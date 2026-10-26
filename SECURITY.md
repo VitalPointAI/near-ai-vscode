@@ -1,203 +1,119 @@
-# NEAR AI for VS Code trust and security report
+# NEAR AI for VS Code: security and privacy
 
-This report describes the security and privacy boundaries implemented in the
-`0.1.0` release candidate and the evidence used for its release checks. It is a
-repository-level report, not an independent audit, provider certification, or
-guarantee about code or services outside this extension.
+This report describes what the current code does with your code, keys, and
+requests, and what it does not do yet. It is a repository-level report, not an
+independent audit or a guarantee about NEAR AI Cloud, the models it serves, or
+other software.
 
-## Scope and status
+Last reviewed: 2026-10-26, against the code on `main`.
 
-The extension is a VS Code host plus webview application. The host controls
-credentials, provider requests, policy decisions, durable operational records,
-and wallet state. The webview is a presentation and interaction surface and is
-not an authority for credentials, attribution, usage, cost, or wallet writes.
+## Where your data goes
 
-Status for this release candidate:
-
-- Implemented controls and negative-path tests are passing in this checkout.
-- The packaged VSIX is checked after every package operation by a fail-closed
-  content verifier.
-- No production runtime dependencies are declared.
-- Wallet entitlement/staking writes are intentionally unavailable until an
-  independently verified official configuration and callback contract exists.
-- TEE status is provider-reported metadata; this extension does not independently
-  attest hardware or make a universal TEE guarantee.
-- The final GSD security audit closed a release-metadata regression by excluding
-  both the mounted `.git` marker and the usable `.git-real` repository directory
-  from the VSIX and by making the verifier reject either path if present.
-
-## Permissions and outbound boundaries
-
-The extension uses the following VS Code/host capabilities:
-
-| Capability | Why it is used | Boundary |
+| What | Where it goes | Notes |
 | --- | --- | --- |
-| SecretStorage | Store project/profile-scoped API and refresh credentials | Host-only; values are not placed in settings, prompts, activity, analytics, exports, or errors |
-| Workspace settings/files | Read configuration and persist bounded profile/checkpoint state | Workspace-scoped paths; raw credentials are not written to project files |
-| Webviews and commands | Render onboarding/chat/status and receive typed user actions | Allowlisted DTOs and strict message parsing |
-| Network requests | Call the selected provider's models, pricing, chat, and usage endpoints | Configured provider boundary; privacy preflight and local-only policy apply |
-| External links | Open the NEAR AI Cloud API-key portal when requested | User-visible `https://cloud.near.ai/` navigation |
-| Child processes | Check/update Open-GSD and run the selected Codex workflow | Explicit argv, workspace cwd, and `shell: false` for the GSD runner |
+| Chat messages (sidebar and `@nearai`) | NEAR AI Cloud's OpenAI-compatible API at your configured endpoint | Each message passes the outbound check below first. |
+| Open-GSD workflows | **The Codex CLI, using whatever provider Codex is configured for** | Not routed through NEAR AI, not privacy-checked, and not cost-tracked. This is replaced by a native NEAR runner in milestone 2 (phases 8–9). |
+| Your API key | VS Code SecretStorage, one key per project and profile | Never written to settings, project files, logs, activity, analytics, exports, or error messages. |
+| Activity and cost records | `.planning/.near-ai/` in your project | Operational facts only (models, token counts, costs, outcomes); no prompts or replies. Add it to `.gitignore` if you do not want it committed. |
+| Open-GSD installation | `npx @opengsd/gsd-core@latest` from the npm registry | Runs only in projects set up with NEAR AI, only when a GSD command needs it or an update is available. The version is not pinned. |
 
-The extension does not read, transmit, overwrite, archive, or delete
-`~/.near-credentials`. The wallet seam is external-wallet-only and separate from
-API-key profiles. No local signing key, seed phrase, or wallet credential file is
-required by the shipped default.
+### Which models are private
 
-## Data handling
+NEAR AI runs some models inside an attested trusted execution environment
+(TEE) and forwards others to third-party providers. The extension reads this
+from NEAR's model catalog (`/v1/model/list`) and shows it in the model picker
+and on every reply:
 
-Before a provider request, host-side privacy preflight classifies secret/private
-file paths, personal data, unknown content, and scope expansion. Secret and
-private-file findings block by default. Local-only mode blocks non-local provider
-boundaries. A one-time override is bound to the exact provider, boundary, scope,
-classification set, and short expiry; its audit record contains a redacted
-preview rather than raw context.
+- **Private · runs in NEAR TEE**: NEAR reports attestation support and serves
+  the model itself (for example GLM 5.3, Kimi K3, Qwen 3.x).
+- **Not private · forwarded to …**: NEAR forwards the request to another
+  provider, named in the label (for example `openrouter.ai` for DeepSeek V4.1
+  Flash, `anthropic.com` for Claude models).
 
-Provider and activity records retain bounded operational facts: request/session
-IDs, selected organization/profile and workspace-project attribution, phase,
-agent, model, latency, token counts when available, estimated cost, actual cost
-when reported, approval state, outcome, and provider verification status. The
-extension keeps estimated and actual values separate and preserves unavailable
-values as unavailable.
+The extension does not yet verify NEAR's per-response attestation signatures
+itself; the label reflects NEAR's catalog. Set `nearAi.privacyMode` to
+`tee-only` to block every model NEAR forwards elsewhere.
 
-The host recomputes analytics and exports from bounded records. Persisted event
-ownership is normalized from its owning session during reload, so a conflicting
-event-shaped attribution cannot relabel history. Webviews cannot inject
-authoritative cost or attribution values.
+## The outbound check
 
-## Provider and TEE qualification
+Every chat message passes one check before it leaves VS Code, in this order:
 
-The default endpoint is the OpenAI-compatible NEAR AI Cloud API. The extension
-can display a `verified`, `unverified`, or `unknown` provider signal when it is
-returned in supported response metadata. That display is evidence of what the
-provider returned to the extension, not an independent attestation. The code
-does not claim that every model, endpoint, response, or user-selected provider
-runs inside a TEE.
+1. **Emergency stop.** `NEAR AI: Emergency Stop` blocks all requests and stops
+   anything running until `NEAR AI: Resume`. The state survives reloads.
+2. **Daily spend limit.** With `nearAi.dailySpendLimitUsd` set, requests stop
+   once today's recorded spend reaches the limit.
+3. **TEE-only mode.** Blocks models NEAR forwards to another provider.
+4. **Privacy check on the new message.** What looks like a credential (API key,
+   token, password, private key) or a private-file path is blocked; what looks
+   like personal data asks for confirmation. A blocked message can be sent once
+   with an explicit override that is bound to that exact message and expires
+   after a minute.
 
-## Wallet and staking separation
+Earlier turns of a conversation are not re-checked; each was checked when it
+was sent. The check applies to chat only; it does not yet cover Open-GSD
+workflows (see the table above).
 
-The release contains typed, fail-closed entitlement and exact transaction
-preview boundaries. It does not ship a concrete NEAR AI staking network, RPC,
-validator, entitlement endpoint, transaction method, or callback value. Missing,
-expired, or untrusted injected configuration produces an unavailable status and
-keeps all stake-changing writes disabled before wallet authorization. A future
-integration must supply verified official values, fresh exact-scope approval,
-and an external wallet callback contract. This limitation is intentional and is
-not represented as production staking support.
+## Costs
 
-## Dependency provenance
+Estimates come from NEAR's published per-model prices and the token usage NEAR
+streams back. The actual charge is read afterwards from NEAR's billing API
+(`POST /v1/billing/costs`, keyed by the `inference-id` response header). When
+NEAR has not recorded a charge yet, the cost stays marked as an estimate rather
+than being shown as $0.
 
-`package.json` declares no runtime `dependencies`. The installed production tree
-therefore resolves to:
+## Permissions the extension uses
 
-```text
-near-ai-vscode@0.1.0
-└── (empty)
-```
+| Capability | Used for |
+| --- | --- |
+| SecretStorage | Project-scoped API keys |
+| Workspace files | Reading `.planning/` status; writing `.planning/.near-ai/` records and `.planning/HANDOFF.json` checkpoints when you ask |
+| Network | Your configured NEAR AI endpoint only. API keys are sent only over HTTPS; plain HTTP is accepted only for `localhost` |
+| Child processes | The Open-GSD installer (`npx`) and the Codex CLI for GSD workflows, with argument arrays and `shell: false` |
+| External links | Opening `https://cloud.near.ai/` to create a key, when you choose to |
 
-The development toolchain observed from `npm ls --depth=0 --all` in this
-checkout is:
+The extension never reads, writes, moves, or deletes `~/.near-credentials`, and
+has no wallet, staking, or NEAR account sign-in feature. Those wait for a
+documented NEAR AI contract.
 
-```text
-@types/node@22.20.5
-@types/vscode@1.140.0
-@vscode/vsce@3.9.2
-typescript@5.9.3
-```
+## Activation
 
-These are dev-only packages. `package-lock.json` is lockfile version 3 and pins
-their registry resolutions and SHA-512 integrity values. The root entries
-reviewed for this report are:
+The extension activates automatically only in workspaces that contain
+`.planning/.near-ai/`, a folder created by your own actions in the extension.
+Elsewhere it starts only when you open its view or run one of its commands, and
+opening the view writes nothing to the project.
 
-| Package | Resolved version | Registry resolution | Integrity |
-| --- | --- | --- | --- |
-| `@types/node` | 22.20.5 | `https://registry.npmjs.org/@types/node/-/node-22.20.5.tgz` | `sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==` |
-| `@types/vscode` | 1.140.0 | `https://registry.npmjs.org/@types/vscode/-/vscode-1.140.0.tgz` | `sha512-KAB5RBZIgnUhpp4mKsVJPPHLOQKu6WtGy2xpfWjaajEXO4xIIC+UESAXLiQ9ewx6QD1uBmvC/S8BJzkbvv4bRA==` |
-| `@vscode/vsce` | 3.9.2 | `https://registry.npmjs.org/@vscode/vsce/-/vsce-3.9.2.tgz` | `sha512-XSxMosEEDO6vLxELAHVkwmhC0qe0ijZni2jB9Rcs8kQsW4lhTDQ/wMzmwFs/buotAWSnpmUp/dRWD2ufG3UYKA==` |
-| `typescript` | 5.9.3 | `https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz` | `sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==` |
+## Dependencies
 
-No package was added for release verification or image generation. The two
-Marketplace GIFs are generated from a checked-in, dependency-free Node script,
-then the generator itself is excluded from the VSIX.
+`package.json` declares no runtime dependencies; the shipped extension contains
+only its own compiled code and assets. Development tools (`typescript`,
+`@types/node`, `@types/vscode`, `@vscode/vsce`) are pinned with integrity hashes
+in `package-lock.json`. `npm audit --omit=dev --audit-level=high` reports 0
+vulnerabilities for the shipped tree.
 
-The clean `npm ci` install also reported two high-severity findings when npm
-audited the complete development tree. The release gate intentionally audits
-the shipped production tree with `npm audit --omit=dev --audit-level=high`,
-which returned `found 0 vulnerabilities`; the reported development-only audit
-result is not presented as a claim that the full toolchain is vulnerability
-free.
-
-## Backdoor-oriented source review
-
-The review covered the extension host, provider, privacy, wallet, GSD runner,
-and release files. The reproducible checks were:
-
-```bash
-grep -RInE 'eval\\(|new Function|vm\\.|shell:[[:space:]]*true' src scripts
-grep -RInE 'exec\\(|execFile\\(|spawn\\(' src
-grep -RInE 'near-credentials|readFile.*credential|writeFile.*credential|unlink.*credential' src
-grep -RInE 'console\\.(log|error)|show(Error|Warning|Information)Message' src
-npm ls --omit=dev --all
-npm audit --omit=dev --audit-level=high
-```
-
-Observed results for this checkout:
-
-- No `eval`, `new Function`, VM evaluation, or `shell: true` path was found.
-- The expected child-process calls are limited to the Open-GSD updater and
-  runner. The runner passes an argv array with `shell: false`; runtime output is
-  bounded and redacted before it becomes an activity event.
-- `near-credentials` appears only in privacy denylist/negative-test coverage;
-  there is no wallet filesystem reader or credential-file mutation path.
-- User-visible errors, activity, audit, analytics, exports, and wallet DTOs use
-  redaction/allowlists. The negative tests reject API-key, refresh-token,
-  bearer, seed/private-key, prompt/context, and unrestricted-path shaped values.
-- The production dependency tree is empty. The audit command is still required
-  as a release gate so a future runtime dependency cannot be introduced without
-  evidence.
-
-This review is source- and test-based; it does not prove the integrity of the
-host operating system, VS Code, npm registry, configured provider, or future
-changes after this report.
-
-## Reproducible release evidence
-
-Run from a clean checkout with the lockfile present:
+## Verify it yourself
 
 ```bash
 npm ci
-npm ls --omit=dev --all
+npm ls --omit=dev --all                    # (empty)
 npm audit --omit=dev --audit-level=high
-npm run lint
-npm test
-npm run package
-npm run verify:release
+npm run check                              # type check and tests
+npm run verify:release                     # package, then inspect the VSIX
+grep -RInE 'eval\(|new Function|shell:[[:space:]]*true' src scripts
 ```
 
-`verify:release` runs the package command and then inspects the resulting VSIX
-with the local `unzip` tool. It requires the manifest, README, SECURITY report,
-license, compiled extension entrypoint, every non-test `dist/**/*.js` runtime
-module, and both Marketplace GIFs. It rejects `.codex`, `.agents`, `.planning`,
-source, test, source-map, node_modules, package-lock, `.git`, `.git-real`, and
-other development entries. A missing required asset or unexpected development
-entry exits non-zero. The final release check for this checkout produced 66
-archive entries, 58 runtime JavaScript files, and 7 required release assets,
-with no forbidden entries.
+`verify:release` fails if the packaged VSIX is missing the manifest, README,
+this report, the license, the compiled extension, the sidebar's scripts and
+stylesheet, or the listing screenshots, or if it contains source, tests, source
+maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 
-The complete repository verification result for this release is recorded in the
-phase execution summary at
-`.planning/phases/05-verification-hardening-and-release/05-05-SUMMARY.md`.
+## Known limitations
 
-## Known limitations and remediation status
+| Limitation | Plan |
+| --- | --- |
+| Open-GSD workflows run through the Codex CLI and its provider, outside the outbound check | Native NEAR runner, milestone 2 phases 8–9 |
+| Per-response TEE attestation is not verified by the extension | Verify NEAR attestation/signature endpoints, milestone 2 |
+| The Open-GSD installer runs an unpinned `@latest` package from npm | Pin and verify the runtime the native runner installs, milestone 2 phase 9 |
+| Team studio, attachments, image generation, and context memory are hidden | Rebuilt on the native runner, milestone 2 phase 11 |
 
-| Limitation | Status | Remediation |
-| --- | --- | --- |
-| NEAR account token exchange is prepared in the UI but not configured | Open, explicit | Verify and implement the official provider exchange contract before enabling it |
-| Official NEAR AI staking/wallet configuration and callback contract are unavailable | Open, fail-closed | Supply independently verified network, validator, endpoints, methods, and callback/status values; keep writes disabled until then |
-| TEE evidence is provider-reported, not independently attested by the extension | Accepted limitation | Preserve `unknown`/`unverified` states and avoid universal TEE claims |
-| Interactive VS Code host/wallet callback smoke verification is not available without the official callback contract | Open verification item | Run the manual flow after the official integration exists |
-| The mounted `.git` marker cannot be replaced because it is busy | Environment limitation | A separate local `.git-real` repository is used for attributable commits; configure a remote and publish credentials before pushing |
-
-Report issues through the project’s normal issue channel with reproduction steps
-and redacted logs. Do not include API keys, wallet signing material, raw prompts,
-or private workspace paths in a report.
+Report security issues through the repository's issue tracker with redacted
+logs. Never include API keys, raw prompts, or private file contents.

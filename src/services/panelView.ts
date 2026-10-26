@@ -63,13 +63,14 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 <main id="transcript" aria-label="Conversation" aria-live="off">
   <section id="welcome">
     <h2>Private AI for this project</h2>
-    <p>Ask anything about your code, or type <strong>/</strong> for Open-GSD workflows. Models run in NEAR AI Cloud's TEE-backed inference.</p>
+    <p>Ask anything about your code, or type <strong>/</strong> for Open-GSD workflows. Models marked 🔒 run inside NEAR AI's attested TEE; others are forwarded by NEAR to another provider, and every reply says which.</p>
     <div class="suggestions">
       ${start.map((definition) => `<button type="button" data-command="${definition.command}">${escapeText(definition.title)}<small>${escapeText(definition.description)}</small></button>`).join('\n      ')}
     </div>
   </section>
 </main>
 <footer>
+  <nav id="project-links" aria-label="Planning files" hidden></nav>
   <div class="composer">
     <div id="commands" role="listbox" aria-label="Open-GSD commands" hidden></div>
     <textarea id="input" rows="1" placeholder="Ask NEAR AI, or type / for commands" aria-label="Message NEAR AI" aria-controls="commands" aria-autocomplete="list" aria-expanded="false"></textarea>

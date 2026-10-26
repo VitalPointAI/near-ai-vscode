@@ -15,6 +15,7 @@
   const status = $('status');
   const menu = $('commands');
   const live = $('live');
+  const projectLinks = $('project-links');
   const commands = JSON.parse(document.body.dataset.commands || '[]');
   const saved = vscode.getState() || {};
 
@@ -174,6 +175,7 @@
     if (finished) {
       tool.spinner.remove();
       if (event.state === 'failed') tool.details.open = true;
+      if (event.state !== 'cancelled') nextActions(tool, event.state === 'failed');
       announce('/' + event.command + ' ' + event.state);
       setBusy(false);
       post({ type: 'refresh-status' });
@@ -210,6 +212,28 @@
     }
     append(card);
     announce('Open-GSD is asking: ' + prompt.question);
+  }
+
+  // Key planning files from the host's artifact list, as links that open in the editor.
+  const KEY_ARTIFACTS = /(^|\/)(PROJECT|ROADMAP|REQUIREMENTS|STATE)\.md$/;
+  function renderArtifacts(artifacts) {
+    const links = (artifacts || []).filter((item) => item.kind === 'directory' || KEY_ARTIFACTS.test(item.path));
+    projectLinks.replaceChildren(...links.map((item) => {
+      const link = el('button', 'link', item.kind === 'directory' ? 'Current phase' : item.path.split('/').pop().replace(/\.md$/, ''));
+      link.type = 'button';
+      link.title = item.path;
+      link.addEventListener('click', () => post({ type: 'open-artifact', path: item.path, kind: item.kind }));
+      return link;
+    }));
+    projectLinks.hidden = !links.length;
+  }
+
+  // After a workflow finishes, offer the usual next steps instead of a dead end.
+  function nextActions(tool, failed) {
+    const row = el('div', 'next-actions');
+    const choices = failed ? [['progress', 'Show progress']] : [['next', 'Continue with the next step'], ['progress', 'Show progress']];
+    choices.forEach(([command, label], index) => row.append(textButton(label, () => runCommand(command), index === 0)));
+    tool.details.after(row);
   }
 
   function resetConversation() {
@@ -389,6 +413,7 @@
         break;
       }
       case 'history-error': notice(m.text, [], true); break;
+      case 'artifacts': renderArtifacts(m.artifacts); break;
       default: break;
     }
   });

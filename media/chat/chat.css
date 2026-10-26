@@ -113,6 +113,14 @@ details.tool .log {
 #welcome .suggestions button:hover { background: var(--vscode-list-hoverBackground); }
 #welcome .suggestions small { display: block; color: var(--vscode-descriptionForeground); }
 
+/* Planning-file links and post-run next steps */
+#project-links { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 0 2px 6px; font-size: 11px; }
+#project-links[hidden] { display: none; }
+#project-links::before { content: 'Project:'; color: var(--vscode-descriptionForeground); }
+.link { padding: 0; border: 0; background: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: inherit; }
+.link:hover { text-decoration: underline; color: var(--vscode-textLink-activeForeground); }
+.next-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 14px 10px; }
+
 /* Composer */
 footer { padding: 6px 12px 8px; }
 .composer {

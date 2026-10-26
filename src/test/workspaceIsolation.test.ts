@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -31,10 +31,19 @@ function loadUpdater(): typeof GsdUpdaterType {
 function recordingRunner(calls: Array<{ args: string[]; cwd?: string }>) {
   return async (command: string, args: string[], cwd?: string) => {
     calls.push({ args: [command, ...args], cwd });
-    if (args[0] === 'list') return { stdout: '{}', stderr: '' };
     if (args[0] === 'view') return { stdout: '"9.9.9"', stderr: '' };
     return { stdout: '', stderr: '' };
   };
+}
+
+/** A runtime home with Open-GSD installed the way the real installer leaves it. */
+async function runtimeHome(version?: string): Promise<string> {
+  const home = await mkdtemp(path.join(tmpdir(), 'near-ai-runtime-'));
+  if (version) {
+    await mkdir(path.join(home, 'gsd-core'), { recursive: true });
+    await writeFile(path.join(home, 'gsd-core', 'VERSION'), `${version}\n`);
+  }
+  return home;
 }
 
 test('panel startup reads leave an uninitialized workspace untouched', async () => {
@@ -70,25 +79,41 @@ test('activation in a NEAR AI project keeps Open-GSD current', async () => {
   const calls: Array<{ args: string[]; cwd?: string }> = [];
   const GsdUpdater = loadUpdater();
   const context = fakeContext();
-  assert.equal(await new GsdUpdater(recordingRunner(calls), root).start(context as never), true);
+  assert.equal(await new GsdUpdater(recordingRunner(calls), root, undefined, undefined, await runtimeHome('1.0.0')).start(context as never), true);
   context.subscriptions.forEach((subscription) => subscription.dispose());
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls.some((call) => call.args[1] === 'list'), true);
+  assert.equal(calls.some((call) => call.args[1] === 'view'), true, 'checks the registry for a newer release');
 });
 
-test('ensureInstalled skips the installer when Open-GSD is already present', async () => {
+test('an Open-GSD install is detected from its VERSION file, so ensureInstalled does not reinstall it', async () => {
   const calls: Array<{ args: string[]; cwd?: string }> = [];
-  const runner = async (command: string, args: string[], cwd?: string) => { calls.push({ args: [command, ...args], cwd }); return { stdout: JSON.stringify({ dependencies: { '@opengsd/gsd-core': { version: '1.0.0' } } }), stderr: '' }; };
   const GsdUpdater = loadUpdater();
-  assert.equal(await new GsdUpdater(runner, undefined).ensureInstalled(), true);
-  assert.equal(calls.some((call) => call.args[0] === 'npx'), false);
+  assert.equal(await new GsdUpdater(recordingRunner(calls), undefined, undefined, undefined, await runtimeHome('1.19.0')).ensureInstalled(), true);
+  assert.deepEqual(calls, []);
+});
+
+test('ensureInstalled installs Open-GSD only when the runtime has no VERSION file', async () => {
+  const calls: Array<{ args: string[]; cwd?: string }> = [];
+  const GsdUpdater = loadUpdater();
+  await new GsdUpdater(recordingRunner(calls), undefined, undefined, undefined, await runtimeHome()).ensureInstalled();
+  assert.equal(calls.some((call) => call.args[0] === 'npx' && call.args.includes('--global')), true);
+});
+
+test('a current install is left alone; an older one is updated', async () => {
+  const GsdUpdater = loadUpdater();
+  const current: Array<{ args: string[]; cwd?: string }> = [];
+  await new GsdUpdater(recordingRunner(current), undefined, undefined, undefined, await runtimeHome('9.9.9')).checkAndUpdate();
+  assert.equal(current.some((call) => call.args[0] === 'npx'), false);
+  const older: Array<{ args: string[]; cwd?: string }> = [];
+  await new GsdUpdater(recordingRunner(older), undefined, undefined, undefined, await runtimeHome('9.9.8')).checkAndUpdate();
+  assert.equal(older.some((call) => call.args[0] === 'npx'), true);
 });
 
 test('updater never installs Open-GSD into a project that does not already have it', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-no-local-'));
   const calls: Array<{ args: string[]; cwd?: string }> = [];
   const GsdUpdater = loadUpdater();
-  await new GsdUpdater(recordingRunner(calls), root).checkAndUpdate();
+  await new GsdUpdater(recordingRunner(calls), root, undefined, undefined, await runtimeHome()).checkAndUpdate();
   assert.equal(calls.some((call) => call.args.includes('--local')), false);
   assert.equal(calls.some((call) => call.cwd === root), false);
   assert.deepEqual(await readdir(root), []);
@@ -99,6 +124,6 @@ test('updater refreshes an existing project-local Open-GSD install', async () =>
   await mkdir(path.join(root, '.codex', 'gsd-core'), { recursive: true });
   const calls: Array<{ args: string[]; cwd?: string }> = [];
   const GsdUpdater = loadUpdater();
-  await new GsdUpdater(recordingRunner(calls), root).checkAndUpdate();
+  await new GsdUpdater(recordingRunner(calls), root, undefined, undefined, await runtimeHome()).checkAndUpdate();
   assert.equal(calls.some((call) => call.args.includes('--local') && call.cwd === root), true);
 });

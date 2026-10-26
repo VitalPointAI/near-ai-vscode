@@ -76,6 +76,8 @@ Make the shipped product truthful and functional before building on it. Fix Open
 
 **Requirements:** FIX-01..08, PRIV-01, PRIV-02, PRIV-03, PRIV-05, COST-01, COST-02, COST-03, SAFE-01, GSD-02, CHAT-04, AUTH-01, SEC-03, TEST-02
 
+**Status:** Complete 2026-10-26 (`phases/07-honest-working-baseline/07-01-SUMMARY.md`).
+
 ### Phase 8: Agent harness core
 
 Build the runner's engine: a streaming tool-calling loop over NEAR's OpenAI-compatible `/v1/chat/completions` (verified on 2026-10-26 for parallel calls, round trips, and streamed deltas on GLM 5.3, GLM 5.3 Flash, Kimi K3/K2.6, Qwen 3.5, DeepSeek V3.2/V4.1 Flash) with retries, cancellation, turn limits, and per-turn cost. Implement the core tools (Read, Write, Edit, Glob, Grep, Bash with persistent sessions and background jobs, TodoWrite) with workspace containment, a permission engine driven by `nearAi.actionPolicy` plus allow/deny rules, approval cards with diffs and command previews, file checkpoints with one-click revert, and audit events. Add a local OpenAI-compatible provider kind so local runtimes use the same harness.
@@ -102,7 +104,7 @@ Rebuild the advanced features on the runner so they do real work: the onboarding
 
 ### Phase 12: End-to-end verification, model selection, and release
 
-Run the extension in a real VS Code extension host with automated UI tests, plus opt-in live tests against NEAR (a full GSD new-project, plan, and execute run on a sample repository). Evaluate GLM 5.3, Kimi K3, and DeepSeek V4.1 Flash on fixed coding tasks to confirm defaults. Security review, accurate SECURITY.md and listing with real screenshots, then publish.
+Run the extension in a real VS Code extension host with automated UI tests, plus opt-in live tests against NEAR (a full GSD new-project, plan, and execute run on a sample repository). Evaluate GLM 5.3, Kimi K3, and DeepSeek V4.1 Flash on fixed coding tasks to confirm defaults. Verify NEAR's per-response attestation (`/v1/attestation/report`, `/v1/signature/{chat_id}`) so "TEE verified" reflects a checked signature rather than catalog metadata. Security review, accurate SECURITY.md and listing with real screenshots, then publish.
 
 **Requirements:** TEST-01, TEST-03, SEC-01, SEC-02, SEC-03, PKG-01, PKG-02
 
@@ -112,4 +114,4 @@ NEAR account sign-in (AUTH-02) and wallet, staking, and entitlement (AUTH-04, CO
 
 ## Next action
 
-Phase 7: plan with `/gsd-plan-phase 7`.
+Phase 8: plan with `/gsd-plan-phase 8`.

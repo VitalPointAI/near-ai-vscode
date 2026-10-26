@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
@@ -33,6 +34,16 @@ export const hasLocalGsdInstall = async (workspaceRoot: string): Promise<boolean
  */
 export const isNearAiProject = async (workspaceRoot: string): Promise<boolean> => isDirectory(path.join(workspaceRoot, '.planning', '.near-ai'));
 
+/** Reads an Open-GSD install's VERSION file; null when absent or not a version. */
+export async function readGsdVersion(gsdCoreDir: string): Promise<string | null> {
+  try {
+    const version = (await readFile(path.join(gsdCoreDir, 'VERSION'), 'utf8')).trim();
+    return /^\d+\.\d+\.\d+$/.test(version) ? version : null;
+  } catch {
+    return null;
+  }
+}
+
 async function isDirectory(target: string): Promise<boolean> {
   try {
     return (await stat(target)).isDirectory();
@@ -48,7 +59,8 @@ export class GsdUpdater {
     private readonly runner: CommandRunner = defaultCommandRunner,
     private readonly workspaceRoot: string | undefined = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
     private readonly localInstallExists: (workspaceRoot: string) => Promise<boolean> = hasLocalGsdInstall,
-    private readonly projectInitiated: (workspaceRoot: string) => Promise<boolean> = isNearAiProject
+    private readonly projectInitiated: (workspaceRoot: string) => Promise<boolean> = isNearAiProject,
+    private readonly runtimeHome: string = process.env.CODEX_HOME || path.join(homedir(), '.codex')
   ) {}
 
   /** Keeps Open-GSD current in NEAR AI projects. Any other workspace gets no npm calls, timers, or notifications. */
@@ -91,14 +103,13 @@ export class GsdUpdater {
     }
   }
 
+  /**
+   * The installer copies Open-GSD into the runtime's config directory rather than installing an
+   * npm package, so `npm list -g` never sees it; the installed `gsd-core/VERSION` file is the
+   * source of truth.
+   */
   private async getInstalledVersion(): Promise<string | null> {
-    try {
-      const result = await this.runner('npm', ['list', '--global', GSD_PACKAGE, '--depth=0', '--json']);
-      const parsed = JSON.parse(result.stdout) as { dependencies?: Record<string, { version?: string }> };
-      return parsed.dependencies?.[GSD_PACKAGE]?.version ?? null;
-    } catch {
-      return null;
-    }
+    return readGsdVersion(path.join(this.runtimeHome, 'gsd-core'));
   }
 
   private async getLatestVersion(): Promise<string> {

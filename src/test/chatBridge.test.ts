@@ -175,13 +175,20 @@ test('team lifecycle protocol round-trips bounded CRUD, version, import/export, 
   if (invocation.type === 'team-invocation-status') assert.equal(invocation.value.estimatedCostUsd, 1);
 });
 
-test('team studio renderer exposes named lifecycle controls, live host status, safe text rendering, and reduced motion', async () => {
-  const source = await readFile(path.join(process.cwd(), 'src/services/chat.ts'), 'utf8');
-  for (const control of ['team-create', 'team-update', 'team-duplicate', 'team-archive', 'team-restore', 'team-delete', 'team-select-version', 'team-export', 'team-bind', 'team-invoke']) assert.match(source, new RegExp(control));
-  assert.match(source, /aria-live/);
-  assert.match(source, /textContent/);
-  assert.match(source, /prefers-reduced-motion/);
-  assert.match(source, /Host derives project identity/);
-  assert.match(source, /team-action-status/);
+test('the Tools tab hides features that do not run yet and keeps analytics and artifacts', () => {
+  const nodeModule = require('node:module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
+  const originalLoad = nodeModule._load;
+  nodeModule._load = (request, parent, isMain) => request === 'vscode' ? { workspace: { workspaceFolders: undefined } } : originalLoad(request, parent, isMain);
+  let html: string;
+  try {
+    html = (require('../services/chat') as typeof import('../services/chat')).toolsWebviewHtmlForTest();
+  } finally {
+    nodeModule._load = originalLoad;
+  }
+  const hiddenRule = /#team-studio,\[aria-labelledby="attachments-heading"\],\[aria-labelledby="generation-heading"\],\[aria-labelledby="memory-heading"\],#attach,#multimodal-prepare\{display:none!important\}/;
+  assert.match(html, hiddenRule);
+  assert.match(html, /id="tools-note"/);
+  assert.doesNotMatch(html, /fleet-heading[^}]*display:none/);
+  assert.doesNotMatch(html, /wallet-entitlement-heading/);
 });
 

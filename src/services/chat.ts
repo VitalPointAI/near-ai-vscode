@@ -52,7 +52,18 @@ export async function openTools(context: vscode.ExtensionContext, auth: AuthServ
     retainContextWhenHidden: true
   });
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
-  await initializeChat(context, auth, panel, withWalletStatusPanel(chatHtml2(panel.webview)));
+  await initializeChat(context, auth, panel, toolsHtml(chatHtml2(panel.webview)));
+}
+
+/**
+ * The Tools tab keeps what works today (analytics, artifacts, history) and hides team studio,
+ * attachments, generation, and memory, which only record intent until they run on the native
+ * NEAR runner (milestone 2, phase 11). Their markup stays so the page's scripts keep working.
+ */
+function toolsHtml(html: string): string {
+  const hidden = '#team-studio,[aria-labelledby="attachments-heading"],[aria-labelledby="generation-heading"],[aria-labelledby="memory-heading"],#attach,#multimodal-prepare{display:none!important}';
+  const note = '<p class="status" id="tools-note">Teams, attachments, image generation, and context memory are coming back once they run on the native NEAR runner.</p>';
+  return html.replace('</style>', `${hidden}</style>`).replace('</header>', `${note}</header>`);
 }
 
 export async function attachChatToView(context: vscode.ExtensionContext, auth: AuthService, view: vscode.WebviewView, html: string): Promise<void> {
@@ -738,10 +749,6 @@ async function sendStakingStatus(panel: ChatHost, staking: StakingService, refre
   panel.webview.postMessage(walletStatusMessage(status));
 }
 
-function withWalletStatusPanel(html: string): string {
-  const panel = '<section aria-labelledby="wallet-entitlement-heading" data-wallet-status="unavailable"><h2 id="wallet-entitlement-heading">Wallet entitlement</h2><p>Unavailable — verified staking configuration is not supplied; stake-changing actions are disabled.</p><p>Connect only an external wallet when verified network and entitlement configuration is available. This extension never reads local wallet credential files.</p></section>';
-  return html.replace('</header>', `${panel}</header>`);
-}
 
 async function loadModels(panel: ChatHost, auth: AuthService): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -839,6 +846,11 @@ function panelLayoutEnhancementHtml(nonce: string): string {
 /** Test-only seam for executing the production chat webview scripts without opening a panel. */
 export function chatWebviewHtmlForTest(): string {
   return chatHtml2();
+}
+
+/** Test-only seam for the Tools tab exactly as `nearAi.openTools` renders it. */
+export function toolsWebviewHtmlForTest(): string {
+  return toolsHtml(chatHtml2());
 }
 
 function memoryExplorerEnhancementHtml(nonce: string): string {

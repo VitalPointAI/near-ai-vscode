@@ -2,19 +2,19 @@
 
 **Private AI coding that you can see, steer, and afford.**
 
-Chat with open models running in NEAR AI Cloud's confidential (TEE-backed)
-inference. Plan and ship whole projects with built-in Open-GSD workflows. See
-the model, tokens, and cost of every answer. And your code never passes
-through a tool that quietly writes to your repo or pushes your keys around.
+Chat with models running in NEAR AI Cloud's confidential (TEE) inference, with
+every model clearly labelled private or not. Plan whole projects with built-in
+Open-GSD workflows. See the model, tokens, and cost of every answer, and decide
+exactly what is allowed to leave your machine.
 
 ![NEAR AI chat beside the editor in VS Code](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-chat.png)
 
 ## Why developers choose NEAR AI
 
-- **Your code stays private.** Requests go to NEAR AI Cloud, where models run
-  inside trusted execution environments. When the provider confirms a
-  verified enclave, the answer is marked **TEE verified**, so you know where
-  your code was processed.
+- **You know where your code goes.** NEAR AI runs some models inside attested
+  trusted execution environments and forwards others to third parties. Every
+  model in the picker, and every reply, says which. Private models come first,
+  and the default (GLM 5.3) is one of them.
 - **It feels like part of VS Code.** A compact chat in the secondary side bar
   uses your theme and fonts. Prefer the built-in Chat view? Type
   `@nearai` there instead.
@@ -25,9 +25,10 @@ through a tool that quietly writes to your repo or pushes your keys around.
 - **From idea to shipped, not just autocomplete.** Open-GSD turns a goal into
   requirements, phases, plans, and verified work, with agents doing the legwork
   and you making the calls.
-- **Nothing happens behind your back.** Planning and reading run freely. File
-  writes, shell commands, network calls, and git changes wait for your approval
-  unless you choose otherwise.
+- **You stay in control of what's sent.** Each message is checked before it
+  leaves: likely secrets are held back, personal data asks first, TEE-only mode
+  blocks forwarded models, a daily spend limit caps cost, and an emergency stop
+  halts everything.
 
 ## Features
 
@@ -51,18 +52,12 @@ workflow needs a decision, it asks you right in the chat.
 
 ![A planning workflow asking for a decision](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-workflow.png)
 
-### Built for teams and bigger projects
+### Spend and activity
 
-Open **NEAR AI Tools** from the title bar for:
-
-- **Team studio:** reusable, versioned agent teams you can bind to a project.
-- **Context memory:** scoped private and shared project knowledge, with
-  approval before anything is changed.
-- **Image and video generation:** with cost and approval before each run.
-- **Attachments:** images, audio, video, PDFs, and documents, kept local until
-  you approve an operation.
-- **Analytics:** sessions, agents, models, and spend by organization and
-  project, exportable.
+Open **NEAR AI Tools** from the title bar for analytics: sessions, models,
+tokens, and spend by organization and project, exportable. Agent teams,
+attachments, image generation, and context memory are being rebuilt on a native
+NEAR agent runner and will appear there when they do real work.
 
 ### Respects your projects
 
@@ -87,8 +82,10 @@ copy of Open-GSD to a project that doesn't already have one.
   or exports.
 - Keys are only sent over **HTTPS**. Plain HTTP is allowed only for a model
   runtime on your own machine (`localhost`).
-- A **privacy check** runs before each request. It blocks secrets and private
-  files by default, and a local-only mode keeps everything off the cloud.
+- A **privacy check** runs on every chat message before it is sent. Likely
+  credentials and private-file paths are held back (you can send a message once
+  anyway), personal data asks first, and `tee-only` mode blocks models NEAR
+  forwards to other providers.
 - The chat view only receives display data; credentials and raw context stay
   in the extension host.
 - The extension never reads `~/.near-credentials` or other local wallet files.
@@ -99,8 +96,9 @@ Read the full [security and trust report](SECURITY.md).
 
 - VS Code 1.90 or newer.
 - A NEAR AI Cloud API key.
-- For Open-GSD workflows: the Codex CLI (`codex`) on your PATH and npm access
-  (Open-GSD installs itself the first time you run a workflow).
+- For Open-GSD workflows, for now: the Codex CLI (`codex`) on your PATH and
+  npm access. These runs use Codex's own configured model provider, not NEAR AI,
+  until the native NEAR runner replaces it (see [SECURITY.md](SECURITY.md)).
 
 ## Settings
 
@@ -109,16 +107,16 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.defaultModel` | `z-ai/glm-5.3` | Model used for new chats. |
 | `nearAi.actionPolicy` | `approve-risky` | How much agents may do without asking. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
+| `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |
+| `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount. |
 | `nearAi.autoInstallGsd` | `true` | Install Open-GSD when a workflow needs it and keep it current in NEAR AI projects. |
 
 ## Good to know
 
-- **TEE status is reported by the provider.** NEAR AI marks verified
-  responses; the extension shows that signal but does not attest hardware
-  itself.
-- **Staking and NEAR account sign-in are coming.** Wallet entitlement and
-  staking stay switched off until NEAR AI publishes a verified configuration,
-  and API keys are used for sign-in until then.
+- **Privacy labels come from NEAR's model catalog.** The extension does not
+  yet verify NEAR's per-response attestation signatures itself.
+- **No wallet, staking, or NEAR account sign-in yet.** They wait for a
+  documented NEAR AI contract; sign-in uses API keys.
 
 ## Troubleshooting
 
