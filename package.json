@@ -2,7 +2,7 @@
   "name": "near-ai-vscode",
   "displayName": "Near AI for VSCode",
   "description": "A private, cost-aware Open-GSD coding harness powered by NEAR AI Cloud.",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-icon.png",
   "license": "MIT",
@@ -17,6 +17,7 @@
     "onCommand:nearAi.status",
     "onCommand:nearAi.openChat",
     "onCommand:nearAi.gsdProgress",
+    "onView:nearAiChatView",
     "onChatParticipant:nearAi"
   ],
   "main": "./dist/extension.js",
@@ -29,6 +30,25 @@
       { "command": "nearAi.gsdProgress", "title": "Open-GSD: Show Progress" },
       { "command": "nearAi.saveCheckpoint", "title": "Open-GSD: Save Continuity Checkpoint" }
     ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "nearAiPanel",
+          "title": "NEAR AI",
+          "icon": "media/near-ai-icon.png"
+        }
+      ]
+    },
+    "views": {
+      "nearAiPanel": [
+        {
+          "type": "webview",
+          "id": "nearAiChatView",
+          "name": "NEAR AI",
+          "visibility": "visible"
+        }
+      ]
+    },
     "chatParticipants": [
       {
         "id": "nearAi",
@@ -81,6 +101,7 @@
     "test": "npm run compile && node --test dist/test/*.test.js",
     "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
     "generate:icon": "node scripts/generate-near-ai-icon.mjs",
+    "install:global": "node scripts/install-global-extension.mjs",
     "verify:release": "npm run package && node scripts/verify-release-content.mjs",
     "check": "npm run lint && npm test"
   },

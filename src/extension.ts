@@ -10,6 +10,7 @@ import { openChat } from './services/chat';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { StakingService } from './services/stakingService';
 import { walletStatusCopy } from './services/chatBridge';
+import { NearAiPanelViewProvider } from './services/panelView';
 
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new AuthService(context.secrets);
@@ -32,6 +33,16 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('nearAi.gsdProgress', () => openChat(context, auth, undefined, 'progress')),
     vscode.commands.registerCommand('nearAi.saveCheckpoint', () => saveCheckpoint())
   );
+
+  // Panel view is the supported extension surface that places NEAR AI beside
+  // the built-in Chat/Codex/Claude-style panel tabs in VS Code forks.
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(
+    NearAiPanelViewProvider.viewId,
+    new NearAiPanelViewProvider(
+      () => vscode.commands.executeCommand('nearAi.openChat'),
+      () => vscode.commands.executeCommand('nearAi.setup')
+    )
+  ));
 
   // Register NEAR AI as a native Chat participant so it appears alongside
   // other chat entries (for example Chat, Codex, and Claude Code) when the

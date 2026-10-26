@@ -91,6 +91,15 @@ boundary uses explicit argv and no shell interpolation for GSD execution.
 
 ## Installation
 
+The extension is installed once per code-server/VS Code profile and is then
+available across every project opened by that profile. From this project,
+run `npm run verify:release && npm run install:global`; on a separate
+code-server host, run `code-server --install-extension
+near-ai-vscode-<version>.vsix --force`. Reload the window after installation
+and look for the `NEAR AI` tab beside the other panel tabs. The legacy
+`@nearAi` Chat participant remains available in Local-harness builds as a
+compatibility fallback.
+
 ### Marketplace
 
 Install **Near AI for VSCode** from the VS Code Extensions view, then run
