@@ -61,6 +61,55 @@ Plans:
 - [x] 05-04-PLAN.md — immutable persisted ActivityStore attribution on reload with legacy-unknown security regressions
 - [x] 05-05-PLAN.md — trust/security report, Marketplace listing, dependency evidence, and clean VSIX packaging verification
 
+## Milestone 2: A working core and a native NEAR agent runner
+
+Started 2026-10-26 after the delivery audit (`.planning/AUDIT-2026-10-26.md`) found that phases 1-6 were mostly unreachable, faked, or built against API contracts that do not exist. Goal: every advertised capability works end to end on NEAR AI, Open-GSD runs on a clean-room agent harness inside the extension (no proprietary runtime), and private TEE models are the default.
+
+Ground rules for this milestone:
+- A plan is complete only when its behavior is reachable from the UI or a command and proven by a test that drives the real path. Source-text tests, fake processes speaking invented protocols, and tests that seed state production never creates do not count as evidence.
+- Every external contract (NEAR endpoints, headers, catalog fields, Open-GSD file formats) is verified against the live service or installed files before code depends on it.
+- The harness is a clean-room implementation built from public behavior descriptions; no Claude Code or Codex source is copied or bundled.
+
+### Phase 7: Honest, working baseline
+
+Make the shipped product truthful and functional before building on it. Fix Open-GSD detection (read installed VERSION files, not `npm list`). Load actual cost from `POST /v1/billing/costs` keyed by the `inference-id` header, show estimates in the sidebar, and request streamed usage. Label every model's privacy from NEAR's catalog (TEE-attested vs forwarded) and show "TEE verified" only from NEAR's attestation/signature endpoints. Put privacy preflight, the action policy, spend limits, and an emergency stop on every outbound chat path, with a TEE-only sovereignty mode. Add profile removal, sidebar artifact links, history, and next-action buttons. Remove dead options (NEAR account auth mode, staking/wallet entry points) and hide Tools features until Phase 11 makes them real. Correct README and SECURITY.md, require the sidebar assets in the release check, and replace source-text tests with behavior tests that drive `initializeChat` and the participant.
+
+**Requirements:** FIX-01..08, PRIV-01, PRIV-02, PRIV-03, PRIV-05, COST-01, COST-02, COST-03, SAFE-01, GSD-02, CHAT-04, AUTH-01, SEC-03, TEST-02
+
+### Phase 8: Agent harness core
+
+Build the runner's engine: a streaming tool-calling loop over NEAR's OpenAI-compatible `/v1/chat/completions` (verified on 2026-10-26 for parallel calls, round trips, and streamed deltas on GLM 5.3, GLM 5.3 Flash, Kimi K3/K2.6, Qwen 3.5, DeepSeek V3.2/V4.1 Flash) with retries, cancellation, turn limits, and per-turn cost. Implement the core tools (Read, Write, Edit, Glob, Grep, Bash with persistent sessions and background jobs, TodoWrite) with workspace containment, a permission engine driven by `nearAi.actionPolicy` plus allow/deny rules, approval cards with diffs and command previews, file checkpoints with one-click revert, and audit events. Add a local OpenAI-compatible provider kind so local runtimes use the same harness.
+
+**Requirements:** HARN-01..08, SAFE-01, SAFE-02, MODEL-02, MODEL-03
+
+### Phase 9: Open-GSD on the runner
+
+Install Open-GSD's Claude runtime into extension-owned storage (never the user's `~/.claude`) and run it natively: load skills, commands, agents, and workflows; expand `$ARGUMENTS` and `@` includes; provide the Skill and SlashCommand tools; turn AskUserQuestion into interactive cards in the sidebar and buttons in `@nearai`; run `gsd-tools.cjs` with VS Code's bundled Node. Every installed GSD skill becomes discoverable with arguments. Progress, status line, and next actions come from real run events and STATE.md.
+
+**Requirements:** RUN-01..06, GSD-01, GSD-03, GSD-04, GSD-05, CHAT-02, CHAT-03, CHAT-05
+
+### Phase 10: Sub-agents, background work, context, and sessions
+
+Implement the Agent/Task tool from GSD agent definitions (system prompt, tool allowlist, model tier mapped to NEAR models: deep = Kimi K3, default = GLM 5.3, fast = GLM 5.3 Flash), parallel and background agents with limits and notifications, and real agent events feeding the fleet view. Add context management (budget tracking, tool-output truncation, summarization-based compaction), continuity thresholds with automatic handoff and restore, durable local session transcripts with resume, WebFetch behind approval, and an assessment of the Workflow tool and MCP clients that GSD workflows reference.
+
+**Requirements:** HARN-09..12, AGENT-01, AGENT-02, AGENT-03, AGENT-04, CTX-01..04, CHAT-04, OBS-01
+
+### Phase 11: Teams, multimodal, generation, and memory on the runner
+
+Rebuild the advanced features on the runner so they do real work: the onboarding team questionnaire creates an accepted project team (ONB-04); teams can be created, edited, and invoked as runner sub-agents; attachments are transcribed (Whisper) or understood (vision models) through NEAR; image generation uses FLUX via the real catalog shape; runs write facts to context memory and agents receive bounded slices; reputation updates from real outcomes.
+
+**Requirements:** ONB-04, TEAM-01..04, MULTI-01..03, GEN-01, GEN-02, MEM-01..06, ROUTE-01, ROUTE-02, AGENT-05..07
+
+### Phase 12: End-to-end verification, model selection, and release
+
+Run the extension in a real VS Code extension host with automated UI tests, plus opt-in live tests against NEAR (a full GSD new-project, plan, and execute run on a sample repository). Evaluate GLM 5.3, Kimi K3, and DeepSeek V4.1 Flash on fixed coding tasks to confirm defaults. Security review, accurate SECURITY.md and listing with real screenshots, then publish.
+
+**Requirements:** TEST-01, TEST-03, SEC-01, SEC-02, SEC-03, PKG-01, PKG-02
+
+### Deferred
+
+NEAR account sign-in (AUTH-02) and wallet, staking, and entitlement (AUTH-04, COST-05, STAKE-01..03) wait for a documented NEAR AI contract; their entry points are removed in Phase 7 rather than shipped as stubs.
+
 ## Next action
 
-Phase 6 Plans 06-01 through 06-11 are implemented and summarized. The remaining work is final human Marketplace/extension-host review.
+Phase 7: plan with `/gsd-plan-phase 7`.

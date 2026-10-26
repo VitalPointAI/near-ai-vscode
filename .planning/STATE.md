@@ -34,8 +34,8 @@ Progress: [███████░░░] 67%
 
 ## Decisions
 
-- Support both NEAR AI API-key authentication and NEAR account sign-in in the architecture.
-- Automatically install the stable Open-GSD runtime on first activation when it is missing; keep this enabled by default and make it configurable.
+- Support NEAR AI API-key authentication. NEAR account sign-in is deferred until NEAR AI documents a token-exchange contract (2026-10-26).
+- *(Superseded 2026-10-26)* ~~Automatically install the stable Open-GSD runtime on first activation~~. Open-GSD is installed only when the user runs a GSD workflow in a project set up with the extension and it is missing; the extension activates only in workspaces containing `.planning/.near-ai/`.
 - Require approval for risky actions by default.
 - Treat onboarding, chat/GSD, model/routing controls, cost visibility, and agent controls as the initial product slice.
 - Preserve Open-GSD as the workflow engine and make its artifacts/state visible rather than replacing them.
@@ -118,6 +118,11 @@ Progress: [███████░░░] 67%
 - [Phase 06]: Expose graph inspection as bounded host DTOs with accessible interactive graph, semantic table, and keyboard-navigable outline fallback.
 - [Phase 06]: Keep graph rendering dependency-free; sanitize host graph DTOs before webview delivery and consume memory approval fingerprints once.
 - [Phase 06]: Plan 06-11 uses callback-safe generated script assembly and dependency-free runtime webview tests.
+
+- [2026-10-26] Milestone 2: Open-GSD runs on a clean-room agent harness inside the extension over NEAR AI's OpenAI-compatible API; no Codex or Claude Code runtime is invoked or bundled.
+- [2026-10-26] Default model is `z-ai/glm-5.3` (TEE-attested via Tinfoil, 1M context, fastest tool calling in the 2026-10-26 probe). Runner tiers: deep = Kimi K3, default = GLM 5.3, fast = GLM 5.3 Flash. Non-TEE models stay selectable and are labelled as forwarded.
+- [2026-10-26] NEAR's Anthropic-compatible `/v1/messages` serves Anthropic-backed models only, and those are forwarded to Anthropic; it is not used.
+- [2026-10-26] A plan is complete only when its behavior is reachable from the UI and proven by a test of the real path (see `.planning/AUDIT-2026-10-26.md`).
 
 ## Risks to resolve
 

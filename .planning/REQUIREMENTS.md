@@ -19,7 +19,7 @@
 - **GSD-01**: Users can discover and invoke Open-GSD commands from chat, including project setup, planning, execution, verification, and progress workflows.
 - **GSD-02**: Open-GSD artifacts and state remain inspectable in the workspace, with links from chat to relevant files and phases.
 - **GSD-03**: On every extension startup, and at least once every 24 hours during a long-running session, the extension checks the stable `@opengsd/gsd-core@latest` release and compares it with the active installation.
-- **GSD-03a**: If Open-GSD is missing at first activation, the extension installs the stable global runtime and synchronizes the current project before presenting GSD-dependent workflows.
+- **GSD-03a**: *(Superseded 2026-10-26.)* Open-GSD is installed only when the user runs a GSD workflow from the extension in a project set up with it and Open-GSD is missing; other workspaces are never touched.
 - **GSD-04**: When a newer stable Open-GSD release exists, the extension can install/update the global Open-GSD runtime and synchronize the current project to that version, while reporting progress, failures, and the exact version transition.
 - **GSD-05**: The updater is restricted to the official Open-GSD package/channel, preserves user files, supports cancellation/recovery, and never leaves the project in a partially updated state.
 - **MODEL-01**: Users can browse the current NEAR AI model catalog and select a default model for chat and coding work.
@@ -77,6 +77,37 @@
 - **CTX-02**: Continuity warnings fire before context exhaustion at configurable warning/critical thresholds; critical state automatically saves a resumable handoff and prevents starting new complex work until continuity is secured.
 - **CTX-03**: After compaction, restart, or a new session, the extension restores the last GSD handoff, active phase/plan, agent ledger, approvals, and pending next action without relying on conversational memory.
 - **CTX-04**: Context-monitor failure is non-blocking and visible; the extension falls back to structured checkpoints and session handoffs rather than silently continuing without continuity protection.
+
+## Milestone 2 requirements
+
+- **FIX-01**: Open-GSD installation is detected from installed runtime files, so the installer runs only when Open-GSD is genuinely missing or outdated.
+- **FIX-02**: Actual request cost is loaded from NEAR AI's billing API using the `inference-id` response header; estimates appear in every chat surface during and after a response.
+- **FIX-03**: Every model shows whether NEAR runs it in an attested TEE or forwards it to another provider, from NEAR's catalog metadata; "TEE verified" appears only when NEAR's attestation or signature endpoints confirm it.
+- **FIX-04**: Users can remove a project profile and its stored key.
+- **FIX-05**: The sidebar shows GSD artifact links, session history, and next-action buttons after runs.
+- **FIX-06**: Options and panels without a working implementation are removed or hidden; nothing ships as a stub.
+- **FIX-07**: README, SECURITY.md, and the Marketplace listing describe only verified behavior.
+- **FIX-08**: The release check fails if any runtime asset of the sidebar or Tools tab is missing.
+- **TEST-02**: Tests for user-facing behavior drive the real host message path or command; tests that only match source text are not accepted as evidence.
+- **TEST-03**: Opt-in live tests exercise NEAR AI and a full Open-GSD run end to end; an extension-host UI test suite covers the sidebar, approvals, and commands.
+- **HARN-01**: A clean-room agent loop streams model output and tool calls over NEAR's OpenAI-compatible API with parallel tool calls, retries, cancellation, turn limits, and per-turn usage and cost.
+- **HARN-02**: Read, Write, Edit, Glob, and Grep tools operate only inside the workspace, with exact-match edits and size-bounded reads.
+- **HARN-03**: A Bash tool runs commands in a persistent shell session with timeouts, output limits, background jobs, and cancellation, without shell injection from tool arguments.
+- **HARN-04**: A permission engine applies `nearAi.actionPolicy` and user allow/deny rules to every tool call; risky calls show an approval card with a diff or command preview.
+- **HARN-05**: Every run can be reverted: files changed by the runner are checkpointed and restorable in one action.
+- **HARN-06**: A TodoWrite tool and task list show the runner's plan and progress in the sidebar.
+- **HARN-07**: Every tool call, approval, and model turn is recorded as a structured audit and activity event without raw secrets.
+- **HARN-08**: The harness contains no copied or bundled proprietary agent-runtime code.
+- **HARN-09**: An Agent tool spawns sub-agents from definition files with their own system prompt, tool allowlist, and model tier, in the foreground or background, with concurrency limits.
+- **HARN-10**: Context usage is tracked per run; long tool outputs are truncated and earlier context is summarized before the model's window is exceeded.
+- **HARN-11**: Session transcripts are stored locally and can be resumed with full context.
+- **HARN-12**: WebFetch is available behind approval; the need for WebSearch, Workflow, and MCP tools is assessed against the GSD workflows that reference them.
+- **RUN-01**: Open-GSD's Claude runtime is installed into extension-owned storage, never into the user's Claude Code configuration.
+- **RUN-02**: Installed GSD skills, commands, agents, and workflows load with frontmatter, `$ARGUMENTS`, and `@` include resolution.
+- **RUN-03**: Every installed GSD skill is discoverable in the sidebar and `@nearai` and accepts arguments.
+- **RUN-04**: AskUserQuestion from a workflow pauses the run and renders an interactive question; the answer returns to the same run.
+- **RUN-05**: `gsd-tools.cjs` runs through the Bash tool with VS Code's bundled Node, with no separate Node install required.
+- **RUN-06**: A user can complete `/gsd-new-project`, `/gsd-plan-phase`, and `/gsd-execute-phase` on a sample repository entirely on NEAR AI.
 
 ## Out of scope for the first milestone
 
