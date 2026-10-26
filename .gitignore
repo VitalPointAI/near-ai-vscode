@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.vsix
+.env
+.env.*
+.vscode-test/
+.git-unusable-archive/
+
+.git-real/

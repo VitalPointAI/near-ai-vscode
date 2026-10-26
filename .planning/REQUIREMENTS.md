@@ -1,0 +1,86 @@
+# Requirements
+
+## v1 requirements
+
+- **ONB-01**: A first-run onboarding flow explains privacy, authentication choices, model access, and action approvals.
+- **ONB-02**: Users unfamiliar with GSD get a visual guided onboarding flow that explains the workflow, checks prerequisites, configures NEAR AI, confirms safety defaults, initializes the first project, and presents the next recommended action.
+- **ONB-03**: The onboarding flow is resumable, accessible, keyboard navigable, and reports each step’s status without requiring users to understand CLI commands.
+- **ONB-04**: During first-project/Open-GSD initialization, the extension asks concise project-shaping questions and recommends an appropriate role-based agent team, showing responsibilities, expected coordination/cost tradeoffs, and allowing the user to accept or customize the team before execution.
+- **AUTH-01**: Users can configure a NEAR AI API key through VS Code SecretStorage without persisting it in workspace files.
+- **AUTH-02**: The architecture supports NEAR account sign-in with short-lived access credentials and secure refresh/revocation behavior.
+- **AUTH-03**: Users can assign distinct NEAR AI API keys to individual workspace projects or named organization profiles; key material is isolated in VS Code SecretStorage by project/profile identity, never copied to workspace files, logs, prompts, analytics, or exports, and is never silently reused across projects.
+- **AUTH-04**: Users can connect an explicitly authorized NEAR wallet/account for account-bound NEAR AI entitlements without the extension reading, editing, deleting, or importing local NEAR credential files.
+- **CHAT-01**: The extension provides a native chat interface with streaming assistant output, cancellation, conversation state, and error recovery.
+- **CHAT-02**: The chat explains work in progress with streamed, developer-friendly status updates covering the current phase, tool/action, model, agent, wait state, approval request, retry, and completion/failure outcome.
+- **CHAT-03**: The chat supports interactive prompts with structured choices, free-form answers, cancellation, and resumption without losing the surrounding conversation or GSD state.
+- **CHAT-04**: Users can inspect and reopen conversation/activity history, including the associated project, phase, plans, agents, models, costs, approvals, and outcomes.
+- **CHAT-05**: The chat includes a persistent accessible GSD info line showing project completion percentage, current phase/total phases, current plan/total plans, execution state, active agent count, and available cost/budget context.
+- **UX-01**: The chat surface provides a small NEAR-branded animated status indicator for thinking/reasoning, streaming, tool approval, completion, and errors, with a reduced-motion fallback.
+- **GSD-01**: Users can discover and invoke Open-GSD commands from chat, including project setup, planning, execution, verification, and progress workflows.
+- **GSD-02**: Open-GSD artifacts and state remain inspectable in the workspace, with links from chat to relevant files and phases.
+- **GSD-03**: On every extension startup, and at least once every 24 hours during a long-running session, the extension checks the stable `@opengsd/gsd-core@latest` release and compares it with the active installation.
+- **GSD-03a**: If Open-GSD is missing at first activation, the extension installs the stable global runtime and synchronizes the current project before presenting GSD-dependent workflows.
+- **GSD-04**: When a newer stable Open-GSD release exists, the extension can install/update the global Open-GSD runtime and synchronize the current project to that version, while reporting progress, failures, and the exact version transition.
+- **GSD-05**: The updater is restricted to the official Open-GSD package/channel, preserves user files, supports cancellation/recovery, and never leaves the project in a partially updated state.
+- **MODEL-01**: Users can browse the current NEAR AI model catalog and select a default model for chat and coding work.
+- **MODEL-02**: Users can configure and discover supported local AI providers/endpoints, including OpenAI-compatible local runtimes, and select local models for chat and agent work.
+- **MODEL-03**: Provider selection is explicit per project/session, clearly labels local versus NEAR AI inference, and never silently falls back from local inference to cloud inference.
+- **MODEL-04**: Each project has an explicit active provider/organization profile, with a clearly reported key scope and safe switching/validation flow; organization profiles may be reused only when the user explicitly selects them.
+- **ROUTE-01**: Users can configure model routing for sub-agents by role/task, with visible routing decisions and safe fallback behavior.
+- **ROUTE-02**: The orchestrator maintains explainable, role-specific agent reputation scores from verified outcomes, rework, reliability, latency, cost efficiency, and user feedback; scores decay over time and influence future routing without permanently excluding lower-scoring agents.
+- **AGENT-01**: Users can generate, inspect, pause, resume, cancel, and limit sub-agents spawned for an Open-GSD task.
+- **AGENT-02**: The UI continuously reports deployed, active, waiting, completed, failed, and cancelled agent counts, with drill-down by role, task, model, route, tokens, cost, duration, and outcome.
+- **AGENT-03**: Agent activity has a live event timeline and durable analytics that can be filtered by session, project, phase, model, role, and time range.
+- **AGENT-04**: Each sub-agent receives a memorable user-visible identity and reports concise lifecycle updates with optional light humor, while preserving exact role, task, model, route, status, cost, approval, and error information.
+- **AGENT-05**: Agent reputation updates are recorded as structured analytics events with enough evidence to explain score changes, support reset/opt-out controls, and prevent self-reinforcing routing loops.
+- **AGENT-06**: Agent identities and non-sensitive operating parameters persist locally across sessions so the orchestrator can rehydrate or resurrect an agent when needed, with versioning, reset, export, and deletion controls that do not remove NEAR credentials.
+- **AGENT-07**: Accepted agent-team configurations persist with the project and can be reviewed, edited, versioned, and rehydrated by the orchestrator without storing private prompts or credentials.
+- **TEAM-01**: Users can manually create, name, edit, duplicate, version, archive, and delete reusable agent teams independently of any one project.
+- **TEAM-02**: Team builders can define each member's stable role, responsibilities, skills, tools/capabilities, model/provider route, personality/tone/style guidance, autonomy limits, budget limits, and approval requirements using bounded allowlisted contracts.
+- **TEAM-03**: Users can preview a team's members, responsibilities, routing, estimated coordination/cost tradeoffs, privacy boundary, and required capabilities before saving or invoking it; invoking a team requires explicit project binding and preserves the project safety policy.
+- **TEAM-04**: Saved teams are versioned, non-sensitive, exportable/importable, and rehydrated safely across sessions/projects without storing API keys, wallet signing material, private prompts, raw context, or unrestricted paths.
+- **MULTI-01**: Users can attach multimodal project content through a guided, accessible flow for images, video, audio, documents, and structured data, with file-size/type limits, previews, provenance, and explicit local-versus-cloud handling.
+- **MULTI-02**: The orchestrator classifies multimodal inputs, selects compatible model capabilities, tracks derived artifacts and transformations, preserves source-to-output relationships, and reports when a provider cannot process a modality.
+- **MULTI-03**: Multimodal context passes the same privacy preflight, local-only policy, redaction, approval, cost attribution, and durable-history rules as text/code context; raw media is never copied into analytics or prompts unless explicitly authorized.
+- **GEN-01**: Image and video generation are first-class agent skills with explicit model capability metadata, routing, estimated/actual cost handling, output storage boundaries, provenance, cancellation, and approval before generation or external publication.
+- **GEN-02**: Agents cannot claim or invoke image/video generation capability unless the selected provider/model advertises it and the action passes policy, budget, privacy, and approval gates.
+- **MEM-01**: Every persistent agent has an isolated, versioned private memory namespace, while each reusable team has a separate collective memory namespace; neither namespace stores credentials, signing material, raw private prompts, or unrestricted workspace content by default.
+- **MEM-02**: The orchestrator can derive a bounded task-specific context-graph slice for an agent from private and collective memory using provenance, relevance, confidence, freshness/decay, privacy policy, and project/team scope, and records which non-sensitive facts were supplied.
+- **MEM-03**: Context-graph knowledge can grow and be revised through allowlisted facts, relationships, functions/capabilities, actors, source provenance, confidence, conflict/tension state, user feedback, and decay/retraction; contradictory or low-confidence knowledge remains visible rather than silently overwriting prior evidence.
+- **MEM-04**: Users can inspect, search, filter, correct, merge, retract, export, and reset permitted memory/graph entries with clear scope labels for agent-private, team-collective, project, and shared knowledge, without exposing secrets or private raw context.
+- **MEM-05**: The extension provides an accessible interactive graph view, with nodes for actors/knowledge/functions/artifacts, edges for typed relationships, and visible positive/negative/neutral tension weights plus provenance/confidence and time controls; a table/outline view is available when graph visualization is unsuitable.
+- **MEM-06**: Memory retrieval and graph updates are auditable, bounded, cancellation-safe, and local-only compatible; cloud inference never receives more graph context than the explicit privacy/provider policy allows.
+- **COST-01**: The UI shows request-level estimates during generation and actual cost/usage when returned or available through NEAR AI reporting APIs.
+- **COST-02**: Users can set spend limits, warnings, and an emergency stop for autonomous work.
+- **COST-03**: The UI provides live session/project analytics for requests, tokens, estimated and actual cost, latency, model distribution, cache usage when available, and budget remaining.
+- **COST-04**: Cost analytics attribute requests, tokens, estimates, actual charges, and budgets to the selected organization profile and project, with filterable summaries and exportable records that contain no API key material or sensitive prompt/context content.
+- **COST-05**: The extension can display the authenticated account's current NEAR AI credit balance, entitlement/staking status, validator identity, network, and last refresh time using read-only provider/account data, clearly distinguishing unavailable or stale values.
+- **STAKE-01**: Users can initiate NEAR AI entitlement staking to a verified configured validator from the extension through an external wallet authorization flow, with an exact transaction preview, network/validator/amount confirmation, explicit approval, status tracking, and recovery guidance; no transaction is submitted silently.
+- **STAKE-02**: Staking and credit actions are isolated from project API-key profiles, require fresh wallet authorization, never expose signing material to the extension webview or model context, and never delete or mutate files under `~/.near-credentials`.
+- **STAKE-03**: The extension shows stake/unstake/credit history only from verified bounded account/provider responses, redacts sensitive data, and records non-sensitive audit facts such as account label, network, validator, amount, transaction ID, and outcome without private keys or seed phrases.
+- **SAFE-01**: Reads and planning may run automatically, while writes, shell commands, network actions, and git mutations require approval by default.
+- **SAFE-02**: Every tool/action request has an understandable preview, scope, approval decision, and audit entry.
+- **PRIV-01**: The extension clearly shows the configured inference provider, TEE/verification status when available, and what context is being sent.
+- **PRIV-02**: Before context leaves the workspace, the extension performs a privacy preflight that identifies likely secrets, personal/private data, sensitive files, and scope expansion, then shows the user a concise redacted preview and the exact policy decision.
+- **PRIV-03**: Privacy policy supports block, warn-and-confirm, and allow modes by data class/path, with local-only exclusions, explicit one-time overrides, and an emergency stop that prevents new outbound requests.
+- **PRIV-04**: Privacy decisions and detections are auditable without storing raw sensitive content, and user-facing warnings clearly explain sovereignty impact, provider boundary, and how to keep the data local.
+- **PRIV-05**: A local-only sovereignty mode can block all non-local network inference and tool network actions, with an explicit, auditable override required to leave the machine.
+- **PKG-01**: The result is buildable and packageable as an installable VSIX with documented local development and installation steps.
+- **PKG-02**: Release includes a compelling, accurate VS Code Marketplace listing with value proposition, NEAR AI privacy/TEE explanation, sovereignty controls, GSD onboarding, agent/team behavior, model and cost transparency, screenshots or animated demos, requirements, permissions, privacy details, installation, troubleshooting, and roadmap.
+- **TEST-01**: Authentication, routing, cost accounting, approvals, command dispatch, and packaging have automated verification at the appropriate boundaries.
+- **SEC-01**: Every security-sensitive GSD plan includes a threat model, least-privilege review, negative-path tests, secret/redaction checks, dependency review, and verification evidence before the plan can be summarized.
+- **SEC-02**: The extension never reads, transmits, overwrites, or deletes NEAR credential files; API keys and refresh credentials remain in VS Code SecretStorage and are excluded from logs, prompts, analytics, exports, and crash/error output.
+- **SEC-03**: Release includes a trust and security report documenting permissions, outbound data boundaries, dependency provenance, reproducible verification commands, backdoor-oriented review results, known limitations, and remediation status.
+- **OBS-01**: All agent/tool/model lifecycle events use a structured event schema suitable for live UI updates, durable local analytics, export, and post-run summaries without storing secrets or raw private prompts by default.
+- **UX-02**: Personalized agent presentation is accessible, respectful, reduced-motion compatible, and configurable with a quiet/professional mode that removes humor without removing operational detail.
+- **CTX-01**: The extension uses Open-GSD's context-monitor/checkpoint lifecycle when available and verifies that context warnings are enabled for the active runtime.
+- **CTX-02**: Continuity warnings fire before context exhaustion at configurable warning/critical thresholds; critical state automatically saves a resumable handoff and prevents starting new complex work until continuity is secured.
+- **CTX-03**: After compaction, restart, or a new session, the extension restores the last GSD handoff, active phase/plan, agent ledger, approvals, and pending next action without relying on conversational memory.
+- **CTX-04**: Context-monitor failure is non-blocking and visible; the extension falls back to structured checkpoints and session handoffs rather than silently continuing without continuity protection.
+
+## Out of scope for the first milestone
+
+- Building or hosting proprietary inference models.
+- Replacing the Open-GSD workflow or silently rewriting its artifacts.
+- Unrestricted autonomous execution without configurable safety controls.
+- Organization-wide billing administration beyond the APIs needed for personal/workspace cost visibility.

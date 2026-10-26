@@ -1,0 +1,6 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { customizeAgentTeam, recommendAgentTeam } from '../services/agentTeams';
+const answers = { goal: 'Ship a safe feature', riskLevel: 'high' as const, preferredProvider: 'local-runtime', locality: 'local' as const, workShape: 'feature' as const };
+test('role-based team recommendation exposes responsibilities and tradeoffs', () => { const recommendation = recommendAgentTeam(answers); assert.deepEqual(recommendation.roles.map((row) => row.role), ['planner', 'implementer', 'security', 'tester', 'reviewer']); assert.ok(recommendation.roles.every((row) => row.responsibility && row.coordination && row.modelTradeoff && row.privacyBoundary)); assert.equal(recommendation.estimatedCost, 'high'); });
+test('team customization supports add/remove without private answers', () => { const recommendation = recommendAgentTeam(answers); const custom = customizeAgentTeam(recommendation, { remove: ['security'], add: ['researcher'] }); assert.equal(custom.roles.some((row) => row.role === 'security'), false); assert.equal(custom.roles.some((row) => row.role === 'researcher'), true); assert.doesNotMatch(JSON.stringify(custom), /Ship a safe feature|local-runtime/); });

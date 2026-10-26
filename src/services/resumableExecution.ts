@@ -1,0 +1,21 @@
+import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import type { BudgetState } from '../domain/approval';
+
+export interface ResumableAgent { id: string; role: string; status: 'running' | 'waiting' | 'paused' | 'completed' | 'failed' | 'cancelled'; model?: string; costUsd?: number; }
+export interface ResumeSnapshot { version: 1; snapshotId: string; sessionId: string; projectId: string; phase?: string; agents: ResumableAgent[]; pendingApprovalIds: string[]; budgets: Record<string, BudgetState>; lastSafeEvent: { id: string; type: string; timestamp: string }; nextAction: { kind: 'request-approval' | 'resume-agent' | 'review' | 'none'; id?: string; summary: string }; requiresFreshPolicy: true; requiresFreshApproval: true; }
+
+export class ResumableExecution {
+  private snapshot?: ResumeSnapshot;
+  public constructor(private readonly workspaceRoot?: string, private readonly now: () => number = Date.now) {}
+  public async save(input: Omit<ResumeSnapshot, 'version' | 'snapshotId' | 'requiresFreshPolicy' | 'requiresFreshApproval'>): Promise<ResumeSnapshot> { this.snapshot = { version: 1, snapshotId: `resume-${randomUUID().replaceAll('-', '').slice(0, 16)}`, ...clone(input), agents: input.agents.slice(0, 50).map(agent), pendingApprovalIds: [...new Set(input.pendingApprovalIds)].slice(0, 100), requiresFreshPolicy: true, requiresFreshApproval: true }; await this.persist(); return clone(this.snapshot); }
+  public async restore(): Promise<ResumeSnapshot | undefined> { if (this.snapshot) return clone(this.snapshot); if (!this.workspaceRoot) return undefined; try { const parsed = JSON.parse(await fs.readFile(this.filePath, 'utf8')) as ResumeSnapshot; if (parsed.version !== 1 || !parsed.requiresFreshPolicy || !parsed.requiresFreshApproval) return undefined; this.snapshot = normalize(parsed); return this.snapshot && clone(this.snapshot); } catch { return undefined; } }
+  public async markSafeEvent(event: { id: string; type: string }): Promise<void> { if (!this.snapshot) await this.restore(); if (!this.snapshot) return; this.snapshot.lastSafeEvent = { ...event, timestamp: new Date(this.now()).toISOString() }; await this.persist(); }
+  public async prepareResume(approvalId?: string): Promise<{ allowed: false; reason: string } | { allowed: true; reason: string; snapshot: ResumeSnapshot }> { const snapshot = await this.restore(); if (!snapshot) return { allowed: false, reason: 'No resumable execution state.' }; if (snapshot.nextAction.kind === 'request-approval' && (!approvalId || !snapshot.pendingApprovalIds.includes(approvalId))) return { allowed: false, reason: 'Fresh approval is required for the pending action.' }; return { allowed: true, reason: 'Display state restored; caller must perform fresh policy/preflight before dispatch.', snapshot: clone(snapshot) }; }
+  private get filePath(): string { return path.join(this.workspaceRoot ?? '', '.planning', '.near-ai', 'resume.json'); }
+  private async persist(): Promise<void> { if (!this.workspaceRoot || !this.snapshot) return; const file = this.filePath; const temporary = `${file}.${process.pid}.tmp`; try { await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(temporary, `${JSON.stringify(this.snapshot)}\n`, 'utf8'); await fs.rename(temporary, file); } catch { try { await fs.rm(temporary, { force: true }); } catch { /* best effort */ } } }
+}
+function agent(value: ResumableAgent): ResumableAgent { return { id: value.id.slice(0, 80), role: value.role.slice(0, 80), status: value.status, model: value.model?.slice(0, 120), costUsd: typeof value.costUsd === 'number' ? Math.max(0, value.costUsd) : 0 }; }
+function normalize(value: ResumeSnapshot): ResumeSnapshot | undefined { if (!value || value.version !== 1 || typeof value.sessionId !== 'string' || typeof value.projectId !== 'string' || !value.lastSafeEvent || !value.nextAction) return undefined; return { ...value, agents: Array.isArray(value.agents) ? value.agents.slice(0, 50).map(agent) : [], pendingApprovalIds: Array.isArray(value.pendingApprovalIds) ? [...new Set(value.pendingApprovalIds)].slice(0, 100) : [], requiresFreshPolicy: true, requiresFreshApproval: true }; }
+function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }

@@ -1,0 +1,17 @@
+.vscode/**
+.planning/**
+.codex/**
+.agents/**
+src/**
+test/**
+scripts/**
+tsconfig.json
+package-lock.json
+*.tsbuildinfo
+*.map
+**/*.map
+dist/test/**
+node_modules/**
+.git/**
+.git-real/**
+.gitignore

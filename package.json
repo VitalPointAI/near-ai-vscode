@@ -1,0 +1,78 @@
+{
+  "name": "near-ai-vscode",
+  "displayName": "Near AI for VSCode",
+  "description": "A private, cost-aware Open-GSD coding harness powered by NEAR AI Cloud.",
+  "version": "0.1.0",
+  "publisher": "near-ai",
+  "license": "MIT",
+  "engines": {
+    "vscode": ">=1.90.0"
+  },
+  "categories": ["Chat", "Other"],
+  "keywords": ["NEAR AI", "Open-GSD", "AI", "TEE", "agents"],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:nearAi.setup",
+    "onCommand:nearAi.status",
+    "onCommand:nearAi.openChat",
+    "onCommand:nearAi.gsdProgress"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "nearAi.setup", "title": "Near AI: Set Up" },
+      { "command": "nearAi.status", "title": "Near AI: Show Status" },
+      { "command": "nearAi.openChat", "title": "Near AI: Open Chat" },
+      { "command": "nearAi.gsdCommand", "title": "Open-GSD: Choose Command" },
+      { "command": "nearAi.gsdProgress", "title": "Open-GSD: Show Progress" },
+      { "command": "nearAi.saveCheckpoint", "title": "Open-GSD: Save Continuity Checkpoint" }
+    ],
+    "configuration": {
+      "title": "Near AI for VSCode",
+      "properties": {
+        "nearAi.baseUrl": {
+          "type": "string",
+          "default": "https://cloud-api.near.ai/v1",
+          "description": "NEAR AI Cloud API base URL."
+        },
+        "nearAi.authMode": {
+          "type": "string",
+          "enum": ["apiKey", "nearAccount"],
+          "default": "apiKey",
+          "description": "Authentication mode used for NEAR AI Cloud."
+        },
+        "nearAi.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional default model name."
+        },
+        "nearAi.actionPolicy": {
+          "type": "string",
+          "enum": ["approve-risky", "mostly-autonomous", "fully-autonomous"],
+          "default": "approve-risky",
+          "description": "Default policy for agent actions."
+        },
+        "nearAi.autoInstallGsd": {
+          "type": "boolean",
+          "default": true,
+          "description": "Install or update the stable Open-GSD runtime automatically when the extension activates."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run compile && node --test dist/test/*.test.js",
+    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
+    "verify:release": "npm run package && node scripts/verify-release-content.mjs",
+    "check": "npm run lint && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.2.2",
+    "typescript": "^5.7.2"
+  }
+}
