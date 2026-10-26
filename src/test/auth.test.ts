@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createProjectCredentialScope } from '../domain/auth';
+import { createProjectCredentialScope, deriveProfileId, isProfileId } from '../domain/auth';
 import { API_KEY_SECRET, REFRESH_TOKEN_SECRET, AuthService, SecretStorageLike, scopedSecret } from '../services/auth';
 
 class MemorySecrets implements SecretStorageLike {
@@ -40,4 +40,12 @@ test('legacy credentials require an explicit current-project import and are neve
 test('invalid scopes cannot be used to probe arbitrary SecretStorage keys', async () => {
   const auth = new AuthService(new MemorySecrets());
   await assert.rejects(() => auth.getScopedApiKey({ version: 1, projectId: '/workspace/project-a', profileId: 'profile-company' }), /valid project/);
+});
+
+test('project names are user-friendly while internal profile scopes remain valid and opaque', () => {
+  const profileId = deriveProfileId('/workspace/project-a', 'Research & Development / 2026');
+  assert.equal(isProfileId(profileId), true);
+  assert.match(profileId, /^profile-research-development-2026-[a-f0-9]{10}$/);
+  assert.equal(deriveProfileId('/workspace/project-a', 'Research & Development / 2026'), profileId);
+  assert.notEqual(deriveProfileId('/workspace/project-b', 'Research & Development / 2026'), profileId);
 });

@@ -56,6 +56,20 @@ export function isProfileId(value: unknown): value is string {
 }
 
 /**
+ * Turn the user-facing project name into an opaque, stable profile key.
+ * Users should name projects naturally; the provider scope still receives a
+ * constrained identifier without exposing the workspace path in storage.
+ */
+export function deriveProfileId(projectIdentity: string, projectName: string): string {
+  const identity = projectIdentity.trim();
+  const name = projectName.trim();
+  if (!identity || !name || identity.includes('\u0000') || name.includes('\u0000')) throw new Error('A project identity and name are required.');
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'project';
+  const suffix = createHash('sha256').update(`${identity}\u0000${name}`).digest('hex').slice(0, 10);
+  return `profile-${slug}-${suffix}`;
+}
+
+/**
  * Hash the canonical workspace identity before it is used in a secret name.
  * The path itself, display names, and credential material never enter storage keys.
  */

@@ -11,6 +11,7 @@ import { chooseGsdCommand } from './services/gsdCommands';
 import { StakingService } from './services/stakingService';
 import { walletStatusCopy } from './services/chatBridge';
 import { NearAiPanelViewProvider } from './services/panelView';
+import { deriveProfileId } from './domain/auth';
 
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new AuthService(context.secrets);
@@ -113,10 +114,9 @@ async function saveProfileCredential(auth: AuthService, apiKey: string): Promise
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showWarningMessage('Open a workspace before configuring a project profile.'); return; }
   const profiles = new ProfileStore(root, auth);
-  const profileId = await vscode.window.showInputBox({ prompt: 'Stable profile ID (for example, profile-company)', placeHolder: 'profile-company', ignoreFocusOut: true });
-  if (profileId === undefined) return;
-  const displayName = await vscode.window.showInputBox({ prompt: 'Profile name', value: profileId, ignoreFocusOut: true });
+  const displayName = await vscode.window.showInputBox({ prompt: 'Project name', value: vscode.workspace.name ?? 'My project', placeHolder: 'Anything you want to call this project', ignoreFocusOut: true });
   if (displayName === undefined) return;
+  const profileId = deriveProfileId(root, displayName);
   const organization = await vscode.window.showInputBox({ prompt: 'Organization or company', ignoreFocusOut: true });
   if (organization === undefined) return;
   const settings = readSettings();
@@ -129,9 +129,9 @@ async function saveProfileCredential(auth: AuthService, apiKey: string): Promise
   await profiles.saveProfileApiKey(profileId, apiKey);
   const validated = await profiles.validate(profileId);
   if (validated.validation.status === 'valid') {
-    void vscode.window.showInformationMessage(`Profile “${validated.displayName}” is validated for this workspace. Select it explicitly from Chat Setup before dispatch.`);
+    void vscode.window.showInformationMessage(`Project “${validated.displayName}” is validated for this workspace. Select it explicitly from Chat Setup before dispatch.`);
   } else {
-    void vscode.window.showWarningMessage(`Profile “${validated.displayName}” was saved but provider validation did not pass. Review Setup before dispatch.`);
+    void vscode.window.showWarningMessage(`Project “${validated.displayName}” was saved but provider validation did not pass. Review Setup before dispatch.`);
   }
 }
 

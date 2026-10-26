@@ -70,23 +70,13 @@ for (let y = 0; y < size; y += 1) for (let x = 0; x < size; x += 1) {
   blend(x, y, 2 + glow * 4, 13 + glow * 12, 28 + glow * 26, 1);
 }
 
-// A quiet planning route behind the mark: three nodes imply AI orchestration,
-// while the stepped path alludes to Open-GSD's plan/execute progression.
-const route = [92, 374, 92, 424, 190, 452, 286, 382, 404, 310];
-for (let index = 0; index < route.length - 2; index += 2) {
-  strokeSegment(route[index], route[index + 1], route[index + 2], route[index + 3], 4, [0, 142, 124], 14);
-}
-for (const [x, y] of [[92, 374], [286, 382], [404, 310]]) {
-  circle(x, y, 13, [0, 210, 173], 0.14);
-  circle(x, y, 6, [76, 255, 210], 1);
-}
-
-// Clean angular N based on the attached reference mark.
+// The actual NEAR mark: three clean rounded strokes, with no extra chart or
+// invented glyph competing with the recognizable logo silhouette.
 const mint = [0, 236, 178];
 const mintLight = [54, 255, 204];
-strokeSegment(151, 370, 151, 166, 29, mint, 20);
-strokeSegment(151, 166, 361, 370, 29, mintLight, 20);
-strokeSegment(361, 370, 361, 166, 29, mint, 20);
+strokeSegment(157, 356, 157, 156, 31, mint, 18);
+strokeSegment(157, 156, 355, 356, 31, mintLight, 18);
+strokeSegment(355, 356, 355, 156, 31, mint, 18);
 
 function crc32(buffer) {
   let crc = 0xffffffff;
