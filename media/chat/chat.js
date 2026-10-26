@@ -11,6 +11,7 @@
   const input = $('input');
   const send = $('send');
   const model = $('model');
+  const profile = $('profile');
   const status = $('status');
   const menu = $('commands');
   const live = $('live');
@@ -286,6 +287,7 @@
   });
   input.addEventListener('blur', () => { menu.hidden = true; });
   send.addEventListener('click', submit);
+  profile.addEventListener('click', () => post({ type: profile.dataset.state === 'missing' ? 'open-setup' : 'select-profile' }));
   status.addEventListener('click', () => { if (!busy) runCommand('progress'); });
   model.addEventListener('change', () => { saved.model = model.value; vscode.setState(saved); model.title = model.selectedOptions[0] ? model.selectedOptions[0].title : ''; });
   document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => runCommand(button.dataset.command)));
@@ -313,8 +315,19 @@
       case 'auth-required':
         if (current) { current.node.remove(); current = undefined; }
         setBusy(false);
-        notice(m.text || 'Set up NEAR AI to start chatting.', [textButton('Set up', () => post({ type: 'open-setup' }), true)]);
+        notice(m.text || 'Set up NEAR AI to start chatting.', [
+          textButton('Set up', () => post({ type: 'open-setup' }), true),
+          textButton('Choose profile', () => post({ type: 'select-profile' }))
+        ]);
         break;
+      case 'profile-status': {
+        const value = m.value || {};
+        const active = (value.profiles || []).find((item) => item.profileId === value.activeProfileId);
+        profile.textContent = active ? active.displayName : 'Set up';
+        profile.title = active ? active.displayName + (active.organization && active.organization !== active.displayName ? ' · ' + active.organization : '') + ' — click to switch profile' : 'Set up NEAR AI for this project';
+        profile.dataset.state = active ? (active.validation && active.validation.status === 'valid' ? 'ready' : 'attention') : 'missing';
+        break;
+      }
       case 'assistant-start': if (!current) startAssistant(); current.model = m.model; if (m.status) status.textContent = m.status; break;
       case 'assistant-delta':
         if (!current) startAssistant();

@@ -204,3 +204,19 @@ test('a provider that never responds times out instead of hanging', async () => 
   });
   await assert.rejects(() => client.listModels(), (error: unknown) => error instanceof NearAiError && error.status === 408 && error.retryable);
 });
+
+test('model list falls back to /models when the pricing endpoint is unavailable', async () => {
+  const seen: string[] = [];
+  const client = new NearAiClient({
+    baseUrl: 'https://example.test/v1', apiKey: 'secret', maxRetries: 0,
+    fetchFn: async (url) => {
+      seen.push(String(url));
+      if (String(url).endsWith('/models/pricing')) return new Response('{}', { status: 404 });
+      return new Response(JSON.stringify({ object: 'list', data: [{ id: 'deepseek-ai/DeepSeek-V3', pricing: { input: 0.27, output: 1.1 } }] }), { status: 200 });
+    }
+  });
+  const models = await client.listModelsWithPricing();
+  assert.deepEqual(seen, ['https://example.test/v1/models/pricing', 'https://example.test/v1/models']);
+  assert.equal(models[0]?.id, 'deepseek-ai/DeepSeek-V3');
+  assert.equal(models[0]?.inputPricePerMillion, 0.27);
+});

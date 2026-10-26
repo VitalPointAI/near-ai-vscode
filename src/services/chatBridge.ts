@@ -30,6 +30,7 @@ export type ChatWebviewMessage =
   | { type: 'history' }
   | { type: 'new-chat' }
   | { type: 'open-tools' }
+  | { type: 'select-profile' }
   | { type: 'insert-code'; text: string }
   | { type: 'reopen-session'; sessionId: string }
   | { type: 'continue-session'; sessionId: string }
@@ -488,7 +489,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'text')) return undefined;
     return { type: 'insert-code', text: message.text };
   }
-  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools') {
+  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'select-profile') {
     if (Object.keys(message).some((key) => key !== 'type')) return undefined;
     return { type: message.type };
   }
@@ -726,9 +727,22 @@ export function progressActivitySummary(card: ProgressCard): string {
   return safeProgressText(`${state}: ${card.action}${card.tool ? ` · tool ${card.tool}` : ''}${card.phase ? ` · ${card.phase}` : ''}${card.model ? ` · model ${card.model}` : ''}${card.agent ? ` · agent ${card.agent}` : ''}${card.agentCount !== undefined ? ` · ${card.agentCount} agents` : ''}${card.attempt ? ` · attempt ${card.attempt}` : ''}${card.retry ? ' · retry' : ''}${card.approvalRequired ? ' · approval required' : ''}`);
 }
 
-export function modelOptions(models: ModelInfo[]): ChatModelOption[] {
+/** Embedding, reranking, and speech models cannot hold a conversation. */
+export function isChatModel(model: Pick<ModelInfo, 'id'>): boolean {
+  return model.id.trim().length > 0 && !/(?:embed|rerank|whisper|tts|speech|moderation)/i.test(model.id);
+}
+
+/** The configured default when the provider offers it, otherwise the provider's first chat model. */
+export function defaultChatModel(models: ModelInfo[], configured?: string): string | undefined {
+  const chat = models.filter(isChatModel);
+  return chat.find((model) => model.id === configured?.trim())?.id ?? chat[0]?.id;
+}
+
+export function modelOptions(models: ModelInfo[], configured?: string): ChatModelOption[] {
+  const preferred = defaultChatModel(models, configured);
   return models
-    .filter((model) => model.id.trim().length > 0)
+    .filter(isChatModel)
+    .sort((a, b) => Number(b.id === preferred) - Number(a.id === preferred))
     .map((model) => ({
       id: model.id,
       label: model.inputPricePerMillion === undefined

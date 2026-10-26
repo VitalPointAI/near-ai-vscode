@@ -5,7 +5,7 @@ import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { ActivityStore } from './activityStore';
 import { AuthService } from './auth';
-import { ConversationTurn, promptMessage, providerErrorMessage } from './chatBridge';
+import { ConversationTurn, defaultChatModel, promptMessage, providerErrorMessage } from './chatBridge';
 import { GsdProgressEvent, GsdRunner } from './gsdRunner';
 import { GsdUpdater } from './gsdUpdater';
 import { UsageMetadata } from './nearAiClient';
@@ -15,7 +15,6 @@ import { readSettings, shouldAutoInstallGsd } from './settings';
 
 export const PARTICIPANT_ID = 'nearAi';
 export const RESPOND_TO_GSD_COMMAND = 'nearAi.respondToGsdPrompt';
-const FALLBACK_MODEL = 'deepseek-ai/DeepSeek-V3';
 
 interface ParticipantResult extends vscode.ChatResult {
   metadata: { command?: string };
@@ -78,7 +77,17 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
     response.button({ command: 'nearAi.setup', title: 'Review setup' });
     return;
   }
-  const model = readSettings().defaultModel || FALLBACK_MODEL;
+  let model: string | undefined;
+  try {
+    model = defaultChatModel(await provider.client.listModels(), readSettings().defaultModel);
+  } catch (error) {
+    response.markdown(providerErrorMessage(error));
+    return;
+  }
+  if (!model) {
+    response.markdown('NEAR AI returned no chat models for this key.');
+    return;
+  }
   const activity = new ActivityStore(root);
   const session = await activity.start({ project: path.basename(root), attribution: hostAttribution(profiles.projectScopeId, path.basename(root), profile.profileId, profile.organization), model, summary: 'Chat view session started.' });
   const abort = new AbortController();

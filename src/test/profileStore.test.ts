@@ -92,3 +92,31 @@ test('legacy import leaves the profile pending until provider validation and can
     assert.equal(await auth.getScopedApiKey(otherProjectStore.getScope('profile-company')), undefined);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('configure saves the key, validates, and activates the profile so chat can use it', async () => {
+  const root = await tempRoot();
+  try {
+    const store = new ProfileStore(root, new AuthService(new MemorySecrets()), { validator: async () => undefined });
+    const profile = await store.configure({ profileId: 'profile-acme', displayName: 'Acme', organization: 'Acme', baseUrl: 'https://example.test/v1', authMode: 'apiKey' }, 'sk-test');
+    assert.equal(profile.validation.status, 'valid');
+    assert.equal((await new ProfileStore(root).getActiveProfile())?.profileId, 'profile-acme');
+    const again = await store.configure({ profileId: 'profile-acme', displayName: 'Acme', organization: 'Acme Corp', baseUrl: 'https://example.test/v1', authMode: 'apiKey' }, 'sk-new');
+    assert.equal(again.organization, 'Acme Corp');
+    assert.equal(again.validation.status, 'valid');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('configure leaves the active profile unchanged when the key fails validation', async () => {
+  const root = await tempRoot();
+  try {
+    const store = new ProfileStore(root, new AuthService(new MemorySecrets()), { validator: async () => { throw new Error('HTTP 401'); } });
+    const profile = await store.configure({ profileId: 'profile-bad', displayName: 'Bad', organization: 'Bad', baseUrl: 'https://example.test/v1', authMode: 'apiKey' }, 'sk-wrong');
+    assert.equal(profile.validation.status, 'invalid');
+    assert.match(profile.validation.error ?? '', /401/);
+    assert.equal(await store.getActiveSelection(), undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

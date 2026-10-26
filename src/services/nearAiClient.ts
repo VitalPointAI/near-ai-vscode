@@ -128,8 +128,15 @@ export class NearAiClient {
   }
 
   public async listModelsWithPricing(signal?: AbortSignal): Promise<ModelInfo[]> {
-    const response = await this.request('/models/pricing', { method: 'GET', signal });
-    return this.rememberModels(normalizeModelRows(await jsonRows(response), (this.options.clock ?? (() => new Date().toISOString()))(), '/models/pricing'));
+    // NEAR AI's /models already carries pricing; /models/pricing is preferred when it answers with rows.
+    try {
+      const response = await this.request('/models/pricing', { method: 'GET', signal });
+      const models = normalizeModelRows(await jsonRows(response), (this.options.clock ?? (() => new Date().toISOString()))(), '/models/pricing');
+      if (models.length) return this.rememberModels(models);
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw error;
+    }
+    return this.listModels(signal);
   }
 
   /** Official NEAR image-generation contract. No video endpoint is assumed here. */

@@ -24,11 +24,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
       openApiKeyPortal: () => openApiKeyPortal(),
-      configureApiKey: () => configureApiKey(auth),
+      configureApiKey: () => configureApiKey(auth, sidebar),
       openStaking: () => openTools(context, auth),
       showProgress: () => showStatus(auth)
     })),
     vscode.commands.registerCommand('nearAi.status', () => showStatus(auth)),
+    vscode.commands.registerCommand('nearAi.selectProfile', () => selectProfile(auth, sidebar)),
     vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
     vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
     vscode.commands.registerCommand('nearAi.openTools', () => openTools(context, auth)),
@@ -75,44 +76,71 @@ async function saveCheckpoint(): Promise<void> {
   void vscode.window.showInformationMessage(`Continuity checkpoint saved: ${path}`);
 }
 
-async function configureApiKey(auth: AuthService): Promise<void> {
-  const value = await vscode.window.showInputBox({ prompt: 'Enter your NEAR AI Cloud API key', password: true, ignoreFocusOut: true });
-  if (value === undefined) return;
+async function configureApiKey(auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI keys and profiles are scoped to a project.'); return; }
+  const displayName = (await vscode.window.showInputBox({
+    title: 'NEAR AI Set Up (1/3)', prompt: 'Project name', value: vscode.workspace.name ?? 'My project', ignoreFocusOut: true,
+    validateInput: (value) => value.trim() ? undefined : 'Enter a name for this project.'
+  }))?.trim();
+  if (!displayName) return;
+  const organization = await vscode.window.showInputBox({ title: 'NEAR AI Set Up (2/3)', prompt: 'Organization or company (optional, used for cost reports)', placeHolder: displayName, ignoreFocusOut: true });
+  if (organization === undefined) return;
+  const apiKey = (await vscode.window.showInputBox({
+    title: 'NEAR AI Set Up (3/3)', prompt: 'NEAR AI Cloud API key', password: true, ignoreFocusOut: true,
+    validateInput: (value) => value.trim() ? undefined : 'Paste your NEAR AI Cloud API key.'
+  }))?.trim();
+  if (!apiKey) return;
   try {
-    await saveProfileCredential(auth, value);
+    const profile = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Checking your NEAR AI key…' }, () =>
+      new ProfileStore(root, auth).configure({ profileId: deriveProfileId(root, displayName), displayName, organization: organization.trim() || displayName, baseUrl: readSettings().baseUrl, authMode: 'apiKey' }, apiKey));
+    if (profile.validation.status === 'valid') {
+      await sidebar.refresh();
+      void vscode.window.showInformationMessage(`NEAR AI is ready for “${profile.displayName}”. Pick a model and start chatting.`);
+      return;
+    }
+    const retry = await vscode.window.showErrorMessage(`NEAR AI couldn't verify that key: ${profile.validation.error ?? 'validation failed'}`, 'Re-enter key', 'Open NEAR AI Cloud');
+    if (retry === 'Re-enter key') await configureApiKey(auth, sidebar);
+    if (retry === 'Open NEAR AI Cloud') await openApiKeyPortal();
   } catch (error) {
     void vscode.window.showErrorMessage(redactSecrets(error instanceof Error ? error.message : String(error)));
   }
 }
 
-async function saveProfileCredential(auth: AuthService, apiKey: string): Promise<void> {
+/** Switches this project's active profile, re-validating ones whose key needs checking. */
+async function selectProfile(auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) { void vscode.window.showWarningMessage('Open a workspace before configuring a project profile.'); return; }
+  if (!root) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
   const profiles = new ProfileStore(root, auth);
-  const displayName = await vscode.window.showInputBox({ prompt: 'Project name', value: vscode.workspace.name ?? 'My project', placeHolder: 'Anything you want to call this project', ignoreFocusOut: true });
-  if (displayName === undefined) return;
-  const profileId = deriveProfileId(root, displayName);
-  const organization = await vscode.window.showInputBox({ prompt: 'Organization or company', ignoreFocusOut: true });
-  if (organization === undefined) return;
-  const settings = readSettings();
-  const existing = await profiles.get(profileId);
-  if (existing) {
-    await profiles.update({ profileId, displayName, organization, baseUrl: settings.baseUrl, authMode: 'apiKey' });
-  } else {
-    await profiles.create({ profileId, displayName, organization, baseUrl: settings.baseUrl, authMode: 'apiKey' });
+  const metadata = await profiles.exportMetadata();
+  const setUp = { label: '$(add) Set up a new profile…', profileId: undefined };
+  const picked = await vscode.window.showQuickPick([
+    ...metadata.profiles.map((profile) => ({
+      label: `${profile.profileId === metadata.activeProfileId ? '$(check) ' : ''}${profile.displayName}`,
+      description: profile.organization === profile.displayName ? undefined : profile.organization,
+      detail: profile.validation.status === 'valid' ? 'Verified' : `Needs verification (${profile.validation.status}): select to check the key again`,
+      profileId: profile.profileId
+    })),
+    setUp
+  ], { title: 'NEAR AI profile for this project', placeHolder: metadata.profiles.length ? 'Choose the profile to use' : 'No profiles yet' });
+  if (!picked) return;
+  if (!picked.profileId) { await configureApiKey(auth, sidebar); return; }
+  let profile = await profiles.get(picked.profileId);
+  if (profile && profile.validation.status !== 'valid') {
+    profile = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Checking your NEAR AI key…' }, () => profiles.validate(picked.profileId));
   }
-  await profiles.saveProfileApiKey(profileId, apiKey);
-  const validated = await profiles.validate(profileId);
-  if (validated.validation.status === 'valid') {
-    void vscode.window.showInformationMessage(`Project “${validated.displayName}” is validated for this workspace. Select it explicitly from Chat Setup before dispatch.`);
-  } else {
-    void vscode.window.showWarningMessage(`Project “${validated.displayName}” was saved but provider validation did not pass. Review Setup before dispatch.`);
+  if (profile?.validation.status !== 'valid') {
+    const next = await vscode.window.showErrorMessage(`That profile's key couldn't be verified: ${profile?.validation.error ?? 'validation failed'}`, 'Re-enter key');
+    if (next) await configureApiKey(auth, sidebar);
+    return;
   }
+  await profiles.select(profile.profileId);
+  await sidebar.refresh();
 }
 
 async function openApiKeyPortal(): Promise<void> {
   await vscode.env.openExternal(vscode.Uri.parse('https://cloud.near.ai/'));
-  void vscode.window.showInformationMessage('Create your NEAR AI Cloud API key, then return here and choose “I already have a key”.');
+  void vscode.window.showInformationMessage('Create a NEAR AI Cloud API key, then run NEAR AI: Set Up again and choose “I already have a key”.');
 }
 
 async function showStatus(auth: AuthService): Promise<void> {

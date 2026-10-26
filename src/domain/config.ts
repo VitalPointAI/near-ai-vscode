@@ -10,12 +10,13 @@ export interface NearAiSettings {
 }
 
 export const DEFAULT_BASE_URL = 'https://cloud-api.near.ai/v1';
+export const DEFAULT_MODEL = 'deepseek/deepseek-v4.1-flash';
 
 export function createDefaultSettings(): NearAiSettings {
   return {
     baseUrl: DEFAULT_BASE_URL,
     authMode: 'apiKey',
-    defaultModel: '',
+    defaultModel: DEFAULT_MODEL,
     actionPolicy: defaultActionPolicy()
   };
 }

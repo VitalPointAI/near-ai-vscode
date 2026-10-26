@@ -175,6 +175,19 @@ export class ProfileStore {
     return clone(active);
   }
 
+  /**
+   * The Set Up flow: creates or updates the profile, stores its key, validates it with the
+   * provider, and makes it this project's active profile when validation passes.
+   */
+  public async configure(input: CreateOrganizationProfileInput, apiKey: string): Promise<OrganizationProfile> {
+    if (await this.get(input.profileId)) await this.update(input);
+    else await this.create(input);
+    await this.saveProfileApiKey(input.profileId, apiKey);
+    const validated = await this.validate(input.profileId);
+    if (validated.validation.status === 'valid') await this.select(input.profileId);
+    return validated;
+  }
+
   public async remove(profileId: string): Promise<boolean> {
     await this.load();
     if (!isProfileId(profileId)) throw new Error('A stable profile ID is required.');

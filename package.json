@@ -75,6 +75,12 @@
         "icon": "$(gear)"
       },
       {
+        "command": "nearAi.selectProfile",
+        "title": "Select Profile",
+        "category": "NEAR AI",
+        "icon": "$(account)"
+      },
+      {
         "command": "nearAi.status",
         "title": "Show Status",
         "category": "NEAR AI"
@@ -213,8 +219,8 @@
         },
         "nearAi.defaultModel": {
           "type": "string",
-          "default": "",
-          "description": "Optional default model name."
+          "default": "deepseek/deepseek-v4.1-flash",
+          "description": "Model used for new chats. If NEAR AI doesn't offer it, the first available chat model is used."
         },
         "nearAi.actionPolicy": {
           "type": "string",
@@ -254,6 +260,11 @@
           "command": "nearAi.setup",
           "when": "view == nearAiChatView",
           "group": "navigation@4"
+        },
+        {
+          "command": "nearAi.selectProfile",
+          "when": "view == nearAiChatView",
+          "group": "overflow@0"
         },
         {
           "command": "nearAi.status",

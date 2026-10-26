@@ -235,6 +235,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand('nearAi.setup');
       return;
     }
+    if (message.type === 'select-profile') {
+      await vscode.commands.executeCommand('nearAi.selectProfile');
+      return;
+    }
     if (message.type === 'open-tools') {
       await vscode.commands.executeCommand('nearAi.openTools');
       return;
@@ -402,7 +406,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       panel.webview.postMessage({ type: 'auth-required', text: 'Select and validate a named NEAR AI organization profile in Setup before chatting.' });
       return;
     }
-    const model = message.model?.trim() || state.model || 'deepseek-ai/DeepSeek-V3';
+    const model = message.model?.trim() || state.model;
+    if (!model) { panel.webview.postMessage({ type: 'assistant-error', text: 'Choose a model from the list below the message box.' }); return; }
     state.model = model;
     state.abort?.abort();
     const abort = new AbortController();
@@ -732,7 +737,7 @@ async function loadModels(panel: ChatHost, auth: AuthService): Promise<void> {
   try {
     const provider = await createNearAiProvider({ auth, profile: activeProfile, scope: profiles.getScope(activeSelection.profileId) });
     const models = await provider.client.listModelsWithPricing();
-    panel.webview.postMessage({ type: 'models', models: modelOptions(models) });
+    panel.webview.postMessage({ type: 'models', models: modelOptions(models, readSettings().defaultModel) });
   } catch (error) {
     panel.webview.postMessage({ type: 'models-error', text: providerErrorMessage(error) });
   }
@@ -750,8 +755,6 @@ async function sendProfileStatus(panel: ChatHost, auth: AuthService, existing?: 
   const configured = active ? Boolean(await auth.getScopedApiKey(profiles.getScope(active))) : false;
   const value = profileStatusMessage(exported.profiles, exported.projectId, active, configured);
   panel.webview.postMessage({ type: 'profile-status', value });
-  const selected = value.profiles.find((profile) => profile.profileId === value.activeProfileId);
-  panel.webview.postMessage({ type: 'status', value: `${selected ? `${selected.displayName} · ${selected.organization}` : 'Profile setup required'} · ${selected?.validation.status ?? 'not selected'} · ${value.projectScope}` });
 }
 
 async function readGsdStatusLine(): Promise<string> {

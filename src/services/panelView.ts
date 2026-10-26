@@ -27,6 +27,12 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
     await this.post({ type: 'reset' });
   }
 
+  /** Reloads models, profile, and status after setup or a profile switch. */
+  public async refresh(): Promise<void> {
+    await this.request({ type: 'load-models' });
+    await this.request({ type: 'refresh-status' });
+  }
+
   /** Asks the view to send a host-validated intent, so host actions reuse the view's own message flow. */
   public async request(payload: ChatWebviewMessage): Promise<void> {
     await this.post({ type: 'host-request', payload });
@@ -68,6 +74,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
     <div id="commands" role="listbox" aria-label="Open-GSD commands" hidden></div>
     <textarea id="input" rows="1" placeholder="Ask NEAR AI, or type / for commands" aria-label="Message NEAR AI" aria-controls="commands" aria-autocomplete="list" aria-expanded="false"></textarea>
     <div class="bar">
+      <button id="profile" class="chip" type="button" title="Choose the NEAR AI profile for this project">Set up</button>
       <select id="model" aria-label="Model"><option value="">Loading models…</option></select>
       <span class="spacer"></span>
       <button id="send" class="icon-button" type="button" aria-label="Send"></button>

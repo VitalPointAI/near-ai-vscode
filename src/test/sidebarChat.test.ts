@@ -80,3 +80,12 @@ test('usage footer shows model, tokens, cost, and verification', () => {
   assert.equal(usageFooter('m', { inputTokens: 1000, outputTokens: 234, estimatedCostUsd: 0.00123, verificationStatus: 'verified', latencyMs: 5 }), '*m · 1,234 tokens · ~$0.0012 · TEE verified*');
   assert.equal(usageFooter('m', { actualCostUsd: 0.5, verificationStatus: 'unknown', latencyMs: 5 }), '*m · $0.5000*');
 });
+
+test('model choices skip non-chat models and lead with the configured default', () => {
+  const { defaultChatModel, modelOptions } = require('../services/chatBridge') as typeof import('../services/chatBridge');
+  const models = [{ id: 'Qwen/Qwen3-Embedding-0.6B' }, { id: 'anthropic/claude-fable-5' }, { id: 'Qwen/Qwen3-Reranker-0.6B' }, { id: 'z-ai/glm-5.3' }] as never;
+  assert.equal(defaultChatModel(models), 'anthropic/claude-fable-5');
+  assert.equal(defaultChatModel(models, 'z-ai/glm-5.3'), 'z-ai/glm-5.3');
+  assert.equal(defaultChatModel(models, 'gone/model'), 'anthropic/claude-fable-5');
+  assert.deepEqual(modelOptions(models, 'z-ai/glm-5.3').map((option) => option.id), ['z-ai/glm-5.3', 'anthropic/claude-fable-5']);
+});

@@ -106,7 +106,7 @@ Read the full [security and trust report](SECURITY.md).
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `nearAi.defaultModel` | provider default | Model used for new chats. |
+| `nearAi.defaultModel` | `deepseek/deepseek-v4.1-flash` | Model used for new chats. |
 | `nearAi.actionPolicy` | `approve-risky` | How much agents may do without asking. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
 | `nearAi.autoInstallGsd` | `true` | Install Open-GSD when a workflow needs it and keep it current in NEAR AI projects. |
