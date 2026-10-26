@@ -36,11 +36,24 @@ import { MemoryApprovalError, MemoryApprovalRegistry } from './memoryApproval';
 import type { HostMemoryApprovalAuthorization } from './memoryApproval';
 import type { MemoryApprovalDescriptor, MemoryScope } from '../domain/contextGraph';
 
+export interface ChatHost {
+  webview: vscode.Webview;
+  onDidDispose: vscode.Event<void>;
+}
+
 export async function openChat(context: vscode.ExtensionContext, auth: AuthService, initialPrompt?: string, initialGsdCommand?: string): Promise<void> {
   const panel = vscode.window.createWebviewPanel('nearAiChat', 'Near AI Chat', vscode.ViewColumn.One, {
     enableScripts: true,
     retainContextWhenHidden: true
   });
+  await initializeChat(context, auth, panel, initialPrompt, initialGsdCommand);
+}
+
+export async function attachChatToView(context: vscode.ExtensionContext, auth: AuthService, view: vscode.WebviewView): Promise<void> {
+  await initializeChat(context, auth, view);
+}
+
+async function initializeChat(context: vscode.ExtensionContext, auth: AuthService, panel: ChatHost, initialPrompt?: string, initialGsdCommand?: string): Promise<void> {
   const state = {
     abort: undefined as AbortController | undefined,
     model: readSettings().defaultModel,
@@ -471,7 +484,7 @@ export async function openGsdArtifact(root: string, requested: Pick<GsdArtifactL
   return true;
 }
 
-export async function runGsdCommand(panel: vscode.WebviewPanel, runner: GsdRunner, command: string, root: string, activity: ActivityStore, onPrompt?: (prompt: StructuredPrompt) => void): Promise<void> {
+export async function runGsdCommand(panel: ChatHost, runner: GsdRunner, command: string, root: string, activity: ActivityStore, onPrompt?: (prompt: StructuredPrompt) => void): Promise<void> {
   const session = await activity.start({ project: path.basename(root), plans: [command], summary: `Open-GSD /${command} started.` });
   try {
     let progressIndex = 0;
@@ -511,7 +524,7 @@ export async function invokeTeamFromHost(workspaceRoot: string, teams: TeamStudi
   return teamInvocationStatusMessage({ invocationId: agent.id, teamId: validatedBinding.teamId, versionId: validatedBinding.versionId, role: agent.role, status: agent.status === 'running' ? 'running' : 'failed', stage: agent.status === 'running' ? 'running' : 'failed', provider: agent.routeSnapshot?.provider, model: agent.routeSnapshot?.model ?? agent.model, locality: agent.routeSnapshot?.locality, privacyBoundary: agent.routeSnapshot?.privacyBoundary, estimatedCostUsd: agent.costUsd, startedAt: agent.startedAt, updatedAt: agent.updatedAt });
 }
 
-async function sendTeamStatus(panel: vscode.WebviewPanel, teams: TeamStudioStore): Promise<void> {
+async function sendTeamStatus(panel: ChatHost, teams: TeamStudioStore): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const initialization = root ? new ProjectInitialization(root) : undefined;
   panel.webview.postMessage(teamStatusMessage(await teams.list({ includeArchived: true }), initialization ? await initialization.getReusableBinding() : undefined));
@@ -663,16 +676,16 @@ async function loadCapabilityAwarePreview(preview: import('../domain/teamStudio'
   }
 }
 
-async function sendHistory(panel: vscode.WebviewPanel, store: ActivityStore | undefined): Promise<void> {
+async function sendHistory(panel: ChatHost, store: ActivityStore | undefined): Promise<void> {
   panel.webview.postMessage({ type: 'history', sessions: store ? (await store.list()).map(sessionSummaryMessage) : [] });
 }
 
-async function sendArtifacts(panel: vscode.WebviewPanel): Promise<void> {
+async function sendArtifacts(panel: ChatHost): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   panel.webview.postMessage({ type: 'artifacts', artifacts: root ? await discoverGsdArtifacts(root) : [] });
 }
 
-async function sendStakingStatus(panel: vscode.WebviewPanel, staking: StakingService, refresh = false): Promise<void> {
+async function sendStakingStatus(panel: ChatHost, staking: StakingService, refresh = false): Promise<void> {
   const status = refresh ? await staking.refreshStatus() : staking.getStatus();
   panel.webview.postMessage(walletStatusMessage(status));
 }
@@ -682,7 +695,7 @@ function withWalletStatusPanel(html: string): string {
   return html.replace('</header>', `${panel}</header>`);
 }
 
-async function loadModels(panel: vscode.WebviewPanel, auth: AuthService): Promise<void> {
+async function loadModels(panel: ChatHost, auth: AuthService): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const profiles = root ? new ProfileStore(root, auth) : undefined;
   const activeProfile = profiles ? await profiles.getActiveProfile() : undefined;
@@ -700,7 +713,7 @@ async function loadModels(panel: vscode.WebviewPanel, auth: AuthService): Promis
   }
 }
 
-async function sendProfileStatus(panel: vscode.WebviewPanel, auth: AuthService, existing?: ProfileStore): Promise<void> {
+async function sendProfileStatus(panel: ChatHost, auth: AuthService, existing?: ProfileStore): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) {
     panel.webview.postMessage({ type: 'profile-status', value: profileStatusMessage([], 'No workspace', undefined, false) });

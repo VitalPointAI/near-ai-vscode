@@ -39,10 +39,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // the built-in Chat/Codex/Claude-style panel tabs in VS Code forks.
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(
     NearAiPanelViewProvider.viewId,
-    new NearAiPanelViewProvider(
-      () => vscode.commands.executeCommand('nearAi.openChat'),
-      () => vscode.commands.executeCommand('nearAi.setup')
-    )
+    new NearAiPanelViewProvider(context, auth)
   ));
 
   // Register NEAR AI as a native Chat participant so it appears alongside
