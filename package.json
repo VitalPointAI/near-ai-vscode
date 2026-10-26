@@ -2,8 +2,9 @@
   "name": "near-ai-vscode",
   "displayName": "Near AI for VSCode",
   "description": "A private, cost-aware Open-GSD coding harness powered by NEAR AI Cloud.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "VitalPoint",
+  "icon": "media/near-ai-icon.png",
   "license": "MIT",
   "engines": {
     "vscode": ">=1.90.0"
@@ -15,7 +16,8 @@
     "onCommand:nearAi.setup",
     "onCommand:nearAi.status",
     "onCommand:nearAi.openChat",
-    "onCommand:nearAi.gsdProgress"
+    "onCommand:nearAi.gsdProgress",
+    "onChatParticipant:nearAi"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -26,6 +28,18 @@
       { "command": "nearAi.gsdCommand", "title": "Open-GSD: Choose Command" },
       { "command": "nearAi.gsdProgress", "title": "Open-GSD: Show Progress" },
       { "command": "nearAi.saveCheckpoint", "title": "Open-GSD: Save Continuity Checkpoint" }
+    ],
+    "chatParticipants": [
+      {
+        "id": "nearAi",
+        "name": "nearAi",
+        "fullName": "NEAR AI",
+        "description": "Open the NEAR AI Open-GSD workspace in the current VS Code chat flow.",
+        "isSticky": true,
+        "commands": [
+          { "name": "open", "description": "Open the NEAR AI workspace" }
+        ]
+      }
     ],
     "configuration": {
       "title": "Near AI for VSCode",
@@ -66,6 +80,7 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run compile && node --test dist/test/*.test.js",
     "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
+    "generate:icon": "node scripts/generate-near-ai-icon.mjs",
     "verify:release": "npm run package && node scripts/verify-release-content.mjs",
     "check": "npm run lint && npm test"
   },

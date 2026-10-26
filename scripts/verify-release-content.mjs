@@ -62,6 +62,7 @@ const required = [
   'extension/readme.md',
   'extension/SECURITY.md',
   'extension/LICENSE.txt',
+  'extension/media/near-ai-icon.png',
   'extension/dist/extension.js',
   'extension/docs/marketplace/near-ai-overview.gif',
   'extension/docs/marketplace/near-ai-setup.gif'

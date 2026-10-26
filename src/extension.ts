@@ -32,6 +32,21 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('nearAi.gsdProgress', () => openChat(context, auth, undefined, 'progress')),
     vscode.commands.registerCommand('nearAi.saveCheckpoint', () => saveCheckpoint())
   );
+
+  // Register NEAR AI as a native Chat participant so it appears alongside
+  // other chat entries (for example Chat, Codex, and Claude Code) when the
+  // host supports the local Chat Participant API. The existing webview chat
+  // remains the extension's full workspace; the participant gives users a
+  // same-flow entry point and a reliable fallback button.
+  if (typeof vscode.chat?.createChatParticipant === 'function') {
+    const participant = vscode.chat.createChatParticipant('nearAi', async (_request, _chatContext, response, token) => {
+      if (token.isCancellationRequested) return;
+      await vscode.commands.executeCommand('nearAi.openChat');
+      response.markdown('NEAR AI is ready in this workspace.');
+      response.button({ command: 'nearAi.openChat', title: 'Open NEAR AI workspace' });
+    });
+    context.subscriptions.push(participant);
+  }
 }
 
 async function saveCheckpoint(): Promise<void> {
