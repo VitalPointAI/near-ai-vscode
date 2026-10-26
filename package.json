@@ -219,7 +219,7 @@
         },
         "nearAi.defaultModel": {
           "type": "string",
-          "default": "deepseek/deepseek-v4.1-flash",
+          "default": "z-ai/glm-5.3",
           "description": "Model used for new chats. If NEAR AI doesn't offer it, the first available chat model is used."
         },
         "nearAi.actionPolicy": {
