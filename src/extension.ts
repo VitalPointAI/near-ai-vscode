@@ -4,58 +4,59 @@ import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
 import { GsdUpdater } from './services/gsdUpdater';
-import { readSettings } from './services/settings';
+import { readSettings, shouldAutoInstallGsd } from './services/settings';
 import { openOnboarding } from './services/onboarding';
-import { openChat } from './services/chat';
+import { openTools } from './services/chat';
+import { ActivityStore } from './services/activityStore';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { StakingService } from './services/stakingService';
 import { walletStatusCopy } from './services/chatBridge';
 import { NearAiPanelViewProvider } from './services/panelView';
 import { deriveProfileId } from './domain/auth';
+import { registerChatParticipant } from './services/chatParticipant';
 
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new AuthService(context.secrets);
-  new GsdUpdater().start(context);
+  if (shouldAutoInstallGsd()) void new GsdUpdater().start(context);
 
+  const sidebar = new NearAiPanelViewProvider(context, auth);
   context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
       openApiKeyPortal: () => openApiKeyPortal(),
       configureApiKey: () => configureApiKey(auth),
-      openStaking: () => openChat(context, auth),
+      openStaking: () => openTools(context, auth),
       showProgress: () => showStatus(auth)
     })),
     vscode.commands.registerCommand('nearAi.status', () => showStatus(auth)),
-    vscode.commands.registerCommand('nearAi.openChat', () => openChat(context, auth)),
+    vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
+    vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
+    vscode.commands.registerCommand('nearAi.openTools', () => openTools(context, auth)),
+    vscode.commands.registerCommand('nearAi.showHistory', () => showHistory(sidebar)),
     vscode.commands.registerCommand('nearAi.gsdCommand', async () => {
       const selected = await chooseGsdCommand();
-      if (!selected) return;
-      await openChat(context, auth, undefined, selected.command);
+      if (selected) await sidebar.request({ type: 'open-command', command: selected.command });
     }),
-    vscode.commands.registerCommand('nearAi.gsdProgress', () => openChat(context, auth, undefined, 'progress')),
+    vscode.commands.registerCommand('nearAi.gsdProgress', () => sidebar.request({ type: 'open-command', command: 'progress' })),
     vscode.commands.registerCommand('nearAi.saveCheckpoint', () => saveCheckpoint())
   );
 
-  // Panel view is the supported extension surface that places NEAR AI beside
-  // the built-in Chat/Codex/Claude-style panel tabs in VS Code forks.
-  context.subscriptions.push(vscode.window.registerWebviewViewProvider(
-    NearAiPanelViewProvider.viewId,
-    new NearAiPanelViewProvider(context, auth)
-  ));
+  // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
+  registerChatParticipant(context, auth);
+}
 
-  // Register NEAR AI as a native Chat participant so it appears alongside
-  // other chat entries (for example Chat, Codex, and Claude Code) when the
-  // host supports the local Chat Participant API. The existing webview chat
-  // remains the extension's full workspace; the participant gives users a
-  // same-flow entry point and a reliable fallback button.
-  if (typeof vscode.chat?.createChatParticipant === 'function') {
-    const participant = vscode.chat.createChatParticipant('nearAi', async (_request, _chatContext, response, token) => {
-      if (token.isCancellationRequested) return;
-      await vscode.commands.executeCommand('nearAi.openChat');
-      response.markdown('NEAR AI is ready in this workspace.');
-      response.button({ command: 'nearAi.openChat', title: 'Open NEAR AI workspace' });
-    });
-    context.subscriptions.push(participant);
-  }
+async function showHistory(sidebar: NearAiPanelViewProvider): Promise<void> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) { void vscode.window.showInformationMessage('Open a folder to see NEAR AI session history.'); return; }
+  const sessions = await new ActivityStore(root).list();
+  if (!sessions.length) { void vscode.window.showInformationMessage('No NEAR AI sessions in this project yet.'); return; }
+  const picked = await vscode.window.showQuickPick(sessions.slice().reverse().map((session) => ({
+    label: session.plans.length ? session.plans.map((plan) => `/${plan}`).join(', ') : 'Chat',
+    description: session.outcome,
+    detail: [new Date(session.updatedAt).toLocaleString(), session.models.join(', ')].filter(Boolean).join(' · '),
+    sessionId: session.sessionId
+  })), { placeHolder: 'Reopen a NEAR AI session', matchOnDetail: true });
+  if (picked) await sidebar.request({ type: 'reopen-session', sessionId: picked.sessionId });
 }
 
 async function saveCheckpoint(): Promise<void> {
@@ -72,29 +73,6 @@ async function saveCheckpoint(): Promise<void> {
     pendingApprovals: 0
   });
   void vscode.window.showInformationMessage(`Continuity checkpoint saved: ${path}`);
-}
-
-async function runSetup(auth: AuthService): Promise<void> {
-  const choice = await vscode.window.showQuickPick(
-    ['Configure API key', 'Use NEAR account sign-in', 'Show current status'],
-    { placeHolder: 'Choose how Near AI for VSCode should connect' }
-  );
-  if (choice === 'Configure API key') {
-    const value = await vscode.window.showInputBox({ prompt: 'Enter your NEAR AI Cloud API key', password: true, ignoreFocusOut: true });
-    if (value === undefined) return;
-    try {
-      await saveProfileCredential(auth, value);
-    } catch (error) {
-      void vscode.window.showErrorMessage(redactSecrets(error instanceof Error ? error.message : String(error)));
-    }
-  } else if (choice === 'Use NEAR account sign-in') {
-    await vscode.workspace.getConfiguration('nearAi').update('authMode', 'nearAccount', vscode.ConfigurationTarget.Global);
-    void vscode.window.showInformationMessage('NEAR account sign-in is prepared but the provider token exchange is not yet configured.');
-  } else if (choice === 'Show current status') {
-    await showStatus(auth);
-  } else if (!choice) {
-    return;
-  }
 }
 
 async function configureApiKey(auth: AuthService): Promise<void> {

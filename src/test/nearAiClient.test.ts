@@ -184,3 +184,23 @@ test('transient failures use bounded exponential retry and cancellation stops re
   await assert.rejects(() => cancelled.listModels(controller.signal), (error: unknown) => error instanceof DOMException && error.name === 'AbortError');
   assert.equal(cancelledAttempts, 1);
 });
+
+test('api key is never sent to a plain-HTTP remote endpoint', async () => {
+  let called = false;
+  const client = new NearAiClient({ baseUrl: 'http://example.test/v1', apiKey: 'secret', fetchFn: async () => { called = true; return new Response('[]'); } });
+  await assert.rejects(() => client.listModels(), /must use HTTPS/);
+  assert.equal(called, false);
+});
+
+test('plain HTTP is allowed for a localhost runtime', async () => {
+  const client = new NearAiClient({ baseUrl: 'http://127.0.0.1:8080/v1', apiKey: 'secret', fetchFn: async () => new Response(JSON.stringify({ data: [] }), { status: 200 }) });
+  assert.deepEqual(await client.listModels(), []);
+});
+
+test('a provider that never responds times out instead of hanging', async () => {
+  const client = new NearAiClient({
+    baseUrl: 'https://example.test/v1', apiKey: 'secret', maxRetries: 0, responseTimeoutMs: 20,
+    fetchFn: (_url, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+  });
+  await assert.rejects(() => client.listModels(), (error: unknown) => error instanceof NearAiError && error.status === 408 && error.retryable);
+});

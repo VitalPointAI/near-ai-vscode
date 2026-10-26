@@ -2,33 +2,79 @@
   "name": "near-ai-vscode",
   "displayName": "Near AI for VSCode",
   "description": "A private, cost-aware Open-GSD coding harness powered by NEAR AI Cloud.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-vscode-icon-128.png",
   "license": "MIT",
   "engines": {
     "vscode": ">=1.90.0"
   },
-  "categories": ["Chat", "Other"],
-  "keywords": ["NEAR AI", "Open-GSD", "AI", "TEE", "agents"],
+  "categories": [
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "NEAR AI",
+    "Open-GSD",
+    "AI",
+    "TEE",
+    "agents"
+  ],
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:nearAi.setup",
-    "onCommand:nearAi.status",
-    "onCommand:nearAi.openChat",
-    "onCommand:nearAi.gsdProgress",
-    "onView:nearAiChatView",
-    "onChatParticipant:nearAi"
+    "workspaceContains:.planning/.near-ai/**"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      { "command": "nearAi.setup", "title": "Near AI: Set Up" },
-      { "command": "nearAi.status", "title": "Near AI: Show Status" },
-      { "command": "nearAi.openChat", "title": "Near AI: Open Chat" },
-      { "command": "nearAi.gsdCommand", "title": "Open-GSD: Choose Command" },
-      { "command": "nearAi.gsdProgress", "title": "Open-GSD: Show Progress" },
-      { "command": "nearAi.saveCheckpoint", "title": "Open-GSD: Save Continuity Checkpoint" }
+      {
+        "command": "nearAi.newChat",
+        "title": "New Chat",
+        "category": "NEAR AI",
+        "icon": "$(add)"
+      },
+      {
+        "command": "nearAi.showHistory",
+        "title": "Show Chat History",
+        "category": "NEAR AI",
+        "icon": "$(history)"
+      },
+      {
+        "command": "nearAi.openTools",
+        "title": "Open Tools",
+        "category": "NEAR AI",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "nearAi.setup",
+        "title": "Set Up",
+        "category": "NEAR AI",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "nearAi.status",
+        "title": "Show Status",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.openChat",
+        "title": "Open Chat",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.gsdCommand",
+        "title": "Run Open-GSD Command…",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.gsdProgress",
+        "title": "Show Open-GSD Progress",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.saveCheckpoint",
+        "title": "Save Continuity Checkpoint",
+        "category": "NEAR AI"
+      }
     ],
     "viewsContainers": {
       "secondarySidebar": [
@@ -44,7 +90,7 @@
         {
           "type": "webview",
           "id": "nearAiChatView",
-          "name": "NEAR AI",
+          "name": "Chat",
           "visibility": "visible"
         }
       ]
@@ -52,12 +98,75 @@
     "chatParticipants": [
       {
         "id": "nearAi",
-        "name": "nearAi",
+        "name": "nearai",
         "fullName": "NEAR AI",
-        "description": "Open the NEAR AI Open-GSD workspace in the current VS Code chat flow.",
+        "description": "Chat with private NEAR AI models and run Open-GSD workflows.",
         "isSticky": true,
         "commands": [
-          { "name": "open", "description": "Open the NEAR AI workspace" }
+          {
+            "name": "new-project",
+            "description": "Create project context and requirements from an idea."
+          },
+          {
+            "name": "onboard",
+            "description": "Map an existing repository and establish GSD context."
+          },
+          {
+            "name": "next",
+            "description": "Inspect project state and choose the appropriate next action."
+          },
+          {
+            "name": "progress",
+            "description": "Review phases, plans, current state, and recommended action."
+          },
+          {
+            "name": "discuss-phase",
+            "description": "Clarify phase intent and capture decisions before planning."
+          },
+          {
+            "name": "plan-phase",
+            "description": "Create an executable phase plan with verification steps."
+          },
+          {
+            "name": "execute-phase",
+            "description": "Run phase plans with dependency-aware agent execution."
+          },
+          {
+            "name": "verify-work",
+            "description": "Validate the implementation conversationally against acceptance criteria."
+          },
+          {
+            "name": "code-review",
+            "description": "Check changed source for bugs, security, and maintainability."
+          },
+          {
+            "name": "audit-uat",
+            "description": "Find unresolved verification and acceptance gaps."
+          },
+          {
+            "name": "map-codebase",
+            "description": "Generate architecture and codebase intelligence for agents."
+          },
+          {
+            "name": "graphify",
+            "description": "Create or inspect the planning knowledge graph."
+          },
+          {
+            "name": "thread",
+            "description": "Preserve decisions and continuity across sessions."
+          },
+          {
+            "name": "stats",
+            "description": "Display phases, plans, requirements, and project metrics."
+          },
+          {
+            "name": "settings",
+            "description": "Adjust workflow toggles, model profile, and automation."
+          },
+          {
+            "name": "update",
+            "description": "Update the installed GSD runtime and inspect its changelog."
+          }
         ]
       }
     ],
@@ -71,9 +180,12 @@
         },
         "nearAi.authMode": {
           "type": "string",
-          "enum": ["apiKey", "nearAccount"],
+          "enum": [
+            "apiKey",
+            "nearAccount"
+          ],
           "default": "apiKey",
-                  "description": "Inference uses a NEAR AI Cloud API key. A NEAR account or external wallet is separate and may be used for staking."
+          "description": "Inference uses a NEAR AI Cloud API key. A NEAR account or external wallet is separate and may be used for staking."
         },
         "nearAi.defaultModel": {
           "type": "string",
@@ -82,16 +194,54 @@
         },
         "nearAi.actionPolicy": {
           "type": "string",
-          "enum": ["approve-risky", "mostly-autonomous", "fully-autonomous"],
+          "enum": [
+            "approve-risky",
+            "mostly-autonomous",
+            "fully-autonomous"
+          ],
           "default": "approve-risky",
           "description": "Default policy for agent actions."
         },
         "nearAi.autoInstallGsd": {
           "type": "boolean",
           "default": true,
-          "description": "Install or update the stable Open-GSD runtime automatically when the extension activates."
+          "description": "In projects set up with NEAR AI, install Open-GSD if it is missing when you run a GSD command, and keep it on the latest stable release. Other workspaces are never touched."
         }
       }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "nearAi.newChat",
+          "when": "view == nearAiChatView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "nearAi.showHistory",
+          "when": "view == nearAiChatView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "nearAi.openTools",
+          "when": "view == nearAiChatView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "nearAi.setup",
+          "when": "view == nearAiChatView",
+          "group": "navigation@4"
+        },
+        {
+          "command": "nearAi.status",
+          "when": "view == nearAiChatView",
+          "group": "overflow@1"
+        },
+        {
+          "command": "nearAi.saveCheckpoint",
+          "when": "view == nearAiChatView",
+          "group": "overflow@2"
+        }
+      ]
     }
   },
   "scripts": {

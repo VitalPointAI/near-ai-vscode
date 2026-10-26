@@ -1,3 +1,4 @@
+import { isSecureEndpoint } from '../domain/config';
 import { redactSecrets } from '../domain/redaction';
 import type { CapabilityMetadataStatus, CapabilityModality, CapabilityPrivacyBoundary, SkillCapability, ProviderOperation } from '../domain/capabilities';
 
@@ -80,8 +81,12 @@ export interface NearAiClientOptions {
   fetchFn?: typeof fetch;
   maxRetries?: number;
   retryBaseDelayMs?: number;
+  /** How long to wait for response headers; a stream that has started is never cut off. */
+  responseTimeoutMs?: number;
   clock?: () => string;
 }
+
+export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
 
 export function createNearAiClient(options: NearAiClientOptions): NearAiClient {
   return new NearAiClient(options);
@@ -254,20 +259,35 @@ export class NearAiClient {
     const url = `${this.options.baseUrl.replace(/\/$/, '')}${path}`;
     const maxRetries = Math.max(0, Math.min(3, this.options.maxRetries ?? 2));
     const retryBaseDelayMs = Math.max(0, this.options.retryBaseDelayMs ?? 100);
+    const responseTimeoutMs = Math.max(1, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
+    if (!isSecureEndpoint(url)) throw new NearAiError(0, 'NEAR AI endpoint must use HTTPS; plain HTTP is only allowed for localhost.', false);
     for (let attempt = 0; ; attempt += 1) {
       let response: Response;
+      const attemptAbort = new AbortController();
+      const forwardAbort = () => attemptAbort.abort(init.signal?.reason);
+      if (init.signal?.aborted) forwardAbort(); else init.signal?.addEventListener('abort', forwardAbort, { once: true });
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; attemptAbort.abort(); }, responseTimeoutMs);
       try {
         response = await this.fetchFn(url, {
           ...init,
+          signal: attemptAbort.signal,
           headers: { authorization: `Bearer ${this.options.apiKey}`, ...(init.headers ?? {}) }
         });
       } catch (error) {
-        if (init.signal?.aborted || isAbortError(error)) throw error;
+        if (init.signal?.aborted) throw error;
+        if (timedOut) {
+          if (attempt < maxRetries) { await waitForRetry(retryBaseDelayMs, attempt, init.signal ?? undefined); continue; }
+          throw new NearAiError(408, `NEAR AI did not respond within ${Math.round(responseTimeoutMs / 1000)} seconds.`, true);
+        }
+        if (isAbortError(error)) throw error;
         if (attempt < maxRetries) {
           await waitForRetry(retryBaseDelayMs, attempt, init.signal ?? undefined);
           continue;
         }
         throw new NearAiError(0, `NEAR AI request failed: ${error instanceof Error ? error.message : 'network error'}.`, true);
+      } finally {
+        clearTimeout(timer);
       }
       if (init.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
       if (response.ok) return response;

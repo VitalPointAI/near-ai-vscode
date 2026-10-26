@@ -4,6 +4,7 @@ dist/
 .env
 .env.*
 .vscode-test/
-.git-unusable-archive/
 
-.git-real/
+# NEAR AI per-project runtime state (profiles metadata, activity, audit)
+.planning/.near-ai/
+.planning/HANDOFF.json

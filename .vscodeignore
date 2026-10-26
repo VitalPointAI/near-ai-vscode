@@ -13,5 +13,4 @@ package-lock.json
 dist/test/**
 node_modules/**
 .git/**
-.git-real/**
 .gitignore

@@ -95,14 +95,14 @@ available across every project opened by that profile. From this project,
 run `npm run verify:release && npm run install:global`; on a separate
 code-server host, run `code-server --install-extension
 near-ai-vscode-<version>.vsix --force`. Reload the window after installation
-and look for the `NEAR AI` tab beside the other panel tabs. The legacy
-`@nearAi` Chat participant remains available in Local-harness builds as a
-compatibility fallback.
+and look for the `NEAR AI` view in the secondary side bar, beside other chat
+extensions. In hosts with VS Code's built-in Chat view, you can also type
+`@nearai` there, with every Open-GSD workflow available as a slash command.
 
 ### Marketplace
 
 Install **Near AI for VSCode** from the VS Code Extensions view, then run
-**Near AI: Set Up** from the Command Palette.
+**NEAR AI: Set Up** from the Command Palette.
 
 ### Local VSIX
 
@@ -111,26 +111,34 @@ npm ci
 npm run verify:release
 ```
 
-Install the generated `near-ai-vscode-0.1.0.vsix` from **Extensions → Views and
+Install the generated `near-ai-vscode-<version>.vsix` from **Extensions → Views and
 More Actions → Install from VSIX...**. `verify:release` compiles the extension,
 packages it, and fails closed if required runtime/listing assets are missing or
 development artifacts enter the archive.
 
 ## First run
 
-1. Open a workspace and run **Near AI: Set Up**.
+1. Open a workspace and run **NEAR AI: Set Up**.
 2. Create or enter a NEAR AI Cloud API key. Give the project any name you want;
    the extension creates the constrained internal profile scope automatically.
 3. Confirm that provider validation succeeds, then explicitly select the
    profile in Chat Setup.
 4. Review the privacy preview and action policy before starting a GSD workflow.
-5. Use **Open-GSD: Choose Command** or **Near AI: Open Chat** to continue.
+5. Chat in the **NEAR AI** sidebar, or type `/` there (or in `@nearai`) to run
+   an Open-GSD workflow. Team studio, memory, generation, and analytics open
+   from the view's **Open Tools** action.
 
-The extension checks for the stable `@opengsd/gsd-core@latest` runtime at startup
-and during long sessions. When `nearAi.autoInstallGsd` is enabled (the default),
-it may use the documented `npx` package channel to install/update the runtime
-and synchronize the current project. Disable that setting if runtime updates
-must be managed outside VS Code.
+The extension leaves projects alone unless you set them up with NEAR AI. It
+only auto-activates in workspaces that contain `.planning/.near-ai/`, a folder
+created by your own actions in the extension (running an Open-GSD command,
+saving a profile). Opening the sidebar or reading status writes nothing.
+
+When `nearAi.autoInstallGsd` is enabled (the default), Open-GSD is installed
+from the stable `@opengsd/gsd-core@latest` channel only when you run a GSD
+command from the extension and it is missing. In NEAR AI projects the extension
+also keeps that install current at startup and daily. A project-local Open-GSD
+install is refreshed only if the project already has one; the extension never
+adds one. Disable the setting to manage Open-GSD yourself.
 
 ## Wallet and staking limitation
 
@@ -144,7 +152,7 @@ limitation, not a claim that production staking is enabled.
 
 ## Troubleshooting
 
-- **No profile can dispatch:** open **Near AI: Set Up**, select the intended
+- **No profile can dispatch:** open **NEAR AI: Set Up**, select the intended
   workspace profile, and validate it again. Stale or invalid profiles are
   blocked from dispatch.
 - **The model list or cost is unavailable:** confirm the provider endpoint and
@@ -153,7 +161,10 @@ limitation, not a claim that production staking is enabled.
   policy. Review the scope, provider boundary, redacted preview, and budget
   impact before approving.
 - **Open-GSD is unavailable:** check `nearAi.autoInstallGsd`, your network and
-  npm access, then run **Open-GSD: Show Progress** after the update check.
+  npm access, then run any GSD command (for example `/progress`) to trigger the
+  install.
+- **The provider endpoint is rejected:** API keys are only sent over HTTPS.
+  Plain `http:` is accepted only for a runtime on `localhost`/`127.0.0.1`/`[::1]`.
 - **Wallet status is unavailable:** this is expected until a verified official
   staking configuration and callback contract are supplied; no wallet write is
   attempted.

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { redactSecrets } from '../domain/redaction';
-import { AuthMode } from '../domain/config';
+import { AuthMode, isSecureEndpoint } from '../domain/config';
 import { ActiveProfileSelection, AUTH_PROFILE_VERSION, OrganizationProfile, ProfileValidation, ProjectCredentialScope, createProjectCredentialScope, isProfileId } from '../domain/auth';
 import { AuthService } from './auth';
 import { validateNearAiProvider } from './providerFactory';
@@ -300,7 +300,7 @@ function safeBaseUrl(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.length > 300 || /(?:api[_ -]?key|token|secret|password)/i.test(value)) return undefined;
   try {
     const parsed = new URL(value.trim());
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString().replace(/\/$/, '') : undefined;
+    return isSecureEndpoint(parsed.toString()) ? parsed.toString().replace(/\/$/, '') : undefined;
   } catch { return undefined; }
 }
 

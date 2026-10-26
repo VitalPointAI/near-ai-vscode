@@ -6,7 +6,7 @@ import { ActivitySessionSummary, AttributionSnapshot } from '../domain/activity'
 import { normalizePrompt, PromptResponse, StructuredPrompt, isPromptId, isSessionId, progressCardFromEvent, ProgressCard, safeProgressText } from '../domain/chatProgress';
 import { parseGsdPlanningState } from '../domain/gsdStatus';
 import type { AnalyticsFilter, AnalyticsResult } from '../domain/analytics';
-import { AuthMode } from '../domain/config';
+import { AuthMode, isSecureEndpoint } from '../domain/config';
 import { isProfileId, OrganizationProfile } from '../domain/auth';
 import type { EntitlementStatusView, StakeHistoryEntry, StakingOperation, TransactionPreviewView } from '../domain/staking';
 import type { AgentCapability, AgentRole } from '../domain/agents';
@@ -28,6 +28,9 @@ export type ChatWebviewMessage =
   | { type: 'send'; text: string; model?: string }
   | { type: 'stop' }
   | { type: 'history' }
+  | { type: 'new-chat' }
+  | { type: 'open-tools' }
+  | { type: 'insert-code'; text: string }
   | { type: 'reopen-session'; sessionId: string }
   | { type: 'continue-session'; sessionId: string }
   | { type: 'prompt-choice'; sessionId: string; promptId: string; choiceId: string }
@@ -481,7 +484,11 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   if (memoryMessage) return memoryMessage;
   if (message.type === 'set-quiet-mode' && typeof message.quiet === 'boolean' && Object.keys(message).length === 2) return { type: 'set-quiet-mode', quiet: message.quiet };
   if (message.type === 'agent-drill-down' && typeof message.agentId === 'string' && /^[A-Za-z0-9._:-]{1,120}$/.test(message.agentId) && Object.keys(message).length === 2) return { type: 'agent-drill-down', agentId: message.agentId };
-  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history') {
+  if (message.type === 'insert-code' && typeof message.text === 'string' && message.text.length > 0 && message.text.length <= 100_000) {
+    if (Object.keys(message).some((key) => key !== 'type' && key !== 'text')) return undefined;
+    return { type: 'insert-code', text: message.text };
+  }
+  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools') {
     if (Object.keys(message).some((key) => key !== 'type')) return undefined;
     return { type: message.type };
   }
@@ -689,7 +696,7 @@ function safeProfileText(value: unknown, max: number): value is string {
 
 function safeBaseUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 300 || /(?:api[_ -]?key|token|secret|password)/i.test(value)) return false;
-  try { const parsed = new URL(value); return parsed.protocol === 'https:' || parsed.protocol === 'http:'; } catch { return false; }
+  return isSecureEndpoint(value);
 }
 
 function isAnalyticsFilter(value: unknown): value is AnalyticsFilter {
