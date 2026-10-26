@@ -2,7 +2,7 @@
   "name": "near-ai-vscode",
   "displayName": "Near AI for VSCode",
   "description": "A private, cost-aware Open-GSD coding harness powered by NEAR AI Cloud.",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-icon.png",
   "license": "MIT",
@@ -31,16 +31,16 @@
       { "command": "nearAi.saveCheckpoint", "title": "Open-GSD: Save Continuity Checkpoint" }
     ],
     "viewsContainers": {
-      "panel": [
+      "secondarySidebar": [
         {
-          "id": "nearAiPanel",
+          "id": "nearAiSecondaryViewContainer",
           "title": "NEAR AI",
           "icon": "media/near-ai-icon.png"
         }
       ]
     },
     "views": {
-      "nearAiPanel": [
+      "nearAiSecondaryViewContainer": [
         {
           "type": "webview",
           "id": "nearAiChatView",
