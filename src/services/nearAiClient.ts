@@ -7,6 +7,29 @@ export interface ChatMessage {
   content: string;
 }
 
+/** A tool call as the OpenAI-compatible API returns it; `arguments` is a JSON string. */
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+/** Conversation messages for tool-calling runs. */
+export type AgentMessage =
+  | { role: 'system' | 'user'; content: string }
+  | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] }
+  | { role: 'tool'; tool_call_id: string; content: string };
+
+export interface ToolDefinition {
+  type: 'function';
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+}
+
+export type CompletionEvent =
+  | { type: 'text'; text: string }
+  | { type: 'reasoning'; text: string }
+  | { type: 'done'; message: Extract<AgentMessage, { role: 'assistant' }>; finishReason: string; usage: UsageMetadata };
+
 export interface ModelInfo {
   id: string;
   name?: string;
@@ -275,6 +298,75 @@ export class NearAiClient {
     const completed = { ...latest, latencyMs: Date.now() - started };
     yield { type: 'status', status: 'completed', metadata: completed };
     yield { type: 'done', metadata: completed };
+  }
+
+  /**
+   * One streamed model turn with tools. Text and reasoning stream as they arrive; tool calls are
+   * assembled from their indexed fragments and returned whole in the final `done` event.
+   */
+  public async *streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal): AsyncGenerator<CompletionEvent> {
+    const started = Date.now();
+    const response = await this.request('/chat/completions', {
+      method: 'POST',
+      signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) })
+    });
+    let usage = metadataFromHeaders(response.headers, started);
+    if (!response.body) throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, usage.requestId);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const calls: Array<{ id: string; name: string; arguments: string }> = [];
+    let text = '';
+    let finishReason = 'stop';
+    let buffer = '';
+    try {
+      for (;;) {
+        const next = await reader.read();
+        if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+        buffer += next.done ? decoder.decode() : decoder.decode(next.value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = next.done ? '' : (lines.pop() ?? '');
+        for (const line of lines) {
+          const value = line.trim();
+          if (!value.startsWith('data:')) continue;
+          const payload = value.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          let chunk: { choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; tool_calls?: Array<{ index?: number; id?: unknown; function?: { name?: unknown; arguments?: unknown } }> }; finish_reason?: unknown }>; usage?: Record<string, unknown> };
+          try { chunk = JSON.parse(payload); } catch { throw new NearAiError(0, 'NEAR AI returned malformed streaming data.', false, usage.requestId); }
+          if (chunk.usage) {
+            usage = usageFromPayload(chunk.usage, usage, usage.requestId, usage.provider);
+            usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens) ?? usage.estimatedCostUsd;
+          }
+          const choice = chunk.choices?.[0];
+          if (!choice) continue;
+          if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason;
+          const delta = choice.delta ?? {};
+          const reasoning = stringValue(delta.reasoning_content) ?? stringValue(delta.reasoning);
+          if (reasoning) yield { type: 'reasoning', text: reasoning };
+          const content = stringValue(delta.content);
+          if (content) { text += content; yield { type: 'text', text: content }; }
+          for (const fragment of delta.tool_calls ?? []) {
+            const index = typeof fragment.index === 'number' ? fragment.index : calls.length;
+            const call = calls[index] ?? (calls[index] = { id: '', name: '', arguments: '' });
+            if (typeof fragment.id === 'string' && fragment.id) call.id = fragment.id;
+            if (typeof fragment.function?.name === 'string') call.name += fragment.function.name;
+            if (typeof fragment.function?.arguments === 'string') call.arguments += fragment.function.arguments;
+          }
+        }
+        if (next.done) break;
+      }
+    } finally {
+      if (signal?.aborted) await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
+    const toolCalls: ToolCall[] = calls.filter((call) => call.name).map((call, index) => ({ id: call.id || `call_${index}`, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
+    yield {
+      type: 'done',
+      message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
+      finishReason,
+      usage: { ...usage, latencyMs: Date.now() - started }
+    };
   }
 
   private async *readEvents(body: ReadableStream<Uint8Array>, initial: UsageMetadata, signal?: AbortSignal, model?: ModelInfo): AsyncGenerator<ChatStreamEvent> {
