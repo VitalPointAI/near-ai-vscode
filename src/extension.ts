@@ -21,7 +21,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
       openApiKeyPortal: () => openApiKeyPortal(),
       configureApiKey: () => configureApiKey(auth),
-      useNearAccount: () => useNearAccount(),
+      openStaking: () => openChat(context, auth),
       showProgress: () => showStatus(auth)
     })),
     vscode.commands.registerCommand('nearAi.status', () => showStatus(auth)),
@@ -138,11 +138,6 @@ async function saveProfileCredential(auth: AuthService, apiKey: string): Promise
 async function openApiKeyPortal(): Promise<void> {
   await vscode.env.openExternal(vscode.Uri.parse('https://cloud.near.ai/'));
   void vscode.window.showInformationMessage('Create your NEAR AI Cloud API key, then return here and choose “I already have a key”.');
-}
-
-async function useNearAccount(): Promise<void> {
-  await vscode.workspace.getConfiguration('nearAi').update('authMode', 'nearAccount', vscode.ConfigurationTarget.Global);
-  void vscode.window.showInformationMessage('NEAR account sign-in is prepared but the provider token exchange is not yet configured.');
 }
 
 async function showStatus(auth: AuthService): Promise<void> {

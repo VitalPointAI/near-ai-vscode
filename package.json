@@ -2,7 +2,7 @@
   "name": "near-ai-vscode",
   "displayName": "Near AI for VSCode",
   "description": "A private, cost-aware Open-GSD coding harness powered by NEAR AI Cloud.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-icon.png",
   "license": "MIT",
@@ -73,7 +73,7 @@
           "type": "string",
           "enum": ["apiKey", "nearAccount"],
           "default": "apiKey",
-          "description": "Authentication mode used for NEAR AI Cloud."
+                  "description": "Inference uses a NEAR AI Cloud API key. A NEAR account or external wallet is separate and may be used for staking."
         },
         "nearAi.defaultModel": {
           "type": "string",

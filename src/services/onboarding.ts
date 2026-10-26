@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 export interface OnboardingActions {
   openApiKeyPortal: () => Promise<void>;
   configureApiKey: () => Promise<void>;
-  useNearAccount: () => Promise<void>;
+  openStaking: () => Promise<void>;
   showProgress: () => Promise<void>;
 }
 
@@ -16,7 +16,7 @@ export function openOnboarding(context: vscode.ExtensionContext, actions: Onboar
   panel.webview.onDidReceiveMessage(async (message: { type?: string }) => {
     if (message.type === 'configure-api-key') await actions.configureApiKey();
     if (message.type === 'open-api-key-portal') await actions.openApiKeyPortal();
-    if (message.type === 'near-account') await actions.useNearAccount();
+    if (message.type === 'open-staking') await actions.openStaking();
     if (message.type === 'show-progress') await actions.showProgress();
     if (message.type === 'complete') {
       void vscode.window.showInformationMessage('You are ready. Open the chat to start your first GSD project.');
@@ -59,14 +59,15 @@ function onboardingHtml(webview: vscode.Webview): string {
   <h2>Your guided path</h2>
   <div class="steps" role="list">
     <div class="step" role="listitem"><div class="number">01</div><strong>Get oriented</strong><span>Understand what the agents will do and what GSD files mean.</span></div>
-    <div class="step" role="listitem"><div class="number">02</div><strong>Connect privately</strong><span>Choose NEAR AI API key or NEAR account sign-in.</span></div>
+    <div class="step" role="listitem"><div class="number">02</div><strong>Connect privately</strong><span>Add the NEAR AI Cloud API key used for inference.</span></div>
     <div class="step" role="listitem"><div class="number">03</div><strong>Set guardrails</strong><span>Reads and planning are automatic; risky actions ask first.</span></div>
     <div class="step" role="listitem"><div class="number">04</div><strong>Describe the idea</strong><span>Chat through the project brief and let GSD create the plan.</span></div>
     <div class="step" role="listitem"><div class="number">05</div><strong>Keep momentum</strong><span>Watch phase, plan, agent, cost, and verification progress below chat.</span></div>
   </div>
   <h2>Connect NEAR AI Cloud</h2>
-  <p>For the fastest setup, create a NEAR AI Cloud API key, then paste it into the extension. Credentials stay in VS Code SecretStorage: they are never written into your project files or sent to an agent as configuration text.</p>
-  <div class="actions"><button data-action="open-api-key-portal">Get a NEAR AI Cloud API key</button><button data-action="configure-api-key">I already have a key</button><button data-action="near-account">Use NEAR account sign-in</button></div>
+  <p>Inference requires a NEAR AI Cloud API key. Paste it into the extension and credentials stay in VS Code SecretStorage: they are never written into your project files or sent to an agent as configuration text.</p>
+  <div class="actions"><button data-action="open-api-key-portal">Get a NEAR AI Cloud API key</button><button data-action="configure-api-key">I already have a key</button></div>
+  <p class="note"><strong>Staking is separate.</strong> A NEAR account or external wallet may be connected later to view entitlement and authorize staking transactions; it does not authenticate Cloud inference or replace the API key. <button data-action="open-staking">Open staking controls</button></p>
   <p class="note"><strong>New to GSD?</strong> You do not need to memorize commands. The chat will explain each step, show what is happening, and ask before any risky change.</p>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();

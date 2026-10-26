@@ -77,9 +77,8 @@ limitations, and remediation status.
 ## Requirements and permissions
 
 - VS Code `1.90` or newer.
-- A NEAR AI Cloud API key or the supported NEAR account sign-in setup. In this
-  release, NEAR account sign-in is prepared in the UI but its provider token
-  exchange is not configured.
+- A NEAR AI Cloud API key for inference. A NEAR account or external wallet is a
+  separate staking/entitlement connection and does not replace the API key.
 - A workspace folder for project-scoped profiles and Open-GSD workflows.
 - Network access to the configured provider when using cloud inference. The
   setup command may open `https://cloud.near.ai/` to create an API key.
@@ -120,8 +119,8 @@ development artifacts enter the archive.
 ## First run
 
 1. Open a workspace and run **Near AI: Set Up**.
-2. Create or enter a NEAR AI Cloud API key. Choose a stable profile ID,
-   display name, and organization/company label.
+2. Create or enter a NEAR AI Cloud API key. Give the project any name you want;
+   the extension creates the constrained internal profile scope automatically.
 3. Confirm that provider validation succeeds, then explicitly select the
    profile in Chat Setup.
 4. Review the privacy preview and action policy before starting a GSD workflow.
