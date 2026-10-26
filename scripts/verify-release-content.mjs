@@ -65,8 +65,9 @@ const required = [
   'extension/media/near-ai-vscode-icon-128.png',
   'extension/media/near-ai-vscode-icon.svg',
   'extension/dist/extension.js',
-  'extension/docs/marketplace/near-ai-overview.gif',
-  'extension/docs/marketplace/near-ai-setup.gif'
+  'extension/docs/marketplace/near-ai-chat.png',
+  'extension/docs/marketplace/near-ai-commands.png',
+  'extension/docs/marketplace/near-ai-workflow.png'
 ];
 const missing = required.filter((entry) => !entrySet.has(entry));
 if (missing.length > 0) fail(`required entries are missing: ${missing.join(', ')}`);

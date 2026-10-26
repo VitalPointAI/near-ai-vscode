@@ -1,4 +1,4 @@
-# Near AI for VSCode trust and security report
+# NEAR AI for VS Code trust and security report
 
 This report describes the security and privacy boundaries implemented in the
 `0.1.0` release candidate and the evidence used for its release checks. It is a
