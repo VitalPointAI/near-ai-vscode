@@ -25,7 +25,7 @@ export type ChatWebviewMessage =
   | { type: 'refresh-status' }
   | { type: 'open-command'; command: string }
   | { type: 'open-artifact'; path: string; kind: GsdArtifactKind }
-  | { type: 'send'; text: string; model?: string }
+  | { type: 'send'; text: string; model?: string; overrideToken?: string }
   | { type: 'stop' }
   | { type: 'history' }
   | { type: 'new-chat' }
@@ -341,6 +341,17 @@ export interface ConversationTurn {
 export interface ChatModelOption {
   id: string;
   label: string;
+  /** "tee" when NEAR runs the model in an attested TEE; "forwarded" when NEAR sends it to another provider. */
+  privacy: 'tee' | 'forwarded' | 'unknown';
+  forwardedTo?: string;
+}
+
+/** Short, user-facing privacy wording for a model, shared by every chat surface. */
+export function modelPrivacyLabel(model?: Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>): string {
+  if (model?.privacyBoundary === 'tee') return 'Private · runs in NEAR TEE';
+  if (model?.privacyBoundary === 'local') return 'Local';
+  if (model?.privacyBoundary === 'cloud') return model.forwardedTo ? `Not private · forwarded to ${model.forwardedTo}` : 'Not private · forwarded';
+  return 'Privacy unknown';
 }
 
 export interface GsdArtifactLink {
@@ -508,11 +519,13 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     return { type: 'open-command', command: message.command };
   }
   if (message.type !== 'send' || typeof message.text !== 'string' || !message.text.trim()) return undefined;
-  if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model')) return undefined;
+  if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model' && key !== 'overrideToken')) return undefined;
+  if (message.overrideToken !== undefined && (typeof message.overrideToken !== 'string' || !/^privacy-[0-9a-f-]{36}$/.test(message.overrideToken))) return undefined;
   return {
     type: 'send',
     text: message.text.trim(),
-    model: typeof message.model === 'string' ? message.model.trim() || undefined : undefined
+    model: typeof message.model === 'string' ? message.model.trim() || undefined : undefined,
+    ...(message.overrideToken ? { overrideToken: message.overrideToken as string } : {})
   };
 }
 
@@ -732,22 +745,23 @@ export function isChatModel(model: Pick<ModelInfo, 'id'>): boolean {
   return model.id.trim().length > 0 && !/(?:embed|rerank|whisper|tts|speech|moderation)/i.test(model.id);
 }
 
-/** The configured default when the provider offers it, otherwise the provider's first chat model. */
+/** The configured default when the provider offers it, otherwise the first private chat model, otherwise the first chat model. */
 export function defaultChatModel(models: ModelInfo[], configured?: string): string | undefined {
   const chat = models.filter(isChatModel);
-  return chat.find((model) => model.id === configured?.trim())?.id ?? chat[0]?.id;
+  return chat.find((model) => model.id === configured?.trim())?.id ?? chat.find((model) => model.privacyBoundary === 'tee')?.id ?? chat[0]?.id;
 }
 
 export function modelOptions(models: ModelInfo[], configured?: string): ChatModelOption[] {
   const preferred = defaultChatModel(models, configured);
+  const rank = (model: ModelInfo) => (model.id === preferred ? 0 : model.privacyBoundary === 'tee' ? 1 : 2);
   return models
     .filter(isChatModel)
-    .sort((a, b) => Number(b.id === preferred) - Number(a.id === preferred))
+    .sort((a, b) => rank(a) - rank(b))
     .map((model) => ({
       id: model.id,
-      label: model.inputPricePerMillion === undefined
-        ? model.id
-        : `${model.id} · $${model.inputPricePerMillion}/$${model.outputPricePerMillion ?? 0} per 1M`
+      label: [model.id, modelPrivacyLabel(model), model.inputPricePerMillion === undefined ? undefined : `$${model.inputPricePerMillion}/$${model.outputPricePerMillion ?? 0} per 1M`].filter(Boolean).join(' · '),
+      privacy: model.privacyBoundary === 'tee' || model.privacyBoundary === 'local' ? 'tee' : model.privacyBoundary === 'cloud' ? 'forwarded' : 'unknown',
+      ...(model.forwardedTo ? { forwardedTo: model.forwardedTo } : {})
     }));
 }
 

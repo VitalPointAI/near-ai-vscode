@@ -99,8 +99,19 @@ test('model options preserve catalog IDs and keep pricing display separate', () 
     { id: 'free', supportsReasoning: true },
     { id: ' ', supportsReasoning: false }
   ]), [
-    { id: 'qwen', label: 'qwen · $0.2/$0.8 per 1M' },
-    { id: 'free', label: 'free' }
+    { id: 'qwen', label: 'qwen · Privacy unknown · $0.2/$0.8 per 1M', privacy: 'unknown' },
+    { id: 'free', label: 'free · Privacy unknown', privacy: 'unknown' }
+  ]);
+});
+
+test('model options lead with private models and label forwarded ones with their destination', () => {
+  const options = modelOptions([
+    { id: 'deepseek/deepseek-v4.1-flash', privacyBoundary: 'cloud', forwardedTo: 'openrouter.ai', supportsReasoning: false },
+    { id: 'z-ai/glm-5.3', privacyBoundary: 'tee', supportsReasoning: false }
+  ]);
+  assert.deepEqual(options.map((option) => [option.id, option.privacy, option.label]), [
+    ['z-ai/glm-5.3', 'tee', 'z-ai/glm-5.3 · Private · runs in NEAR TEE'],
+    ['deepseek/deepseek-v4.1-flash', 'forwarded', 'deepseek/deepseek-v4.1-flash · Not private · forwarded to openrouter.ai']
   ]);
 });
 

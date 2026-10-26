@@ -104,6 +104,22 @@
         "command": "nearAi.saveCheckpoint",
         "title": "Save Continuity Checkpoint",
         "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.removeProfile",
+        "title": "Remove Profile…",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.emergencyStop",
+        "title": "Emergency Stop",
+        "category": "NEAR AI",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "nearAi.resume",
+        "title": "Resume After Emergency Stop",
+        "category": "NEAR AI"
       }
     ],
     "viewsContainers": {
@@ -208,15 +224,6 @@
           "default": "https://cloud-api.near.ai/v1",
           "description": "NEAR AI Cloud API base URL."
         },
-        "nearAi.authMode": {
-          "type": "string",
-          "enum": [
-            "apiKey",
-            "nearAccount"
-          ],
-          "default": "apiKey",
-          "description": "Inference uses a NEAR AI Cloud API key. A NEAR account or external wallet is separate and may be used for staking."
-        },
         "nearAi.defaultModel": {
           "type": "string",
           "default": "z-ai/glm-5.3",
@@ -230,12 +237,36 @@
             "fully-autonomous"
           ],
           "default": "approve-risky",
-          "description": "Default policy for agent actions."
+          "description": "Default policy for agent actions.",
+          "enumDescriptions": [
+            "Reads and planning run automatically; file writes, shell commands, network and git changes ask first.",
+            "Same approvals as approve-risky until the native runner ships its finer-grained rules.",
+            "Agents act without asking. Use only in throwaway workspaces."
+          ]
         },
         "nearAi.autoInstallGsd": {
           "type": "boolean",
           "default": true,
           "description": "In projects set up with NEAR AI, install Open-GSD if it is missing when you run a GSD command, and keep it on the latest stable release. Other workspaces are never touched."
+        },
+        "nearAi.privacyMode": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "tee-only"
+          ],
+          "enumDescriptions": [
+            "Any NEAR AI model can be used; each is labelled private or forwarded.",
+            "Only models NEAR runs in an attested TEE can be used; messages to forwarded models are blocked."
+          ],
+          "default": "standard",
+          "description": "Whether chats may use models that NEAR AI forwards to other providers."
+        },
+        "nearAi.dailySpendLimitUsd": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Stop sending NEAR AI requests once today's recorded spend reaches this amount in USD. 0 means no limit."
         }
       }
     },
@@ -275,6 +306,16 @@
           "command": "nearAi.saveCheckpoint",
           "when": "view == nearAiChatView",
           "group": "overflow@2"
+        },
+        {
+          "command": "nearAi.removeProfile",
+          "when": "view == nearAiChatView",
+          "group": "overflow@0"
+        },
+        {
+          "command": "nearAi.emergencyStop",
+          "when": "view == nearAiChatView",
+          "group": "overflow@9"
         }
       ]
     }

@@ -75,11 +75,12 @@ test('chat participant rebuilds only its own plain-chat turns', () => {
   assert.deepEqual(history, [{ role: 'user', content: 'hello' }, { role: 'assistant', content: 'hi there' }]);
 });
 
-test('usage footer shows model, tokens, cost, and verification', () => {
+test('usage footer shows model, privacy, tokens, and actual cost over the estimate', () => {
   const { usageFooter } = withVscodeStub(() => require('../services/chatParticipant') as typeof import('../services/chatParticipant'));
-  assert.equal(usageFooter('m', { inputTokens: 1000, outputTokens: 234, estimatedCostUsd: 0.00123, verificationStatus: 'verified', latencyMs: 5 }), '*m · 1,234 tokens · ~$0.0012 · TEE verified*');
-  assert.equal(usageFooter('m', { actualCostUsd: 0.5, verificationStatus: 'unknown', latencyMs: 5 }), '*m · $0.5000*');
+  assert.equal(usageFooter('m', { inputTokens: 1000, outputTokens: 234, estimatedCostUsd: 0.00123, verificationStatus: 'unknown', latencyMs: 5 }, 'Private · runs in NEAR TEE'), '*m · Private · runs in NEAR TEE · 1,234 tokens · ~$0.0012 est.*');
+  assert.equal(usageFooter('m', { estimatedCostUsd: 0.4, actualCostUsd: 0.5, verificationStatus: 'unknown', latencyMs: 5 }), '*m · $0.5000*');
 });
+
 
 test('model choices skip non-chat models and lead with the configured default', () => {
   const { defaultChatModel, modelOptions } = require('../services/chatBridge') as typeof import('../services/chatBridge');

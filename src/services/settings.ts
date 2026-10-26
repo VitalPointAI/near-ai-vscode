@@ -1,17 +1,22 @@
 import * as vscode from 'vscode';
-import { AuthMode, createDefaultSettings, NearAiSettings } from '../domain/config';
+import { createDefaultSettings, NearAiSettings } from '../domain/config';
 import { ActionPolicyMode } from '../domain/policy';
+import { isEmergencyStopped } from './emergencyStop';
+
+const POLICY_MODES: ActionPolicyMode[] = ['approve-risky', 'mostly-autonomous', 'fully-autonomous'];
 
 export function readSettings(): NearAiSettings {
   const configuration = vscode.workspace.getConfiguration('nearAi');
   const defaults = createDefaultSettings();
-  const mode = configuration.get<AuthMode>('authMode', defaults.authMode);
-  const actionPolicy = configuration.get<ActionPolicyMode>('actionPolicy', defaults.actionPolicy.mode);
+  const policy = configuration.get<ActionPolicyMode>('actionPolicy', defaults.actionPolicy.mode);
+  const limit = configuration.get<number>('dailySpendLimitUsd', defaults.dailySpendLimitUsd);
   return {
     baseUrl: configuration.get<string>('baseUrl', defaults.baseUrl),
-    authMode: mode === 'nearAccount' ? 'nearAccount' : 'apiKey',
+    authMode: 'apiKey',
     defaultModel: configuration.get<string>('defaultModel', defaults.defaultModel),
-    actionPolicy: { mode: actionPolicy, emergencyStop: false }
+    actionPolicy: { mode: POLICY_MODES.includes(policy) ? policy : defaults.actionPolicy.mode, emergencyStop: isEmergencyStopped() },
+    privacyMode: configuration.get<string>('privacyMode') === 'tee-only' ? 'tee-only' : 'standard',
+    dailySpendLimitUsd: Number.isFinite(limit) && limit > 0 ? limit : 0
   };
 }
 

@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 export interface OnboardingActions {
   openApiKeyPortal: () => Promise<void>;
   configureApiKey: () => Promise<void>;
-  openStaking: () => Promise<void>;
   showProgress: () => Promise<void>;
 }
 
@@ -16,7 +15,6 @@ export function openOnboarding(context: vscode.ExtensionContext, actions: Onboar
   panel.webview.onDidReceiveMessage(async (message: { type?: string }) => {
     if (message.type === 'configure-api-key') await actions.configureApiKey();
     if (message.type === 'open-api-key-portal') await actions.openApiKeyPortal();
-    if (message.type === 'open-staking') await actions.openStaking();
     if (message.type === 'show-progress') await actions.showProgress();
     if (message.type === 'complete') {
       void vscode.window.showInformationMessage('You are ready. Open the chat to start your first GSD project.');
@@ -67,7 +65,6 @@ function onboardingHtml(webview: vscode.Webview): string {
   <h2>Connect NEAR AI Cloud</h2>
   <p>Inference requires a NEAR AI Cloud API key. Paste it into the extension and credentials stay in VS Code SecretStorage: they are never written into your project files or sent to an agent as configuration text.</p>
   <div class="actions"><button data-action="open-api-key-portal">Get a NEAR AI Cloud API key</button><button data-action="configure-api-key">I already have a key</button></div>
-  <p class="note"><strong>Staking is separate.</strong> A NEAR account or external wallet may be connected later to view entitlement and authorize staking transactions; it does not authenticate Cloud inference or replace the API key. <button data-action="open-staking">Open staking controls</button></p>
   <p class="note"><strong>New to GSD?</strong> You do not need to memorize commands. The chat will explain each step, show what is happening, and ask before any risky change.</p>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();

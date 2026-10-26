@@ -1,12 +1,17 @@
 import { ActionPolicy, ActionPolicyMode, defaultActionPolicy } from './policy';
+import { SovereigntyMode } from './privacy';
 
 export type AuthMode = 'apiKey' | 'nearAccount';
+
 
 export interface NearAiSettings {
   baseUrl: string;
   authMode: AuthMode;
   defaultModel: string;
   actionPolicy: ActionPolicy;
+  privacyMode: Extract<SovereigntyMode, 'standard' | 'tee-only'>;
+  /** 0 means no limit. */
+  dailySpendLimitUsd: number;
 }
 
 export const DEFAULT_BASE_URL = 'https://cloud-api.near.ai/v1';
@@ -17,7 +22,9 @@ export function createDefaultSettings(): NearAiSettings {
     baseUrl: DEFAULT_BASE_URL,
     authMode: 'apiKey',
     defaultModel: DEFAULT_MODEL,
-    actionPolicy: defaultActionPolicy()
+    actionPolicy: defaultActionPolicy(),
+    privacyMode: 'standard',
+    dailySpendLimitUsd: 0
   };
 }
 

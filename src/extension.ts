@@ -9,14 +9,15 @@ import { openOnboarding } from './services/onboarding';
 import { openTools } from './services/chat';
 import { ActivityStore } from './services/activityStore';
 import { chooseGsdCommand } from './services/gsdCommands';
-import { StakingService } from './services/stakingService';
-import { walletStatusCopy } from './services/chatBridge';
 import { NearAiPanelViewProvider } from './services/panelView';
 import { deriveProfileId } from './domain/auth';
 import { registerChatParticipant } from './services/chatParticipant';
+import { initEmergencyStop, setEmergencyStop } from './services/emergencyStop';
+import { clearProviderCache } from './services/providerCache';
 
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new AuthService(context.secrets);
+  initEmergencyStop(context);
   if (shouldAutoInstallGsd()) void new GsdUpdater().start(context);
 
   const sidebar = new NearAiPanelViewProvider(context, auth);
@@ -25,11 +26,19 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
       openApiKeyPortal: () => openApiKeyPortal(),
       configureApiKey: () => configureApiKey(auth, sidebar),
-      openStaking: () => openTools(context, auth),
       showProgress: () => showStatus(auth)
     })),
     vscode.commands.registerCommand('nearAi.status', () => showStatus(auth)),
     vscode.commands.registerCommand('nearAi.selectProfile', () => selectProfile(auth, sidebar)),
+    vscode.commands.registerCommand('nearAi.removeProfile', () => removeProfile(auth, sidebar)),
+    vscode.commands.registerCommand('nearAi.emergencyStop', async () => {
+      await setEmergencyStop(true);
+      void vscode.window.showWarningMessage('NEAR AI emergency stop is on. Running requests and workflows were stopped, and nothing more will be sent until you resume.', 'Resume').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAi.resume'); });
+    }),
+    vscode.commands.registerCommand('nearAi.resume', async () => {
+      await setEmergencyStop(false);
+      void vscode.window.showInformationMessage('NEAR AI resumed.');
+    }),
     vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
     vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
     vscode.commands.registerCommand('nearAi.openTools', () => openTools(context, auth)),
@@ -94,6 +103,7 @@ async function configureApiKey(auth: AuthService, sidebar: NearAiPanelViewProvid
   try {
     const profile = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Checking your NEAR AI key…' }, () =>
       new ProfileStore(root, auth).configure({ profileId: deriveProfileId(root, displayName), displayName, organization: organization.trim() || displayName, baseUrl: readSettings().baseUrl, authMode: 'apiKey' }, apiKey));
+    clearProviderCache();
     if (profile.validation.status === 'valid') {
       await sidebar.refresh();
       void vscode.window.showInformationMessage(`NEAR AI is ready for “${profile.displayName}”. Pick a model and start chatting.`);
@@ -105,6 +115,23 @@ async function configureApiKey(auth: AuthService, sidebar: NearAiPanelViewProvid
   } catch (error) {
     void vscode.window.showErrorMessage(redactSecrets(error instanceof Error ? error.message : String(error)));
   }
+}
+
+/** Deletes a profile's metadata and its key from SecretStorage, after confirmation. */
+async function removeProfile(auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
+  const profiles = new ProfileStore(root, auth);
+  const metadata = await profiles.exportMetadata();
+  if (!metadata.profiles.length) { void vscode.window.showInformationMessage('This project has no NEAR AI profiles.'); return; }
+  const picked = await vscode.window.showQuickPick(metadata.profiles.map((profile) => ({ label: profile.displayName, description: profile.profileId === metadata.activeProfileId ? 'active' : undefined, profileId: profile.profileId })), { title: 'Remove a NEAR AI profile', placeHolder: 'Its API key is deleted from VS Code SecretStorage' });
+  if (!picked) return;
+  const confirm = await vscode.window.showWarningMessage(`Remove "${picked.label}" and delete its API key from this machine?`, { modal: true }, 'Remove');
+  if (confirm !== 'Remove') return;
+  await profiles.remove(picked.profileId);
+  clearProviderCache();
+  await sidebar.refresh();
+  void vscode.window.showInformationMessage(`Removed "${picked.label}".`);
 }
 
 /** Switches this project's active profile, re-validating ones whose key needs checking. */
@@ -135,6 +162,7 @@ async function selectProfile(auth: AuthService, sidebar: NearAiPanelViewProvider
     return;
   }
   await profiles.select(profile.profileId);
+  clearProviderCache();
   await sidebar.refresh();
 }
 
@@ -153,14 +181,14 @@ async function showStatus(auth: AuthService): Promise<void> {
   const configured = active && profiles ? Boolean(await auth.getScopedApiKey(profiles.getScope(active.profileId))) : false;
   const message = [
     `Profile: ${active ? `${active.displayName} · ${active.organization}` : 'none selected'}`,
-    `Provider: ${active?.provider ?? 'near-ai'} · project scope: ${metadata?.projectId ?? 'no workspace'}`,
     `Validation: ${active?.validation.status ?? 'setup required'}${active?.validation.validatedAt ? ` at ${active.validation.validatedAt}` : ''}${active?.validation.error ? ` · ${active.validation.error}` : ''}`,
-    `Credential: ${configured ? 'configured' : 'not configured'}`,
+    `API key: ${configured ? 'stored in VS Code SecretStorage' : 'not configured'}`,
     `Endpoint: ${active?.baseUrl ?? settings.baseUrl}`,
-    `Model: ${model}`,
-    `Policy: ${settings.actionPolicy.mode}`,
-    `Wallet entitlement: ${walletStatusCopy(StakingService.unavailable().getStatus())}`,
-    'TEE verification: available when returned by the provider'
+    `Default model: ${model}`,
+    `Privacy mode: ${settings.privacyMode === 'tee-only' ? 'TEE-only (models NEAR forwards elsewhere are blocked)' : 'standard'}`,
+    `Daily spend limit: ${settings.dailySpendLimitUsd > 0 ? `$${settings.dailySpendLimitUsd.toFixed(2)}` : 'none'}`,
+    `Action policy: ${settings.actionPolicy.mode}`,
+    `Emergency stop: ${settings.actionPolicy.emergencyStop ? 'ON (nothing is sent)' : 'off'}`
   ].join('\n');
   void vscode.window.showInformationMessage(message, { modal: true });
 }

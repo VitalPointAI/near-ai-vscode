@@ -28,8 +28,10 @@
 
   let busy = false;
   let current;
+  let lastReply;
   let tools = new Map();
   let menuIndex = 0;
+  let modelInfo = new Map();
 
   function post(message) { vscode.postMessage(message); }
   function announce(text) { live.textContent = text; }
@@ -129,14 +131,16 @@
     announce(text);
   }
 
-  function usageLine(usage, modelId) {
+  // The reply footer: model, privacy, tokens, and cost. The estimate (~$) is replaced by the
+  // actual charge when NEAR's billing API reports it.
+  function usageLine(usage, modelId, privacy, actualCostUsd) {
     const parts = [];
     if (modelId) parts.push(modelId);
+    if (privacy) parts.push(privacy);
     const tokens = (usage && (usage.inputTokens || 0) + (usage.outputTokens || 0)) || 0;
     if (tokens) parts.push(tokens.toLocaleString() + ' tokens');
-    const cost = usage && (usage.actualCostUsd !== undefined ? usage.actualCostUsd : usage.estimatedCostUsd);
-    if (cost !== undefined) parts.push((usage.actualCostUsd === undefined ? '~$' : '$') + cost.toFixed(4));
-    if (usage && usage.verificationStatus === 'verified') parts.push('TEE verified');
+    if (actualCostUsd !== undefined) parts.push('$' + actualCostUsd.toFixed(4));
+    else if (usage && usage.estimatedCostUsd !== undefined) parts.push('~$' + usage.estimatedCostUsd.toFixed(4) + ' est.');
     return parts.join(' · ');
   }
 
@@ -289,7 +293,7 @@
   send.addEventListener('click', submit);
   profile.addEventListener('click', () => post({ type: profile.dataset.state === 'missing' ? 'open-setup' : 'select-profile' }));
   status.addEventListener('click', () => { if (!busy) runCommand('progress'); });
-  model.addEventListener('change', () => { saved.model = model.value; vscode.setState(saved); model.title = model.selectedOptions[0] ? model.selectedOptions[0].title : ''; });
+  model.addEventListener('change', () => { saved.model = model.value; vscode.setState(saved); model.title = (modelInfo.get(model.value) || {}).label || ''; });
   document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => runCommand(button.dataset.command)));
 
   window.addEventListener('message', (event) => {
@@ -301,14 +305,26 @@
       case 'status': status.textContent = m.value || ''; status.title = (m.value || '') + ' — click for detailed progress'; break;
       case 'models': {
         const models = m.models || [];
-        model.replaceChildren(...(models.length ? models : [{ id: '', label: 'No models — set up a profile' }]).map((item) => {
-          const option = el('option', '', item.id ? item.id.split('/').pop() : item.label);
-          option.value = item.id;
-          option.title = item.label;
-          return option;
-        }));
-        if (saved.model && models.some((item) => item.id === saved.model)) model.value = saved.model;
-        model.title = (models.find((item) => item.id === model.value) || {}).label || '';
+        if (!models.length) {
+          model.replaceChildren(el('option', '', 'No models — set up a profile'));
+          model.title = '';
+          break;
+        }
+        const groups = [['tee', 'Private · runs in NEAR TEE'], ['forwarded', 'Not private · NEAR forwards to another provider'], ['unknown', 'Privacy unknown']];
+        model.replaceChildren(...groups.map(([kind, label]) => {
+          const group = el('optgroup');
+          group.label = label;
+          group.append(...models.filter((item) => item.privacy === kind).map((item) => {
+            const option = el('option', '', item.id.split('/').pop() + (kind === 'tee' ? ' 🔒' : ''));
+            option.value = item.id;
+            option.title = item.label;
+            return option;
+          }));
+          return group;
+        }).filter((group) => group.children.length));
+        modelInfo = new Map(models.map((item) => [item.id, item]));
+        if (saved.model && modelInfo.has(saved.model)) model.value = saved.model;
+        model.title = (modelInfo.get(model.value) || {}).label || '';
         break;
       }
       case 'models-error': model.replaceChildren(el('option', '', 'Models unavailable')); model.title = m.text || ''; break;
@@ -328,13 +344,33 @@
         profile.dataset.state = active ? (active.validation && active.validation.status === 'valid' ? 'ready' : 'attention') : 'missing';
         break;
       }
-      case 'assistant-start': if (!current) startAssistant(); current.model = m.model; if (m.status) status.textContent = m.status; break;
+      case 'assistant-start': if (!current) startAssistant(); current.model = m.model; current.privacy = m.privacy; if (m.status) status.textContent = m.status; break;
       case 'assistant-delta':
         if (!current) startAssistant();
         current.text += m.text || '';
         if (!current.frame) current.frame = requestAnimationFrame(flushAssistant);
         break;
-      case 'assistant-done': finishAssistant(usageLine(m.usage, current && current.model)); announce('Response complete.'); break;
+      case 'assistant-done':
+        if (current) lastReply = { node: current.node, usage: m.usage, model: current.model, privacy: current.privacy };
+        finishAssistant(usageLine(m.usage, current && current.model, current && current.privacy));
+        announce('Response complete.');
+        break;
+      case 'assistant-cost': {
+        const meta = lastReply && lastReply.node.querySelector('.meta');
+        if (meta) meta.textContent = usageLine(lastReply.usage, lastReply.model, lastReply.privacy, m.actualCostUsd);
+        break;
+      }
+      case 'outbound-blocked': {
+        if (current) { current.node.remove(); current = undefined; }
+        setBusy(false);
+        const actions = m.overrideToken ? [textButton(m.confirm ? 'Send anyway' : 'Send once anyway', () => {
+          setBusy(true);
+          startAssistant();
+          post({ type: 'send', text: m.text, model: m.model, overrideToken: m.overrideToken });
+        }, false)] : [];
+        notice(m.reason, actions, !m.confirm);
+        break;
+      }
       case 'assistant-cancelled':
         if (current) finishAssistant('Stopped');
         else setBusy(false);

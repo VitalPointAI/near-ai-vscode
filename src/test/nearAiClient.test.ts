@@ -82,26 +82,28 @@ test('request construction keeps credentials out of errors and normalizes header
   await assert.rejects(() => failing.listModels(), (error: NearAiError) => !error.message.includes('secret') && !error.message.includes('Bearer'));
 });
 
-test('stream events include ordered status, usage, request identity, and verification metadata', async () => {
+test('stream events carry usage and the inference-id billing ID, request streamed usage, and never claim TEE verification from headers', async () => {
   const stream = new ReadableStream({
     start(controller) {
-      controller.enqueue(new TextEncoder().encode('data: {"id":"stream-1","choices":[{"delta":{"content":"hi"}}]}\n\n'));
-      controller.enqueue(new TextEncoder().encode('data: {"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n'));
+      controller.enqueue(new TextEncoder().encode('data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"hi"}}]}\n\n'));
+      controller.enqueue(new TextEncoder().encode('data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n'));
       controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
       controller.close();
     }
   });
-  const client = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'secret', fetchFn: async () => new Response(stream, {
-    status: 200,
-    headers: { 'x-request-id': 'header-id', 'x-provider': 'near', 'x-near-tee-verified': 'true' }
-  }) });
+  let body: Record<string, unknown> = {};
+  const client = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'secret', fetchFn: async (_url, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(stream, { status: 200, headers: { 'inference-id': '6f1c9a52-1111-5a3b-9c1d-2e4f6a8b0c1d', 'x-request-id': 'transport-only', 'x-near-tee-verified': 'true' } });
+  } });
   const events = [];
   for await (const event of client.streamChatEvents('model-a', [{ role: 'user', content: 'hello' }])) events.push(event);
+  assert.deepEqual(body.stream_options, { include_usage: true });
   assert.deepEqual(events.map((event) => event.type), ['status', 'text', 'text', 'status', 'done']);
-  assert.equal(events[1].type === 'text' && events[1].metadata?.requestId, 'stream-1');
+  assert.equal(events[1].type === 'text' && events[1].metadata?.requestId, '6f1c9a52-1111-5a3b-9c1d-2e4f6a8b0c1d');
   assert.equal(events[2].type === 'text' && events[2].metadata?.inputTokens, 3);
   assert.equal(events[3].type === 'status' && events[3].status, 'completed');
-  assert.equal(events[3].type === 'status' && events[3].metadata.verificationStatus, 'verified');
+  assert.equal(events[3].type === 'status' && events[3].metadata.verificationStatus, 'unknown');
 });
 
 test('cancellation ends a stream without a completion event', async () => {
@@ -142,21 +144,31 @@ test('cost estimates use normalized per-million pricing and remain unavailable w
   assert.equal(estimateCostUsd({ id: 'model-a', inputPricePerMillion: 1 }, 10_000, 5_000), undefined);
 });
 
-test('provider reconciliation preserves actual cost separately from estimates', async () => {
+test('actual cost comes from POST /billing/costs keyed by inference-id, converted from nano-USD', async () => {
+  const requests: Array<{ url: string; body: unknown }> = [];
   const client = new NearAiClient({
     baseUrl: 'https://example.test/v1',
     apiKey: 'secret',
-    fetchFn: async (url) => {
-      assert.equal(url, 'https://example.test/v1/usage/req%2F1');
-      return new Response(JSON.stringify({ data: { request_id: 'req/1', input_tokens: '12', output_tokens: 8, actual_cost_usd: '0.034', provider: 'near', verification_status: 'verified' } }), { status: 200, headers: { 'x-request-id': 'header-id' } });
+    fetchFn: async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify({ requests: [{ requestId: 'req-1', costNanoUsd: 34_000_000 }] }), { status: 200 });
     }
   });
-  const usage = await client.reconcileUsage('req/1');
-  assert.equal(usage.requestId, 'req/1');
-  assert.equal(usage.inputTokens, 12);
-  assert.equal(usage.outputTokens, 8);
+  const usage = await client.reconcileUsage('req-1', undefined, [0]);
+  assert.deepEqual(requests, [{ url: 'https://example.test/v1/billing/costs', body: { requestIds: ['req-1'] } }]);
   assert.equal(usage.actualCostUsd, 0.034);
   assert.equal(usage.estimatedCostUsd, undefined);
+});
+
+test('an unrecorded request stays without an actual cost instead of reporting $0', async () => {
+  let calls = 0;
+  const client = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'secret', fetchFn: async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ requests: [{ requestId: 'req-2', costNanoUsd: 0 }], warning: 'No usage record matched.' }), { status: 200 });
+  } });
+  const usage = await client.reconcileUsage('req-2', undefined, [0, 1, 1]);
+  assert.equal(calls, 3);
+  assert.equal(usage.actualCostUsd, undefined);
 });
 
 test('transient failures use bounded exponential retry and cancellation stops retries', async () => {
@@ -166,7 +178,8 @@ test('transient failures use bounded exponential retry and cancellation stops re
     apiKey: 'secret',
     maxRetries: 2,
     retryBaseDelayMs: 0,
-    fetchFn: async () => {
+    fetchFn: async (url) => {
+      if (String(url).endsWith('/model/list')) return new Response(JSON.stringify({ models: [] }), { status: 200 });
       attempts += 1;
       return attempts < 3 ? new Response('', { status: 503 }) : new Response(JSON.stringify({ data: [] }), { status: 200 });
     }
@@ -176,7 +189,8 @@ test('transient failures use bounded exponential retry and cancellation stops re
 
   const controller = new AbortController();
   let cancelledAttempts = 0;
-  const cancelled = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'secret', retryBaseDelayMs: 25, fetchFn: async () => {
+  const cancelled = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'secret', retryBaseDelayMs: 25, fetchFn: async (url) => {
+    if (String(url).endsWith('/model/list')) return new Response(JSON.stringify({ models: [] }), { status: 200 });
     cancelledAttempts += 1;
     controller.abort();
     return new Response('', { status: 503 });
@@ -216,7 +230,25 @@ test('model list falls back to /models when the pricing endpoint is unavailable'
     }
   });
   const models = await client.listModelsWithPricing();
-  assert.deepEqual(seen, ['https://example.test/v1/models/pricing', 'https://example.test/v1/models']);
+  assert.deepEqual(seen, ['https://example.test/v1/models/pricing', 'https://example.test/v1/models', 'https://example.test/v1/model/list']);
   assert.equal(models[0]?.id, 'deepseek-ai/DeepSeek-V3');
   assert.equal(models[0]?.inputPricePerMillion, 0.27);
+});
+
+test('model privacy comes from /model/list: attested NEAR models are TEE, external ones are forwarded', async () => {
+  const client = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'secret', fetchFn: async (url) => String(url).endsWith('/model/list')
+    ? new Response(JSON.stringify({ models: [
+      { modelId: 'z-ai/glm-5.3', metadata: { attestationSupported: true, verifiable: true, providerType: 'tinfoil' } },
+      { modelId: 'deepseek/deepseek-v4.1-flash', metadata: { attestationSupported: false, providerType: 'external', providerConfig: { backend: 'openai_compatible', base_url: 'https://openrouter.ai/api/v1', api_key: '***' } } },
+      { modelId: 'anthropic/claude-sonnet-5-5', metadata: { attestationSupported: false, providerType: 'external', providerConfig: { backend: 'anthropic', base_url: 'https://api.anthropic.com/v1' } } }
+    ] }), { status: 200 })
+    : new Response(JSON.stringify({ data: [{ id: 'z-ai/glm-5.3' }, { id: 'deepseek/deepseek-v4.1-flash' }, { id: 'anthropic/claude-sonnet-5-5' }, { id: 'unlisted/model' }] }), { status: 200 }) });
+  const models = await client.listModels();
+  assert.deepEqual(models.map((model) => [model.id, model.privacyBoundary, model.forwardedTo]), [
+    ['z-ai/glm-5.3', 'tee', undefined],
+    ['deepseek/deepseek-v4.1-flash', 'cloud', 'openrouter.ai'],
+    ['anthropic/claude-sonnet-5-5', 'cloud', 'anthropic.com'],
+    ['unlisted/model', undefined, undefined]
+  ]);
+  assert.doesNotMatch(JSON.stringify(models), /\*\*\*|api_key/);
 });

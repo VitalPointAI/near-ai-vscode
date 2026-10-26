@@ -125,6 +125,7 @@ export class PrivacyPreflight {
   private outcome(request: ProviderRequest, classes: DataClass[], override: boolean): PrivacyDecision['outcome'] {
     if (override) return 'allow';
     if (this.mode === 'local-only' && request.providerBoundary !== 'local') return 'block';
+    if (this.mode === 'tee-only' && request.providerBoundary !== 'tee' && request.providerBoundary !== 'local') return 'block';
     let result: PrivacyDecision['outcome'] = 'allow';
     for (const dataClass of classes) {
       const rule = this.ruleFor(request, dataClass);
@@ -152,6 +153,7 @@ export class PrivacyPreflight {
   private reason(request: ProviderRequest, classes: DataClass[], override: boolean): string {
     if (override) return 'explicit one-time override accepted for the exact provider, scope, and classification';
     if (this.mode === 'local-only' && request.providerBoundary !== 'local') return 'local-only mode blocks non-local provider or network boundary';
+    if (this.mode === 'tee-only' && request.providerBoundary !== 'tee' && request.providerBoundary !== 'local') return 'TEE-only mode blocks models that NEAR forwards to another provider';
     return classes.length ? `policy evaluated classifications: ${classes.join(', ')}` : 'policy evaluated without findings';
   }
 }

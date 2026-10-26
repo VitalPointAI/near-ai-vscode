@@ -6,9 +6,12 @@ import { formatGsdStatusLine, parseGsdPlanningState, statusSnapshot } from '../d
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { AuthService } from './auth';
 import { createNearAiProvider } from './providerFactory';
+import { activeProvider } from './providerCache';
+import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
+import { OutboundGuard, spentTodayUsd } from './outboundGuard';
 import { ProfileStore } from './profileStore';
 import { readSettings, shouldAutoInstallGsd } from './settings';
-import { appendAssistantTurn, appendUserTurn, modelOptions, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, promptMessage, promptResponseMatches, progressActivitySummary, progressCardMessage, GsdArtifactLink, profileStatusMessage, walletStatusMessage, walletPreviewMessage, walletHistoryMessage, walletErrorMessage, teamListMessage, teamPreviewMessage, teamStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage, capabilityAwareTeamPreview, generationPreviewMessage, generationStatusMessage, generationPublicationMessage, memoryInspectMessage, memorySliceMessage, memoryApprovalPreviewMessage, multimodalStatusMessage, sanitizeContextGraphNode } from './chatBridge';
+import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, promptMessage, promptResponseMatches, progressActivitySummary, progressCardMessage, GsdArtifactLink, profileStatusMessage, walletStatusMessage, walletPreviewMessage, walletHistoryMessage, walletErrorMessage, teamListMessage, teamPreviewMessage, teamStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage, capabilityAwareTeamPreview, generationPreviewMessage, generationStatusMessage, generationPublicationMessage, memoryInspectMessage, memorySliceMessage, memoryApprovalPreviewMessage, multimodalStatusMessage, sanitizeContextGraphNode } from './chatBridge';
 import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './chatBridge';
 import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
 import { GsdProgressEvent, GsdRunner } from './gsdRunner';
@@ -82,6 +85,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     ,contextMemory: undefined as ContextGraphMemory | undefined
     ,memoryApprovals: undefined as MemoryApprovalRegistry | undefined
     ,memorySessionId: undefined as string | undefined
+    ,guard: undefined as OutboundGuard | undefined
+    ,guardSettings: undefined as string | undefined
   };
   panel.webview.html = html;
   panel.webview.onDidReceiveMessage(async (value: unknown) => {
@@ -378,6 +383,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     if (message.type === 'open-command') {
+      if (isEmergencyStopped()) { panel.webview.postMessage({ type: 'command-progress', state: 'failed', command: message.command, text: 'Emergency stop is on. Run "NEAR AI: Resume" first.' }); return; }
       const definition = GSD_COMMANDS.find((candidate) => candidate.command === message.command);
       const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (definition && root) { state.activity = state.activity ?? new ActivityStore(root); await ensureOpenGsd(root); await runGsdCommand(panel, state.gsd, definition.command, root, state.activity, (prompt) => { state.prompt = prompt; state.activeSessionId = prompt.sessionId; }); }
@@ -397,71 +403,76 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (message.type !== 'send' || !message.text?.trim()) return;
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const profiles = root ? new ProfileStore(root, auth) : undefined;
-    const activeProfile = profiles ? await profiles.getActiveProfile() : undefined;
-    const activeSelection = profiles ? await profiles.getActiveSelection() : undefined;
-    if (!profiles || !activeProfile || !activeSelection || activeProfile.validation.status !== 'valid') {
+    let active;
+    try {
+      active = root ? await activeProvider(root, auth) : undefined;
+    } catch (error) {
+      panel.webview.postMessage({ type: 'auth-required', text: providerErrorMessage(error) });
+      return;
+    }
+    if (!root || !active) {
       // Nothing is written here: a chat attempt before setup must not turn the workspace into a NEAR AI project.
-      await sendProfileStatus(panel, auth, profiles);
-      panel.webview.postMessage({ type: 'auth-required', text: 'Select and validate a named NEAR AI organization profile in Setup before chatting.' });
+      await sendProfileStatus(panel, auth);
+      panel.webview.postMessage({ type: 'auth-required', text: 'Set up a NEAR AI profile for this project to start chatting.' });
       return;
     }
     const model = message.model?.trim() || state.model;
     if (!model) { panel.webview.postMessage({ type: 'assistant-error', text: 'Choose a model from the list below the message box.' }); return; }
+    const modelInfo = active.models.find((candidate) => candidate.id === model);
+    state.activity = state.activity ?? new ActivityStore(root);
+    const settings = readSettings();
+    if (!state.guard || state.guardSettings !== JSON.stringify([settings.privacyMode, settings.dailySpendLimitUsd, settings.actionPolicy])) {
+      state.guard = new OutboundGuard(settings);
+      state.guardSettings = JSON.stringify([settings.privacyMode, settings.dailySpendLimitUsd, settings.actionPolicy]);
+    }
+    const verdict = state.guard.check({ model, modelInfo, text: message.text, overrideToken: message.overrideToken }, spentTodayUsd(await state.activity.list()));
+    if (verdict.outcome !== 'allow') {
+      panel.webview.postMessage({ type: 'outbound-blocked', text: message.text, model, reason: verdict.reason, overrideToken: verdict.overrideToken, confirm: verdict.outcome === 'confirm' });
+      return;
+    }
     state.model = model;
     state.abort?.abort();
     const abort = new AbortController();
     state.abort = abort;
-    let provider;
-    try {
-      provider = await createNearAiProvider({ auth, profile: activeProfile, scope: profiles.getScope(activeSelection.profileId) });
-    } catch (error) {
-      state.providerProfileId = undefined;
-      panel.webview.postMessage({ type: 'auth-required', text: providerErrorMessage(error) });
-      return;
-    }
-    state.providerProfileId = provider.profileId;
-    const client = provider.client;
-    if (root) {
-      state.activity = state.activity ?? new ActivityStore(root);
-      const attribution = hostAttribution(profiles.projectScopeId, path.basename(root), activeProfile.profileId, activeProfile.organization);
-      const session = await state.activity.start({ project: path.basename(root), attribution, model, summary: 'Chat session started.' });
-      state.activeSessionId = session.sessionId;
-      await state.activity.append(session.sessionId, { status: 'running', kind: 'message', model, summary: 'User message received.' });
-    }
+    state.providerProfileId = active.provider.profileId;
+    const client = active.provider.client;
+    const attribution = hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization);
+    const session = await state.activity.start({ project: path.basename(root), attribution, model, summary: 'Chat session started.' });
+    state.activeSessionId = session.sessionId;
+    await state.activity.append(session.sessionId, { status: 'running', kind: 'message', model, summary: 'User message received.' });
     state.history = appendUserTurn(state.history, message.text);
-    panel.webview.postMessage({ type: 'assistant-start', model, status: await readGsdStatusLine() });
+    panel.webview.postMessage({ type: 'assistant-start', model, privacy: modelPrivacyLabel(modelInfo), status: await readGsdStatusLine() });
     let assistantText = '';
     try {
       for await (const event of client.streamChatEvents(model, state.history, abort.signal)) {
         if (state.abort !== abort) break;
         if (event.type === 'text') {
           assistantText += event.text;
-          panel.webview.postMessage({ type: 'assistant-delta', text: event.text, status: await readGsdStatusLine() });
+          panel.webview.postMessage({ type: 'assistant-delta', text: event.text, usage: event.metadata });
         } else if (event.type === 'status' && event.status === 'started') {
-          if (state.activity && state.activeSessionId) await state.activity.append(state.activeSessionId, { status: 'running', kind: 'model', model, requestId: event.metadata.requestId, summary: 'Provider request started.' });
+          await state.activity.append(session.sessionId, { status: 'running', kind: 'model', model, requestId: event.metadata.requestId, summary: 'Provider request started.' });
         } else if (event.type === 'done') {
-          let metadata = event.metadata;
-          if (metadata.requestId && metadata.actualCostUsd === undefined) {
+          state.history = appendAssistantTurn(state.history, assistantText);
+          panel.webview.postMessage({ type: 'assistant-done', usage: event.metadata });
+          let actualCostUsd: number | undefined;
+          if (event.metadata.requestId) {
             try {
-              const reconciled = await client.reconcileUsage(metadata.requestId, abort.signal);
-              metadata = { ...metadata, ...reconciled, estimatedCostUsd: metadata.estimatedCostUsd };
+              actualCostUsd = (await client.reconcileUsage(event.metadata.requestId, abort.signal)).actualCostUsd;
             } catch {
-              // Provider reporting is best effort; unavailable actuals remain unavailable.
+              // Billing lookup is best effort; the estimate stays visible and labelled as an estimate.
             }
           }
-          state.history = appendAssistantTurn(state.history, assistantText);
-          if (state.activity && state.activeSessionId) await state.activity.append(state.activeSessionId, { status: 'completed', kind: 'message', model, requestId: metadata.requestId, summary: 'Assistant response completed.', estimatedCostUsd: metadata.estimatedCostUsd, actualCostUsd: metadata.actualCostUsd, inputTokens: metadata.inputTokens, outputTokens: metadata.outputTokens, durationMs: metadata.latencyMs });
-          panel.webview.postMessage({ type: 'assistant-done', usage: metadata });
-          if (state.activity) await sendHistory(panel, state.activity);
+          if (actualCostUsd !== undefined) panel.webview.postMessage({ type: 'assistant-cost', actualCostUsd });
+          await state.activity.append(session.sessionId, { status: 'completed', kind: 'message', model, requestId: event.metadata.requestId, summary: 'Assistant response completed.', estimatedCostUsd: event.metadata.estimatedCostUsd, actualCostUsd, inputTokens: event.metadata.inputTokens, outputTokens: event.metadata.outputTokens, durationMs: event.metadata.latencyMs });
+          await sendHistory(panel, state.activity);
         } else if (event.type === 'status' && event.status === 'cancelled') {
-          if (state.activity && state.activeSessionId) await state.activity.append(state.activeSessionId, { status: 'cancelled', summary: 'Chat request cancelled by the user.' });
+          await state.activity.append(session.sessionId, { status: 'cancelled', summary: 'Chat request cancelled by the user.' });
           panel.webview.postMessage({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
         }
       }
     } catch (error) {
       if (!abort.signal.aborted) {
-        if (state.activity && state.activeSessionId) await state.activity.append(state.activeSessionId, { status: 'failed', summary: 'Chat request failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
+        await state.activity.append(session.sessionId, { status: 'failed', summary: 'Chat request failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
         panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
       }
     } finally {
@@ -469,6 +480,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
   }, undefined, context.subscriptions);
   panel.onDidDispose(() => state.abort?.abort(), undefined, context.subscriptions);
+  onDidChangeEmergencyStop(async (engaged) => {
+    if (!engaged) return;
+    state.abort?.abort();
+    state.abort = undefined;
+    state.gsd.cancel();
+    panel.webview.postMessage({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
+  }, undefined, context.subscriptions);
   if (initialPrompt) panel.webview.postMessage({ type: 'prefill', text: initialPrompt });
   panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine() });
   panel.webview.postMessage({ type: 'commands', commands: GSD_COMMANDS });
@@ -727,17 +745,9 @@ function withWalletStatusPanel(html: string): string {
 
 async function loadModels(panel: ChatHost, auth: AuthService): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const profiles = root ? new ProfileStore(root, auth) : undefined;
-  const activeProfile = profiles ? await profiles.getActiveProfile() : undefined;
-  const activeSelection = profiles ? await profiles.getActiveSelection() : undefined;
-  if (!profiles || !activeProfile || !activeSelection || activeProfile.validation.status !== 'valid') {
-    panel.webview.postMessage({ type: 'models', models: [] });
-    return;
-  }
   try {
-    const provider = await createNearAiProvider({ auth, profile: activeProfile, scope: profiles.getScope(activeSelection.profileId) });
-    const models = await provider.client.listModelsWithPricing();
-    panel.webview.postMessage({ type: 'models', models: modelOptions(models, readSettings().defaultModel) });
+    const active = root ? await activeProvider(root, auth) : undefined;
+    panel.webview.postMessage({ type: 'models', models: active ? modelOptions(active.models, readSettings().defaultModel) : [] });
   } catch (error) {
     panel.webview.postMessage({ type: 'models-error', text: providerErrorMessage(error) });
   }

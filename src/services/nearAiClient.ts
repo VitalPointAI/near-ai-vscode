@@ -31,6 +31,8 @@ export interface ModelInfo {
   locality?: 'cloud' | 'local' | 'hybrid' | 'unknown';
   verificationStatus?: VerificationStatus;
   attestationStatus?: string;
+  /** Where NEAR sends the request when it does not run the model in its own TEE (e.g. "anthropic", "openrouter.ai"). */
+  forwardedTo?: string;
   cancellationSupported?: boolean;
   publicationSupported?: boolean;
   capabilityMetadataStatus?: CapabilityMetadataStatus;
@@ -124,7 +126,36 @@ export class NearAiClient {
 
   public async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
     const response = await this.request('/models', { method: 'GET', signal });
-    return this.rememberModels(normalizeModelRows(await jsonRows(response), (this.options.clock ?? (() => new Date().toISOString()))(), '/models'));
+    const models = normalizeModelRows(await jsonRows(response), (this.options.clock ?? (() => new Date().toISOString()))(), '/models');
+    return this.rememberModels(await this.withPrivacy(models, signal));
+  }
+
+  private async withPrivacy(models: ModelInfo[], signal?: AbortSignal): Promise<ModelInfo[]> {
+    let privacy: Map<string, Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>>;
+    try {
+      privacy = await this.listModelPrivacy(signal);
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw error;
+      return models;
+    }
+    return models.map((model) => ({ ...model, ...(privacy.get(model.id) ?? {}) }));
+  }
+
+  /**
+   * Which models NEAR runs inside an attested TEE and which it forwards to another provider,
+   * from `/model/list` metadata. Only the backend kind and destination host are read.
+   */
+  public async listModelPrivacy(signal?: AbortSignal): Promise<Map<string, Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>>> {
+    const response = await this.request('/model/list', { method: 'GET', signal });
+    const body = objectValue(await response.json());
+    const rows = Array.isArray(body.models) ? body.models.map(objectValue) : [];
+    const privacy = new Map<string, Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>>();
+    for (const row of rows) {
+      const id = stringValue(row.modelId);
+      if (!id) continue;
+      privacy.set(id, modelPrivacy(objectValue(row.metadata)));
+    }
+    return privacy;
   }
 
   public async listModelsWithPricing(signal?: AbortSignal): Promise<ModelInfo[]> {
@@ -132,7 +163,7 @@ export class NearAiClient {
     try {
       const response = await this.request('/models/pricing', { method: 'GET', signal });
       const models = normalizeModelRows(await jsonRows(response), (this.options.clock ?? (() => new Date().toISOString()))(), '/models/pricing');
-      if (models.length) return this.rememberModels(models);
+      if (models.length) return this.rememberModels(await this.withPrivacy(models, signal));
     } catch (error) {
       if (signal?.aborted || isAbortError(error)) throw error;
     }
@@ -163,13 +194,29 @@ export class NearAiClient {
     return imageResult(await response.json(), metadataFromHeaders(response.headers, started));
   }
 
-  /** Reconcile a completed request with provider-reported usage and actual cost. */
-  public async reconcileUsage(requestId: string, signal?: AbortSignal): Promise<UsageMetadata> {
-    const response = await this.request(`/usage/${encodeURIComponent(requestId)}`, { method: 'GET', signal });
-    const body = await response.json() as Record<string, unknown>;
-    const payload = objectValue(body.data ?? body);
-    const metadata = usageFromPayload(payload, metadataFromHeaders(response.headers, Date.now()), requestId);
-    return { ...metadata, estimatedCostUsd: undefined };
+  /**
+   * Actual cost for a completed request from NEAR's billing API. `requestId` must be the
+   * `inference-id` response header. NEAR reports 0 with a warning until usage is recorded,
+   * so an unrecorded request resolves to undefined rather than a fabricated $0.
+   */
+  public async actualCostUsd(requestId: string, signal?: AbortSignal): Promise<number | undefined> {
+    const response = await this.request('/billing/costs', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestIds: [requestId] }) });
+    const body = objectValue(await response.json());
+    const rows = Array.isArray(body.requests) ? body.requests.map(objectValue) : [];
+    const row = rows.find((candidate) => candidate.requestId === requestId);
+    const nanoUsd = numberValue(row?.costNanoUsd);
+    if (nanoUsd === undefined || (nanoUsd === 0 && body.warning)) return undefined;
+    return nanoUsd / 1e9;
+  }
+
+  /** Polls briefly for the actual cost, since billing records can lag the response by a moment. */
+  public async reconcileUsage(requestId: string, signal?: AbortSignal, delaysMs: number[] = [0, 1500, 4000]): Promise<UsageMetadata> {
+    for (const delay of delaysMs) {
+      if (delay) await waitForRetry(delay, 0, signal);
+      const cost = await this.actualCostUsd(requestId, signal);
+      if (cost !== undefined) return { requestId, actualCostUsd: cost, verificationStatus: 'unknown', latencyMs: 0 };
+    }
+    return { requestId, verificationStatus: 'unknown', latencyMs: 0 };
   }
 
   public async *streamChat(model: string, messages: ChatMessage[], signal?: AbortSignal): AsyncGenerator<ChatDelta> {
@@ -178,7 +225,7 @@ export class NearAiClient {
       method: 'POST',
       signal,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true })
+      body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
     });
     const metadata = metadataFromHeaders(response.headers, started);
     if (!response.body) throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId);
@@ -205,22 +252,27 @@ export class NearAiClient {
       method: 'POST',
       signal,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true })
+      body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
     });
     const metadata = metadataFromHeaders(response.headers, started);
     if (!response.body) throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId);
 
     yield { type: 'status', status: 'started', metadata };
+    let latest = metadata;
     try {
-      for await (const event of this.readEvents(response.body, metadata, signal, this.models.get(model))) yield event;
+      for await (const event of this.readEvents(response.body, metadata, signal, this.models.get(model))) {
+        if (event.type === 'text' && event.metadata) latest = event.metadata;
+        yield event;
+      }
     } catch (error) {
       if (signal?.aborted || isAbortError(error)) {
-        yield { type: 'status', status: 'cancelled', metadata: { ...metadata, latencyMs: Date.now() - started } };
+        yield { type: 'status', status: 'cancelled', metadata: { ...latest, latencyMs: Date.now() - started } };
         return;
       }
       throw error;
     }
-    const completed = { ...metadata, latencyMs: Date.now() - started };
+    // The completion carries the usage streamed with the response, not just the response headers.
+    const completed = { ...latest, latencyMs: Date.now() - started };
     yield { type: 'status', status: 'completed', metadata: completed };
     yield { type: 'done', metadata: completed };
   }
@@ -387,6 +439,14 @@ function operationList(value: unknown): { values: ProviderOperation[]; malformed
 
 function sameValues(left: string[], right: string[]): boolean { return left.length === right.length && left.every((value) => right.includes(value)); }
 function readinessValue(value: unknown): ModelInfo['readiness'] { return value === 'ready' || value === 'available' ? 'ready' : value === 'not-ready' || value === 'unavailable' || value === 'disabled' ? 'not-ready' : 'unknown'; }
+function modelPrivacy(metadata: Record<string, unknown>): Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'> {
+  if (metadata.attestationSupported === true && metadata.providerType !== 'external') return { privacyBoundary: 'tee' };
+  const config = objectValue(metadata.providerConfig);
+  let host: string | undefined;
+  try { host = typeof config.base_url === 'string' ? new URL(config.base_url).hostname.replace(/^api\./, '') : undefined; } catch { host = undefined; }
+  return { privacyBoundary: 'cloud', forwardedTo: host ?? stringValue(config.backend) ?? stringValue(metadata.providerType) };
+}
+
 function privacyBoundaryValue(value: unknown): CapabilityPrivacyBoundary { return value === 'local' || value === 'cloud' || value === 'tee' ? value : 'unknown'; }
 function localityValue(value: unknown): ModelInfo['locality'] { return value === 'local' || value === 'cloud' || value === 'hybrid' ? value : 'unknown'; }
 function verificationValue(value: unknown): VerificationStatus { return value === 'verified' || value === 'true' ? 'verified' : value === 'unverified' || value === 'false' ? 'unverified' : 'unknown'; }
@@ -404,7 +464,7 @@ function parseSseLine(line: string, metadata: UsageMetadata, model?: ModelInfo):
       choices?: Array<{ delta?: { content?: unknown } }>;
       usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; input_tokens?: unknown; output_tokens?: unknown };
     };
-    const nextMetadata = usageFromPayload(parsed.usage ?? {}, metadata, stringValue(parsed.id) ?? metadata.requestId, stringValue(parsed.provider) ?? metadata.provider);
+    const nextMetadata = usageFromPayload(parsed.usage ?? {}, metadata, metadata.requestId, stringValue(parsed.provider) ?? metadata.provider);
     nextMetadata.estimatedCostUsd = estimateCostUsd(model ?? { id: '' }, nextMetadata.inputTokens, nextMetadata.outputTokens) ?? metadata.estimatedCostUsd;
     const text = stringValue(parsed.choices?.[0]?.delta?.content) ?? '';
     return text || parsed.usage ? { type: 'text', text, metadata: nextMetadata } : undefined;
@@ -414,20 +474,9 @@ function parseSseLine(line: string, metadata: UsageMetadata, model?: ModelInfo):
 }
 
 function metadataFromHeaders(headers: Headers, startedAt: number): UsageMetadata {
-  const verification = headers.get('x-near-tee-verified') ?? headers.get('x-verification-status') ?? headers.get('x-tee-status');
-  const metadata: UsageMetadata = {
-    requestId: headers.get('x-request-id') ?? headers.get('request-id') ?? headers.get('x-near-request-id') ?? undefined,
-    provider: headers.get('x-provider') ?? headers.get('x-near-provider') ?? undefined,
-    inputTokens: headerNumber(headers, 'x-input-tokens', 'x-prompt-tokens', 'x-usage-input-tokens'),
-    outputTokens: headerNumber(headers, 'x-output-tokens', 'x-completion-tokens', 'x-usage-output-tokens'),
-    verificationStatus: verification === 'true' || verification === 'verified' ? 'verified' : verification === 'false' || verification === 'unverified' ? 'unverified' : 'unknown',
-    latencyMs: Date.now() - startedAt
-  };
-  const estimatedCost = headerNumber(headers, 'x-estimated-cost-usd', 'x-estimated-cost');
-  const actualCost = headerNumber(headers, 'x-actual-cost-usd', 'x-actual-cost');
-  if (estimatedCost !== undefined) metadata.estimatedCostUsd = estimatedCost;
-  if (actualCost !== undefined) metadata.actualCostUsd = actualCost;
-  return metadata;
+  // NEAR identifies a completion for billing by `inference-id`; `x-request-id` is only a transport ID.
+  // TEE verification is never inferred from headers: it needs NEAR's attestation/signature endpoints.
+  return { requestId: headers.get('inference-id') ?? undefined, verificationStatus: 'unknown', latencyMs: Date.now() - startedAt };
 }
 
 function usageFromPayload(payload: Record<string, unknown>, base: UsageMetadata, requestId?: string, provider?: string): UsageMetadata {

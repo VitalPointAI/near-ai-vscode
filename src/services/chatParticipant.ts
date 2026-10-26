@@ -5,12 +5,13 @@ import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { ActivityStore } from './activityStore';
 import { AuthService } from './auth';
-import { ConversationTurn, defaultChatModel, promptMessage, providerErrorMessage } from './chatBridge';
+import { ConversationTurn, defaultChatModel, modelPrivacyLabel, promptMessage, providerErrorMessage } from './chatBridge';
+import { OutboundGuard, spentTodayUsd } from './outboundGuard';
+import { activeProvider } from './providerCache';
+import { isEmergencyStopped } from './emergencyStop';
 import { GsdProgressEvent, GsdRunner } from './gsdRunner';
 import { GsdUpdater } from './gsdUpdater';
 import { UsageMetadata } from './nearAiClient';
-import { ProfileStore } from './profileStore';
-import { createNearAiProvider } from './providerFactory';
 import { readSettings, shouldAutoInstallGsd } from './settings';
 
 export const PARTICIPANT_ID = 'nearAi';
@@ -61,44 +62,46 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
     response.markdown('Open a folder first. NEAR AI keys and profiles are scoped to a project.');
     return;
   }
-  const profiles = new ProfileStore(root, auth);
-  const profile = await profiles.getActiveProfile();
-  const selection = await profiles.getActiveSelection();
-  if (!profile || !selection || profile.validation.status !== 'valid') {
+  let active;
+  try {
+    active = await activeProvider(root, auth);
+  } catch (error) {
+    response.markdown(providerErrorMessage(error));
+    response.button({ command: 'nearAi.selectProfile', title: 'Review profile' });
+    return;
+  }
+  if (!active) {
     response.markdown('This project has no validated NEAR AI profile yet. Set one up to start chatting.');
     response.button({ command: 'nearAi.setup', title: 'Set up NEAR AI' });
     return;
   }
-  let provider;
-  try {
-    provider = await createNearAiProvider({ auth, profile, scope: profiles.getScope(selection.profileId) });
-  } catch (error) {
-    response.markdown(providerErrorMessage(error));
-    response.button({ command: 'nearAi.setup', title: 'Review setup' });
-    return;
-  }
-  let model: string | undefined;
-  try {
-    model = defaultChatModel(await provider.client.listModels(), readSettings().defaultModel);
-  } catch (error) {
-    response.markdown(providerErrorMessage(error));
-    return;
-  }
+  const settings = readSettings();
+  const model = defaultChatModel(active.models, settings.defaultModel);
   if (!model) {
     response.markdown('NEAR AI returned no chat models for this key.');
     return;
   }
+  const modelInfo = active.models.find((candidate) => candidate.id === model);
   const activity = new ActivityStore(root);
-  const session = await activity.start({ project: path.basename(root), attribution: hostAttribution(profiles.projectScopeId, path.basename(root), profile.profileId, profile.organization), model, summary: 'Chat view session started.' });
+  const verdict = new OutboundGuard(settings).check({ model, modelInfo, text: prompt }, spentTodayUsd(await activity.list()));
+  if (verdict.outcome !== 'allow') {
+    response.markdown(`${verdict.reason}\n\nNothing was sent.${verdict.overrideToken ? ' To send it anyway, use the NEAR AI sidebar, which can send a flagged message once.' : ''}`);
+    return;
+  }
+  const session = await activity.start({ project: path.basename(root), attribution: hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization), model, summary: 'Chat view session started.' });
   const abort = new AbortController();
   const cancel = token.onCancellationRequested(() => abort.abort());
   response.progress(`Asking ${model}…`);
   try {
-    for await (const event of provider.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
+    for await (const event of active.provider.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
       if (event.type === 'text') response.markdown(event.text);
       else if (event.type === 'done') {
-        response.markdown(`\n\n${usageFooter(model, event.metadata)}`);
-        await activity.append(session.sessionId, { status: 'completed', kind: 'message', model, requestId: event.metadata.requestId, summary: 'Assistant response completed.', estimatedCostUsd: event.metadata.estimatedCostUsd, actualCostUsd: event.metadata.actualCostUsd, inputTokens: event.metadata.inputTokens, outputTokens: event.metadata.outputTokens });
+        let actualCostUsd: number | undefined;
+        if (event.metadata.requestId) {
+          try { actualCostUsd = (await active.provider.client.reconcileUsage(event.metadata.requestId, abort.signal)).actualCostUsd; } catch { actualCostUsd = undefined; }
+        }
+        response.markdown(`\n\n${usageFooter(model, { ...event.metadata, actualCostUsd }, modelPrivacyLabel(modelInfo))}`);
+        await activity.append(session.sessionId, { status: 'completed', kind: 'message', model, requestId: event.metadata.requestId, summary: 'Assistant response completed.', estimatedCostUsd: event.metadata.estimatedCostUsd, actualCostUsd, inputTokens: event.metadata.inputTokens, outputTokens: event.metadata.outputTokens, durationMs: event.metadata.latencyMs });
       } else if (event.type === 'status' && event.status === 'cancelled') {
         await activity.append(session.sessionId, { status: 'cancelled', summary: 'Chat request cancelled by the user.' });
       }
@@ -114,6 +117,10 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
 }
 
 async function runGsdInChat(runner: GsdRunner, command: string, note: string, root: string, response: vscode.ChatResponseStream, token: vscode.CancellationToken): Promise<void> {
+  if (isEmergencyStopped()) {
+    response.markdown('Emergency stop is on. Run **NEAR AI: Resume** first.');
+    return;
+  }
   if (runner.runningCommand) {
     response.markdown(`\`/${runner.runningCommand}\` is still running. Wait for it to finish or stop it first.`);
     return;
@@ -183,12 +190,12 @@ export function historyFromChatContext(turns: ReadonlyArray<vscode.ChatRequestTu
   return history.slice(-20);
 }
 
-export function usageFooter(model: string, usage: UsageMetadata): string {
+export function usageFooter(model: string, usage: UsageMetadata, privacy?: string): string {
   const parts = [model];
+  if (privacy) parts.push(privacy);
   const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   if (tokens) parts.push(`${tokens.toLocaleString('en-US')} tokens`);
-  const cost = usage.actualCostUsd ?? usage.estimatedCostUsd;
-  if (cost !== undefined) parts.push(`${usage.actualCostUsd === undefined ? '~' : ''}$${cost.toFixed(4)}`);
-  if (usage.verificationStatus === 'verified') parts.push('TEE verified');
+  if (usage.actualCostUsd !== undefined) parts.push(`$${usage.actualCostUsd.toFixed(4)}`);
+  else if (usage.estimatedCostUsd !== undefined) parts.push(`~$${usage.estimatedCostUsd.toFixed(4)} est.`);
   return `*${parts.join(' · ')}*`;
 }

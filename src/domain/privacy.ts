@@ -10,7 +10,8 @@ export type DataClass =
   | 'public';
 
 export type ProviderBoundary = 'local' | 'cloud' | 'tee' | 'unknown';
-export type SovereigntyMode = 'standard' | 'local-only';
+/** `tee-only` allows only NEAR models run in an attested TEE (or a local runtime). */
+export type SovereigntyMode = 'standard' | 'tee-only' | 'local-only';
 export type PrivacyRuleMode = 'block' | 'warn-and-confirm' | 'allow' | 'local-only';
 
 export interface PrivacyRule {

@@ -31,7 +31,7 @@ test('provider factory isolates project and profile SecretStorage slots and neve
     return new Response(JSON.stringify({ data: [] }), { status: 200 });
   } });
   await provider.client.listModels();
-  assert.deepEqual(requests, [{ url: 'https://example.test/v1/models', authorization: 'Bearer project-a-secret' }]);
+  assert.deepEqual(requests, [{ url: 'https://example.test/v1/models', authorization: 'Bearer project-a-secret' }, { url: 'https://example.test/v1/model/list', authorization: 'Bearer project-a-secret' }]);
   assert.equal(await auth.getScopedApiKey(scopeB), undefined);
   assert.equal(await auth.getScopedApiKey(otherProfile), undefined);
   assert.doesNotMatch(JSON.stringify({ profileId: provider.profileId, projectId: provider.projectId, baseUrl: provider.baseUrl }), /project-a-secret/);
@@ -57,5 +57,5 @@ test('an explicit selected profile changes the host-side credential resolution',
   await first.client.listModels();
   const second = await createNearAiProvider({ auth, profile: profile('profile-second'), scope: secondScope, fetchFn: async (_url, init) => { seen.push(String((init?.headers as Record<string, string>).authorization)); return new Response(JSON.stringify({ data: [] }), { status: 200 }); } });
   await second.client.listModels();
-  assert.deepEqual(seen, ['Bearer first-secret', 'Bearer second-secret']);
+  assert.deepEqual(seen, ['Bearer first-secret', 'Bearer first-secret', 'Bearer second-secret', 'Bearer second-secret']);
 });
