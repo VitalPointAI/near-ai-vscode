@@ -5,13 +5,20 @@ scoped NEAR AI provider profile, understand what will be sent, keep risky
 actions behind approval, and follow model, usage, cost, and verification facts
 as work progresses.
 
-This `0.1.0` release is a release-candidate foundation. It is designed to make
-the host/provider boundary visible and reviewable; it does not promise that
-every provider, wallet, or TEE status is available in every environment.
+This `0.1.1` public preview makes the host/provider boundary visible and
+reviewable. Core chat, Open-GSD execution, team studio, multimodal intake,
+privacy controls, cost telemetry, and context-graph workflows are implemented;
+provider-specific capabilities called out below remain explicitly fail-closed.
 
-![Chat and activity demo](docs/marketplace/near-ai-overview.gif)
+![Chat and activity demo](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-overview.gif)
 
-![Setup and privacy controls demo](docs/marketplace/near-ai-setup.gif)
+![Setup and privacy controls demo](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-setup.gif)
+
+The animated screenshots above are hosted from this repository so they render
+in the Marketplace listing. Additional screenshots can be added the same way:
+commit PNG/JPG/GIF assets under `docs/marketplace/`, reference their public
+`https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/...` URL in
+this README, then publish a new extension version.
 
 ## What you get
 
@@ -159,12 +166,20 @@ Press `F5` in VS Code to launch an Extension Development Host. The release
 content verifier is intentionally independent of the extension runtime and
 checks the actual VSIX entry list after packaging.
 
-## Roadmap
+## Current limitations and roadmap
 
-The next release work may include a verified provider token-exchange flow,
-officially specified wallet/entitlement integration, richer human-operated
-VS Code host smoke coverage, and additional provider adapters. Those items are
-roadmap only; this release does not enable them silently.
+The NEAR account token-exchange flow is prepared in the UI but is not enabled
+until the official provider contract is verified. NEAR AI staking and credit
+balance writes are also fail-closed until the official network, validator,
+endpoint, and wallet callback contract are available. TEE state is
+provider-reported rather than independently attested. Live extension-host,
+screen-reader, focus, and reduced-motion review still needs to be performed in
+VS Code; the automated runtime harness and accessibility contracts are covered
+by the release tests.
+
+Future work may add the verified token-exchange flow, official staking/
+entitlement integration, more provider adapters, and richer human-operated
+VS Code smoke coverage. These capabilities are not silently enabled.
 
 ## License
 
