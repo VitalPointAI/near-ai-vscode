@@ -1,8 +1,10 @@
-import { deflateSync } from 'node:zlib';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { deflateSync, inflateSync } from 'node:zlib';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Official NEAR AI tile asset, downloaded from the published brand page:
+// https://near.ai/brand (tertiary/tile-color.png)
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const size = 512;
 const pixels = Buffer.alloc(size * size * 4);
@@ -64,6 +66,56 @@ function ellipse(cx, cy, rx, ry, rotation, width, color) {
   }
 }
 
+function decodeRgbaPng(path) {
+  const source = readFileSync(path);
+  let offset = 8;
+  let width = 0; let height = 0; let bitDepth = 0; let colorType = 0;
+  const idat = [];
+  while (offset < source.length) {
+    const length = source.readUInt32BE(offset); offset += 4;
+    const type = source.toString('ascii', offset, offset + 4); offset += 4;
+    const data = source.subarray(offset, offset + length); offset += length + 4;
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0); height = data.readUInt32BE(4); bitDepth = data[8]; colorType = data[9];
+    } else if (type === 'IDAT') idat.push(data);
+    else if (type === 'IEND') break;
+  }
+  if (bitDepth !== 8 || colorType !== 6) throw new Error('Expected an 8-bit RGBA PNG');
+  const stride = width * 4;
+  const raw = inflateSync(Buffer.concat(idat));
+  const decoded = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * (stride + 1)];
+    const sourceRow = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    const rowOffset = y * stride;
+    for (let x = 0; x < stride; x += 1) {
+      const left = x >= 4 ? decoded[rowOffset + x - 4] : 0;
+      const above = y > 0 ? decoded[rowOffset - stride + x] : 0;
+      const upperLeft = y > 0 && x >= 4 ? decoded[rowOffset - stride + x - 4] : 0;
+      let value = sourceRow[x];
+      if (filter === 1) value = (value + left) & 255;
+      else if (filter === 2) value = (value + above) & 255;
+      else if (filter === 3) value = (value + Math.floor((left + above) / 2)) & 255;
+      else if (filter === 4) {
+        const predictor = left + above - upperLeft;
+        const pa = Math.abs(predictor - left); const pb = Math.abs(predictor - above); const pc = Math.abs(predictor - upperLeft);
+        value = (value + (pa <= pb && pa <= pc ? left : pb <= pc ? above : upperLeft)) & 255;
+      }
+      decoded[rowOffset + x] = value;
+    }
+  }
+  return { width, height, pixels: decoded };
+}
+function compositeOfficialTile(tile, x0, y0, outputSize) {
+  for (let y = y0; y < y0 + outputSize; y += 1) for (let x = x0; x < x0 + outputSize; x += 1) {
+    const sourceX = Math.floor((x - x0) * tile.width / outputSize);
+    const sourceY = Math.floor((y - y0) * tile.height / outputSize);
+    const index = (sourceY * tile.width + sourceX) * 4;
+    const alpha = tile.pixels[index + 3] / 255;
+    blend(x, y, tile.pixels[index], tile.pixels[index + 1], tile.pixels[index + 2], alpha);
+  }
+}
+
 for (let y = 0; y < size; y += 1) for (let x = 0; x < size; x += 1) {
   const distance = Math.hypot(x - size / 2, y - size / 2) / (size * 0.72);
   const glow = Math.max(0, 1 - distance);
@@ -75,10 +127,8 @@ ellipse(256, 256, 190, 116, 0.48, 3, [255, 190, 38]);
 
 const gold = [255, 188, 34];
 const goldLight = [255, 222, 76];
-// Angular NEAR-inspired N: two strong uprights joined by one rising diagonal.
-strokeSegment(145, 375, 145, 137, 31, gold, 18);
-strokeSegment(145, 137, 367, 375, 31, goldLight, 18);
-strokeSegment(367, 375, 367, 137, 31, gold, 18);
+const officialTile = decodeRgbaPng(resolve(root, 'scripts/assets/near-ai-official-tile.png'));
+compositeOfficialTile(officialTile, 76, 76, 360);
 
 for (const [x, y, color] of [[118, 118, goldLight], [394, 118, [45, 218, 255]], [418, 256, gold], [394, 394, [45, 218, 255]], [118, 394, gold], [94, 256, [45, 218, 255]]]) {
   circle(x, y, 19, color, 0.18);
