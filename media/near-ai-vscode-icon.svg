@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1254 1254">
+<title>NEAR AI for VSCode</title><desc>Editable vector reconstruction of the generated icon. NEAR symbol traced from supplied raster, not a verified official asset.</desc>
+<defs>
+<linearGradient id="tile" x1="0" y1="0" x2=".85" y2="1"><stop stop-color="#33414f"/><stop offset=".32" stop-color="#18232d"/><stop offset="1" stop-color="#101820"/></linearGradient>
+<linearGradient id="edge" x2=".8" y2="1"><stop stop-color="#a9b7c2"/><stop offset=".3" stop-color="#334a60"/><stop offset=".7" stop-color="#192836"/><stop offset="1" stop-color="#05090d"/></linearGradient>
+<linearGradient id="cyan" x2=".8" y2="1"><stop stop-color="#56f0f4"/><stop offset="1" stop-color="#0bcbe6"/></linearGradient>
+<linearGradient id="mint" x2=".8" y2="1"><stop stop-color="#adffd4"/><stop offset="1" stop-color="#62edb1"/></linearGradient>
+<radialGradient id="spark"><stop stop-color="white"/><stop offset=".6" stop-color="#e6ffff"/><stop offset="1" stop-color="#67eaf3"/></radialGradient>
+<filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="9"/></filter>
+<filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="10"/></filter>
+</defs>
+<g id="background"><path fill="#080c10" d="M0 0h1254v1254H0z"/></g>
+<g id="tile-body"><rect x="93" y="111" width="1068" height="1050" rx="174" fill="#030609"/><rect x="94" y="94" width="1066" height="1046" rx="168" fill="url(#tile)" stroke="url(#edge)" stroke-width="5"/><path d="M264 111H989Q1126 111 1140 242" fill="none" stroke="#8da8bd" stroke-opacity=".2" stroke-width="3"/></g>
+<g id="near-mark" fill="#fff"><path d="M359 689V286C359 248 381 220 415 220C436 220 451 229 467 246L782 596Q796 610 796 590V350Q796 334 784 342L694 408Q677 422 662 409Q648 397 661 379L788 242Q807 220 831 220C870 220 895 248 895 286V690C895 730 872 757 837 757Q809 757 786 732L472 392Q458 378 458 397V626Q458 642 472 632L561 568Q579 556 591 571Q602 584 588 601L465 735Q443 757 417 757C382 757 359 730 359 689Z"/></g>
+<g id="graph-glow" opacity=".25" filter="url(#glow)" fill="#43d9e6"><rect x="578" y="789" width="98" height="96" rx="25"/><rect x="578" y="928" width="98" height="96" rx="25"/><rect x="842" y="837" width="140" height="146" rx="32" fill="#69f0b0"/></g>
+<g id="graph-connectors" fill="none" stroke="#39d9e7" stroke-width="14" stroke-linecap="round"><path d="M427 887L564 842M427 934L564 979M690 842L827 887M690 979L827 933"/></g>
+<g id="task-nodes" fill="url(#cyan)" stroke="#7bf7fb" stroke-opacity=".6" stroke-width="2"><rect x="578" y="789" width="98" height="96" rx="25"/><rect x="578" y="928" width="98" height="96" rx="25"/></g>
+<g id="outcome-node"><rect x="842" y="837" width="140" height="146" rx="32" fill="url(#mint)" stroke="#baffdf" stroke-width="2"/><path d="M883 912l21 21 39-46" fill="none" stroke="#10292c" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g id="ai-sparkle"><path d="M342 839C331 883 317 893 277 904Q268 908 278 912C318 923 331 938 338 975Q342 988 347 975C358 936 372 922 407 913Q418 909 407 905C368 892 356 878 347 840Q344 831 342 839Z" fill="url(#spark)" stroke="#89f4ff" stroke-width="2"/></g>
+</svg>

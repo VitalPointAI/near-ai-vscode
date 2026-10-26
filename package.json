@@ -2,9 +2,9 @@
   "name": "near-ai-vscode",
   "displayName": "Near AI for VSCode",
   "description": "A private, cost-aware Open-GSD coding harness powered by NEAR AI Cloud.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "VitalPoint",
-  "icon": "media/near-ai-icon.png",
+  "icon": "media/near-ai-vscode-icon-128.png",
   "license": "MIT",
   "engines": {
     "vscode": ">=1.90.0"
@@ -35,7 +35,7 @@
         {
           "id": "nearAiSecondaryViewContainer",
           "title": "NEAR AI",
-          "icon": "media/near-ai-icon.png"
+          "icon": "media/near-ai-vscode-icon.svg"
         }
       ]
     },
