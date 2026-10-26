@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import * as vscode from 'vscode';
@@ -6,11 +7,13 @@ import { formatGsdStatusLine, parseGsdPlanningState, statusSnapshot } from '../d
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { AuthService } from './auth';
 import { createNearAiProvider } from './providerFactory';
-import { activeProvider } from './providerCache';
+import { activeProvider, clientFor } from './providerCache';
+import { AgentConversation } from './agentSession';
+import { findRipgrep } from '../agent/tools';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { OutboundGuard, spentTodayUsd } from './outboundGuard';
 import { ProfileStore } from './profileStore';
-import { readSettings, shouldAutoInstallGsd } from './settings';
+import { readAgentRules, readSettings, shouldAutoInstallGsd } from './settings';
 import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, promptMessage, promptResponseMatches, progressActivitySummary, progressCardMessage, GsdArtifactLink, profileStatusMessage, walletStatusMessage, walletPreviewMessage, walletHistoryMessage, walletErrorMessage, teamListMessage, teamPreviewMessage, teamStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage, capabilityAwareTeamPreview, generationPreviewMessage, generationStatusMessage, generationPublicationMessage, memoryInspectMessage, memorySliceMessage, memoryApprovalPreviewMessage, multimodalStatusMessage, sanitizeContextGraphNode } from './chatBridge';
 import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './chatBridge';
 import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
@@ -97,6 +100,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     ,memoryApprovals: undefined as MemoryApprovalRegistry | undefined
     ,memorySessionId: undefined as string | undefined
     ,guard: undefined as OutboundGuard | undefined
+    ,agent: undefined as AgentConversation | undefined
     ,guardSettings: undefined as string | undefined
   };
   panel.webview.html = html;
@@ -106,6 +110,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'stop') {
       state.abort?.abort();
       state.abort = undefined;
+      state.agent?.stop();
       state.gsd.cancel();
       panel.webview.postMessage({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
       return;
@@ -262,9 +267,19 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'new-chat') {
       state.abort?.abort();
       state.abort = undefined;
+      state.agent?.reset();
       state.history = [];
       state.activeSessionId = undefined;
       state.prompt = undefined;
+      return;
+    }
+    if (message.type === 'approval-reply') {
+      state.agent?.answerApproval(message.callId, { decision: message.decision, feedback: message.feedback });
+      return;
+    }
+    if (message.type === 'revert-run') {
+      const restored = await state.agent?.revert(message.runId) ?? [];
+      panel.webview.postMessage({ type: 'run-reverted', runId: message.runId, files: restored });
       return;
     }
     if (message.type === 'insert-code') {
@@ -442,59 +457,26 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     state.model = model;
-    state.abort?.abort();
-    const abort = new AbortController();
-    state.abort = abort;
     state.providerProfileId = active.provider.profileId;
-    const client = active.provider.client;
     const attribution = hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization);
-    const session = await state.activity.start({ project: path.basename(root), attribution, model, summary: 'Chat session started.' });
+    const session = await state.activity.start({ project: path.basename(root), attribution, model, summary: 'Agent conversation turn started.' });
     state.activeSessionId = session.sessionId;
-    await state.activity.append(session.sessionId, { status: 'running', kind: 'message', model, summary: 'User message received.' });
-    state.history = appendUserTurn(state.history, message.text);
-    panel.webview.postMessage({ type: 'assistant-start', model, privacy: modelPrivacyLabel(modelInfo), status: await readGsdStatusLine() });
-    let assistantText = '';
+    state.agent = state.agent ?? new AgentConversation(root, (outbound) => { void panel.webview.postMessage(outbound); }, path.join(context.globalStorageUri.fsPath, 'checkpoints'), ripgrepPath());
     try {
-      for await (const event of client.streamChatEvents(model, state.history, abort.signal)) {
-        if (state.abort !== abort) break;
-        if (event.type === 'text') {
-          assistantText += event.text;
-          panel.webview.postMessage({ type: 'assistant-delta', text: event.text, usage: event.metadata });
-        } else if (event.type === 'status' && event.status === 'started') {
-          await state.activity.append(session.sessionId, { status: 'running', kind: 'model', model, requestId: event.metadata.requestId, summary: 'Provider request started.' });
-        } else if (event.type === 'done') {
-          state.history = appendAssistantTurn(state.history, assistantText);
-          panel.webview.postMessage({ type: 'assistant-done', usage: event.metadata });
-          let actualCostUsd: number | undefined;
-          if (event.metadata.requestId) {
-            try {
-              actualCostUsd = (await client.reconcileUsage(event.metadata.requestId, abort.signal)).actualCostUsd;
-            } catch {
-              // Billing lookup is best effort; the estimate stays visible and labelled as an estimate.
-            }
-          }
-          if (actualCostUsd !== undefined) panel.webview.postMessage({ type: 'assistant-cost', actualCostUsd });
-          await state.activity.append(session.sessionId, { status: 'completed', kind: 'message', model, requestId: event.metadata.requestId, summary: 'Assistant response completed.', estimatedCostUsd: event.metadata.estimatedCostUsd, actualCostUsd, inputTokens: event.metadata.inputTokens, outputTokens: event.metadata.outputTokens, durationMs: event.metadata.latencyMs });
-          await sendHistory(panel, state.activity);
-        } else if (event.type === 'status' && event.status === 'cancelled') {
-          await state.activity.append(session.sessionId, { status: 'cancelled', summary: 'Chat request cancelled by the user.' });
-          panel.webview.postMessage({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
-        }
-      }
+      const route = clientFor(active, model);
+      await state.agent.send({ text: message.text, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local });
+      await sendHistory(panel, state.activity);
     } catch (error) {
-      if (!abort.signal.aborted) {
-        await state.activity.append(session.sessionId, { status: 'failed', summary: 'Chat request failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
-        panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
-      }
-    } finally {
-      if (state.abort === abort) state.abort = undefined;
+      await state.activity.append(session.sessionId, { status: 'failed', summary: 'Agent run failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
+      panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
     }
   }, undefined, context.subscriptions);
-  panel.onDidDispose(() => state.abort?.abort(), undefined, context.subscriptions);
+  panel.onDidDispose(() => { state.abort?.abort(); state.agent?.dispose(); }, undefined, context.subscriptions);
   onDidChangeEmergencyStop(async (engaged) => {
     if (!engaged) return;
     state.abort?.abort();
     state.abort = undefined;
+    state.agent?.stop();
     state.gsd.cancel();
     panel.webview.postMessage({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
   }, undefined, context.subscriptions);
@@ -536,6 +518,11 @@ async function insertIntoActiveEditor(text: string): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) { void vscode.window.showInformationMessage('Open a file to insert code at the cursor.'); return; }
   await editor.edit((edit) => editor.selections.forEach((selection) => edit.replace(selection, text)));
+}
+
+function ripgrepPath(): string | undefined {
+  const appRoot = (vscode.env as { appRoot?: string } | undefined)?.appRoot;
+  return appRoot ? findRipgrep(appRoot, (candidate) => existsSync(candidate)) : undefined;
 }
 
 /** Running an Open-GSD command from the extension is what makes a workspace a NEAR AI project, so a missing runtime is installed only here. */

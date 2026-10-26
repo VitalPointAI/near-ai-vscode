@@ -16,6 +16,7 @@
   const menu = $('commands');
   const live = $('live');
   const projectLinks = $('project-links');
+  const todoPanel = $('todos');
   const commands = JSON.parse(document.body.dataset.commands || '[]');
   const saved = vscode.getState() || {};
 
@@ -30,6 +31,8 @@
   let busy = false;
   let current;
   let lastReply;
+  let runInfo = {};
+  const agentRows = new Map();
   let tools = new Map();
   let menuIndex = 0;
   let modelInfo = new Map();
@@ -237,12 +240,104 @@
   }
 
   function resetConversation() {
+    agentRows.clear();
+    renderTodos([]);
     transcript.replaceChildren(welcome);
     welcome.hidden = false;
     tools = new Map();
     current = undefined;
     setBusy(false);
     input.focus();
+  }
+
+
+  // Agent tool calls: a collapsible row each, between the text segments of the reply.
+  function closeSegment() {
+    if (!current) return;
+    if (current.frame) cancelAnimationFrame(current.frame);
+    flushAssistant();
+    if (!current.text) current.node.remove();
+    current = undefined;
+  }
+  function onAgentToolStart(m) {
+    closeSegment();
+    const details = el('details', 'tool agent-tool');
+    const summary = el('summary');
+    const spinner = el('span', 'spinner');
+    const state = el('span', 'state', '');
+    summary.append(spinner, el('strong', '', m.title), state);
+    const log = el('div', 'log');
+    details.append(summary, log);
+    append(details);
+    agentRows.set(m.callId, { details, spinner, state, log });
+  }
+  function onAgentToolEnd(m) {
+    const row = agentRows.get(m.callId);
+    if (!row) return;
+    row.spinner.remove();
+    row.details.dataset.state = m.ok ? 'completed' : 'failed';
+    row.state.textContent = m.ok ? '' : 'failed';
+    row.log.textContent = m.output || '';
+    if (!m.ok) row.details.open = true;
+    const card = document.getElementById('approval-' + m.callId);
+    if (card && !card.dataset.answered) card.remove();
+  }
+  function onApproval(m) {
+    const card = el('div', 'question approval');
+    card.id = 'approval-' + m.callId;
+    card.setAttribute('role', 'group');
+    card.setAttribute('aria-label', 'Approve: ' + m.title);
+    card.append(el('p', '', m.title));
+    const preview = m.preview || {};
+    if (preview.kind === 'diff') {
+      const pre = el('pre', 'diff');
+      (preview.diff || '(no changes)').split('\n').forEach((line) => pre.append(el('span', line.startsWith('+') && !line.startsWith('+++') ? 'add' : line.startsWith('-') && !line.startsWith('---') ? 'del' : line.startsWith('@@') ? 'hunk' : '', line + '\n')));
+      card.append(pre);
+    } else if (preview.kind === 'command') {
+      const pre = el('pre', 'command');
+      pre.append(el('code', '', preview.command));
+      card.append(pre, el('div', 'meta', 'in ' + (!preview.cwd || preview.cwd === '.' ? 'the workspace root' : preview.cwd) + (preview.background ? ' · runs in the background' : '')));
+    } else if (preview.kind === 'note') {
+      card.append(el('div', 'meta', preview.text));
+    }
+    const feedback = el('input');
+    feedback.placeholder = 'Optional: tell NEAR AI what to do instead';
+    feedback.setAttribute('aria-label', 'Instructions if you decline');
+    const choices = el('div', 'choices');
+    const answer = (decision, label) => {
+      card.dataset.answered = 'true';
+      card.querySelectorAll('button,input').forEach((node) => { node.disabled = true; });
+      choices.replaceChildren(el('span', 'meta', label));
+      post({ type: 'approval-reply', callId: m.callId, decision, ...(decision === 'deny' && feedback.value.trim() ? { feedback: feedback.value.trim() } : {}) });
+    };
+    const runLabel = m.tool === 'Bash' ? 'Allow this command for this run' : 'Allow edits for this run';
+    choices.append(
+      textButton('Allow', () => answer('allow', 'Allowed'), true),
+      textButton(runLabel, () => answer('allow-run', runLabel.replace('Allow', 'Allowed'))),
+      textButton('Deny', () => answer('deny', 'Declined'))
+    );
+    card.append(choices, feedback);
+    append(card);
+    announce('Approval needed: ' + m.title);
+  }
+  function renderTodos(todos) {
+    todoPanel.hidden = !todos.length;
+    const list = el('ul');
+    todos.forEach((todo) => {
+      const item = el('li', 'todo ' + todo.status, todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content);
+      item.setAttribute('aria-label', todo.status.replace('_', ' ') + ': ' + todo.content);
+      list.append(item);
+    });
+    const done = todos.filter((todo) => todo.status === 'completed').length;
+    todoPanel.replaceChildren(el('div', 'todo-title', `Tasks · ${done}/${todos.length}`), list);
+  }
+  function onRunChanges(m) {
+    const row = el('div', 'changes');
+    row.id = 'changes-' + m.runId;
+    row.append(el('span', '', `${m.files.length} file${m.files.length === 1 ? '' : 's'} changed`));
+    row.title = m.files.join('\n') + '\n(Changes made by shell commands are not included.)';
+    row.append(textButton('Revert', () => { row.querySelector('button').disabled = true; post({ type: 'revert-run', runId: m.runId }); }));
+    append(row);
   }
 
   // Slash-command menu
@@ -334,7 +429,7 @@
           model.title = '';
           break;
         }
-        const groups = [['tee', 'Private · runs in NEAR TEE'], ['forwarded', 'Not private · NEAR forwards to another provider'], ['unknown', 'Privacy unknown']];
+        const groups = [['local', 'Local · runs on this machine'], ['tee', 'Private · runs in NEAR TEE'], ['forwarded', 'Not private · NEAR forwards to another provider'], ['unknown', 'Privacy unknown']];
         model.replaceChildren(...groups.map(([kind, label]) => {
           const group = el('optgroup');
           group.label = label;
@@ -368,17 +463,31 @@
         profile.dataset.state = active ? (active.validation && active.validation.status === 'valid' ? 'ready' : 'attention') : 'missing';
         break;
       }
-      case 'assistant-start': if (!current) startAssistant(); current.model = m.model; current.privacy = m.privacy; if (m.status) status.textContent = m.status; break;
+      case 'assistant-start': runInfo = { model: m.model, privacy: m.privacy }; if (!current) startAssistant(); if (m.status) status.textContent = m.status; break;
       case 'assistant-delta':
         if (!current) startAssistant();
         current.text += m.text || '';
         if (!current.frame) current.frame = requestAnimationFrame(flushAssistant);
         break;
-      case 'assistant-done':
-        if (current) lastReply = { node: current.node, usage: m.usage, model: current.model, privacy: current.privacy };
-        finishAssistant(usageLine(m.usage, current && current.model, current && current.privacy));
+      case 'assistant-done': {
+        // A run is several text segments around tool rows; the footer goes after the last one.
+        if (!current) startAssistant();
+        lastReply = { node: current.node, usage: m.usage, model: runInfo.model, privacy: runInfo.privacy };
+        finishAssistant(usageLine(m.usage, runInfo.model, runInfo.privacy));
         announce('Response complete.');
         break;
+      }
+      case 'tool-start': onAgentToolStart(m); break;
+      case 'tool-end': onAgentToolEnd(m); break;
+      case 'approval-request': onApproval(m); break;
+      case 'todos': renderTodos(m.todos || []); break;
+      case 'run-changes': onRunChanges(m); break;
+      case 'run-reverted': {
+        const row = document.getElementById('changes-' + m.runId);
+        if (row) row.replaceChildren(el('span', '', `Reverted ${m.files.length} file${m.files.length === 1 ? '' : 's'}.`));
+        announce('Changes reverted.');
+        break;
+      }
       case 'assistant-cost': {
         const meta = lastReply && lastReply.node.querySelector('.meta');
         if (meta) meta.textContent = usageLine(lastReply.usage, lastReply.model, lastReply.privacy, m.actualCostUsd);
@@ -396,6 +505,7 @@
         break;
       }
       case 'assistant-cancelled':
+        agentRows.forEach((row) => { if (row.spinner.isConnected) { row.spinner.remove(); row.state.textContent = 'stopped'; } });
         if (current) finishAssistant('Stopped');
         else setBusy(false);
         if (m.status) status.textContent = m.status;

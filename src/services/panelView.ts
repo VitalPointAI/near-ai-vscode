@@ -70,6 +70,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
   </section>
 </main>
 <footer>
+  <section id="todos" aria-label="Task list" aria-live="polite" hidden></section>
   <nav id="project-links" aria-label="Planning files" hidden></nav>
   <div class="composer">
     <div id="commands" role="listbox" aria-label="Open-GSD commands" hidden></div>

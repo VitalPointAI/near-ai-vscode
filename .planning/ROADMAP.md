@@ -84,6 +84,8 @@ Build the runner's engine: a streaming tool-calling loop over NEAR's OpenAI-comp
 
 **Requirements:** HARN-01..08, SAFE-01, SAFE-02, MODEL-02, MODEL-03
 
+**Status:** Complete 2026-10-26 (`phases/08-agent-harness-core/08-01-SUMMARY.md`). Setup also offers a hybrid NEAR AI Cloud + local profile.
+
 ### Phase 9: Open-GSD on the runner
 
 Install Open-GSD's Claude runtime into extension-owned storage (never the user's `~/.claude`) and run it natively: load skills, commands, agents, and workflows; expand `$ARGUMENTS` and `@` includes; provide the Skill and SlashCommand tools; turn AskUserQuestion into interactive cards in the sidebar and buttons in `@nearai`; run `gsd-tools.cjs` with VS Code's bundled Node. Every installed GSD skill becomes discoverable with arguments. Progress, status line, and next actions come from real run events and STATE.md.
@@ -114,4 +116,4 @@ NEAR account sign-in (AUTH-02) and wallet, staking, and entitlement (AUTH-04, CO
 
 ## Next action
 
-Phase 8: plan with `/gsd-plan-phase 8`.
+Phase 9: plan with `/gsd-plan-phase 9`.

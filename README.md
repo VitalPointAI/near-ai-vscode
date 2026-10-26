@@ -32,11 +32,28 @@ exactly what is allowed to leave your machine.
 
 ## Features
 
+### An agent, not just a chat
+
+Ask for a change and NEAR AI does the work in your workspace: it searches and
+reads your code, edits files, and runs your build and tests, showing every step
+as a row in the chat.
+
+- **You approve what matters.** File edits show a diff and shell commands show
+  the exact command before they run, with **Allow**, **Allow for this run**, or
+  **Deny** (with a note on what to do instead). Reads and searches run freely.
+- **Undo a whole run.** Every file the agent changes is snapshotted first, so
+  one **Revert** puts them all back.
+- **A visible plan.** Multi-step work keeps a task list above the input box.
+- **Guard rails.** The agent can only touch files inside the workspace, asks
+  before reading likely credential files (`.env`, keys), and never runs
+  commands on your deny list.
+
 ### Chat that fits in your editor
 
 - Streaming answers with formatted code, plus **Copy** and **Insert at cursor**
   on every code block.
-- Pick any model NEAR AI offers from the input box, with pricing shown.
+- Pick any model NEAR AI offers, or one from a local runtime such as Ollama or
+  LM Studio, from the input box, with pricing and privacy shown.
 - **New Chat**, **History**, **Tools**, and **Set Up** live in the view's title
   bar, just like other VS Code views.
 - Keyboard-first, with screen-reader labels and reduced-motion support.
@@ -70,8 +87,10 @@ copy of Open-GSD to a project that doesn't already have one.
 
 1. Install **NEAR AI for VS Code** and open a project folder.
 2. Run **NEAR AI: Set Up** from the Command Palette.
-3. Create a NEAR AI Cloud API key at [cloud.near.ai](https://cloud.near.ai/),
-   or paste the one you have, and give the project a name.
+3. Choose where models run: **NEAR AI Cloud** (create a key at
+   [cloud.near.ai](https://cloud.near.ai/)), a **local runtime** (Ollama, LM
+   Studio, vLLM, or any OpenAI-compatible server), or **both**, picking a cloud
+   or local model for each chat.
 4. Open the **NEAR AI** view in the secondary side bar and start chatting, or
    type `/new-project` to plan something new.
 
@@ -95,7 +114,7 @@ Read the full [security and trust report](SECURITY.md).
 ## Requirements
 
 - VS Code 1.90 or newer.
-- A NEAR AI Cloud API key.
+- A NEAR AI Cloud API key, a local OpenAI-compatible runtime, or both.
 - For Open-GSD workflows, for now: the Codex CLI (`codex`) on your PATH and
   npm access. These runs use Codex's own configured model provider, not NEAR AI,
   until the native NEAR runner replaces it (see [SECURITY.md](SECURITY.md)).
@@ -105,7 +124,9 @@ Read the full [security and trust report](SECURITY.md).
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `nearAi.defaultModel` | `z-ai/glm-5.3` | Model used for new chats. |
-| `nearAi.actionPolicy` | `approve-risky` | How much agents may do without asking. |
+| `nearAi.actionPolicy` | `approve-risky` | `approve-risky`: edits and commands ask first. `mostly-autonomous`: edits run, commands ask. `fully-autonomous`: everything runs except deny-listed commands. |
+| `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking (simple commands only; anything with `;`, `|`, `>`, or `$( )` asks). |
+| `nearAi.agent.denyCommands` | `rm -rf /`, `git push --force`, … | Commands the agent may never run. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
 | `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |
 | `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount. |
@@ -129,6 +150,11 @@ Read the full [security and trust report](SECURITY.md).
   Open-GSD.
 - **Endpoint rejected:** use an `https://` URL, or `http://localhost` for a
   local runtime.
+- **Local runtime unreachable:** start it (for example `ollama serve`) and
+  check the URL ends in `/v1`, then run **NEAR AI: Set Up** again.
+- **The agent changed something you didn't want:** click **Revert** under the
+  run. Changes made by shell commands it ran are not included; use git for
+  those.
 
 ## Build from source
 

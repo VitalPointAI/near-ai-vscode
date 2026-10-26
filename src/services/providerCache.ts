@@ -30,12 +30,24 @@ export async function activeProvider(root: string, auth: AuthService): Promise<A
   let entry = cache.get(key);
   if (!entry || Date.now() - entry.loadedAt > CATALOG_TTL_MS) {
     const provider = entry?.provider ?? await createNearAiProvider({ auth, profile, scope: profiles.getScope(selection.profileId) });
-    const models = provider.client.listModelsWithPricing();
+    // A local runtime has no NEAR catalog, pricing, or billing; its models run on this machine.
+    const models = provider.provider === 'local'
+      ? provider.client.listLocalModels()
+      : provider.localClient
+        ? Promise.all([provider.client.listModelsWithPricing(), provider.localClient.listLocalModels()]).then(([cloud, local]) => [...local, ...cloud])
+        : provider.client.listModelsWithPricing();
     entry = { provider, models, loadedAt: Date.now() };
     cache.set(key, entry);
     models.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
   }
   return { profile, profiles, provider: entry.provider, models: await entry.models };
+}
+
+/** The client that serves `model`: the local runtime for local models, NEAR AI Cloud otherwise. */
+export function clientFor(active: ActiveProvider, model: string): { client: ResolvedProvider['client']; local: boolean } {
+  const info = active.models.find((candidate) => candidate.id === model);
+  const local = info?.privacyBoundary === 'local' || active.provider.provider === 'local';
+  return { client: local && active.provider.localClient ? active.provider.localClient : active.provider.client, local };
 }
 
 /** Drops cached providers, e.g. after a profile or key is removed. */

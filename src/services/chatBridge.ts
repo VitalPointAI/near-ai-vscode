@@ -31,6 +31,8 @@ export type ChatWebviewMessage =
   | { type: 'new-chat' }
   | { type: 'open-tools' }
   | { type: 'select-profile' }
+  | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'deny'; feedback?: string }
+  | { type: 'revert-run'; runId: string }
   | { type: 'insert-code'; text: string }
   | { type: 'reopen-session'; sessionId: string }
   | { type: 'continue-session'; sessionId: string }
@@ -342,14 +344,14 @@ export interface ChatModelOption {
   id: string;
   label: string;
   /** "tee" when NEAR runs the model in an attested TEE; "forwarded" when NEAR sends it to another provider. */
-  privacy: 'tee' | 'forwarded' | 'unknown';
+  privacy: 'tee' | 'local' | 'forwarded' | 'unknown';
   forwardedTo?: string;
 }
 
 /** Short, user-facing privacy wording for a model, shared by every chat surface. */
 export function modelPrivacyLabel(model?: Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>): string {
   if (model?.privacyBoundary === 'tee') return 'Private · runs in NEAR TEE';
-  if (model?.privacyBoundary === 'local') return 'Local';
+  if (model?.privacyBoundary === 'local') return 'Local · runs on this machine';
   if (model?.privacyBoundary === 'cloud') return model.forwardedTo ? `Not private · forwarded to ${model.forwardedTo}` : 'Not private · forwarded';
   return 'Privacy unknown';
 }
@@ -496,6 +498,14 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   if (memoryMessage) return memoryMessage;
   if (message.type === 'set-quiet-mode' && typeof message.quiet === 'boolean' && Object.keys(message).length === 2) return { type: 'set-quiet-mode', quiet: message.quiet };
   if (message.type === 'agent-drill-down' && typeof message.agentId === 'string' && /^[A-Za-z0-9._:-]{1,120}$/.test(message.agentId) && Object.keys(message).length === 2) return { type: 'agent-drill-down', agentId: message.agentId };
+  if (message.type === 'approval-reply') {
+    if (Object.keys(message).some((key) => !['type', 'callId', 'decision', 'feedback'].includes(key))) return undefined;
+    if (typeof message.callId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(message.callId)) return undefined;
+    if (message.decision !== 'allow' && message.decision !== 'allow-run' && message.decision !== 'deny') return undefined;
+    if (message.feedback !== undefined && (typeof message.feedback !== 'string' || message.feedback.length > 2000)) return undefined;
+    return { type: 'approval-reply', callId: message.callId, decision: message.decision, ...(message.feedback ? { feedback: message.feedback as string } : {}) };
+  }
+  if (message.type === 'revert-run' && typeof message.runId === 'string' && /^run-\d+-[a-f0-9]{6}$/.test(message.runId) && Object.keys(message).length === 2) return { type: 'revert-run', runId: message.runId };
   if (message.type === 'insert-code' && typeof message.text === 'string' && message.text.length > 0 && message.text.length <= 100_000) {
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'text')) return undefined;
     return { type: 'insert-code', text: message.text };
@@ -753,14 +763,14 @@ export function defaultChatModel(models: ModelInfo[], configured?: string): stri
 
 export function modelOptions(models: ModelInfo[], configured?: string): ChatModelOption[] {
   const preferred = defaultChatModel(models, configured);
-  const rank = (model: ModelInfo) => (model.id === preferred ? 0 : model.privacyBoundary === 'tee' ? 1 : 2);
+  const rank = (model: ModelInfo) => (model.id === preferred ? 0 : model.privacyBoundary === 'tee' || model.privacyBoundary === 'local' ? 1 : 2);
   return models
     .filter(isChatModel)
     .sort((a, b) => rank(a) - rank(b))
     .map((model) => ({
       id: model.id,
       label: [model.id, modelPrivacyLabel(model), model.inputPricePerMillion === undefined ? undefined : `$${model.inputPricePerMillion}/$${model.outputPricePerMillion ?? 0} per 1M`].filter(Boolean).join(' · '),
-      privacy: model.privacyBoundary === 'tee' || model.privacyBoundary === 'local' ? 'tee' : model.privacyBoundary === 'cloud' ? 'forwarded' : 'unknown',
+      privacy: model.privacyBoundary === 'tee' ? 'tee' : model.privacyBoundary === 'local' ? 'local' : model.privacyBoundary === 'cloud' ? 'forwarded' : 'unknown',
       ...(model.forwardedTo ? { forwardedTo: model.forwardedTo } : {})
     }));
 }

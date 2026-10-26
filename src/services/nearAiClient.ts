@@ -164,6 +164,13 @@ export class NearAiClient {
     return models.map((model) => ({ ...model, ...(privacy.get(model.id) ?? {}) }));
   }
 
+  /** Models from a local OpenAI-compatible runtime (`/models`), all marked as running on this machine. */
+  public async listLocalModels(signal?: AbortSignal): Promise<ModelInfo[]> {
+    const response = await this.request('/models', { method: 'GET', signal });
+    const models = normalizeModelRows(await jsonRows(response), (this.options.clock ?? (() => new Date().toISOString()))(), '/models');
+    return this.rememberModels(models.map((model) => ({ ...model, privacyBoundary: 'local' as const, locality: 'local' as const })));
+  }
+
   /**
    * Which models NEAR runs inside an attested TEE and which it forwards to another provider,
    * from `/model/list` metadata. Only the backend kind and destination host are read.
@@ -230,6 +237,21 @@ export class NearAiClient {
     const nanoUsd = numberValue(row?.costNanoUsd);
     if (nanoUsd === undefined || (nanoUsd === 0 && body.warning)) return undefined;
     return nanoUsd / 1e9;
+  }
+
+  /** Total actual cost of several completions (an agent run), or undefined until every one is recorded. */
+  public async actualCostsUsd(requestIds: string[], signal?: AbortSignal, delaysMs: number[] = [0, 1500, 4000]): Promise<number | undefined> {
+    const ids = [...new Set(requestIds.filter(Boolean))];
+    if (!ids.length) return undefined;
+    for (const delay of delaysMs) {
+      if (delay) await waitForRetry(delay, 0, signal);
+      const response = await this.request('/billing/costs', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestIds: ids }) });
+      const body = objectValue(await response.json());
+      const rows = Array.isArray(body.requests) ? body.requests.map(objectValue) : [];
+      const costs = ids.map((id) => numberValue(rows.find((row) => row.requestId === id)?.costNanoUsd));
+      if (costs.every((cost) => cost !== undefined && (cost > 0 || !body.warning))) return (costs as number[]).reduce((total, cost) => total + cost, 0) / 1e9;
+    }
+    return undefined;
   }
 
   /** Polls briefly for the actual cost, since billing records can lag the response by a moment. */
@@ -423,7 +445,7 @@ export class NearAiClient {
         response = await this.fetchFn(url, {
           ...init,
           signal: attemptAbort.signal,
-          headers: { authorization: `Bearer ${this.options.apiKey}`, ...(init.headers ?? {}) }
+          headers: { ...(this.options.apiKey ? { authorization: `Bearer ${this.options.apiKey}` } : {}), ...(init.headers ?? {}) }
         });
       } catch (error) {
         if (init.signal?.aborted) throw error;

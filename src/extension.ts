@@ -11,6 +11,7 @@ import { ActivityStore } from './services/activityStore';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
 import { deriveProfileId } from './domain/auth';
+import { isSecureEndpoint } from './domain/config';
 import { registerChatParticipant } from './services/chatParticipant';
 import { initEmergencyStop, setEmergencyStop } from './services/emergencyStop';
 import { clearProviderCache } from './services/providerCache';
@@ -88,29 +89,61 @@ async function saveCheckpoint(): Promise<void> {
 async function configureApiKey(auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI keys and profiles are scoped to a project.'); return; }
+  const kind = await vscode.window.showQuickPick([
+    { label: 'NEAR AI Cloud', description: 'Private TEE models and others NEAR forwards; needs an API key', provider: 'near-ai' as const },
+    { label: 'Local runtime', description: 'Ollama, LM Studio, vLLM, or any OpenAI-compatible server on this machine', provider: 'local' as const },
+    { label: 'NEAR AI Cloud + local runtime', description: 'Both: pick a local or a cloud model for each chat', provider: 'hybrid' as const }
+  ], { title: 'NEAR AI Set Up', placeHolder: 'Where should models run?', ignoreFocusOut: true });
+  if (!kind) return;
+  const usesLocal = kind.provider !== 'near-ai';
+  const usesCloud = kind.provider !== 'local';
+  const steps = 2 + (usesLocal ? 2 : 0) + (usesCloud ? 1 : 0);
+  let step = 0;
+  const title = () => `NEAR AI Set Up (${++step}/${steps})`;
   const displayName = (await vscode.window.showInputBox({
-    title: 'NEAR AI Set Up (1/3)', prompt: 'Project name', value: vscode.workspace.name ?? 'My project', ignoreFocusOut: true,
+    title: title(), prompt: 'Project name', value: vscode.workspace.name ?? 'My project', ignoreFocusOut: true,
     validateInput: (value) => value.trim() ? undefined : 'Enter a name for this project.'
   }))?.trim();
   if (!displayName) return;
-  const organization = await vscode.window.showInputBox({ title: 'NEAR AI Set Up (2/3)', prompt: 'Organization or company (optional, used for cost reports)', placeHolder: displayName, ignoreFocusOut: true });
+  const organization = await vscode.window.showInputBox({ title: title(), prompt: 'Organization or company (optional, used for cost reports)', placeHolder: displayName, ignoreFocusOut: true });
   if (organization === undefined) return;
-  const apiKey = (await vscode.window.showInputBox({
-    title: 'NEAR AI Set Up (3/3)', prompt: 'NEAR AI Cloud API key', password: true, ignoreFocusOut: true,
-    validateInput: (value) => value.trim() ? undefined : 'Paste your NEAR AI Cloud API key.'
-  }))?.trim();
-  if (!apiKey) return;
+  let localBaseUrl: string | undefined;
+  let localApiKey = '';
+  if (usesLocal) {
+    const entered = (await vscode.window.showInputBox({
+      title: title(), prompt: 'Local runtime URL (OpenAI-compatible, ending in /v1)', value: 'http://localhost:11434/v1', ignoreFocusOut: true,
+      validateInput: (value) => isSecureEndpoint(value.trim()) ? undefined : 'Use http://localhost, http://127.0.0.1, or an https:// URL.'
+    }))?.trim();
+    if (!entered) return;
+    localBaseUrl = entered.replace(/\/$/, '');
+    const key = await vscode.window.showInputBox({ title: title(), prompt: 'API key for the local runtime (leave empty if it needs none)', password: true, ignoreFocusOut: true });
+    if (key === undefined) return;
+    localApiKey = key.trim();
+  }
+  let cloudApiKey = '';
+  if (usesCloud) {
+    const key = (await vscode.window.showInputBox({
+      title: title(), prompt: 'NEAR AI Cloud API key', password: true, ignoreFocusOut: true,
+      validateInput: (value) => value.trim() ? undefined : 'Paste your NEAR AI Cloud API key.'
+    }))?.trim();
+    if (!key) return;
+    cloudApiKey = key;
+  }
+  const suffix = kind.provider === 'local' ? ' (local)' : kind.provider === 'hybrid' ? ' (cloud + local)' : '';
+  const input = kind.provider === 'local'
+    ? { baseUrl: localBaseUrl!, apiKey: localApiKey, localApiKey: '' }
+    : { baseUrl: readSettings().baseUrl, apiKey: cloudApiKey, localApiKey, ...(kind.provider === 'hybrid' ? { localBaseUrl } : {}) };
   try {
-    const profile = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Checking your NEAR AI key…' }, () =>
-      new ProfileStore(root, auth).configure({ profileId: deriveProfileId(root, displayName), displayName, organization: organization.trim() || displayName, baseUrl: readSettings().baseUrl, authMode: 'apiKey' }, apiKey));
+    const profile = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: usesCloud ? 'Checking your NEAR AI key…' : 'Connecting to the local runtime…' }, () =>
+      new ProfileStore(root, auth).configure({ profileId: deriveProfileId(root, `${displayName}${suffix}`), displayName: `${displayName}${suffix}`, organization: organization.trim() || displayName, baseUrl: input.baseUrl, authMode: 'apiKey', provider: kind.provider, ...('localBaseUrl' in input && input.localBaseUrl ? { localBaseUrl: input.localBaseUrl } : {}) }, input.apiKey, input.localApiKey));
     clearProviderCache();
     if (profile.validation.status === 'valid') {
       await sidebar.refresh();
       void vscode.window.showInformationMessage(`NEAR AI is ready for “${profile.displayName}”. Pick a model and start chatting.`);
       return;
     }
-    const retry = await vscode.window.showErrorMessage(`NEAR AI couldn't verify that key: ${profile.validation.error ?? 'validation failed'}`, 'Re-enter key', 'Open NEAR AI Cloud');
-    if (retry === 'Re-enter key') await configureApiKey(auth, sidebar);
+    const retry = await vscode.window.showErrorMessage(`Setup couldn't connect: ${profile.validation.error ?? 'validation failed'}`, 'Try again', ...(usesCloud ? ['Open NEAR AI Cloud'] : []));
+    if (retry === 'Try again') await configureApiKey(auth, sidebar);
     if (retry === 'Open NEAR AI Cloud') await openApiKeyPortal();
   } catch (error) {
     void vscode.window.showErrorMessage(redactSecrets(error instanceof Error ? error.message : String(error)));

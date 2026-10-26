@@ -13,13 +13,19 @@ export interface ProfileValidation {
   error?: string;
 }
 
+/** `hybrid` combines NEAR AI Cloud with a local runtime; each model is served by the endpoint that lists it. */
+export type ProviderKind = 'near-ai' | 'local' | 'hybrid';
+
 export interface OrganizationProfile {
   version: typeof AUTH_PROFILE_VERSION;
   profileId: string;
   displayName: string;
   organization: string;
-  provider: 'near-ai';
+  /** "local" is an OpenAI-compatible runtime on this machine (Ollama, LM Studio, vLLM, …). */
+  provider: ProviderKind;
   baseUrl: string;
+  /** The local runtime's URL for a hybrid profile. */
+  localBaseUrl?: string;
   authMode: AuthMode;
   createdAt: string;
   updatedAt: string;
@@ -43,9 +49,16 @@ export interface ActiveProfileSelection {
 export interface ResolvedProvider {
   profileId: string;
   projectId: string;
-  provider: 'near-ai';
+  provider: ProviderKind;
   baseUrl: string;
   client: NearAiClient;
+  /** For a hybrid profile, the client for the local runtime. */
+  localClient?: NearAiClient;
+}
+
+/** Hybrid profiles keep the local runtime's optional key in a separate SecretStorage slot. */
+export function localKeyScope(scope: ProjectCredentialScope): ProjectCredentialScope {
+  return { ...scope, profileId: `profile-local-${createHash('sha256').update(scope.profileId).digest('hex').slice(0, 24)}` };
 }
 
 export const PROFILE_ID_PATTERN = /^profile-[a-z0-9][a-z0-9-]{1,63}$/;

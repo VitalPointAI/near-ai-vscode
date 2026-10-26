@@ -113,6 +113,26 @@ details.tool .log {
 #welcome .suggestions button:hover { background: var(--vscode-list-hoverBackground); }
 #welcome .suggestions small { display: block; color: var(--vscode-descriptionForeground); }
 
+/* Agent runs: approvals with diff or command previews, task list, revert */
+.approval pre { margin: 0 0 8px; max-height: 260px; overflow: auto; padding: 6px 8px; border-radius: 4px; font: 11px/1.45 var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background)); white-space: pre; }
+.approval pre.command { white-space: pre-wrap; word-break: break-all; }
+.approval .diff .add { color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b); background: var(--vscode-diffEditor-insertedLineBackground, transparent); }
+.approval .diff .del { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); background: var(--vscode-diffEditor-removedLineBackground, transparent); }
+.approval .diff .hunk { color: var(--vscode-descriptionForeground); }
+.approval .choices .meta { margin: 0; }
+details.agent-tool summary strong { font-family: var(--vscode-font-family); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.agent-tool .state { color: var(--vscode-errorForeground); }
+#todos { margin: 0 2px 6px; padding: 6px 8px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; font-size: 12px; }
+#todos[hidden] { display: none; }
+#todos .todo-title { color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
+#todos ul { margin: 0; padding: 0; list-style: none; }
+#todos .todo::before { display: inline-block; width: 16px; content: '○'; color: var(--vscode-descriptionForeground); }
+#todos .todo.in_progress { color: var(--vscode-foreground); font-weight: 600; }
+#todos .todo.in_progress::before { content: '◐'; color: var(--vscode-progressBar-background); }
+#todos .todo.completed { color: var(--vscode-descriptionForeground); text-decoration: line-through; }
+#todos .todo.completed::before { content: '✓'; color: var(--vscode-testing-iconPassed, inherit); }
+.changes { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+
 /* Planning-file links and post-run next steps */
 #project-links { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 0 2px 6px; font-size: 11px; }
 #project-links[hidden] { display: none; }

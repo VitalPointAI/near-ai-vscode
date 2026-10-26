@@ -237,11 +237,11 @@
             "fully-autonomous"
           ],
           "default": "approve-risky",
-          "description": "Default policy for agent actions.",
+          "description": "How much the agent may do without asking. Every file change can be reverted from the chat.",
           "enumDescriptions": [
-            "Reads and planning run automatically; file writes, shell commands, network and git changes ask first.",
-            "Same approvals as approve-risky until the native runner ships its finer-grained rules.",
-            "Agents act without asking. Use only in throwaway workspaces."
+            "File edits and shell commands ask first; reads and searches run automatically.",
+            "File edits run automatically; shell commands still ask unless allow-listed.",
+            "Everything runs without asking except deny-listed commands. Use only in throwaway workspaces."
           ]
         },
         "nearAi.autoInstallGsd": {
@@ -267,6 +267,39 @@
           "default": 0,
           "minimum": 0,
           "description": "Stop sending NEAR AI requests once today's recorded spend reaches this amount in USD. 0 means no limit."
+        },
+        "nearAi.agent.allowCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "git status",
+            "git diff",
+            "git log",
+            "git show",
+            "git branch",
+            "ls",
+            "pwd",
+            "node --version",
+            "npm --version"
+          ],
+          "description": "Shell commands the agent may run without asking, matched by prefix. Commands that chain, redirect, or substitute (;, |, >, $( ), …) always ask."
+        },
+        "nearAi.agent.denyCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "rm -rf /",
+            "rm -rf ~",
+            "git push --force",
+            "git push -f",
+            "mkfs",
+            ":(){"
+          ],
+          "description": "Shell commands the agent is never allowed to run, matched as substrings, whatever the action policy."
         }
       }
     },

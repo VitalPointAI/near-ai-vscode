@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { redactSecrets } from '../domain/redaction';
 import { AuthMode, isSecureEndpoint } from '../domain/config';
-import { ActiveProfileSelection, AUTH_PROFILE_VERSION, OrganizationProfile, ProfileValidation, ProjectCredentialScope, createProjectCredentialScope, isProfileId } from '../domain/auth';
+import { ActiveProfileSelection, AUTH_PROFILE_VERSION, OrganizationProfile, ProviderKind, localKeyScope, ProfileValidation, ProjectCredentialScope, createProjectCredentialScope, isProfileId } from '../domain/auth';
 import { AuthService } from './auth';
 import { validateNearAiProvider } from './providerFactory';
 
@@ -29,6 +29,8 @@ export interface CreateOrganizationProfileInput {
   organization: string;
   baseUrl: string;
   authMode: AuthMode;
+  provider?: ProviderKind;
+  localBaseUrl?: string;
 }
 
 export interface UpdateOrganizationProfileInput {
@@ -127,7 +129,7 @@ export class ProfileStore {
     if (!isProfileId(input.profileId)) throw new Error('Profile ID must start with profile- and contain only lowercase letters, numbers, and hyphens.');
     if (this.ledger.profiles.some((profile) => profile.profileId === input.profileId)) throw new Error('That profile ID already exists.');
     const now = this.clock();
-    const profile = normalizeProfile({ version: AUTH_PROFILE_VERSION, ...input, provider: 'near-ai', createdAt: now, updatedAt: now, validation: { status: 'pending' } });
+    const profile = normalizeProfile({ version: AUTH_PROFILE_VERSION, ...input, provider: input.provider ?? 'near-ai', createdAt: now, updatedAt: now, validation: { status: 'pending' } });
     if (!profile) throw new Error('Profile metadata is invalid.');
     this.ledger.profiles = [profile, ...this.ledger.profiles].slice(0, MAX_PROFILES);
     await this.persist();
@@ -139,7 +141,7 @@ export class ProfileStore {
     const current = this.ledger.profiles.find((profile) => profile.profileId === input.profileId);
     if (!current) throw new Error('The requested profile was not found.');
     const changedCredentialInputs = input.baseUrl !== undefined || input.authMode !== undefined;
-    const updated = normalizeProfile({ ...current, ...input, provider: 'near-ai', updatedAt: this.clock(), validation: changedCredentialInputs ? { status: 'stale' } : current.validation });
+    const updated = normalizeProfile({ ...current, ...input, provider: current.provider, updatedAt: this.clock(), validation: changedCredentialInputs ? { status: 'stale' } : current.validation });
     if (!updated) throw new Error('Profile metadata is invalid.');
     Object.assign(current, updated);
     await this.persist();
@@ -179,10 +181,18 @@ export class ProfileStore {
    * The Set Up flow: creates or updates the profile, stores its key, validates it with the
    * provider, and makes it this project's active profile when validation passes.
    */
-  public async configure(input: CreateOrganizationProfileInput, apiKey: string): Promise<OrganizationProfile> {
+  public async configure(input: CreateOrganizationProfileInput, apiKey: string, localApiKey = ''): Promise<OrganizationProfile> {
     if (await this.get(input.profileId)) await this.update(input);
     else await this.create(input);
-    await this.saveProfileApiKey(input.profileId, apiKey);
+    if (input.provider === 'hybrid') {
+      if (!this.auth) throw new Error('An authentication service is required to save a profile credential.');
+      const scope = localKeyScope(this.getScope(input.profileId));
+      if (localApiKey) await this.auth.saveScopedApiKey(scope, localApiKey);
+      else await this.auth.removeScopedCredentials(scope);
+    }
+    // A local runtime may need no key; an empty key leaves the slot unset.
+    if (apiKey || input.provider !== 'local') await this.saveProfileApiKey(input.profileId, apiKey);
+    else await this.markValidationStale(input.profileId);
     const validated = await this.validate(input.profileId);
     if (validated.validation.status === 'valid') await this.select(input.profileId);
     return validated;
@@ -195,7 +205,10 @@ export class ProfileStore {
     this.ledger.profiles = this.ledger.profiles.filter((profile) => profile.profileId !== profileId);
     if (before === this.ledger.profiles.length) return false;
     if (this.ledger.active?.profileId === profileId) this.ledger.active = undefined;
-    if (this.auth) await this.auth.removeScopedCredentials(this.getScope(profileId));
+    if (this.auth) {
+      await this.auth.removeScopedCredentials(this.getScope(profileId));
+      await this.auth.removeScopedCredentials(localKeyScope(this.getScope(profileId)));
+    }
     await this.persist();
     return true;
   }
@@ -281,12 +294,15 @@ function normalizeProfile(value: unknown): OrganizationProfile | undefined {
   const organization = safeLabel(source.organization ?? source.company, 120);
   const baseUrl = safeBaseUrl(source.baseUrl);
   if (!displayName || !organization || !baseUrl) return undefined;
+  const provider: ProviderKind = source.provider === 'local' || source.provider === 'hybrid' ? source.provider : 'near-ai';
+  const localBaseUrl = provider === 'hybrid' ? safeBaseUrl(source.localBaseUrl) : undefined;
+  if (provider === 'hybrid' && !localBaseUrl) return undefined;
   const authMode: AuthMode | undefined = source.authMode === 'nearAccount' ? 'nearAccount' : source.authMode === 'apiKey' ? 'apiKey' : undefined;
   if (!authMode) return undefined;
   const validation = normalizeValidation(source.validation ?? { status: source.validationStatus });
   if (!validation) return undefined;
   const now = new Date(0).toISOString();
-  return { version: AUTH_PROFILE_VERSION, profileId: source.profileId, displayName, organization, provider: 'near-ai', baseUrl, authMode, createdAt: safeTimestamp(source.createdAt) ?? now, updatedAt: safeTimestamp(source.updatedAt) ?? now, validation };
+  return { version: AUTH_PROFILE_VERSION, profileId: source.profileId, displayName, organization, provider, baseUrl, ...(localBaseUrl ? { localBaseUrl } : {}), authMode, createdAt: safeTimestamp(source.createdAt) ?? now, updatedAt: safeTimestamp(source.updatedAt) ?? now, validation };
 }
 
 function normalizeValidation(value: unknown): ProfileValidation | undefined {

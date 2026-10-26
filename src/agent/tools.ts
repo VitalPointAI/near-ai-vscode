@@ -22,7 +22,7 @@ export interface ToolContext {
 }
 
 /** What an approval card shows before a risky call runs. */
-export type ToolPreview = { kind: 'diff'; path: string; diff: string } | { kind: 'command'; command: string; cwd: string; background: boolean };
+export type ToolPreview = { kind: 'diff'; path: string; diff: string } | { kind: 'command'; command: string; cwd: string; background: boolean } | { kind: 'note'; text: string };
 
 export interface AgentTool<I = Record<string, unknown>> {
   name: string;
@@ -34,7 +34,16 @@ export interface AgentTool<I = Record<string, unknown>> {
   /** A short title for the activity row, e.g. "Read src/extension.ts". */
   title(input: I, context: ToolContext): string;
   preview?(input: I, context: ToolContext): Promise<ToolPreview>;
+  /** A reason to ask before an otherwise read-only call, e.g. reading a likely credential file. */
+  sensitive?(input: I): string | undefined;
   run(input: I, context: ToolContext): Promise<string>;
+}
+
+/** Files that usually hold credentials; reading one asks first, since its contents go to the model. */
+const SENSITIVE_FILE = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.npmrc|\.pypirc|\.netrc|id_[a-z0-9]+|[^/]*\.(?:pem|key|p12|pfx|keystore)|credentials?(?:\.[a-z]+)?|secrets?(?:\.[a-z]+)?)$|\.near-credentials|\.aws\/|\.ssh\//i;
+
+export function sensitivePathReason(requested: string): string | undefined {
+  return SENSITIVE_FILE.test(requested.replace(/\\/g, '/')) ? `${requested} looks like it may contain credentials, and its contents would be sent to the model.` : undefined;
 }
 
 const MAX_READ_LINES = 2_000;
@@ -74,6 +83,7 @@ export const readTool: AgentTool<{ path: string; offset: number; limit: number }
   capability: 'read',
   parse: (raw) => ({ path: str(raw, 'file_path')!, offset: Math.max(1, Math.floor(num(raw, 'offset') ?? 1)), limit: Math.min(MAX_READ_LINES, Math.max(1, Math.floor(num(raw, 'limit') ?? MAX_READ_LINES))) }),
   title: (input) => `Read ${input.path}`,
+  sensitive: (input) => sensitivePathReason(input.path),
   async run(input, context) {
     const absolute = await resolveInWorkspace(context.root, input.path);
     const text = await readText(absolute);
@@ -204,6 +214,7 @@ export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string
     return { pattern: str(raw, 'pattern')!, path: str(raw, 'path', false), glob: str(raw, 'glob', false), mode, ignoreCase: bool(raw, '-i'), context: Math.min(20, Math.max(0, Math.floor(num(raw, 'context') ?? 0))), headLimit: Math.min(2_000, Math.max(1, Math.floor(num(raw, 'head_limit') ?? 250))) };
   },
   title: (input) => `Search for ${JSON.stringify(input.pattern)}${input.glob ? ` in ${input.glob}` : ''}`,
+  sensitive: (input) => (input.path ? sensitivePathReason(input.path) : undefined),
   async run(input, context) {
     const base = await resolveInWorkspace(context.root, input.path ?? '.');
     const output = context.ripgrepPath ? await ripgrep(context.ripgrepPath, base, input, context) : await jsGrep(base, input, context);

@@ -7,7 +7,7 @@ import { ActivityStore } from './activityStore';
 import { AuthService } from './auth';
 import { ConversationTurn, defaultChatModel, modelPrivacyLabel, promptMessage, providerErrorMessage } from './chatBridge';
 import { OutboundGuard, spentTodayUsd } from './outboundGuard';
-import { activeProvider } from './providerCache';
+import { activeProvider, clientFor } from './providerCache';
 import { isEmergencyStopped } from './emergencyStop';
 import { GsdProgressEvent, GsdRunner } from './gsdRunner';
 import { GsdUpdater } from './gsdUpdater';
@@ -93,12 +93,13 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   const cancel = token.onCancellationRequested(() => abort.abort());
   response.progress(`Asking ${model}…`);
   try {
-    for await (const event of active.provider.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
+    const route = clientFor(active, model);
+    for await (const event of route.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
       if (event.type === 'text') response.markdown(event.text);
       else if (event.type === 'done') {
         let actualCostUsd: number | undefined;
-        if (event.metadata.requestId) {
-          try { actualCostUsd = (await active.provider.client.reconcileUsage(event.metadata.requestId, abort.signal)).actualCostUsd; } catch { actualCostUsd = undefined; }
+        if (event.metadata.requestId && !route.local) {
+          try { actualCostUsd = (await route.client.reconcileUsage(event.metadata.requestId, abort.signal)).actualCostUsd; } catch { actualCostUsd = undefined; }
         }
         response.markdown(`\n\n${usageFooter(model, { ...event.metadata, actualCostUsd }, modelPrivacyLabel(modelInfo))}`);
         await activity.append(session.sessionId, { status: 'completed', kind: 'message', model, requestId: event.metadata.requestId, summary: 'Assistant response completed.', estimatedCostUsd: event.metadata.estimatedCostUsd, actualCostUsd, inputTokens: event.metadata.inputTokens, outputTokens: event.metadata.outputTokens, durationMs: event.metadata.latencyMs });

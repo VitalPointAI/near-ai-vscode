@@ -19,6 +19,7 @@ class MemorySecrets implements SecretStorageLike {
 }
 
 const INFERENCE_ID = '0b6e3f9e-5a1d-5c2b-8f4e-1d2c3b4a5f60';
+const billingBodies: unknown[] = [];
 
 function fakeNear(calls: string[]) {
   return async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -27,7 +28,10 @@ function fakeNear(calls: string[]) {
     if (url.endsWith('/models/pricing')) return new Response('{}', { status: 404 });
     if (url.endsWith('/models')) return Response.json({ data: [{ id: 'z-ai/glm-5.3', pricing: { input: 1.8, output: 5.75 } }, { id: 'deepseek/deepseek-v4.1-flash', pricing: { input: 0.3, output: 1.2 } }] });
     if (url.endsWith('/model/list')) return Response.json({ models: [{ modelId: 'z-ai/glm-5.3', metadata: { attestationSupported: true, providerType: 'tinfoil' } }, { modelId: 'deepseek/deepseek-v4.1-flash', metadata: { attestationSupported: false, providerType: 'external', providerConfig: { base_url: 'https://openrouter.ai/api/v1' } } }] });
-    if (url.endsWith('/billing/costs')) return Response.json({ requests: [{ requestId: INFERENCE_ID, costNanoUsd: 2_500_000 }] });
+    if (url.endsWith('/billing/costs')) {
+      billingBodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ requests: [{ requestId: INFERENCE_ID, costNanoUsd: 2_500_000 }] });
+    }
     if (url.endsWith('/chat/completions')) {
       assert.equal(JSON.parse(String(init?.body)).stream_options.include_usage, true);
       const body = ['data: {"choices":[{"delta":{"content":"Hello"}}]}', 'data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":1000}}', 'data: [DONE]', ''].join('\n\n');
@@ -86,8 +90,8 @@ test('a sidebar message streams from NEAR with privacy label, estimate, and actu
     await sidebar.send({ type: 'send', text: 'Say hello', model: 'z-ai/glm-5.3' });
     const start = sidebar.posted.find((message) => message.type === 'assistant-start');
     assert.equal(start?.privacy, 'Private · runs in NEAR TEE');
-    const done = sidebar.posted.find((message) => message.type === "assistant-done") as { usage: { estimatedCostUsd: number; requestId: string } };
-    assert.equal(done.usage.requestId, INFERENCE_ID);
+    const done = sidebar.posted.find((message) => message.type === 'assistant-done') as { usage: { estimatedCostUsd: number } };
+    assert.deepEqual(billingBodies.at(-1), { requestIds: [INFERENCE_ID] }, 'the run is billed by each turn\'s inference-id');
     assert.equal(Number(done.usage.estimatedCostUsd.toFixed(5)), 0.00755);
     assert.deepEqual(sidebar.posted.find((message) => message.type === 'assistant-cost'), { type: 'assistant-cost', actualCostUsd: 0.0025 });
     assert.ok(calls.includes('/billing/costs'));
@@ -121,4 +125,113 @@ test('without a profile the sidebar asks for setup and writes nothing to the pro
   assert.ok(sidebar.posted.some((message) => message.type === 'auth-required'));
   const { readdir } = await import('node:fs/promises');
   assert.deepEqual(await readdir(root), []);
+});
+
+test('an agent run through the sidebar reads, asks to edit with a diff, edits on approval, and reverts', async () => {
+  const { root, auth } = await projectWithProfile();
+  const { writeFile, readFile } = await import('node:fs/promises');
+  await writeFile(path.join(root, 'app.ts'), 'export const port = 3000;\n');
+  const turns = [
+    { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'Read', arguments: '{"file_path":"app.ts"}' } }] },
+    { tool_calls: [{ index: 0, id: 'call_edit', function: { name: 'Edit', arguments: '{"file_path":"app.ts","old_string":"3000","new_string":"8080"}' } }] },
+    { content: 'Changed the port to 8080.' }
+  ];
+  let turn = 0;
+  const calls: string[] = [];
+  const base = fakeNear(calls);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (!String(input).endsWith('/chat/completions')) return base(input, init);
+    calls.push('/chat/completions');
+    const delta = turns[turn++] ?? { content: 'done' };
+    const body = [`data: ${JSON.stringify({ choices: [{ delta, finish_reason: delta.tool_calls ? 'tool_calls' : 'stop' }] })}`, 'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":10}}', 'data: [DONE]', ''].join('\n\n');
+    return new Response(body, { status: 200, headers: { 'inference-id': INFERENCE_ID } });
+  }) as typeof fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    let approval: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 200 && !approval; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      approval = sidebar.posted.find((message) => message.type === 'approval-request');
+    }
+    assert.ok(approval, 'the edit waits for approval');
+    assert.match(String((approval.preview as { diff: string }).diff), /-export const port = 3000;\n\+export const port = 8080;/);
+    assert.equal(await readFile(path.join(root, 'app.ts'), 'utf8'), 'export const port = 3000;\n', 'nothing changes before approval');
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    assert.equal(await readFile(path.join(root, 'app.ts'), 'utf8'), 'export const port = 8080;\n');
+    assert.deepEqual(sidebar.posted.filter((message) => message.type === 'tool-start').map((message) => message.title), ['Read app.ts', 'Edit app.ts']);
+    const changes = sidebar.posted.find((message) => message.type === 'run-changes') as { runId: string; files: string[] };
+    assert.deepEqual(changes.files, ['app.ts']);
+    await sidebar.send({ type: 'revert-run', runId: changes.runId });
+    assert.equal(await readFile(path.join(root, 'app.ts'), 'utf8'), 'export const port = 3000;\n');
+    assert.deepEqual((sidebar.posted.find((message) => message.type === 'run-reverted') as { files: string[] }).files, ['app.ts']);
+    assert.equal(calls.filter((call) => call === '/chat/completions').length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a local runtime profile needs no key, labels its models local, and never calls NEAR billing or catalog', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-local-'));
+  const auth = new AuthService(new MemorySecrets());
+  const seen: Array<{ url: string; auth: string | null }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    seen.push({ url, auth: new Headers(init?.headers).get('authorization') });
+    if (url.endsWith('/models')) return Response.json({ data: [{ id: 'qwen3-coder:30b' }] });
+    if (url.endsWith('/chat/completions')) return new Response(['data: {"choices":[{"delta":{"content":"local hello"}}]}', 'data: [DONE]', ''].join('\n\n'));
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+  try {
+    const profiles = new ProfileStore(root, auth);
+    const profile = await profiles.configure({ profileId: deriveProfileId(root, 'Demo local'), displayName: 'Demo (local)', organization: 'Demo', baseUrl: 'http://localhost:11434/v1', authMode: 'apiKey', provider: 'local' }, '');
+    assert.equal(profile.validation.status, 'valid');
+    const sidebar = await openSidebar(root, auth);
+    const models = sidebar.posted.find((message) => message.type === 'models') as { models: Array<{ id: string; privacy: string; label: string }> };
+    assert.deepEqual(models.models.map((model) => [model.id, model.privacy]), [['qwen3-coder:30b', 'local']]);
+    await sidebar.send({ type: 'send', text: 'hi', model: 'qwen3-coder:30b' });
+    assert.equal(sidebar.posted.find((message) => message.type === 'assistant-start')?.privacy, 'Local · runs on this machine');
+    assert.ok(sidebar.posted.some((message) => message.type === 'assistant-done'));
+    assert.equal(seen.some((request) => /model\/list|billing/.test(request.url)), false, 'no NEAR-only endpoints');
+    assert.equal(seen.every((request) => request.url.startsWith('http://localhost:11434/v1/') && request.auth === null), true, 'only the local runtime, with no bearer header');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a hybrid profile lists cloud and local models and sends each message to the endpoint that serves its model', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-hybrid-'));
+  const auth = new AuthService(new MemorySecrets());
+  const seen: Array<{ url: string; auth: string | null }> = [];
+  const cloud = fakeNear([]);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    seen.push({ url, auth: new Headers(init?.headers).get('authorization') });
+    if (url.startsWith('http://localhost:11434/v1/')) {
+      if (url.endsWith('/models')) return Response.json({ data: [{ id: 'qwen3-coder:30b' }] });
+      return new Response(['data: {"choices":[{"delta":{"content":"from local"}}]}', 'data: [DONE]', ''].join('\n\n'));
+    }
+    return cloud(input, init);
+  }) as typeof fetch;
+  try {
+    const profiles = new ProfileStore(root, auth);
+    const profile = await profiles.configure({ profileId: deriveProfileId(root, 'Demo hybrid'), displayName: 'Demo (cloud + local)', organization: 'Demo', baseUrl: 'https://cloud-api.near.ai/v1', localBaseUrl: 'http://localhost:11434/v1', authMode: 'apiKey', provider: 'hybrid' }, 'sk-cloud', 'sk-local');
+    assert.equal(profile.validation.status, 'valid');
+    const sidebar = await openSidebar(root, auth);
+    const models = sidebar.posted.find((message) => message.type === 'models') as { models: Array<{ id: string; privacy: string }> };
+    assert.deepEqual(models.models.map((model) => [model.id, model.privacy]).sort(), [['deepseek/deepseek-v4.1-flash', 'forwarded'], ['qwen3-coder:30b', 'local'], ['z-ai/glm-5.3', 'tee']]);
+    seen.length = 0;
+    await sidebar.send({ type: 'send', text: 'hi local', model: 'qwen3-coder:30b' });
+    assert.deepEqual(seen.map((request) => [new URL(request.url).host, request.auth]), [['localhost:11434', 'Bearer sk-local']]);
+    seen.length = 0;
+    await sidebar.send({ type: 'send', text: 'hi cloud', model: 'z-ai/glm-5.3' });
+    assert.equal(seen.every((request) => new URL(request.url).host === 'cloud-api.near.ai' && request.auth === 'Bearer sk-cloud'), true);
+    assert.ok(seen.some((request) => request.url.endsWith('/billing/costs')), 'cloud turns are billed');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

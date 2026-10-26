@@ -116,11 +116,13 @@ export class AgentRun {
     }
     this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title });
     const command = tool.capability === 'shell' ? String((input as { command?: unknown }).command ?? '') : undefined;
-    const permission = decidePermission(tool.capability, command, this.options.policy, this.options.rules, this.grants);
+    const sensitive = tool.sensitive?.(input);
+    const decided = decidePermission(tool.capability, command, this.options.policy, this.options.rules, this.grants);
+    const permission = sensitive && decided.decision === 'allow' && this.options.policy.mode !== 'fully-autonomous' ? { decision: 'ask' as const } : decided;
     if (permission.decision === 'deny') return this.finish(call.id, false, `Not allowed: ${permission.reason}`);
     if (permission.decision === 'ask') {
       let preview: ToolPreview | undefined;
-      try { preview = await tool.preview?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
+      try { preview = sensitive ? { kind: 'note', text: sensitive } : await tool.preview?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
       const reply = await this.options.requestApproval({ callId: call.id, tool: tool.name, title, capability: tool.capability, preview });
       if (reply.decision === 'deny') return this.finish(call.id, false, `The user declined this action.${reply.feedback ? ` Their note: ${reply.feedback}` : ''} Do not retry it unchanged; adjust or ask what they want.`);
       if (reply.decision === 'allow-run') {
