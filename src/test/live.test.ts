@@ -106,6 +106,8 @@ test('live eval: default-model candidates on fixed coding tasks', { skip: skip |
       const passed = await run(process.execPath, ['--test'], { cwd: root }).then(() => true, () => false);
       const cost = await near.actualCostsUsd(usage.map((turn) => turn.requestId!).filter(Boolean)).catch(() => undefined);
       rows.push({ model, task: task.name, passed, outcome, turns: usage.length, seconds: Math.round(ms / 1000), costUsd: cost });
+      // Each run takes from seconds to minutes; report as they finish so a long run doesn't look hung.
+      console.log(`eval ${rows.length}/${candidates.length * TASKS.length}: ${model} ${task.name} ${passed ? 'passed' : 'FAILED'} (${outcome}, ${usage.length} turns, ${Math.round(ms / 1000)}s${cost !== undefined ? `, $${cost.toFixed(4)}` : ''})`);
     }
   }
   console.table(rows);
