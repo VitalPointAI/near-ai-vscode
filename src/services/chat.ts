@@ -617,7 +617,17 @@ function ripgrepPath(): string | undefined {
 function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost): AgentConversation {
   const storage = context.globalStorageUri.fsPath;
   const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root, sharedTranscriptKey(context.secrets)) : undefined;
-  return new AgentConversation(root, (outbound) => { void panel.webview.postMessage(outbound); }, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts, sharedActivityFeed());
+  const post = (outbound: Record<string, unknown>) => {
+    void panel.webview.postMessage(outbound);
+    // An agent held for approval waits; say so when the chat isn't on screen.
+    if (outbound.type === 'approval-request' && (panel as { visible?: boolean }).visible === false) {
+      void vscode.window.showWarningMessage(`An agent is waiting for your approval: ${String(outbound.title ?? 'an action')}`, 'Show chat').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAiChatView.focus'); });
+    }
+  };
+  const conversation = new AgentConversation(root, post, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts, sharedActivityFeed());
+  const minutes = vscode.workspace.getConfiguration('nearAi').get<number>('agent.approvalTimeoutMinutes', 15);
+  conversation.approvalTimeoutMs = Math.max(0, Math.min(1_440, typeof minutes === 'number' && Number.isFinite(minutes) ? minutes : 15)) * 60_000;
+  return conversation;
 }
 
 /** One GSD host per extension storage folder, shared by the sidebar and the Tools tab. */

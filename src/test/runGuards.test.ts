@@ -75,3 +75,31 @@ test('a run stops at its cost budget, counting its sub-agents, and keeps its wor
   assert.ok(posted.some((message) => message.type === 'notice' && /Stopped the run: its estimated cost reached \$4\.00, the limit for one run \(\$3\.50/.test(String(message.text))));
   assert.ok(posted.some((message) => message.type === 'assistant-cancelled'));
 });
+
+test('an approval nobody answers is declined after the timeout, and the run carries on', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-approval-timeout-'));
+  let turn = 0;
+  let toolResult = '';
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const usage = { verificationStatus: 'unknown' as const, latencyMs: 1 };
+      turn += 1;
+      if (turn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('w1', 'Write', { file_path: 'notes.md', content: 'x' })] }, finishReason: 'tool_calls', usage }; return; }
+      toolResult = String(messages.at(-1)?.content);
+      yield { type: 'done', message: { role: 'assistant', content: 'Could not write notes.md: it needs your approval.' }, finishReason: 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.approvalTimeoutMs = 50;
+  try {
+    await conversation.send({ text: 'write notes', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
+  } finally {
+    conversation.dispose();
+  }
+  assert.ok(posted.some((message) => message.type === 'approval-request'));
+  assert.match(String(posted.find((message) => message.type === 'approval-expired')?.text), /No one approved "Write notes\.md" within 0 minutes, so it was declined/);
+  assert.match(toolResult, /declined[\s\S]*Nobody answered within 0 minutes/);
+  assert.ok(posted.some((message) => message.type === 'assistant-done'), 'the run finished instead of waiting');
+});

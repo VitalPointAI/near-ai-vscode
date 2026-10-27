@@ -559,11 +559,24 @@ export class AgentConversation {
     if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
   }
 
+  /** How long an approval may wait before it is declined, so an unattended run carries on (0: wait indefinitely). */
+  public approvalTimeoutMs = 15 * 60_000;
+
   private askApproval(request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalReply> {
     if (signal.aborted) return Promise.resolve({ decision: 'deny' });
     return new Promise((resolve) => {
-      this.approvals.set(request.callId, resolve);
-      signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) resolve({ decision: 'deny' }); }, { once: true });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settle = (reply: ApprovalReply) => { if (timer) clearTimeout(timer); resolve(reply); };
+      this.approvals.set(request.callId, settle);
+      signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) settle({ decision: 'deny' }); }, { once: true });
+      if (this.approvalTimeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (!this.approvals.delete(request.callId)) return;
+          const minutes = Math.round(this.approvalTimeoutMs / 60_000);
+          this.post({ type: 'approval-expired', callId: request.callId, text: `No one approved "${request.title}" within ${minutes} minute${minutes === 1 ? '' : 's'}, so it was declined and the agent continued without it.` });
+          settle({ decision: 'deny', feedback: `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'} (the user may be away). Continue without this action if you can, and report what still needs their approval.` });
+        }, this.approvalTimeoutMs);
+      }
       this.post({ type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview });
     });
   }

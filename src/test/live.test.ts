@@ -172,7 +172,7 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
   const open = new Map<string, { title: string; at: number }>();
   const spans: Array<{ title: string; startS: number; seconds: number }> = [];
   const conversation: AgentConversation = new AgentConversation(root, (message) => {
-    const value = message as { type: string; id?: string; callId?: string; title?: string; text?: string; questions?: Array<{ question: string; options: Array<{ label: string }> }> };
+    const value = message as { type: string; id?: string; callId?: string; title?: string; text?: string; preview?: unknown; questions?: Array<{ question: string; options: Array<{ label: string }> }> };
     posted.push(value);
     if (value.type === 'tool-start' && value.callId) open.set(value.callId, { title: String(value.title), at: Date.now() });
     if (value.type === 'tool-end' && value.callId && open.has(value.callId)) {
@@ -181,6 +181,14 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
     }
     if (value.type === 'notice' || value.type === 'assistant-retry') console.log(`  notice: ${String(value.text).slice(0, 200)}`);
     if (value.type === 'questions-request' && value.id && value.questions) conversation.answerQuestions(value.id, value.questions.map((question) => question.options[0]?.label ?? 'yes'));
+    // Actions held for approval (even in fully-autonomous mode, e.g. a network command after reading
+    // web pages) would wait forever here: print each with its reason, then approve it in this
+    // throwaway sample project so the cycle can finish.
+    if (value.type === 'approval-request' && value.callId) {
+      const preview = value.preview as { kind?: string; text?: string } | undefined;
+      console.log(`  held for approval: ${String(value.title)} — ${String(preview?.text ?? '').split('\n')[0].slice(0, 200)}`);
+      conversation.answerApproval(String(value.callId), { decision: 'allow' });
+    }
   }, path.join(context.storage, 'checkpoints'));
   try {
     await conversation.send({ text: `/${skill!.name}${args ? ` ${args}` : ''}`, skill: { name: skill!.name, args }, gsd: context.gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, availableModels: models.map((candidate) => candidate.id), contextWindows: Object.fromEntries(models.filter((candidate) => candidate.contextLength).map((candidate) => [candidate.id, candidate.contextLength!])), maxParallelAgents: 4, maxTurns: 120, budget: { maxCostUsd: Number(process.env.NEAR_LIVE_BUDGET_USD ?? 3), maxTokens: 8_000_000 } });

@@ -583,6 +583,17 @@
       case 'tool-start': onAgentToolStart(m); break;
       case 'tool-end': onAgentToolEnd(m); break;
       case 'approval-request': onApproval(m); break;
+      case 'approval-expired': {
+        const card = document.getElementById('approval-' + m.callId);
+        if (card && !card.dataset.answered) {
+          card.dataset.answered = 'true';
+          card.querySelectorAll('button,input').forEach((node) => { node.disabled = true; });
+          const choices = card.querySelector('.choices');
+          if (choices) choices.replaceChildren(el('span', 'meta', 'Declined: no one answered in time'));
+        }
+        notice(m.text || 'An approval request expired.', []);
+        break;
+      }
       case 'todos': renderTodos(m.todos || []); break;
       case 'run-changes': onRunChanges(m); break;
       case 'run-reverted': {

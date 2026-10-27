@@ -473,6 +473,13 @@
           },
           "default": [],
           "description": "Environment variables to pass to the agent's shell even though they look like credentials (for example GITHUB_TOKEN for gh). Others whose names or values look like keys, tokens, or passwords are kept out, because the agent's commands could send them to the model."
+        },
+        "nearAi.agent.approvalTimeoutMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 0,
+          "maximum": 1440,
+          "description": "How long an action waiting for your approval waits before it is declined, so an unattended run carries on without it (the agent is told and reports what still needs you). 0 waits indefinitely."
         }
       }
     },
