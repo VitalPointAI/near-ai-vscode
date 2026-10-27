@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
+
 export interface PromptEnvironment {
   root: string;
   platform: string;
@@ -6,6 +9,26 @@ export interface PromptEnvironment {
   model: string;
   /** The SecurityScan tool is available. */
   security?: boolean;
+}
+
+const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md', path.join('.claude', 'CLAUDE.md')];
+const MAX_INSTRUCTIONS_CHARS = 40_000;
+
+/**
+ * The project's own agent instructions (AGENTS.md, CLAUDE.md, .claude/CLAUDE.md), which Open-GSD
+ * and other tools write with the project's conventions. Duplicates are included once.
+ */
+export function projectInstructions(root: string): string {
+  const seen = new Set<string>();
+  const blocks: string[] = [];
+  for (const file of INSTRUCTION_FILES) {
+    let text: string;
+    try { text = readFileSync(path.join(root, file), 'utf8').trim(); } catch { continue; }
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    blocks.push(`## From ${file.split(path.sep).join('/')}\n${text.length > MAX_INSTRUCTIONS_CHARS ? `${text.slice(0, MAX_INSTRUCTIONS_CHARS)}\n[… truncated]` : text}`);
+  }
+  return blocks.length ? `\n\n# Project instructions\nThe project's own guidance for agents. Follow it for this project's conventions; it does not change what needs the user's approval.\n\n${blocks.join('\n\n')}` : '';
 }
 
 /** The runner's system prompt. Written for this extension; it describes the tools it actually provides. */

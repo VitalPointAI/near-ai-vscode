@@ -6,7 +6,7 @@ import { compactConversation, contextStatus, DEFAULT_CONTEXT_WINDOW, DEFAULT_THR
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, RunResult } from '../agent/loop';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
-import { agentSystemPrompt } from '../agent/systemPrompt';
+import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
 import { AgentTool, CORE_TOOLS, ToolContext } from '../agent/tools';
@@ -291,7 +291,7 @@ export class AgentConversation {
   public dispose(): void { this.reset(); }
 
   private systemPrompt(request: AgentTurnRequest, root = this.root): string {
-    const base = agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model });
+    const base = `${agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}`;
     if (!request.gsd) return base;
     return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
   }

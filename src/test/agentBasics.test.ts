@@ -161,3 +161,17 @@ test('permissions: reads always run, writes follow the policy, commands follow d
   assert.equal(decide('workspaceWrite'), 'allow');
   assert.equal(decide('read', undefined, { mode: 'fully-autonomous', emergencyStop: true }), 'deny');
 });
+
+test('project instruction files (AGENTS.md, CLAUDE.md, .claude/CLAUDE.md) reach the agent once each', async () => {
+  const { projectInstructions } = await import('../agent/systemPrompt');
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-instructions-'));
+  assert.equal(projectInstructions(root), '');
+  await mkdir(path.join(root, '.claude'));
+  await writeFile(path.join(root, 'AGENTS.md'), 'Use tabs.');
+  await writeFile(path.join(root, 'CLAUDE.md'), 'Use tabs.');
+  await writeFile(path.join(root, '.claude', 'CLAUDE.md'), '<!-- GSD:project-start -->\n## Project\n**tempconv**');
+  const text = projectInstructions(root);
+  assert.match(text, /# Project instructions[\s\S]*## From AGENTS\.md\nUse tabs\.[\s\S]*## From \.claude\/CLAUDE\.md\n<!-- GSD:project-start -->/);
+  assert.equal(text.match(/Use tabs\./g)?.length, 1, 'an identical copy is included once');
+  assert.match(text, /does not change what needs the user's approval/);
+});
