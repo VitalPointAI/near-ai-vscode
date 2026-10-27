@@ -134,7 +134,8 @@ test('a paused agent waits before its next turn until resumed', async () => {
 test('context: old tool output is trimmed, thresholds follow Open-GSD, and compaction keeps tool calls with their results', async () => {
   const big = 'x'.repeat(5_000);
   const messages: AgentMessage[] = [{ role: 'system', content: 'sys' }];
-  for (let n = 0; n < 12; n += 1) messages.push({ role: 'assistant', content: null, tool_calls: [call(`c${n}`, 'Read', {})] }, { role: 'tool', tool_call_id: `c${n}`, content: big });
+  // Trimming advances in steps of 10 past the 8 most recent (see promptCache.test.ts), so use 18.
+  for (let n = 0; n < 18; n += 1) messages.push({ role: 'assistant', content: null, tool_calls: [call(`c${n}`, 'Read', {})] }, { role: 'tool', tool_call_id: `c${n}`, content: big });
   const trimmed = trimOldToolResults(messages);
   const toolContents = trimmed.filter((message) => message.role === 'tool').map((message) => message.content.length);
   assert.equal(toolContents.filter((length) => length === 5_000).length, 8, 'the eight most recent tool results are kept whole');

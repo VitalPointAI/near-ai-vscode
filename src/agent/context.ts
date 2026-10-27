@@ -27,10 +27,18 @@ export function contextStatus(usedTokens: number, window: number, thresholds = D
   return { usedTokens, window, remainingPercent, level: level === 'critical' ? 'critical' : level === 'warning' ? 'warning' : 'normal' };
 }
 
-/** First, cheap step: shorten large tool outputs except the most recent ones. Returns a new array. */
-export function trimOldToolResults(messages: AgentMessage[], keepRecent = KEEP_RECENT_TOOL_RESULTS): AgentMessage[] {
+/** Trimming advances in steps of this many tool results, so the conversation's start changes rarely. */
+const TRIM_STEP = 10;
+
+/**
+ * First, cheap step: shorten large tool outputs except the most recent ones. Returns a new array.
+ * NEAR caches prompt prefixes, and rewriting an early message makes every later turn miss the
+ * cache, so the trimmed region grows in steps of TRIM_STEP rather than by one result each turn.
+ */
+export function trimOldToolResults(messages: AgentMessage[], keepRecent = KEEP_RECENT_TOOL_RESULTS, step = TRIM_STEP): AgentMessage[] {
   const toolIndexes = messages.map((message, index) => (message.role === 'tool' ? index : -1)).filter((index) => index >= 0);
-  const protectedIndexes = new Set(toolIndexes.slice(-keepRecent));
+  const trimmable = Math.floor(Math.max(0, toolIndexes.length - keepRecent) / step) * step;
+  const protectedIndexes = new Set(toolIndexes.slice(trimmable));
   return messages.map((message, index) => {
     if (message.role !== 'tool' || protectedIndexes.has(index) || message.content.length <= TRIM_TOOL_RESULT_CHARS) return message;
     return { ...message, content: `${message.content.slice(0, 600)}\n\n[Older tool output trimmed to save context; ${message.content.length - 600} characters removed. Re-run the tool if you need it.]` };

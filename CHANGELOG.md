@@ -47,6 +47,11 @@ runtime in between.
   to pass specific ones) and out of the Open-GSD installer; the search setup
   says that Brave and Tavily keys link queries to your account; SECURITY.md
   lists every connection the extension makes.
+- **Prompt caching counted and kept effective.** NEAR caches prompt prefixes
+  automatically; estimates and run budgets now price cached input at NEAR's
+  cache-read rate (GLM 5.3: $0.45 instead of $1.80 per million), context
+  trimming advances in steps so the cached prefix stays stable, and Agent
+  Activity shows each agent's cache hit rate.
 - **Runaway protection.** A run and all its sub-agents stop cleanly, keeping
   their work, at a per-run cost cap (`nearAi.agent.maxRunCostUsd`, default $5),
   what is left of the daily spend limit, or a token cap, checked before every

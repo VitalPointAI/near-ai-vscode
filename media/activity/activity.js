@@ -94,14 +94,14 @@
       const name = el('td', 'agent-cell');
       name.append(el('span', 'dot'), el('span', '', (stat.parentId ? '↳ ' : '') + stat.agent));
       tr.append(name, el('td', 'model', stat.model), el('td', 'status', stat.status === 'max-turns' ? 'turn limit' : stat.status),
-        el('td', 'num', number(stat.turns)), el('td', 'num', number(stat.inputTokens)), el('td', 'num', number(stat.outputTokens)), el('td', 'num', speed ? speed.toFixed(1) : '–'),
+        el('td', 'num', number(stat.turns)), el('td', 'num', number(stat.inputTokens)), el('td', 'num', stat.inputTokens ? Math.round((100 * (stat.cachedTokens || 0)) / stat.inputTokens) + '%' : '–'), el('td', 'num', number(stat.outputTokens)), el('td', 'num', speed ? speed.toFixed(1) : '–'),
         el('td', 'num', money(stat.costUsd)), el('td', 'num', number(stat.toolCalls) + (stat.toolErrors ? ' (' + stat.toolErrors + ' failed)' : '')), el('td', 'num', number(stat.retries)), securityCell(stat),
         el('td', 'num', duration((stat.endedAt || now) - stat.startedAt)));
       return tr;
     }));
     const running = stats.filter((stat) => stat.status === 'running').length;
     const sum = (key) => stats.reduce((total, stat) => total + stat[key], 0);
-    const totals = [['Agents', running ? running + ' running / ' + stats.length : String(stats.length)], ['Tokens in', number(sum('inputTokens'))], ['Tokens out', number(sum('outputTokens'))], ['Est. cost', money(sum('costUsd'))], ['Tool calls', number(sum('toolCalls')) + (sum('toolErrors') ? ' (' + sum('toolErrors') + ' failed)' : '')], ['Retries', number(sum('retries'))], ['Security', [sum('injections') + ' injection' + (sum('injections') === 1 ? '' : 's') + ' flagged', sum('hiddenRemoved') + ' hidden removed', sum('held') + ' held', sum('blocked') + ' blocked'].join(' · ')]];
+    const totals = [['Agents', running ? running + ' running / ' + stats.length : String(stats.length)], ['Tokens in', number(sum('inputTokens')) + (sum('inputTokens') ? ' (' + Math.round((100 * sum('cachedTokens')) / sum('inputTokens')) + '% cached)' : '')], ['Tokens out', number(sum('outputTokens'))], ['Est. cost', money(sum('costUsd'))], ['Tool calls', number(sum('toolCalls')) + (sum('toolErrors') ? ' (' + sum('toolErrors') + ' failed)' : '')], ['Retries', number(sum('retries'))], ['Security', [sum('injections') + ' injection' + (sum('injections') === 1 ? '' : 's') + ' flagged', sum('hiddenRemoved') + ' hidden removed', sum('held') + ' held', sum('blocked') + ' blocked'].join(' · ')]];
     $('totals').replaceChildren(...totals.flatMap(([label, value]) => { const wrap = el('div', 'total'); wrap.append(el('dt', '', label), el('dd', '', value)); return [wrap]; }));
     const seen = new Set();
     for (const stat of stats) { seen.add(stat.agentId); if (!names.has(stat.agentId)) { names.set(stat.agentId, stat.agent); const option = el('option', '', stat.agent + ' · ' + stat.agentId.slice(-6)); option.value = stat.agentId; filterAgent.append(option); } }

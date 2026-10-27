@@ -151,7 +151,7 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
     if (value.type === 'questions-request' && value.id && value.questions) conversation.answerQuestions(value.id, value.questions.map((question) => question.options[0]?.label ?? 'yes'));
   }, path.join(context.storage, 'checkpoints'));
   try {
-    await conversation.send({ text: `/${skill!.name}${args ? ` ${args}` : ''}`, skill: { name: skill!.name, args }, gsd: context.gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, availableModels: models.map((candidate) => candidate.id), maxParallelAgents: 4, maxTurns: 120, budget: { maxCostUsd: Number(process.env.NEAR_LIVE_BUDGET_USD ?? 3), maxTokens: 8_000_000 } });
+    await conversation.send({ text: `/${skill!.name}${args ? ` ${args}` : ''}`, skill: { name: skill!.name, args }, gsd: context.gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, availableModels: models.map((candidate) => candidate.id), contextWindows: Object.fromEntries(models.filter((candidate) => candidate.contextLength).map((candidate) => [candidate.id, candidate.contextLength!])), maxParallelAgents: 4, maxTurns: 120, budget: { maxCostUsd: Number(process.env.NEAR_LIVE_BUDGET_USD ?? 3), maxTokens: 8_000_000 } });
   } finally {
     // The conversation keeps a shell open between turns; close it so the test process can exit.
     conversation.dispose();

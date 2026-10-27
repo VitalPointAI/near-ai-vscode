@@ -639,11 +639,12 @@ function newConversationId(): string {
 
 function sumUsage(turns: UsageMetadata[]): UsageMetadata {
   const total: UsageMetadata = { verificationStatus: 'unknown', latencyMs: turns.reduce((sum, turn) => sum + turn.latencyMs, 0) };
-  const add = (key: 'inputTokens' | 'outputTokens' | 'estimatedCostUsd') => {
+  const add = (key: 'inputTokens' | 'cachedInputTokens' | 'outputTokens' | 'estimatedCostUsd') => {
     const values = turns.map((turn) => turn[key]).filter((value): value is number => value !== undefined);
     if (values.length) total[key] = values.reduce((sum, value) => sum + value, 0);
   };
   add('inputTokens');
+  add('cachedInputTokens');
   add('outputTokens');
   add('estimatedCostUsd');
   return total;

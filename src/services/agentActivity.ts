@@ -37,6 +37,8 @@ export interface AgentStats {
   endedAt?: number;
   turns: number;
   inputTokens: number;
+  /** Of inputTokens, served from NEAR's prompt cache. */
+  cachedTokens: number;
   outputTokens: number;
   costUsd: number;
   modelMs: number;
@@ -106,7 +108,7 @@ export class ActivityFeed {
   }
 
   public agentStarted(agent: { agentId: string; agent: string; runId: string; model: string; parentId?: string }, prompt?: string, system?: string): void {
-    this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: this.now(), turns: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0 });
+    this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: this.now(), turns: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0 });
     for (const stale of [...this.stats.keys()].slice(0, Math.max(0, this.stats.size - MAX_AGENTS))) this.stats.delete(stale);
     const base = { runId: agent.runId, agentId: agent.agentId, agent: agent.agent };
     this.add({ ...base, kind: 'agent-start', title: `${agent.agent} started on ${agent.model}` });
@@ -171,6 +173,7 @@ export class ActivityFeed {
     if (!stat) return;
     stat.turns += 1;
     stat.inputTokens += usage.inputTokens ?? 0;
+    stat.cachedTokens += usage.cachedInputTokens ?? 0;
     stat.outputTokens += usage.outputTokens ?? 0;
     stat.costUsd += usage.estimatedCostUsd ?? 0;
     stat.modelMs += usage.latencyMs ?? 0;

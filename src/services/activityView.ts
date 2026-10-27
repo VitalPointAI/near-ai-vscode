@@ -119,7 +119,7 @@ function activityHtml(webview: vscode.Webview, media: vscode.Uri): string {
   <dl id="totals" class="totals" aria-label="Totals"></dl>
 </header>
 <section class="agents" aria-labelledby="agents-heading"><h2 id="agents-heading">Agents</h2><div class="table-wrap"><table id="agents"><thead><tr>
-  <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">Status</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tokens in</th><th scope="col" class="num">Tokens out</th><th scope="col" class="num">Tok/s</th><th scope="col" class="num">Est. cost</th><th scope="col" class="num">Tools</th><th scope="col" class="num">Retries</th><th scope="col">Security</th><th scope="col" class="num">Time</th>
+  <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">Status</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tokens in</th><th scope="col" class="num" title="Share of input tokens NEAR served from its prompt cache, billed at the lower cache-read price">Cache</th><th scope="col" class="num">Tokens out</th><th scope="col" class="num">Tok/s</th><th scope="col" class="num">Est. cost</th><th scope="col" class="num">Tools</th><th scope="col" class="num">Retries</th><th scope="col">Security</th><th scope="col" class="num">Time</th>
 </tr></thead><tbody></tbody></table></div><p id="empty-agents" class="hint">No agents have run yet. Send a message or run a workflow in the NEAR AI chat.</p></section>
 <section class="stream-section" aria-labelledby="stream-heading">
   <div class="toolbar" role="toolbar" aria-label="Stream filters">

@@ -71,6 +71,8 @@ export interface UsageMetadata {
   requestId?: string;
   provider?: string;
   inputTokens?: number;
+  /** Of inputTokens, how many NEAR served from its prompt cache (billed at the cache-read price). */
+  cachedInputTokens?: number;
   outputTokens?: number;
   estimatedCostUsd?: number;
   actualCostUsd?: number;
@@ -150,9 +152,12 @@ export function classifyRetryableFailure(status: number, signal?: AbortSignal): 
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-export function estimateCostUsd(model: ModelInfo, inputTokens = 0, outputTokens = 0): number | undefined {
+/** NEAR's prices: cached input tokens at the cache-read price when NEAR lists one, the rest at the input price. */
+export function estimateCostUsd(model: ModelInfo, inputTokens = 0, outputTokens = 0, cachedInputTokens = 0): number | undefined {
   if (model.inputPricePerMillion === undefined || model.outputPricePerMillion === undefined) return undefined;
-  return (inputTokens * model.inputPricePerMillion + outputTokens * model.outputPricePerMillion) / 1_000_000;
+  const cached = Math.min(Math.max(0, cachedInputTokens), inputTokens);
+  const cachePrice = model.cachePricePerMillion ?? model.inputPricePerMillion;
+  return ((inputTokens - cached) * model.inputPricePerMillion + cached * cachePrice + outputTokens * model.outputPricePerMillion) / 1_000_000;
 }
 
 export class NearAiClient {
@@ -255,7 +260,7 @@ export class NearAiClient {
     const text = stringValue(objectValue(choice.message).content);
     if (!text) throw new NearAiError(0, 'The vision model returned no description.', false);
     const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
-    usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens);
+    usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
     return { text, usage };
   }
 
@@ -407,7 +412,7 @@ export class NearAiClient {
           if (!chatId && typeof chunk.id === 'string' && chunk.id) chatId = chunk.id;
           if (chunk.usage) {
             usage = usageFromPayload(chunk.usage, usage, usage.requestId, usage.provider);
-            usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens) ?? usage.estimatedCostUsd;
+            usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens) ?? usage.estimatedCostUsd;
           }
           const choice = chunk.choices?.[0];
           if (!choice) continue;
@@ -564,7 +569,9 @@ export function normalizeModelInfo(model: Record<string, unknown>, fetchedAt = n
   const contextLength = numberValue(model.context_length ?? model.contextLength ?? model.max_context_length);
   const inputPrice = numberValue(pricing.input_per_million ?? pricing.inputPricePerMillion ?? pricing.input ?? model.input_price_per_million ?? model.inputPricePerMillion);
   const outputPrice = numberValue(pricing.output_per_million ?? pricing.outputPricePerMillion ?? pricing.output ?? model.output_price_per_million ?? model.outputPricePerMillion);
-  const cachePrice = numberValue(pricing.cache_per_million ?? pricing.cachePricePerMillion ?? pricing.cache ?? model.cache_price_per_million ?? model.cachePricePerMillion);
+  // NEAR's /v1/models gives input and output per million tokens and input_cache_read per token.
+  const cacheReadPerToken = numberValue(pricing.input_cache_read);
+  const cachePrice = numberValue(pricing.cache_per_million ?? pricing.cachePricePerMillion ?? pricing.cache ?? model.cache_price_per_million ?? model.cachePricePerMillion) ?? (cacheReadPerToken !== undefined ? Number((cacheReadPerToken * 1_000_000).toPrecision(12)) : undefined);
   const imagePrice = numberValue(pricing.image_per_unit ?? pricing.imagePricePerUnit ?? pricing.image ?? model.image_price_per_unit ?? model.imagePricePerUnit);
   const videoPrice = numberValue(pricing.video_per_unit ?? pricing.videoPricePerUnit ?? pricing.video ?? model.video_price_per_unit ?? model.videoPricePerUnit);
   const requestPrice = numberValue(pricing.request_per_unit ?? pricing.requestPricePerUnit ?? pricing.request ?? model.request_price_per_unit ?? model.requestPricePerUnit);
@@ -636,7 +643,7 @@ function parseSseLine(line: string, metadata: UsageMetadata, model?: ModelInfo):
       usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; input_tokens?: unknown; output_tokens?: unknown };
     };
     const nextMetadata = usageFromPayload(parsed.usage ?? {}, metadata, metadata.requestId, stringValue(parsed.provider) ?? metadata.provider);
-    nextMetadata.estimatedCostUsd = estimateCostUsd(model ?? { id: '' }, nextMetadata.inputTokens, nextMetadata.outputTokens) ?? metadata.estimatedCostUsd;
+    nextMetadata.estimatedCostUsd = estimateCostUsd(model ?? { id: '' }, nextMetadata.inputTokens, nextMetadata.outputTokens, nextMetadata.cachedInputTokens) ?? metadata.estimatedCostUsd;
     const text = stringValue(parsed.choices?.[0]?.delta?.content) ?? '';
     return text || parsed.usage ? { type: 'text', text, metadata: nextMetadata } : undefined;
   } catch {
@@ -658,6 +665,10 @@ function usageFromPayload(payload: Record<string, unknown>, base: UsageMetadata,
     inputTokens: numberValue(payload.input_tokens ?? payload.prompt_tokens ?? payload.inputTokens) ?? base.inputTokens,
     outputTokens: numberValue(payload.output_tokens ?? payload.completion_tokens ?? payload.outputTokens) ?? base.outputTokens
   };
+  // NEAR reports prompt-cache hits as prompt_tokens_details.cached_tokens (input_tokens_details in the Responses API).
+  const details = objectValue(payload.prompt_tokens_details ?? payload.input_tokens_details);
+  const cached = numberValue(details.cached_tokens ?? payload.cached_tokens);
+  if (cached !== undefined) next.cachedInputTokens = cached;
   const verification = stringValue(payload.verification_status ?? payload.verificationStatus ?? payload.tee_status ?? payload.teeStatus);
   if (verification === 'verified' || verification === 'true') next.verificationStatus = 'verified';
   if (verification === 'unverified' || verification === 'false') next.verificationStatus = 'unverified';
