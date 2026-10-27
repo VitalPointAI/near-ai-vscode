@@ -88,8 +88,11 @@ test('attachments: text inlines, images are read by a vision model when the chos
   await writeFile(path.join(dir, 'notes.md'), '# Notes\nship friday');
   await writeFile(path.join(dir, 'shot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   await writeFile(path.join(dir, 'memo.wav'), Buffer.from('RIFF'));
+  await writeFile(path.join(dir, 'clip.mp4'), Buffer.from('ftyp'));
+  await assert.rejects(() => stageAttachment(path.join(dir, 'clip.mp4')), /\.mp4 files are not supported/);
+  // PDFs are read now (see documents.test.ts); a damaged one fails clearly instead of passing on nothing.
   await writeFile(path.join(dir, 'spec.pdf'), Buffer.from('%PDF'));
-  await assert.rejects(() => stageAttachment(path.join(dir, 'spec.pdf')), /\.pdf files are not supported yet/);
+  await assert.rejects(() => stageAttachment(path.join(dir, 'spec.pdf')), /spec\.pdf could not be read as a PDF/);
   const staged = await Promise.all(['notes.md', 'shot.png', 'memo.wav'].map((name) => stageAttachment(path.join(dir, name))));
   const calls: string[] = [];
   const client = {

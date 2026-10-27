@@ -71,6 +71,9 @@ const required = [
   'extension/docs/marketplace/near-ai-chat.png',
   'extension/docs/marketplace/near-ai-commands.png',
   'extension/docs/marketplace/near-ai-approval.png',
+  'extension/vendor/pdfjs/pdf.min.mjs',
+  'extension/vendor/pdfjs/pdf.worker.min.mjs',
+  'extension/vendor/pdfjs/LICENSE',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];
 const missing = required.filter((entry) => !entrySet.has(entry));

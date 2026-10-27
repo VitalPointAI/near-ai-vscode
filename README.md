@@ -97,11 +97,13 @@ tokens, and spend by organization and project, exportable.
   version. Teams can be duplicated, archived, restored, imported, and deleted.
   **Set Up Project Team** asks a few questions and drafts a team for the
   project in `.planning/.near-ai/team.md` for you to review.
-- **Attachments.** Attach images, audio, and text files to a message. Images
-  are read by the chosen model if it reads images, otherwise by a vision model
-  (`nearAi.agent.visionModel`); audio is transcribed with Whisper. The chat
-  says which model handled each file. PDFs, Office files, and video are not
-  supported yet.
+- **Attachments.** Attach images, audio, documents, and text files to a
+  message. Images are read by the chosen model if it reads images, otherwise
+  by a vision model (`nearAi.agent.visionModel`); audio is transcribed with
+  Whisper. The chat says which model handled each file. PDFs (with a text
+  layer), Word (.docx), PowerPoint (.pptx, with speaker notes), and Excel
+  (.xlsx, every sheet) are read on your machine, and only their text is sent.
+  Scanned PDFs, the old .doc/.ppt/.xls formats, and video are not supported.
 - **Image generation.** When the provider lists an image model, the agent can
   create PNGs in your workspace with its GenerateImage tool. It asks first and
   shows the price, and **Revert** removes the file.
@@ -150,7 +152,7 @@ Read the full [security and trust report](SECURITY.md).
 
 ## Requirements
 
-- VS Code 1.90 or newer.
+- VS Code 1.101 or newer (it runs on Node 22 or later; Node 20 is end of life).
 - A NEAR AI Cloud API key, a local OpenAI-compatible runtime, or both.
 - For Open-GSD workflows: npm access, so Open-GSD can be installed the first
   time you run one.

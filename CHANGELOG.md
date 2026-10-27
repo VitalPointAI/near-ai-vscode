@@ -19,7 +19,10 @@ runtime in between.
   archive and import. Run one with `/team:<name>`. **Set Up Project Team**
   drafts one from a few questions.
 - **Attachments.** Images are read by a vision model and audio is transcribed
-  with Whisper. Text files are included inline.
+  with Whisper. PDFs, .docx, .pptx, and .xlsx are read on your machine and
+  their text is included, as are text files.
+- **Requires VS Code 1.101 or newer**, which runs extensions on Node 22 or
+  later (Node 20 is end of life).
 - **Image generation** with NEAR's image models, saved through checkpoints.
 - **Project memory.** Remember and Recall, reviewed with **Manage Project
   Memory**.

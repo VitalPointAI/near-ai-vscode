@@ -234,11 +234,12 @@ test('live GSD: idea to working code — new-project, plan-phase, and execute-ph
 
 const FIXTURES = path.join(__dirname, '..', '..', 'test', 'fixtures', 'media');
 
-test('live media: an image and a voice note are read, and an image is generated', { skip, timeout: 600_000 }, async () => {
+test('live media: an image, a voice note, a PDF, and a spreadsheet are read, and an image is generated', { skip, timeout: 600_000 }, async () => {
   const { client: near, models } = await client();
   const model = pick(models, /^z-ai\/glm-5\.3$/i)!;
-  const staged = [await stageAttachment(path.join(FIXTURES, 'build-code.png')), await stageAttachment(path.join(FIXTURES, 'secret-word.wav'))];
-  const question = 'What is the build code in the image, and what is the secret word in the voice note?';
+  const documents = path.join(FIXTURES, '..', 'documents');
+  const staged = [await stageAttachment(path.join(FIXTURES, 'build-code.png')), await stageAttachment(path.join(FIXTURES, 'secret-word.wav')), await stageAttachment(path.join(documents, 'report.pdf')), await stageAttachment(path.join(documents, 'sales.xlsx'))];
+  const question = 'What is the build code in the image, the secret word in the voice note, the project codename in the PDF report, and the audit code in the spreadsheet?';
   const prepared = await prepareAttachments(staged, { client: near, model, models, visionModel: 'z-ai/glm-5.3-flash', transcriptionModel: 'openai/whisper-large-v3', question });
   console.log(`attachments: ${prepared.notes.join(' ')}\n${prepared.text}`);
   assert.match(prepared.text, /OTTER-5813/i, 'the image text was read');
@@ -258,6 +259,8 @@ test('live media: an image and a voice note are read, and an image is generated'
   console.log(`answer: ${answer.slice(-400)}`);
   assert.match(answer, /OTTER-5813/i);
   assert.match(answer, /pelican/i);
+  assert.match(answer, /HERON-2291/i, 'the PDF was read');
+  assert.match(answer, /KESTREL-7740/i, 'the spreadsheet was read');
   const icon = path.join(root, 'icon.png');
   assert.ok(existsSync(icon), 'the agent generated icon.png');
   assert.deepEqual([...(await readFile(icon)).subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], 'icon.png is a PNG');

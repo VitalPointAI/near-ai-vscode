@@ -8,3 +8,4 @@ dist/
 # NEAR AI per-project runtime state (profiles metadata, activity, audit)
 .planning/.near-ai/
 .planning/HANDOFF.json
+vendor/

@@ -62,13 +62,13 @@ export async function openTools(context: vscode.ExtensionContext, auth: AuthServ
 }
 
 /**
- * The Tools tab keeps what works today (analytics, artifacts, history) and hides team studio,
- * attachments, generation, and memory, which only record intent until they run on the native
- * NEAR runner (milestone 2, phase 11). Their markup stays so the page's scripts keep working.
+ * The Tools tab keeps analytics, artifacts, and history. Its old team studio, attachments,
+ * generation, and memory sections are hidden: those features run in the sidebar chat now. Their
+ * markup stays so the page's scripts keep working until the legacy panel is removed.
  */
 function toolsHtml(html: string): string {
   const hidden = '#team-studio,[aria-labelledby="attachments-heading"],[aria-labelledby="generation-heading"],[aria-labelledby="memory-heading"],#attach,#multimodal-prepare{display:none!important}';
-  const note = '<p class="status" id="tools-note">Teams, attachments, image generation, and context memory are coming back once they run on the native NEAR runner.</p>';
+  const note = '<p class="status" id="tools-note">Teams, attachments, image generation, and project memory are in the NEAR AI chat in the side bar: use /team:, the paperclip, or ask the agent.</p>';
   return html.replace('</style>', `${hidden}</style>`).replace('</header>', `${note}</header>`);
 }
 
@@ -129,6 +129,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
           const attachment = await stageAttachment(uri.fsPath);
           state.attachments.set(attachment.id, attachment);
           panel.webview.postMessage({ type: 'attachment-staged', id: attachment.id, name: attachment.name, kind: attachment.kind, size: attachment.size });
+          if (attachment.note) panel.webview.postMessage({ type: 'notice', text: attachment.note });
         } catch (error) {
           panel.webview.postMessage({ type: 'notice', text: providerErrorMessage(error) });
         }
@@ -501,7 +502,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       state.guard = new OutboundGuard(settings);
       state.guardSettings = JSON.stringify([settings.privacyMode, settings.dailySpendLimitUsd, settings.actionPolicy]);
     }
-    const attachedText = staged.filter((item) => item.kind === 'text').map((item) => item.bytes.toString('utf8')).join('\n');
+    // Documents are checked by their extracted text, which is what is sent.
+    const attachedText = staged.map((item) => item.kind === 'text' ? item.bytes.toString('utf8') : item.kind === 'document' ? item.text ?? '' : '').filter(Boolean).join('\n');
     const verdict = state.guard.check({ model, modelInfo, text: attachedText ? `${text}\n${attachedText}` : text, overrideToken: message.type === 'send' ? message.overrideToken : undefined }, spentTodayUsd(await state.activity.list()));
     if (verdict.outcome !== 'allow') {
       panel.webview.postMessage({ type: 'outbound-blocked', text, model, reason: verdict.reason, overrideToken: message.type === 'send' ? verdict.overrideToken : undefined, confirm: verdict.outcome === 'confirm' });

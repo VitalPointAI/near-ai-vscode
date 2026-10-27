@@ -2,18 +2,25 @@ import { randomBytes } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ModelInfo, NearAiClient, UsageMetadata } from '../services/nearAiClient';
+import { DocumentFormat, documentText } from './documents';
 import { ToolError } from './workspace';
 
-export type AttachmentKind = 'image' | 'audio' | 'text';
+export type AttachmentKind = 'image' | 'audio' | 'text' | 'document';
 
-export interface StagedAttachment { id: string; name: string; kind: AttachmentKind; mime: string; size: number; bytes: Buffer }
+/** `text` is the extracted text of a document, read when it is attached; `note` says what could not be read. */
+export interface StagedAttachment { id: string; name: string; kind: AttachmentKind; mime: string; size: number; bytes: Buffer; text?: string; note?: string }
 
 const TYPES: Record<string, { kind: AttachmentKind; mime: string }> = {
   png: { kind: 'image', mime: 'image/png' }, jpg: { kind: 'image', mime: 'image/jpeg' }, jpeg: { kind: 'image', mime: 'image/jpeg' }, gif: { kind: 'image', mime: 'image/gif' }, webp: { kind: 'image', mime: 'image/webp' },
+  pdf: { kind: 'document', mime: 'application/pdf' },
+  docx: { kind: 'document', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  pptx: { kind: 'document', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' },
+  xlsx: { kind: 'document', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
   mp3: { kind: 'audio', mime: 'audio/mpeg' }, wav: { kind: 'audio', mime: 'audio/wav' }, m4a: { kind: 'audio', mime: 'audio/mp4' }, ogg: { kind: 'audio', mime: 'audio/ogg' }, flac: { kind: 'audio', mime: 'audio/flac' }, webm: { kind: 'audio', mime: 'audio/webm' }
 };
 const TEXT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'csv', 'tsv', 'yaml', 'yml', 'xml', 'html', 'css', 'log', 'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'h', 'cpp', 'hpp', 'cs', 'php', 'sh', 'sql', 'toml', 'ini', 'env.example']);
-const LIMITS: Record<AttachmentKind, number> = { image: 10 * 1024 * 1024, audio: 25 * 1024 * 1024, text: 1024 * 1024 };
+const LIMITS: Record<AttachmentKind, number> = { image: 10 * 1024 * 1024, audio: 25 * 1024 * 1024, text: 1024 * 1024, document: 25 * 1024 * 1024 };
+const LEGACY_OFFICE: Record<string, string> = { doc: '.docx', xls: '.xlsx', ppt: '.pptx' };
 
 /** Reads and checks a file the user chose to attach. */
 export async function stageAttachment(file: string): Promise<StagedAttachment> {
@@ -21,13 +28,15 @@ export async function stageAttachment(file: string): Promise<StagedAttachment> {
   const extension = name.toLowerCase().split('.').slice(1).join('.') || '';
   const last = extension.split('.').pop() ?? '';
   const type = TYPES[last] ?? (TEXT_EXTENSIONS.has(last) || TEXT_EXTENSIONS.has(extension) ? { kind: 'text' as const, mime: 'text/plain' } : undefined);
-  if (!type) throw new ToolError(`${name}: .${last || '(no extension)'} files are not supported yet. Attach images, audio, or text files (code, Markdown, JSON, CSV…); for PDFs or Office documents, paste or export the text.`);
+  if (!type && LEGACY_OFFICE[last]) throw new ToolError(`${name} is in the old binary .${last} format, which can't be read. Save it as ${LEGACY_OFFICE[last]} and attach that.`);
+  if (!type) throw new ToolError(`${name}: .${last || '(no extension)'} files are not supported. Attach images, audio, documents (PDF, .docx, .pptx, .xlsx), or text files (code, Markdown, JSON, CSV…).`);
   const info = await stat(file);
   if (!info.isFile()) throw new ToolError(`${name} is not a file.`);
   if (info.size > LIMITS[type.kind]) throw new ToolError(`${name} is ${Math.round(info.size / 1024 / 1024)} MB; ${type.kind} attachments are limited to ${LIMITS[type.kind] / 1024 / 1024} MB.`);
   const bytes = await readFile(file);
   if (type.kind === 'text' && bytes.subarray(0, 8000).includes(0)) throw new ToolError(`${name} looks binary, not text.`);
-  return { id: `att-${randomBytes(6).toString('hex')}`, name, kind: type.kind, mime: type.mime, size: info.size, bytes };
+  const extracted = type.kind === 'document' ? await documentText(bytes, last as DocumentFormat, name) : undefined;
+  return { id: `att-${randomBytes(6).toString('hex')}`, name, kind: type.kind, mime: type.mime, size: info.size, bytes, ...(extracted ? { text: extracted.text, ...(extracted.note ? { note: extracted.note } : {}) } : {}) };
 }
 
 export interface PreparedAttachments { text: string; usage: UsageMetadata[]; notes: string[] }
@@ -45,6 +54,9 @@ export async function prepareAttachments(attachments: StagedAttachment[], option
   for (const attachment of attachments) {
     if (attachment.kind === 'text') {
       blocks.push(`<attachment name="${attachment.name}" kind="text">\n${attachment.bytes.toString('utf8')}\n</attachment>`);
+    } else if (attachment.kind === 'document') {
+      if (attachment.note) notes.push(attachment.note);
+      blocks.push(`<attachment name="${attachment.name}" kind="document">\n${attachment.text || `(No text could be read. ${attachment.note ?? ''})`.trim()}\n</attachment>`);
     } else if (attachment.kind === 'image') {
       const model = reads(options.model, 'image') ? options.model : options.visionModel;
       if (!options.models.some((candidate) => candidate.id === model)) throw new ToolError(`No image-reading model is available for ${attachment.name}. Set nearAi.agent.visionModel to a model your provider offers that reads images.`);
