@@ -98,7 +98,7 @@ const TASKS: Array<{ name: string; files: Record<string, string>; prompt: string
   }
 ];
 
-test('live eval: models compared on coding, research, and planning tasks', { skip: skip || (process.env.NEAR_LIVE_EVAL ? false : 'set NEAR_LIVE_EVAL=1'), timeout: 3_600_000 }, async () => {
+test('live eval: models compared on coding, research, and planning tasks', { skip: skip || (process.env.NEAR_LIVE_EVAL ? false : 'set NEAR_LIVE_EVAL=1'), timeout: 4 * 3_600_000 }, async () => {
   const { client: near, models } = await client();
   const wanted = (process.env.NEAR_LIVE_EVAL_MODELS ?? 'z-ai/glm-5.3,z-ai/glm-5.3-flash').split(',').map((id) => id.trim()).filter(Boolean);
   const candidates = wanted.filter((id) => models.some((model) => model.id === id));
@@ -110,7 +110,7 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
     { name: 'phase-plan', kind: 'planning' as const, files: { 'spec.md': PLAN_SPEC }, prompt: PLAN_PROMPT }
   ];
   const total = candidates.length * tasks.length * runs;
-  const rows: Array<{ model: string; task: string; kind: string; run: number; score: number; outOf: number; outcome: string; turns: number; seconds: number; costUsd?: number; cachePct: number; misses: string }> = [];
+  const rows: Array<{ model: string; task: string; kind: string; run: number; score: number; outOf: number; outcome: string; turns: number; seconds: number; tokPerSec?: number; costUsd?: number; cachePct: number; misses: string }> = [];
   for (const model of candidates) {
     for (const task of tasks) {
       for (let attempt = 1; attempt <= runs; attempt += 1) {
@@ -133,9 +133,15 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
         const cost = await near.actualCostsUsd(usage.map((turn) => turn.requestId!).filter(Boolean)).catch(() => undefined);
         const input = usage.reduce((sum, turn) => sum + (turn.inputTokens ?? 0), 0);
         const cachePct = input ? Math.round((100 * usage.reduce((sum, turn) => sum + (turn.cachedInputTokens ?? 0), 0)) / input) : 0;
-        rows.push({ model, task: task.name, kind: task.kind, run: attempt, score, outOf, outcome, turns: usage.length, seconds: Math.round(ms / 1000), ...(cost !== undefined ? { costUsd: cost } : {}), cachePct, misses: misses.join('; ') });
+        // Generation speed, not counting the wait for each reply's first token.
+        const generatingMs = usage.reduce((sum, turn) => sum + Math.max(0, turn.latencyMs - (turn.firstTokenMs ?? 0)), 0);
+        const output = usage.reduce((sum, turn) => sum + (turn.outputTokens ?? 0), 0);
+        const tokPerSec = generatingMs > 0 && output ? Math.round(output / (generatingMs / 1000)) : undefined;
+        const estimated = usage.reduce((sum, turn) => sum + (turn.estimatedCostUsd ?? 0), 0);
+        const costUsd = cost ?? (estimated > 0 ? estimated : undefined);
+        rows.push({ model, task: task.name, kind: task.kind, run: attempt, score, outOf, outcome, turns: usage.length, seconds: Math.round(ms / 1000), ...(tokPerSec !== undefined ? { tokPerSec } : {}), ...(costUsd !== undefined ? { costUsd } : {}), cachePct, misses: misses.join('; ') });
         // Report each run as it finishes, so a long eval never looks hung.
-        console.log(`eval ${rows.length}/${total}: ${model} ${task.name} #${attempt}: ${score}/${outOf} (${outcome}, ${usage.length} turns, ${Math.round(ms / 1000)}s${cost !== undefined ? `, $${cost.toFixed(4)}` : ''}, ${cachePct}% cached)${misses.length ? ` missed: ${misses.join('; ')}` : ''}`);
+        console.log(`eval ${rows.length}/${total}: ${model} ${task.name} #${attempt}: ${score}/${outOf} (${outcome}, ${usage.length} turns, ${Math.round(ms / 1000)}s${tokPerSec !== undefined ? ` at ${tokPerSec} tok/s` : ''}${costUsd !== undefined ? `, $${costUsd.toFixed(4)}${cost === undefined ? ' est.' : ''}` : ''}, ${cachePct}% cached)${misses.length ? ` missed: ${misses.join('; ')}` : ''}`);
       }
     }
   }
@@ -144,7 +150,9 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
     const mine = rows.filter((row) => row.model === model);
     const avg = (kind: string) => { const list = mine.filter((row) => row.kind === kind); return list.length ? Math.round((10 * list.reduce((sum, row) => sum + row.score, 0)) / list.length) / 10 : undefined; };
     const costs = mine.map((row) => row.costUsd).filter((value): value is number => value !== undefined);
-    return { model, coding: `${mine.filter((row) => row.kind === 'coding' && row.score === 10).length}/${mine.filter((row) => row.kind === 'coding').length} passed`, research: avg('research'), planning: avg('planning'), totalCostUsd: costs.length ? Number(costs.reduce((sum, value) => sum + value, 0).toFixed(4)) : undefined, avgSeconds: Math.round(mine.reduce((sum, row) => sum + row.seconds, 0) / mine.length), avgCachePct: Math.round(mine.reduce((sum, row) => sum + row.cachePct, 0) / mine.length) };
+    const speeds = mine.map((row) => row.tokPerSec).filter((value): value is number => value !== undefined);
+    const info = models.find((candidate) => candidate.id === model);
+    return { model, privacy: info?.privacyBoundary === 'tee' ? 'TEE' : `forwarded${info?.forwardedTo ? ` (${info.forwardedTo})` : ''}`, coding: `${mine.filter((row) => row.kind === 'coding' && row.score === 10).length}/${mine.filter((row) => row.kind === 'coding').length} passed`, research: avg('research'), planning: avg('planning'), totalCostUsd: costs.length ? Number(costs.reduce((sum, value) => sum + value, 0).toFixed(4)) : undefined, avgSeconds: Math.round(mine.reduce((sum, row) => sum + row.seconds, 0) / mine.length), avgTokPerSec: speeds.length ? Math.round(speeds.reduce((sum, value) => sum + value, 0) / speeds.length) : undefined, avgCachePct: Math.round(mine.reduce((sum, row) => sum + row.cachePct, 0) / mine.length) };
   });
   console.log('summary (research and planning are average scores out of 10):');
   console.table(summary);
@@ -252,7 +260,7 @@ async function filesUnder(dir: string, pattern: RegExp): Promise<string[]> {
   return found;
 }
 
-test('live GSD: idea to working code — new-project, plan-phase, and execute-phase in worktrees', { skip: gsdSkip, timeout: 7_200_000 }, async () => {
+test('live GSD: idea to working code — new-project, plan-phase, and execute-phase in worktrees', { skip: gsdSkip, timeout: 4 * 3_600_000 }, async () => {
   const { client: near, models } = await client();
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-gsd-cycle-'));
   await run('git', ['init', '-q'], { cwd: root });
