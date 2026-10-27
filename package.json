@@ -247,7 +247,7 @@
         "nearAi.autoInstallGsd": {
           "type": "boolean",
           "default": true,
-          "description": "In projects set up with NEAR AI, install Open-GSD if it is missing when you run a GSD command, and keep it on the latest stable release. Other workspaces are never touched."
+          "description": "Install Open-GSD into the extension's storage the first time you run a workflow, and keep it on the latest stable release in projects set up with NEAR AI. Your ~/.claude setup is never touched."
         },
         "nearAi.privacyMode": {
           "type": "string",
@@ -300,6 +300,21 @@
             ":(){"
           ],
           "description": "Shell commands the agent is never allowed to run, matched as substrings, whatever the action policy."
+        },
+        "nearAi.agent.deepModel": {
+          "type": "string",
+          "default": "moonshotai/kimi-k3",
+          "description": "Model for Open-GSD sub-agents in the deep tier (opus). If your provider does not offer it, the chat's model is used."
+        },
+        "nearAi.agent.standardModel": {
+          "type": "string",
+          "default": "z-ai/glm-5.3",
+          "description": "Model for Open-GSD sub-agents in the standard tier (sonnet). If your provider does not offer it, the chat's model is used."
+        },
+        "nearAi.agent.fastModel": {
+          "type": "string",
+          "default": "z-ai/glm-5.3-flash",
+          "description": "Model for Open-GSD sub-agents in the fast tier (haiku). If your provider does not offer it, the chat's model is used."
         }
       }
     },

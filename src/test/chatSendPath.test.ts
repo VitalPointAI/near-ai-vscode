@@ -235,3 +235,72 @@ test('a hybrid profile lists cloud and local models and sends each message to th
     globalThis.fetch = originalFetch;
   }
 });
+
+test('a GSD slash command runs the installed skill on the runner: it asks a question, spawns a sub-agent, and reports', async () => {
+  const { root, auth } = await projectWithProfile();
+  const { writeFile: write, mkdir: makeDir } = await import('node:fs/promises');
+  // An installed runtime in the extension's storage, laid out as the installer leaves it.
+  const home = path.join(root, '.global', 'gsd', '1.20.0');
+  await makeDir(path.join(home, 'gsd-core', 'bin'), { recursive: true });
+  await makeDir(path.join(home, 'skills', 'gsd-progress'), { recursive: true });
+  await makeDir(path.join(home, 'agents'), { recursive: true });
+  await write(path.join(home, 'gsd-core', 'VERSION'), '1.20.0\n');
+  await write(path.join(home, 'gsd-core', 'bin', 'gsd-tools.cjs'), '');
+  await write(path.join(home, 'gsd-core', 'progress-workflow.md'), 'WORKFLOW: report the current phase.');
+  await write(path.join(home, 'skills', 'gsd-progress', 'SKILL.md'), `---\nname: gsd-progress\ndescription: Show progress\nargument-hint: "[--verbose]"\n---\n<arguments>$ARGUMENTS</arguments>\n@${path.join(home, 'gsd-core', 'progress-workflow.md')}\n`);
+  await write(path.join(home, 'agents', 'gsd-planner.md'), '---\nname: gsd-planner\ndescription: Plans\ntools: Read, Grep\nmodel: haiku\n---\nYou are the GSD planner.\n');
+  await write(path.join(root, '.global', 'gsd', 'current.json'), JSON.stringify({ version: '1.20.0' }));
+  await write(path.join(root, 'ROADMAP.md'), '# Phase 9\n');
+  const parent = [
+    { tool_calls: [{ index: 0, id: 'ask1', function: { name: 'AskUserQuestion', arguments: JSON.stringify({ questions: [{ question: 'Which phase?', header: 'Phase', options: [{ label: 'Phase 9' }, { label: 'Phase 10' }], multiSelect: false }] }) } }] },
+    { tool_calls: [{ index: 0, id: 'agent1', function: { name: 'Agent', arguments: JSON.stringify({ subagent_type: 'gsd-planner', description: 'Read the roadmap', prompt: 'Read ROADMAP.md and summarise it.', model: 'haiku' }) } }] },
+    { content: 'Progress for Phase 9 is ready.' }
+  ];
+  const child = [
+    { tool_calls: [{ index: 0, id: 'r1', function: { name: 'Read', arguments: '{"file_path":"ROADMAP.md"}' } }] },
+    { content: 'The roadmap lists Phase 9.' }
+  ];
+  const requests: Array<{ model: string; system: string; user: string; tools: string[] }> = [];
+  const calls: string[] = [];
+  const base = fakeNear(calls);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (!String(input).endsWith('/chat/completions')) return base(input, init);
+    const body = JSON.parse(String(init?.body)) as { model: string; messages: Array<{ role: string; content: string }>; tools?: Array<{ function: { name: string } }> };
+    requests.push({ model: body.model, system: body.messages[0].content, user: body.messages[1]?.content ?? '', tools: (body.tools ?? []).map((tool) => tool.function.name) });
+    const isChild = body.messages[0].content.startsWith('You are the GSD planner.');
+    const script = isChild ? child : parent;
+    const turn = body.messages.filter((message) => message.role === 'assistant').length;
+    const delta = script[turn] ?? { content: 'done' };
+    const stream = [`data: ${JSON.stringify({ choices: [{ delta, finish_reason: 'tool_calls' in delta ? 'tool_calls' : 'stop' }] })}`, 'data: {"choices":[],"usage":{"prompt_tokens":50,"completion_tokens":5}}', 'data: [DONE]', ''].join('\n\n');
+    return new Response(stream, { headers: { 'inference-id': INFERENCE_ID } });
+  }) as typeof fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'open-command', command: 'progress', args: '--verbose', model: 'z-ai/glm-5.3' });
+    let questions: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 300 && !questions; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      questions = sidebar.posted.find((message) => message.type === 'questions-request');
+    }
+    assert.ok(questions, 'the workflow waits for the answer');
+    await sidebar.send({ type: 'questions-reply', id: questions.id, answers: ['Phase 9'] });
+    await running;
+    const first = requests[0];
+    assert.match(first.user, /The user ran \/gsd-progress --verbose/);
+    assert.match(first.user, /<arguments>--verbose<\/arguments>/);
+    assert.match(first.user, /WORKFLOW: report the current phase\./, 'the @ include was expanded');
+    assert.ok(['Skill', 'AskUserQuestion', 'Agent', 'Task', 'WebFetch'].every((tool) => first.tools.includes(tool)));
+    const childRequest = requests.find((request) => request.system.startsWith('You are the GSD planner.'))!;
+    assert.equal(childRequest.model, 'z-ai/glm-5.3', 'the fast tier falls back to the chosen model when the provider lacks it');
+    assert.deepEqual(childRequest.tools.sort(), ['Grep', 'Read'], 'a sub-agent gets only the tools its definition lists');
+    const agentResult = requests.filter((request) => !request.system.startsWith('You are the GSD planner.')).length;
+    assert.equal(agentResult, 3);
+    assert.ok(sidebar.posted.some((message) => message.type === 'tool-start' && String(message.title).startsWith('gsd-planner › Read ROADMAP.md')));
+    assert.ok(sidebar.posted.some((message) => message.type === 'assistant-done'));
+    const commandList = sidebar.posted.filter((message) => message.type === 'commands').at(-1) as { commands: Array<{ command: string; argumentHint?: string }> };
+    assert.deepEqual(commandList.commands, [{ command: 'gsd-progress', title: 'gsd-progress', description: 'Show progress', argumentHint: '[--verbose]' }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

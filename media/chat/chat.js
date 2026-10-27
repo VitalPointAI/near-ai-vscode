@@ -15,9 +15,11 @@
   const status = $('status');
   const menu = $('commands');
   const live = $('live');
+  const defaultPlaceholder = input.placeholder;
   const projectLinks = $('project-links');
   const todoPanel = $('todos');
-  const commands = JSON.parse(document.body.dataset.commands || '[]');
+  // Replaced by the host with the installed Open-GSD skills.
+  let commands = JSON.parse(document.body.dataset.commands || '[]');
   const saved = vscode.getState() || {};
 
   const ICONS = {
@@ -320,6 +322,51 @@
     append(card);
     announce('Approval needed: ' + m.title);
   }
+  // AskUserQuestion: one block per question, options as buttons (or checkboxes when several may
+  // apply) plus a free-text "Other", answered together.
+  function onQuestions(m) {
+    const card = el('div', 'question questions');
+    card.setAttribute('role', 'group');
+    card.setAttribute('aria-label', 'NEAR AI has questions');
+    const readers = m.questions.map((question, index) => {
+      const block = el('fieldset', 'q');
+      const legend = el('legend', '', (question.header ? question.header + ' · ' : '') + question.question);
+      block.append(legend);
+      const name = m.id + '-' + index;
+      const choices = question.options.map((option) => {
+        const label = el('label', 'option');
+        const box = el('input');
+        box.type = question.multiSelect ? 'checkbox' : 'radio';
+        box.name = name;
+        box.value = option.label;
+        label.append(box, el('span', '', option.label));
+        if (option.description) label.append(el('small', '', option.description));
+        block.append(label);
+        return box;
+      });
+      const other = el('input', 'other');
+      other.placeholder = 'Other (type your own answer)';
+      other.setAttribute('aria-label', 'Other answer for: ' + question.question);
+      block.append(other);
+      card.append(block);
+      return () => {
+        const picked = choices.filter((box) => box.checked).map((box) => box.value);
+        if (other.value.trim()) picked.push(other.value.trim());
+        return picked.join(', ');
+      };
+    });
+    const submitButton = textButton('Submit answers', () => {
+      const answers = readers.map((read) => read());
+      if (answers.some((answer) => !answer)) { announce('Answer every question first.'); return; }
+      card.querySelectorAll('button,input').forEach((node) => { node.disabled = true; });
+      submitButton.replaceWith(el('span', 'meta', 'Answered'));
+      post({ type: 'questions-reply', id: m.id, answers });
+    }, true);
+    card.append(submitButton);
+    append(card);
+    announce('NEAR AI is asking you ' + (m.questions.length === 1 ? 'a question.' : m.questions.length + ' questions.'));
+  }
+
   function renderTodos(todos) {
     todoPanel.hidden = !todos.length;
     const list = el('ul');
@@ -347,7 +394,7 @@
     return commands.filter((command) => rank(command) < 3).sort((a, b) => rank(a) - rank(b)).slice(0, 12);
   }
   function renderMenu() {
-    const open = /^\/[\w-]*$/.test(input.value);
+    const open = /^\/[\w:-]*$/.test(input.value);
     const matches = open ? matchingCommands() : [];
     menu.hidden = !matches.length;
     input.setAttribute('aria-expanded', String(!menu.hidden));
@@ -359,28 +406,42 @@
       option.setAttribute('role', 'option');
       option.setAttribute('aria-selected', String(index === menuIndex));
       option.append(el('strong', '', '/' + command.command), el('span', '', command.description));
-      option.addEventListener('mousedown', (event) => { event.preventDefault(); runCommand(command.command); });
+      option.addEventListener('mousedown', (event) => { event.preventDefault(); chooseCommand(command); });
       return option;
     }));
     input.setAttribute('aria-activedescendant', 'command-' + matches[menuIndex].command);
   }
-  function runCommand(command) {
+  function findCommand(name) {
+    return commands.find((command) => command.command === name) || commands.find((command) => command.command === 'gsd-' + name);
+  }
+  function runCommand(command, args) {
     input.value = '';
+    input.placeholder = defaultPlaceholder;
     menu.hidden = true;
     autosize();
     updateSendState();
-    const turn = el('div', 'turn user', '/' + command);
-    append(turn);
+    append(el('div', 'turn user', '/' + command + (args ? ' ' + args : '')));
     setBusy(true);
-    post({ type: 'open-command', command });
+    post({ type: 'open-command', command, ...(args ? { args } : {}), ...(model.value ? { model: model.value } : {}) });
+  }
+  // Picking a command that takes arguments fills it in and shows its argument hint; others run at once.
+  function chooseCommand(command) {
+    if (!command.argumentHint) { runCommand(command.command); return; }
+    input.value = '/' + command.command + ' ';
+    input.placeholder = command.argumentHint;
+    menu.hidden = true;
+    autosize();
+    updateSendState();
+    input.focus();
   }
 
   function submit() {
     if (busy) { post({ type: 'stop' }); return; }
     const text = input.value.trim();
     if (!text) return;
-    const exact = /^\/([\w-]+)$/.exec(text);
-    if (exact && commands.some((command) => command.command === exact[1])) { runCommand(exact[1]); return; }
+    const slash = /^\/([\w:-]+)(?:\s+([\s\S]*))?$/.exec(text);
+    const command = slash && findCommand(slash[1]);
+    if (command) { runCommand(command.command, (slash[2] || '').trim()); return; }
     append(el('div', 'turn user', text));
     input.value = '';
     autosize();
@@ -403,7 +464,7 @@
         renderMenu();
         return;
       }
-      if ((event.key === 'Enter' || event.key === 'Tab') && matches[menuIndex]) { event.preventDefault(); runCommand(matches[menuIndex].command); return; }
+      if ((event.key === 'Enter' || event.key === 'Tab') && matches[menuIndex]) { event.preventDefault(); chooseCommand(matches[menuIndex]); return; }
       if (event.key === 'Escape') { menu.hidden = true; return; }
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); }
@@ -524,6 +585,10 @@
       }
       case 'history-error': notice(m.text, [], true); break;
       case 'artifacts': renderArtifacts(m.artifacts); break;
+      case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
+      case 'notice': notice(m.text || '', []); break;
+      case 'agents': status.textContent = /Agents \d+/.test(status.textContent) ? status.textContent.replace(/Agents \d+/, 'Agents ' + m.count) : status.textContent; break;
+      case 'questions-request': onQuestions(m); break;
       default: break;
     }
   });

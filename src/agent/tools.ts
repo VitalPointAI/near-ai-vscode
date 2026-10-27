@@ -19,6 +19,8 @@ export interface ToolContext {
   readFiles: Set<string>;
   ripgrepPath?: string;
   onTodos?: (todos: Todo[]) => void;
+  /** Directories Read, Glob, and Grep may also use (the Open-GSD runtime); never writable. */
+  readOnlyRoots?: string[];
 }
 
 /** What an approval card shows before a risky call runs. */
@@ -85,7 +87,7 @@ export const readTool: AgentTool<{ path: string; offset: number; limit: number }
   title: (input) => `Read ${input.path}`,
   sensitive: (input) => sensitivePathReason(input.path),
   async run(input, context) {
-    const absolute = await resolveInWorkspace(context.root, input.path);
+    const absolute = await resolveInWorkspace(context.root, input.path, context.readOnlyRoots);
     const text = await readText(absolute);
     context.readFiles.add(absolute);
     const lines = text.split(/\r?\n/);
@@ -187,7 +189,7 @@ export const globTool: AgentTool<{ pattern: string; path?: string }> = {
   parse: (raw) => ({ pattern: str(raw, 'pattern')!, path: str(raw, 'path', false) }),
   title: (input) => `Find ${input.pattern}${input.path ? ` in ${input.path}` : ''}`,
   async run(input, context) {
-    const base = await resolveInWorkspace(context.root, input.path ?? '.');
+    const base = await resolveInWorkspace(context.root, input.path ?? '.', context.readOnlyRoots);
     const includeSkipped = [...SKIP_DIRS].some((name) => input.pattern.includes(name));
     const found: Array<{ relative: string; absolute: string }> = [];
     await walk(context.root, base, (absolute, relative) => {
@@ -216,7 +218,7 @@ export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string
   title: (input) => `Search for ${JSON.stringify(input.pattern)}${input.glob ? ` in ${input.glob}` : ''}`,
   sensitive: (input) => (input.path ? sensitivePathReason(input.path) : undefined),
   async run(input, context) {
-    const base = await resolveInWorkspace(context.root, input.path ?? '.');
+    const base = await resolveInWorkspace(context.root, input.path ?? '.', context.readOnlyRoots);
     const output = context.ripgrepPath ? await ripgrep(context.ripgrepPath, base, input, context) : await jsGrep(base, input, context);
     const lines = output.split('\n').filter(Boolean).map((line) => line.startsWith(context.root) ? displayPath(context.root, line.split(':')[0]) + line.slice(line.split(':')[0].length) : line);
     if (!lines.length) return 'No matches.';

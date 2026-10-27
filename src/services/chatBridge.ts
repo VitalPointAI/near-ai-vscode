@@ -23,7 +23,8 @@ export type ChatWebviewMessage =
   | { type: 'load-models' }
   | { type: 'open-setup' }
   | { type: 'refresh-status' }
-  | { type: 'open-command'; command: string }
+  | { type: 'open-command'; command: string; args?: string; model?: string }
+  | { type: 'questions-reply'; id: string; answers: string[] }
   | { type: 'open-artifact'; path: string; kind: GsdArtifactKind }
   | { type: 'send'; text: string; model?: string; overrideToken?: string }
   | { type: 'stop' }
@@ -524,9 +525,17 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'path' && key !== 'kind')) return undefined;
     return { type: 'open-artifact', path: message.path, kind: message.kind };
   }
-  if (message.type === 'open-command' && typeof message.command === 'string' && GSD_COMMANDS.some((definition) => definition.command === message.command)) {
-    if (Object.keys(message).some((key) => key !== 'type' && key !== 'command')) return undefined;
-    return { type: 'open-command', command: message.command };
+  // Slash commands name an installed Open-GSD skill; the host checks it exists in the installed version.
+  if (message.type === 'open-command' && typeof message.command === 'string' && /^[a-z0-9][a-z0-9:_-]{0,79}$/i.test(message.command)) {
+    if (Object.keys(message).some((key) => !['type', 'command', 'args', 'model'].includes(key))) return undefined;
+    if (message.args !== undefined && (typeof message.args !== 'string' || message.args.length > 4000)) return undefined;
+    if (message.model !== undefined && (typeof message.model !== 'string' || message.model.length > 200)) return undefined;
+    return { type: 'open-command', command: message.command, ...(message.args ? { args: (message.args as string).trim() } : {}), ...(message.model ? { model: (message.model as string).trim() } : {}) };
+  }
+  if (message.type === 'questions-reply' && typeof message.id === 'string' && /^q-[a-f0-9]{12}$/.test(message.id) && Array.isArray(message.answers)) {
+    if (Object.keys(message).some((key) => !['type', 'id', 'answers'].includes(key))) return undefined;
+    if (message.answers.length > 4 || message.answers.some((answer) => typeof answer !== 'string' || answer.length > 4000)) return undefined;
+    return { type: 'questions-reply', id: message.id, answers: message.answers as string[] };
   }
   if (message.type !== 'send' || typeof message.text !== 'string' || !message.text.trim()) return undefined;
   if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model' && key !== 'overrideToken')) return undefined;

@@ -34,3 +34,13 @@ export function readAgentRules(): PermissionRules {
   };
   return { allowCommands: list('agent.allowCommands', DEFAULT_RULES.allowCommands), denyCommands: list('agent.denyCommands', DEFAULT_RULES.denyCommands) };
 }
+
+/** NEAR models for Open-GSD's model tiers (opus → deep, sonnet → standard, haiku → fast). */
+export function readModelTiers(): { deep: string; standard: string; fast: string } {
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const pick = (key: string, fallback: string) => {
+    const value = configuration.get<unknown>(key, fallback);
+    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  };
+  return { deep: pick('agent.deepModel', 'moonshotai/kimi-k3'), standard: pick('agent.standardModel', 'z-ai/glm-5.3'), fast: pick('agent.fastModel', 'z-ai/glm-5.3-flash') };
+}

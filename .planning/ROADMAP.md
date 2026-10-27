@@ -92,6 +92,8 @@ Install Open-GSD's Claude runtime into extension-owned storage (never the user's
 
 **Requirements:** RUN-01..06, GSD-01, GSD-03, GSD-04, GSD-05, CHAT-02, CHAT-03, CHAT-05
 
+**Status:** Complete 2026-10-26 except RUN-06's live run, moved to phase 12 (`phases/09-open-gsd-on-the-runner/09-01-SUMMARY.md`). A foreground Agent tool was pulled in from phase 10 because GSD workflows depend on it.
+
 ### Phase 10: Sub-agents, background work, context, and sessions
 
 Implement the Agent/Task tool from GSD agent definitions (system prompt, tool allowlist, model tier mapped to NEAR models: deep = Kimi K3, default = GLM 5.3, fast = GLM 5.3 Flash), parallel and background agents with limits and notifications, and real agent events feeding the fleet view. Add context management (budget tracking, tool-output truncation, summarization-based compaction), continuity thresholds with automatic handoff and restore, durable local session transcripts with resume, WebFetch behind approval, and an assessment of the Workflow tool and MCP clients that GSD workflows reference.
@@ -116,4 +118,4 @@ NEAR account sign-in (AUTH-02) and wallet, staking, and entitlement (AUTH-04, CO
 
 ## Next action
 
-Phase 9: plan with `/gsd-plan-phase 9`.
+Phase 10: plan with `/gsd-plan-phase 10`.

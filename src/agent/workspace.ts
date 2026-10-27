@@ -13,15 +13,16 @@ export class ToolError extends Error {
  * taken from the workspace root. Symlinks are followed for whatever part of the path exists, so
  * a link inside the workspace cannot be used to reach files outside it.
  */
-export async function resolveInWorkspace(root: string, requested: string): Promise<string> {
+export async function resolveInWorkspace(root: string, requested: string, readOnlyRoots: string[] = []): Promise<string> {
   if (typeof requested !== 'string' || !requested.trim() || requested.includes('\0')) throw new ToolError('A file path is required.');
   const realRoot = await realpath(root);
   const absolute = path.resolve(realRoot, requested.trim());
   const resolved = await realpathOfExistingPrefix(absolute);
-  if (resolved !== realRoot && !resolved.startsWith(realRoot + path.sep)) {
-    throw new ToolError(`${requested} is outside the workspace. Tools can only use files under ${realRoot}.`);
-  }
-  return resolved;
+  const within = (base: string) => resolved === base || resolved.startsWith(base + path.sep);
+  if (within(realRoot)) return resolved;
+  // Extra roots (the Open-GSD runtime) can be read but are never passed for writes.
+  for (const extra of readOnlyRoots) if (within(await realpath(extra).catch(() => extra))) return resolved;
+  throw new ToolError(`${requested} is outside the workspace. Tools can only use files under ${realRoot}.`);
 }
 
 export function displayPath(root: string, absolute: string): string {

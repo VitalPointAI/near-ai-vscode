@@ -48,7 +48,8 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
 export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspSource'>, media: vscode.Uri): string {
   const nonce = randomBytes(16).toString('base64');
   const asset = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
-  const commands = JSON.stringify(GSD_COMMANDS.map(({ command, title, description }) => ({ command, title, description })));
+  // The host replaces this list with the installed Open-GSD skills once they load.
+  const commands = JSON.stringify(GSD_COMMANDS.map(({ command, title, description }) => ({ command: `gsd-${command}`, title, description })));
   const start = ['new-project', 'onboard', 'progress'].map((id) => GSD_COMMANDS.find((definition) => definition.command === id)).filter((definition) => definition !== undefined);
   return `<!doctype html>
 <html lang="en">
@@ -65,7 +66,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
     <h2>Private AI for this project</h2>
     <p>Ask anything about your code, or type <strong>/</strong> for Open-GSD workflows. Models marked 🔒 run inside NEAR AI's attested TEE; others are forwarded by NEAR to another provider, and every reply says which.</p>
     <div class="suggestions">
-      ${start.map((definition) => `<button type="button" data-command="${definition.command}">${escapeText(definition.title)}<small>${escapeText(definition.description)}</small></button>`).join('\n      ')}
+      ${start.map((definition) => `<button type="button" data-command="gsd-${definition.command}">${escapeText(definition.title)}<small>${escapeText(definition.description)}</small></button>`).join('\n      ')}
     </div>
   </section>
 </main>

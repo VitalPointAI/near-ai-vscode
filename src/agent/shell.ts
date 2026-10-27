@@ -25,7 +25,7 @@ export class ShellSession {
   private cwd: string;
   private readonly jobs = new Map<string, BackgroundJob>();
 
-  public constructor(root: string, private readonly shellPath: string = findShell()) {
+  public constructor(root: string, private readonly shellPath: string = findShell(), private readonly extraEnv: NodeJS.ProcessEnv = {}) {
     this.cwd = root;
   }
 
@@ -37,7 +37,7 @@ export class ShellSession {
 
   public startBackground(command: string): string {
     const id = `bash_${randomBytes(4).toString('hex')}`;
-    const child = spawn(this.shellPath, ['-c', command], { cwd: this.cwd, env: shellEnv(), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(this.shellPath, ['-c', command], { cwd: this.cwd, env: shellEnv(this.extraEnv), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const job: BackgroundJob = { process: child, output: '', read: 0, exitCode: undefined, command };
     const append = (chunk: Buffer) => { job.output = (job.output + chunk.toString()).slice(-MAX_BACKGROUND_BUFFER); };
     child.stdout?.on('data', append);
@@ -109,7 +109,7 @@ export class ShellSession {
   private ensureShell(): ChildProcess {
     if (this.process && this.process.exitCode === null) return this.process;
     const args = /bash(\.exe)?$/.test(this.shellPath) ? ['--noprofile', '--norc'] : [];
-    const child = spawn(this.shellPath, args, { cwd: this.cwd, env: shellEnv(), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(this.shellPath, args, { cwd: this.cwd, env: shellEnv(this.extraEnv), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child.stderr?.on('data', (chunk: Buffer) => { child.stdout?.emit('data', chunk); });
     child.on('error', () => undefined);
     child.stdin?.write('exec 2>&1\n');
@@ -123,8 +123,11 @@ export class ShellSession {
   }
 }
 
-function shellEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, PAGER: 'cat', GIT_PAGER: 'cat', TERM: 'dumb', NO_COLOR: '1', CI: process.env.CI ?? '' };
+function shellEnv(extra: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const base: NodeJS.ProcessEnv = { ...process.env, PAGER: 'cat', GIT_PAGER: 'cat', TERM: 'dumb', NO_COLOR: '1', CI: process.env.CI ?? '' };
+  // Electron's own flag must not leak into commands the agent runs.
+  delete base.ELECTRON_RUN_AS_NODE;
+  return { ...base, ...extra };
 }
 
 function killGroup(child: ChildProcess): void {

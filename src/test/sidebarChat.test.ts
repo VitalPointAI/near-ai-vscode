@@ -51,7 +51,7 @@ test('sidebar html loads only nonce scripts and theme-relative assets', () => {
   assert.doesNotMatch(html, /<style|\sstyle="|\son[a-z]+="|unsafe-inline/);
   assert.match(html, /default-src 'none'/);
   const commands = JSON.parse(/data-commands="([^"]*)"/.exec(html)?.[1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&') ?? '[]') as Array<{ command: string }>;
-  assert.ok(commands.some((command) => command.command === 'new-project'));
+  assert.ok(commands.some((command) => command.command === 'gsd-new-project'));
 });
 
 test('new sidebar intents are strictly validated', () => {

@@ -26,6 +26,8 @@ export interface AgentRunOptions {
   policy: ActionPolicy;
   rules: PermissionRules;
   maxTurns?: number;
+  /** Shared with sub-agents so "allow for this run" covers the whole run. */
+  grants?: RunGrants;
   requestApproval(request: ApprovalRequest): Promise<ApprovalReply>;
   emit(event: AgentEvent): void;
 }
@@ -40,11 +42,12 @@ const UI_OUTPUT_CHARS = 6_000;
  * calling a tool, the turn limit is reached, or the run is cancelled.
  */
 export class AgentRun {
-  public readonly grants = new RunGrants();
+  public readonly grants: RunGrants;
   private readonly byName: Map<string, AgentTool<any>>;
   private readonly definitions: ToolDefinition[];
 
   public constructor(private readonly options: AgentRunOptions) {
+    this.grants = options.grants ?? new RunGrants();
     this.byName = new Map(options.tools.map((tool) => [tool.name, tool]));
     this.definitions = options.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } }));
   }

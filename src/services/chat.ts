@@ -3,22 +3,21 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import * as vscode from 'vscode';
-import { formatGsdStatusLine, parseGsdPlanningState, statusSnapshot } from '../domain/gsdStatus';
+import { formatGsdStatusLine, parseGsdPlanningState, statusSnapshot, withLiveStatus } from '../domain/gsdStatus';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { AuthService } from './auth';
 import { createNearAiProvider } from './providerFactory';
 import { activeProvider, clientFor } from './providerCache';
-import { AgentConversation } from './agentSession';
+import { AgentConversation, findSkill, GsdContext } from './agentSession';
+import { GsdHost } from '../gsd/host';
 import { findRipgrep } from '../agent/tools';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { OutboundGuard, spentTodayUsd } from './outboundGuard';
 import { ProfileStore } from './profileStore';
-import { readAgentRules, readSettings, shouldAutoInstallGsd } from './settings';
+import { readAgentRules, readModelTiers, readSettings, shouldAutoInstallGsd } from './settings';
 import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, promptMessage, promptResponseMatches, progressActivitySummary, progressCardMessage, GsdArtifactLink, profileStatusMessage, walletStatusMessage, walletPreviewMessage, walletHistoryMessage, walletErrorMessage, teamListMessage, teamPreviewMessage, teamStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage, capabilityAwareTeamPreview, generationPreviewMessage, generationStatusMessage, generationPublicationMessage, memoryInspectMessage, memorySliceMessage, memoryApprovalPreviewMessage, multimodalStatusMessage, sanitizeContextGraphNode } from './chatBridge';
 import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './chatBridge';
 import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
-import { GsdProgressEvent, GsdRunner } from './gsdRunner';
-import { GsdUpdater } from './gsdUpdater';
 import { ActivityStore } from './activityStore';
 import { AnalyticsStore } from './analyticsStore';
 import { AuditStore } from './auditStore';
@@ -78,7 +77,6 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     abort: undefined as AbortController | undefined,
     model: readSettings().defaultModel,
     history: [] as ConversationTurn[],
-    gsd: new GsdRunner(),
     activity: undefined as ActivityStore | undefined,
     activeSessionId: undefined as string | undefined,
     prompt: undefined as StructuredPrompt | undefined,
@@ -111,8 +109,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       state.abort?.abort();
       state.abort = undefined;
       state.agent?.stop();
-      state.gsd.cancel();
       panel.webview.postMessage({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
+      return;
+    }
+    if (message.type === 'questions-reply') {
+      state.agent?.answerQuestions(message.id, message.answers);
       return;
     }
     if (message.type === 'attachment-select') {
@@ -374,28 +375,6 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       else panel.webview.postMessage({ type: 'analytics', result: buildFleetView(result.fleet, state.quiet) });
       return;
     }
-    if (message.type === 'prompt-choice' || message.type === 'prompt-answer' || message.type === 'prompt-cancel' || message.type === 'prompt-resume') {
-      const response = message as PromptResponse;
-      if (!promptResponseMatches(response, state.prompt) || state.activeSessionId !== response.sessionId) {
-        panel.webview.postMessage({ type: 'prompt-error', text: 'That prompt is no longer active. Refresh the session and try again.' });
-        return;
-      }
-      state.gsd.respond(response);
-      if (response.type === 'prompt-cancel') {
-        state.prompt = { ...state.prompt as StructuredPrompt, state: 'cancelled' };
-        if (state.activity) await state.activity.append(response.sessionId, { status: 'cancelled', kind: 'session', summary: 'Structured prompt cancelled; prior session context retained.' });
-      } else if (response.type === 'prompt-resume') {
-        state.prompt = { ...state.prompt as StructuredPrompt, state: 'resumed' };
-        if (state.activity) await state.activity.append(response.sessionId, { status: 'waiting', kind: 'session', summary: 'Structured prompt resumed from the existing session.' });
-      } else {
-        state.prompt = { ...state.prompt as StructuredPrompt, state: 'answered' };
-        if (state.activity) await state.activity.append(response.sessionId, { status: 'running', kind: 'message', summary: 'Structured prompt response accepted; session context retained.' });
-      }
-      // The runner owns the process boundary. This typed message is the only value
-      // sent back across it; no raw command or stored prompt is replayed by the UI.
-      panel.webview.postMessage({ type: 'prompt-response-accepted', responseType: response.type, sessionId: response.sessionId, promptId: response.promptId });
-      return;
-    }
     if (message.type === 'reopen-session' || message.type === 'continue-session') {
       const store = state.activity ?? createActivityStore();
       state.activity = store;
@@ -406,14 +385,6 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       state.history = [{ role: 'assistant', content: `Reopened ${session.project}${session.phase ? ` · ${session.phase}` : ''}. Prior prompts are not retained by default. The recorded outcome was ${session.outcome}; no command was replayed.` }];
       panel.webview.postMessage({ type: 'session-reopened', session: sessionSummaryMessage(session), continuation: session.continuationAvailable });
       if (message.type === 'continue-session') panel.webview.postMessage({ type: 'prefill', text: 'Continue from the reopened project context without replaying the completed process.' });
-      return;
-    }
-    if (message.type === 'open-command') {
-      if (isEmergencyStopped()) { panel.webview.postMessage({ type: 'command-progress', state: 'failed', command: message.command, text: 'Emergency stop is on. Run "NEAR AI: Resume" first.' }); return; }
-      const definition = GSD_COMMANDS.find((candidate) => candidate.command === message.command);
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (definition && root) { state.activity = state.activity ?? new ActivityStore(root); await ensureOpenGsd(root); await runGsdCommand(panel, state.gsd, definition.command, root, state.activity, (prompt) => { state.prompt = prompt; state.activeSessionId = prompt.sessionId; }); }
-      else panel.webview.postMessage({ type: 'command-progress', state: 'failed', command: message.command, text: 'Open a workspace before running an Open-GSD workflow.' });
       return;
     }
     if (message.type === 'open-artifact') {
@@ -427,7 +398,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await loadModels(panel, auth);
       return;
     }
-    if (message.type !== 'send' || !message.text?.trim()) return;
+    if (message.type !== 'send' && message.type !== 'open-command') return;
+    if (message.type === 'send' && !message.text?.trim()) return;
+    if (isEmergencyStopped()) { panel.webview.postMessage({ type: 'outbound-blocked', text: '', model: '', reason: 'Emergency stop is on. Run "NEAR AI: Resume" to continue.', confirm: false }); return; }
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     let active;
     try {
@@ -445,27 +418,52 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const model = message.model?.trim() || state.model;
     if (!model) { panel.webview.postMessage({ type: 'assistant-error', text: 'Choose a model from the list below the message box.' }); return; }
     const modelInfo = active.models.find((candidate) => candidate.id === model);
+    // Open-GSD: a slash command installs it when missing; plain chat uses it only if already installed.
+    const gsdHost = gsdHostFor(context);
+    let gsd: GsdContext | undefined;
+    let skill: { name: string; args: string } | undefined;
+    try {
+      if (message.type === 'open-command') {
+        if (!(await gsdHost.context())) {
+          if (!shouldAutoInstallGsd()) { panel.webview.postMessage({ type: 'assistant-error', text: 'Open-GSD is not installed. Turn on nearAi.autoInstallGsd to install it when you run a workflow.' }); return; }
+          panel.webview.postMessage({ type: 'notice', text: 'Installing Open-GSD for NEAR AI (first workflow only)…' });
+        }
+        gsd = await gsdHost.ensure();
+        const found = findSkill(gsd.skills, message.command);
+        if (!found) { panel.webview.postMessage({ type: 'assistant-error', text: `Open-GSD ${await gsdHost.runtime.installedVersion()} has no /${message.command} command.` }); return; }
+        skill = { name: found.name, args: message.args ?? '' };
+        panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHost) });
+      } else {
+        gsd = await gsdHost.context();
+      }
+    } catch (error) {
+      panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
+      return;
+    }
+    const text = message.type === 'send' ? message.text : `/${skill!.name}${skill!.args ? ` ${skill!.args}` : ''}`;
     state.activity = state.activity ?? new ActivityStore(root);
     const settings = readSettings();
     if (!state.guard || state.guardSettings !== JSON.stringify([settings.privacyMode, settings.dailySpendLimitUsd, settings.actionPolicy])) {
       state.guard = new OutboundGuard(settings);
       state.guardSettings = JSON.stringify([settings.privacyMode, settings.dailySpendLimitUsd, settings.actionPolicy]);
     }
-    const verdict = state.guard.check({ model, modelInfo, text: message.text, overrideToken: message.overrideToken }, spentTodayUsd(await state.activity.list()));
+    const verdict = state.guard.check({ model, modelInfo, text, overrideToken: message.type === 'send' ? message.overrideToken : undefined }, spentTodayUsd(await state.activity.list()));
     if (verdict.outcome !== 'allow') {
-      panel.webview.postMessage({ type: 'outbound-blocked', text: message.text, model, reason: verdict.reason, overrideToken: verdict.overrideToken, confirm: verdict.outcome === 'confirm' });
+      panel.webview.postMessage({ type: 'outbound-blocked', text, model, reason: verdict.reason, overrideToken: message.type === 'send' ? verdict.overrideToken : undefined, confirm: verdict.outcome === 'confirm' });
       return;
     }
     state.model = model;
     state.providerProfileId = active.provider.profileId;
     const attribution = hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization);
-    const session = await state.activity.start({ project: path.basename(root), attribution, model, summary: 'Agent conversation turn started.' });
+    const session = await state.activity.start({ project: path.basename(root), attribution, model, ...(skill ? { plans: [skill.name] } : {}), summary: skill ? `/${skill.name} started.` : 'Agent conversation turn started.' });
     state.activeSessionId = session.sessionId;
     state.agent = state.agent ?? new AgentConversation(root, (outbound) => { void panel.webview.postMessage(outbound); }, path.join(context.globalStorageUri.fsPath, 'checkpoints'), ripgrepPath());
     try {
       const route = clientFor(active, model);
-      await state.agent.send({ text: message.text, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local });
+      await state.agent.send({ text, skill, gsd, tiers: readModelTiers(), availableModels: active.models.map((candidate) => candidate.id), client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local });
       await sendHistory(panel, state.activity);
+      panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine({ agents: 0, activity: state.activity }) });
+      await sendArtifacts(panel);
     } catch (error) {
       await state.activity.append(session.sessionId, { status: 'failed', summary: 'Agent run failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
       panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
@@ -477,22 +475,17 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     state.abort?.abort();
     state.abort = undefined;
     state.agent?.stop();
-    state.gsd.cancel();
     panel.webview.postMessage({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
   }, undefined, context.subscriptions);
   if (initialPrompt) panel.webview.postMessage({ type: 'prefill', text: initialPrompt });
   panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine() });
-  panel.webview.postMessage({ type: 'commands', commands: GSD_COMMANDS });
+  panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHostFor(context)) });
   await sendArtifacts(panel);
   state.activity = createActivityStore();
   await sendHistory(panel, state.activity);
   await sendProfileStatus(panel, auth);
   await sendStakingStatus(panel, state.staking);
   await loadModels(panel, auth);
-  if (initialGsdCommand) {
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (root) { state.activity = state.activity ?? new ActivityStore(root); await ensureOpenGsd(root); await runGsdCommand(panel, state.gsd, initialGsdCommand, root, state.activity, (prompt) => { state.prompt = prompt; state.activeSessionId = prompt.sessionId; }); }
-  }
 }
 
 export async function openGsdArtifact(root: string, requested: Pick<GsdArtifactLink, 'path' | 'kind'>, artifacts: GsdArtifactLink[]): Promise<boolean> {
@@ -525,36 +518,20 @@ function ripgrepPath(): string | undefined {
   return appRoot ? findRipgrep(appRoot, (candidate) => existsSync(candidate)) : undefined;
 }
 
-/** Running an Open-GSD command from the extension is what makes a workspace a NEAR AI project, so a missing runtime is installed only here. */
-async function ensureOpenGsd(root: string): Promise<void> {
-  if (shouldAutoInstallGsd()) await new GsdUpdater(undefined, root).ensureInstalled();
+/** One GSD host per extension storage folder, shared by the sidebar and the Tools tab. */
+const gsdHosts = new Map<string, GsdHost>();
+function gsdHostFor(context: vscode.ExtensionContext): GsdHost {
+  const storage = context.globalStorageUri.fsPath;
+  let host = gsdHosts.get(storage);
+  if (!host) { host = new GsdHost(storage); gsdHosts.set(storage, host); }
+  return host;
 }
 
-export async function runGsdCommand(panel: ChatHost, runner: GsdRunner, command: string, root: string, activity: ActivityStore, onPrompt?: (prompt: StructuredPrompt) => void): Promise<void> {
-  const session = await activity.start({ project: path.basename(root), plans: [command], summary: `Open-GSD /${command} started.` });
-  try {
-    let progressIndex = 0;
-    let activityWrites = Promise.resolve();
-    await runner.run(command, root, (event: GsdProgressEvent) => {
-      const card = progressCardMessage({ ...event, sessionId: session.sessionId, phase: command }, progressIndex++);
-      panel.webview.postMessage({ type: 'progress-card', card });
-      panel.webview.postMessage({ type: 'command-progress', ...event, sessionId: session.sessionId });
-      activityWrites = activityWrites.then(async () => { await activity.append(session.sessionId, { status: event.state === 'completed' ? 'completed' : event.state === 'cancelled' ? 'cancelled' : event.state === 'failed' ? 'failed' : event.state === 'waiting' ? 'waiting' : 'running', kind: event.state === 'waiting' || card.approvalRequired ? 'approval' : 'tool', approvalRequired: card.approvalRequired === true || event.state === 'waiting', summary: progressActivitySummary(card), phase: card.phase, tool: card.tool, action: card.action, model: card.model, agentId: card.agent, agentCount: card.agentCount, attempt: card.attempt, retry: card.retry, plan: command }); });
-      const parsedPrompt = promptMessage((event as GsdProgressEvent & { prompt?: unknown }).prompt);
-      const runtimePrompt = parsedPrompt ? { ...parsedPrompt, sessionId: session.sessionId } : undefined;
-      if (runtimePrompt) { onPrompt?.(runtimePrompt); panel.webview.postMessage({ type: 'structured-prompt', prompt: runtimePrompt }); }
-      if (event.state === 'completed' || event.state === 'failed' || event.state === 'cancelled') {
-        void readGsdStatusLine().then((value) => panel.webview.postMessage({ type: 'status', value }));
-        void sendArtifacts(panel);
-      }
-    });
-    await activityWrites;
-    await sendHistory(panel, activity);
-  } catch (error) {
-    await activity.append(session.sessionId, { status: 'failed', summary: 'Open-GSD command could not be started.' });
-    panel.webview.postMessage({ type: 'command-progress', state: 'failed', command, text: error instanceof Error ? error.message : 'Open-GSD could not be started.' });
-    await sendHistory(panel, activity);
-  }
+/** Slash commands for the composer: the installed skills, or the core workflows before the first install. */
+async function commandList(host: GsdHost): Promise<Array<{ command: string; title: string; description: string; argumentHint?: string }>> {
+  const installed = await host.commands().catch(() => []);
+  if (installed.length) return installed.map((command) => ({ command: command.name, title: command.name, description: command.description, ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}) }));
+  return GSD_COMMANDS.map((definition) => ({ command: `gsd-${definition.command}`, title: definition.title, description: definition.description }));
 }
 
 function createActivityStore(): ActivityStore | undefined {
@@ -761,17 +738,20 @@ async function sendProfileStatus(panel: ChatHost, auth: AuthService, existing?: 
   panel.webview.postMessage({ type: 'profile-status', value });
 }
 
-async function readGsdStatusLine(): Promise<string> {
+async function readGsdStatusLine(live?: { agents: number; activity?: ActivityStore }): Promise<string> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) return 'No workspace · GSD not initialized · Agents 0';
+  if (!root) return 'No workspace';
   const statePath = path.join(root, '.planning', 'STATE.md');
   const roadmapPath = path.join(root, '.planning', 'ROADMAP.md');
+  let line: string;
   try {
     const [state, roadmap] = await Promise.all([fs.readFile(statePath, 'utf8'), fs.readFile(roadmapPath, 'utf8')]);
-    return formatGsdStatusLine(statusSnapshot(parseGsdPlanningState(state, roadmap)));
+    line = formatGsdStatusLine(statusSnapshot(parseGsdPlanningState(state, roadmap)));
   } catch {
-    return 'GSD not initialized · Run setup to begin · Agents 0';
+    line = 'No GSD project yet · type /gsd-new-project to start · Agents 0';
   }
+  const spent = live?.activity ? spentTodayUsd(await live.activity.list().catch(() => [])) : 0;
+  return withLiveStatus(line, { agents: live?.agents ?? 0, spentTodayUsd: spent });
 }
 
 function chatHtml2(_webview?: vscode.Webview): string {

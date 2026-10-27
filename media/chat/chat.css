@@ -133,6 +133,13 @@ details.agent-tool .state { color: var(--vscode-errorForeground); }
 #todos .todo.completed::before { content: '✓'; color: var(--vscode-testing-iconPassed, inherit); }
 .changes { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; font-size: 12px; color: var(--vscode-descriptionForeground); }
 
+/* AskUserQuestion */
+.questions fieldset { margin: 0 0 10px; padding: 0; border: 0; }
+.questions legend { padding: 0; margin-bottom: 6px; font-weight: 600; }
+.questions .option { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; align-items: baseline; padding: 3px 0; cursor: pointer; }
+.questions .option small { grid-column: 2; color: var(--vscode-descriptionForeground); }
+.questions input.other { margin-top: 4px; }
+
 /* Planning-file links and post-run next steps */
 #project-links { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 0 2px 6px; font-size: 11px; }
 #project-links[hidden] { display: none; }

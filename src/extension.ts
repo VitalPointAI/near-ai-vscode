@@ -3,7 +3,7 @@ import { redactSecrets } from './domain/redaction';
 import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
-import { GsdUpdater } from './services/gsdUpdater';
+import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
 import { readSettings, shouldAutoInstallGsd } from './services/settings';
 import { openOnboarding } from './services/onboarding';
 import { openTools } from './services/chat';
@@ -19,7 +19,11 @@ import { clearProviderCache } from './services/providerCache';
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new AuthService(context.secrets);
   initEmergencyStop(context);
-  if (shouldAutoInstallGsd()) void new GsdUpdater().start(context);
+  if (shouldAutoInstallGsd()) {
+    void startRuntimeUpdates(new GsdRuntime(context.globalStorageUri.fsPath), vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, (message, failed) => {
+      void (failed ? vscode.window.showWarningMessage(message) : vscode.window.showInformationMessage(message));
+    }).then((updates) => { if (updates) context.subscriptions.push(updates); });
+  }
 
   const sidebar = new NearAiPanelViewProvider(context, auth);
   context.subscriptions.push(
@@ -46,14 +50,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('nearAi.showHistory', () => showHistory(sidebar)),
     vscode.commands.registerCommand('nearAi.gsdCommand', async () => {
       const selected = await chooseGsdCommand();
-      if (selected) await sidebar.request({ type: 'open-command', command: selected.command });
+      if (selected) await sidebar.request({ type: 'open-command', command: `gsd-${selected.command}` });
     }),
-    vscode.commands.registerCommand('nearAi.gsdProgress', () => sidebar.request({ type: 'open-command', command: 'progress' })),
+    vscode.commands.registerCommand('nearAi.gsdProgress', () => sidebar.request({ type: 'open-command', command: 'gsd-progress' })),
     vscode.commands.registerCommand('nearAi.saveCheckpoint', () => saveCheckpoint())
   );
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
-  registerChatParticipant(context, auth);
+  registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
 }
 
 async function showHistory(sidebar: NearAiPanelViewProvider): Promise<void> {

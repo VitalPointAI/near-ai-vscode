@@ -62,10 +62,14 @@ as a row in the chat.
 
 ![Open-GSD command menu](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-commands.png)
 
-Type `/` to run any of 16 workflows: start a project, onboard an existing
-codebase, discuss, plan, and execute phases, verify work, review code, map the
-codebase, and more. Runs appear as collapsible activity rows, and when a
-workflow needs a decision, it asks you right in the chat.
+Type `/` for every installed Open-GSD workflow: start a project, onboard an
+existing codebase, discuss, plan, and execute phases, verify work, review code,
+map the codebase, and more, with arguments such as `/gsd-plan-phase 3`.
+Workflows run on the NEAR AI agent runner with your chosen model: their
+sub-agents appear as activity rows, file changes ask for approval and can be
+reverted, and when a workflow needs a decision it asks you right in the chat.
+Open-GSD installs itself into the extension's own storage the first time you
+run a workflow and stays current; your `~/.claude` setup is never touched.
 
 ![A planning workflow asking for a decision](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-workflow.png)
 
@@ -115,9 +119,8 @@ Read the full [security and trust report](SECURITY.md).
 
 - VS Code 1.90 or newer.
 - A NEAR AI Cloud API key, a local OpenAI-compatible runtime, or both.
-- For Open-GSD workflows, for now: the Codex CLI (`codex`) on your PATH and
-  npm access. These runs use Codex's own configured model provider, not NEAR AI,
-  until the native NEAR runner replaces it (see [SECURITY.md](SECURITY.md)).
+- For Open-GSD workflows: npm access, so Open-GSD can be installed the first
+  time you run one.
 
 ## Settings
 
@@ -127,6 +130,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.actionPolicy` | `approve-risky` | `approve-risky`: edits and commands ask first. `mostly-autonomous`: edits run, commands ask. `fully-autonomous`: everything runs except deny-listed commands. |
 | `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking (simple commands only; anything with `;`, `|`, `>`, or `$( )` asks). |
 | `nearAi.agent.denyCommands` | `rm -rf /`, `git push --force`, … | Commands the agent may never run. |
+| `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / GLM 5.3 Flash | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
 | `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |
 | `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount. |
@@ -145,9 +149,8 @@ Read the full [security and trust report](SECURITY.md).
   validate a profile for this project.
 - **No models or costs shown:** check your API key and endpoint; prices appear
   when the provider publishes them.
-- **A workflow won't start:** make sure `codex` is on your PATH and npm can
-  reach the registry, then run any command, such as `/progress`, to install
-  Open-GSD.
+- **A workflow won't start:** make sure npm can reach the registry, then run
+  any workflow, such as `/gsd-progress`, to install Open-GSD.
 - **Endpoint rejected:** use an `https://` URL, or `http://localhost` for a
   local runtime.
 - **Local runtime unreachable:** start it (for example `ollama serve`) and

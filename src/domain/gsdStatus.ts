@@ -94,5 +94,12 @@ export function formatGsdStatusLine(snapshot: GsdStatusSnapshot): string {
     snapshot.budgetRemainingUsd === undefined ? undefined : `Budget $${snapshot.budgetRemainingUsd.toFixed(4)}`
   ].filter((value): value is string => value !== undefined);
   const cost = costs.length ? ` · ${costs.join(' · ')}` : '';
-  return `${percent} · ${phase} · ${plan} · ${snapshot.state} · ${agents}${cost}`;
+  const state = snapshot.state ? ` · ${snapshot.state}` : '';
+  return `${percent} · ${phase} · ${plan}${state} · ${agents}${cost}`;
+}
+
+/** Live facts the runner knows that STATE.md does not: running sub-agents and today's spend. */
+export function withLiveStatus(line: string, live: { agents: number; spentTodayUsd: number }): string {
+  const withAgents = line.replace(/Agents \d+/, `Agents ${live.agents}`);
+  return live.spentTodayUsd > 0 ? `${withAgents} · $${live.spentTodayUsd.toFixed(2)} today` : withAgents;
 }

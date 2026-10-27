@@ -5,7 +5,6 @@ import path from 'node:path';
 import test from 'node:test';
 import { discoverGsdArtifacts, isSafeArtifactPath, promptResponseMessage, profileStatusMessage } from '../services/chatBridge';
 import { ActivityStore } from '../services/activityStore';
-import { GsdProgressEvent, GsdRunner } from '../services/gsdRunner';
 
 test('chat prompt controls accept only typed, session-bound response shapes', () => {
   assert.deepEqual(promptResponseMessage({ type: 'prompt-cancel', sessionId: 'session-demo-001', promptId: 'approval' }), { type: 'prompt-cancel', sessionId: 'session-demo-001', promptId: 'approval' });
@@ -64,42 +63,4 @@ test('safe artifact opener reveals approved directories and rejects forged paths
     nodeModule._load = originalLoad;
   }
   assert.equal(opened[0]?.startsWith('revealInExplorer:'), true);
-});
-
-test('command session shares panel activity store and history reopen sees terminal outcome', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-command-session-'));
-  const store = new ActivityStore(root, { clock: (() => { let i = 0; return () => `2026-02-01T00:00:0${i++}Z`; })() });
-  const messages: Array<Record<string, unknown>> = [];
-  const panel = { webview: { postMessage: (message: Record<string, unknown>) => { messages.push(message); } } };
-  const runner = {
-    async run(command: string, workspaceRoot: string, onEvent: (event: GsdProgressEvent) => void): Promise<void> {
-      assert.equal(command, 'progress');
-      assert.equal(workspaceRoot, root);
-      onEvent({ state: 'started', command });
-      onEvent({ state: 'waiting', command, text: 'Approval required', approvalRequired: true, tool: 'shell', action: 'Run checks' });
-      onEvent({ state: 'completed', command, exitCode: 0, text: 'Completed safely' });
-    }
-  } as unknown as GsdRunner;
-
-  // chat.ts imports VS Code host APIs. Stub only that host boundary for this
-  // deterministic command-lifecycle test; the runner and durable store are real.
-  const nodeModule = require('node:module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
-  const originalLoad = nodeModule._load;
-  nodeModule._load = (request, parent, isMain) => request === 'vscode' ? { workspace: { workspaceFolders: undefined } } : originalLoad(request, parent, isMain);
-  try {
-    const { runGsdCommand } = require('../services/chat') as typeof import('../services/chat');
-    await runGsdCommand(panel as never, runner, 'progress', root, store);
-  } finally {
-    nodeModule._load = originalLoad;
-  }
-
-  const sessions = await store.list();
-  assert.equal(sessions.length, 1);
-  assert.equal(sessions[0]?.plans[0], 'progress');
-  assert.equal(sessions[0]?.outcome, 'completed');
-  const history = messages.filter((message) => message.type === 'history').at(-1);
-  assert.ok(history);
-  assert.equal((history?.sessions as Array<{ sessionId: string }>)[0]?.sessionId, sessions[0]?.sessionId);
-  assert.equal(messages.some((message) => message.type === 'command-progress' && message.state === 'completed'), true);
-  assert.equal(messages.some((message) => message.type === 'command-progress' && message.command === 'reopen'), false);
 });

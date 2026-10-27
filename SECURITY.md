@@ -13,10 +13,10 @@ Last reviewed: 2026-10-26, against the code on `main`.
 | --- | --- | --- |
 | Chat messages (sidebar and `@nearai`) | The endpoint serving the model you picked: NEAR AI Cloud, or your local runtime | Each message passes the outbound check below first. |
 | What the sidebar agent reads or runs | The same model, as tool results: file contents it reads, search results, and command output | Files under the workspace only. Reading a likely credential file (`.env`, private keys, SSH, AWS, or NEAR credential files) asks first. Pick a private or local model to keep this inside a TEE or on your machine. |
-| Open-GSD workflows | **The Codex CLI, using whatever provider Codex is configured for** | Not routed through NEAR AI, not privacy-checked, and not cost-tracked. This is replaced by a native NEAR runner in milestone 2 (phases 8–9). |
+| Open-GSD workflows | The NEAR AI agent runner, on the model you picked; sub-agents use the model for their tier (`nearAi.agent.deepModel`, `standardModel`, `fastModel`) when your provider offers it | The same outbound check, approvals, revert, and cost tracking as any agent run. No Codex or Claude Code runtime is invoked. |
 | Your API key | VS Code SecretStorage, one key per project and profile | Never written to settings, project files, logs, activity, analytics, exports, or error messages. |
 | Activity and cost records | `.planning/.near-ai/` in your project | Operational facts only (models, token counts, costs, outcomes); no prompts or replies. Add it to `.gitignore` if you do not want it committed. |
-| Open-GSD installation | `npx @opengsd/gsd-core@latest` from the npm registry | Runs only in projects set up with NEAR AI, only when a GSD command needs it or an update is available. The version is not pinned. |
+| Open-GSD installation | `npx @opengsd/gsd-core@<exact version> --claude --global` into the extension's own storage, never `~/.claude` | Installed the first time you run a workflow; in NEAR AI projects, checked for updates at startup and daily. A new version must pass a compatibility check before it replaces the installed one, and the previous version is kept. |
 
 ### Which models are private
 
@@ -69,7 +69,7 @@ than being shown as $0.
 | SecretStorage | Project-scoped API keys |
 | Workspace files | The agent's Read, Write, Edit, Glob, and Grep tools, confined to the workspace (symlinks included); `.planning/.near-ai/` records; `.planning/HANDOFF.json` when you save a checkpoint. Snapshots for **Revert** are kept in VS Code's extension storage, outside the project. |
 | Network | Your configured NEAR AI endpoint and, if you set one up, your local runtime. API keys are sent only over HTTPS; plain HTTP is accepted only for `localhost`. Each key goes only to its own endpoint. |
-| Child processes | A bash session for the agent's commands (each shown for approval unless allow-listed, never if deny-listed), VS Code's bundled ripgrep for searches, the Open-GSD installer (`npx`), and the Codex CLI for GSD workflows |
+| Child processes | A bash session for the agent's commands (each shown for approval unless allow-listed, never if deny-listed), VS Code's bundled ripgrep for searches, and the Open-GSD installer (`npx`, plus `npm view` to check the latest version) |
 | External links | Opening `https://cloud.near.ai/` to create a key, when you choose to |
 
 The extension never reads, writes, moves, or deletes `~/.near-credentials`, and
@@ -111,9 +111,9 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 
 | Limitation | Plan |
 | --- | --- |
-| Open-GSD workflows run through the Codex CLI and its provider, outside the outbound check | Native NEAR runner, milestone 2 phases 8–9 |
 | Per-response TEE attestation is not verified by the extension | Verify NEAR attestation/signature endpoints, milestone 2 |
-| The Open-GSD installer runs an unpinned `@latest` package from npm | Pin and verify the runtime the native runner installs, milestone 2 phase 9 |
+| Open-GSD's Claude Code hooks (statusline, context monitor) are not run | Context monitoring and continuity come from the runner itself, milestone 2 phase 10 |
+| `run_in_background` sub-agents run in the foreground | Background agents, milestone 2 phase 10 |
 | Team studio, attachments, image generation, and context memory are hidden | Rebuilt on the native runner, milestone 2 phase 11 |
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
 | Under `fully-autonomous`, the agent runs commands without asking | Only the deny list applies; intended for throwaway workspaces |
