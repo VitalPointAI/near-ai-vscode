@@ -12,7 +12,7 @@ export interface TeamMember { name: string; role?: string; model?: string; tools
 export interface TeamDefinition { slug: string; name: string; description: string; members: TeamMember[]; file: string }
 
 const MEMBER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'Remember', 'Recall'];
+const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'Remember', 'Recall', 'VectorizeImage', 'RenderSvg', 'CreatePresentation'];
 const MAX_VERSIONS = 20;
 
 export function slugify(value: string): string {

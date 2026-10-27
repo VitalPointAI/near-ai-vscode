@@ -54,7 +54,7 @@ export function isSensitivePath(file: string): boolean {
 }
 
 /** Reading a path asks first when either the path or the file it resolves to looks like a credential. */
-async function sensitiveRead(requested: string | undefined, context: ToolContext): Promise<string | undefined> {
+export async function sensitiveRead(requested: string | undefined, context: ToolContext): Promise<string | undefined> {
   if (requested === undefined) return undefined;
   if (isSensitivePath(requested)) return sensitivePathReason(requested);
   const resolved = await resolveInWorkspace(context.root, requested, context.readOnlyRoots).catch(() => undefined);
@@ -67,7 +67,7 @@ async function sensitiveRead(requested: string | undefined, context: ToolContext
  */
 const PROTECTED_WRITE = /(?:^|\/)(?:\.git|\.planning\/\.near-ai)(?:\/|$)/;
 
-async function protectedWrite(requested: string, context: ToolContext): Promise<string | undefined> {
+export async function protectedWrite(requested: string, context: ToolContext): Promise<string | undefined> {
   const resolved = await resolveInWorkspace(context.root, requested).catch(() => undefined);
   const relative = resolved ? path.relative(context.root, resolved).split(path.sep).join('/') : requested;
   if (relative.endsWith('.planning/.near-ai/team.md')) return undefined;

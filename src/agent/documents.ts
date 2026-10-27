@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { inflateRawSync } from 'node:zlib';
 import { ToolError } from './workspace';
+import { readZip } from './zip';
 
 // Text from attached documents, read on this machine: PDFs with Mozilla's pdf.js (vendored at build
 // time into vendor/pdfjs, since the extension ships no node_modules) and .docx, .pptx, and .xlsx
@@ -11,7 +11,6 @@ export type DocumentFormat = 'pdf' | 'docx' | 'pptx' | 'xlsx';
 export interface DocumentText { text: string; pages?: number; note?: string }
 
 const MAX_TEXT_CHARS = 200_000;
-const MAX_UNPACKED_BYTES = 50 * 1024 * 1024;
 const MAX_PDF_PAGES = 500;
 const MAX_SHEET_ROWS = 5_000;
 
@@ -72,40 +71,6 @@ async function pdfText(bytes: Buffer, name: string): Promise<DocumentText> {
 
 // ---- Office Open XML ------------------------------------------------------------------------
 
-/** The entries of a zip archive, each inflated on demand within a shared size budget. */
-function unzip(bytes: Buffer, name: string): Map<string, () => string> {
-  let end = -1;
-  for (let index = bytes.length - 22; index >= Math.max(0, bytes.length - 65_557); index -= 1) if (bytes.readUInt32LE(index) === 0x06054b50) { end = index; break; }
-  if (end < 0) throw new ToolError(`${name} is not a valid Office file.`);
-  const entries = new Map<string, () => string>();
-  let budget = MAX_UNPACKED_BYTES;
-  let offset = bytes.readUInt32LE(end + 16);
-  for (let count = bytes.readUInt16LE(end + 10); count > 0; count -= 1) {
-    if (offset + 46 > bytes.length || bytes.readUInt32LE(offset) !== 0x02014b50) throw new ToolError(`${name} is not a valid Office file.`);
-    const method = bytes.readUInt16LE(offset + 10);
-    const compressed = bytes.readUInt32LE(offset + 20);
-    const nameLength = bytes.readUInt16LE(offset + 28);
-    const local = bytes.readUInt32LE(offset + 42);
-    const entry = bytes.toString('utf8', offset + 46, offset + 46 + nameLength);
-    offset += 46 + nameLength + bytes.readUInt16LE(offset + 30) + bytes.readUInt16LE(offset + 32);
-    entries.set(entry, () => {
-      if (local + 30 > bytes.length || bytes.readUInt32LE(local) !== 0x04034b50) throw new ToolError(`${name} is not a valid Office file.`);
-      const start = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28);
-      const data = bytes.subarray(start, start + compressed);
-      let output: Buffer;
-      try {
-        output = method === 0 ? data : method === 8 ? inflateRawSync(data, { maxOutputLength: Math.max(1, budget) }) : Buffer.alloc(0);
-      } catch {
-        throw new ToolError(`${name} is too large when unpacked (over ${MAX_UNPACKED_BYTES / 1024 / 1024} MB) or damaged.`);
-      }
-      budget -= output.length;
-      if (budget < 0) throw new ToolError(`${name} is too large when unpacked (over ${MAX_UNPACKED_BYTES / 1024 / 1024} MB).`);
-      return output.toString('utf8');
-    });
-  }
-  return entries;
-}
-
 function decodeXml(text: string): string {
   return text.replace(/&(lt|gt|amp|quot|apos|#\d+|#x[0-9a-f]+);/gi, (match, entity: string) => {
     const named: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
@@ -128,8 +93,8 @@ function relationships(xml: string | undefined, folder: string): Map<string, { t
 }
 
 function officeText(bytes: Buffer, format: Exclude<DocumentFormat, 'pdf'>, name: string): DocumentText {
-  const zip = unzip(bytes, name);
-  const read = (entry: string) => zip.get(entry)?.();
+  const zip = readZip(bytes, name);
+  const read = (entry: string) => zip.get(entry)?.().toString('utf8');
   if (format === 'docx') return { text: wordText(read('word/document.xml') ?? missing(name, 'word/document.xml')) };
   if (format === 'pptx') return slidesText(read, name);
   return sheetsText(read, name);

@@ -7,6 +7,7 @@ import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, Ru
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt } from '../agent/systemPrompt';
+import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { AgentTool, CORE_TOOLS, ToolContext } from '../agent/tools';
 import { displayPath } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
@@ -330,7 +331,7 @@ export class AgentConversation {
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
-    const base = [...CORE_TOOLS, ...media, ...memoryFor()];
+    const base = [...CORE_TOOLS, ...GRAPHICS_TOOLS, ...media, ...memoryFor()];
     const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : [])];
     if (!agents.length) return base;
     const gsd = request.gsd;

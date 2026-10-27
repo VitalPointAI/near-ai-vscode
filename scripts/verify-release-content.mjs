@@ -74,6 +74,17 @@ const required = [
   'extension/vendor/pdfjs/pdf.min.mjs',
   'extension/vendor/pdfjs/pdf.worker.min.mjs',
   'extension/vendor/pdfjs/LICENSE',
+  'extension/vendor/resvg/resvg.js',
+  'extension/vendor/resvg/resvg.wasm',
+  'extension/vendor/resvg/NOTICE',
+  'extension/vendor/imagetracer/imagetracer.js',
+  'extension/vendor/imagetracer/LICENSE',
+  'extension/vendor/pptxgenjs/pptxgen.cjs',
+  'extension/vendor/pptxgenjs/LICENSES.txt',
+  'extension/vendor/fonts/DejaVuSans.ttf',
+  'extension/vendor/fonts/DejaVuSans-Bold.ttf',
+  'extension/vendor/fonts/LICENSE',
+  'extension/vendor/manifest.json',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];
 const missing = required.filter((entry) => !entrySet.has(entry));
