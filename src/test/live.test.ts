@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -15,11 +15,13 @@ import { CORE_TOOLS } from '../agent/tools';
 import { loadAgents, loadSkills } from '../gsd/library';
 import { gsdShellEnv } from '../gsd/runtime';
 import { AgentConversation, findSkill } from '../services/agentSession';
+import { gradePlan, gradeResearch, PLAN_PROMPT, PLAN_SPEC, RESEARCH_PROMPT, RESEARCH_SOURCES } from './evalGraders';
 import { NearAiClient, type ModelInfo, type UsageMetadata } from '../services/nearAiClient';
 
 // Live tests against NEAR AI Cloud. They spend real money (cents), so they are opt-in:
 //   NEAR_AI_API_KEY=...                      tool round trip, signature verification, billing
-//   NEAR_LIVE_EVAL=1                         also compare default-model candidates on fixed coding tasks
+//   NEAR_LIVE_EVAL=1                         also compare models on coding, research, and planning tasks
+//                                            (NEAR_LIVE_EVAL_MODELS=a,b; NEAR_LIVE_EVAL_RUNS=2; NEAR_LIVE_EVAL_OUT=file.json)
 //   (with the key alone, also: image and voice-note attachments and image generation)
 //   NEAR_LIVE_GSD=1 NEAR_GSD_HOME=<runtime>  also run /gsd-map-codebase on a sample repo and a full
 //                                            GSD cycle (new-project, plan, execute in worktrees)
@@ -94,28 +96,58 @@ const TASKS: Array<{ name: string; files: Record<string, string>; prompt: string
   }
 ];
 
-test('live eval: default-model candidates on fixed coding tasks', { skip: skip || (process.env.NEAR_LIVE_EVAL ? false : 'set NEAR_LIVE_EVAL=1'), timeout: 1_800_000 }, async () => {
+test('live eval: models compared on coding, research, and planning tasks', { skip: skip || (process.env.NEAR_LIVE_EVAL ? false : 'set NEAR_LIVE_EVAL=1'), timeout: 3_600_000 }, async () => {
   const { client: near, models } = await client();
-  const candidates = [pick(models, /^z-ai\/glm-5\.3$/i), pick(models, /kimi-k3/i), pick(models, /deepseek-v4\.1-flash/i)].filter((id): id is string => Boolean(id));
-  const rows: Array<Record<string, unknown>> = [];
+  const wanted = (process.env.NEAR_LIVE_EVAL_MODELS ?? 'z-ai/glm-5.3,z-ai/glm-5.3-flash').split(',').map((id) => id.trim()).filter(Boolean);
+  const candidates = wanted.filter((id) => models.some((model) => model.id === id));
+  assert.ok(candidates.length, `none of ${wanted.join(', ')} is offered`);
+  const runs = Math.max(1, Number(process.env.NEAR_LIVE_EVAL_RUNS ?? 2));
+  const tasks = [
+    ...TASKS.map((task) => ({ name: task.name, kind: 'coding' as const, files: task.files, prompt: task.prompt })),
+    { name: 'research-brief', kind: 'research' as const, files: RESEARCH_SOURCES, prompt: RESEARCH_PROMPT },
+    { name: 'phase-plan', kind: 'planning' as const, files: { 'spec.md': PLAN_SPEC }, prompt: PLAN_PROMPT }
+  ];
+  const total = candidates.length * tasks.length * runs;
+  const rows: Array<{ model: string; task: string; kind: string; run: number; score: number; outOf: number; outcome: string; turns: number; seconds: number; costUsd?: number; cachePct: number; misses: string }> = [];
   for (const model of candidates) {
-    for (const task of TASKS) {
-      const root = await mkdtemp(path.join(tmpdir(), `near-ai-eval-${task.name}-`));
-      for (const [name, content] of Object.entries(task.files)) await writeFile(path.join(root, name), content);
-      let outcome = 'error';
-      let usage: UsageMetadata[] = [];
-      let ms = 0;
-      try { ({ outcome, usage, ms } = await agent(near, model, root, task.prompt)); } catch (error) { outcome = `error: ${(error as Error).message.slice(0, 80)}`; }
-      const passed = await run(process.execPath, ['--test'], { cwd: root }).then(() => true, () => false);
-      const cost = await near.actualCostsUsd(usage.map((turn) => turn.requestId!).filter(Boolean)).catch(() => undefined);
-      rows.push({ model, task: task.name, passed, outcome, turns: usage.length, seconds: Math.round(ms / 1000), costUsd: cost });
-      // Each run takes from seconds to minutes; report as they finish so a long run doesn't look hung.
-      console.log(`eval ${rows.length}/${candidates.length * TASKS.length}: ${model} ${task.name} ${passed ? 'passed' : 'FAILED'} (${outcome}, ${usage.length} turns, ${Math.round(ms / 1000)}s${cost !== undefined ? `, $${cost.toFixed(4)}` : ''})`);
+    for (const task of tasks) {
+      for (let attempt = 1; attempt <= runs; attempt += 1) {
+        const root = await mkdtemp(path.join(tmpdir(), `near-ai-eval-${task.name}-`));
+        for (const [name, content] of Object.entries(task.files)) { await mkdir(path.dirname(path.join(root, name)), { recursive: true }); await writeFile(path.join(root, name), content); }
+        let outcome = 'error';
+        let usage: UsageMetadata[] = [];
+        let ms = 0;
+        try { ({ outcome, usage, ms } = await agent(near, model, root, task.prompt)); } catch (error) { outcome = `error: ${(error as Error).message.slice(0, 80)}`; }
+        let score = 0;
+        let outOf = 10;
+        let misses: string[] = [];
+        if (task.kind === 'coding') score = await run(process.execPath, ['--test'], { cwd: root }).then(() => 10, () => 0);
+        else {
+          const file = path.join(root, task.kind === 'research' ? 'brief.md' : 'PLAN.md');
+          const text = await readFile(file, 'utf8').catch(() => '');
+          ({ score, misses } = text ? (task.kind === 'research' ? gradeResearch(text) : gradePlan(text)) : { score: 0, misses: [`no ${path.basename(file)} written`] });
+          outOf = 10;
+        }
+        const cost = await near.actualCostsUsd(usage.map((turn) => turn.requestId!).filter(Boolean)).catch(() => undefined);
+        const input = usage.reduce((sum, turn) => sum + (turn.inputTokens ?? 0), 0);
+        const cachePct = input ? Math.round((100 * usage.reduce((sum, turn) => sum + (turn.cachedInputTokens ?? 0), 0)) / input) : 0;
+        rows.push({ model, task: task.name, kind: task.kind, run: attempt, score, outOf, outcome, turns: usage.length, seconds: Math.round(ms / 1000), ...(cost !== undefined ? { costUsd: cost } : {}), cachePct, misses: misses.join('; ') });
+        // Report each run as it finishes, so a long eval never looks hung.
+        console.log(`eval ${rows.length}/${total}: ${model} ${task.name} #${attempt}: ${score}/${outOf} (${outcome}, ${usage.length} turns, ${Math.round(ms / 1000)}s${cost !== undefined ? `, $${cost.toFixed(4)}` : ''}, ${cachePct}% cached)${misses.length ? ` missed: ${misses.join('; ')}` : ''}`);
+      }
     }
   }
-  console.table(rows);
+  console.table(rows.map(({ misses, ...row }) => row));
+  const summary = candidates.map((model) => {
+    const mine = rows.filter((row) => row.model === model);
+    const avg = (kind: string) => { const list = mine.filter((row) => row.kind === kind); return list.length ? Math.round((10 * list.reduce((sum, row) => sum + row.score, 0)) / list.length) / 10 : undefined; };
+    const costs = mine.map((row) => row.costUsd).filter((value): value is number => value !== undefined);
+    return { model, coding: `${mine.filter((row) => row.kind === 'coding' && row.score === 10).length}/${mine.filter((row) => row.kind === 'coding').length} passed`, research: avg('research'), planning: avg('planning'), totalCostUsd: costs.length ? Number(costs.reduce((sum, value) => sum + value, 0).toFixed(4)) : undefined, avgSeconds: Math.round(mine.reduce((sum, row) => sum + row.seconds, 0) / mine.length), avgCachePct: Math.round(mine.reduce((sum, row) => sum + row.cachePct, 0) / mine.length) };
+  });
+  console.log('summary (research and planning are average scores out of 10):');
+  console.table(summary);
   const out = process.env.NEAR_LIVE_EVAL_OUT;
-  if (out) await writeFile(out, JSON.stringify({ at: new Date().toISOString(), rows }, null, 2));
+  if (out) await writeFile(out, JSON.stringify({ at: new Date().toISOString(), runs, rows, summary }, null, 2));
   assert.ok(rows.length > 0);
 });
 
