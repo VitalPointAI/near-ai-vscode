@@ -52,6 +52,12 @@ NEAR's reference verifier (`nearai/nearai-cloud-verifier`) and checks that:
 4. The quote's `report_data` binds the signing address and the fresh nonce, and
    any GPU evidence echoes the nonce.
 
+The result names which key signed. **NEAR AI's gateway key** (seen for
+tool-calling responses) proves the exchange passed unaltered through NEAR's
+attested gateway. It does not by itself prove which enclave ran the model,
+since the model's TEE is attested separately in the same report. **The model's
+key** is signed inside the model's own TEE.
+
 What is **not** checked in the editor, and the result says so:
 
 - the platform's TCB status and certificate revocation, which need Intel's

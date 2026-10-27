@@ -64,11 +64,17 @@ Writes into `.git/` and `.planning/.near-ai/` now always ask, even after
 "allow edits for this run". Otherwise a write to `.git/config` followed by
 the auto-allowed `git status` could run code.
 
-## Needs the user (NEAR AI key)
+## Live results (user's key, 2026-10-26)
 
-- `NEAR_AI_API_KEY=… node --test dist/test/live.test.js`: confirms Verify
-  returns "signed" against NEAR's real endpoints (signature payload shape,
-  quote format).
+- `live.test.js` passes against NEAR. A GLM 5.3 tool round trip works, and
+  Verify returns "signed". The signer is **NEAR AI's gateway key**
+  (`0xb98a…e779`), found in `gateway_attestation`. The first run failed
+  because only `model_attestations` was searched, as in NEAR's reference
+  verifier; fixed in `1a01b15`. The genuine Intel TDX quote binds the key with
+  a fresh nonce. Billing reported $0.0036 for the run.
+
+## Still needs the user (NEAR AI key)
+
 - `NEAR_LIVE_EVAL=1`: default-model comparison. GLM 5.3 stays the default
   until then.
 - `NEAR_LIVE_GSD=1 NEAR_GSD_HOME=…`: RUN-06.
