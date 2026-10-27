@@ -96,6 +96,12 @@ INTEGRATIONS, STACK, STRUCTURE, TESTING) in about 48 minutes. The test then
 kept the process open because it never disposed the conversation's shell; the
 test now disposes it. The extension disposes conversations itself.
 
+The 48 minutes came from sub-agents sharing one shell: the four mappers'
+commands queued behind the orchestrator's while it waited. With a shell per
+sub-agent (ffc5baf), the rerun took 182 s: all four mappers started together
+at +10 s, no tool call took more than a second, and all seven documents were
+written.
+
 ## Still needs the user
 
 - Repackage 0.4.0 (`npm run verify:release`) and publish.
