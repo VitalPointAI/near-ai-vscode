@@ -3,7 +3,13 @@
 ## 0.4.0
 
 A native agent that runs on NEAR AI's private models, with no proprietary
-runtime in between.
+runtime in between. It is built for more than coding: research, presales and
+solution design, writing, and data analysis projects get their own teams and
+workflows.
+
+- **See progress as it happens.** Each running agent shows what it is doing,
+  how long it has run, and its tool calls. Click one to open its activity. A
+  progress line in the chat sums up long, quiet stretches.
 
 - **Agent in the sidebar.** It reads, searches, edits and runs commands in your
   project, with approval cards that show diffs and commands, per-run grants,

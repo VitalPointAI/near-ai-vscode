@@ -1,7 +1,7 @@
 {
   "name": "near-ai-vscode",
   "displayName": "NEAR AI for VS Code",
-  "description": "Private AI coding in VS Code: chat with TEE-backed NEAR AI models, run Open-GSD project workflows, and see the cost of every answer.",
+  "description": "Private AI agents for coding, research, presales, writing, and data work: TEE-backed NEAR AI models, Open-GSD project workflows, and the cost of every answer.",
   "version": "0.4.0",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-vscode-icon-128.png",
@@ -24,6 +24,7 @@
   "categories": [
     "AI",
     "Chat",
+    "Data Science",
     "Other"
   ],
   "keywords": [
@@ -39,6 +40,14 @@
     "qwen",
     "llama",
     "coding assistant",
+    "research",
+    "writing",
+    "presales",
+    "documents",
+    "powerpoint",
+    "mcp",
+    "sbom",
+    "privacy",
     "agents",
     "open-gsd",
     "project planning",

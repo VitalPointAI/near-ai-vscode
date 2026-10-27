@@ -1,34 +1,60 @@
 # NEAR AI for VS Code
 
-**Private AI coding that you can see, steer, and afford.**
+**Private AI agents for the work you do in VS Code: code, research, proposals,
+writing, and data. You can see, steer, and afford them.**
 
-Chat with models running in NEAR AI Cloud's confidential (TEE) inference, with
-every model clearly labelled private or not. Plan whole projects with built-in
-Open-GSD workflows. See the model, tokens, and cost of every answer, and decide
+Work with models running in NEAR AI Cloud's confidential (TEE) inference, with
+every model clearly labelled private or not. Agents plan and carry out whole
+projects through built-in Open-GSD workflows, with a team suited to the kind of
+project. You see the model, tokens, and cost of every answer, and decide
 exactly what is allowed to leave your machine.
 
 ![NEAR AI chat beside the editor in VS Code](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-chat.png)
 
-## Why developers choose NEAR AI
+## What you can use it for
 
-- **You know where your code goes.** NEAR AI runs some models inside attested
+- **Software development.** Agents read your code, make changes, run your
+  build and tests, and review, red-team, and verify the work. Dependency scans
+  write an SBOM and check every package for known vulnerabilities.
+- **Research and analysis.** Researchers search the web with the provider you
+  choose, read pages, PDFs, and Office documents, verify quotes against their
+  sources, and write cited findings. Hidden text and likely prompt injections
+  in what they read are caught and reported.
+- **Presales and solution design.** Turn requirements and RFP documents into
+  solution designs, bills of materials, and proposals. Connect a distributor's
+  MCP server (for example Ingram Micro Xvantage) for live product and pricing
+  data, and produce PowerPoint decks with diagrams.
+- **Writing and content.** Plan, draft, edit, and fact-check long documents,
+  with an editor and a red-team reviewer before anything is final.
+- **Data analysis.** Read spreadsheets and data files, analyse them with your
+  own tools, and write up the results with charts and graphics.
+
+**NEAR AI: Set Up Project Team** asks which kind of project you have and sets
+up a team and workflow for it. Your files stay in your workspace, and work is
+sent only to the model you pick.
+
+## Why choose NEAR AI
+
+- **You know where your work goes.** NEAR AI runs some models inside attested
   trusted execution environments and forwards others to third parties. Every
   model in the picker, and every reply, says which. Private models come first,
-  and the default (GLM 5.3) is one of them.
+  and the default (GLM 5.3) is one of them. Transcripts are encrypted on disk,
+  credentials are kept out of the agent's shell, and nothing is sent as
+  telemetry.
 - **It feels like part of VS Code.** A compact chat in the secondary side bar
   uses your theme and fonts. Prefer the built-in Chat view? Type
   `@nearai` there instead.
 - **You always know the cost.** Every response shows the model, token count,
   and cost: estimated up front, then the actual amount when NEAR AI reports it.
-  The status line under the chat shows project progress, active agents, and
-  estimated spend.
-- **From idea to shipped, not just autocomplete.** Open-GSD turns a goal into
-  requirements, phases, plans, and verified work, with agents doing the legwork
-  and you making the calls.
+  Each run has a cost budget and a daily spend limit you can adjust, and agents
+  that repeat themselves are stopped before they waste money.
+- **From idea to finished work, not just autocomplete.** Open-GSD turns a goal
+  into requirements, phases, plans, and verified results. Agents do the legwork
+  and you make the calls. The agents strip and Agent Activity show what every
+  agent is doing as it works.
 - **You stay in control of what's sent.** Each message is checked before it
   leaves: likely secrets are held back, personal data asks first, TEE-only mode
-  blocks forwarded models, a daily spend limit caps cost, and an emergency stop
-  halts everything.
+  blocks forwarded models, and an emergency stop halts everything.
 
 ## Features
 
@@ -46,7 +72,10 @@ as a row in the chat.
 - **A visible plan.** Multi-step work keeps a task list above the input box.
 - **Sub-agents you can see and steer.** Workflows hand work to sub-agents,
   in parallel or in the background; each running one appears above the input
-  box with **Pause**, **Resume**, and **Stop**.
+  box with what it is doing now, how long it has run, its tool calls, and
+  **Pause**, **Resume**, and **Stop**. Click one to see its full activity. When
+  a long run has shown nothing new for a minute, a progress line in the chat
+  sums up the running agents and the spend so far.
 - **Long sessions stay on track.** Old tool output is trimmed and, near the
   model's limit, earlier history is summarized automatically (with a handoff
   saved for GSD). **History** reopens any earlier conversation with its full
@@ -146,6 +175,10 @@ tokens, and spend by organization and project, exportable.
   layer), Word (.docx), PowerPoint (.pptx, with speaker notes), and Excel
   (.xlsx, every sheet) are read on your machine, and only their text is sent.
   Scanned PDFs, the old .doc/.ppt/.xls formats, and video are not supported.
+- **Graphics and slides.** Agents draw diagrams and icons as SVG, turn
+  supplied images into SVG with VectorizeImage, render SVG to PNG, and build
+  PowerPoint decks (.pptx) with CreatePresentation. All of this runs on your
+  machine.
 - **Image generation.** When the provider lists an image model, the agent can
   create PNGs in your workspace with its GenerateImage tool. It asks first and
   shows the price, and **Revert** removes the file.
