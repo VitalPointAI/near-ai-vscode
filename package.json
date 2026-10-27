@@ -159,6 +159,12 @@
         "title": "Set Up Web Search",
         "category": "NEAR AI",
         "icon": "$(search)"
+      },
+      {
+        "command": "nearAi.spendingLimits",
+        "title": "Spending Limits",
+        "category": "NEAR AI",
+        "icon": "$(credit-card)"
       }
     ],
     "viewsContainers": {
@@ -527,6 +533,11 @@
           "command": "nearAi.setUpWebSearch",
           "when": "view == nearAiChatView",
           "group": "overflow@4"
+        },
+        {
+          "command": "nearAi.spendingLimits",
+          "when": "view == nearAiChatView",
+          "group": "overflow@5"
         }
       ]
     }

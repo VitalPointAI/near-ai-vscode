@@ -39,6 +39,8 @@ runtime in between.
   their work, at a per-run cost cap (`nearAi.agent.maxRunCostUsd`, default $5),
   what is left of the daily spend limit, or a token cap, checked before every
   model turn; an agent repeating the same action is nudged and then stopped.
+  **NEAR AI: Spending Limits** shows today's spend and changes the daily,
+  per-run cost, and per-run token limits for you or one workspace.
 - **Project types.** Set Up Project Team now starts from a project type
   (software, research, presales, writing, data, general) with a tailored team
   and AGENTS.md guidance for each stage of the GSD cycle, including a red-team

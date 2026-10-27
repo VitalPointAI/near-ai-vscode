@@ -9,6 +9,7 @@ import { openOnboarding } from './services/onboarding';
 import { registerAgentActivity } from './services/activityView';
 import { registerSecurityScanning } from './services/securityScan';
 import { registerWebSearchSetup } from './services/webSearchSetup';
+import { registerSpendingLimits } from './services/spendingLimits';
 import { openTools } from './services/chat';
 import { TranscriptStore } from './services/transcripts';
 import { chooseGsdCommand } from './services/gsdCommands';
@@ -36,6 +37,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerAgentActivity(context);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
+  registerSpendingLimits(context);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
