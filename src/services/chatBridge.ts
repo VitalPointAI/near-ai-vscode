@@ -38,6 +38,7 @@ export type ChatWebviewMessage =
   | { type: 'select-profile' }
   | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'deny'; feedback?: string }
   | { type: 'revert-run'; runId: string }
+  | { type: 'verify-response'; runId: string }
   | { type: 'insert-code'; text: string }
   | { type: 'reopen-session'; sessionId: string }
   | { type: 'continue-session'; sessionId: string }
@@ -511,6 +512,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     return { type: 'approval-reply', callId: message.callId, decision: message.decision, ...(message.feedback ? { feedback: message.feedback as string } : {}) };
   }
   if (message.type === 'revert-run' && typeof message.runId === 'string' && /^run-\d+-[a-f0-9]{6}$/.test(message.runId) && Object.keys(message).length === 2) return { type: 'revert-run', runId: message.runId };
+  if (message.type === 'verify-response' && typeof message.runId === 'string' && /^run-\d+-[a-f0-9]{6}$/.test(message.runId) && Object.keys(message).length === 2) return { type: 'verify-response', runId: message.runId };
   if (message.type === 'insert-code' && typeof message.text === 'string' && message.text.length > 0 && message.text.length <= 100_000) {
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'text')) return undefined;
     return { type: 'insert-code', text: message.text };
@@ -769,6 +771,18 @@ export function promptResponseMatches(response: PromptResponse, prompt: Structur
 export function progressActivitySummary(card: ProgressCard): string {
   const state = card.state === 'approval' ? 'Approval required' : card.state[0].toUpperCase() + card.state.slice(1);
   return safeProgressText(`${state}: ${card.action}${card.tool ? ` · tool ${card.tool}` : ''}${card.phase ? ` · ${card.phase}` : ''}${card.model ? ` · model ${card.model}` : ''}${card.agent ? ` · agent ${card.agent}` : ''}${card.agentCount !== undefined ? ` · ${card.agentCount} agents` : ''}${card.attempt ? ` · attempt ${card.attempt}` : ''}${card.retry ? ' · retry' : ''}${card.approvalRequired ? ' · approval required' : ''}`);
+}
+
+/**
+ * Models a run may hand work to (sub-agents, tiers, image generation) without the user picking
+ * them: on the same route as the chosen model (local or cloud) and at least as private. A run on a
+ * TEE model never reaches a forwarded one; a local run stays on this machine.
+ */
+export function modelsAsPrivateAs(models: ModelInfo[], chosen: ModelInfo | undefined): ModelInfo[] {
+  const boundary = chosen?.privacyBoundary;
+  if (boundary === 'local') return models.filter((model) => model.privacyBoundary === 'local');
+  const cloud = models.filter((model) => model.privacyBoundary !== 'local');
+  return boundary === 'tee' ? cloud.filter((model) => model.privacyBoundary === 'tee') : cloud;
 }
 
 /** Embedding, reranking, and speech models cannot hold a conversation. */

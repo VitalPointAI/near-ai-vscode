@@ -3,7 +3,7 @@ import type { ActionCapability, ActionPolicy } from '../domain/policy';
 export type PermissionDecision = { decision: 'allow' | 'ask' } | { decision: 'deny'; reason: string };
 
 export interface PermissionRules {
-  /** Command prefixes that run without asking, e.g. "npm test", "git status". */
+  /** Commands (leading words) that run without asking when written as plain words, e.g. "npm test". */
   allowCommands: string[];
   /** Substrings that are always refused, e.g. "git push --force". */
   denyCommands: string[];
@@ -14,8 +14,31 @@ export const DEFAULT_RULES: PermissionRules = {
   denyCommands: ['rm -rf /', 'rm -rf ~', 'git push --force', 'git push -f', 'mkfs', ':(){']
 };
 
-/** Shell syntax that chains, redirects, or substitutes; a command containing it is never auto-allowed by prefix. */
-const COMPOUND = /[;&|<>`\n]|\$\(/;
+/**
+ * Only plain words are auto-allowed: anything else (chaining, redirects, substitution, quotes,
+ * globs, `~`, variables, newlines) needs approval. Checked on the raw command, before any
+ * whitespace is collapsed.
+ */
+const PLAIN_COMMAND = /^[A-Za-z0-9 _.\/:=@+,%-]+$/;
+/** git options that write files, read outside the repository, run programs, or destroy refs. */
+const RISKY_GIT_ARG = /^(?:--output(?:=|$)|-o$|--no-index$|--ext-diff$|--textconv$|--exec|--upload-pack|--receive-pack|-c$|-C$|--git-dir|--work-tree|-[a-zA-Z]*[DdMmfc][a-zA-Z]*$|--delete$|--force$|--move$|--copy$|--set-upstream|--unset-upstream|--edit-description$)/;
+const SAFE_GIT_BRANCH_ARGS = new Set(['-a', '-r', '-v', '-vv', '--list', '--show-current', '--all', '--remotes']);
+
+/** Whether a command matches an allow-list entry and is simple enough to run without asking. */
+export function isAutoAllowed(command: string, allowCommands: string[]): boolean {
+  const raw = command.trim();
+  if (!raw || !PLAIN_COMMAND.test(raw)) return false;
+  const words = raw.split(/ +/);
+  if (words.some((word) => word.startsWith('/') || word.split('/').includes('..'))) return false;
+  const entry = allowCommands.map((prefix) => prefix.trim().split(/\s+/)).find((prefix) => prefix[0] && prefix.every((word, index) => words[index] === word));
+  if (!entry) return false;
+  const rest = words.slice(entry.length);
+  if (words[0] === 'git') {
+    if (rest.some((word) => RISKY_GIT_ARG.test(word))) return false;
+    if (words[1] === 'branch' && rest.some((word) => !SAFE_GIT_BRANCH_ARGS.has(word))) return false;
+  }
+  return true;
+}
 
 /**
  * Grants made from approval cards for the rest of one run: "allow edits for this run" and
@@ -39,11 +62,12 @@ export function decidePermission(capability: ActionCapability, command: string |
     return { decision: 'ask' };
   }
   if (capability === 'shell') {
-    const normalized = (command ?? '').trim().replace(/\s+/g, ' ');
-    const denied = rules.denyCommands.find((pattern) => pattern && normalized.includes(pattern));
+    // The deny list is a backstop, not a sandbox: matched with quotes and escapes removed.
+    const unquoted = normalizeCommand((command ?? '').replace(/["'\\]/g, ''));
+    const denied = rules.denyCommands.find((pattern) => pattern && unquoted.includes(normalizeCommand(pattern)));
     if (denied) return { decision: 'deny', reason: `"${denied}" is on your deny list (nearAi.agent.denyCommands).` };
-    if (grants.commands.has(normalized)) return { decision: 'allow' };
-    if (!COMPOUND.test(normalized) && rules.allowCommands.some((prefix) => prefix && (normalized === prefix || normalized.startsWith(`${prefix} `)))) return { decision: 'allow' };
+    if (grants.commands.has((command ?? '').trim())) return { decision: 'allow' };
+    if (isAutoAllowed(command ?? '', rules.allowCommands)) return { decision: 'allow' };
     if (policy.mode === 'fully-autonomous') return { decision: 'allow' };
     return { decision: 'ask' };
   }

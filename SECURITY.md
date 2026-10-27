@@ -32,9 +32,63 @@ and on every reply:
   provider, named in the label (for example `openrouter.ai` for DeepSeek V4.1
   Flash, `anthropic.com` for Claude models).
 
-The extension does not yet verify NEAR's per-response attestation signatures
-itself; the label reflects NEAR's catalog. Set `nearAi.privacyMode` to
-`tee-only` to block every model NEAR forwards elsewhere.
+The label reflects NEAR's catalog. Set `nearAi.privacyMode` to `tee-only` to
+block every model NEAR forwards elsewhere.
+
+### Checking a response's signature
+
+Answers from a private model have a **Verify signature** action. It follows
+NEAR's reference verifier (`nearai/nearai-cloud-verifier`) and checks that:
+
+1. NEAR's signature (`/v1/signature/{chat_id}`) covers SHA-256 hashes equal to
+   the exact request this editor sent and the raw response it received. The
+   extension keeps only these hashes, not the text.
+2. The signature (EIP-191, secp256k1) recovers to NEAR's signing address.
+3. A fresh attestation report (`/v1/attestation/report`, with a random nonce
+   from the extension) contains a **genuine Intel TDX quote**. The quote is
+   signed by its attestation key. The Quoting Enclave's report vouches for that
+   key and is signed by the platform's PCK certificate. That certificate chains
+   to Intel's SGX Root CA, which the extension pins by fingerprint.
+4. The quote's `report_data` binds the signing address and the fresh nonce, and
+   any GPU evidence echoes the nonce.
+
+What is **not** checked in the editor, and the result says so:
+
+- the platform's TCB status and certificate revocation, which need Intel's
+  collateral;
+- which code the enclave runs (its measurements against NEAR's published
+  build);
+- NVIDIA's GPU attestation verdict.
+
+For those, use [cloud.near.ai/verify](https://cloud.near.ai/verify) or NEAR's
+verifier. Only the final answer of a run is offered for verification. Tool-call
+turns are signed the same way but are not checked.
+
+### What the agent can do without asking
+
+Under the default `approve-risky` policy, reads and searches run freely, and
+file changes and commands ask first. A command runs without asking only if it
+matches `nearAi.agent.allowCommands` and is written as plain words. That rules
+out quotes, `~`, variables, globs, newlines, pipes, redirects and substitution.
+It must also use no absolute or `..` paths, and no git options that write files,
+read outside the repository, or delete refs. These always ask, even after
+**Allow edits for this run**:
+
+- reading a file that looks like a credential, through any path or symlink;
+- writing into `.git/`, where hooks and config would run on the next git
+  command;
+- writing into `.planning/.near-ai/`.
+
+Search results leave out credential-looking files unless you search one
+directly. WebFetch follows redirects itself, requires https at every hop, and
+refuses hosts that resolve to loopback, private, link-local or metadata
+addresses.
+
+Sub-agents, model tiers and image generation only use models on the same route
+as the one you picked (local or cloud) that are at least as private. A run on a
+TEE model never hands work to a forwarded model, and a local run stays local.
+API keys are bound to the endpoint they were saved for, in SecretStorage, so
+editing the project's profile file cannot redirect a key.
 
 ## The outbound check
 
@@ -99,6 +153,7 @@ npm ci
 npm ls --omit=dev --all                    # (empty)
 npm audit --omit=dev --audit-level=high
 npm run check                              # type check and tests
+npm run test:e2e                           # real VS Code (needs xvfb-run on Linux)
 npm run verify:release                     # package, then inspect the VSIX
 grep -RInE 'eval\(|new Function|shell:[[:space:]]*true' src scripts
 ```
@@ -112,7 +167,7 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 
 | Limitation | Plan |
 | --- | --- |
-| Per-response TEE attestation is not verified by the extension | Verify NEAR attestation/signature endpoints, milestone 2 |
+| Verify signature does not check TCB status or revocation, enclave measurements, or NVIDIA's verdict | Use cloud.near.ai/verify or NEAR's verifier for a full check |
 | Open-GSD's Claude Code hooks (statusline, context monitor) are not run | The runner provides its own context thresholds, compaction, and handoff instead |
 | Open-GSD's `Workflow` tool and MCP servers (for example context7) are not available | Workflows that need them report the tool as unavailable and fall back to their other paths |
 | PDFs, Office files, and video can't be attached; video can't be generated | Not planned for this release |
@@ -120,7 +175,10 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 | Memory has a searchable list, not a graph view; teams have no shared team memory | Members get project memory and their own private memory |
 | Agent reputation is recorded per role but does not yet change which model a role uses | Routing comes from team `model:` lines and the deep/standard/fast settings |
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
-| Under `fully-autonomous`, the agent runs commands without asking | Only the deny list applies; intended for throwaway workspaces |
+| Under `fully-autonomous`, the agent runs commands and writes protected files without asking | Only the deny list applies, and it is a substring backstop, not a sandbox. Intended for throwaway workspaces |
+| Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
+| The daily spend limit is checked when a message is sent, not between turns of a long run | Use Stop or the emergency stop; the turn limit (`nearAi.agent.maxTurns`) bounds each run |
+| Conversation transcripts (for resuming chats) are stored unencrypted in VS Code's extension storage | Turn off `nearAi.agent.saveTranscripts`; tool output in them can include file contents |
 
 Report security issues through the repository's issue tracker with redacted
 logs. Never include API keys, raw prompts, or private file contents.

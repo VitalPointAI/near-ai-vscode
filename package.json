@@ -2,7 +2,7 @@
   "name": "near-ai-vscode",
   "displayName": "NEAR AI for VS Code",
   "description": "Private AI coding in VS Code: chat with TEE-backed NEAR AI models, run Open-GSD project workflows, and see the cost of every answer.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-vscode-icon-128.png",
   "galleryBanner": {
@@ -438,11 +438,13 @@
     "install:global": "node scripts/install-global-extension.mjs",
     "verify:release": "npm run package && node scripts/verify-release-content.mjs",
     "check": "npm run lint && npm test",
+    "test:e2e": "npm run compile && env -u ELECTRON_RUN_AS_NODE xvfb-run -a node dist/test/e2e/run.js",
     "generate:screenshots": "npm run compile && node scripts/generate-marketplace-screenshots.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "2.5.2",
     "@vscode/vsce": "^3.2.2",
     "typescript": "^5.7.2"
   }

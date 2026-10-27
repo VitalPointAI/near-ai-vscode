@@ -1,3 +1,5 @@
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import type { AgentTool } from '../agent/tools';
 import { ToolError } from '../agent/workspace';
 import { expandPrompt, GsdAgent, GsdSkill } from './library';
@@ -119,7 +121,7 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     title: (input) => `Fetch ${new URL(input.url).host}${new URL(input.url).pathname}`,
     async preview(input) { return { kind: 'note', text: `Fetch ${input.url}. The page's text is sent to the model.` }; },
     async run(input, context) {
-      const response = await fetch(input.url, { signal: context.signal, redirect: 'follow', headers: { 'user-agent': 'NEAR-AI-VSCode/1.0', accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' } });
+      const response = await fetchPublic(input.url, context.signal);
       if (!response.ok) throw new ToolError(`The page returned HTTP ${response.status}.`);
       const bytes = new Uint8Array(await response.arrayBuffer()).subarray(0, MAX_FETCH_BYTES);
       const body = new TextDecoder().decode(bytes);
@@ -129,6 +131,42 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
   };
 
   return [skillTool, askTool, agentTool, taskTool, webFetchTool];
+}
+
+/**
+ * Fetches a public https page, following up to five redirects by hand so that every hop is
+ * checked: https only, and the host must not resolve to a loopback, private, link-local, or
+ * other non-public address (no reaching localhost services or cloud metadata endpoints).
+ */
+export async function fetchPublic(start: string, signal?: AbortSignal, lookup: (host: string) => Promise<string[]> = resolveHost, fetchFn: typeof fetch = fetch): Promise<Response> {
+  let url = new URL(start);
+  for (let hop = 0; hop <= 5; hop += 1) {
+    if (url.protocol !== 'https:') throw new ToolError(`Refused to fetch ${url.toString()}: only https:// URLs can be fetched.`);
+    const host = url.hostname.replace(/^\[|\]$/g, '');
+    const addresses = isIP(host) ? [host] : await lookup(host).catch(() => { throw new ToolError(`Could not resolve ${host}.`); });
+    const blocked = addresses.find((address) => !isPublicAddress(address));
+    if (blocked) throw new ToolError(`Refused to fetch ${url.host}: it resolves to ${blocked}, which is not a public address.`);
+    const response = await fetchFn(url.toString(), { signal, redirect: 'manual', headers: { 'user-agent': 'NEAR-AI-VSCode/1.0', accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' } });
+    const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
+    if (!location) return response;
+    url = new URL(location, url);
+  }
+  throw new ToolError('Too many redirects.');
+}
+
+async function resolveHost(host: string): Promise<string[]> {
+  return (await dnsLookup(host, { all: true, verbatim: true })).map((entry) => entry.address);
+}
+
+export function isPublicAddress(address: string): boolean {
+  if (isIP(address) === 4) {
+    const [a, b] = address.split('.').map(Number);
+    return !(a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224);
+  }
+  const lower = address.toLowerCase();
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
+  if (mapped) return isPublicAddress(mapped[1]);
+  return !(lower === '::' || lower === '::1' || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower) || /^ff/.test(lower));
 }
 
 function htmlToText(html: string): string {

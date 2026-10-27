@@ -19,7 +19,6 @@
   const projectLinks = $('project-links');
   const todoPanel = $('todos');
   const chips = $('chips');
-  $('attach').innerHTML = ICONS.attach;
   $('attach').addEventListener('click', () => post({ type: 'attach-files' }));
   const agentPanel = $('agents');
   let contextLeft;
@@ -35,6 +34,7 @@
     attach: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5 5 9a1.5 1.5 0 0 0 2.1 2.1L12.6 5.6a2.5 2.5 0 0 0-3.5-3.5L3.4 7.8a3.5 3.5 0 0 0 5 5l4.2-4.2.7.7-4.2 4.2a4.5 4.5 0 0 1-6.4-6.4l5.7-5.7a3.5 3.5 0 0 1 4.9 4.9l-5.5 5.5a2.5 2.5 0 0 1-3.5-3.5l5.5-5.5z"/></svg>',
     check: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6.3 11.6-3.6-3.6.7-.7 2.9 2.9 6.3-6.3.7.7z"/></svg>'
   };
+  $('attach').innerHTML = ICONS.attach;
 
   let busy = false;
   let current;
@@ -587,6 +587,26 @@
         const row = document.getElementById('changes-' + m.runId);
         if (row) row.replaceChildren(el('span', '', `Reverted ${m.files.length} file${m.files.length === 1 ? '' : 's'}.`));
         announce('Changes reverted.');
+        break;
+      }
+      case 'response-verifiable': {
+        const node = lastReply && lastReply.node;
+        if (!node) break;
+        const row = el('div', 'verify');
+        row.id = 'verify-' + m.runId;
+        row.append(textButton('Verify signature', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation\u2026')); post({ type: 'verify-response', runId: m.runId }); }));
+        node.append(row);
+        break;
+      }
+      case 'response-verification': {
+        const row = document.getElementById('verify-' + m.runId);
+        if (!row) break;
+        const r = m.result || {};
+        const icon = r.outcome === 'signed' ? '\u2713 ' : r.outcome === 'failed' ? '\u2717 ' : '';
+        const line = el('span', r.outcome === 'failed' ? 'verify-failed' : r.outcome === 'signed' ? 'verify-ok' : '', icon + (r.summary || ''));
+        if (r.notChecked && r.notChecked.length) line.title = 'Not checked in the editor: ' + r.notChecked.join(', ') + '. For a full check use cloud.near.ai/verify or NEAR\u2019s nearai-cloud-verifier.';
+        row.replaceChildren(line);
+        announce(r.summary || 'Verification finished.');
         break;
       }
       case 'assistant-cost': {

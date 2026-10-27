@@ -116,10 +116,12 @@ Run the extension in a real VS Code extension host with automated UI tests, plus
 
 **Requirements:** TEST-01, TEST-03, SEC-01, SEC-02, SEC-03, PKG-01, PKG-02
 
+**Status:** Built and verified 2026-10-26 (`phases/12-verification-and-release/12-01-SUMMARY.md`): extension-host tests, native response and TDX quote verification, a security review with every finding fixed, and a 0.4.0 release candidate (not published). Live checks against NEAR (Verify on real responses, model evaluation, RUN-06) need the user's API key.
+
 ### Deferred
 
 NEAR account sign-in (AUTH-02) and wallet, staking, and entitlement (AUTH-04, COST-05, STAKE-01..03) wait for a documented NEAR AI contract; their entry points are removed in Phase 7 rather than shipped as stubs.
 
 ## Next action
 
-Phase 12: end-to-end verification and release candidate.
+Run the opt-in live tests with a NEAR AI key (see the Phase 12 summary), then publish 0.4.0.

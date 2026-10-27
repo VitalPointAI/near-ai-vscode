@@ -1,6 +1,7 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
+import { isSensitivePath } from '../agent/tools';
 
 // Reads Open-GSD's Claude-runtime files generically: any skill or agent in the installed
 // version is discovered, frontmatter keys this runner does not know are ignored, and nothing
@@ -151,20 +152,24 @@ export async function loadAgents(home: string): Promise<GsdAgent[]> {
 }
 
 /**
- * Turns a skill or agent body into the prompt the model sees: `$ARGUMENTS` becomes what the user
- * typed, and each line that is only `@<path>` is replaced by that file's contents (nested
- * includes too, each file once). Includes are only read from the runtime directory or the
- * workspace; anything else is left as a visible note.
+ * Turns a skill or agent body into the prompt the model sees: each line that is only `@<path>` is
+ * replaced by that file's contents (nested includes too, each file once), then `$ARGUMENTS` becomes
+ * what the user typed. Includes are only read from the runtime directory or the workspace, by
+ * real path, and never from credential-looking files; anything else is left as a visible note.
  */
 export async function expandPrompt(body: string, options: { args?: string; home: string; root: string; maxDepth?: number }): Promise<string> {
   const seen = new Set<string>();
-  const allowed = (absolute: string) => [options.home, options.root].some((base) => absolute === base || absolute.startsWith(base + path.sep));
+  const bases = await Promise.all([options.home, options.root].map((base) => realpath(base).catch(() => base)));
+  const allowed = (absolute: string) => bases.some((base) => absolute === base || absolute.startsWith(base + path.sep));
   const expand = async (text: string, depth: number): Promise<string> => {
     const lines: string[] = [];
     for (const line of text.split(/\r?\n/)) {
       const include = INCLUDE_LINE.exec(line.trim())?.[1];
       if (!include) { lines.push(line); continue; }
-      const absolute = await locateInclude(include, options.home, options.root);
+      // Resolved through symlinks, so a link in a cloned repository can't pull in outside files.
+      const absolute = await realpath(await locateInclude(include, options.home, options.root)).catch(() => undefined);
+      if (!absolute) { lines.push(`[include not found: ${include}]`); continue; }
+      if (isSensitivePath(absolute)) { lines.push(`[include skipped: ${include} looks like it may contain credentials]`); continue; }
       if (!allowed(absolute)) { lines.push(`[include skipped: ${include} is outside the Open-GSD runtime and the workspace]`); continue; }
       if (seen.has(absolute)) continue;
       seen.add(absolute);
@@ -174,8 +179,9 @@ export async function expandPrompt(body: string, options: { args?: string; home:
     }
     return lines.join('\n');
   };
-  const withArgs = body.replace(/\$ARGUMENTS/g, options.args ?? '');
-  return expand(withArgs, 0);
+  // Arguments are substituted after includes are expanded, so text the user or model passes
+  // as arguments can never add include lines.
+  return (await expand(body, 0)).replace(/\$ARGUMENTS/g, () => options.args ?? '');
 }
 
 /** Maps a GSD model tier or ID onto the configured NEAR models; unknown values fall back to the run's model. */

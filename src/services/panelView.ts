@@ -10,6 +10,8 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'nearAiChatView';
   private view?: vscode.WebviewView;
   private pending: unknown[] = [];
+  /** Set only by the extension-host tests (NEAR_AI_E2E=1) to observe both directions of the view's messages. */
+  public tap?: { toView(message: unknown): void; fromView(message: unknown): void };
 
   public constructor(private readonly context: vscode.ExtensionContext, private readonly auth: AuthService) {}
 
@@ -18,6 +20,12 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
     const media = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'chat');
     webviewView.webview.options = { enableScripts: true, localResourceRoots: [media] };
     webviewView.onDidDispose(() => { this.view = undefined; });
+    if (this.tap) {
+      const tap = this.tap;
+      const post = webviewView.webview.postMessage.bind(webviewView.webview);
+      webviewView.webview.postMessage = (message: unknown) => { tap.toView(message); return post(message); };
+      webviewView.webview.onDidReceiveMessage((message: unknown) => tap.fromView(message));
+    }
     await attachChatToView(this.context, this.auth, webviewView, sidebarHtml(webviewView.webview, media));
     for (const message of this.pending.splice(0)) void webviewView.webview.postMessage(message);
   }

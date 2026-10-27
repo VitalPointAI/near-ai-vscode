@@ -16,6 +16,7 @@ import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
+import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
 import { PreparedAttachments } from '../agent/attachments';
 import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
@@ -87,6 +88,7 @@ interface LiveAgent {
  */
 export class AgentConversation {
   private messages: AgentMessage[] = [];
+  private readonly verifiable = new Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>();
   /** What the user typed, keyed by a hash of the message the model saw (survives compaction). */
   private display = new Map<string, string>();
   private conversationId = newConversationId();
@@ -172,6 +174,12 @@ export class AgentConversation {
       else {
         if (result.outcome === 'max-turns') this.post({ type: 'assistant-delta', text: '\n\n_Stopped after reaching the turn limit. Send a message to continue._' });
         this.post({ type: 'assistant-done', usage });
+        const evidence = result.usage.at(-1)?.evidence;
+        if (evidence && !request.local && request.privacy.startsWith('Private')) {
+          this.verifiable.set(runId, { model: request.model, evidence, client: request.client });
+          for (const old of [...this.verifiable.keys()].slice(0, -20)) this.verifiable.delete(old);
+          this.post({ type: 'response-verifiable', runId });
+        }
       }
       if (changed.length) this.post({ type: 'run-changes', runId, files: changed });
       await record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'message', model: request.model, summary: `${request.skill ? `/${request.skill.name} run` : 'Agent run'} ${result.outcome}; ${changed.length} file(s) changed.`, estimatedCostUsd: usage.estimatedCostUsd, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
@@ -216,6 +224,13 @@ export class AgentConversation {
     this.abort = undefined;
     for (const agent of this.agents.values()) agent.abort.abort();
     this.releasePending();
+  }
+
+  /** Checks NEAR's signature and TDX attestation for a run's final answer. */
+  public async verifyRun(runId: string): Promise<VerificationResult> {
+    const entry = this.verifiable.get(runId);
+    if (!entry) return { outcome: 'unavailable', summary: 'This response can no longer be verified from the editor (only the last 20 are kept).', checks: {}, notChecked: NOT_CHECKED_IN_EDITOR };
+    return entry.client.verifyResponse(entry.model, entry.evidence);
   }
 
   /** Undoes every file change a run made with the file tools. */

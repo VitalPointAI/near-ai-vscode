@@ -1,6 +1,6 @@
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
-import { decidePermission, normalizeCommand, PermissionRules, RunGrants } from './permissions';
+import { decidePermission, PermissionRules, RunGrants } from './permissions';
 import { truncate } from './shell';
 import type { AgentTool, Todo, ToolContext, ToolPreview } from './tools';
 import { ToolError } from './workspace';
@@ -134,7 +134,8 @@ export class AgentRun {
     }
     this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title });
     const command = tool.capability === 'shell' ? String((input as { command?: unknown }).command ?? '') : undefined;
-    const sensitive = tool.sensitive?.(input);
+    let sensitive: string | undefined;
+    try { sensitive = await tool.sensitive?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
     const decided = decidePermission(tool.capability, command, this.options.policy, this.options.rules, this.grants);
     const permission = sensitive && decided.decision === 'allow' && this.options.policy.mode !== 'fully-autonomous' ? { decision: 'ask' as const } : decided;
     if (permission.decision === 'deny') return this.finish(call.id, false, `Not allowed: ${permission.reason}`);
@@ -145,7 +146,7 @@ export class AgentRun {
       if (reply.decision === 'deny') return this.finish(call.id, false, `The user declined this action.${reply.feedback ? ` Their note: ${reply.feedback}` : ''} Do not retry it unchanged; adjust or ask what they want.`);
       if (reply.decision === 'allow-run') {
         if (tool.capability === 'workspaceWrite') this.grants.edits = true;
-        if (command) this.grants.commands.add(normalizeCommand(command));
+        if (command) this.grants.commands.add(command.trim());
       }
     }
     try {

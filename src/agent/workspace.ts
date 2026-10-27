@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 
 export class ToolError extends Error {
@@ -37,6 +37,8 @@ async function realpathOfExistingPrefix(absolute: string): Promise<string> {
     try {
       return path.join(await realpath(current), ...missing.reverse());
     } catch {
+      // A link whose target is missing would be followed by a later write; refuse it.
+      if (await lstat(current).then((info) => info.isSymbolicLink(), () => false)) throw new ToolError(`${current} is a symbolic link to a missing target, so it can't be used safely.`);
       const parent = path.dirname(current);
       if (parent === current) return absolute;
       missing.push(path.basename(current));

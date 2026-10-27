@@ -17,7 +17,10 @@ import { registerWorkspaceCommands } from './services/workspaceCommands';
 import { initEmergencyStop, setEmergencyStop } from './services/emergencyStop';
 import { clearProviderCache } from './services/providerCache';
 
-export function activate(context: vscode.ExtensionContext): void {
+/** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
+export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
+
+export function activate(context: vscode.ExtensionContext): NearAiTestApi | undefined {
   const auth = new AuthService(context.secrets);
   initEmergencyStop(context);
   if (shouldAutoInstallGsd()) {
@@ -64,6 +67,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
+  return process.env.NEAR_AI_E2E === '1' ? { auth, sidebar } : undefined;
 }
 
 async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPanelViewProvider): Promise<void> {

@@ -70,6 +70,7 @@ const required = [
   'extension/media/chat/markdown.js',
   'extension/docs/marketplace/near-ai-chat.png',
   'extension/docs/marketplace/near-ai-commands.png',
+  'extension/docs/marketplace/near-ai-approval.png',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];
 const missing = required.filter((entry) => !entrySet.has(entry));

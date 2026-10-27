@@ -154,8 +154,9 @@ export class ProfileStore {
 
   public async saveProfileApiKey(profileId: string, apiKey: string): Promise<OrganizationProfile> {
     if (!this.auth) throw new Error('An authentication service is required to save a profile credential.');
-    if (!await this.get(profileId)) throw new Error('The requested profile was not found.');
-    await this.auth.saveScopedApiKey(this.getScope(profileId), apiKey);
+    const profile = await this.get(profileId);
+    if (!profile) throw new Error('The requested profile was not found.');
+    await this.auth.saveScopedApiKey(this.getScope(profileId), apiKey, profile.baseUrl);
     return this.markValidationStale(profileId);
   }
 
@@ -187,7 +188,7 @@ export class ProfileStore {
     if (input.provider === 'hybrid') {
       if (!this.auth) throw new Error('An authentication service is required to save a profile credential.');
       const scope = localKeyScope(this.getScope(input.profileId));
-      if (localApiKey) await this.auth.saveScopedApiKey(scope, localApiKey);
+      if (localApiKey) await this.auth.saveScopedApiKey(scope, localApiKey, input.localBaseUrl);
       else await this.auth.removeScopedCredentials(scope);
     }
     // A local runtime may need no key; an empty key leaves the slot unset.

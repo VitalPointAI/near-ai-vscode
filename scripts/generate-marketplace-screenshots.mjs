@@ -43,15 +43,31 @@ const themeCss = `:root{${Object.entries(THEME).map(([key, value]) => `--vscode-
 const SCENARIOS = {
   chat: `
     send('Add a timeout to the provider request so it never hangs.');
-    host({type:'assistant-start',model:'deepseek-ai/DeepSeek-V3'});
-    host({type:'assistant-delta',text:'Wrap the request in an **AbortController** and clear the timer once headers arrive, so long streams are never cut off:\\n\\n\`\`\`ts\\nconst abort = new AbortController();\\nconst timer = setTimeout(() => abort.abort(), 60_000);\\nconst res = await fetch(url, { signal: abort.signal });\\nclearTimeout(timer);\\n\`\`\`\\n\\n- Retry \`408\`, \`429\`, and \`5xx\` with backoff\\n- Surface a clear error instead of spinning forever'});
-    host({type:'assistant-done',usage:{inputTokens:1840,outputTokens:212,actualCostUsd:0.00073,verificationStatus:'verified'}});`,
+    host({type:'assistant-start',model:'z-ai/glm-5.3',privacy:'Private · runs in NEAR TEE'});
+    host({type:'assistant-delta',text:'I\\u2019ll look at how requests are made first.'});
+    host({type:'tool-start',callId:'c1',tool:'Read',title:'Read src/client.ts'});
+    host({type:'tool-end',callId:'c1',ok:true,output:'42 lines'});
+    host({type:'tool-start',callId:'c2',tool:'Edit',title:'Edit src/client.ts'});
+    host({type:'tool-end',callId:'c2',ok:true,output:'Edited src/client.ts'});
+    host({type:'tool-start',callId:'c3',tool:'Bash',title:'npm test'});
+    host({type:'tool-end',callId:'c3',ok:true,output:'tests 18 · pass 18'});
+    host({type:'assistant-delta',text:'Requests now abort after **60 seconds**, and the timer is cleared once headers arrive so long streams are never cut off:\\n\\n\`\`\`ts\\nconst abort = new AbortController();\\nconst timer = setTimeout(() => abort.abort(), 60_000);\\n\`\`\`\\n\\nAll 18 tests pass.'});
+    host({type:'assistant-done',usage:{inputTokens:18400,outputTokens:612,estimatedCostUsd:0.0041,verificationStatus:'unknown'}});
+    host({type:'run-changes',runId:'run-1-abcdef',files:['src/client.ts']});
+    host({type:'response-verifiable',runId:'run-1-abcdef'});
+    host({type:'response-verification',runId:'run-1-abcdef',result:{outcome:'signed',summary:'Signed by 0x3f2c…91ab. A genuine Intel TDX quote, fresh for this check, binds that key, with matching GPU evidence.',checks:{},notChecked:[]}});`,
   workflow: `
-    command('plan-phase');
-    host({type:'command-progress',sessionId:'session-demo00001',command:'plan-phase',state:'started'});
-    host({type:'command-progress',sessionId:'session-demo00001',command:'plan-phase',state:'output',text:'Reading ROADMAP.md and REQUIREMENTS.md…'});
-    host({type:'command-progress',sessionId:'session-demo00001',command:'plan-phase',state:'running',action:'researching phase 7 · 3 agents'});
-    host({type:'structured-prompt',prompt:{sessionId:'session-demo00001',promptId:'scope',question:'Phase 7 touches billing. How should risky changes be handled?',choices:[{id:'approve',label:'Ask me before each write'},{id:'batch',label:'Batch for review'}],freeForm:{enabled:true,placeholder:'Or describe your own rule…'},state:'open',plans:[]}});`,
+    command('plan-phase 7');
+    host({type:'assistant-start',model:'z-ai/glm-5.3',privacy:'Private · runs in NEAR TEE'});
+    host({type:'assistant-delta',text:'Reading ROADMAP.md and REQUIREMENTS.md for phase 7.'});
+    host({type:'agents',count:2,agents:[{id:'agent-1',label:'gsd-phase-researcher',description:'Research billing retries',model:'z-ai/glm-5.3',background:true},{id:'agent-2',label:'gsd-pattern-mapper',description:'Map existing patterns',model:'z-ai/glm-5.3-flash',background:true}]});
+    host({type:'questions-request',id:'q-demo',questions:[{header:'Risky writes',question:'Phase 7 touches billing. How should risky changes be handled?',multiSelect:false,options:[{label:'Ask me before each write',description:'Approval card for every file change and command'},{label:'Batch for review',description:'Collect changes and review them together at the end'}]}]});`,
+  approval: `
+    send('Rename fetchUser to getUser everywhere.');
+    host({type:'assistant-start',model:'z-ai/glm-5.3',privacy:'Private · runs in NEAR TEE'});
+    host({type:'tool-start',callId:'c1',tool:'Grep',title:'Grep "fetchUser"'});
+    host({type:'tool-end',callId:'c1',ok:true,output:'3 matches'});
+    host({type:'approval-request',callId:'c2',tool:'Edit',title:'Edit src/api.ts',preview:{kind:'diff',diff:'--- src/api.ts\\n+++ src/api.ts\\n@@ -1,4 +1,4 @@\\n-export async function fetchUser(id: string) {\\n+export async function getUser(id: string) {\\n   const res = await request(\`/users/\${id}\`);\\n   return res.json();\\n }'}});`,
   commands: `
     input.addEventListener('blur', (event) => event.stopImmediatePropagation(), true);
     input.focus(); input.value = '/'; input.dispatchEvent(new Event('input'));`
@@ -122,8 +138,8 @@ function sidebar(script) {
     const input = document.getElementById('input');
     const send = (text) => { input.value = text; input.dispatchEvent(new Event('input')); document.getElementById('send').click(); };
     const command = (name) => { input.value = '/' + name; input.dispatchEvent(new Event('input')); document.getElementById('send').click(); };
-    host({ type: 'models', models: [{ id: 'deepseek-ai/DeepSeek-V3', label: 'deepseek-ai/DeepSeek-V3 · $0.27/$1.1 per 1M' }] });
-    host({ type: 'status', value: '72% · Phase 7/9 · Plan 2/4 · running · Agents 3 · Est. $0.4100' });
+    host({ type: 'models', models: [{ id: 'z-ai/glm-5.3', label: '🔒 GLM 5.3', privacy: 'tee' }, { id: 'moonshotai/kimi-k3', label: '🔒 Kimi K3', privacy: 'tee' }] });
+    host({ type: 'status', value: 'Open-GSD 1.19.0 · Phase 7 of 9 · planning' });
     setTimeout(() => { ${script} }, 30);
   });
   </script>`;

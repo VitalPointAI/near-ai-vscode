@@ -220,3 +220,7 @@ footer { padding: 6px 12px 8px; }
 
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+.verify { margin-top: 4px; font-size: 0.9em; color: var(--vscode-descriptionForeground); }
+.verify-ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
+.verify-failed { color: var(--vscode-errorForeground); }

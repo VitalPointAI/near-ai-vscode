@@ -55,6 +55,8 @@ as a row in the chat.
   before reading likely credential files (`.env`, keys), and never runs
   commands on your deny list.
 
+![An edit waiting for approval, with its diff](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-approval.png)
+
 ### Chat that fits in your editor
 
 - Streaming answers with formatted code, plus **Copy** and **Insert at cursor**
@@ -137,6 +139,9 @@ copy of Open-GSD to a project that doesn't already have one.
   credentials and private-file paths are held back (you can send a message once
   anyway), personal data asks first, and `tee-only` mode blocks models NEAR
   forwards to other providers.
+- **Verify signature** on an answer from a private model checks NEAR's
+  signature over the exact request and response, and that a genuine, fresh
+  Intel TDX quote binds the signing key. See [what it does and doesn't check](SECURITY.md#checking-a-responses-signature).
 - The chat view only receives display data; credentials and raw context stay
   in the extension host.
 - The extension never reads `~/.near-credentials` or other local wallet files.

@@ -13,11 +13,11 @@ export interface CreateNearAiProviderOptions {
 async function clientsFor(options: CreateNearAiProviderOptions): Promise<{ client: NearAiClient; localClient?: NearAiClient }> {
   const { auth, profile, scope, fetchFn } = options;
   if (!isProjectCredentialScope(scope) || scope.profileId !== profile.profileId) throw new Error('The provider scope does not match the selected profile.');
-  const apiKey = await auth.getScopedApiKey(scope) ?? '';
+  const apiKey = await auth.getScopedApiKeyFor(scope, profile.baseUrl) ?? '';
   if (!apiKey && profile.provider !== 'local') throw new Error('The selected profile has no configured credential.');
   const client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn });
   if (profile.provider !== 'hybrid' || !profile.localBaseUrl) return { client };
-  const localApiKey = await auth.getScopedApiKey(localKeyScope(scope)) ?? '';
+  const localApiKey = await auth.getScopedApiKeyFor(localKeyScope(scope), profile.localBaseUrl) ?? '';
   return { client, localClient: new NearAiClient({ baseUrl: profile.localBaseUrl, apiKey: localApiKey, fetchFn }) };
 }
 

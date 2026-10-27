@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isSecureEndpoint } from '../domain/config';
 import { redactSecrets } from '../domain/redaction';
 import type { CapabilityMetadataStatus, CapabilityModality, CapabilityPrivacyBoundary, SkillCapability, ProviderOperation } from '../domain/capabilities';
@@ -74,6 +76,8 @@ export interface UsageMetadata {
   actualCostUsd?: number;
   verificationStatus: VerificationStatus;
   latencyMs: number;
+  /** Hashes for checking NEAR's signature on this completion later. */
+  evidence?: ResponseEvidence;
 }
 
 export interface ImageGenerationOptions {
@@ -360,13 +364,12 @@ export class NearAiClient {
    */
   public async *streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal): AsyncGenerator<CompletionEvent> {
     const started = Date.now();
-    const response = await this.request('/chat/completions', {
-      method: 'POST',
-      signal,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) })
-    });
+    const requestBody = JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
+    const response = await this.request('/chat/completions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: requestBody });
     let usage = metadataFromHeaders(response.headers, started);
+    // NEAR signs SHA-256 of the exact request body and raw response; keep both hashes for verification.
+    const rawResponse = createHash('sha256');
+    let chatId: string | undefined;
     if (!response.body) throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, usage.requestId);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -378,6 +381,7 @@ export class NearAiClient {
       for (;;) {
         const next = await reader.read();
         if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+        if (next.value) rawResponse.update(next.value);
         buffer += next.done ? decoder.decode() : decoder.decode(next.value, { stream: true });
         const lines = buffer.split(/\r?\n/);
         buffer = next.done ? '' : (lines.pop() ?? '');
@@ -386,8 +390,9 @@ export class NearAiClient {
           if (!value.startsWith('data:')) continue;
           const payload = value.slice(5).trim();
           if (payload === '[DONE]') continue;
-          let chunk: { choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; tool_calls?: Array<{ index?: number; id?: unknown; function?: { name?: unknown; arguments?: unknown } }> }; finish_reason?: unknown }>; usage?: Record<string, unknown> };
+          let chunk: { id?: unknown; choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; tool_calls?: Array<{ index?: number; id?: unknown; function?: { name?: unknown; arguments?: unknown } }> }; finish_reason?: unknown }>; usage?: Record<string, unknown> };
           try { chunk = JSON.parse(payload); } catch { throw new NearAiError(0, 'NEAR AI returned malformed streaming data.', false, usage.requestId); }
+          if (!chatId && typeof chunk.id === 'string' && chunk.id) chatId = chunk.id;
           if (chunk.usage) {
             usage = usageFromPayload(chunk.usage, usage, usage.requestId, usage.provider);
             usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens) ?? usage.estimatedCostUsd;
@@ -419,8 +424,13 @@ export class NearAiClient {
       type: 'done',
       message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
       finishReason,
-      usage: { ...usage, latencyMs: Date.now() - started }
+      usage: { ...usage, latencyMs: Date.now() - started, ...(chatId ? { evidence: { chatId, requestHash: sha256Hex(requestBody), responseHash: rawResponse.digest('hex') } } : {}) }
     };
+  }
+
+  /** Checks NEAR's signature and attestation for a completion this client received. */
+  public async verifyResponse(model: string, evidence: ResponseEvidence, signal?: AbortSignal, trust: { trustedRoot?: string; now?: Date } = {}): Promise<VerificationResult> {
+    return verifyResponse(evidence, model, async (path) => (await this.request(path, { method: 'GET', signal })).json(), trust);
   }
 
   private async *readEvents(body: ReadableStream<Uint8Array>, initial: UsageMetadata, signal?: AbortSignal, model?: ModelInfo): AsyncGenerator<ChatStreamEvent> {

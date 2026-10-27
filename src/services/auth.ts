@@ -1,4 +1,4 @@
-import { AuthMode } from '../domain/config';
+import { AuthMode, DEFAULT_BASE_URL } from '../domain/config';
 import { ProjectCredentialScope, isProjectCredentialScope } from '../domain/auth';
 
 export const API_KEY_SECRET = 'nearAi.apiKey';
@@ -44,11 +44,34 @@ export class AuthService {
     await this.secrets.delete(API_KEY_SECRET);
   }
 
-  public async saveScopedApiKey(scope: ProjectCredentialScope, apiKey: string): Promise<void> {
+  /**
+   * Saves a key together with the endpoint it is for. The endpoint is kept in SecretStorage, not in
+   * the project's profile file, so editing that file cannot send the key somewhere else.
+   */
+  public async saveScopedApiKey(scope: ProjectCredentialScope, apiKey: string, endpoint?: string): Promise<void> {
     this.assertScope(scope);
     const normalized = apiKey.trim();
     if (!normalized) throw new Error('An API key is required.');
     await this.secrets.store(scopedSecret(scope, 'api-key'), normalized);
+    if (endpoint) await this.secrets.store(scopedSecret(scope, 'api-key-endpoint'), normalizeEndpoint(endpoint));
+    else await this.secrets.delete(scopedSecret(scope, 'api-key-endpoint'));
+  }
+
+  /**
+   * The key, only if it was saved for `endpoint`. Keys saved before endpoints were recorded are
+   * released only to NEAR AI Cloud's default endpoint, which is then recorded.
+   */
+  public async getScopedApiKeyFor(scope: ProjectCredentialScope, endpoint: string): Promise<string | undefined> {
+    const apiKey = await this.getScopedApiKey(scope);
+    if (!apiKey) return undefined;
+    const bound = await this.secrets.get(scopedSecret(scope, 'api-key-endpoint'));
+    const wanted = normalizeEndpoint(endpoint);
+    if (bound === undefined && wanted === normalizeEndpoint(DEFAULT_BASE_URL)) {
+      await this.secrets.store(scopedSecret(scope, 'api-key-endpoint'), wanted);
+      return apiKey;
+    }
+    if (bound !== wanted) throw new Error(`This profile's endpoint (${wanted}) is not the one its key was saved for. Run NEAR AI: Set Up again to use it.`);
+    return apiKey;
   }
 
   public async getScopedApiKey(scope: ProjectCredentialScope): Promise<string | undefined> {
@@ -59,6 +82,7 @@ export class AuthService {
   public async removeScopedApiKey(scope: ProjectCredentialScope): Promise<void> {
     this.assertScope(scope);
     await this.secrets.delete(scopedSecret(scope, 'api-key'));
+    await this.secrets.delete(scopedSecret(scope, 'api-key-endpoint'));
   }
 
   public async saveScopedRefreshToken(scope: ProjectCredentialScope, refreshToken: string): Promise<void> {
@@ -102,7 +126,11 @@ export class AuthService {
   }
 }
 
-export function scopedSecret(scope: ProjectCredentialScope, kind: 'api-key' | 'refresh-token'): string {
+export function scopedSecret(scope: ProjectCredentialScope, kind: 'api-key' | 'refresh-token' | 'api-key-endpoint'): string {
   if (!isProjectCredentialScope(scope)) throw new Error('A valid project and stable profile scope is required.');
   return `nearAi.v${SCOPED_SECRET_VERSION}.${scope.projectId}.${scope.profileId}.${kind}`;
+}
+
+function normalizeEndpoint(endpoint: string): string {
+  return endpoint.trim().replace(/\/+$/, '');
 }

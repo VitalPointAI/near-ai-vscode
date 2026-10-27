@@ -36,8 +36,8 @@ export interface AgentTool<I = Record<string, unknown>> {
   /** A short title for the activity row, e.g. "Read src/extension.ts". */
   title(input: I, context: ToolContext): string;
   preview?(input: I, context: ToolContext): Promise<ToolPreview>;
-  /** A reason to ask before an otherwise read-only call, e.g. reading a likely credential file. */
-  sensitive?(input: I): string | undefined;
+  /** A reason to always ask first, e.g. reading a likely credential file or writing into `.git/`. */
+  sensitive?(input: I, context: ToolContext): string | undefined | Promise<string | undefined>;
   run(input: I, context: ToolContext): Promise<string>;
 }
 
@@ -45,7 +45,33 @@ export interface AgentTool<I = Record<string, unknown>> {
 const SENSITIVE_FILE = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.npmrc|\.pypirc|\.netrc|id_[a-z0-9]+|[^/]*\.(?:pem|key|p12|pfx|keystore)|credentials?(?:\.[a-z]+)?|secrets?(?:\.[a-z]+)?)$|\.near-credentials|\.aws\/|\.ssh\//i;
 
 export function sensitivePathReason(requested: string): string | undefined {
-  return SENSITIVE_FILE.test(requested.replace(/\\/g, '/')) ? `${requested} looks like it may contain credentials, and its contents would be sent to the model.` : undefined;
+  return isSensitivePath(requested) ? `${requested} looks like it may contain credentials, and its contents would be sent to the model.` : undefined;
+}
+
+/** Tests the path as written (normalized, so `.env/` and `./.env/.` count) and as it resolves. */
+export function isSensitivePath(file: string): boolean {
+  return SENSITIVE_FILE.test(path.posix.normalize(file.replace(/\\/g, '/')).replace(/\/+$/, ''));
+}
+
+/** Reading a path asks first when either the path or the file it resolves to looks like a credential. */
+async function sensitiveRead(requested: string | undefined, context: ToolContext): Promise<string | undefined> {
+  if (requested === undefined) return undefined;
+  if (isSensitivePath(requested)) return sensitivePathReason(requested);
+  const resolved = await resolveInWorkspace(context.root, requested, context.readOnlyRoots).catch(() => undefined);
+  return resolved && isSensitivePath(resolved) ? `${requested} resolves to ${resolved}, which looks like it may contain credentials, and its contents would be sent to the model.` : undefined;
+}
+
+/**
+ * Writes that always ask, even after "allow edits for this run": git's own files (hooks and
+ * config run code on the next git command) and this extension's project settings.
+ */
+const PROTECTED_WRITE = /(?:^|\/)(?:\.git|\.planning\/\.near-ai)(?:\/|$)/;
+
+async function protectedWrite(requested: string, context: ToolContext): Promise<string | undefined> {
+  const resolved = await resolveInWorkspace(context.root, requested).catch(() => undefined);
+  const relative = resolved ? path.relative(context.root, resolved).split(path.sep).join('/') : requested;
+  if (relative.endsWith('.planning/.near-ai/team.md')) return undefined;
+  return PROTECTED_WRITE.test(relative) ? `${requested} is inside ${relative.startsWith('.git') || relative.includes('/.git') ? '.git, where hooks and config run code on the next git command' : '.planning/.near-ai, which holds this project\'s NEAR AI settings'}. Approve this write only if you expect it.` : undefined;
 }
 
 const MAX_READ_LINES = 2_000;
@@ -85,7 +111,7 @@ export const readTool: AgentTool<{ path: string; offset: number; limit: number }
   capability: 'read',
   parse: (raw) => ({ path: str(raw, 'file_path')!, offset: Math.max(1, Math.floor(num(raw, 'offset') ?? 1)), limit: Math.min(MAX_READ_LINES, Math.max(1, Math.floor(num(raw, 'limit') ?? MAX_READ_LINES))) }),
   title: (input) => `Read ${input.path}`,
-  sensitive: (input) => sensitivePathReason(input.path),
+  sensitive: (input, context) => sensitiveRead(input.path, context),
   async run(input, context) {
     const absolute = await resolveInWorkspace(context.root, input.path, context.readOnlyRoots);
     const text = await readText(absolute);
@@ -114,6 +140,7 @@ export const writeTool: AgentTool<{ path: string; content: string }> = {
   capability: 'workspaceWrite',
   parse: (raw) => ({ path: str(raw, 'file_path')!, content: typeof raw.content === 'string' ? raw.content : (() => { throw new ToolError('Parameter "content" must be a string.'); })() }),
   title: (input) => `Write ${input.path}`,
+  sensitive: (input, context) => protectedWrite(input.path, context),
   async preview(input, context) {
     const absolute = await resolveInWorkspace(context.root, input.path);
     const before = await readFile(absolute, 'utf8').catch(() => '');
@@ -144,6 +171,7 @@ export const editTool: AgentTool<{ path: string; oldString: string; newString: s
     return { path: str(raw, 'file_path')!, oldString, newString, replaceAll: bool(raw, 'replace_all') };
   },
   title: (input) => `Edit ${input.path}`,
+  sensitive: (input, context) => protectedWrite(input.path, context),
   async preview(input, context) {
     const absolute = await resolveInWorkspace(context.root, input.path);
     const before = await readText(absolute);
@@ -216,12 +244,16 @@ export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string
     return { pattern: str(raw, 'pattern')!, path: str(raw, 'path', false), glob: str(raw, 'glob', false), mode, ignoreCase: bool(raw, '-i'), context: Math.min(20, Math.max(0, Math.floor(num(raw, 'context') ?? 0))), headLimit: Math.min(2_000, Math.max(1, Math.floor(num(raw, 'head_limit') ?? 250))) };
   },
   title: (input) => `Search for ${JSON.stringify(input.pattern)}${input.glob ? ` in ${input.glob}` : ''}`,
-  sensitive: (input) => (input.path ? sensitivePathReason(input.path) : undefined),
+  sensitive: (input, context) => sensitiveRead(input.path, context),
   async run(input, context) {
     const base = await resolveInWorkspace(context.root, input.path ?? '.', context.readOnlyRoots);
     const output = context.ripgrepPath ? await ripgrep(context.ripgrepPath, base, input, context) : await jsGrep(base, input, context);
-    const lines = output.split('\n').filter(Boolean).map((line) => line.startsWith(context.root) ? displayPath(context.root, line.split(':')[0]) + line.slice(line.split(':')[0].length) : line);
-    if (!lines.length) return 'No matches.';
+    // Credential-looking files are left out unless the search was aimed at one (which asked first).
+    const aimed = input.path !== undefined && isSensitivePath(input.path);
+    const all = output.split('\n').filter(Boolean).map((line) => line.startsWith(context.root) ? displayPath(context.root, line.split(':')[0]) + line.slice(line.split(':')[0].length) : line);
+    const lines = aimed ? all : all.filter((line) => !isSensitivePath(line.split(':')[0]));
+    const hidden = all.length - lines.length;
+    if (!lines.length) return hidden ? `No matches outside files that look like credentials (${hidden} line${hidden === 1 ? '' : 's'} hidden; search that file by path to include it).` : 'No matches.';
     return lines.length > input.headLimit ? `${lines.slice(0, input.headLimit).join('\n')}\n\n[${lines.length - input.headLimit} more lines. Narrow the search or raise head_limit.]` : lines.join('\n');
   }
 };

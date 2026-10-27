@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
 interface Snapshot { path: string; original: string | null }
@@ -28,9 +28,12 @@ export class RunCheckpoints {
   public async revert(): Promise<string[]> {
     const restored: string[] = [];
     for (const snapshot of this.snapshots.values()) {
+      // A path that became a symlink since (e.g. via a shell command) is replaced, not written through.
+      const isLink = await lstat(snapshot.path).then((info) => info.isSymbolicLink(), () => false);
       if (snapshot.original === null) {
         await unlink(snapshot.path).catch(() => undefined);
       } else {
+        if (isLink) await unlink(snapshot.path);
         await mkdir(path.dirname(snapshot.path), { recursive: true });
         await writeFile(snapshot.path, Buffer.from(snapshot.original, 'base64'));
       }

@@ -14,3 +14,5 @@ dist/test/**
 node_modules/**
 .git/**
 .gitignore
+.vscode-test/**
+docs/*.pdf
