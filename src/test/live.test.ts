@@ -11,12 +11,14 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { AgentRun } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
+import { agentSystemPrompt } from '../agent/systemPrompt';
 import { CORE_TOOLS } from '../agent/tools';
 import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 import { DEFAULT_ROLE_MODELS, loadAgents, loadSkills } from '../gsd/library';
 import { gsdShellEnv } from '../gsd/runtime';
 import { ActivityFeed, timeBreakdown } from '../services/agentActivity';
 import { AgentConversation, findSkill } from '../services/agentSession';
+import { gradeExecution, loadExecutionTasks, setUpExecutionTask, type ExecutionTask } from './evalExecution';
 import { gradePlan, gradeResearch, PLAN_PROMPT, PLAN_SPEC, RESEARCH_PROMPT, RESEARCH_SOURCES } from './evalGraders';
 import { NearAiClient, type ModelInfo, type UsageMetadata } from '../services/nearAiClient';
 
@@ -63,7 +65,8 @@ async function agent(near: NearAiClient, model: string, root: string, prompt: st
       context: { root, checkpoints: new RunCheckpoints(`live-${Date.now()}`), shell, readFiles: new Set() },
       policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES,
       requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined
-    }).run([{ role: 'system', content: 'You are a coding agent working in the current directory. Use the tools to inspect and change files and run commands. Finish with a one-paragraph summary.' }, { role: 'user', content: prompt }], new AbortController().signal);
+    // The production system prompt, so the eval measures models as the extension runs them.
+    }).run([{ role: 'system', content: agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: false, model }) }, { role: 'user', content: prompt }], new AbortController().signal);
     const answer = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content ?? '';
     return { outcome: result.outcome, answer: String(answer), usage: result.usage, ms: Date.now() - started };
   } finally {
@@ -114,10 +117,12 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
   const candidates = wanted.filter((id) => models.some((model) => model.id === id));
   assert.ok(candidates.length, `none of ${wanted.join(', ')} is offered`);
   const runs = Math.max(1, Number(process.env.NEAR_LIVE_EVAL_RUNS ?? 2));
-  const tasks = [
+  const tasks: Array<{ name: string; kind: 'coding' | 'research' | 'planning' | 'execution'; files: Record<string, string>; prompt: string; execution?: ExecutionTask }> = [
     ...TASKS.map((task) => ({ name: task.name, kind: 'coding' as const, files: task.files, prompt: task.prompt })),
     { name: 'research-brief', kind: 'research' as const, files: RESEARCH_SOURCES, prompt: RESEARCH_PROMPT },
-    { name: 'phase-plan', kind: 'planning' as const, files: { 'spec.md': PLAN_SPEC }, prompt: PLAN_PROMPT }
+    { name: 'phase-plan', kind: 'planning' as const, files: { 'spec.md': PLAN_SPEC }, prompt: PLAN_PROMPT },
+    // Building from a plan, an issue, or a spec in a multi-file project, scored by acceptance tests the model never sees.
+    ...(await loadExecutionTasks()).map((task) => ({ name: task.name, kind: 'execution' as const, files: {}, prompt: task.prompt, execution: task }))
   ];
   const total = candidates.length * tasks.length * runs;
   const rows: Array<{ model: string; task: string; kind: string; run: number; score: number; outOf: number; outcome: string; turns: number; seconds: number; tokPerSec?: number; costUsd?: number; cachePct: number; misses: string }> = [];
@@ -126,14 +131,16 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
       for (let attempt = 1; attempt <= runs; attempt += 1) {
         const root = await mkdtemp(path.join(tmpdir(), `near-ai-eval-${task.name}-`));
         for (const [name, content] of Object.entries(task.files)) { await mkdir(path.dirname(path.join(root, name)), { recursive: true }); await writeFile(path.join(root, name), content); }
+        if (task.execution) await setUpExecutionTask(task.execution, root);
         let outcome = 'error';
         let usage: UsageMetadata[] = [];
         let ms = 0;
-        try { ({ outcome, usage, ms } = await agent(near, model, root, task.prompt)); } catch (error) { outcome = `error: ${(error as Error).message.slice(0, 80)}`; }
+        try { ({ outcome, usage, ms } = await agent(near, model, root, task.prompt, task.kind === 'execution' ? 50 : 30)); } catch (error) { outcome = `error: ${(error as Error).message.slice(0, 80)}`; }
         let score = 0;
         let outOf = 10;
         let misses: string[] = [];
-        if (task.kind === 'coding') {
+        if (task.execution) ({ score, misses } = await gradeExecution(task.execution, root));
+        else if (task.kind === 'coding') {
           // Passing only counts if the tests are the ones it was given.
           const changed = [];
           for (const [name, content] of Object.entries(task.files)) if (/\.test\.js$/.test(name) && await readFile(path.join(root, name), 'utf8').catch(() => '') !== content) changed.push(name);
@@ -169,9 +176,9 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
     const costs = mine.map((row) => row.costUsd).filter((value): value is number => value !== undefined);
     const speeds = mine.map((row) => row.tokPerSec).filter((value): value is number => value !== undefined);
     const info = models.find((candidate) => candidate.id === model);
-    return { model, privacy: info?.privacyBoundary === 'tee' ? 'TEE' : `forwarded${info?.forwardedTo ? ` (${info.forwardedTo})` : ''}`, coding: `${mine.filter((row) => row.kind === 'coding' && row.score === 10).length}/${mine.filter((row) => row.kind === 'coding').length} passed`, research: avg('research'), planning: avg('planning'), totalCostUsd: costs.length ? Number(costs.reduce((sum, value) => sum + value, 0).toFixed(4)) : undefined, avgSeconds: Math.round(mine.reduce((sum, row) => sum + row.seconds, 0) / mine.length), avgTokPerSec: speeds.length ? Math.round(speeds.reduce((sum, value) => sum + value, 0) / speeds.length) : undefined, avgCachePct: Math.round(mine.reduce((sum, row) => sum + row.cachePct, 0) / mine.length) };
+    return { model, privacy: info?.privacyBoundary === 'tee' ? 'TEE' : `forwarded${info?.forwardedTo ? ` (${info.forwardedTo})` : ''}`, coding: `${mine.filter((row) => row.kind === 'coding' && row.score === 10).length}/${mine.filter((row) => row.kind === 'coding').length} passed`, research: avg('research'), planning: avg('planning'), execution: avg('execution'), totalCostUsd: costs.length ? Number(costs.reduce((sum, value) => sum + value, 0).toFixed(4)) : undefined, avgSeconds: Math.round(mine.reduce((sum, row) => sum + row.seconds, 0) / mine.length), avgTokPerSec: speeds.length ? Math.round(speeds.reduce((sum, value) => sum + value, 0) / speeds.length) : undefined, avgCachePct: Math.round(mine.reduce((sum, row) => sum + row.cachePct, 0) / mine.length) };
   });
-  console.log('summary (research and planning are average scores out of 10):');
+  console.log('summary (research, planning, and execution are average scores out of 10; execution is the share of hidden acceptance tests passed):');
   console.table(summary);
   const out = process.env.NEAR_LIVE_EVAL_OUT;
   if (out) await writeFile(out, JSON.stringify({ at: new Date().toISOString(), runs, rows, summary }, null, 2));
