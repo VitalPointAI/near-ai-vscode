@@ -42,7 +42,7 @@ export function registerWebSearchSetup(context: vscode.ExtensionContext): void {
       if (!url) return;
       await configuration.update('webSearch.searxngUrl', url.trim(), vscode.ConfigurationTarget.Global);
     } else {
-      const key = await vscode.window.showInputBox({ title: `${choice.label} API key`, prompt: `Stored in VS Code's encrypted secret storage. Get one at ${choice.provider === 'brave' ? 'https://brave.com/search/api/' : 'https://app.tavily.com'}.`, password: true, ignoreFocusOut: true, validateInput: (value) => (value.trim().length < 10 ? 'That does not look like an API key.' : undefined) });
+      const key = await vscode.window.showInputBox({ title: `${choice.label} API key`, prompt: `Stored in VS Code's encrypted secret storage. ${choice.label} receives each query with this key, which links the searches to your ${choice.label} account. Get a key at ${choice.provider === 'brave' ? 'https://brave.com/search/api/' : 'https://app.tavily.com'}.`, password: true, ignoreFocusOut: true, validateInput: (value) => (value.trim().length < 10 ? 'That does not look like an API key.' : undefined) });
       if (!key) return;
       await context.secrets.store(KEY(choice.provider), key.trim());
     }

@@ -465,6 +465,14 @@
           "minimum": 10000,
           "maximum": 100000000,
           "description": "Stops a run (the agent and all its sub-agents) once it has used this many tokens, for models without known prices. Its work is kept."
+        },
+        "nearAi.agent.shellEnvAllow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Environment variables to pass to the agent's shell even though they look like credentials (for example GITHUB_TOKEN for gh). Others whose names or values look like keys, tokens, or passwords are kept out, because the agent's commands could send them to the model."
         }
       }
     },

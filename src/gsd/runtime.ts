@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { compareVersions } from '../domain/version';
+import { isSecretVariable } from '../agent/shell';
 import { loadAgents, loadSkills } from './library';
 
 export const GSD_PACKAGE = '@opengsd/gsd-core';
@@ -80,7 +81,8 @@ export class GsdRuntime {
       await rm(target, { recursive: true, force: true });
       await mkdir(target, { recursive: true });
       try {
-        await this.run('npx', ['--yes', `${GSD_PACKAGE}@${version}`, '--claude', '--global'], { cwd: target, env: { ...process.env, CLAUDE_CONFIG_DIR: target }, signal, timeoutMs: 300_000 });
+        // The installer is third-party code: it gets the environment without credential-like variables.
+        await this.run('npx', ['--yes', `${GSD_PACKAGE}@${version}`, '--claude', '--global'], { cwd: target, env: { ...installerEnv(), CLAUDE_CONFIG_DIR: target }, signal, timeoutMs: 300_000 });
       } catch (error) {
         await rm(target, { recursive: true, force: true });
         const detail = (error as { stderr?: string }).stderr?.trim().split('\n').slice(-3).join(' ') || (error as Error).message;
@@ -108,6 +110,10 @@ export class GsdRuntime {
     const versions = (await readdir(this.root).catch(() => [])).filter((name) => /^\d+\.\d+\.\d+$/.test(name)).sort(compareVersions).reverse();
     for (const version of versions.filter((name) => name !== current).slice(KEEP_VERSIONS - 1)) await rm(this.dirFor(version), { recursive: true, force: true });
   }
+}
+
+function installerEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([name, value]) => !isSecretVariable(name, value)));
 }
 
 async function readVersionFile(home: string): Promise<string | null> {

@@ -15,9 +15,18 @@ Last reviewed: 2026-10-26, against the code on `main`.
 | What the sidebar agent reads or runs | The same model, as tool results: file contents it reads, search results, and command output | Files under the workspace only. Reading a likely credential file (`.env`, private keys, SSH, AWS, or NEAR credential files) asks first. Pick a private or local model to keep this inside a TEE or on your machine. |
 | Open-GSD workflows | The NEAR AI agent runner, on the model you picked; sub-agents use the model for their tier (`nearAi.agent.deepModel`, `standardModel`, `fastModel`) when your provider offers it | The same outbound check, approvals, revert, and cost tracking as any agent run. No Codex or Claude Code runtime is invoked. |
 | Your API key | VS Code SecretStorage, one key per project and profile | Never written to settings, project files, logs, activity, analytics, exports, or error messages. |
-| Saved conversations | VS Code's extension storage on this machine, one folder per project; never the project itself | Full transcripts, including file contents and command output the agent saw, so History can resume them. The 50 most recent per project are kept. Turn off with `nearAi.agent.saveTranscripts`. |
+| Saved conversations | VS Code's extension storage on this machine, one folder per project; never the project itself | Full transcripts, including file contents and command output the agent saw, so History can resume them, **encrypted with AES-256-GCM** under a key in SecretStorage (files saved before 0.4.0 are re-encrypted when read). The 50 most recent per project are kept. Turn off with `nearAi.agent.saveTranscripts`. |
+| Agent Activity | Memory only, while VS Code runs | Prompts, replies, and tool calls for the live page; time- and size-limited; secrets masked. Never written to disk unless you export it. |
+| Your environment variables | Not passed to the agent's commands when they look like credentials (by name or value) | So `env` or a careless script cannot send them to the model. Pass specific ones with `nearAi.agent.shellEnvAllow`. Local MCP servers get only a minimal environment plus what you configure; the Open-GSD installer gets the environment without credential-like variables. |
+| Web searches | Only after **NEAR AI: Set Up Web Search**: your SearXNG instance, Brave Search, or Tavily | The query text; Brave and Tavily also receive your API key, which links the searches to your account. A SearXNG instance you run keeps queries on your infrastructure. |
+| Web pages the agent fetches | The page's site | A plain GET with the extension's user agent and no cookies, login, or referrer. Asks first under `approve-risky`. |
+| MCP tool calls | Only servers you add and switch on for the project | The call's arguments, shown on the approval card; see MCP connections below. |
+| Dependency checks | OSV.dev (package names and versions) and endoflife.date (runtime versions), after you agree once per project | No code, file contents, or project names. See Checking your project's dependencies. |
 | Activity and cost records | `.planning/.near-ai/` in your project | Operational facts only (models, token counts, costs, outcomes); no prompts or replies. Add it to `.gitignore` if you do not want it committed. |
-| Open-GSD installation | `npx @opengsd/gsd-core@<exact version> --claude --global` into the extension's own storage, never `~/.claude` | Installed the first time you run a workflow; in NEAR AI projects, checked for updates at startup and daily. A new version must pass a compatibility check before it replaces the installed one, and the previous version is kept. |
+| Open-GSD installation | `npx @opengsd/gsd-core@<exact version> --claude --global` into the extension's own storage, never `~/.claude` | Installed the first time you run a workflow; in NEAR AI projects, checked for updates at startup and daily, which contacts the npm registry (it sees your IP address and the package name). Turn both off with `nearAi.autoInstallGsd`. A new version must pass a compatibility check before it replaces the installed one, and the previous version is kept. |
+
+The extension sends **no telemetry** and loads no remote content into its
+pages (each has a content security policy that allows only its own scripts).
 
 ### Which models are private
 
@@ -285,7 +294,6 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 | Under `fully-autonomous`, the agent runs commands and writes protected files without asking | Only the deny list applies, and it is a substring backstop, not a sandbox. Intended for throwaway workspaces |
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
-| Conversation transcripts (for resuming chats) are stored unencrypted in VS Code's extension storage | Turn off `nearAi.agent.saveTranscripts`; tool output in them can include file contents |
 
 Report security issues through the repository's issue tracker with redacted
 logs. Never include API keys, raw prompts, or private file contents.

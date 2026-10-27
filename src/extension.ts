@@ -12,7 +12,7 @@ import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
 import { registerMcpConnections } from './services/mcpView';
 import { openTools } from './services/chat';
-import { TranscriptStore } from './services/transcripts';
+import { sharedTranscriptKey, TranscriptStore } from './services/transcripts';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
 import { deriveProfileId } from './domain/auth';
@@ -83,7 +83,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showInformationMessage('Open a folder to see NEAR AI conversations.'); return; }
-  const saved = await new TranscriptStore(context.globalStorageUri.fsPath, root).list();
+  const saved = await new TranscriptStore(context.globalStorageUri.fsPath, root, sharedTranscriptKey(context.secrets)).list();
   if (!saved.length) { void vscode.window.showInformationMessage(readAgentLimits().saveTranscripts ? 'No saved NEAR AI conversations in this project yet.' : 'Saving conversations is off (nearAi.agent.saveTranscripts).'); return; }
   const picked = await vscode.window.showQuickPick(saved.map((conversation) => ({
     label: conversation.title,

@@ -41,6 +41,12 @@ runtime in between.
   the MCP Connections page. Secrets stay in SecretStorage; tools that can
   change data ask in every mode by default; results are fenced as outside
   content.
+- **Privacy hardening.** Saved conversations are encrypted at rest
+  (AES-256-GCM, key in SecretStorage); environment variables that look like
+  credentials are kept out of the agent's shell (`nearAi.agent.shellEnvAllow`
+  to pass specific ones) and out of the Open-GSD installer; the search setup
+  says that Brave and Tavily keys link queries to your account; SECURITY.md
+  lists every connection the extension makes.
 - **Runaway protection.** A run and all its sub-agents stop cleanly, keeping
   their work, at a per-run cost cap (`nearAi.agent.maxRunCostUsd`, default $5),
   what is left of the daily spend limit, or a token cap, checked before every

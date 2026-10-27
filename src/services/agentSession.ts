@@ -84,6 +84,8 @@ export interface AgentTurnRequest {
   mcpTools?: AgentTool<any>[];
   /** Caps for the whole run (the agent and all its sub-agents), checked before every model turn. */
   budget?: { maxCostUsd: number; maxTokens: number };
+  /** Environment variables to pass to the agent's shell even though they look like credentials. */
+  shellEnvAllow?: string[];
 }
 
 type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
@@ -113,6 +115,7 @@ export class AgentConversation {
   private conversationId = newConversationId();
   private title = '';
   private shell: ShellSession | undefined;
+  private shellEnvAllow: string[] = [];
   private shellEnvKey = '';
   private abort: AbortController | undefined;
   private readonly approvals = new Map<string, (reply: ApprovalReply) => void>();
@@ -150,6 +153,7 @@ export class AgentConversation {
     const runId = `run-${Date.now()}-${randomBytes(3).toString('hex')}`;
     const checkpoints = new RunCheckpoints(runId, this.checkpointDir);
     this.runs.set(runId, checkpoints);
+    this.shellEnvAllow = request.shellEnvAllow ?? [];
     const shell = this.shellFor(request.gsd?.shellEnv ?? {});
     const freshConversation = !this.messages.length;
     if (freshConversation) this.messages.push({ role: 'system', content: this.systemPrompt(request) });
@@ -317,10 +321,10 @@ export class AgentConversation {
   }
 
   private shellFor(env: NodeJS.ProcessEnv): ShellSession {
-    const key = JSON.stringify(env);
+    const key = JSON.stringify([env, this.shellEnvAllow]);
     if (!this.shell || this.shellEnvKey !== key) {
       this.shell?.dispose();
-      this.shell = new ShellSession(this.root, undefined, env);
+      this.shell = new ShellSession(this.root, undefined, env, this.shellEnvAllow);
       this.shellEnvKey = key;
     }
     return this.shell;
@@ -402,7 +406,7 @@ export class AgentConversation {
             if (spawn.isolation === 'worktree') worktree = await createAgentWorktree(this.root, this.worktreeDir, agent.id);
             const agentRoot = worktree?.path ?? this.root;
             // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
-            shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {});
+            shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {}, request.shellEnvAllow ?? []);
             // Research agents gather outside content; their writes belong in .planning/ (others ask).
             const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}) };
             const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}. Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';

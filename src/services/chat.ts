@@ -16,7 +16,7 @@ import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { OutboundGuard, spentTodayUsd } from './outboundGuard';
 import { ProfileStore } from './profileStore';
 import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readSettings, shouldAutoInstallGsd, readRunBudget } from './settings';
-import { TranscriptStore } from './transcripts';
+import { sharedTranscriptKey, TranscriptStore } from './transcripts';
 import { prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
@@ -556,7 +556,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const mcp = await (async () => { try { return await mcpRegistry(context).agentTools(); } catch (error) { return { tools: [], problems: [`MCP tools are unavailable: ${(error as Error).message}`] }; } })();
       for (const problem of mcp.problems) panel.webview.postMessage({ type: 'notice', text: problem });
       const imageModel = delegable.find((candidate) => candidate.id === agentModels.imageModel && (candidate.outputModalities ?? []).includes('image'));
-      await state.agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+      await state.agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       await sendHistory(panel, state.activity);
       panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine({ agents: 0, activity: state.activity }) });
       await sendArtifacts(panel);
@@ -616,7 +616,7 @@ function ripgrepPath(): string | undefined {
 
 function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost): AgentConversation {
   const storage = context.globalStorageUri.fsPath;
-  const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root) : undefined;
+  const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root, sharedTranscriptKey(context.secrets)) : undefined;
   return new AgentConversation(root, (outbound) => { void panel.webview.postMessage(outbound); }, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts, sharedActivityFeed());
 }
 

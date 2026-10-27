@@ -29,7 +29,7 @@ export class ShellSession {
   private readonly jobs = new Map<string, BackgroundJob>();
   private scripts: string | undefined;
 
-  public constructor(root: string, private readonly shellPath: string = findShell(), private readonly extraEnv: NodeJS.ProcessEnv = {}) {
+  public constructor(root: string, private readonly shellPath: string = findShell(), private readonly extraEnv: NodeJS.ProcessEnv = {}, private readonly allowEnv: string[] = []) {
     this.cwd = root;
   }
 
@@ -41,7 +41,7 @@ export class ShellSession {
 
   public startBackground(command: string): string {
     const id = `bash_${randomBytes(4).toString('hex')}`;
-    const child = spawn(this.shellPath, ['-c', command], { cwd: this.cwd, env: shellEnv(this.extraEnv), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(this.shellPath, ['-c', command], { cwd: this.cwd, env: shellEnv(this.extraEnv, this.allowEnv), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const job: BackgroundJob = { process: child, output: '', read: 0, exitCode: undefined, command };
     const append = (chunk: Buffer) => { job.output = (job.output + chunk.toString()).slice(-MAX_BACKGROUND_BUFFER); };
     child.stdout?.on('data', append);
@@ -119,7 +119,7 @@ export class ShellSession {
   private ensureShell(): ChildProcess {
     if (this.process && this.process.exitCode === null) return this.process;
     const args = /bash(\.exe)?$/.test(this.shellPath) ? ['--noprofile', '--norc'] : [];
-    const child = spawn(this.shellPath, args, { cwd: this.cwd, env: shellEnv(this.extraEnv), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(this.shellPath, args, { cwd: this.cwd, env: shellEnv(this.extraEnv, this.allowEnv), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child.stderr?.on('data', (chunk: Buffer) => { child.stdout?.emit('data', chunk); });
     child.on('error', () => undefined);
     child.stdin?.write('exec 2>&1\n');
@@ -133,8 +133,28 @@ export class ShellSession {
   }
 }
 
-function shellEnv(extra: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const base: NodeJS.ProcessEnv = { ...process.env, PAGER: 'cat', GIT_PAGER: 'cat', TERM: 'dumb', NO_COLOR: '1', CI: process.env.CI ?? '' };
+/** Variable names that usually hold credentials. */
+const SECRET_NAME = /(?:^|_)(?:TOKEN|TOKENS|SECRET|SECRETS|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIALS?|AUTH|COOKIE|SESSION_?KEY)(?:_|$)|_PAT$|^AWS_(?:SECRET|SESSION)|^(?:DATABASE|REDIS|MONGO(?:DB)?)_URL$|_DSN$|CONNECTION_?STRING/i;
+/** Values shaped like well-known credentials, whatever the variable is called. */
+const SECRET_VALUE = /^(?:sk-[A-Za-z0-9_-]{16,}|sk_(?:live|test)_|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_|glpat-|AKIA[A-Z0-9]{16}|xox[baprs]-|eyJ[A-Za-z0-9_-]{10,}\.eyJ)/;
+
+/** Whether a variable is kept out of commands the agent runs (unless allowed by name). */
+/** The same words run together in camelCase or lowercase, e.g. npm_config__authToken or apiKey. */
+const SECRET_JOINED = /(?:auth|access|refresh|bearer|api|client|private|session|secret)_?(?:token|key|secret)|password|passwd|passphrase/i;
+
+export function isSecretVariable(name: string, value: string | undefined): boolean {
+  return SECRET_NAME.test(name) || SECRET_JOINED.test(name) || SECRET_VALUE.test(value ?? '');
+}
+
+/**
+ * The agent's shell environment: the editor's, minus anything that looks like a credential (by
+ * name or value), since commands such as `env` would send it to the model. `allow` names
+ * variables to pass anyway (nearAi.agent.shellEnvAllow); `extra` (set by the extension) is kept.
+ */
+function shellEnv(extra: NodeJS.ProcessEnv, allow: string[] = []): NodeJS.ProcessEnv {
+  const base: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) if (allow.includes(name) || !isSecretVariable(name, value)) base[name] = value;
+  Object.assign(base, { PAGER: 'cat', GIT_PAGER: 'cat', TERM: 'dumb', NO_COLOR: '1', CI: process.env.CI ?? '' });
   // Electron's own flag must not leak into commands the agent runs.
   delete base.ELECTRON_RUN_AS_NODE;
   return { ...base, ...extra };
