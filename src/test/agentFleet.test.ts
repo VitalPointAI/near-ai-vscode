@@ -86,6 +86,30 @@ test('the parallel-agent limit runs extra agents one after another', async () =>
   assert.equal(peak, 1);
 });
 
+test('each sub-agent has its own shell, so its commands neither wait behind the parent\'s nor move the parent\'s directory', async () => {
+  const { root, gsd, posted, conversation } = await project();
+  gsd.agents.push({ name: 'gsd-worker', description: 'Works', tools: ['Bash'], body: 'You are the planner.', file: path.join(gsd.home, 'agents', 'gsd-worker.md') });
+  const client = scriptedClient({
+    parent: [
+      { calls: [call('a1', 'Agent', { subagent_type: 'gsd-worker', prompt: 'work', run_in_background: true })] },
+      { calls: [call('p1', 'Bash', { command: 'sleep 2; pwd' })] },
+      { text: 'waiting' },
+      { text: 'done' }
+    ],
+    child: [{ calls: [call('c1', 'Bash', { command: 'mkdir -p sub && cd sub && pwd' })], delayMs: 100 }, { text: 'child done' }]
+  });
+  try {
+    await conversation.send(request(client, gsd, { policy: { mode: 'fully-autonomous', emergencyStop: false } }));
+  } finally {
+    conversation.dispose();
+  }
+  const ends = posted.filter((message) => message.type === 'tool-end').map((message) => String(message.callId));
+  const child = ends.findIndex((id) => id.endsWith(':c1'));
+  assert.ok(child >= 0 && child < ends.indexOf('p1'), `the sub-agent's command finished during the parent's sleep (order: ${ends.join(', ')})`);
+  const parentOutput = String(posted.find((message) => message.type === 'tool-end' && message.callId === 'p1')?.output).trim();
+  assert.ok(parentOutput.split('\n').includes(root), `the sub-agent's cd did not move the parent (got: ${parentOutput})`);
+});
+
 test('a paused agent waits before its next turn until resumed', async () => {
   const { gsd, posted, conversation } = await project();
   const client = scriptedClient({

@@ -271,7 +271,7 @@ export class AgentConversation {
   private systemPrompt(request: AgentTurnRequest): string {
     const base = agentSystemPrompt({ root: this.root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(this.root, '.git')), model: request.model });
     if (!request.gsd) return base;
-    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). When it says to ask the user, use AskUserQuestion.`;
+    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
   }
 
   private shellFor(env: NodeJS.ProcessEnv): ShellSession {
@@ -347,6 +347,9 @@ export class AgentConversation {
         const execute = async (): Promise<string> => {
           await this.acquireSlot(request.maxParallelAgents ?? 4, agent.abort.signal);
           const releaseSlot = () => this.releaseSlot();
+          // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
+          const shell = new ShellSession(this.root, undefined, request.gsd?.shellEnv ?? {});
+          const agentContext = { ...context, shell, readFiles: new Set<string>() };
           this.agents.set(agent.id, agent);
           this.postAgents();
           const started = Date.now();
@@ -354,7 +357,7 @@ export class AgentConversation {
           void record({ status: 'running', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} started.` });
           try {
             const child = new AgentRun({
-              client: request.client, model, tools: allowed, context, policy: request.policy, rules: request.rules, grants, maxTurns: request.maxTurns,
+              client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, maxTurns: request.maxTurns,
               beforeTurn: async (transcript, lastUsage, signal) => {
                 while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
                 return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
@@ -378,6 +381,7 @@ export class AgentConversation {
             void record({ status: 'failed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
             throw error;
           } finally {
+            shell.dispose();
             parent.removeEventListener('abort', onParentAbort);
             this.agents.delete(agent.id);
             releaseSlot();
@@ -390,7 +394,7 @@ export class AgentConversation {
           .catch((error: Error) => { this.notifications.push({ role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="failed">\n${error.message}\n</agent-notification>` }); })
           .finally(() => { this.background.delete(task); });
         this.background.add(task);
-        return `Started ${label} in the background as ${agent.id}. Its report will arrive in a later message when it finishes; continue with other work meanwhile.`;
+        return `Started ${label} in the background as ${agent.id}. Its report will arrive in a later message when it finishes; there is no output file to poll. Continue with other work, or end your turn to wait; do not sleep.`;
       }
     });
     all = [...base, ...extra.filter((tool) => gsd || tool.name !== 'Skill')];

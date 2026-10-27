@@ -129,10 +129,19 @@ test('live GSD: /gsd-map-codebase runs end to end on a sample repository', { ski
   const skill = findSkill(gsd.skills, 'gsd-map-codebase');
   assert.ok(skill, 'the runtime has gsd-map-codebase');
   const posted: Array<{ type: string; [key: string]: unknown }> = [];
+  // A timeline of tool calls, so a slow run shows where the time went.
+  const started = Date.now();
+  const open = new Map<string, { title: string; at: number }>();
+  const spans: Array<{ title: string; startS: number; seconds: number }> = [];
   // Answer any question with its first option, as a user accepting the recommendation would.
   const conversation: AgentConversation = new AgentConversation(root, (message) => {
-    const value = message as { type: string; id?: string; questions?: Array<{ question: string; options: Array<{ label: string }> }> };
+    const value = message as { type: string; id?: string; callId?: string; title?: string; questions?: Array<{ question: string; options: Array<{ label: string }> }> };
     posted.push(value);
+    if (value.type === 'tool-start' && value.callId) open.set(value.callId, { title: String(value.title), at: Date.now() });
+    if (value.type === 'tool-end' && value.callId && open.has(value.callId)) {
+      const span = open.get(value.callId)!;
+      spans.push({ title: span.title, startS: Math.round((span.at - started) / 1000), seconds: Math.round((Date.now() - span.at) / 1000) });
+    }
     if (value.type === 'questions-request' && value.id && value.questions) conversation.answerQuestions(value.id, value.questions.map((question) => question.options[0]?.label ?? 'yes'));
   }, path.join(storage, 'checkpoints'));
   try {
@@ -141,6 +150,10 @@ test('live GSD: /gsd-map-codebase runs end to end on a sample repository', { ski
     // The conversation keeps a shell open between turns; close it so the test process can exit.
     conversation.dispose();
   }
+  const turns = posted.filter((message) => message.type === 'assistant-done').length;
+  console.log(`gsd run: ${Math.round((Date.now() - started) / 1000)} s, ${spans.length} tool calls, ${turns} run(s); slowest tool calls:`);
+  for (const span of [...spans].sort((a, b) => b.seconds - a.seconds).slice(0, 10)) console.log(`  ${span.seconds} s at +${span.startS} s  ${span.title.slice(0, 120)}`);
+  if (process.env.NEAR_LIVE_TRACE) await writeFile(process.env.NEAR_LIVE_TRACE, JSON.stringify(spans, null, 2));
   const docs = existsSync(path.join(root, '.planning', 'codebase')) ? await readdir(path.join(root, '.planning', 'codebase')) : [];
   console.log(`codebase docs: ${docs.join(', ')}`);
   assert.ok(posted.some((message) => message.type === 'assistant-done'), 'the run finished');
