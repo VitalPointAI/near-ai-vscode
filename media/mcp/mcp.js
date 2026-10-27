@@ -22,7 +22,7 @@
     const form = $('form');
     form.hidden = false;
     const editing = Boolean(server);
-    const name = input('text', server ? server.config.name : '', 'Ingram Micro Xvantage');
+    const name = input('text', server ? server.config.name : '', 'Product catalog');
     const transport = document.createElement('select');
     [['http', 'Remote (URL)'], ['stdio', 'Runs on this computer (command)']].forEach(([value, label]) => { const option = el('option', '', label); option.value = value; transport.append(option); });
     transport.value = server ? server.config.transport : 'http';

@@ -21,9 +21,9 @@ exactly what is allowed to leave your machine.
   sources, and write cited findings. Hidden text and likely prompt injections
   in what they read are caught and reported.
 - **Presales and solution design.** Turn requirements and RFP documents into
-  solution designs, bills of materials, and proposals. Connect a distributor's
-  MCP server (for example Ingram Micro Xvantage) for live product and pricing
-  data, and produce PowerPoint decks with diagrams.
+  solution designs, bills of materials, and proposals. Connect the MCP servers
+  you already use for live product, pricing, or account data, and produce
+  PowerPoint decks with diagrams.
 - **Writing and content.** Plan, draft, edit, and fact-check long documents,
   with an editor and a red-team reviewer before anything is final.
 - **Data analysis.** Read spreadsheets and data files, analyse them with your
@@ -129,12 +129,11 @@ notes list the items not fixed. In these projects `/gsd-execute-phase`,
 ### MCP connections
 
 **NEAR AI: Manage MCP Connections** adds Model Context Protocol servers, remote
-(a URL, for example a distributor's tenant server such as Ingram Micro
-Xvantage) or local (a command), and shows each one's status, tools, calls,
+(a URL) or local (a command), and shows each one's status, tools, calls,
 errors, and last use. A server is off until you switch it on for a project.
 Agents then get its tools as `mcp__<server>__<tool>`; a team member gets them
-only if its `tools:` line lists `mcp:<server>`, so you can give a distributor
-connection to your presales team alone. Read-only tools follow your normal
+only if its `tools:` line lists `mcp:<server>`, so you can give a connection
+to one team alone. Read-only tools follow your normal
 approval rules; tools that can change data ask first in every mode unless you
 mark the server Trusted, and the approval card shows exactly what is sent.
 URLs (which may carry the access token), header values, and environment values

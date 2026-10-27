@@ -104,10 +104,10 @@ test('a server that cannot start is reported, not fatal; removing a server delet
 });
 
 test('tool grants and URL rules', () => {
-  assert.equal(mcpToolName('xvantage', 'search products'), 'mcp__xvantage__search_products');
-  assert.ok(grantsMcpTool(['mcp:xvantage'], 'mcp__xvantage__search_products'));
+  assert.equal(mcpToolName('catalog', 'search products'), 'mcp__catalog__search_products');
+  assert.ok(grantsMcpTool(['mcp:catalog'], 'mcp__catalog__search_products'));
   assert.ok(grantsMcpTool(['mcp__context7__*'], 'mcp__context7__resolve'));
-  assert.ok(!grantsMcpTool(['mcp:xvantage', 'Read'], 'mcp__other__x'));
+  assert.ok(!grantsMcpTool(['mcp:catalog', 'Read'], 'mcp__other__x'));
   assert.equal(validateServerUrl('https://mcp.example.com/mcp'), undefined);
   assert.equal(validateServerUrl('http://localhost:3000/mcp'), undefined);
   assert.match(validateServerUrl('http://mcp.example.com')!, /must use https/);
