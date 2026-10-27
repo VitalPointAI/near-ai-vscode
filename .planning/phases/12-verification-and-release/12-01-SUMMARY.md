@@ -73,10 +73,23 @@ the auto-allowed `git status` could run code.
   verifier; fixed in `1a01b15`. The genuine Intel TDX quote binds the key with
   a fresh nonce. Billing reported $0.0036 for the run.
 
+- **Model evaluation** (`NEAR_LIVE_EVAL=1`). Three fixed tasks (implement,
+  fix-bug, refactor), each judged by its own `node --test`. All 9 runs passed.
+
+  | Model | Privacy | Time (3 tasks) | Cost (3 tasks) | Turns |
+  | --- | --- | --- | --- | --- |
+  | z-ai/glm-5.3 | TEE | 41 s | $0.056 | 24 |
+  | moonshotai/kimi-k3 | TEE | 685 s | $0.188 | 36 |
+  | deepseek/deepseek-v4.1-flash | forwarded | 76 s | $0.011 | 30 |
+
+  Decision: **GLM 5.3 stays the default**: private and the fastest, with
+  equal correctness. Kimi K3 is as correct but about 17× slower and 3× the
+  cost. DeepSeek V4.1 Flash is the cheapest but forwarded, so it is not
+  eligible as a private default. The sample is small: it confirms the default
+  works, and is not a benchmark.
+
 ## Still needs the user (NEAR AI key)
 
-- `NEAR_LIVE_EVAL=1`: default-model comparison. GLM 5.3 stays the default
-  until then.
 - `NEAR_LIVE_GSD=1 NEAR_GSD_HOME=…`: RUN-06.
 - Publish 0.4.0 after those pass.
 

@@ -191,3 +191,5 @@ Progress: [███████░░░] 67%
 **Last session:** 2026-10-26T05:43:55.408Z
 **Stopped at:** Completed 06-11-PLAN.md
 **Resume file:** None
+
+- 2026-10-26: Live eval confirmed GLM 5.3 as the default chat model. All three candidates passed; GLM 5.3 was fastest (41 s vs 685 s for Kimi K3) and private. DeepSeek V4.1 Flash was cheapest but forwarded, so it is not a private default.
