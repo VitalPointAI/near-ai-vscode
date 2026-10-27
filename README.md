@@ -83,9 +83,30 @@ run a workflow and stays current; your `~/.claude` setup is never touched.
 ### Spend and activity
 
 Open **NEAR AI Tools** from the title bar for analytics: sessions, models,
-tokens, and spend by organization and project, exportable. Agent teams,
-attachments, image generation, and context memory are being rebuilt on a native
-NEAR agent runner and will appear there when they do real work.
+tokens, and spend by organization and project, exportable.
+
+### Teams, attachments, images, and memory
+
+- **Agent teams.** A team is a Markdown file you edit in VS Code: one
+  `## member` section per member, with optional `role:`, `model:` (a model ID
+  or deep/standard/fast), and `tools:` lines. Run one with `/team:<name> <task>`
+  or **Manage Agent Teams**; a lead agent delegates to the members as
+  sub-agents, each limited to its own tools. Saving a team file records a
+  version. Teams can be duplicated, archived, restored, imported, and deleted.
+  **Set Up Project Team** asks a few questions and drafts a team for the
+  project in `.planning/.near-ai/team.md` for you to review.
+- **Attachments.** Attach images, audio, and text files to a message. Images
+  are read by the chosen model if it reads images, otherwise by a vision model
+  (`nearAi.agent.visionModel`); audio is transcribed with Whisper. The chat
+  says which model handled each file. PDFs, Office files, and video are not
+  supported yet.
+- **Image generation.** When the provider lists an image model, the agent can
+  create PNGs in your workspace with its GenerateImage tool. It asks first and
+  shows the price, and **Revert** removes the file.
+- **Project memory.** The agent saves durable facts with Remember, looks them
+  up with Recall, and starts each run with the facts relevant to your request.
+  Memory stays on this machine and refuses secret-looking content. Review,
+  correct, retract, export, or reset it with **Manage Project Memory**.
 
 ### Respects your projects
 

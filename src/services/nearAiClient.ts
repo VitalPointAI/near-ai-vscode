@@ -203,12 +203,44 @@ export class NearAiClient {
   /** Official NEAR image-generation contract. No video endpoint is assumed here. */
   public async generateImage(model: string, prompt: string, options: ImageGenerationOptions = {}, signal?: AbortSignal): Promise<ImageGenerationResult> {
     const started = Date.now();
-    const body: Record<string, unknown> = { model, prompt };
+    const body: Record<string, unknown> = { model, prompt, response_format: 'b64_json' };
     if (options.count !== undefined) body.n = options.count;
     if (options.size !== undefined) body.size = options.size;
     if (options.quality !== undefined) body.quality = options.quality;
     const response = await this.request('/images/generations', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     return imageResult(await response.json(), metadataFromHeaders(response.headers, started));
+  }
+
+  /** Speech to text through NEAR's `/audio/transcriptions` (multipart: file, model, response_format). */
+  public async transcribeAudio(model: string, audio: Uint8Array, fileName: string, mimeType: string, signal?: AbortSignal): Promise<{ text: string; usage: UsageMetadata }> {
+    const started = Date.now();
+    const form = new FormData();
+    form.append('file', new Blob([audio], { type: mimeType }), fileName);
+    form.append('model', model);
+    form.append('response_format', 'json');
+    const response = await this.request('/audio/transcriptions', { method: 'POST', signal, body: form });
+    const body = objectValue(await response.json());
+    const text = stringValue(body.text);
+    if (text === undefined) throw new NearAiError(0, 'The transcription service returned no text.', false);
+    return { text, usage: metadataFromHeaders(response.headers, started) };
+  }
+
+  /** Asks a vision model about an image (sent as a data URL) and returns its text answer. */
+  public async describeImage(model: string, dataUrl: string, question: string, signal?: AbortSignal): Promise<{ text: string; usage: UsageMetadata }> {
+    const started = Date.now();
+    const response = await this.request('/chat/completions', {
+      method: 'POST',
+      signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: dataUrl } }] }] })
+    });
+    const body = objectValue(await response.json());
+    const choice = objectValue(Array.isArray(body.choices) ? body.choices[0] : undefined);
+    const text = stringValue(objectValue(choice.message).content);
+    if (!text) throw new NearAiError(0, 'The vision model returned no description.', false);
+    const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
+    usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens);
+    return { text, usage };
   }
 
   /** Official NEAR image-edit contract. The staged image bytes never enter durable telemetry. */

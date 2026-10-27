@@ -13,6 +13,7 @@ import { NearAiPanelViewProvider } from './services/panelView';
 import { deriveProfileId } from './domain/auth';
 import { isSecureEndpoint } from './domain/config';
 import { registerChatParticipant } from './services/chatParticipant';
+import { registerWorkspaceCommands } from './services/workspaceCommands';
 import { initEmergencyStop, setEmergencyStop } from './services/emergencyStop';
 import { clearProviderCache } from './services/providerCache';
 
@@ -55,6 +56,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('nearAi.gsdProgress', () => sidebar.request({ type: 'open-command', command: 'gsd-progress' })),
     vscode.commands.registerCommand('nearAi.saveCheckpoint', () => saveCheckpoint())
   );
+
+  registerWorkspaceCommands(context, async (slug) => {
+    const task = await vscode.window.showInputBox({ title: 'Run team', prompt: 'What should the team do?', ignoreFocusOut: true });
+    if (task?.trim()) await sidebar.request({ type: 'open-command', command: `team:${slug}`, args: task.trim() });
+  });
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));

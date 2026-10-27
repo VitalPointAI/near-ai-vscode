@@ -6,7 +6,7 @@ import type { AgentMessage } from './nearAiClient';
 const MAX_TRANSCRIPTS = 50;
 
 export interface TranscriptSummary { id: string; title: string; model: string; updatedAt: string; turns: number }
-export interface Transcript extends TranscriptSummary { messages: AgentMessage[] }
+export interface Transcript extends TranscriptSummary { messages: AgentMessage[]; /** [hash of the message the model saw, what the user typed] */ display?: Array<[string, string]> }
 
 /**
  * Full conversation transcripts, so a chat can be resumed with its context. Kept in the

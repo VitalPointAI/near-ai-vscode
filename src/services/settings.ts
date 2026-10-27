@@ -54,3 +54,13 @@ export function readAgentLimits(): { maxParallelAgents: number; maxTurns: number
   };
   return { maxParallelAgents: bounded('agent.maxParallelAgents', 4, 1, 16), maxTurns: bounded('agent.maxTurns', 60, 5, 500), saveTranscripts: configuration.get<boolean>('agent.saveTranscripts', true) !== false };
 }
+
+/** Models used for attachments and image generation. */
+export function readAgentModels(): { visionModel: string; transcriptionModel: string; imageModel: string } {
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const pick = (key: string, fallback: string) => {
+    const value = configuration.get<unknown>(key, fallback);
+    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  };
+  return { visionModel: pick('agent.visionModel', 'z-ai/glm-5.3-flash'), transcriptionModel: pick('agent.transcriptionModel', 'openai/whisper-large-v3'), imageModel: pick('agent.imageModel', 'black-forest-labs/FLUX.2-klein-4B') };
+}

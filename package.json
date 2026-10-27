@@ -120,6 +120,22 @@
         "command": "nearAi.resume",
         "title": "Resume After Emergency Stop",
         "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.manageTeams",
+        "title": "Manage Teams…",
+        "category": "NEAR AI",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "nearAi.setupProjectTeam",
+        "title": "Set Up Project Team…",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.manageMemory",
+        "title": "Manage Project Memory…",
+        "category": "NEAR AI"
       }
     ],
     "viewsContainers": {
@@ -334,6 +350,21 @@
           "type": "boolean",
           "default": true,
           "description": "Save full conversations (including file contents the agent read) in VS Code's extension storage on this machine so they can be resumed from History. Never saved in the project."
+        },
+        "nearAi.agent.visionModel": {
+          "type": "string",
+          "default": "z-ai/glm-5.3-flash",
+          "description": "Reads image attachments when the chat's model can't (private by default)."
+        },
+        "nearAi.agent.transcriptionModel": {
+          "type": "string",
+          "default": "openai/whisper-large-v3",
+          "description": "Transcribes audio attachments (private by default)."
+        },
+        "nearAi.agent.imageModel": {
+          "type": "string",
+          "default": "black-forest-labs/FLUX.2-klein-4B",
+          "description": "Model the agent's GenerateImage tool uses (private by default). The tool is offered only when your provider lists this model."
         }
       }
     },
@@ -353,6 +384,16 @@
           "command": "nearAi.openTools",
           "when": "view == nearAiChatView",
           "group": "navigation@3"
+        },
+        {
+          "command": "nearAi.manageTeams",
+          "when": "view == nearAiChatView",
+          "group": "overflow@1"
+        },
+        {
+          "command": "nearAi.manageMemory",
+          "when": "view == nearAiChatView",
+          "group": "overflow@2"
         },
         {
           "command": "nearAi.setup",

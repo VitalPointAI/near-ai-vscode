@@ -76,11 +76,13 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
   <nav id="project-links" aria-label="Planning files" hidden></nav>
   <div class="composer">
     <div id="commands" role="listbox" aria-label="Open-GSD commands" hidden></div>
+    <div id="chips" class="chips" hidden></div>
     <textarea id="input" rows="1" placeholder="Ask NEAR AI, or type / for commands" aria-label="Message NEAR AI" aria-controls="commands" aria-autocomplete="list" aria-expanded="false"></textarea>
     <div class="bar">
       <button id="profile" class="chip" type="button" title="Choose the NEAR AI profile for this project">Set up</button>
       <select id="model" aria-label="Model"><option value="">Loading models…</option></select>
       <span class="spacer"></span>
+      <button id="attach" class="icon-button" type="button" aria-label="Attach files" title="Attach images, audio, or text files"></button>
       <button id="send" class="icon-button" type="button" aria-label="Send"></button>
     </div>
   </div>

@@ -108,6 +108,8 @@ Rebuild the advanced features on the runner so they do real work: the onboarding
 
 **Requirements:** ONB-04, TEAM-01..04, MULTI-01..03, GEN-01, GEN-02, MEM-01..06, ROUTE-01, ROUTE-02, AGENT-05..07
 
+**Status:** Complete 2026-10-26 with recorded gaps (`phases/11-teams-multimodal-memory/11-01-SUMMARY.md`): no video, PDF, or Office attachments; no memory graph view or shared team memory; reputation is recorded but does not yet steer routing.
+
 ### Phase 12: End-to-end verification, model selection, and release
 
 Run the extension in a real VS Code extension host with automated UI tests, plus opt-in live tests against NEAR (a full GSD new-project, plan, and execute run on a sample repository). Evaluate GLM 5.3, Kimi K3, and DeepSeek V4.1 Flash on fixed coding tasks to confirm defaults. Verify NEAR's per-response attestation (`/v1/attestation/report`, `/v1/signature/{chat_id}`) so "TEE verified" reflects a checked signature rather than catalog metadata. Security review, accurate SECURITY.md and listing with real screenshots, then publish.
@@ -120,4 +122,4 @@ NEAR account sign-in (AUTH-02) and wallet, staking, and entitlement (AUTH-04, CO
 
 ## Next action
 
-Phase 11: plan with `/gsd-plan-phase 11`.
+Phase 12: end-to-end verification and release candidate.

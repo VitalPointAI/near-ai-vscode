@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
@@ -14,8 +14,15 @@ import { expandPrompt, GsdAgent, GsdSkill, modelForTier } from '../gsd/library';
 import { gsdTools, Question } from '../gsd/tools';
 import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
-import type { AgentMessage, NearAiClient, UsageMetadata } from './nearAiClient';
+import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
+import { PreparedAttachments } from '../agent/attachments';
+import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
+import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
+import type { MemoryScope } from '../domain/contextGraph';
+import type { AgentRole } from '../domain/agents';
+import type { ContextGraphMemory } from './contextGraphMemory';
+import type { ReputationStore } from './reputation';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -48,6 +55,15 @@ export interface AgentTurnRequest {
   contextWindows?: Record<string, number | undefined>;
   maxParallelAgents?: number;
   maxTurns?: number;
+  /** Run a team: a lead agent delegates `text` to the team's members. */
+  team?: TeamDefinition;
+  /** Attachments already read (text inlined, images described, audio transcribed). */
+  attachments?: PreparedAttachments;
+  /** Project memory: relevant facts start each turn, and Remember/Recall are available. */
+  memory?: { store: ContextGraphMemory; projectScope: MemoryScope };
+  /** The provider's image model, when it has one; enables GenerateImage. */
+  imageModel?: ModelInfo;
+  reputation?: ReputationStore;
 }
 
 type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
@@ -71,6 +87,8 @@ interface LiveAgent {
  */
 export class AgentConversation {
   private messages: AgentMessage[] = [];
+  /** What the user typed, keyed by a hash of the message the model saw (survives compaction). */
+  private display = new Map<string, string>();
   private conversationId = newConversationId();
   private title = '';
   private shell: ShellSession | undefined;
@@ -108,18 +126,24 @@ export class AgentConversation {
     if (!this.messages.length) this.messages.push({ role: 'system', content: this.systemPrompt(request) });
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
+    if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
     if (request.skill && request.gsd) {
       const skill = findSkill(request.gsd.skills, request.skill.name);
       if (!skill) throw new Error(`Open-GSD has no skill named ${request.skill.name}.`);
       prompt = `The user ran /${skill.name}${request.skill.args ? ` ${request.skill.args}` : ''}. Follow these instructions:\n\n${await expandPrompt(skill.body, { args: request.skill.args, home: request.gsd.home, root: this.root })}`;
     }
+    const extraUsage: UsageMetadata[] = [...(request.attachments?.usage ?? [])];
+    if (request.attachments?.text) prompt = `${request.attachments.text}\n\n${prompt}`;
+    const remembered = request.memory ? await memoryPreamble(request.memory.store, request.memory.projectScope, request.text).catch(() => undefined) : undefined;
+    if (remembered) prompt = `<project-memory>\n${remembered}\n</project-memory>\n\n${prompt}`;
+    this.display.set(contentKey(prompt), request.text);
     this.messages.push({ role: 'user', content: prompt });
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
+    for (const note of request.attachments?.notes ?? []) this.post({ type: 'notice', text: note });
     const record: Record_ = (event) => request.activity ? request.activity.store.append(request.activity.sessionId, event).catch(() => undefined) : Promise.resolve();
-    const extraUsage: UsageMetadata[] = [];
     const grants = new RunGrants();
     const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [] };
-    const tools = this.toolsFor(request, context, grants, extraUsage, record, abort.signal);
+    const tools = this.toolsFor(request, context, grants, extraUsage, record, abort.signal, runId);
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -209,14 +233,16 @@ export class AgentConversation {
     if (!transcript) return undefined;
     this.reset();
     this.messages = transcript.messages;
+    this.display = new Map(transcript.display ?? []);
     this.conversationId = transcript.id;
     this.title = transcript.title;
-    return visibleTurns(transcript.messages);
+    return visibleTurns(transcript.messages, this.display);
   }
 
   public reset(): void {
     this.stop();
     this.messages = [];
+    this.display = new Map();
     this.conversationId = newConversationId();
     this.title = '';
     this.contextWarned = false;
@@ -275,22 +301,29 @@ export class AgentConversation {
     return next;
   }
 
-  private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal): AgentTool<any>[] {
-    if (!request.gsd) return CORE_TOOLS;
+  private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
+    const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
+    const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
+    const base = [...CORE_TOOLS, ...media, ...memoryFor()];
+    const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : [])];
+    if (!agents.length) return base;
     const gsd = request.gsd;
     let all: AgentTool<any>[] = [];
     const extra = gsdTools({
-      home: gsd.home,
+      home: gsd?.home ?? '',
       root: this.root,
-      skills: gsd.skills,
-      agents: gsd.agents,
+      skills: gsd?.skills ?? [],
+      agents,
       ask: (questions, askSignal) => this.askQuestions(questions, askSignal),
       spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;
         const wanted = modelForTier(spawn.model ?? spawn.agent?.model, request.tiers ?? { deep: request.model, standard: request.model, fast: request.model }, request.model);
         const model = !request.availableModels || request.availableModels.includes(wanted) ? wanted : request.model;
-        const system = spawn.agent ? `${await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root })}\n\n${this.systemPrompt({ ...request, model })}` : this.systemPrompt({ ...request, model });
-        const allowed = spawn.agent?.tools.length ? all.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent'))) : all.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
+        const system = spawn.agent ? `${gsd ? await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root }) : spawn.agent.body}\n\n${this.systemPrompt({ ...request, model })}` : this.systemPrompt({ ...request, model });
+        // Each sub-agent's Remember/Recall also reach its own private memory.
+        const privateMemory = memoryFor({ kind: 'private-agent', id: `agent-${label}`.slice(0, 80) }, `${runId}-${label}`.slice(0, 100));
+        const pool = [...all.filter((tool) => tool.name !== 'Remember' && tool.name !== 'Recall'), ...privateMemory];
+        const allowed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent'))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background };
         // A background agent outlives the tool call but not the run; a foreground one ends with the call too.
         const parent = spawn.background ? runSignal : callSignal;
@@ -321,10 +354,12 @@ export class AgentConversation {
             const result = await child.run([{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }], agent.abort.signal);
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
+            await this.recordReputation(request.reputation, label, result.outcome === 'completed' ? 1 : result.outcome === 'max-turns' ? 0 : -1, agent.id);
             void record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} ${result.outcome}.`, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCostUsd: total.estimatedCostUsd, durationMs: Date.now() - started });
             if (result.outcome === 'cancelled') return `${label} was stopped before it finished.`;
             return typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`;
           } catch (error) {
+            await this.recordReputation(request.reputation, label, -1, agent.id);
             void record({ status: 'failed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
             throw error;
           } finally {
@@ -343,8 +378,15 @@ export class AgentConversation {
         return `Started ${label} in the background as ${agent.id}. Its report will arrive in a later message when it finishes; continue with other work meanwhile.`;
       }
     });
-    all = [...CORE_TOOLS, ...extra];
+    all = [...base, ...extra.filter((tool) => gsd || tool.name !== 'Skill')];
     return all;
+  }
+
+  /** Reliability evidence for the sub-agent's role (when it maps to one), so routing history is explainable. */
+  private async recordReputation(store: ReputationStore | undefined, label: string, value: number, agentId: string): Promise<void> {
+    const role = roleFor(label);
+    if (!store || !role) return;
+    await store.record({ evidenceId: `evidence-${agentId}`.slice(0, 100), profileId: `agent-${label}`.slice(0, 100), role, kind: 'reliability', value, recordedAt: new Date().toISOString(), source: 'runtime', outcome: value > 0 ? 'success' : value < 0 ? 'failure' : 'partial' }).catch(() => undefined);
   }
 
   /** Reports from background agents that finished since the last turn, as user messages. */
@@ -387,7 +429,7 @@ export class AgentConversation {
 
   private async saveTranscript(model: string): Promise<void> {
     if (!this.transcripts || this.messages.length < 2) return;
-    await this.transcripts.save({ id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: this.messages.filter((message) => message.role === 'user').length, messages: this.messages }).catch(() => undefined);
+    await this.transcripts.save({ id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: this.messages.filter((message) => message.role === 'user').length, messages: this.messages, display: [...this.display.entries()].filter(([key]) => this.messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) }).catch(() => undefined);
   }
 
   private forward(event: AgentEvent, model: string, record: Record_): void {
@@ -424,6 +466,21 @@ export class AgentConversation {
   }
 }
 
+/** The memory actor the runner writes as; the host registers it as trusted when it creates the memory service. */
+export const AGENT_MEMORY_ACTOR = 'near-ai-agent';
+
+/** Maps an agent definition name onto the reputation roles. */
+export function roleFor(label: string): AgentRole | undefined {
+  const name = label.toLowerCase();
+  if (/secur/.test(name)) return 'security';
+  if (/plan/.test(name)) return 'planner';
+  if (/research|mapper|analy/.test(name)) return 'researcher';
+  if (/test|nyquist|uat/.test(name)) return 'tester';
+  if (/review|check|verif|audit/.test(name)) return 'reviewer';
+  if (/exec|implement|fix|writer|build/.test(name)) return 'implementer';
+  return undefined;
+}
+
 /** Finds a skill by its name, its name without the `gsd-` prefix, or a legacy `gsd:name` form. */
 export function findSkill(skills: GsdSkill[], name: string): GsdSkill | undefined {
   const wanted = name.replace(/^\//, '').trim();
@@ -431,9 +488,11 @@ export function findSkill(skills: GsdSkill[], name: string): GsdSkill | undefine
 }
 
 /** The user-visible turns of a saved conversation: what the user typed and what the agent answered. */
-export function visibleTurns(messages: AgentMessage[]): Array<{ role: 'user' | 'assistant'; text: string; tools: number }> {
+export function visibleTurns(messages: AgentMessage[], display = new Map<string, string>()): Array<{ role: 'user' | 'assistant'; text: string; tools: number }> {
   const turns: Array<{ role: 'user' | 'assistant'; text: string; tools: number }> = [];
   for (const message of messages) {
+    const shown = message.role === 'user' ? display.get(contentKey(message.content)) : undefined;
+    if (shown !== undefined) { turns.push({ role: 'user', text: shown, tools: 0 }); continue; }
     if (message.role === 'user') {
       const ran = /^The user ran (\/\S+(?: [^\n.]*)?)\. Follow these instructions:/.exec(message.content);
       if (message.content.startsWith('<agent-notification') || message.content.startsWith('<conversation-summary>')) continue;
@@ -445,6 +504,10 @@ export function visibleTurns(messages: AgentMessage[]): Array<{ role: 'user' | '
     }
   }
   return turns;
+}
+
+function contentKey(content: string): string {
+  return createHash('sha256').update(content).digest('hex').slice(0, 24);
 }
 
 function newConversationId(): string {

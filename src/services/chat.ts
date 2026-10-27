@@ -8,14 +8,17 @@ import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { AuthService } from './auth';
 import { createNearAiProvider } from './providerFactory';
 import { activeProvider, clientFor } from './providerCache';
-import { AgentConversation, findSkill, GsdContext } from './agentSession';
+import { projectMemoryScope } from '../agent/extraTools';
+import { AGENT_MEMORY_ACTOR, AgentConversation, findSkill, GsdContext } from './agentSession';
 import { GsdHost } from '../gsd/host';
 import { findRipgrep } from '../agent/tools';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { OutboundGuard, spentTodayUsd } from './outboundGuard';
 import { ProfileStore } from './profileStore';
-import { readAgentLimits, readAgentRules, readModelTiers, readSettings, shouldAutoInstallGsd } from './settings';
+import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readSettings, shouldAutoInstallGsd } from './settings';
 import { TranscriptStore } from './transcripts';
+import { prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
+import { TeamDefinition, TeamLibrary } from '../agent/teams';
 import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, promptMessage, promptResponseMatches, progressActivitySummary, progressCardMessage, GsdArtifactLink, profileStatusMessage, walletStatusMessage, walletPreviewMessage, walletHistoryMessage, walletErrorMessage, teamListMessage, teamPreviewMessage, teamStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage, capabilityAwareTeamPreview, generationPreviewMessage, generationStatusMessage, generationPublicationMessage, memoryInspectMessage, memorySliceMessage, memoryApprovalPreviewMessage, multimodalStatusMessage, sanitizeContextGraphNode } from './chatBridge';
 import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './chatBridge';
 import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
@@ -100,6 +103,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     ,memorySessionId: undefined as string | undefined
     ,guard: undefined as OutboundGuard | undefined
     ,agent: undefined as AgentConversation | undefined
+    ,attachments: new Map<string, StagedAttachment>()
+    ,memory: undefined as ContextGraphMemory | undefined
     ,guardSettings: undefined as string | undefined
   };
   panel.webview.html = html;
@@ -115,6 +120,23 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (message.type === 'questions-reply') {
       state.agent?.answerQuestions(message.id, message.answers);
+      return;
+    }
+    if (message.type === 'attach-files') {
+      const picked = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Attach', title: 'Attach files to your message' });
+      for (const uri of picked ?? []) {
+        try {
+          const attachment = await stageAttachment(uri.fsPath);
+          state.attachments.set(attachment.id, attachment);
+          panel.webview.postMessage({ type: 'attachment-staged', id: attachment.id, name: attachment.name, kind: attachment.kind, size: attachment.size });
+        } catch (error) {
+          panel.webview.postMessage({ type: 'notice', text: providerErrorMessage(error) });
+        }
+      }
+      return;
+    }
+    if (message.type === 'attachment-remove') {
+      state.attachments.delete(message.id);
       return;
     }
     if (message.type === 'agent-control') {
@@ -435,8 +457,14 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const gsdHost = gsdHostFor(context);
     let gsd: GsdContext | undefined;
     let skill: { name: string; args: string } | undefined;
+    let team: TeamDefinition | undefined;
     try {
-      if (message.type === 'open-command') {
+      if (message.type === 'open-command' && message.command.startsWith('team:')) {
+        team = await new TeamLibrary(context.globalStorageUri.fsPath).find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
+        if (!team) { panel.webview.postMessage({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with NEAR AI: Manage Teams.` }); return; }
+        if (!message.args?.trim()) { panel.webview.postMessage({ type: 'assistant-error', text: `Tell the team what to do: /team:${team.slug} <task>` }); return; }
+        gsd = await gsdHost.context();
+      } else if (message.type === 'open-command') {
         if (!(await gsdHost.context())) {
           if (!shouldAutoInstallGsd()) { panel.webview.postMessage({ type: 'assistant-error', text: 'Open-GSD is not installed. Turn on nearAi.autoInstallGsd to install it when you run a workflow.' }); return; }
           panel.webview.postMessage({ type: 'notice', text: 'Installing Open-GSD for NEAR AI (first workflow only)…' });
@@ -445,7 +473,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         const found = findSkill(gsd.skills, message.command);
         if (!found) { panel.webview.postMessage({ type: 'assistant-error', text: `Open-GSD ${await gsdHost.runtime.installedVersion()} has no /${message.command} command.` }); return; }
         skill = { name: found.name, args: message.args ?? '' };
-        panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHost) });
+        panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHost, context.globalStorageUri.fsPath, root) });
       } else {
         gsd = await gsdHost.context();
       }
@@ -453,14 +481,23 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
       return;
     }
-    const text = message.type === 'send' ? message.text : `/${skill!.name}${skill!.args ? ` ${skill!.args}` : ''}`;
+    const text = message.type === 'send' ? message.text : team ? `/team:${team.slug} ${message.args ?? ''}`.trim() : `/${skill!.name}${skill!.args ? ` ${skill!.args}` : ''}`;
+    // Attachments the user staged for this message.
+    const staged = message.type === 'send' ? (message.attachmentIds ?? []).map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item)) : [];
+    const agentModels = readAgentModels();
+    if (readSettings().privacyMode === 'tee-only') {
+      const needs = [...(staged.some((item) => item.kind === 'image') && !(modelInfo?.inputModalities ?? []).includes('image') ? [agentModels.visionModel] : []), ...(staged.some((item) => item.kind === 'audio') ? [agentModels.transcriptionModel] : [])];
+      const forwarded = needs.find((id) => active.models.find((candidate) => candidate.id === id)?.privacyBoundary !== 'tee');
+      if (forwarded) { panel.webview.postMessage({ type: 'outbound-blocked', text, model, reason: `TEE-only mode is on, and ${forwarded}, which would read your attachment, does not run in NEAR's TEE.`, confirm: false }); return; }
+    }
     state.activity = state.activity ?? new ActivityStore(root);
     const settings = readSettings();
     if (!state.guard || state.guardSettings !== JSON.stringify([settings.privacyMode, settings.dailySpendLimitUsd, settings.actionPolicy])) {
       state.guard = new OutboundGuard(settings);
       state.guardSettings = JSON.stringify([settings.privacyMode, settings.dailySpendLimitUsd, settings.actionPolicy]);
     }
-    const verdict = state.guard.check({ model, modelInfo, text, overrideToken: message.type === 'send' ? message.overrideToken : undefined }, spentTodayUsd(await state.activity.list()));
+    const attachedText = staged.filter((item) => item.kind === 'text').map((item) => item.bytes.toString('utf8')).join('\n');
+    const verdict = state.guard.check({ model, modelInfo, text: attachedText ? `${text}\n${attachedText}` : text, overrideToken: message.type === 'send' ? message.overrideToken : undefined }, spentTodayUsd(await state.activity.list()));
     if (verdict.outcome !== 'allow') {
       panel.webview.postMessage({ type: 'outbound-blocked', text, model, reason: verdict.reason, overrideToken: message.type === 'send' ? verdict.overrideToken : undefined, confirm: verdict.outcome === 'confirm' });
       return;
@@ -474,7 +511,20 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     try {
       const route = clientFor(active, model);
       const limits = readAgentLimits();
-      await state.agent.send({ text, skill, gsd, tiers: readModelTiers(), availableModels: active.models.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local });
+      let attachments;
+      if (staged.length) {
+        try {
+          attachments = await prepareAttachments(staged, { client: route.client, model, models: active.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: text });
+        } catch (error) {
+          panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
+          return;
+        }
+        for (const item of staged) state.attachments.delete(item.id);
+        panel.webview.postMessage({ type: 'attachments-cleared' });
+      }
+      state.memory = state.memory ?? new ContextGraphMemory(root, { trustedActorIds: [AGENT_MEMORY_ACTOR] });
+      const imageModel = active.models.find((candidate) => candidate.id === agentModels.imageModel && (candidate.outputModalities ?? []).includes('image'));
+      await state.agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), availableModels: active.models.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local });
       await sendHistory(panel, state.activity);
       panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine({ agents: 0, activity: state.activity }) });
       await sendArtifacts(panel);
@@ -493,7 +543,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   }, undefined, context.subscriptions);
   if (initialPrompt) panel.webview.postMessage({ type: 'prefill', text: initialPrompt });
   panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine() });
-  panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHostFor(context)) });
+  panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHostFor(context), context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath) });
   await sendArtifacts(panel);
   state.activity = createActivityStore();
   await sendHistory(panel, state.activity);
@@ -548,7 +598,12 @@ function gsdHostFor(context: vscode.ExtensionContext): GsdHost {
 }
 
 /** Slash commands for the composer: the installed skills, or the core workflows before the first install. */
-async function commandList(host: GsdHost): Promise<Array<{ command: string; title: string; description: string; argumentHint?: string }>> {
+async function commandList(host: GsdHost, storageDir?: string, root?: string): Promise<Array<{ command: string; title: string; description: string; argumentHint?: string }>> {
+  const teams = storageDir ? (await new TeamLibrary(storageDir).list(root).catch(() => [])).flatMap((entry) => entry.team ? [{ command: `team:${entry.project ? 'project' : entry.team.slug}`, title: entry.team.name, description: `Run the "${entry.team.name}" team${entry.team.description ? ` — ${entry.team.description}` : ''}`, argumentHint: '<task for the team>' }] : []) : [];
+  return [...teams, ...await gsdCommandList(host)];
+}
+
+async function gsdCommandList(host: GsdHost): Promise<Array<{ command: string; title: string; description: string; argumentHint?: string }>> {
   const installed = await host.commands().catch(() => []);
   if (installed.length) return installed.map((command) => ({ command: command.name, title: command.name, description: command.description, ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}) }));
   return GSD_COMMANDS.map((definition) => ({ command: `gsd-${definition.command}`, title: definition.title, description: definition.description }));
@@ -559,7 +614,7 @@ function createActivityStore(): ActivityStore | undefined {
   return root ? new ActivityStore(root) : undefined;
 }
 
-function projectIdForWorkspace(root: string): string { return `project-${createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 32)}`; }
+function projectIdForWorkspace(root: string): string { return projectMemoryScope(root).id; }
 export async function invokeTeamFromHost(workspaceRoot: string, teams: TeamStudioStore, request: Extract<TeamWebviewMessage, { type: 'team-invoke' }>): Promise<ChatTeamMessage> {
   const agent = await invokeBoundTeam(workspaceRoot, teams, request);
   const validatedBinding = await new ProjectInitialization(workspaceRoot).requireReusableBinding();

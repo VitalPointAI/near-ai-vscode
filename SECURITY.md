@@ -115,7 +115,10 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 | Per-response TEE attestation is not verified by the extension | Verify NEAR attestation/signature endpoints, milestone 2 |
 | Open-GSD's Claude Code hooks (statusline, context monitor) are not run | The runner provides its own context thresholds, compaction, and handoff instead |
 | Open-GSD's `Workflow` tool and MCP servers (for example context7) are not available | Workflows that need them report the tool as unavailable and fall back to their other paths |
-| Team studio, attachments, image generation, and context memory are hidden | Rebuilt on the native runner, milestone 2 phase 11 |
+| PDFs, Office files, and video can't be attached; video can't be generated | Not planned for this release |
+| Attached images and audio are sent to the profile's provider (NEAR AI or your local runtime) to be read or transcribed, possibly by a different model than the one you chose | The chat names the model used for each file; TEE-only mode blocks the turn if that model is not TEE-attested |
+| Memory has a searchable list, not a graph view; teams have no shared team memory | Members get project memory and their own private memory |
+| Agent reputation is recorded per role but does not yet change which model a role uses | Routing comes from team `model:` lines and the deep/standard/fast settings |
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
 | Under `fully-autonomous`, the agent runs commands without asking | Only the deny list applies; intended for throwaway workspaces |
 

@@ -18,6 +18,9 @@
   const defaultPlaceholder = input.placeholder;
   const projectLinks = $('project-links');
   const todoPanel = $('todos');
+  const chips = $('chips');
+  $('attach').innerHTML = ICONS.attach;
+  $('attach').addEventListener('click', () => post({ type: 'attach-files' }));
   const agentPanel = $('agents');
   let contextLeft;
   // Replaced by the host with the installed Open-GSD skills.
@@ -29,6 +32,7 @@
     stop: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1"/></svg>',
     copy: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4V2.5A1.5 1.5 0 0 1 5.5 1h7A1.5 1.5 0 0 1 14 2.5v7a1.5 1.5 0 0 1-1.5 1.5H11v1.5A1.5 1.5 0 0 1 9.5 14h-7A1.5 1.5 0 0 1 1 12.5v-7A1.5 1.5 0 0 1 2.5 4zm1 0h4.5A1.5 1.5 0 0 1 11 5.5V10h1.5a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-7a.5.5 0 0 0-.5.5zM2.5 5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5z"/></svg>',
     insert: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1v8.3l2.6-2.6.7.7L7.5 11.2 3.7 7.4l.7-.7L7 9.3V1zM2 13h11v1H2z"/></svg>',
+    attach: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5 5 9a1.5 1.5 0 0 0 2.1 2.1L12.6 5.6a2.5 2.5 0 0 0-3.5-3.5L3.4 7.8a3.5 3.5 0 0 0 5 5l4.2-4.2.7.7-4.2 4.2a4.5 4.5 0 0 1-6.4-6.4l5.7-5.7a3.5 3.5 0 0 1 4.9 4.9l-5.5 5.5a2.5 2.5 0 0 1-3.5-3.5l5.5-5.5z"/></svg>',
     check: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6.3 11.6-3.6-3.6.7-.7 2.9 2.9 6.3-6.3.7.7z"/></svg>'
   };
 
@@ -40,6 +44,16 @@
   let tools = new Map();
   let menuIndex = 0;
   let modelInfo = new Map();
+  const staged = new Map();
+  function renderChips() {
+    chips.replaceChildren(...[...staged.entries()].map(([id, name]) => {
+      const chip = el('span', 'chip-file', name);
+      const remove = iconButton('stop', 'Remove ' + name, () => { staged.delete(id); post({ type: 'attachment-remove', id }); renderChips(); });
+      chip.append(remove);
+      return chip;
+    }));
+    chips.hidden = !staged.size;
+  }
 
   function post(message) { vscode.postMessage(message); }
   function announce(text) { live.textContent = text; }
@@ -467,12 +481,13 @@
     const slash = /^\/([\w:-]+)(?:\s+([\s\S]*))?$/.exec(text);
     const command = slash && findCommand(slash[1]);
     if (command) { runCommand(command.command, (slash[2] || '').trim()); return; }
-    append(el('div', 'turn user', text));
+    const ids = [...staged.keys()];
+    append(el('div', 'turn user', text + (ids.length ? '\n📎 ' + [...staged.values()].join(', ') : '')));
     input.value = '';
     autosize();
     setBusy(true);
     startAssistant();
-    post({ type: 'send', text, model: model.value || undefined });
+    post({ type: 'send', text, model: model.value || undefined, ...(ids.length ? { attachmentIds: ids } : {}) });
   }
   function autosize() {
     input.style.height = 'auto';
@@ -610,6 +625,8 @@
       }
       case 'history-error': notice(m.text, [], true); break;
       case 'artifacts': renderArtifacts(m.artifacts); break;
+      case 'attachment-staged': staged.set(m.id, m.name); renderChips(); announce('Attached ' + m.name); break;
+      case 'attachments-cleared': staged.clear(); renderChips(); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
       case 'agents':

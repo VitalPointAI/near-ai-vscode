@@ -28,7 +28,9 @@ export type ChatWebviewMessage =
   | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' }
   | { type: 'resume-conversation'; id: string }
   | { type: 'open-artifact'; path: string; kind: GsdArtifactKind }
-  | { type: 'send'; text: string; model?: string; overrideToken?: string }
+  | { type: 'send'; text: string; model?: string; overrideToken?: string; attachmentIds?: string[] }
+  | { type: 'attach-files' }
+  | { type: 'attachment-remove'; id: string }
   | { type: 'stop' }
   | { type: 'history' }
   | { type: 'new-chat' }
@@ -534,6 +536,8 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (message.model !== undefined && (typeof message.model !== 'string' || message.model.length > 200)) return undefined;
     return { type: 'open-command', command: message.command, ...(message.args ? { args: (message.args as string).trim() } : {}), ...(message.model ? { model: (message.model as string).trim() } : {}) };
   }
+  if (message.type === 'attach-files' && Object.keys(message).length === 1) return { type: 'attach-files' };
+  if (message.type === 'attachment-remove' && typeof message.id === 'string' && /^att-[a-f0-9]{12}$/.test(message.id) && Object.keys(message).length === 2) return { type: 'attachment-remove', id: message.id };
   if (message.type === 'agent-control' && typeof message.agentId === 'string' && /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i.test(message.agentId) && (message.action === 'pause' || message.action === 'resume' || message.action === 'stop') && Object.keys(message).length === 3) {
     return { type: 'agent-control', agentId: message.agentId, action: message.action };
   }
@@ -544,13 +548,15 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     return { type: 'questions-reply', id: message.id, answers: message.answers as string[] };
   }
   if (message.type !== 'send' || typeof message.text !== 'string' || !message.text.trim()) return undefined;
-  if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model' && key !== 'overrideToken')) return undefined;
+  if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model' && key !== 'overrideToken' && key !== 'attachmentIds')) return undefined;
+  if (message.attachmentIds !== undefined && (!Array.isArray(message.attachmentIds) || message.attachmentIds.length > 10 || message.attachmentIds.some((id) => typeof id !== 'string' || !/^att-[a-f0-9]{12}$/.test(id)))) return undefined;
   if (message.overrideToken !== undefined && (typeof message.overrideToken !== 'string' || !/^privacy-[0-9a-f-]{36}$/.test(message.overrideToken))) return undefined;
   return {
     type: 'send',
     text: message.text.trim(),
     model: typeof message.model === 'string' ? message.model.trim() || undefined : undefined,
-    ...(message.overrideToken ? { overrideToken: message.overrideToken as string } : {})
+    ...(message.overrideToken ? { overrideToken: message.overrideToken as string } : {}),
+    ...(Array.isArray(message.attachmentIds) && message.attachmentIds.length ? { attachmentIds: message.attachmentIds as string[] } : {})
   };
 }
 

@@ -187,6 +187,13 @@ footer { padding: 6px 12px 8px; }
 #send:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
 #send:disabled { color: var(--vscode-descriptionForeground); background: transparent; }
 
+/* Attachment chips */
+.chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px 0; }
+.chips[hidden] { display: none; }
+.chip-file { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 8px; border-radius: 10px; font-size: 11px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.chip-file .icon-button { min-width: 16px; height: 16px; color: inherit; }
+.chip-file .icon-button svg { width: 10px; height: 10px; }
+
 /* Slash-command menu */
 #commands {
   position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 2;
