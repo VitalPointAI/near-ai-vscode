@@ -1,10 +1,11 @@
+import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { matchingFacts, projectMemoryScope } from '../agent/extraTools';
-import { parseTeam, recommendedProjectTeam, TeamLibrary } from '../agent/teams';
-import type { AgentDiscoveryAnswers } from '../domain/agents';
+import { applyProjectType, PROJECT_TYPES, projectTypeTeam } from '../agent/projectTypes';
+import { parseTeam, TeamLibrary } from '../agent/teams';
 import type { MemoryScope } from '../domain/contextGraph';
 import { ContextGraphMemory } from './contextGraphMemory';
 import { MemoryApprovalRegistry } from './memoryApproval';
@@ -95,21 +96,23 @@ async function manageTeams(library: TeamLibrary, runTeam: (slug: string) => Prom
 async function setupProjectTeam(library: TeamLibrary): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
-  const goal = await vscode.window.showInputBox({ title: 'Project team (1/4)', prompt: 'What should the team help you achieve?', ignoreFocusOut: true, validateInput: (value) => value.trim() ? undefined : 'Describe the goal.' });
+  const type = await vscode.window.showQuickPick(PROJECT_TYPES.map((entry) => ({ label: entry.label, description: entry.description, detail: `Team: ${entry.members.map((member) => member.name).join(', ')}`, entry })), { title: 'Set up project (1/3): what kind of project is this?', placeHolder: 'Every type follows the same plan, execute, verify, audit, and release cycle', ignoreFocusOut: true });
+  if (!type) return;
+  const goal = await vscode.window.showInputBox({ title: 'Set up project (2/3)', prompt: 'What should the team help you achieve?', ignoreFocusOut: true, validateInput: (value) => value.trim() ? undefined : 'Describe the goal.' });
   if (!goal) return;
-  const workShape = await pick('Project team (2/4)', 'What kind of work is this?', [['feature', 'Build a feature'], ['bugfix', 'Fix bugs'], ['refactor', 'Refactor'], ['research', 'Research a question'], ['release', 'Prepare a release']]);
-  if (!workShape) return;
-  const riskLevel = await pick('Project team (3/4)', 'How much review does it need?', [['low', 'Light: low risk'], ['medium', 'Normal'], ['high', 'Thorough: security and testing roles too']]);
-  if (!riskLevel) return;
-  const locality = await pick('Project team (4/4)', 'Where may models run?', [['cloud', 'NEAR AI Cloud'], ['local', 'Local runtime only'], ['hybrid', 'Both']]);
+  const locality = await pick('Set up project (3/3)', 'Where may models run?', [['cloud', 'NEAR AI Cloud'], ['local', 'Local runtime only'], ['hybrid', 'Both']]);
   if (!locality) return;
-  const answers: AgentDiscoveryAnswers = { goal: goal.trim().slice(0, 400), workShape: workShape as AgentDiscoveryAnswers['workShape'], riskLevel: riskLevel as AgentDiscoveryAnswers['riskLevel'], locality: locality as AgentDiscoveryAnswers['locality'], preferredProvider: locality === 'local' ? 'local' : 'near-ai' };
   const file = TeamLibrary.projectTeamFile(root);
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, recommendedProjectTeam(answers), 'utf8');
+  if (existsSync(file)) {
+    const replace = await vscode.window.showWarningMessage('This project already has a team. Replace it? Its earlier versions stay in the team history.', { modal: true }, 'Replace');
+    if (replace !== 'Replace') return;
+  }
+  await writeFile(file, projectTypeTeam(type.entry, goal.trim().slice(0, 400), locality as 'cloud' | 'local' | 'hybrid'), 'utf8');
   await library.snapshot(file);
+  await applyProjectType(root, type.entry, goal.trim().slice(0, 400));
   await open(file);
-  void vscode.window.showInformationMessage('Here is the recommended team for this project. Edit members, models, or tools, save, then run it with /team:project <task> in the NEAR AI chat.');
+  void vscode.window.showInformationMessage(`Set up a ${type.entry.label.toLowerCase()} project: the team is open to edit, and AGENTS.md now tells every agent how this kind of work goes through plan, execute, verify, audit, and release. Run the team with /team:project <task>, or a GSD workflow such as /gsd-new-project.`);
 }
 
 async function pick(title: string, placeHolder: string, options: Array<[string, string]>): Promise<string | undefined> {

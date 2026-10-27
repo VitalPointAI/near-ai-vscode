@@ -35,6 +35,11 @@ runtime in between.
   reasoning, and tool calls with per-agent tokens, cost, speed, and failures;
   pause, filter, search, and export. In memory only, time- and size-limited,
   and streamed only while visible.
+- **Project types.** Set Up Project Team now starts from a project type
+  (software, research, presales, writing, data, general) with a tailored team
+  and AGENTS.md guidance for each stage of the GSD cycle, including a red-team
+  stage before verification whose unfixed findings are always reported.
+- **Agents read AGENTS.md and CLAUDE.md** project instructions.
 - **Web search and prompt-injection defenses.** WebSearch (SearXNG, Brave,
   or Tavily), WebFetch for pages and documents, and CheckCitations for every
   agent. Hidden content is removed, likely injections are flagged and shown in

@@ -75,6 +75,10 @@ export interface AgentTurnRequest {
   security?: SecurityAccess;
   /** The WebSearch tool's provider; without one, WebSearch says search is not set up. */
   webSearch?: SearchProvider;
+  /** Added after a GSD skill's instructions (e.g. the project's red-team stage). */
+  skillAddendum?: string;
+  /** Project team members a GSD workflow may spawn by name (e.g. red-team). */
+  projectAgents?: GsdAgent[];
 }
 
 type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
@@ -147,7 +151,7 @@ export class AgentConversation {
     if (request.skill && request.gsd) {
       const skill = findSkill(request.gsd.skills, request.skill.name);
       if (!skill) throw new Error(`Open-GSD has no skill named ${request.skill.name}.`);
-      prompt = `The user ran /${skill.name}${request.skill.args ? ` ${request.skill.args}` : ''}. Follow these instructions:\n\n${await expandPrompt(skill.body, { args: request.skill.args, home: request.gsd.home, root: this.root })}`;
+      prompt = `The user ran /${skill.name}${request.skill.args ? ` ${request.skill.args}` : ''}. Follow these instructions:\n\n${await expandPrompt(skill.body, { args: request.skill.args, home: request.gsd.home, root: this.root })}${request.skillAddendum ?? ''}`;
     }
     const extraUsage: UsageMetadata[] = [...(request.attachments?.usage ?? [])];
     if (request.attachments?.text) prompt = `${request.attachments.text}\n\n${prompt}`;
@@ -349,7 +353,7 @@ export class AgentConversation {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
     const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...memoryFor()];
-    const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : [])];
+    const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
     if (!agents.length) return base;
     const gsd = request.gsd;
     let all: AgentTool<any>[] = [];
@@ -390,7 +394,7 @@ export class AgentConversation {
             // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
             shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {});
             // Research agents gather outside content; their writes belong in .planning/ (others ask).
-            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), ...(/research|synthesi/i.test(label) ? { writeScope: '.planning' } : {}) };
+            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}) };
             const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}. Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
             const base = `${this.systemPrompt({ ...request, model }, agentRoot)}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;

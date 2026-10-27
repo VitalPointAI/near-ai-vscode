@@ -18,11 +18,13 @@ import { ProfileStore } from './profileStore';
 import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readSettings, shouldAutoInstallGsd } from './settings';
 import { TranscriptStore } from './transcripts';
 import { prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
-import { TeamDefinition, TeamLibrary } from '../agent/teams';
+import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
+import type { GsdAgent } from '../gsd/library';
 import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, promptMessage, promptResponseMatches, progressActivitySummary, progressCardMessage, GsdArtifactLink, profileStatusMessage, walletStatusMessage, walletPreviewMessage, walletHistoryMessage, walletErrorMessage, teamListMessage, teamPreviewMessage, teamStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage, capabilityAwareTeamPreview, generationPreviewMessage, generationStatusMessage, generationPublicationMessage, memoryInspectMessage, memorySliceMessage, memoryApprovalPreviewMessage, multimodalStatusMessage, sanitizeContextGraphNode } from './chatBridge';
 import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './chatBridge';
 import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
 import { sharedActivityFeed } from './activityView';
+import { RED_TEAM_WORKFLOW_STEP, redTeamEnabled } from '../agent/projectTypes';
 import { securityAccess } from './securityScan';
 import { webSearchProvider } from './webSearchSetup';
 import { ActivityStore } from './activityStore';
@@ -471,6 +473,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     let gsd: GsdContext | undefined;
     let skill: { name: string; args: string } | undefined;
     let team: TeamDefinition | undefined;
+    let redTeamStep: { addendum: string; agents: GsdAgent[] } | undefined;
     try {
       if (message.type === 'open-command' && message.command.startsWith('team:')) {
         team = await new TeamLibrary(context.globalStorageUri.fsPath).find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
@@ -486,6 +489,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         const found = findSkill(gsd.skills, message.command);
         if (!found) { panel.webview.postMessage({ type: 'assistant-error', text: `Open-GSD ${await gsdHost.runtime.installedVersion()} has no /${message.command} command.` }); return; }
         skill = { name: found.name, args: message.args ?? '' };
+        // Projects set up with a red-team stage add it to GSD workflows that end in verification.
+        if (/^gsd-(?:execute-phase|verify-work|autonomous)$/.test(found.name) && await redTeamEnabled(root)) {
+          const project = await new TeamLibrary(context.globalStorageUri.fsPath).find('project', root).catch(() => undefined);
+          const redTeam = project ? teamAgents(project).filter((agent) => agent.name === 'red-team') : [];
+          redTeamStep = { addendum: RED_TEAM_WORKFLOW_STEP, agents: redTeam };
+        }
         panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHost, context.globalStorageUri.fsPath, root) });
       } else {
         gsd = await gsdHost.context();
@@ -539,7 +548,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       state.memory = state.memory ?? new ContextGraphMemory(root, { trustedActorIds: [AGENT_MEMORY_ACTOR] });
       const delegable = modelsAsPrivateAs(active.models, modelInfo);
       const imageModel = delegable.find((candidate) => candidate.id === agentModels.imageModel && (candidate.outputModalities ?? []).includes('image'));
-      await state.agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets) });
+      await state.agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       await sendHistory(panel, state.activity);
       panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine({ agents: 0, activity: state.activity }) });
       await sendArtifacts(panel);

@@ -82,6 +82,21 @@ run a workflow and stays current; your `~/.claude` setup is never touched.
 
 ![A planning workflow asking for a decision](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-workflow.png)
 
+### Project types and red teaming
+
+**NEAR AI: Set Up Project Team** first asks what kind of project this is:
+software development, research and analysis, presales and solution design,
+writing and content, data analysis, or general. Each type gets a tailored team
+(for example architect, developer, reviewer, QA, and security for software;
+investigator, source verifier, analyst, writer, and editor for research) and
+guidance in `AGENTS.md`, which every agent reads, on how this kind of work goes
+through the same Open-GSD cycle: plan, execute, **red team**, verify, audit,
+release. The red-team member attacks the work before it is verified and
+writes `RED-TEAM.md`; every finding is fixed or given a disposition with a
+reason (accepted risk, deferred, disregarded), and verification and release
+notes list the items not fixed. In these projects `/gsd-execute-phase`,
+`/gsd-verify-work`, and `/gsd-autonomous` include the red-team step.
+
 ### Agent Activity
 
 **NEAR AI: Open Agent Activity** (the pulse button on the chat view, or
