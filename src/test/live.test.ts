@@ -32,6 +32,16 @@ const baseUrl = process.env.NEAR_AI_BASE_URL ?? 'https://cloud-api.near.ai/v1';
 const skip = key ? false : 'set NEAR_AI_API_KEY to run live NEAR AI tests';
 const run = promisify(execFile);
 
+/**
+ * Whether the task's tests pass. This file runs under `node --test`, whose NODE_TEST_CONTEXT makes
+ * a child `node --test` exit 0 even when tests fail, so the child gets an environment without it.
+ */
+async function testsPass(root: string): Promise<boolean> {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  return run(process.execPath, ['--test'], { cwd: root, env }).then(() => true, () => false);
+}
+
 async function client(): Promise<{ client: NearAiClient; models: ModelInfo[] }> {
   const near = new NearAiClient({ baseUrl, apiKey: key! });
   const models = await near.listModels();
@@ -123,7 +133,7 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
         let score = 0;
         let outOf = 10;
         let misses: string[] = [];
-        if (task.kind === 'coding') score = await run(process.execPath, ['--test'], { cwd: root }).then(() => 10, () => 0);
+        if (task.kind === 'coding') score = await testsPass(root) ? 10 : 0;
         else {
           const file = path.join(root, task.kind === 'research' ? 'brief.md' : 'PLAN.md');
           const text = await readFile(file, 'utf8').catch(() => '');

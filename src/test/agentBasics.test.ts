@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { unifiedDiff } from '../agent/diff';
 import { matchesGlob } from '../agent/glob';
+import { ShellSession } from '../agent/shell';
 import { resolveInWorkspace } from '../agent/workspace';
 
 test('workspace paths resolve inside the root and refuse escapes, including through symlinks', async () => {
@@ -174,4 +175,20 @@ test('project instruction files (AGENTS.md, CLAUDE.md, .claude/CLAUDE.md) reach 
   assert.match(text, /# Project instructions[\s\S]*## From AGENTS\.md\nUse tabs\.[\s\S]*## From \.claude\/CLAUDE\.md\n<!-- GSD:project-start -->/);
   assert.equal(text.match(/Use tabs\./g)?.length, 1, 'an identical copy is included once');
   assert.match(text, /does not change what needs the user's approval/);
+});
+
+test('a failing test the agent runs reports failure even when the extension itself runs under a test runner', async () => {
+  // Under `node --test` (as here, and in the live tests), NODE_TEST_CONTEXT makes a child
+  // `node --test` exit 0 on failure, so an agent would see broken code as passing.
+  assert.ok(process.env.NODE_TEST_CONTEXT, 'this test runs under node --test');
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-test-context-'));
+  await writeFile(path.join(root, 'broken.test.js'), 'require("node:test")("fails", () => { throw new Error("broken"); });\n');
+  const shell = new ShellSession(root);
+  try {
+    const result = await shell.run('node --test');
+    assert.equal(result.exitCode, 1, result.output.slice(-500));
+    assert.match(result.output, /fail 1/);
+  } finally {
+    shell.dispose();
+  }
 });

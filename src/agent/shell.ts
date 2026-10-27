@@ -155,8 +155,10 @@ function shellEnv(extra: NodeJS.ProcessEnv, allow: string[] = []): NodeJS.Proces
   const base: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(process.env)) if (allow.includes(name) || !isSecretVariable(name, value)) base[name] = value;
   Object.assign(base, { PAGER: 'cat', GIT_PAGER: 'cat', TERM: 'dumb', NO_COLOR: '1', CI: process.env.CI ?? '' });
-  // Electron's own flag must not leak into commands the agent runs.
+  // Electron's own flag must not leak into commands the agent runs, nor a parent test runner's
+  // context: with NODE_TEST_CONTEXT set, a failing `node --test` exits 0 and the agent sees a pass.
   delete base.ELECTRON_RUN_AS_NODE;
+  delete base.NODE_TEST_CONTEXT;
   return { ...base, ...extra };
 }
 
