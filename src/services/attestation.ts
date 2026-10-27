@@ -23,6 +23,8 @@ export interface VerificationResult {
   outcome: 'signed' | 'failed' | 'unavailable';
   summary: string;
   signingAddress?: string;
+  /** Which attested component holds the signing key. */
+  signer?: 'model' | 'gateway';
   checks: { requestHash?: boolean; responseHash?: boolean; signature?: boolean; genuineQuote?: boolean; addressInQuote?: boolean; nonceInQuote?: boolean; gpuNonce?: boolean };
   notChecked: string[];
 }
@@ -64,9 +66,13 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
   } catch (error) {
     return fail(`The response is signed, but the attestation report could not be fetched (${(error as Error).message}).`, address);
   }
-  const candidates = Array.isArray(report?.model_attestations) ? report.model_attestations as Array<Record<string, unknown>> : [report];
-  const attestation = candidates.find((item) => typeof item?.signing_address === 'string' && item.signing_address.toLowerCase() === address.toLowerCase());
-  if (!attestation || typeof attestation.intel_quote !== 'string') return fail('The response is signed, but NEAR AI returned no attestation for its signing key.', address);
+  const candidates = attestationsIn(report);
+  const match = candidates.find((item) => item.attestation.signing_address.toLowerCase() === address.toLowerCase());
+  if (!match) {
+    const seen = candidates.map((item) => `${item.role} ${item.attestation.signing_address}`).join(', ');
+    return fail(`The response is signed by ${address}, but NEAR AI's attestation report has no quote for that key (report fields: ${Object.keys(report ?? {}).join(', ') || 'none'}; keys attested: ${seen || 'none'}).`, address);
+  }
+  const attestation = match.attestation;
   let reportData: Buffer;
   try { reportData = verifyTdxQuote(attestation.intel_quote, { trustedRoot: options.trustedRoot, now: options.now }).reportData; } catch (error) { checks.genuineQuote = false; return fail(`The response is signed, but its attestation quote is not genuine: ${(error as Error).message}.`, address); }
   checks.genuineQuote = true;
@@ -81,7 +87,26 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
   if (!checks.addressInQuote) return fail('The TDX quote does not bind the key that signed this response.', address);
   if (!checks.nonceInQuote) return fail('The TDX quote does not contain this request\'s fresh nonce, so it may be replayed.', address);
   if (checks.gpuNonce === false) return fail('The GPU attestation does not contain this request\'s fresh nonce.', address);
-  return { outcome: 'signed', summary: `Signed by ${address}. A genuine Intel TDX quote, fresh for this check, binds that key${checks.gpuNonce ? ', with matching GPU evidence' : ''}.`, signingAddress: address, checks, notChecked: NOT_CHECKED_IN_EDITOR };
+  return { outcome: 'signed', summary: `Signed by ${match.role === 'gateway' ? 'NEAR AI\'s gateway key' : 'the model\'s key'} ${address}. A genuine Intel TDX quote, fresh for this check, binds that key${checks.gpuNonce ? ', with matching GPU evidence' : ''}.`, signingAddress: address, signer: match.role, checks, notChecked: NOT_CHECKED_IN_EDITOR };
+}
+
+type Attestation = Record<string, unknown> & { signing_address: string; intel_quote: string };
+
+/**
+ * Every attestation in a report that names a signing key and carries a quote: the model's
+ * (`model_attestations`, or a bare report), NEAR's gateway (`gateway_attestation`), and any other
+ * list NEAR adds (`all_attestations`).
+ */
+function attestationsIn(report: Record<string, unknown> | undefined): Array<{ role: 'model' | 'gateway'; attestation: Attestation }> {
+  const usable = (item: unknown): item is Attestation => Boolean(item) && typeof (item as Attestation).signing_address === 'string' && typeof (item as Attestation).intel_quote === 'string';
+  const list = (value: unknown) => (Array.isArray(value) ? value : []).filter(usable);
+  if (!report) return [];
+  return [
+    ...list(report.model_attestations).map((attestation) => ({ role: 'model' as const, attestation })),
+    ...(usable(report) ? [{ role: 'model' as const, attestation: report }] : []),
+    ...(usable(report.gateway_attestation) ? [{ role: 'gateway' as const, attestation: report.gateway_attestation }] : []),
+    ...list(report.all_attestations).map((attestation) => ({ role: 'model' as const, attestation }))
+  ];
 }
 
 /** SHA-256 fingerprint of Intel's SGX Root CA (certificates.trustedservices.intel.com), which also roots TDX quotes. */

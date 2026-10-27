@@ -69,7 +69,7 @@ test('a quote chained to any CA other than the pinned root is rejected', () => {
 
 const TRUST = { trustedRoot: TEST_ROOT };
 
-function nearFake(options: { quoteNonce?: (nonce: string) => string; signer?: string; response?: string; forgedQuote?: boolean } = {}) {
+function nearFake(options: { quoteNonce?: (nonce: string) => string; signer?: string; response?: string; forgedQuote?: boolean; placement?: 'model' | 'gateway' | 'missing' } = {}) {
   const requests: string[] = [];
   const fetchFn = async (url: string | URL | Request, init?: RequestInit) => {
     const target = new URL(String(url));
@@ -85,7 +85,11 @@ function nearFake(options: { quoteNonce?: (nonce: string) => string; signer?: st
       Buffer.from(SIGNER.slice(2), 'hex').copy(reportData, 0);
       Buffer.from(options.quoteNonce ? options.quoteNonce(nonce) : nonce, 'hex').copy(reportData, 32);
       const quote = options.forgedQuote ? (() => { const forged = Buffer.from(testQuote(reportData), 'hex'); forged[600] ^= 1; return forged.toString('hex'); })() : testQuote(reportData);
-      return Response.json({ model_attestations: [{ signing_address: SIGNER, signing_algo: 'ecdsa', intel_quote: quote, nvidia_payload: JSON.stringify({ nonce }) }] });
+      const ours = { signing_address: SIGNER, signing_algo: 'ecdsa', intel_quote: quote, nvidia_payload: JSON.stringify({ nonce }) };
+      const other = { signing_address: '0x' + '7'.repeat(40), signing_algo: 'ecdsa', intel_quote: testQuote(Buffer.alloc(64)) };
+      if (options.placement === 'gateway') return Response.json({ gateway_attestation: { ...ours, nvidia_payload: undefined }, model_attestations: [other] });
+      if (options.placement === 'missing') return Response.json({ gateway_attestation: other, model_attestations: [other] });
+      return Response.json({ model_attestations: [ours] });
     }
     return new Response('{}', { status: 404 });
   };
@@ -105,7 +109,7 @@ test('a streamed completion keeps hashes of the exact request and raw response, 
   const result = await client.verifyResponse('z-ai/glm-5.3', usage.evidence!, undefined, TRUST);
   assert.equal(result.outcome, 'signed', result.summary);
   assert.deepEqual(result.checks, { requestHash: true, responseHash: true, signature: true, genuineQuote: true, addressInQuote: true, nonceInQuote: true, gpuNonce: true });
-  assert.match(result.summary, /Signed by 0x1563.*genuine Intel TDX quote, fresh for this check, binds that key, with matching GPU evidence/);
+  assert.match(result.summary, /Signed by the model's key 0x1563.*genuine Intel TDX quote, fresh for this check, binds that key, with matching GPU evidence/);
   assert.deepEqual(result.notChecked, ['platform TCB status and certificate revocation (Intel collateral)', 'which code the enclave runs (measurements)', 'NVIDIA GPU attestation verdict'], 'the result says what the editor did not check');
   const untrusted = await client.verifyResponse('z-ai/glm-5.3', usage.evidence!);
   assert.equal(untrusted.outcome, 'failed', 'a quote not rooted at Intel is never reported as signed');
@@ -167,4 +171,17 @@ test('the chat offers Verify only for TEE-private cloud answers, and verifies th
     if (offer) assert.equal((await conversation.verifyRun(offer.runId!)).outcome, 'signed');
   }
   assert.deepEqual(verified, ['z-ai/glm-5.3:chatcmpl-1']);
+});
+
+test('a response signed by NEAR\'s gateway key verifies against the gateway attestation, and a miss says what the report held', async () => {
+  const gateway = nearFake({ placement: 'gateway' });
+  const result = await gateway.client.verifyResponse('z-ai/glm-5.3', (await complete(gateway.client)).evidence!, undefined, TRUST);
+  assert.equal(result.outcome, 'signed', result.summary);
+  assert.equal(result.signer, 'gateway');
+  assert.match(result.summary, /^Signed by NEAR AI's gateway key 0x1563/);
+
+  const missing = nearFake({ placement: 'missing' });
+  const miss = await missing.client.verifyResponse('z-ai/glm-5.3', (await complete(missing.client)).evidence!, undefined, TRUST);
+  assert.equal(miss.outcome, 'failed');
+  assert.match(miss.summary, /report fields: gateway_attestation, model_attestations; keys attested: model 0x7{40}, gateway 0x7{40}/);
 });
