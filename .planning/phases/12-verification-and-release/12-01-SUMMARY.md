@@ -88,10 +88,17 @@ the auto-allowed `git status` could run code.
   eligible as a private default. The sample is small: it confirms the default
   works, and is not a benchmark.
 
-## Still needs the user (NEAR AI key)
+## Live GSD run (RUN-06)
 
-- `NEAR_LIVE_GSD=1 NEAR_GSD_HOME=…`: RUN-06.
-- Publish 0.4.0 after those pass.
+Passed against Open-GSD 1.19.0 with GLM 5.3: `/gsd-map-codebase` on the sample
+repository wrote all seven documents (ARCHITECTURE, CONCERNS, CONVENTIONS,
+INTEGRATIONS, STACK, STRUCTURE, TESTING) in about 48 minutes. The test then
+kept the process open because it never disposed the conversation's shell; the
+test now disposes it. The extension disposes conversations itself.
+
+## Still needs the user
+
+- Repackage 0.4.0 (`npm run verify:release`) and publish.
 
 ## Verification
 

@@ -135,7 +135,12 @@ test('live GSD: /gsd-map-codebase runs end to end on a sample repository', { ski
     posted.push(value);
     if (value.type === 'questions-request' && value.id && value.questions) conversation.answerQuestions(value.id, value.questions.map((question) => question.options[0]?.label ?? 'yes'));
   }, path.join(storage, 'checkpoints'));
-  await conversation.send({ text: '/gsd-map-codebase', skill: { name: skill!.name, args: '' }, gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, availableModels: models.map((candidate) => candidate.id), maxParallelAgents: 4, maxTurns: 80 });
+  try {
+    await conversation.send({ text: '/gsd-map-codebase', skill: { name: skill!.name, args: '' }, gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, availableModels: models.map((candidate) => candidate.id), maxParallelAgents: 4, maxTurns: 80 });
+  } finally {
+    // The conversation keeps a shell open between turns; close it so the test process can exit.
+    conversation.dispose();
+  }
   const docs = existsSync(path.join(root, '.planning', 'codebase')) ? await readdir(path.join(root, '.planning', 'codebase')) : [];
   console.log(`codebase docs: ${docs.join(', ')}`);
   assert.ok(posted.some((message) => message.type === 'assistant-done'), 'the run finished');
