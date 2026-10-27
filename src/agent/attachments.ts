@@ -72,7 +72,7 @@ export async function prepareAttachments(attachments: StagedAttachment[], option
     } else if (attachment.kind === 'image') {
       const model = reads(options.model, 'image') ? options.model : options.visionModel;
       if (!options.models.some((candidate) => candidate.id === model)) throw new ToolError(`No image-reading model is available for ${attachment.name}. Set nearAi.agent.visionModel to a model your provider offers that reads images.`);
-      const result = await options.client.describeImage(model, `data:${attachment.mime};base64,${attachment.bytes.toString('base64')}`, `The user attached this image (${attachment.name}) with the message below. Describe everything relevant to it in detail, and transcribe any text, code, diagrams, or UI exactly.\n\nUser message: ${options.question.slice(0, 2000)}`, options.signal);
+      const result = await options.client.describeImage(model, `data:${attachment.mime};base64,${attachment.bytes.toString('base64')}`, `Describe this image (${attachment.name}) in detail and transcribe any text, code, diagrams, or UI exactly. Describe only this image: do not answer the user's question, and do not mention other files, which are read separately. The user's message, for what to focus on: ${options.question.slice(0, 2000)}`, options.signal);
       usage.push(result.usage);
       if (model !== options.model) notes.push(`${attachment.name} was read by ${model}, because ${options.model} does not read images.`);
       fence(attachment, `image, described by ${model}`, result.text);
