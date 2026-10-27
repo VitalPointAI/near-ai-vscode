@@ -8,6 +8,7 @@ import { PermissionRules, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
+import { grantsMcpTool } from '../mcp/tools';
 import { checkCitationsTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
@@ -79,6 +80,10 @@ export interface AgentTurnRequest {
   skillAddendum?: string;
   /** Project team members a GSD workflow may spawn by name (e.g. red-team). */
   projectAgents?: GsdAgent[];
+  /** Tools of the MCP servers switched on for this project. */
+  mcpTools?: AgentTool<any>[];
+  /** Caps for the whole run (the agent and all its sub-agents), checked before every model turn. */
+  budget?: { maxCostUsd: number; maxTokens: number };
 }
 
 type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
@@ -119,6 +124,8 @@ export class AgentConversation {
   private slotWaiters: Array<() => void> = [];
   private slotsInUse = 0;
   private contextWarned = false;
+  /** Estimated cost and tokens of the current run, across the agent and its sub-agents. */
+  private spend = { costUsd: 0, tokens: 0, stopped: false };
 
   public constructor(
     private readonly root: string,
@@ -139,6 +146,7 @@ export class AgentConversation {
     this.stop();
     const abort = new AbortController();
     this.abort = abort;
+    this.spend = { costUsd: 0, tokens: 0, stopped: false };
     const runId = `run-${Date.now()}-${randomBytes(3).toString('hex')}`;
     const checkpoints = new RunCheckpoints(runId, this.checkpointDir);
     this.runs.set(runId, checkpoints);
@@ -180,6 +188,7 @@ export class AgentConversation {
       grants,
       maxTurns: request.maxTurns,
       beforeTurn: async (transcript, lastUsage, signal) => {
+        this.enforceBudget(request, abort);
         const pending = this.drainNotifications();
         const managed = await this.manageContext(pending.length ? [...transcript, ...pending] : transcript, lastUsage, request, signal, true);
         return managed ?? (pending.length ? [...transcript, ...pending] : undefined);
@@ -352,7 +361,7 @@ export class AgentConversation {
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...memoryFor()];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.mcpTools ?? []), ...memoryFor()];
     const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
     if (!agents.length) return base;
     const gsd = request.gsd;
@@ -371,7 +380,8 @@ export class AgentConversation {
         // Each sub-agent's Remember/Recall also reach its own private memory.
         const privateMemory = memoryFor({ kind: 'private-agent', id: `agent-${label}`.slice(0, 80) }, `${runId}-${label}`.slice(0, 100));
         const pool = [...all.filter((tool) => tool.name !== 'Remember' && tool.name !== 'Recall'), ...privateMemory];
-        const allowed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent'))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
+        // A listed tool, Task for Agent, and MCP tools by name, mcp:<server>, or a trailing-* pattern.
+        const allowed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent')) || (tool.name.startsWith('mcp__') && grantsMcpTool(spawn.agent!.tools, tool.name))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background };
         // A background agent outlives the tool call but not the run; a foreground one ends with the call too.
         const parent = spawn.background ? runSignal : callSignal;
@@ -402,6 +412,7 @@ export class AgentConversation {
             const child = new AgentRun({
               client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, maxTurns: request.maxTurns,
               beforeTurn: async (transcript, lastUsage, signal) => {
+                if (this.abort) this.enforceBudget(request, this.abort);
                 while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
                 return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
               },
@@ -503,6 +514,25 @@ export class AgentConversation {
     await this.transcripts.save({ id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: this.messages.filter((message) => message.role === 'user').length, messages: this.messages, display: [...this.display.entries()].filter(([key]) => this.messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) }).catch(() => undefined);
   }
 
+  private tally(usage: UsageMetadata): void {
+    this.spend.costUsd += usage.estimatedCostUsd ?? 0;
+    this.spend.tokens += (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+  }
+
+  /** Stops the whole run, keeping its work, once its estimated cost or tokens reach the budget. */
+  private enforceBudget(request: AgentTurnRequest, abort: AbortController): void {
+    const budget = request.budget;
+    if (!budget || this.spend.stopped) return;
+    const overCost = this.spend.costUsd >= budget.maxCostUsd;
+    const overTokens = this.spend.tokens >= budget.maxTokens;
+    if (!overCost && !overTokens) return;
+    this.spend.stopped = true;
+    this.post({ type: 'notice', text: overCost
+      ? `Stopped the run: its estimated cost reached $${this.spend.costUsd.toFixed(2)}, the limit for one run ($${budget.maxCostUsd.toFixed(2)}; nearAi.agent.maxRunCostUsd, and never more than what is left of nearAi.dailySpendLimitUsd). Everything it did is kept; send a message to continue.`
+      : `Stopped the run: it used ${Math.round(this.spend.tokens).toLocaleString('en-US')} tokens, the limit for one run (nearAi.agent.maxRunTokens). Everything it did is kept; send a message to continue.` });
+    abort.abort();
+  }
+
   /** Mirrors an agent's events into the Agent Activity feed. */
   private track(agentId: string, event: AgentEvent): void {
     const feed = this.activity;
@@ -521,7 +551,8 @@ export class AgentConversation {
     else if (event.type === 'tool-end') { this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output }); void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' }); }
     else if (event.type === 'todos') this.post({ type: 'todos', todos: event.todos });
     else if (event.type === 'retry') { this.post({ type: 'assistant-retry', discard: event.discardText, text: retryNotice(event) }); void record({ status: 'running', kind: 'model', model, summary: `Model turn failed; retrying (attempt ${event.attempt + 1}).` }); }
-    else if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
+    else if (event.type === 'turn') this.tally(event.usage);
+    if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
   }
 
   private askApproval(request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalReply> {

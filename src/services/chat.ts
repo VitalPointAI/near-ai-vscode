@@ -15,7 +15,7 @@ import { findRipgrep } from '../agent/tools';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { OutboundGuard, spentTodayUsd } from './outboundGuard';
 import { ProfileStore } from './profileStore';
-import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readSettings, shouldAutoInstallGsd } from './settings';
+import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readSettings, shouldAutoInstallGsd, readRunBudget } from './settings';
 import { TranscriptStore } from './transcripts';
 import { prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
@@ -520,7 +520,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     // Documents are checked by their extracted text, which is what is sent.
     const attachedText = staged.map((item) => item.kind === 'text' ? item.bytes.toString('utf8') : item.kind === 'document' ? item.text ?? '' : '').filter(Boolean).join('\n');
-    const verdict = state.guard.check({ model, modelInfo, text: attachedText ? `${text}\n${attachedText}` : text, overrideToken: message.type === 'send' ? message.overrideToken : undefined }, spentTodayUsd(await state.activity.list()));
+    const spentToday = spentTodayUsd(await state.activity.list());
+    const verdict = state.guard.check({ model, modelInfo, text: attachedText ? `${text}\n${attachedText}` : text, overrideToken: message.type === 'send' ? message.overrideToken : undefined }, spentToday);
+    // One run, with all its sub-agents, may spend at most the per-run cap and what is left of today's limit.
+    const runBudget = readRunBudget();
+    if (settings.dailySpendLimitUsd > 0) runBudget.maxCostUsd = Math.max(0, Math.min(runBudget.maxCostUsd, settings.dailySpendLimitUsd - spentToday));
     if (verdict.outcome !== 'allow') {
       panel.webview.postMessage({ type: 'outbound-blocked', text, model, reason: verdict.reason, overrideToken: message.type === 'send' ? verdict.overrideToken : undefined, confirm: verdict.outcome === 'confirm' });
       return;
@@ -548,7 +552,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       state.memory = state.memory ?? new ContextGraphMemory(root, { trustedActorIds: [AGENT_MEMORY_ACTOR] });
       const delegable = modelsAsPrivateAs(active.models, modelInfo);
       const imageModel = delegable.find((candidate) => candidate.id === agentModels.imageModel && (candidate.outputModalities ?? []).includes('image'));
-      await state.agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+      await state.agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       await sendHistory(panel, state.activity);
       panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine({ agents: 0, activity: state.activity }) });
       await sendArtifacts(panel);

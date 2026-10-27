@@ -262,7 +262,7 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
 | Under `fully-autonomous`, the agent runs commands and writes protected files without asking | Only the deny list applies, and it is a substring backstop, not a sandbox. Intended for throwaway workspaces |
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
-| The daily spend limit is checked when a message is sent, not between turns of a long run | Use Stop or the emergency stop; the turn limit (`nearAi.agent.maxTurns`) bounds each run |
+| Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 | Conversation transcripts (for resuming chats) are stored unencrypted in VS Code's extension storage | Turn off `nearAi.agent.saveTranscripts`; tool output in them can include file contents |
 
 Report security issues through the repository's issue tracker with redacted

@@ -35,6 +35,10 @@ runtime in between.
   reasoning, and tool calls with per-agent tokens, cost, speed, and failures;
   pause, filter, search, and export. In memory only, time- and size-limited,
   and streamed only while visible.
+- **Runaway protection.** A run and all its sub-agents stop cleanly, keeping
+  their work, at a per-run cost cap (`nearAi.agent.maxRunCostUsd`, default $5),
+  what is left of the daily spend limit, or a token cap, checked before every
+  model turn; an agent repeating the same action is nudged and then stopped.
 - **Project types.** Set Up Project Team now starts from a project type
   (software, research, presales, writing, data, general) with a tailored team
   and AGENTS.md guidance for each stage of the GSD cycle, including a red-team

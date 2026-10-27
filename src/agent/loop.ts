@@ -44,6 +44,8 @@ export interface AgentRunOptions {
   retryDelaysMs?: number[];
   /** The stream silence limit for a turn's first attempt; it doubles after each stall. */
   idleTimeoutMs?: number;
+  /** Repetitions of the same action, within the last 20 calls, before the agent is nudged and then stopped (default 8 and 14; 0 turns it off). */
+  loopGuard?: { nudgeAt: number; stopAt: number };
   /** Shared with sub-agents so "allow for this run" covers the whole run. */
   grants?: RunGrants;
   /**
@@ -107,6 +109,13 @@ export class AgentRun {
           continue;
         }
         transcript.push(...await this.executeCalls(assistant.tool_calls, signal));
+        const loop = this.checkLoop(assistant.tool_calls);
+        if (loop === 'stop') {
+          transcript.push({ role: 'user', content: `<loop-guard>Stopped: you repeated the same action (${this.lastLoopKey}) ${this.loopCount} times without finishing. Report what was blocking you instead of continuing.</loop-guard>` });
+          this.options.emit({ type: 'text', text: `\n\n_Stopped this agent: it repeated the same action (${this.lastLoopKey}) ${this.loopCount} times without making progress._` });
+          return { outcome: 'max-turns', messages: transcript, usage };
+        }
+        if (loop === 'nudge') transcript.push({ role: 'user', content: `<loop-guard>You have repeated the same action (${this.lastLoopKey}) ${this.loopCount} times in your recent steps. Stop repeating it: if something is blocking you, report what it is and what you tried, then finish with what you have.</loop-guard>` });
       }
       return { outcome: 'max-turns', messages: transcript, usage };
     } catch (error) {
@@ -148,6 +157,37 @@ export class AgentRun {
         if (signal.aborted) throw error;
       }
     }
+  }
+
+  private readonly recent: string[] = [];
+  private nudged = false;
+  private lastLoopKey = '';
+  private loopCount = 0;
+
+  /** What a call acts on, coarsely: the file for file tools, the program and first argument for Bash. */
+  private static loopKey(call: ToolCall): string {
+    let args: Record<string, unknown> = {};
+    try { args = JSON.parse(call.function.arguments || '{}') as Record<string, unknown>; } catch { /* malformed arguments are their own key */ }
+    const file = args.file_path ?? args.path;
+    if (typeof file === 'string') return `${call.function.name} ${file}${typeof args.offset === 'number' ? `@${args.offset}` : ''}`;
+    if (typeof args.command === 'string') return `${call.function.name} ${args.command.trim().split(/\s+/).slice(0, 2).join(' ')}`;
+    return `${call.function.name} ${call.function.arguments.slice(0, 80)}`;
+  }
+
+  /** Watches for an agent stuck repeating the same action: nudges it once, then stops it. */
+  private checkLoop(calls: ToolCall[]): 'nudge' | 'stop' | undefined {
+    const guard = this.options.loopGuard ?? { nudgeAt: 8, stopAt: 14 };
+    if (!guard.nudgeAt) return undefined;
+    for (const call of calls) this.recent.push(AgentRun.loopKey(call));
+    this.recent.splice(0, Math.max(0, this.recent.length - 20));
+    const counts = new Map<string, number>();
+    for (const key of this.recent) counts.set(key, (counts.get(key) ?? 0) + 1);
+    const [key, count] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? ['', 0];
+    this.lastLoopKey = key;
+    this.loopCount = count;
+    if (count >= guard.stopAt) return 'stop';
+    if (count >= guard.nudgeAt && !this.nudged) { this.nudged = true; return 'nudge'; }
+    return undefined;
   }
 
   /** Runs consecutive read-only calls together; anything that changes state runs alone, in order. */

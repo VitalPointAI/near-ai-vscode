@@ -439,6 +439,20 @@
           "type": "string",
           "default": "",
           "description": "Base URL of your SearXNG instance (https, or http for localhost), with JSON output enabled."
+        },
+        "nearAi.agent.maxRunCostUsd": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0.1,
+          "maximum": 1000,
+          "description": "Stops a run (the agent and all its sub-agents) once its estimated cost reaches this many US dollars; never more than what is left of nearAi.dailySpendLimitUsd. Its work is kept."
+        },
+        "nearAi.agent.maxRunTokens": {
+          "type": "number",
+          "default": 4000000,
+          "minimum": 10000,
+          "maximum": 100000000,
+          "description": "Stops a run (the agent and all its sub-agents) once it has used this many tokens, for models without known prices. Its work is kept."
         }
       }
     },
@@ -532,6 +546,7 @@
     "sbom": "node scripts/extension-sbom.mjs"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@resvg/resvg-wasm": "2.6.2",
     "@types/node": "^22.10.0",
     "@types/vscode": "1.101.0",

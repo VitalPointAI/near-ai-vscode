@@ -46,6 +46,16 @@ export function readModelTiers(): { deep: string; standard: string; fast: string
 }
 
 /** Limits for agent runs and whether conversations are saved for resuming. */
+/** Caps for one run, including its sub-agents. */
+export function readRunBudget(): { maxCostUsd: number; maxTokens: number } {
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const bounded = (key: string, fallback: number, min: number, max: number) => {
+    const value = configuration.get<unknown>(key, fallback);
+    return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+  };
+  return { maxCostUsd: bounded('agent.maxRunCostUsd', 5, 0.1, 1_000), maxTokens: bounded('agent.maxRunTokens', 4_000_000, 10_000, 100_000_000) };
+}
+
 /** How long and how much Agent Activity keeps in memory. */
 export function readActivityLimits(): { maxAgeMs: number; maxBytes: number } {
   const configuration = vscode.workspace.getConfiguration('nearAi');
