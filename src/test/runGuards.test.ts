@@ -139,3 +139,33 @@ async function runScriptWithFinish(next: (turn: number) => { calls?: ToolCall[];
     shell.dispose();
   }
 }
+
+test('the token limit applies only to turns without a known price; priced turns are bounded by cost', async () => {
+  const runWith = async (priced: boolean) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'near-ai-token-cap-'));
+    let turns = 0;
+    const near = {
+      async *streamCompletion(): AsyncGenerator<CompletionEvent> {
+        turns += 1;
+        const usage = { inputTokens: 900_000, cachedInputTokens: 850_000, outputTokens: 1_000, ...(priced ? { estimatedCostUsd: 0.05 } : {}), verificationStatus: 'unknown' as const, latencyMs: 1 };
+        yield { type: 'done', message: turns < 6 ? { role: 'assistant', content: null, tool_calls: [call(`r${turns}`, 'Read', { file_path: `f${turns}.txt` })] } : { role: 'assistant', content: 'done' }, finishReason: turns < 6 ? 'tool_calls' : 'stop', usage };
+      },
+      async actualCostsUsd() { return undefined; }
+    };
+    const posted: Array<Record<string, unknown>> = [];
+    const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+    try {
+      await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, budget: { maxCostUsd: 5, maxTokens: 2_000_000 } });
+    } finally {
+      conversation.dispose();
+    }
+    return { turns, posted, spend: conversation.runSpend };
+  };
+  const priced = await runWith(true);
+  assert.equal(priced.turns, 6, 'about 5.4M mostly cached tokens costing $0.30 run to the end');
+  assert.ok(!priced.posted.some((message) => message.type === 'notice' && /Stopped the run/.test(String(message.text))));
+  assert.deepEqual([priced.spend.totalTokens, priced.spend.cachedTokens, priced.spend.unpricedTokens], [5_406_000, 5_100_000, 0]);
+  const unpriced = await runWith(false);
+  assert.equal(unpriced.turns, 3, 'without prices, the token limit stops it');
+  assert.ok(unpriced.posted.some((message) => message.type === 'notice' && /tokens on models without published prices/.test(String(message.text))));
+});

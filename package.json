@@ -464,7 +464,7 @@
           "default": 4000000,
           "minimum": 10000,
           "maximum": 100000000,
-          "description": "Stops a run (the agent and all its sub-agents) once it has used this many tokens, for models without known prices. Its work is kept."
+          "description": "Stops a run (the agent and all its sub-agents) once it has used this many tokens on models without published prices; priced models are bounded by nearAi.agent.maxRunCostUsd instead. Its work is kept."
         },
         "nearAi.agent.shellEnvAllow": {
           "type": "array",

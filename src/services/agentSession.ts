@@ -132,7 +132,7 @@ export class AgentConversation {
   private slotsInUse = 0;
   private contextWarned = false;
   /** Estimated cost and tokens of the current run, across the agent and its sub-agents. */
-  private spend = { costUsd: 0, tokens: 0, stopped: false };
+  private spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
 
   public constructor(
     private readonly root: string,
@@ -153,7 +153,7 @@ export class AgentConversation {
     this.stop();
     const abort = new AbortController();
     this.abort = abort;
-    this.spend = { costUsd: 0, tokens: 0, stopped: false };
+    this.spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
     const runId = `run-${Date.now()}-${randomBytes(3).toString('hex')}`;
     const checkpoints = new RunCheckpoints(runId, this.checkpointDir);
     this.runs.set(runId, checkpoints);
@@ -528,8 +528,17 @@ export class AgentConversation {
   }
 
   private tally(usage: UsageMetadata): void {
-    this.spend.costUsd += usage.estimatedCostUsd ?? 0;
-    this.spend.tokens += (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+    const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+    this.spend.totalTokens += tokens;
+    this.spend.cachedTokens += usage.cachedInputTokens ?? 0;
+    // Priced turns are bounded by the cost limit; the token limit is for models without known prices.
+    if (usage.estimatedCostUsd !== undefined) this.spend.costUsd += usage.estimatedCostUsd;
+    else this.spend.tokens += tokens;
+  }
+
+  /** The current or last run's estimated cost and tokens, across its sub-agents. */
+  public get runSpend(): { costUsd: number; totalTokens: number; cachedTokens: number; unpricedTokens: number } {
+    return { costUsd: this.spend.costUsd, totalTokens: this.spend.totalTokens, cachedTokens: this.spend.cachedTokens, unpricedTokens: this.spend.tokens };
   }
 
   /** Stops the whole run, keeping its work, once its estimated cost or tokens reach the budget. */
@@ -542,7 +551,7 @@ export class AgentConversation {
     this.spend.stopped = true;
     this.post({ type: 'notice', text: overCost
       ? `Stopped the run: its estimated cost reached $${this.spend.costUsd.toFixed(2)}, the limit for one run ($${budget.maxCostUsd.toFixed(2)}; nearAi.agent.maxRunCostUsd, and never more than what is left of nearAi.dailySpendLimitUsd). Everything it did is kept; send a message to continue.`
-      : `Stopped the run: it used ${Math.round(this.spend.tokens).toLocaleString('en-US')} tokens, the limit for one run (nearAi.agent.maxRunTokens). Everything it did is kept; send a message to continue.` });
+      : `Stopped the run: it used ${Math.round(this.spend.tokens).toLocaleString('en-US')} tokens on models without published prices, the limit for one run (nearAi.agent.maxRunTokens). Everything it did is kept; send a message to continue.` });
     abort.abort();
   }
 

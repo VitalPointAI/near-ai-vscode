@@ -198,7 +198,8 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
   }
   const seconds = Math.round((Date.now() - started) / 1000);
   const agents = spans.filter((span) => /^gsd-[\w-]+: /.test(span.title)).length;
-  console.log(`/${skill!.name} ${args}: ${seconds} s, ${spans.length} tool calls, ${agents} sub-agent(s); slowest tool calls:`);
+  const spend = conversation.runSpend;
+  console.log(`/${skill!.name} ${args}: ${seconds} s, ${spans.length} tool calls, ${agents} sub-agent(s), estimated $${spend.costUsd.toFixed(2)} for ${spend.totalTokens.toLocaleString('en-US')} tokens (${spend.totalTokens ? Math.round((100 * spend.cachedTokens) / spend.totalTokens) : 0}% cached); slowest tool calls:`);
   for (const span of [...spans].sort((a, b) => b.seconds - a.seconds).slice(0, 10)) console.log(`  ${span.seconds} s at +${span.startS} s  ${span.title.slice(0, 120)}`);
   if (process.env.NEAR_LIVE_TRACE) await writeFile(`${process.env.NEAR_LIVE_TRACE}.${skill!.name}.json`, JSON.stringify(spans, null, 2));
   assert.ok(posted.some((message) => message.type === 'assistant-done'), `/${skill!.name} finished`);
