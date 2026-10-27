@@ -29,18 +29,25 @@ writeFileSync(path.join(vendor, 'resvg', 'NOTICE'), 'resvg-wasm (https://github.
 copy('imagetracerjs', [['imagetracer_v1.2.6.js', 'imagetracer.js'], ['LICENSE']], 'imagetracer', 'Unlicense');
 copy('dejavu-fonts-ttf', [['ttf/DejaVuSans.ttf'], ['ttf/DejaVuSans-Bold.ttf'], ['LICENSE']], 'fonts', 'Bitstream-Vera AND LicenseRef-Arev-Fonts');
 
-// pptxgenjs and its runtime dependencies, bundled into one CommonJS file.
-mkdirSync(path.join(vendor, 'pptxgenjs'), { recursive: true });
-const result = await build({ entryPoints: [require.resolve('pptxgenjs')], bundle: true, platform: 'node', format: 'cjs', target: 'node22', minify: true, legalComments: 'none', metafile: true, outfile: path.join(vendor, 'pptxgenjs', 'pptxgen.cjs'), logLevel: 'error' });
-// The manifest lists exactly the packages whose code esbuild put in the bundle (nested copies included).
-const bundledDirs = [...new Set(Object.keys(result.metafile.inputs).map((input) => /^(.*node_modules\/(?:@[^/]+\/)?[^/]+)\//.exec(input)?.[1]).filter(Boolean))].sort();
-const licenses = [];
-for (const dir of bundledDirs) {
-  const meta = JSON.parse(readFileSync(path.join(root, dir, 'package.json'), 'utf8'));
-  const file = readdirSync(path.join(root, dir)).find((name) => /^(?:licen[cs]e|copying)/i.test(name));
-  licenses.push(`== ${meta.name} ${meta.version} ==\n${file ? readFileSync(path.join(root, dir, file), 'utf8') : `${meta.license} (the package ships no license file)`}`);
-  manifest.push({ name: meta.name, version: meta.version, license: typeof meta.license === 'string' ? meta.license : 'see LICENSES.txt', purl: `pkg:npm/${meta.name.replace('@', '%40')}@${meta.version}`, path: 'vendor/pptxgenjs', ...(meta.name === 'pptxgenjs' ? {} : { bundledIn: 'pptxgenjs' }) });
+/**
+ * Bundles an entry and its dependencies into one CommonJS file under vendor/<target>, with
+ * LICENSES.txt and manifest rows for exactly the packages esbuild included (nested copies too).
+ */
+async function bundle(entry, target, file, main) {
+  mkdirSync(path.join(vendor, target), { recursive: true });
+  const result = await build({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', target: 'node22', minify: true, legalComments: 'none', metafile: true, outfile: path.join(vendor, target, file), logLevel: 'error' });
+  const dirs = [...new Set(Object.keys(result.metafile.inputs).map((input) => /^(.*node_modules\/(?:@[^/]+\/)?[^/]+)\//.exec(input)?.[1]).filter(Boolean))].sort();
+  const licenses = [];
+  for (const dir of dirs) {
+    const meta = JSON.parse(readFileSync(path.join(root, dir, 'package.json'), 'utf8'));
+    const licenseFile = readdirSync(path.join(root, dir)).find((name) => /^(?:licen[cs]e|copying)/i.test(name));
+    licenses.push(`== ${meta.name} ${meta.version} ==\n${licenseFile ? readFileSync(path.join(root, dir, licenseFile), 'utf8') : `${meta.license} (the package ships no license file)`}`);
+    manifest.push({ name: meta.name, version: meta.version, license: typeof meta.license === 'string' ? meta.license : 'see LICENSES.txt', purl: `pkg:npm/${meta.name.replace('@', '%40')}@${meta.version}`, path: `vendor/${target}`, ...(meta.name === main ? {} : { bundledIn: main }) });
+  }
+  writeFileSync(path.join(vendor, target, 'LICENSES.txt'), licenses.join('\n\n'));
 }
-writeFileSync(path.join(vendor, 'pptxgenjs', 'LICENSES.txt'), licenses.join('\n\n'));
+
+await bundle(require.resolve('pptxgenjs'), 'pptxgenjs', 'pptxgen.cjs', 'pptxgenjs');
+await bundle(path.join(root, 'scripts', 'entries', 'mcp-client.mjs'), 'mcp', 'mcp-client.cjs', '@modelcontextprotocol/sdk');
 
 writeFileSync(path.join(vendor, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);

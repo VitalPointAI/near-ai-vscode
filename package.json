@@ -165,6 +165,12 @@
         "title": "Spending Limits",
         "category": "NEAR AI",
         "icon": "$(credit-card)"
+      },
+      {
+        "command": "nearAi.manageMcp",
+        "title": "Manage MCP Connections",
+        "category": "NEAR AI",
+        "icon": "$(plug)"
       }
     ],
     "viewsContainers": {
@@ -538,6 +544,11 @@
           "command": "nearAi.spendingLimits",
           "when": "view == nearAiChatView",
           "group": "overflow@5"
+        },
+        {
+          "command": "nearAi.manageMcp",
+          "when": "view == nearAiChatView",
+          "group": "overflow@6"
         }
       ]
     }

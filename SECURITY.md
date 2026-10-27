@@ -203,6 +203,28 @@ Web search sends queries to the provider you choose with **NEAR AI: Set Up Web
 Search**: a SearXNG instance you run (queries stay on your infrastructure),
 Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
 
+## MCP connections
+
+- **Storage:** server names, commands, and approval settings in your user
+  storage; URLs, header values, and environment values in SecretStorage (a URL
+  can carry an access token, so it is never shown, only its host); which
+  servers a project uses in that workspace's state, never in the repository.
+- **What is sent:** a tool call's arguments go to that server, and the
+  approval card shows them before anything is sent; the server's results go
+  to your chosen model. Nothing else (no files, no other context) is sent to a
+  server.
+- **Approval:** per server, *ask before changes* (default: tools the server
+  marks read-only follow your normal rules; every other tool asks in every
+  mode, including fully-autonomous), *ask before every call*, or *trusted*.
+  Tools can be switched off one by one.
+- **Local servers** run only after you confirm the exact command, with a
+  minimal environment (PATH, HOME, and the like) plus the variables you set,
+  never the editor's own environment.
+- **Results** are outside content: fenced, scanned for injection attempts, and
+  shown in Agent Activity.
+- **Not yet supported:** servers that require an interactive OAuth sign-in.
+  Servers authenticated by a token in the URL or a header work.
+
 ## Checking your project's dependencies
 
 **NEAR AI: Scan Dependencies for Vulnerabilities** (and, once you agree, every

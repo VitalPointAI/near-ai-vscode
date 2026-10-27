@@ -85,6 +85,10 @@ const required = [
   'extension/vendor/fonts/DejaVuSans-Bold.ttf',
   'extension/vendor/fonts/LICENSE',
   'extension/vendor/manifest.json',
+  'extension/vendor/mcp/mcp-client.cjs',
+  'extension/vendor/mcp/LICENSES.txt',
+  'extension/media/activity/activity.js',
+  'extension/media/mcp/mcp.js',
   'extension/sbom.cdx.json',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];

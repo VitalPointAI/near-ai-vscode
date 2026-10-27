@@ -243,7 +243,16 @@ export class AgentRun {
     if (permission.decision === 'deny') return this.finish(call.id, false, `Not allowed: ${permission.reason}`);
     if (permission.decision === 'ask') {
       let preview: ToolPreview | undefined;
-      try { preview = risky ? { kind: 'note', text: `${risky}${command ? `\n\n$ ${command}` : ''}` } : sensitive ? { kind: 'note', text: sensitive } : await tool.preview?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
+      try {
+        if (risky) {
+          // The reason first, then everything the tool's own preview shows (what is sent, run, or written).
+          const own = await tool.preview?.(input, context);
+          const detail = own?.kind === 'note' ? own.text : own?.kind === 'command' ? `$ ${own.command}` : own?.kind === 'diff' ? own.diff : command ? `$ ${command}` : '';
+          preview = { kind: 'note', text: `${risky}${detail ? `\n\n${detail}` : ''}` };
+        } else {
+          preview = sensitive ? { kind: 'note', text: sensitive } : await tool.preview?.(input, context);
+        }
+      } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
       const reply = await this.options.requestApproval({ callId: call.id, tool: tool.name, title, capability: tool.capability, preview });
       if (reply.decision === 'deny') {
         if (risky) context.onSecurity?.({ kind: 'blocked', source: title, detail: 'The user declined it.' });

@@ -35,6 +35,12 @@ runtime in between.
   reasoning, and tool calls with per-agent tokens, cost, speed, and failures;
   pause, filter, search, and export. In memory only, time- and size-limited,
   and streamed only while visible.
+- **MCP connections.** Add remote or local MCP servers (official SDK client),
+  switch them on per project, scope them to team members with `mcp:<server>`,
+  choose approval per server, switch tools off, and see status and usage on
+  the MCP Connections page. Secrets stay in SecretStorage; tools that can
+  change data ask in every mode by default; results are fenced as outside
+  content.
 - **Runaway protection.** A run and all its sub-agents stop cleanly, keeping
   their work, at a per-run cost cap (`nearAi.agent.maxRunCostUsd`, default $5),
   what is left of the daily spend limit, or a token cap, checked before every

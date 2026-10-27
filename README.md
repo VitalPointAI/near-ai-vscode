@@ -97,6 +97,20 @@ reason (accepted risk, deferred, disregarded), and verification and release
 notes list the items not fixed. In these projects `/gsd-execute-phase`,
 `/gsd-verify-work`, and `/gsd-autonomous` include the red-team step.
 
+### MCP connections
+
+**NEAR AI: Manage MCP Connections** adds Model Context Protocol servers, remote
+(a URL, for example a distributor's tenant server such as Ingram Micro
+Xvantage) or local (a command), and shows each one's status, tools, calls,
+errors, and last use. A server is off until you switch it on for a project.
+Agents then get its tools as `mcp__<server>__<tool>`; a team member gets them
+only if its `tools:` line lists `mcp:<server>`, so you can give a distributor
+connection to your presales team alone. Read-only tools follow your normal
+approval rules; tools that can change data ask first in every mode unless you
+mark the server Trusted, and the approval card shows exactly what is sent.
+URLs (which may carry the access token), header values, and environment values
+are stored in VS Code's encrypted secret storage.
+
 ### Agent Activity
 
 **NEAR AI: Open Agent Activity** (the pulse button on the chat view, or
