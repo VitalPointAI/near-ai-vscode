@@ -133,7 +133,14 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
         let score = 0;
         let outOf = 10;
         let misses: string[] = [];
-        if (task.kind === 'coding') score = await testsPass(root) ? 10 : 0;
+        if (task.kind === 'coding') {
+          // Passing only counts if the tests are the ones it was given.
+          const changed = [];
+          for (const [name, content] of Object.entries(task.files)) if (/\.test\.js$/.test(name) && await readFile(path.join(root, name), 'utf8').catch(() => '') !== content) changed.push(name);
+          if (changed.length) misses = [`changed the test: ${changed.join(', ')}`];
+          else if (!await testsPass(root)) misses = ['tests fail'];
+          score = misses.length ? 0 : 10;
+        }
         else {
           const file = path.join(root, task.kind === 'research' ? 'brief.md' : 'PLAN.md');
           const text = await readFile(file, 'utf8').catch(() => '');
