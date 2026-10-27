@@ -1,3 +1,4 @@
+import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 import { DEFAULT_ROLE_MODELS } from '../gsd/library';
 import * as vscode from 'vscode';
 import { createDefaultSettings, NearAiSettings } from '../domain/config';
@@ -50,7 +51,7 @@ export function readModelTiers(): { deep: string; standard: string; fast: string
     const value = configuration.get<unknown>(key, fallback);
     return typeof value === 'string' && value.trim() ? value.trim() : fallback;
   };
-  return { deep: pick('agent.deepModel', 'moonshotai/kimi-k3'), standard: pick('agent.standardModel', 'z-ai/glm-5.3'), fast: pick('agent.fastModel', 'z-ai/glm-5.3-flash') };
+  return { deep: pick('agent.deepModel', AGENT_DEFAULTS.tiers.deep), standard: pick('agent.standardModel', AGENT_DEFAULTS.tiers.standard), fast: pick('agent.fastModel', AGENT_DEFAULTS.tiers.fast) };
 }
 
 /** Limits for agent runs and whether conversations are saved for resuming. */
@@ -61,7 +62,7 @@ export function readRunBudget(): { maxCostUsd: number; maxTokens: number } {
     const value = configuration.get<unknown>(key, fallback);
     return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
   };
-  return { maxCostUsd: bounded('agent.maxRunCostUsd', 5, 0.1, 1_000), maxTokens: bounded('agent.maxRunTokens', 4_000_000, 10_000, 100_000_000) };
+  return { maxCostUsd: bounded('agent.maxRunCostUsd', AGENT_DEFAULTS.maxRunCostUsd, 0.1, 1_000), maxTokens: bounded('agent.maxRunTokens', AGENT_DEFAULTS.maxRunTokens, 10_000, 100_000_000) };
 }
 
 /** How long and how much Agent Activity keeps in memory. */
@@ -80,7 +81,7 @@ export function readAgentLimits(): { maxParallelAgents: number; maxTurns: number
     const value = configuration.get<unknown>(key, fallback);
     return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.floor(value))) : fallback;
   };
-  return { maxParallelAgents: bounded('agent.maxParallelAgents', 4, 1, 16), maxTurns: bounded('agent.maxTurns', 60, 5, 500), saveTranscripts: configuration.get<boolean>('agent.saveTranscripts', true) !== false };
+  return { maxParallelAgents: bounded('agent.maxParallelAgents', AGENT_DEFAULTS.maxParallelAgents, 1, 16), maxTurns: bounded('agent.maxTurns', AGENT_DEFAULTS.maxTurns, 5, 500), saveTranscripts: configuration.get<boolean>('agent.saveTranscripts', true) !== false };
 }
 
 /** Models used for attachments and image generation. */

@@ -12,6 +12,7 @@ import { AgentRun } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { CORE_TOOLS } from '../agent/tools';
+import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 import { DEFAULT_ROLE_MODELS, loadAgents, loadSkills } from '../gsd/library';
 import { gsdShellEnv } from '../gsd/runtime';
 import { AgentConversation, findSkill } from '../services/agentSession';
@@ -181,17 +182,21 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
     }
     if (value.type === 'notice' || value.type === 'assistant-retry') console.log(`  notice: ${String(value.text).slice(0, 200)}`);
     if (value.type === 'questions-request' && value.id && value.questions) conversation.answerQuestions(value.id, value.questions.map((question) => question.options[0]?.label ?? 'yes'));
-    // Actions held for approval (even in fully-autonomous mode, e.g. a network command after reading
-    // web pages) would wait forever here: print each with its reason, then approve it in this
-    // throwaway sample project so the cycle can finish.
+    // Unattended, as in production: an action held for approval (even in fully-autonomous mode, e.g.
+    // a network command after reading web pages) ends declined once nobody answers. Decline it at
+    // once instead of waiting out the timeout, and print it, so the run must cope as it would for a user.
     if (value.type === 'approval-request' && value.callId) {
       const preview = value.preview as { kind?: string; text?: string } | undefined;
-      console.log(`  held for approval: ${String(value.title)} — ${String(preview?.text ?? '').split('\n')[0].slice(0, 200)}`);
-      conversation.answerApproval(String(value.callId), { decision: 'allow' });
+      console.log(`  held for approval, declined (unattended): ${String(value.title)} — ${String(preview?.text ?? '').split('\n')[0].slice(0, 200)}`);
+      conversation.answerApproval(String(value.callId), { decision: 'deny', feedback: 'Nobody answered (the user may be away). Continue without this action if you can, and report what still needs their approval.' });
     }
   }, path.join(context.storage, 'checkpoints'));
+  // Production defaults (domain/agentDefaults.ts), the same the extension uses; fully-autonomous
+  // is the mode a user picks for an unattended run, which is what this simulates.
+  const budget = { maxCostUsd: process.env.NEAR_LIVE_BUDGET_USD ? Number(process.env.NEAR_LIVE_BUDGET_USD) : AGENT_DEFAULTS.maxRunCostUsd, maxTokens: AGENT_DEFAULTS.maxRunTokens };
+  if (process.env.NEAR_LIVE_BUDGET_USD) console.log(`  WARNING: NEAR_LIVE_BUDGET_USD=${budget.maxCostUsd} overrides the production default of $${AGENT_DEFAULTS.maxRunCostUsd}; this result does not reflect what users get.`);
   try {
-    await conversation.send({ text: `/${skill!.name}${args ? ` ${args}` : ''}`, skill: { name: skill!.name, args }, gsd: context.gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, roleModels: DEFAULT_ROLE_MODELS, availableModels: models.map((candidate) => candidate.id), contextWindows: Object.fromEntries(models.filter((candidate) => candidate.contextLength).map((candidate) => [candidate.id, candidate.contextLength!])), maxParallelAgents: 4, maxTurns: 120, budget: { maxCostUsd: Number(process.env.NEAR_LIVE_BUDGET_USD ?? 3), maxTokens: 8_000_000 } });
+    await conversation.send({ text: `/${skill!.name}${args ? ` ${args}` : ''}`, skill: { name: skill!.name, args }, gsd: context.gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { ...AGENT_DEFAULTS.tiers }, roleModels: DEFAULT_ROLE_MODELS, availableModels: models.map((candidate) => candidate.id), contextWindows: Object.fromEntries(models.filter((candidate) => candidate.contextLength).map((candidate) => [candidate.id, candidate.contextLength!])), maxParallelAgents: AGENT_DEFAULTS.maxParallelAgents, maxTurns: AGENT_DEFAULTS.maxTurns, maxOutputTokens: AGENT_DEFAULTS.maxOutputTokens, budget });
   } finally {
     // The conversation keeps a shell open between turns; close it so the test process can exit.
     conversation.dispose();
