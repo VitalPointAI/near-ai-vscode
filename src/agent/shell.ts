@@ -1,6 +1,8 @@
 import { ChildProcess, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import { ToolError } from './workspace';
 
 export const DEFAULT_TIMEOUT_MS = 120_000;
@@ -14,7 +16,8 @@ interface BackgroundJob { process: ChildProcess; output: string; read: number; e
 
 /**
  * A persistent shell for one agent run: `cd` and exported variables carry over between
- * commands, as in a terminal. Each command's stdin is /dev/null so it cannot consume the
+ * commands, as in a terminal. Each command is written to a private file and sourced with stdin
+ * from /dev/null, so neither its input nor an unterminated heredoc or quote can consume the
  * session's own control lines; its exit status and working directory are read from a random
  * end marker. A timeout or cancellation kills the whole process group and starts a fresh shell.
  */
@@ -24,6 +27,7 @@ export class ShellSession {
   private queue: Promise<unknown> = Promise.resolve();
   private cwd: string;
   private readonly jobs = new Map<string, BackgroundJob>();
+  private scripts: string | undefined;
 
   public constructor(root: string, private readonly shellPath: string = findShell(), private readonly extraEnv: NodeJS.ProcessEnv = {}) {
     this.cwd = root;
@@ -67,6 +71,8 @@ export class ShellSession {
   public dispose(): void {
     for (const job of this.jobs.values()) if (job.exitCode === undefined) killGroup(job.process);
     this.stopShell();
+    if (this.scripts) rmSync(this.scripts, { recursive: true, force: true });
+    this.scripts = undefined;
   }
 
   public get workingDirectory(): string { return this.cwd; }
@@ -102,7 +108,11 @@ export class ShellSession {
       const timer = setTimeout(() => interrupt(`[Command timed out after ${Math.round(timeoutMs / 1000)}s and was killed. The shell was restarted, so earlier cd and exported variables were reset.]`), timeoutMs);
       signal?.addEventListener('abort', onAbort, { once: true });
       shell.stdout?.on('data', onData);
-      shell.stdin?.write(`{\n${command}\n} < /dev/null\nprintf '\\n${marker}:%d:%s\\n' "$?" "$PWD"\n`);
+      this.scripts ??= mkdtempSync(path.join(tmpdir(), 'near-ai-shell-'));
+      const script = path.join(this.scripts, `${marker}.sh`);
+      writeFileSync(script, `${command}\n`, { mode: 0o600 });
+      const quoted = `'${script.replace(/\\/g, '/').replace(/'/g, `'\\''`)}'`;
+      shell.stdin?.write(`{ . ${quoted}; } < /dev/null; __near_status=$?; rm -f ${quoted}; printf '\\n${marker}:%d:%s\\n' "$__near_status" "$PWD"\n`);
     });
   }
 

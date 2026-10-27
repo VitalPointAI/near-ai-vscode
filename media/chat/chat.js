@@ -403,7 +403,9 @@
       item.append(label, controls);
       list.append(item);
     });
-    agentPanel.replaceChildren(el('div', 'todo-title', `Agents running · ${agents.length}`), list);
+    const title = el('div', 'todo-title', `Agents running · ${agents.length} `);
+    title.append(textButton('Activity', () => post({ type: 'open-activity' })));
+    agentPanel.replaceChildren(title, list);
   }
 
   function renderTodos(todos) {

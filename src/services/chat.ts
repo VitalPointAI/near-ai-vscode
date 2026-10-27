@@ -22,6 +22,7 @@ import { TeamDefinition, TeamLibrary } from '../agent/teams';
 import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, promptMessage, promptResponseMatches, progressActivitySummary, progressCardMessage, GsdArtifactLink, profileStatusMessage, walletStatusMessage, walletPreviewMessage, walletHistoryMessage, walletErrorMessage, teamListMessage, teamPreviewMessage, teamStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage, capabilityAwareTeamPreview, generationPreviewMessage, generationStatusMessage, generationPublicationMessage, memoryInspectMessage, memorySliceMessage, memoryApprovalPreviewMessage, multimodalStatusMessage, sanitizeContextGraphNode } from './chatBridge';
 import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './chatBridge';
 import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
+import { sharedActivityFeed } from './activityView';
 import { ActivityStore } from './activityStore';
 import { AnalyticsStore } from './analyticsStore';
 import { AuditStore } from './auditStore';
@@ -295,6 +296,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (message.type === 'select-profile') {
       await vscode.commands.executeCommand('nearAi.selectProfile');
+      return;
+    }
+    if (message.type === 'open-activity') {
+      await vscode.commands.executeCommand('nearAi.openAgentActivity');
       return;
     }
     if (message.type === 'open-tools') {
@@ -593,7 +598,7 @@ function ripgrepPath(): string | undefined {
 function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost): AgentConversation {
   const storage = context.globalStorageUri.fsPath;
   const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root) : undefined;
-  return new AgentConversation(root, (outbound) => { void panel.webview.postMessage(outbound); }, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts);
+  return new AgentConversation(root, (outbound) => { void panel.webview.postMessage(outbound); }, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts, sharedActivityFeed());
 }
 
 /** One GSD host per extension storage folder, shared by the sidebar and the Tools tab. */

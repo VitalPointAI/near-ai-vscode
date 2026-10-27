@@ -31,6 +31,12 @@ runtime in between.
   the signing key.
 - **Local and hybrid runtimes.** Ollama, LM Studio, vLLM, or any
   OpenAI-compatible server, alone or alongside NEAR AI Cloud.
+- **Agent Activity.** A live page of every agent's prompts, replies,
+  reasoning, and tool calls with per-agent tokens, cost, speed, and failures;
+  pause, filter, search, and export. In memory only, time- and size-limited,
+  and streamed only while visible.
+- **Graphics and decks.** Agents can trace images into SVG, render SVG to
+  PNG, and build PowerPoint decks with sharp SVG images, all on this machine.
 - **Resumable chats.** Conversation history is kept on this machine.
 - **Runs recover by themselves.** If NEAR AI stops sending mid-answer for two
   minutes, drops the connection, or is busy, that step is retried (quickly at

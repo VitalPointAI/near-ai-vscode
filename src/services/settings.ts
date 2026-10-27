@@ -46,6 +46,16 @@ export function readModelTiers(): { deep: string; standard: string; fast: string
 }
 
 /** Limits for agent runs and whether conversations are saved for resuming. */
+/** How long and how much Agent Activity keeps in memory. */
+export function readActivityLimits(): { maxAgeMs: number; maxBytes: number } {
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const bounded = (key: string, fallback: number, min: number, max: number) => {
+    const value = configuration.get<unknown>(key, fallback);
+    return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+  };
+  return { maxAgeMs: bounded('activity.retentionMinutes', 60, 5, 1_440) * 60_000, maxBytes: bounded('activity.maxMegabytes', 8, 1, 64) * 1024 * 1024 };
+}
+
 export function readAgentLimits(): { maxParallelAgents: number; maxTurns: number; saveTranscripts: boolean } {
   const configuration = vscode.workspace.getConfiguration('nearAi');
   const bounded = (key: string, fallback: number, min: number, max: number) => {

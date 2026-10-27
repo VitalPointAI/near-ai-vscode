@@ -14,6 +14,7 @@ import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport
 import type { ActionPolicy } from '../domain/policy';
 import { expandPrompt, GsdAgent, GsdSkill, modelForTier } from '../gsd/library';
 import { gsdTools, Question } from '../gsd/tools';
+import type { ActivityFeed } from './agentActivity';
 import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
@@ -113,7 +114,8 @@ export class AgentConversation {
     private readonly post: (message: Record<string, unknown>) => void,
     private readonly checkpointDir: string,
     private readonly ripgrepPath?: string,
-    private readonly transcripts?: TranscriptStore
+    private readonly transcripts?: TranscriptStore,
+    private readonly activity?: ActivityFeed
   ) {}
 
   /** Where sub-agents' git worktrees live: the extension's storage, never the project. */
@@ -130,7 +132,8 @@ export class AgentConversation {
     const checkpoints = new RunCheckpoints(runId, this.checkpointDir);
     this.runs.set(runId, checkpoints);
     const shell = this.shellFor(request.gsd?.shellEnv ?? {});
-    if (!this.messages.length) this.messages.push({ role: 'system', content: this.systemPrompt(request) });
+    const freshConversation = !this.messages.length;
+    if (freshConversation) this.messages.push({ role: 'system', content: this.systemPrompt(request) });
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
     if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
@@ -145,6 +148,8 @@ export class AgentConversation {
     if (remembered) prompt = `<project-memory>\n${remembered}\n</project-memory>\n\n${prompt}`;
     this.display.set(contentKey(prompt), request.text);
     this.messages.push({ role: 'user', content: prompt });
+    const mainId = `main-${runId}`;
+    this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
     for (const note of request.attachments?.notes ?? []) this.post({ type: 'notice', text: note });
     const record: Record_ = (event) => request.activity ? request.activity.store.append(request.activity.sessionId, event).catch(() => undefined) : Promise.resolve();
@@ -167,17 +172,19 @@ export class AgentConversation {
       },
       afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
       requestApproval: (approval) => this.askApproval(approval, abort.signal),
-      emit: (event) => this.forward(event, request.model, record)
+      emit: (event) => { this.track(mainId, event); this.forward(event, request.model, record); }
     });
     try {
       let result: RunResult;
       try {
         result = await run.run(this.messages, abort.signal);
       } catch (error) {
+        this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
         // Keep what the run did, so the next message continues from there.
         if (error instanceof AgentRunError) { this.messages = error.messages; throw error.cause; }
         throw error;
       }
+      this.activity?.agentEnded(mainId, result.outcome);
       this.messages = result.messages;
       const allUsage = [...result.usage, ...extraUsage];
       const usage = sumUsage(allUsage);
@@ -376,6 +383,7 @@ export class AgentConversation {
             const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}. Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
             const base = `${this.systemPrompt({ ...request, model }, agentRoot)}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
+            this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}` }, spawn.prompt, system);
             const child = new AgentRun({
               client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, maxTurns: request.maxTurns,
               beforeTurn: async (transcript, lastUsage, signal) => {
@@ -384,6 +392,7 @@ export class AgentConversation {
               },
               requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal),
               emit: (event) => {
+                this.track(agent.id, event);
                 if (event.type === 'tool-start') this.forward({ ...event, callId: `${agent.id}:${event.callId}`, title: `${label} › ${event.title}` }, model, record);
                 else if (event.type === 'tool-end') this.forward({ ...event, callId: `${agent.id}:${event.callId}` }, model, record);
                 else if (event.type === 'turn') { usage.push(event.usage); extraUsage.push(event.usage); this.forward(event, model, record); }
@@ -391,6 +400,7 @@ export class AgentConversation {
               }
             });
             const result = await child.run([{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }], agent.abort.signal);
+            this.activity?.agentEnded(agent.id, result.outcome);
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
             await this.recordReputation(request.reputation, label, result.outcome === 'completed' ? 1 : result.outcome === 'max-turns' ? 0 : -1, agent.id);
@@ -401,6 +411,7 @@ export class AgentConversation {
             if (result.outcome === 'cancelled') return `${label} was stopped before it finished.${isolated}`;
             return `${typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`}${isolated}`;
           } catch (error) {
+            this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
             await this.recordReputation(request.reputation, label, -1, agent.id);
             void record({ status: 'failed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
             throw error;
@@ -475,6 +486,17 @@ export class AgentConversation {
   private async saveTranscript(model: string): Promise<void> {
     if (!this.transcripts || this.messages.length < 2) return;
     await this.transcripts.save({ id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: this.messages.filter((message) => message.role === 'user').length, messages: this.messages, display: [...this.display.entries()].filter(([key]) => this.messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) }).catch(() => undefined);
+  }
+
+  /** Mirrors an agent's events into the Agent Activity feed. */
+  private track(agentId: string, event: AgentEvent): void {
+    const feed = this.activity;
+    if (!feed) return;
+    if (event.type === 'text' || event.type === 'reasoning') feed.stream(agentId, event.type, event.text);
+    else if (event.type === 'tool-start') feed.toolStarted(agentId, event.callId, event.title, event.input);
+    else if (event.type === 'tool-end') feed.toolEnded(agentId, event.callId, event.ok, event.output);
+    else if (event.type === 'turn') feed.turn(agentId, event.usage);
+    else if (event.type === 'retry') feed.retry(agentId, retryNotice(event));
   }
 
   private forward(event: AgentEvent, model: string, record: Record_): void {

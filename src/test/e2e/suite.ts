@@ -79,6 +79,39 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       const text = observer.toView.slice(before).filter((message) => message.type === 'assistant-delta').map((message) => message.text).join('');
       assert.match(text, /Hi from the fake model/);
     }],
+    ['Agent Activity streams the run while visible, and nothing while hidden', async () => {
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { activityTap } = require(path.join(extension.extensionPath, 'dist/services/activityView')) as typeof import('../../services/activityView');
+      const page = new Observer();
+      activityTap.toView = (message) => page.record(page.toView, message);
+      activityTap.fromView = (message) => page.record(page.fromView, message);
+      await vscode.commands.executeCommand('nearAi.openAgentActivity');
+      await page.next('fromView', (message) => message.type === 'ready');
+      const snapshot = await page.next('toView', (message) => message.type === 'snapshot');
+      const entries = snapshot.entries as Array<{ kind: string; text?: string }>;
+      assert.ok(entries.some((entry) => entry.kind === 'prompt' && entry.text === 'Say hi'), 'the earlier prompt is in the snapshot');
+      assert.ok(entries.some((entry) => entry.kind === 'text' && /Hi from the fake model/.test(entry.text ?? '')), 'and its streamed reply');
+      const stats = snapshot.stats as Array<{ status: string; turns: number; outputTokens: number }>;
+      assert.ok(stats.some((stat) => stat.status === 'completed' && stat.turns >= 1 && stat.outputTokens > 0), JSON.stringify(stats));
+      const before = page.toView.length;
+      await api.sidebar.request({ type: 'send', text: 'Say hi again', model: 'fake-coder' });
+      await observer.next('toView', (message) => message.type === 'assistant-done', observer.toView.length - 1);
+      await page.next('toView', (message) => message.type === 'entries' && JSON.stringify(message.entries).includes('Say hi again'), before);
+      // Hidden: another editor takes the tab's place, and the page gets nothing until it is shown again.
+      await vscode.commands.executeCommand('workbench.action.files.newUntitledFile');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const hidden = page.toView.length;
+      await api.sidebar.request({ type: 'send', text: 'Say hi while hidden', model: 'fake-coder' });
+      await observer.next('toView', (message) => message.type === 'assistant-done', observer.toView.length - 1);
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      assert.equal(page.toView.length, hidden, 'no messages while the page is hidden');
+      const readyAt = page.fromView.length;
+      await vscode.commands.executeCommand('nearAi.openAgentActivity');
+      await page.next('fromView', (message) => message.type === 'ready', readyAt);
+      const again = await page.next('toView', (message) => message.type === 'snapshot' && JSON.stringify(message.entries).includes('Say hi while hidden'), hidden);
+      assert.ok(again, 'showing it again sends what happened meanwhile');
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }],
     ['a file write asks for approval, applies on approval, and Revert removes it', async () => {
       const before = observer.toView.length;
       await api.sidebar.request({ type: 'send', text: 'write notes', model: 'fake-coder' });

@@ -82,6 +82,19 @@ run a workflow and stays current; your `~/.claude` setup is never touched.
 
 ![A planning workflow asking for a decision](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-workflow.png)
 
+### Agent Activity
+
+**NEAR AI: Open Agent Activity** (the pulse button on the chat view, or
+**Activity** next to running agents) opens a live page of what every agent is
+doing: prompts, replies, reasoning, and each tool call with its input and
+result, color-coded per agent, with a table of turns, tokens in and out,
+speed, estimated cost, tool calls and failures, retries, and time for each
+agent. Filter by agent or kind, search, **Pause** (or press P) to read without
+the stream moving, and export to Markdown or JSON. It streams only while the
+tab is visible and keeps entries in memory only, for
+`nearAi.activity.retentionMinutes` (60) and up to
+`nearAi.activity.maxMegabytes` (8 MB); secrets are masked.
+
 ### Spend and activity
 
 Open **NEAR AI Tools** from the title bar for analytics: sessions, models,

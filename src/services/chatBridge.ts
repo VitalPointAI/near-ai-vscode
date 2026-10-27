@@ -35,6 +35,7 @@ export type ChatWebviewMessage =
   | { type: 'history' }
   | { type: 'new-chat' }
   | { type: 'open-tools' }
+  | { type: 'open-activity' }
   | { type: 'select-profile' }
   | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'deny'; feedback?: string }
   | { type: 'revert-run'; runId: string }
@@ -517,7 +518,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'text')) return undefined;
     return { type: 'insert-code', text: message.text };
   }
-  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'select-profile') {
+  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'open-activity' || message.type === 'select-profile') {
     if (Object.keys(message).some((key) => key !== 'type')) return undefined;
     return { type: message.type };
   }

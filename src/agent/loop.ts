@@ -22,7 +22,7 @@ export interface ApprovalReply { decision: 'allow' | 'allow-run' | 'deny'; feedb
 export type AgentEvent =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
-  | { type: 'tool-start'; callId: string; tool: string; title: string }
+  | { type: 'tool-start'; callId: string; tool: string; title: string; input?: string }
   | { type: 'tool-end'; callId: string; ok: boolean; output: string }
   | { type: 'todos'; todos: Todo[] }
   | { type: 'turn'; model: string; usage: UsageMetadata }
@@ -182,11 +182,11 @@ export class AgentRun {
       title = tool.title(input, context);
     } catch (error) {
       const message = error instanceof SyntaxError ? `Arguments are not valid JSON: ${error.message}` : (error as Error).message;
-      this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title });
+      this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title, input: call.function.arguments });
       this.options.emit({ type: 'tool-end', callId: call.id, ok: false, output: message });
       return `Error: ${message}`;
     }
-    this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title });
+    this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title, input: call.function.arguments });
     const command = tool.capability === 'shell' ? String((input as { command?: unknown }).command ?? '') : undefined;
     let sensitive: string | undefined;
     try { sensitive = await tool.sensitive?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }

@@ -65,6 +65,27 @@ test('shell session keeps cd and variables between commands, reports exit codes,
   }
 });
 
+test('an unterminated heredoc, quote, or syntax error fails at once instead of eating the session until the timeout', async () => {
+  const { ShellSession } = await import('../agent/shell');
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-shell-'));
+  const shell = new ShellSession(root);
+  try {
+    const started = Date.now();
+    const heredoc = await shell.run("cat <<'GSD_ARGS_END'\n--auto\n", 10_000);
+    assert.equal(heredoc.timedOut, false);
+    assert.match(heredoc.output, /--auto/);
+    const quote = await shell.run('echo "never closed', 10_000);
+    assert.equal(quote.timedOut, false);
+    assert.notEqual(quote.exitCode, 0);
+    const syntax = await shell.run('if then fi', 10_000);
+    assert.equal(syntax.exitCode, 2);
+    assert.ok(Date.now() - started < 5_000, `took ${Date.now() - started} ms`);
+    assert.equal((await shell.run("cd / && echo 'it'\\''s fine'")).output.trim(), "it's fine", 'the session still works, quoting intact');
+  } finally {
+    shell.dispose();
+  }
+});
+
 test('background shells run independently and report new output on each read', async () => {
   const { ShellSession } = await import('../agent/shell');
   const shell = new ShellSession(await mkdtemp(path.join(tmpdir(), 'near-ai-bg-')));
