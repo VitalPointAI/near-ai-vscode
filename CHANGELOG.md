@@ -26,6 +26,10 @@ runtime in between.
 - **Local and hybrid runtimes.** Ollama, LM Studio, vLLM, or any
   OpenAI-compatible server, alone or alongside NEAR AI Cloud.
 - **Resumable chats.** Conversation history is kept on this machine.
+- **Runs recover by themselves.** If NEAR AI stops sending mid-answer for two
+  minutes, drops the connection, or is busy, that step is retried (quickly at
+  first, then every minute) and the run carries on from where it was. An
+  answer that is still arriving is never cut off. **Stop** ends it.
 - **Security hardening.**
   - Commands run without approval only when written as plain words.
   - `.git/` and the extension's settings are protected from silent writes.

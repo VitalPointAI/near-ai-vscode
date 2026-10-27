@@ -631,6 +631,11 @@
         else setBusy(false);
         if (m.status) status.textContent = m.status;
         break;
+      case 'assistant-retry':
+        // The failed attempt's partial text is void; the retry streams its own.
+        if (current && m.discard) { current.text = current.text.slice(0, Math.max(0, current.text.length - m.discard)); flushAssistant(); }
+        notice(m.text || 'Retrying…', []);
+        break;
       case 'assistant-error':
         finishAssistant();
         notice(m.text || 'The request failed.', [], true);

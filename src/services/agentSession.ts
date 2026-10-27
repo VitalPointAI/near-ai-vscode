@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextStatus, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
-import { AgentEvent, AgentRun, ApprovalReply, ApprovalRequest } from '../agent/loop';
+import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, RunResult } from '../agent/loop';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt } from '../agent/systemPrompt';
@@ -165,7 +165,14 @@ export class AgentConversation {
       emit: (event) => this.forward(event, request.model, record)
     });
     try {
-      const result = await run.run(this.messages, abort.signal);
+      let result: RunResult;
+      try {
+        result = await run.run(this.messages, abort.signal);
+      } catch (error) {
+        // Keep what the run did, so the next message continues from there.
+        if (error instanceof AgentRunError) { this.messages = error.messages; throw error.cause; }
+        throw error;
+      }
       this.messages = result.messages;
       const allUsage = [...result.usage, ...extraUsage];
       const usage = sumUsage(allUsage);
@@ -367,6 +374,7 @@ export class AgentConversation {
                 if (event.type === 'tool-start') this.forward({ ...event, callId: `${agent.id}:${event.callId}`, title: `${label} › ${event.title}` }, model, record);
                 else if (event.type === 'tool-end') this.forward({ ...event, callId: `${agent.id}:${event.callId}` }, model, record);
                 else if (event.type === 'turn') { usage.push(event.usage); extraUsage.push(event.usage); this.forward(event, model, record); }
+                else if (event.type === 'retry') this.post({ type: 'notice', text: `${label}: ${retryNotice(event)}` });
               }
             });
             const result = await child.run([{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }], agent.abort.signal);
@@ -456,6 +464,7 @@ export class AgentConversation {
     else if (event.type === 'tool-start') { this.post({ type: 'tool-start', callId: event.callId, tool: event.tool, title: event.title }); void record({ status: 'running', kind: 'tool', tool: event.tool, summary: event.title.slice(0, 200) }); }
     else if (event.type === 'tool-end') { this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output }); void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' }); }
     else if (event.type === 'todos') this.post({ type: 'todos', todos: event.todos });
+    else if (event.type === 'retry') { this.post({ type: 'assistant-retry', discard: event.discardText, text: retryNotice(event) }); void record({ status: 'running', kind: 'model', model, summary: `Model turn failed; retrying (attempt ${event.attempt + 1}).` }); }
     else if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
   }
 
@@ -523,6 +532,10 @@ export function visibleTurns(messages: AgentMessage[], display = new Map<string,
     }
   }
   return turns;
+}
+
+export function retryNotice(event: Extract<AgentEvent, { type: 'retry' }>): string {
+  return `${event.reason} Retrying in ${Math.round(event.delayMs / 1000)} s (attempt ${event.attempt + 1}); the run continues from where it was.`;
 }
 
 function contentKey(content: string): string {

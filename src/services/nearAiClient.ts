@@ -110,12 +110,16 @@ export interface NearAiClientOptions {
   fetchFn?: typeof fetch;
   maxRetries?: number;
   retryBaseDelayMs?: number;
-  /** How long to wait for response headers; a stream that has started is never cut off. */
+  /** How long to wait for response headers. */
   responseTimeoutMs?: number;
+  /** How long a started stream may go without sending anything before it counts as stalled. */
+  streamIdleTimeoutMs?: number;
   clock?: () => string;
 }
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
+/** Silence, not total time: every chunk restarts it, so a long answer that keeps arriving is never cut off. */
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 export function createNearAiClient(options: NearAiClientOptions): NearAiClient {
   return new NearAiClient(options);
@@ -130,6 +134,14 @@ export class NearAiError extends Error {
   ) {
     super(redactSecrets(message));
     this.name = 'NearAiError';
+  }
+}
+
+/** A stream that stopped sending, or a connection that dropped mid-response. Always worth retrying. */
+export class StreamInterruptedError extends NearAiError {
+  public constructor(message: string, public readonly stalled: boolean, requestId?: string) {
+    super(0, message, true, requestId);
+    this.name = 'StreamInterruptedError';
   }
 }
 
@@ -362,7 +374,7 @@ export class NearAiClient {
    * One streamed model turn with tools. Text and reasoning stream as they arrive; tool calls are
    * assembled from their indexed fragments and returned whole in the final `done` event.
    */
-  public async *streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal): AsyncGenerator<CompletionEvent> {
+  public async *streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options: { idleTimeoutMs?: number } = {}): AsyncGenerator<CompletionEvent> {
     const started = Date.now();
     const requestBody = JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
     const response = await this.request('/chat/completions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: requestBody });
@@ -377,10 +389,10 @@ export class NearAiClient {
     let text = '';
     let finishReason = 'stop';
     let buffer = '';
+    const idleTimeoutMs = options.idleTimeoutMs ?? this.idleTimeoutMs;
     try {
       for (;;) {
-        const next = await reader.read();
-        if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+        const next = await readWithin(reader, idleTimeoutMs, signal, usage.requestId);
         if (next.value) rawResponse.update(next.value);
         buffer += next.done ? decoder.decode() : decoder.decode(next.value, { stream: true });
         const lines = buffer.split(/\r?\n/);
@@ -441,8 +453,7 @@ export class NearAiClient {
     let finished = false;
     try {
       while (!finished) {
-        const next = await reader.read();
-        if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+        const next = await readWithin(reader, this.idleTimeoutMs, signal, initial.requestId);
         if (next.done) {
           buffer += decoder.decode();
           finished = true;
@@ -463,6 +474,10 @@ export class NearAiClient {
       if (signal?.aborted) await reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
+  }
+
+  private get idleTimeoutMs(): number {
+    return Math.max(1, this.options.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS);
   }
 
   private rememberModels(models: ModelInfo[]): ModelInfo[] {
@@ -695,6 +710,31 @@ function numberValue(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+}
+
+type ReadResult = { done: true; value?: undefined } | { done: false; value: Uint8Array };
+
+/**
+ * The next chunk of a stream, or a StreamInterruptedError when nothing arrives within `idleMs`
+ * or the connection drops. Each call starts a fresh wait, so the limit is on silence only.
+ */
+async function readWithin(reader: ReadableStreamDefaultReader<Uint8Array>, idleMs: number, signal: AbortSignal | undefined, requestId: string | undefined): Promise<ReadResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let next: ReadResult | 'stalled';
+  try {
+    next = await Promise.race([reader.read() as Promise<ReadResult>, new Promise<'stalled'>((resolve) => { timer = setTimeout(() => resolve('stalled'), idleMs); })]);
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw new DOMException('The operation was aborted.', 'AbortError');
+    throw new StreamInterruptedError(`The connection to NEAR AI dropped mid-response (${error instanceof Error ? error.message : 'network error'}).`, false, requestId);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+  if (next === 'stalled') {
+    await reader.cancel().catch(() => undefined);
+    throw new StreamInterruptedError(`NEAR AI stopped sending the response (nothing for ${Math.round(idleMs / 1000)} seconds).`, true, requestId);
+  }
+  return next;
 }
 
 async function waitForRetry(baseDelayMs: number, attempt: number, signal?: AbortSignal): Promise<void> {

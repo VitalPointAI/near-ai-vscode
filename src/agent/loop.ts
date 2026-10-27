@@ -5,6 +5,17 @@ import { truncate } from './shell';
 import type { AgentTool, Todo, ToolContext, ToolPreview } from './tools';
 import { ToolError } from './workspace';
 
+/** Matches the client's DEFAULT_STREAM_IDLE_TIMEOUT_MS; the loop doubles it after a stall. */
+const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
+const MAX_IDLE_TIMEOUT_MS = 600_000;
+
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+  });
+}
+
 export interface ApprovalRequest { callId: string; tool: string; title: string; capability: ActionCapability; preview?: ToolPreview }
 export interface ApprovalReply { decision: 'allow' | 'allow-run' | 'deny'; feedback?: string }
 
@@ -14,18 +25,24 @@ export type AgentEvent =
   | { type: 'tool-start'; callId: string; tool: string; title: string }
   | { type: 'tool-end'; callId: string; ok: boolean; output: string }
   | { type: 'todos'; todos: Todo[] }
-  | { type: 'turn'; model: string; usage: UsageMetadata };
+  | { type: 'turn'; model: string; usage: UsageMetadata }
+  /** A model turn failed and will be tried again; `discardText` characters streamed by the failed attempt are void. */
+  | { type: 'retry'; attempt: number; delayMs: number; reason: string; discardText: number };
 
 export type RunOutcome = 'completed' | 'max-turns' | 'cancelled';
 
 export interface AgentRunOptions {
-  client: { streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal): AsyncGenerator<CompletionEvent> };
+  client: { streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options?: { idleTimeoutMs?: number }): AsyncGenerator<CompletionEvent> };
   model: string;
   tools: AgentTool<any>[];
   context: Omit<ToolContext, 'signal' | 'onTodos'>;
   policy: ActionPolicy;
   rules: PermissionRules;
   maxTurns?: number;
+  /** Waits before successive retries of a failed model turn; the last one repeats. */
+  retryDelaysMs?: number[];
+  /** The stream silence limit for a turn's first attempt; it doubles after each stall. */
+  idleTimeoutMs?: number;
   /** Shared with sub-agents so "allow for this run" covers the whole run. */
   grants?: RunGrants;
   /**
@@ -41,6 +58,16 @@ export interface AgentRunOptions {
 
 export interface RunResult { outcome: RunOutcome; messages: AgentMessage[]; usage: UsageMetadata[] }
 
+/** A run that failed for a reason retrying cannot fix; carries the transcript so the work is not lost. */
+export class AgentRunError extends Error {
+  public constructor(public readonly cause: unknown, public readonly messages: AgentMessage[]) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'AgentRunError';
+  }
+}
+
+/** Quick retries first, then once a minute for as long as it takes. */
+export const RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
 const MAX_TOOL_RESULT_CHARS = 40_000;
 const UI_OUTPUT_CHARS = 6_000;
 
@@ -68,17 +95,9 @@ export class AgentRun {
         const replaced = await this.options.beforeTurn?.(transcript, usage.at(-1), signal);
         if (replaced) transcript = replaced;
         if (signal.aborted) return { outcome: 'cancelled', messages: transcript, usage };
-        let assistant: Extract<AgentMessage, { role: 'assistant' }> | undefined;
-        for await (const event of this.options.client.streamCompletion(this.options.model, transcript, this.definitions, signal)) {
-          if (event.type === 'text') this.options.emit({ type: 'text', text: event.text });
-          else if (event.type === 'reasoning') this.options.emit({ type: 'reasoning', text: event.text });
-          else {
-            assistant = event.message;
-            usage.push(event.usage);
-            this.options.emit({ type: 'turn', model: this.options.model, usage: event.usage });
-          }
-        }
-        if (!assistant) throw new Error('The model ended its turn without a response.');
+        const reply = await this.modelTurn(transcript, signal);
+        const assistant = reply.message;
+        usage.push(reply.usage);
         transcript.push(assistant);
         if (!assistant.tool_calls?.length) {
           const more = await this.options.afterAnswer?.(transcript, signal);
@@ -91,7 +110,42 @@ export class AgentRun {
       return { outcome: 'max-turns', messages: transcript, usage };
     } catch (error) {
       if (signal.aborted) return { outcome: 'cancelled', messages: transcript, usage };
-      throw error;
+      throw new AgentRunError(error, transcript);
+    }
+  }
+
+  /**
+   * One model turn, tried again for as long as it fails for a reason that can pass (a stalled or
+   * dropped stream, a rate limit, a server error), so a directed run finishes without anyone
+   * having to step in. Only cancelling the run, or an error retrying cannot fix, ends it.
+   */
+  private async modelTurn(transcript: AgentMessage[], signal: AbortSignal): Promise<{ message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata }> {
+    const delays = this.options.retryDelaysMs ?? RETRY_DELAYS_MS;
+    let idleTimeoutMs = this.options.idleTimeoutMs;
+    for (let attempt = 0; ; attempt += 1) {
+      let streamed = 0;
+      try {
+        let reply: { message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata } | undefined;
+        for await (const event of this.options.client.streamCompletion(this.options.model, transcript, this.definitions, signal, idleTimeoutMs ? { idleTimeoutMs } : {})) {
+          if (event.type === 'text') { streamed += event.text.length; this.options.emit({ type: 'text', text: event.text }); }
+          else if (event.type === 'reasoning') this.options.emit({ type: 'reasoning', text: event.text });
+          else reply = { message: event.message, usage: event.usage };
+        }
+        if (reply) {
+          this.options.emit({ type: 'turn', model: this.options.model, usage: reply.usage });
+          return reply;
+        }
+        throw Object.assign(new Error('The model ended its turn without a response.'), { retryable: true });
+      } catch (error) {
+        if (signal.aborted || (error as { retryable?: unknown }).retryable !== true) throw error;
+        const reason = (error as Error).message;
+        const delayMs = delays[Math.min(attempt, delays.length - 1)] ?? 60_000;
+        // A stall may be a slow server rather than a dead one: give the next attempt longer.
+        if ((error as { stalled?: unknown }).stalled === true) idleTimeoutMs = Math.min(MAX_IDLE_TIMEOUT_MS, 2 * (idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS));
+        this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs, reason, discardText: streamed });
+        await wait(delayMs, signal);
+        if (signal.aborted) throw error;
+      }
     }
   }
 
