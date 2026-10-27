@@ -120,6 +120,8 @@ export interface NearAiClientOptions {
 }
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
+/** Output tokens allowed in one agent reply unless nearAi.agent.maxOutputTokens says otherwise. */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
 /** Silence, not total time: every chunk restarts it, so a long answer that keeps arriving is never cut off. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
 
@@ -379,9 +381,13 @@ export class NearAiClient {
    * One streamed model turn with tools. Text and reasoning stream as they arrive; tool calls are
    * assembled from their indexed fragments and returned whole in the final `done` event.
    */
-  public async *streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options: { idleTimeoutMs?: number } = {}): AsyncGenerator<CompletionEvent> {
+  public async *streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options: { idleTimeoutMs?: number; maxOutputTokens?: number } = {}): AsyncGenerator<CompletionEvent> {
     const started = Date.now();
-    const requestBody = JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
+    // Cap one reply's output (reasoning included), never above the model's own limit: a model that
+    // keeps generating inside a single turn is otherwise bounded only by that limit.
+    const modelMax = this.models.get(model)?.maxOutputTokens;
+    const maxTokens = Math.max(256, Math.min(options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS, modelMax ?? Number.POSITIVE_INFINITY));
+    const requestBody = JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
     const response = await this.request('/chat/completions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: requestBody });
     let usage = metadataFromHeaders(response.headers, started);
     // NEAR signs SHA-256 of the exact request body and raw response; keep both hashes for verification.

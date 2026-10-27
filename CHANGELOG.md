@@ -56,6 +56,9 @@ runtime in between.
   their work, at a per-run cost cap (`nearAi.agent.maxRunCostUsd`, default $5),
   what is left of the daily spend limit, or a token cap, checked before every
   model turn; an agent repeating the same action is nudged and then stopped.
+  Each reply is capped at `nearAi.agent.maxOutputTokens` (default 32,000,
+  never above the model's limit); a reply cut off there is followed by a
+  request to continue more concisely, and repeated cut-offs stop the agent.
   An approval nobody answers is declined after
   `nearAi.agent.approvalTimeoutMinutes` (default 15) so an unattended run
   carries on, and a notification appears when an agent is waiting while the

@@ -103,3 +103,39 @@ test('an approval nobody answers is declined after the timeout, and the run carr
   assert.match(toolResult, /declined[\s\S]*Nobody answered within 0 minutes/);
   assert.ok(posted.some((message) => message.type === 'assistant-done'), 'the run finished instead of waiting');
 });
+
+test('each reply is capped, a cut-off reply asks for a shorter continuation and its tool call is not run, and repeated cut-offs stop the agent', async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  const { NearAiClient } = await import('../services/nearAiClient');
+  const capped = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'k', fetchFn: (async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'small', max_output_tokens: 8_000 }, { id: 'big' }] }));
+    sent.push(JSON.parse(String(init?.body)));
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`);
+  }) as typeof fetch });
+  await capped.listModels().catch(() => undefined);
+  for await (const event of capped.streamCompletion('small', [{ role: 'user', content: 'hi' }], [])) void event;
+  for await (const event of capped.streamCompletion('big', [{ role: 'user', content: 'hi' }], [], undefined, { maxOutputTokens: 12_000 })) void event;
+  assert.deepEqual(sent.map((body) => body.max_tokens), [8_000, 12_000], 'the default 32,000 is lowered to the model\'s own limit; a setting applies otherwise');
+
+  const { result, turns, transcripts, texts } = await runScriptWithFinish((turn) => (turn === 0 ? { calls: [call('w1', 'Write', { file_path: 'half.md', content: 'trunc' })], finish: 'length' } : turn < 6 ? { text: 'and so on and so on', finish: 'length' } : { text: 'done', finish: 'stop' }));
+  assert.match(String(transcripts[1].at(-1)?.content), /^<output-limit>Your last reply hit the output limit and was cut off/);
+  assert.ok(!transcripts[1].some((message) => message.role === 'tool'), 'the cut-off tool call was not run');
+  assert.equal(result.outcome, 'max-turns');
+  assert.equal(turns, 4, 'stopped at the fourth cut-off reply');
+  assert.match(texts.join(''), /replies kept running past the output limit/);
+});
+
+async function runScriptWithFinish(next: (turn: number) => { calls?: ToolCall[]; text?: string; finish: string }) {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-output-limit-'));
+  let turn = 0;
+  const transcripts: AgentMessage[][] = [];
+  const client = { async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> { transcripts.push(structuredClone(messages)); const step = next(turn++); yield { type: 'done', message: { role: 'assistant', content: step.text ?? null, ...(step.calls ? { tool_calls: step.calls } : {}) }, finishReason: step.finish, usage: { verificationStatus: 'unknown', latencyMs: 1 } }; } };
+  const shell = new ShellSession(root);
+  const texts: string[] = [];
+  try {
+    const run = new AgentRun({ client, model: 'm', tools: CORE_TOOLS, maxTurns: 30, context: { root, checkpoints: new RunCheckpoints('limit'), shell, readFiles: new Set() }, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), emit: (event) => { if (event.type === 'text') texts.push(event.text); } });
+    return { result: await run.run([{ role: 'user', content: 'go' }], new AbortController().signal), turns: turn, transcripts, texts };
+  } finally {
+    shell.dispose();
+  }
+}

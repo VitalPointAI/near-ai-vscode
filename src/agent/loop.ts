@@ -33,7 +33,7 @@ export type AgentEvent =
 export type RunOutcome = 'completed' | 'max-turns' | 'cancelled';
 
 export interface AgentRunOptions {
-  client: { streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options?: { idleTimeoutMs?: number }): AsyncGenerator<CompletionEvent> };
+  client: { streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options?: { idleTimeoutMs?: number; maxOutputTokens?: number }): AsyncGenerator<CompletionEvent> };
   model: string;
   tools: AgentTool<any>[];
   context: Omit<ToolContext, 'signal' | 'onTodos'>;
@@ -44,6 +44,8 @@ export interface AgentRunOptions {
   retryDelaysMs?: number[];
   /** The stream silence limit for a turn's first attempt; it doubles after each stall. */
   idleTimeoutMs?: number;
+  /** Output tokens one reply may use (the client's default when unset). */
+  maxOutputTokens?: number;
   /** Repetitions of the same action, within the last 20 calls, before the agent is nudged and then stopped (default 8 and 14; 0 turns it off). */
   loopGuard?: { nudgeAt: number; stopAt: number };
   /** Shared with sub-agents so "allow for this run" covers the whole run. */
@@ -102,6 +104,17 @@ export class AgentRun {
         const assistant = reply.message;
         usage.push(reply.usage);
         transcript.push(assistant);
+        // A reply cut off at the output cap is not an answer: ask for a shorter continuation.
+        if (reply.finishReason === 'length') {
+          this.truncations += 1;
+          if (this.truncations >= 4) {
+            this.options.emit({ type: 'text', text: '\n\n_Stopped this agent: its replies kept running past the output limit._' });
+            return { outcome: 'max-turns', messages: transcript, usage };
+          }
+          if (assistant.tool_calls?.length) { transcript.pop(); transcript.push({ role: 'assistant', content: assistant.content ?? '' }); }
+          transcript.push({ role: 'user', content: '<output-limit>Your last reply hit the output limit and was cut off, so any tool call in it was not run. Continue more concisely: keep reasoning short, and write long files in several smaller parts.</output-limit>' });
+          continue;
+        }
         if (!assistant.tool_calls?.length) {
           const more = await this.options.afterAnswer?.(transcript, signal);
           if (!more?.length) return { outcome: 'completed', messages: transcript, usage };
@@ -129,17 +142,17 @@ export class AgentRun {
    * dropped stream, a rate limit, a server error), so a directed run finishes without anyone
    * having to step in. Only cancelling the run, or an error retrying cannot fix, ends it.
    */
-  private async modelTurn(transcript: AgentMessage[], signal: AbortSignal): Promise<{ message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata }> {
+  private async modelTurn(transcript: AgentMessage[], signal: AbortSignal): Promise<{ message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata; finishReason?: string }> {
     const delays = this.options.retryDelaysMs ?? RETRY_DELAYS_MS;
     let idleTimeoutMs = this.options.idleTimeoutMs;
     for (let attempt = 0; ; attempt += 1) {
       let streamed = 0;
       try {
-        let reply: { message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata } | undefined;
-        for await (const event of this.options.client.streamCompletion(this.options.model, transcript, this.definitions, signal, idleTimeoutMs ? { idleTimeoutMs } : {})) {
+        let reply: { message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata; finishReason?: string } | undefined;
+        for await (const event of this.options.client.streamCompletion(this.options.model, transcript, this.definitions, signal, { ...(idleTimeoutMs ? { idleTimeoutMs } : {}), ...(this.options.maxOutputTokens ? { maxOutputTokens: this.options.maxOutputTokens } : {}) })) {
           if (event.type === 'text') { streamed += event.text.length; this.options.emit({ type: 'text', text: event.text }); }
           else if (event.type === 'reasoning') this.options.emit({ type: 'reasoning', text: event.text });
-          else reply = { message: event.message, usage: event.usage };
+          else reply = { message: event.message, usage: event.usage, finishReason: event.finishReason };
         }
         if (reply) {
           this.options.emit({ type: 'turn', model: this.options.model, usage: reply.usage });
@@ -159,6 +172,7 @@ export class AgentRun {
     }
   }
 
+  private truncations = 0;
   private readonly recent: string[] = [];
   private nudged = false;
   private lastLoopKey = '';

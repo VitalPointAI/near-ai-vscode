@@ -480,6 +480,13 @@
           "minimum": 0,
           "maximum": 1440,
           "description": "How long an action waiting for your approval waits before it is declined, so an unattended run carries on without it (the agent is told and reports what still needs you). 0 waits indefinitely."
+        },
+        "nearAi.agent.maxOutputTokens": {
+          "type": "number",
+          "default": 32000,
+          "minimum": 1000,
+          "maximum": 1000000,
+          "description": "Most output tokens (reasoning included) one agent reply may use, never more than the model allows. A reply cut off at the limit is followed by a request to continue more concisely."
         }
       }
     },

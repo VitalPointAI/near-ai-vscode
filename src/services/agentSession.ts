@@ -86,6 +86,8 @@ export interface AgentTurnRequest {
   budget?: { maxCostUsd: number; maxTokens: number };
   /** Environment variables to pass to the agent's shell even though they look like credentials. */
   shellEnvAllow?: string[];
+  /** Output tokens one reply may use (nearAi.agent.maxOutputTokens). */
+  maxOutputTokens?: number;
 }
 
 type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
@@ -191,6 +193,7 @@ export class AgentConversation {
       rules: request.rules,
       grants,
       maxTurns: request.maxTurns,
+      maxOutputTokens: request.maxOutputTokens,
       beforeTurn: async (transcript, lastUsage, signal) => {
         this.enforceBudget(request, abort);
         const pending = this.drainNotifications();
@@ -414,7 +417,7 @@ export class AgentConversation {
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}` }, spawn.prompt, system);
             const child = new AgentRun({
-              client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, maxTurns: request.maxTurns,
+              client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
                 while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });

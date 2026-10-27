@@ -8,10 +8,10 @@ import { NearAiClient, type UsageMetadata } from '../services/nearAiClient';
 
 // Vectors produced with ethers 5.7.2, the library NEAR's reference verifier uses.
 const SIGNER = '0x1563915e194d8cfba1943570603f7606a3115508';
-const REQUEST = '{"model":"z-ai/glm-5.3","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}';
+const REQUEST = '{"model":"z-ai/glm-5.3","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true},"max_tokens":32000}';
 const RESPONSE = 'data: {"id":"chatcmpl-abc123","choices":[{"delta":{"content":"Hello"}}]}\n\ndata: {"id":"chatcmpl-abc123","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}\n\ndata: [DONE]\n\n';
-const SIGNED_TEXT = 'a3a857ed80fa1ba58bdb26a07333623b08b42245562e36dd8004d84f0c4fa0d8:7c179c988290cfb148188195d6100f7e17f8d1dca2f49cb4468bd78edfcaba1d';
-const SIGNATURE = '0x3a770bba95a77d397d25523360f73900399737145bc30dfa0bd3b9c8aff76054704daac9963e60950096840b0af9d6a3c12496838807b7ab12c5efcdf31b4e0f1c';
+const SIGNED_TEXT = 'd1d0b24bb777fcf4ae45955851e08f1ecc13c8621464a6275f9234d303aa88dd:7c179c988290cfb148188195d6100f7e17f8d1dca2f49cb4468bd78edfcaba1d';
+const SIGNATURE = '0x9d1240667d9e3cdc54800a31594240001dc0a79a9623c3dce63ed4f26008ae76123e52ceab780f0fce6075d9617f7a0e1c936873f0e9969ee043297967eafbb71b';
 
 test('keccak-256 and personal_sign recovery match ethers', () => {
   assert.equal(keccak256(Buffer.alloc(0)).toString('hex'), 'c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470');
