@@ -15,6 +15,7 @@ Last reviewed: 2026-10-26, against the code on `main`.
 | What the sidebar agent reads or runs | The same model, as tool results: file contents it reads, search results, and command output | Files under the workspace only. Reading a likely credential file (`.env`, private keys, SSH, AWS, or NEAR credential files) asks first. Pick a private or local model to keep this inside a TEE or on your machine. |
 | Open-GSD workflows | The NEAR AI agent runner, on the model you picked; sub-agents use the model for their tier (`nearAi.agent.deepModel`, `standardModel`, `fastModel`) when your provider offers it | The same outbound check, approvals, revert, and cost tracking as any agent run. No Codex or Claude Code runtime is invoked. |
 | Your API key | VS Code SecretStorage, one key per project and profile | Never written to settings, project files, logs, activity, analytics, exports, or error messages. |
+| Saved conversations | VS Code's extension storage on this machine, one folder per project; never the project itself | Full transcripts, including file contents and command output the agent saw, so History can resume them. The 50 most recent per project are kept. Turn off with `nearAi.agent.saveTranscripts`. |
 | Activity and cost records | `.planning/.near-ai/` in your project | Operational facts only (models, token counts, costs, outcomes); no prompts or replies. Add it to `.gitignore` if you do not want it committed. |
 | Open-GSD installation | `npx @opengsd/gsd-core@<exact version> --claude --global` into the extension's own storage, never `~/.claude` | Installed the first time you run a workflow; in NEAR AI projects, checked for updates at startup and daily. A new version must pass a compatibility check before it replaces the installed one, and the previous version is kept. |
 
@@ -112,8 +113,8 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 | Limitation | Plan |
 | --- | --- |
 | Per-response TEE attestation is not verified by the extension | Verify NEAR attestation/signature endpoints, milestone 2 |
-| Open-GSD's Claude Code hooks (statusline, context monitor) are not run | Context monitoring and continuity come from the runner itself, milestone 2 phase 10 |
-| `run_in_background` sub-agents run in the foreground | Background agents, milestone 2 phase 10 |
+| Open-GSD's Claude Code hooks (statusline, context monitor) are not run | The runner provides its own context thresholds, compaction, and handoff instead |
+| Open-GSD's `Workflow` tool and MCP servers (for example context7) are not available | Workflows that need them report the tool as unavailable and fall back to their other paths |
 | Team studio, attachments, image generation, and context memory are hidden | Rebuilt on the native runner, milestone 2 phase 11 |
 | **Revert** restores files changed by the agent's file tools, not changes made by shell commands it ran | Use git for command side effects; documented in the chat |
 | Under `fully-autonomous`, the agent runs commands without asking | Only the deny list applies; intended for throwaway workspaces |

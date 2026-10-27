@@ -25,6 +25,8 @@ export type ChatWebviewMessage =
   | { type: 'refresh-status' }
   | { type: 'open-command'; command: string; args?: string; model?: string }
   | { type: 'questions-reply'; id: string; answers: string[] }
+  | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' }
+  | { type: 'resume-conversation'; id: string }
   | { type: 'open-artifact'; path: string; kind: GsdArtifactKind }
   | { type: 'send'; text: string; model?: string; overrideToken?: string }
   | { type: 'stop' }
@@ -532,6 +534,10 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (message.model !== undefined && (typeof message.model !== 'string' || message.model.length > 200)) return undefined;
     return { type: 'open-command', command: message.command, ...(message.args ? { args: (message.args as string).trim() } : {}), ...(message.model ? { model: (message.model as string).trim() } : {}) };
   }
+  if (message.type === 'agent-control' && typeof message.agentId === 'string' && /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i.test(message.agentId) && (message.action === 'pause' || message.action === 'resume' || message.action === 'stop') && Object.keys(message).length === 3) {
+    return { type: 'agent-control', agentId: message.agentId, action: message.action };
+  }
+  if (message.type === 'resume-conversation' && typeof message.id === 'string' && /^conv-[a-z0-9-]{6,60}$/.test(message.id) && Object.keys(message).length === 2) return { type: 'resume-conversation', id: message.id };
   if (message.type === 'questions-reply' && typeof message.id === 'string' && /^q-[a-f0-9]{12}$/.test(message.id) && Array.isArray(message.answers)) {
     if (Object.keys(message).some((key) => !['type', 'id', 'answers'].includes(key))) return undefined;
     if (message.answers.length > 4 || message.answers.some((answer) => typeof answer !== 'string' || answer.length > 4000)) return undefined;

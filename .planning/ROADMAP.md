@@ -100,6 +100,8 @@ Implement the Agent/Task tool from GSD agent definitions (system prompt, tool al
 
 **Requirements:** HARN-09..12, AGENT-01, AGENT-02, AGENT-03, AGENT-04, CTX-01..04, CHAT-04, OBS-01
 
+**Status:** Complete 2026-10-26 (`phases/10-subagents-context-sessions/10-01-SUMMARY.md`). Workflow and MCP tools assessed and documented as unavailable.
+
 ### Phase 11: Teams, multimodal, generation, and memory on the runner
 
 Rebuild the advanced features on the runner so they do real work: the onboarding team questionnaire creates an accepted project team (ONB-04); teams can be created, edited, and invoked as runner sub-agents; attachments are transcribed (Whisper) or understood (vision models) through NEAR; image generation uses FLUX via the real catalog shape; runs write facts to context memory and agents receive bounded slices; reputation updates from real outcomes.
@@ -118,4 +120,4 @@ NEAR account sign-in (AUTH-02) and wallet, staking, and entitlement (AUTH-04, CO
 
 ## Next action
 
-Phase 10: plan with `/gsd-plan-phase 10`.
+Phase 11: plan with `/gsd-plan-phase 11`.

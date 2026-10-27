@@ -16,8 +16,11 @@ export interface GsdServices {
   agents: GsdAgent[];
   /** Shows the questions in the chat and resolves with one answer per question. */
   ask(questions: Question[], signal: AbortSignal): Promise<string[]>;
-  /** Runs a sub-agent to completion and resolves with its final report. */
-  spawn(request: { type: string; agent?: GsdAgent; prompt: string; description: string; model?: string }, signal: AbortSignal): Promise<string>;
+  /**
+   * Runs a sub-agent. In the foreground it resolves with the final report; in the background it
+   * resolves at once with the agent's id, and the report reaches the caller when it finishes.
+   */
+  spawn(request: { type: string; agent?: GsdAgent; prompt: string; description: string; model?: string; background: boolean }, signal: AbortSignal): Promise<string>;
 }
 
 const MAX_FETCH_BYTES = 2 * 1024 * 1024;
@@ -74,8 +77,7 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
   const agentRun = async (raw: { type: string; prompt: string; description: string; model?: string; background: boolean }, signal: AbortSignal) => {
     const agent = services.agents.find((candidate) => candidate.name === raw.type);
     if (!agent && raw.type && raw.type !== 'general-purpose') throw new ToolError(`No agent definition named "${raw.type}". Available: ${services.agents.map((candidate) => candidate.name).join(', ')}, or general-purpose.`);
-    const report = await services.spawn({ type: raw.type || 'general-purpose', agent, prompt: raw.prompt, description: raw.description, model: raw.model }, signal);
-    return raw.background ? `${report}\n\n[run_in_background is not supported yet; the agent ran to completion in the foreground.]` : report;
+    return services.spawn({ type: raw.type || 'general-purpose', agent, prompt: raw.prompt, description: raw.description, model: raw.model, background: raw.background }, signal);
   };
 
   const agentParse = (raw: Record<string, unknown>) => {
@@ -91,7 +93,7 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
   const agentParameters = { type: 'object', properties: { description: { type: 'string', description: 'Three to five words on the task.' }, prompt: { type: 'string', description: 'The complete task for the agent; it sees nothing else from this conversation.' }, subagent_type: { type: 'string', description: `One of: ${services.agents.map((agent) => agent.name).join(', ')}, or general-purpose.` }, model: { type: 'string', description: 'Optional tier or model ID.' }, run_in_background: { type: 'boolean' } }, required: ['prompt'], additionalProperties: false };
   const agentTool: AgentTool<ReturnType<typeof agentParse>> = {
     name: 'Agent',
-    description: 'Start a sub-agent with its own context to do a self-contained task, and get back its final report. Give it everything it needs in the prompt. Several Agent calls in one turn run in parallel.',
+    description: 'Start a sub-agent with its own context to do a self-contained task, and get back its final report. Give it everything it needs in the prompt. Several Agent calls in one turn run in parallel. With run_in_background the call returns at once and the report arrives in a later message when the agent finishes.',
     parameters: agentParameters,
     // Its own tool calls go through the same permission checks; the call itself only reads.
     capability: 'plan',

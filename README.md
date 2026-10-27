@@ -44,6 +44,13 @@ as a row in the chat.
 - **Undo a whole run.** Every file the agent changes is snapshotted first, so
   one **Revert** puts them all back.
 - **A visible plan.** Multi-step work keeps a task list above the input box.
+- **Sub-agents you can see and steer.** Workflows hand work to sub-agents,
+  in parallel or in the background; each running one appears above the input
+  box with **Pause**, **Resume**, and **Stop**.
+- **Long sessions stay on track.** Old tool output is trimmed and, near the
+  model's limit, earlier history is summarized automatically (with a handoff
+  saved for GSD). **History** reopens any earlier conversation with its full
+  context.
 - **Guard rails.** The agent can only touch files inside the workspace, asks
   before reading likely credential files (`.env`, keys), and never runs
   commands on your deny list.
@@ -131,6 +138,9 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking (simple commands only; anything with `;`, `|`, `>`, or `$( )` asks). |
 | `nearAi.agent.denyCommands` | `rm -rf /`, `git push --force`, … | Commands the agent may never run. |
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / GLM 5.3 Flash | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). |
+| `nearAi.agent.maxParallelAgents` | `4` | Sub-agents that may run at once. |
+| `nearAi.agent.maxTurns` | `60` | Model turns per run before it pauses for you. |
+| `nearAi.agent.saveTranscripts` | `true` | Keep conversations on this machine so History can resume them. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
 | `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |
 | `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount. |

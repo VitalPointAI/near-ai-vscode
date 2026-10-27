@@ -315,6 +315,25 @@
           "type": "string",
           "default": "z-ai/glm-5.3-flash",
           "description": "Model for Open-GSD sub-agents in the fast tier (haiku). If your provider does not offer it, the chat's model is used."
+        },
+        "nearAi.agent.maxParallelAgents": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "How many sub-agents may run at the same time."
+        },
+        "nearAi.agent.maxTurns": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "maximum": 500,
+          "description": "The most model turns one agent run (or sub-agent) may take before it stops and asks you to continue."
+        },
+        "nearAi.agent.saveTranscripts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save full conversations (including file contents the agent read) in VS Code's extension storage on this machine so they can be resumed from History. Never saved in the project."
         }
       }
     },

@@ -18,6 +18,8 @@
   const defaultPlaceholder = input.placeholder;
   const projectLinks = $('project-links');
   const todoPanel = $('todos');
+  const agentPanel = $('agents');
+  let contextLeft;
   // Replaced by the host with the installed Open-GSD skills.
   let commands = JSON.parse(document.body.dataset.commands || '[]');
   const saved = vscode.getState() || {};
@@ -244,6 +246,7 @@
   function resetConversation() {
     agentRows.clear();
     renderTodos([]);
+    renderAgents([]);
     transcript.replaceChildren(welcome);
     welcome.hidden = false;
     tools = new Map();
@@ -367,6 +370,28 @@
     announce('NEAR AI is asking you ' + (m.questions.length === 1 ? 'a question.' : m.questions.length + ' questions.'));
   }
 
+  // Running sub-agents with pause, resume, and stop.
+  function renderAgents(agents) {
+    agentPanel.hidden = !agents.length;
+    if (!agents.length) { agentPanel.replaceChildren(); return; }
+    const list = el('ul');
+    agents.forEach((agent) => {
+      const item = el('li', 'agent' + (agent.paused ? ' paused' : ''));
+      const label = el('span', 'agent-label', agent.label + (agent.description ? ' · ' + agent.description : ''));
+      label.title = agent.model + (agent.background ? ' · background' : '');
+      const controls = el('span', 'agent-controls');
+      controls.append(
+        agent.paused
+          ? textButton('Resume', () => post({ type: 'agent-control', agentId: agent.id, action: 'resume' }))
+          : textButton('Pause', () => post({ type: 'agent-control', agentId: agent.id, action: 'pause' })),
+        textButton('Stop', () => post({ type: 'agent-control', agentId: agent.id, action: 'stop' }))
+      );
+      item.append(label, controls);
+      list.append(item);
+    });
+    agentPanel.replaceChildren(el('div', 'todo-title', `Agents running · ${agents.length}`), list);
+  }
+
   function renderTodos(todos) {
     todoPanel.hidden = !todos.length;
     const list = el('ul');
@@ -482,7 +507,7 @@
       case 'host-request': post(m.payload); break;
       case 'reset': resetConversation(); post({ type: 'new-chat' }); break;
       case 'prefill': input.value = m.text || ''; autosize(); updateSendState(); input.focus(); break;
-      case 'status': status.textContent = m.value || ''; status.title = (m.value || '') + ' — click for detailed progress'; break;
+      case 'status': status.textContent = (m.value || '') + (status.dataset.context || ''); status.title = (m.value || '') + ' — click for detailed progress'; break;
       case 'models': {
         const models = m.models || [];
         if (!models.length) {
@@ -587,7 +612,29 @@
       case 'artifacts': renderArtifacts(m.artifacts); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
-      case 'agents': status.textContent = /Agents \d+/.test(status.textContent) ? status.textContent.replace(/Agents \d+/, 'Agents ' + m.count) : status.textContent; break;
+      case 'agents':
+        status.textContent = /Agents \d+/.test(status.textContent) ? status.textContent.replace(/Agents \d+/, 'Agents ' + m.count) : status.textContent;
+        renderAgents(m.agents || []);
+        break;
+      case 'context':
+        contextLeft = m.level === 'normal' ? undefined : m.remainingPercent;
+        status.dataset.context = contextLeft === undefined ? '' : ` · context ${contextLeft}% left`;
+        break;
+      case 'transcript': {
+        resetConversation();
+        (m.turns || []).forEach((turn) => {
+          if (turn.role === 'user') append(el('div', 'turn user', turn.text));
+          else {
+            const node = append(el('div', 'turn assistant'));
+            const body = el('div');
+            renderMarkdown(body, turn.text || '');
+            node.append(body);
+            if (turn.tools) node.append(el('div', 'meta', `${turn.tools} tool call${turn.tools === 1 ? '' : 's'}`));
+          }
+        });
+        notice('Resumed this conversation with its full context. Continue where you left off.', []);
+        break;
+      }
       case 'questions-request': onQuestions(m); break;
       default: break;
     }

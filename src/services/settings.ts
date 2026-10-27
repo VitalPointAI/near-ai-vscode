@@ -44,3 +44,13 @@ export function readModelTiers(): { deep: string; standard: string; fast: string
   };
   return { deep: pick('agent.deepModel', 'moonshotai/kimi-k3'), standard: pick('agent.standardModel', 'z-ai/glm-5.3'), fast: pick('agent.fastModel', 'z-ai/glm-5.3-flash') };
 }
+
+/** Limits for agent runs and whether conversations are saved for resuming. */
+export function readAgentLimits(): { maxParallelAgents: number; maxTurns: number; saveTranscripts: boolean } {
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const bounded = (key: string, fallback: number, min: number, max: number) => {
+    const value = configuration.get<unknown>(key, fallback);
+    return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.floor(value))) : fallback;
+  };
+  return { maxParallelAgents: bounded('agent.maxParallelAgents', 4, 1, 16), maxTurns: bounded('agent.maxTurns', 60, 5, 500), saveTranscripts: configuration.get<boolean>('agent.saveTranscripts', true) !== false };
+}

@@ -122,8 +122,14 @@ details.tool .log {
 .approval .choices .meta { margin: 0; }
 details.agent-tool summary strong { font-family: var(--vscode-font-family); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 details.agent-tool .state { color: var(--vscode-errorForeground); }
-#todos { margin: 0 2px 6px; padding: 6px 8px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; font-size: 12px; }
-#todos[hidden] { display: none; }
+#agents, #todos { margin: 0 2px 6px; padding: 6px 8px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; font-size: 12px; }
+#agents[hidden], #todos[hidden] { display: none; }
+#agents ul { margin: 0; padding: 0; list-style: none; }
+#agents .agent { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+#agents .agent-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#agents .agent.paused .agent-label { color: var(--vscode-descriptionForeground); font-style: italic; }
+#agents .text-button { padding: 0 6px; font-size: 11px; }
+#agents .todo-title, #todos .todo-title { color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
 #todos .todo-title { color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
 #todos ul { margin: 0; padding: 0; list-style: none; }
 #todos .todo::before { display: inline-block; width: 16px; content: '○'; color: var(--vscode-descriptionForeground); }

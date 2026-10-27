@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
+import { compactConversation, contextStatus, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import { AgentEvent, AgentRun, ApprovalReply, ApprovalRequest } from '../agent/loop';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
@@ -12,7 +13,9 @@ import type { ActionPolicy } from '../domain/policy';
 import { expandPrompt, GsdAgent, GsdSkill, modelForTier } from '../gsd/library';
 import { gsdTools, Question } from '../gsd/tools';
 import type { ActivityStore } from './activityStore';
+import { saveHandoff } from './handoff';
 import type { AgentMessage, NearAiClient, UsageMetadata } from './nearAiClient';
+import { TranscriptStore } from './transcripts';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -41,32 +44,58 @@ export interface AgentTurnRequest {
   /** NEAR models for GSD's model tiers; a tier model the provider lacks falls back to `model`. */
   tiers?: ModelTiers;
   availableModels?: string[];
+  /** The model's context window in tokens, from the catalog. */
+  contextWindows?: Record<string, number | undefined>;
+  maxParallelAgents?: number;
+  maxTurns?: number;
+}
+
+type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
+
+interface LiveAgent {
+  id: string;
+  label: string;
+  description: string;
+  model: string;
+  abort: AbortController;
+  paused: boolean;
+  resume?: () => void;
+  background: boolean;
 }
 
 /**
- * One sidebar conversation with the agent. Keeps the message history and a persistent shell
- * across turns, routes approval cards and questions to the webview and back, runs GSD skills and
- * sub-agents, and keeps each run's file checkpoints so the user can revert it.
+ * One sidebar conversation with the agent. Keeps the message history (saved locally so it can be
+ * resumed) and a persistent shell, routes approvals and questions to the webview, runs GSD skills
+ * and sub-agents (foreground or background, with pause/stop and a concurrency limit), manages the
+ * context window, and keeps each run's file checkpoints so the user can revert it.
  */
 export class AgentConversation {
   private messages: AgentMessage[] = [];
+  private conversationId = newConversationId();
+  private title = '';
   private shell: ShellSession | undefined;
   private shellEnvKey = '';
   private abort: AbortController | undefined;
   private readonly approvals = new Map<string, (reply: ApprovalReply) => void>();
   private readonly questions = new Map<string, (answers: string[]) => void>();
   private readonly runs = new Map<string, RunCheckpoints>();
-  private activeAgents = 0;
+  private readonly agents = new Map<string, LiveAgent>();
+  private readonly background = new Set<Promise<void>>();
+  private notifications: AgentMessage[] = [];
+  private slotWaiters: Array<() => void> = [];
+  private slotsInUse = 0;
+  private contextWarned = false;
 
   public constructor(
     private readonly root: string,
     private readonly post: (message: Record<string, unknown>) => void,
     private readonly checkpointDir: string,
-    private readonly ripgrepPath?: string
+    private readonly ripgrepPath?: string,
+    private readonly transcripts?: TranscriptStore
   ) {}
 
   public get running(): boolean { return Boolean(this.abort); }
-  public get runningAgents(): number { return this.activeAgents; }
+  public get runningAgents(): number { return this.agents.size; }
 
   public async send(request: AgentTurnRequest): Promise<void> {
     this.stop();
@@ -77,6 +106,7 @@ export class AgentConversation {
     this.runs.set(runId, checkpoints);
     const shell = this.shellFor(request.gsd?.shellEnv ?? {});
     if (!this.messages.length) this.messages.push({ role: 'system', content: this.systemPrompt(request) });
+    if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
     if (request.skill && request.gsd) {
       const skill = findSkill(request.gsd.skills, request.skill.name);
@@ -85,11 +115,11 @@ export class AgentConversation {
     }
     this.messages.push({ role: 'user', content: prompt });
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
-    const record = (event: Parameters<ActivityStore['append']>[1]) => request.activity ? request.activity.store.append(request.activity.sessionId, event).catch(() => undefined) : Promise.resolve();
+    const record: Record_ = (event) => request.activity ? request.activity.store.append(request.activity.sessionId, event).catch(() => undefined) : Promise.resolve();
     const extraUsage: UsageMetadata[] = [];
     const grants = new RunGrants();
     const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [] };
-    const tools = this.toolsFor(request, context, grants, extraUsage, record);
+    const tools = this.toolsFor(request, context, grants, extraUsage, record, abort.signal);
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -98,6 +128,13 @@ export class AgentConversation {
       policy: request.policy,
       rules: request.rules,
       grants,
+      maxTurns: request.maxTurns,
+      beforeTurn: async (transcript, lastUsage, signal) => {
+        const pending = this.drainNotifications();
+        const managed = await this.manageContext(pending.length ? [...transcript, ...pending] : transcript, lastUsage, request, signal, true);
+        return managed ?? (pending.length ? [...transcript, ...pending] : undefined);
+      },
+      afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
       requestApproval: (approval) => this.askApproval(approval, abort.signal),
       emit: (event) => this.forward(event, request.model, record)
     });
@@ -114,6 +151,7 @@ export class AgentConversation {
       }
       if (changed.length) this.post({ type: 'run-changes', runId, files: changed });
       await record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'message', model: request.model, summary: `${request.skill ? `/${request.skill.name} run` : 'Agent run'} ${result.outcome}; ${changed.length} file(s) changed.`, estimatedCostUsd: usage.estimatedCostUsd, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
+      await this.saveTranscript(request.model);
       const ids = allUsage.map((turn) => turn.requestId).filter((id): id is string => Boolean(id));
       if (result.outcome !== 'cancelled' && ids.length && !request.local) {
         const actual = await request.client.actualCostsUsd(ids).catch(() => undefined);
@@ -138,9 +176,21 @@ export class AgentConversation {
     this.questions.delete(id);
   }
 
+  /** Pause (before its next model turn), resume, or stop one sub-agent. */
+  public controlAgent(agentId: string, action: 'pause' | 'resume' | 'stop'): boolean {
+    const agent = this.agents.get(agentId);
+    if (!agent) return false;
+    if (action === 'stop') agent.abort.abort();
+    else if (action === 'pause') agent.paused = true;
+    else { agent.paused = false; agent.resume?.(); agent.resume = undefined; }
+    this.postAgents();
+    return true;
+  }
+
   public stop(): void {
     this.abort?.abort();
     this.abort = undefined;
+    for (const agent of this.agents.values()) agent.abort.abort();
     this.releasePending();
   }
 
@@ -153,9 +203,24 @@ export class AgentConversation {
     return restored.map((file) => displayPath(this.root, file));
   }
 
+  /** Continues an earlier conversation with its full context; returns its visible turns for the view. */
+  public async restore(id: string): Promise<Array<{ role: 'user' | 'assistant'; text: string; tools: number }> | undefined> {
+    const transcript = await this.transcripts?.load(id);
+    if (!transcript) return undefined;
+    this.reset();
+    this.messages = transcript.messages;
+    this.conversationId = transcript.id;
+    this.title = transcript.title;
+    return visibleTurns(transcript.messages);
+  }
+
   public reset(): void {
     this.stop();
     this.messages = [];
+    this.conversationId = newConversationId();
+    this.title = '';
+    this.contextWarned = false;
+    this.notifications = [];
     this.shell?.dispose();
     this.shell = undefined;
   }
@@ -165,7 +230,7 @@ export class AgentConversation {
   private systemPrompt(request: AgentTurnRequest): string {
     const base = agentSystemPrompt({ root: this.root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(this.root, '.git')), model: request.model });
     if (!request.gsd) return base;
-    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type. When it says to ask the user, use AskUserQuestion.`;
+    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). When it says to ask the user, use AskUserQuestion.`;
   }
 
   private shellFor(env: NodeJS.ProcessEnv): ShellSession {
@@ -178,7 +243,39 @@ export class AgentConversation {
     return this.shell;
   }
 
-  private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>): AgentTool<any>[] {
+  /**
+   * Keeps the transcript inside the model's window. Over 60% used, old tool output is trimmed;
+   * at Open-GSD's warning threshold the user is told; at the critical threshold earlier history
+   * is summarized by the model and, for the main run, a handoff is saved. If summarizing fails,
+   * trimming still applies and the user is told, so work continues rather than overflowing.
+   */
+  private async manageContext(transcript: AgentMessage[], lastUsage: UsageMetadata | undefined, request: AgentTurnRequest, signal: AbortSignal, mainRun: boolean): Promise<AgentMessage[] | undefined> {
+    const window = request.contextWindows?.[request.model] ?? DEFAULT_CONTEXT_WINDOW;
+    const reported = lastUsage?.inputTokens !== undefined ? lastUsage.inputTokens + (lastUsage.outputTokens ?? 0) : undefined;
+    const used = Math.max(reported ?? 0, estimateTokens(transcript));
+    const status = contextStatus(used, window, DEFAULT_THRESHOLDS);
+    if (mainRun) this.post({ type: 'context', remainingPercent: status.remainingPercent, level: status.level });
+    if (status.remainingPercent > 40) return undefined;
+    let next = trimOldToolResults(transcript);
+    if (status.level === 'warning' && mainRun && !this.contextWarned) {
+      this.contextWarned = true;
+      this.post({ type: 'notice', text: `Context is ${100 - status.remainingPercent}% full. Older tool output is being trimmed; at ${100 - DEFAULT_THRESHOLDS.criticalRemaining}% the conversation is summarized automatically.` });
+    }
+    if (status.level !== 'critical') return next;
+    try {
+      next = await compactConversation(request.client, request.model, next, signal);
+      if (mainRun) {
+        this.post({ type: 'notice', text: 'The conversation was summarized to stay within the model\'s context window. A handoff was saved to .planning/HANDOFF.json.' });
+        await saveHandoff(this.root, { reason: 'context-critical', currentAction: this.title || 'Agent conversation', nextAction: 'Continue from the summarized conversation, or resume it from NEAR AI history.', activeAgents: this.agents.size, pendingApprovals: this.approvals.size }).catch(() => undefined);
+      }
+    } catch (error) {
+      if (signal.aborted) throw error;
+      if (mainRun) this.post({ type: 'notice', text: `Summarizing the conversation failed (${(error as Error).message}); older tool output was trimmed instead. Consider starting a new chat soon.` });
+    }
+    return next;
+  }
+
+  private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal): AgentTool<any>[] {
     if (!request.gsd) return CORE_TOOLS;
     const gsd = request.gsd;
     let all: AgentTool<any>[] = [];
@@ -188,44 +285,112 @@ export class AgentConversation {
       skills: gsd.skills,
       agents: gsd.agents,
       ask: (questions, askSignal) => this.askQuestions(questions, askSignal),
-      spawn: async (spawn, spawnSignal) => {
+      spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;
-        const prefix = `${label}-${randomBytes(3).toString('hex')}`;
         const wanted = modelForTier(spawn.model ?? spawn.agent?.model, request.tiers ?? { deep: request.model, standard: request.model, fast: request.model }, request.model);
         const model = !request.availableModels || request.availableModels.includes(wanted) ? wanted : request.model;
         const system = spawn.agent ? `${await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root })}\n\n${this.systemPrompt({ ...request, model })}` : this.systemPrompt({ ...request, model });
         const allowed = spawn.agent?.tools.length ? all.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent'))) : all.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
-        this.activeAgents += 1;
-        this.post({ type: 'agents', count: this.activeAgents });
-        void record({ status: 'running', kind: 'agent', agentRole: label, model, summary: `Sub-agent ${label} started.` });
-        try {
-          const child = new AgentRun({
-            client: request.client, model, tools: allowed, context, policy: request.policy, rules: request.rules, grants,
-            requestApproval: (approval) => this.askApproval({ ...approval, callId: `${prefix}:${approval.callId}`, title: `${label} › ${approval.title}` }, spawnSignal),
-            emit: (event) => {
-              if (event.type === 'tool-start') this.forward({ ...event, callId: `${prefix}:${event.callId}`, title: `${label} › ${event.title}` }, model, record);
-              else if (event.type === 'tool-end') this.forward({ ...event, callId: `${prefix}:${event.callId}` }, model, record);
-              else if (event.type === 'turn') { extraUsage.push(event.usage); this.forward(event, model, record); }
-            }
-          });
-          const result = await child.run([{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }], spawnSignal);
-          const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
-          void record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'agent', agentRole: label, model, summary: `Sub-agent ${label} ${result.outcome}.` });
-          return typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`;
-        } catch (error) {
-          void record({ status: 'failed', kind: 'agent', agentRole: label, model, summary: `Sub-agent ${label} failed.` });
-          throw error;
-        } finally {
-          this.activeAgents -= 1;
-          this.post({ type: 'agents', count: this.activeAgents });
-        }
+        const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background };
+        // A background agent outlives the tool call but not the run; a foreground one ends with the call too.
+        const parent = spawn.background ? runSignal : callSignal;
+        const onParentAbort = () => agent.abort.abort();
+        parent.addEventListener('abort', onParentAbort, { once: true });
+        const execute = async (): Promise<string> => {
+          await this.acquireSlot(request.maxParallelAgents ?? 4, agent.abort.signal);
+          const releaseSlot = () => this.releaseSlot();
+          this.agents.set(agent.id, agent);
+          this.postAgents();
+          const started = Date.now();
+          const usage: UsageMetadata[] = [];
+          void record({ status: 'running', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} started.` });
+          try {
+            const child = new AgentRun({
+              client: request.client, model, tools: allowed, context, policy: request.policy, rules: request.rules, grants, maxTurns: request.maxTurns,
+              beforeTurn: async (transcript, lastUsage, signal) => {
+                while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
+                return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
+              },
+              requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal),
+              emit: (event) => {
+                if (event.type === 'tool-start') this.forward({ ...event, callId: `${agent.id}:${event.callId}`, title: `${label} › ${event.title}` }, model, record);
+                else if (event.type === 'tool-end') this.forward({ ...event, callId: `${agent.id}:${event.callId}` }, model, record);
+                else if (event.type === 'turn') { usage.push(event.usage); extraUsage.push(event.usage); this.forward(event, model, record); }
+              }
+            });
+            const result = await child.run([{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }], agent.abort.signal);
+            const total = sumUsage(usage);
+            const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
+            void record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} ${result.outcome}.`, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCostUsd: total.estimatedCostUsd, durationMs: Date.now() - started });
+            if (result.outcome === 'cancelled') return `${label} was stopped before it finished.`;
+            return typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`;
+          } catch (error) {
+            void record({ status: 'failed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
+            throw error;
+          } finally {
+            parent.removeEventListener('abort', onParentAbort);
+            this.agents.delete(agent.id);
+            releaseSlot();
+            this.postAgents();
+          }
+        };
+        if (!spawn.background) return execute();
+        const task = execute()
+          .then((report) => { this.notifications.push({ role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="finished">\n${report}\n</agent-notification>` }); })
+          .catch((error: Error) => { this.notifications.push({ role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="failed">\n${error.message}\n</agent-notification>` }); })
+          .finally(() => { this.background.delete(task); });
+        this.background.add(task);
+        return `Started ${label} in the background as ${agent.id}. Its report will arrive in a later message when it finishes; continue with other work meanwhile.`;
       }
     });
     all = [...CORE_TOOLS, ...extra];
     return all;
   }
 
-  private forward(event: AgentEvent, model: string, record: (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>): void {
+  /** Reports from background agents that finished since the last turn, as user messages. */
+  private drainNotifications(): AgentMessage[] {
+    const pending = this.notifications;
+    this.notifications = [];
+    return pending;
+  }
+
+  /** When the model is done but background agents are still running, wait for the next report. */
+  private async waitForBackground(signal: AbortSignal): Promise<AgentMessage[] | undefined> {
+    const ready = this.drainNotifications();
+    if (ready.length) return ready;
+    if (!this.background.size || signal.aborted) return undefined;
+    this.post({ type: 'notice', text: `Waiting for ${this.background.size} background agent${this.background.size === 1 ? '' : 's'} to finish…` });
+    await Promise.race([...this.background, new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))]);
+    return signal.aborted ? undefined : this.drainNotifications();
+  }
+
+  /** Reserves a slot in the same synchronous step as the check, so parallel spawns cannot overshoot the limit. */
+  private async acquireSlot(limit: number, signal: AbortSignal): Promise<void> {
+    while (this.slotsInUse >= Math.max(1, limit)) {
+      if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+      await new Promise<void>((resolve) => { this.slotWaiters.push(resolve); signal.addEventListener('abort', () => resolve(), { once: true }); });
+    }
+    if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    this.slotsInUse += 1;
+  }
+
+  private releaseSlot(): void {
+    this.slotsInUse = Math.max(0, this.slotsInUse - 1);
+    const waiters = this.slotWaiters;
+    this.slotWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
+  private postAgents(): void {
+    this.post({ type: 'agents', count: this.agents.size, agents: [...this.agents.values()].map((agent) => ({ id: agent.id, label: agent.label, description: agent.description, model: agent.model, paused: agent.paused, background: agent.background })) });
+  }
+
+  private async saveTranscript(model: string): Promise<void> {
+    if (!this.transcripts || this.messages.length < 2) return;
+    await this.transcripts.save({ id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: this.messages.filter((message) => message.role === 'user').length, messages: this.messages }).catch(() => undefined);
+  }
+
+  private forward(event: AgentEvent, model: string, record: Record_): void {
     if (event.type === 'text') this.post({ type: 'assistant-delta', text: event.text });
     else if (event.type === 'tool-start') { this.post({ type: 'tool-start', callId: event.callId, tool: event.tool, title: event.title }); void record({ status: 'running', kind: 'tool', tool: event.tool, summary: event.title.slice(0, 200) }); }
     else if (event.type === 'tool-end') { this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output }); void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' }); }
@@ -237,6 +402,7 @@ export class AgentConversation {
     if (signal.aborted) return Promise.resolve({ decision: 'deny' });
     return new Promise((resolve) => {
       this.approvals.set(request.callId, resolve);
+      signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) resolve({ decision: 'deny' }); }, { once: true });
       this.post({ type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview });
     });
   }
@@ -262,6 +428,27 @@ export class AgentConversation {
 export function findSkill(skills: GsdSkill[], name: string): GsdSkill | undefined {
   const wanted = name.replace(/^\//, '').trim();
   return skills.find((skill) => skill.name === wanted) ?? skills.find((skill) => skill.name === `gsd-${wanted}` || skill.name.replace(/:/g, '-') === wanted);
+}
+
+/** The user-visible turns of a saved conversation: what the user typed and what the agent answered. */
+export function visibleTurns(messages: AgentMessage[]): Array<{ role: 'user' | 'assistant'; text: string; tools: number }> {
+  const turns: Array<{ role: 'user' | 'assistant'; text: string; tools: number }> = [];
+  for (const message of messages) {
+    if (message.role === 'user') {
+      const ran = /^The user ran (\/\S+(?: [^\n.]*)?)\. Follow these instructions:/.exec(message.content);
+      if (message.content.startsWith('<agent-notification') || message.content.startsWith('<conversation-summary>')) continue;
+      turns.push({ role: 'user', text: ran ? ran[1] : message.content, tools: 0 });
+    } else if (message.role === 'assistant') {
+      const last = turns.at(-1);
+      if (last?.role === 'assistant') { last.text += message.content ? `${last.text ? '\n\n' : ''}${message.content}` : ''; last.tools += message.tool_calls?.length ?? 0; }
+      else turns.push({ role: 'assistant', text: message.content ?? '', tools: message.tool_calls?.length ?? 0 });
+    }
+  }
+  return turns;
+}
+
+function newConversationId(): string {
+  return `conv-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
 }
 
 function sumUsage(turns: UsageMetadata[]): UsageMetadata {

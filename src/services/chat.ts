@@ -14,7 +14,8 @@ import { findRipgrep } from '../agent/tools';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { OutboundGuard, spentTodayUsd } from './outboundGuard';
 import { ProfileStore } from './profileStore';
-import { readAgentRules, readModelTiers, readSettings, shouldAutoInstallGsd } from './settings';
+import { readAgentLimits, readAgentRules, readModelTiers, readSettings, shouldAutoInstallGsd } from './settings';
+import { TranscriptStore } from './transcripts';
 import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, promptMessage, promptResponseMatches, progressActivitySummary, progressCardMessage, GsdArtifactLink, profileStatusMessage, walletStatusMessage, walletPreviewMessage, walletHistoryMessage, walletErrorMessage, teamListMessage, teamPreviewMessage, teamStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage, capabilityAwareTeamPreview, generationPreviewMessage, generationStatusMessage, generationPublicationMessage, memoryInspectMessage, memorySliceMessage, memoryApprovalPreviewMessage, multimodalStatusMessage, sanitizeContextGraphNode } from './chatBridge';
 import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './chatBridge';
 import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
@@ -114,6 +115,18 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (message.type === 'questions-reply') {
       state.agent?.answerQuestions(message.id, message.answers);
+      return;
+    }
+    if (message.type === 'agent-control') {
+      state.agent?.controlAgent(message.agentId, message.action);
+      return;
+    }
+    if (message.type === 'resume-conversation') {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!root) return;
+      state.agent = state.agent ?? conversationFor(context, root, panel);
+      const turns = await state.agent.restore(message.id);
+      panel.webview.postMessage(turns ? { type: 'transcript', turns } : { type: 'history-error', text: 'That conversation is no longer saved on this machine.' });
       return;
     }
     if (message.type === 'attachment-select') {
@@ -457,10 +470,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const attribution = hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization);
     const session = await state.activity.start({ project: path.basename(root), attribution, model, ...(skill ? { plans: [skill.name] } : {}), summary: skill ? `/${skill.name} started.` : 'Agent conversation turn started.' });
     state.activeSessionId = session.sessionId;
-    state.agent = state.agent ?? new AgentConversation(root, (outbound) => { void panel.webview.postMessage(outbound); }, path.join(context.globalStorageUri.fsPath, 'checkpoints'), ripgrepPath());
+    state.agent = state.agent ?? conversationFor(context, root, panel);
     try {
       const route = clientFor(active, model);
-      await state.agent.send({ text, skill, gsd, tiers: readModelTiers(), availableModels: active.models.map((candidate) => candidate.id), client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local });
+      const limits = readAgentLimits();
+      await state.agent.send({ text, skill, gsd, tiers: readModelTiers(), availableModels: active.models.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local });
       await sendHistory(panel, state.activity);
       panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine({ agents: 0, activity: state.activity }) });
       await sendArtifacts(panel);
@@ -516,6 +530,12 @@ async function insertIntoActiveEditor(text: string): Promise<void> {
 function ripgrepPath(): string | undefined {
   const appRoot = (vscode.env as { appRoot?: string } | undefined)?.appRoot;
   return appRoot ? findRipgrep(appRoot, (candidate) => existsSync(candidate)) : undefined;
+}
+
+function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost): AgentConversation {
+  const storage = context.globalStorageUri.fsPath;
+  const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root) : undefined;
+  return new AgentConversation(root, (outbound) => { void panel.webview.postMessage(outbound); }, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts);
 }
 
 /** One GSD host per extension storage folder, shared by the sidebar and the Tools tab. */

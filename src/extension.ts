@@ -4,10 +4,10 @@ import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
-import { readSettings, shouldAutoInstallGsd } from './services/settings';
+import { readAgentLimits, readSettings, shouldAutoInstallGsd } from './services/settings';
 import { openOnboarding } from './services/onboarding';
 import { openTools } from './services/chat';
-import { ActivityStore } from './services/activityStore';
+import { TranscriptStore } from './services/transcripts';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
 import { deriveProfileId } from './domain/auth';
@@ -47,7 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
     vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
     vscode.commands.registerCommand('nearAi.openTools', () => openTools(context, auth)),
-    vscode.commands.registerCommand('nearAi.showHistory', () => showHistory(sidebar)),
+    vscode.commands.registerCommand('nearAi.showHistory', () => showHistory(context, sidebar)),
     vscode.commands.registerCommand('nearAi.gsdCommand', async () => {
       const selected = await chooseGsdCommand();
       if (selected) await sidebar.request({ type: 'open-command', command: `gsd-${selected.command}` });
@@ -60,18 +60,18 @@ export function activate(context: vscode.ExtensionContext): void {
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
 }
 
-async function showHistory(sidebar: NearAiPanelViewProvider): Promise<void> {
+async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) { void vscode.window.showInformationMessage('Open a folder to see NEAR AI session history.'); return; }
-  const sessions = await new ActivityStore(root).list();
-  if (!sessions.length) { void vscode.window.showInformationMessage('No NEAR AI sessions in this project yet.'); return; }
-  const picked = await vscode.window.showQuickPick(sessions.slice().reverse().map((session) => ({
-    label: session.plans.length ? session.plans.map((plan) => `/${plan}`).join(', ') : 'Chat',
-    description: session.outcome,
-    detail: [new Date(session.updatedAt).toLocaleString(), session.models.join(', ')].filter(Boolean).join(' · '),
-    sessionId: session.sessionId
-  })), { placeHolder: 'Reopen a NEAR AI session', matchOnDetail: true });
-  if (picked) await sidebar.request({ type: 'reopen-session', sessionId: picked.sessionId });
+  if (!root) { void vscode.window.showInformationMessage('Open a folder to see NEAR AI conversations.'); return; }
+  const saved = await new TranscriptStore(context.globalStorageUri.fsPath, root).list();
+  if (!saved.length) { void vscode.window.showInformationMessage(readAgentLimits().saveTranscripts ? 'No saved NEAR AI conversations in this project yet.' : 'Saving conversations is off (nearAi.agent.saveTranscripts).'); return; }
+  const picked = await vscode.window.showQuickPick(saved.map((conversation) => ({
+    label: conversation.title,
+    description: `${conversation.turns} message${conversation.turns === 1 ? '' : 's'}`,
+    detail: `${new Date(conversation.updatedAt).toLocaleString()} · ${conversation.model}`,
+    id: conversation.id
+  })), { placeHolder: 'Resume a NEAR AI conversation with its full context', matchOnDescription: true, matchOnDetail: true });
+  if (picked) await sidebar.request({ type: 'resume-conversation', id: picked.id });
 }
 
 async function saveCheckpoint(): Promise<void> {

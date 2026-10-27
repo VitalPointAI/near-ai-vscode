@@ -28,6 +28,13 @@ export interface AgentRunOptions {
   maxTurns?: number;
   /** Shared with sub-agents so "allow for this run" covers the whole run. */
   grants?: RunGrants;
+  /**
+   * Called before every model turn with the transcript and the last turn's usage. May wait (a
+   * paused agent) and may return a replacement transcript (compaction, injected notifications).
+   */
+  beforeTurn?(transcript: AgentMessage[], lastUsage: UsageMetadata | undefined, signal: AbortSignal): Promise<AgentMessage[] | void>;
+  /** Called when the model answers without a tool call; returning messages continues the run with them. */
+  afterAnswer?(transcript: AgentMessage[], signal: AbortSignal): Promise<AgentMessage[] | undefined>;
   requestApproval(request: ApprovalRequest): Promise<ApprovalReply>;
   emit(event: AgentEvent): void;
 }
@@ -53,11 +60,14 @@ export class AgentRun {
   }
 
   public async run(messages: AgentMessage[], signal: AbortSignal): Promise<RunResult> {
-    const transcript = [...messages];
+    let transcript = [...messages];
     const usage: UsageMetadata[] = [];
     const maxTurns = this.options.maxTurns ?? 60;
     try {
       for (let turn = 0; turn < maxTurns; turn += 1) {
+        const replaced = await this.options.beforeTurn?.(transcript, usage.at(-1), signal);
+        if (replaced) transcript = replaced;
+        if (signal.aborted) return { outcome: 'cancelled', messages: transcript, usage };
         let assistant: Extract<AgentMessage, { role: 'assistant' }> | undefined;
         for await (const event of this.options.client.streamCompletion(this.options.model, transcript, this.definitions, signal)) {
           if (event.type === 'text') this.options.emit({ type: 'text', text: event.text });
@@ -70,7 +80,12 @@ export class AgentRun {
         }
         if (!assistant) throw new Error('The model ended its turn without a response.');
         transcript.push(assistant);
-        if (!assistant.tool_calls?.length) return { outcome: 'completed', messages: transcript, usage };
+        if (!assistant.tool_calls?.length) {
+          const more = await this.options.afterAnswer?.(transcript, signal);
+          if (!more?.length) return { outcome: 'completed', messages: transcript, usage };
+          transcript.push(...more);
+          continue;
+        }
         transcript.push(...await this.executeCalls(assistant.tool_calls, signal));
       }
       return { outcome: 'max-turns', messages: transcript, usage };
