@@ -97,8 +97,8 @@ async function exportActivity(activity: ActivityFeed, format: 'markdown' | 'json
 export function activityMarkdown(entries: ActivityEntry[], stats: AgentStats[]): string {
   const time = (at: number) => new Date(at).toISOString().slice(11, 19);
   const fence = (text: string) => `\`\`\`\`\n${text}\n\`\`\`\``;
-  const lines = ['# Agent activity', '', '| Agent | Model | Status | Turns | Tokens in | Tokens out | Est. cost | Tool calls (errors) | Retries |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
-  for (const stat of stats) lines.push(`| ${stat.agent} | ${stat.model} | ${stat.status} | ${stat.turns} | ${stat.inputTokens} | ${stat.outputTokens} | $${stat.costUsd.toFixed(4)} | ${stat.toolCalls} (${stat.toolErrors}) | ${stat.retries} |`);
+  const lines = ['# Agent activity', '', '| Agent | Model | Status | Turns | Tokens in | Tokens out | Est. cost | Tool calls (errors) | Retries | Injections flagged | Hidden removed | Held | Blocked |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
+  for (const stat of stats) lines.push(`| ${stat.agent} | ${stat.model} | ${stat.status} | ${stat.turns} | ${stat.inputTokens} | ${stat.outputTokens} | $${stat.costUsd.toFixed(4)} | ${stat.toolCalls} (${stat.toolErrors}) | ${stat.retries} | ${stat.injections} | ${stat.hiddenRemoved} | ${stat.held} | ${stat.blocked} |`);
   lines.push('');
   for (const entry of entries) {
     lines.push(`### ${time(entry.at)} · ${entry.agent} · ${entry.kind}${entry.title ? ` · ${entry.title}` : ''}${entry.ok === false ? ' (failed)' : ''}`, '');
@@ -119,7 +119,7 @@ function activityHtml(webview: vscode.Webview, media: vscode.Uri): string {
   <dl id="totals" class="totals" aria-label="Totals"></dl>
 </header>
 <section class="agents" aria-labelledby="agents-heading"><h2 id="agents-heading">Agents</h2><div class="table-wrap"><table id="agents"><thead><tr>
-  <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">Status</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tokens in</th><th scope="col" class="num">Tokens out</th><th scope="col" class="num">Tok/s</th><th scope="col" class="num">Est. cost</th><th scope="col" class="num">Tools</th><th scope="col" class="num">Retries</th><th scope="col" class="num">Time</th>
+  <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">Status</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tokens in</th><th scope="col" class="num">Tokens out</th><th scope="col" class="num">Tok/s</th><th scope="col" class="num">Est. cost</th><th scope="col" class="num">Tools</th><th scope="col" class="num">Retries</th><th scope="col">Security</th><th scope="col" class="num">Time</th>
 </tr></thead><tbody></tbody></table></div><p id="empty-agents" class="hint">No agents have run yet. Send a message or run a workflow in the NEAR AI chat.</p></section>
 <section class="stream-section" aria-labelledby="stream-heading">
   <div class="toolbar" role="toolbar" aria-label="Stream filters">
@@ -130,6 +130,7 @@ function activityHtml(webview: vscode.Webview, media: vscode.Uri): string {
     <label><input type="checkbox" data-kind="reasoning"> Reasoning</label>
     <label><input type="checkbox" data-kind="tool" checked> Tools</label>
     <label><input type="checkbox" data-kind="system"> System prompts</label>
+    <label><input type="checkbox" data-kind="security" checked> Security</label>
     <input id="search" type="search" placeholder="Search" aria-label="Search the stream">
     <button id="pause" type="button" aria-pressed="false" title="Pause the stream to read it; new activity is held until you resume (P)">Pause</button>
     <label><input id="follow" type="checkbox" checked> Follow</label>

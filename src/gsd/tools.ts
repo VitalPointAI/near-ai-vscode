@@ -1,5 +1,3 @@
-import { lookup as dnsLookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import type { AgentTool } from '../agent/tools';
 import { ToolError } from '../agent/workspace';
 import { expandPrompt, GsdAgent, GsdSkill } from './library';
@@ -25,7 +23,6 @@ export interface GsdServices {
   spawn(request: { type: string; agent?: GsdAgent; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree' }, signal: AbortSignal): Promise<string>;
 }
 
-const MAX_FETCH_BYTES = 2 * 1024 * 1024;
 
 /** Tools Open-GSD's Claude runtime expects, implemented for this runner. */
 export function gsdTools(services: GsdServices): AgentTool<any>[] {
@@ -121,74 +118,8 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
   // Earlier Claude Code releases named this tool Task; GSD workflows may use either name.
   const taskTool: AgentTool<ReturnType<typeof agentParse>> = { ...agentTool, name: 'Task' };
 
-  const webFetchTool: AgentTool<{ url: string; prompt?: string }> = {
-    name: 'WebFetch',
-    description: 'Fetch a public web page (https) and return its text. Pass prompt to say what you are looking for.',
-    parameters: { type: 'object', properties: { url: { type: 'string' }, prompt: { type: 'string' } }, required: ['url'], additionalProperties: false },
-    capability: 'network',
-    parse: (raw) => {
-      if (typeof raw.url !== 'string') throw new ToolError('Missing required parameter "url".');
-      let url: URL;
-      try { url = new URL(raw.url); } catch { throw new ToolError('url is not a valid URL.'); }
-      if (url.protocol !== 'https:') throw new ToolError('Only https:// URLs can be fetched.');
-      return { url: url.toString(), prompt: typeof raw.prompt === 'string' ? raw.prompt : undefined };
-    },
-    title: (input) => `Fetch ${new URL(input.url).host}${new URL(input.url).pathname}`,
-    async preview(input) { return { kind: 'note', text: `Fetch ${input.url}. The page's text is sent to the model.` }; },
-    async run(input, context) {
-      const response = await fetchPublic(input.url, context.signal);
-      if (!response.ok) throw new ToolError(`The page returned HTTP ${response.status}.`);
-      const bytes = new Uint8Array(await response.arrayBuffer()).subarray(0, MAX_FETCH_BYTES);
-      const body = new TextDecoder().decode(bytes);
-      const text = /html/i.test(response.headers.get('content-type') ?? '') ? htmlToText(body) : body;
-      return `${input.prompt ? `Looking for: ${input.prompt}\n\n` : ''}${text.slice(0, 40_000)}`;
-    }
-  };
-
-  return [skillTool, slashTool, askTool, agentTool, taskTool, webFetchTool];
+  return [skillTool, slashTool, askTool, agentTool, taskTool];
 }
 
-/**
- * Fetches a public https page, following up to five redirects by hand so that every hop is
- * checked: https only, and the host must not resolve to a loopback, private, link-local, or
- * other non-public address (no reaching localhost services or cloud metadata endpoints).
- */
-export async function fetchPublic(start: string, signal?: AbortSignal, lookup: (host: string) => Promise<string[]> = resolveHost, fetchFn: typeof fetch = fetch): Promise<Response> {
-  let url = new URL(start);
-  for (let hop = 0; hop <= 5; hop += 1) {
-    if (url.protocol !== 'https:') throw new ToolError(`Refused to fetch ${url.toString()}: only https:// URLs can be fetched.`);
-    const host = url.hostname.replace(/^\[|\]$/g, '');
-    const addresses = isIP(host) ? [host] : await lookup(host).catch(() => { throw new ToolError(`Could not resolve ${host}.`); });
-    const blocked = addresses.find((address) => !isPublicAddress(address));
-    if (blocked) throw new ToolError(`Refused to fetch ${url.host}: it resolves to ${blocked}, which is not a public address.`);
-    const response = await fetchFn(url.toString(), { signal, redirect: 'manual', headers: { 'user-agent': 'NEAR-AI-VSCode/1.0', accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' } });
-    const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
-    if (!location) return response;
-    url = new URL(location, url);
-  }
-  throw new ToolError('Too many redirects.');
-}
-
-async function resolveHost(host: string): Promise<string[]> {
-  return (await dnsLookup(host, { all: true, verbatim: true })).map((entry) => entry.address);
-}
-
-export function isPublicAddress(address: string): boolean {
-  if (isIP(address) === 4) {
-    const [a, b] = address.split('.').map(Number);
-    return !(a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224);
-  }
-  const lower = address.toLowerCase();
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-  if (mapped) return isPublicAddress(mapped[1]);
-  return !(lower === '::' || lower === '::1' || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower) || /^ff/.test(lower));
-}
-
-function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, '')
-    .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-}
+// WebFetch and its address checks moved to ../agent/webTools; re-exported for existing callers.
+export { fetchPublic, isPublicAddress } from '../agent/webTools';

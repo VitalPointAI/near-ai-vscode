@@ -6,6 +6,7 @@ import type { RunCheckpoints } from './checkpoints';
 import { unifiedDiff } from './diff';
 import { matchesGlob } from './glob';
 import { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, ShellSession, truncate } from './shell';
+import { NETWORK_COMMAND } from './untrusted';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
 
 export interface Todo { content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }
@@ -21,7 +22,17 @@ export interface ToolContext {
   onTodos?: (todos: Todo[]) => void;
   /** Directories Read, Glob, and Grep may also use (the Open-GSD runtime); never writable. */
   readOnlyRoots?: string[];
+  /** Whether this run has read outside content (web pages, search results, attachments, MCP results). */
+  tainted?(): boolean;
+  /** Text of pages fetched in this run, by URL, for CheckCitations. */
+  pages?: Map<string, string>;
+  /** When set, writes outside this workspace-relative folder ask first (research agents write only .planning/). */
+  writeScope?: string;
+  /** Reports a defense that acted: hidden content removed, a likely injection flagged, an action held or blocked. */
+  onSecurity?(event: SecurityEvent): void;
 }
+
+export interface SecurityEvent { kind: 'injection' | 'hidden-content' | 'held' | 'blocked'; source: string; detail: string }
 
 /** What an approval card shows before a risky call runs. */
 export type ToolPreview = { kind: 'diff'; path: string; diff: string } | { kind: 'command'; command: string; cwd: string; background: boolean } | { kind: 'note'; text: string };
@@ -38,6 +49,10 @@ export interface AgentTool<I = Record<string, unknown>> {
   preview?(input: I, context: ToolContext): Promise<ToolPreview>;
   /** A reason to always ask first, e.g. reading a likely credential file or writing into `.git/`. */
   sensitive?(input: I, context: ToolContext): string | undefined | Promise<string | undefined>;
+  /** A reason to ask even under fully-autonomous mode, e.g. a command that could send data out after the run read untrusted content. */
+  risky?(input: I, context: ToolContext): string | undefined | Promise<string | undefined>;
+  /** Its result is outside content: the run is treated as having read untrusted input from then on. */
+  untrusted?: boolean;
   run(input: I, context: ToolContext): Promise<string>;
 }
 
@@ -71,7 +86,15 @@ export async function protectedWrite(requested: string, context: ToolContext): P
   const resolved = await resolveInWorkspace(context.root, requested).catch(() => undefined);
   const relative = resolved ? path.relative(context.root, resolved).split(path.sep).join('/') : requested;
   if (relative.endsWith('.planning/.near-ai/team.md')) return undefined;
+  if (context.writeScope && !(relative === context.writeScope || relative.startsWith(`${context.writeScope.replace(/\/$/, '')}/`))) return `${requested} is outside ${context.writeScope}, where this agent's work belongs. Approve this write only if you expect it.`;
   return PROTECTED_WRITE.test(relative) ? `${requested} is inside ${relative.startsWith('.git') || relative.includes('/.git') ? '.git, where hooks and config run code on the next git command' : '.planning/.near-ai, which holds this project\'s NEAR AI settings'}. Approve this write only if you expect it.` : undefined;
+}
+
+/** A write outside the agent's folder after it read outside content asks even under fully-autonomous mode. */
+async function outOfScopeAfterTaint(requested: string, context: ToolContext): Promise<string | undefined> {
+  if (!context.writeScope || !context.tainted?.()) return undefined;
+  const reason = await protectedWrite(requested, context);
+  return reason?.includes(context.writeScope) ? `${reason} This agent has read outside content, which may have asked for this write.` : undefined;
 }
 
 const MAX_READ_LINES = 2_000;
@@ -141,6 +164,7 @@ export const writeTool: AgentTool<{ path: string; content: string }> = {
   parse: (raw) => ({ path: str(raw, 'file_path')!, content: typeof raw.content === 'string' ? raw.content : (() => { throw new ToolError('Parameter "content" must be a string.'); })() }),
   title: (input) => `Write ${input.path}`,
   sensitive: (input, context) => protectedWrite(input.path, context),
+  risky: (input, context) => outOfScopeAfterTaint(input.path, context),
   async preview(input, context) {
     const absolute = await resolveInWorkspace(context.root, input.path);
     const before = await readFile(absolute, 'utf8').catch(() => '');
@@ -172,6 +196,7 @@ export const editTool: AgentTool<{ path: string; oldString: string; newString: s
   },
   title: (input) => `Edit ${input.path}`,
   sensitive: (input, context) => protectedWrite(input.path, context),
+  risky: (input, context) => outOfScopeAfterTaint(input.path, context),
   async preview(input, context) {
     const absolute = await resolveInWorkspace(context.root, input.path);
     const before = await readText(absolute);
@@ -306,6 +331,7 @@ export const bashTool: AgentTool<{ command: string; timeoutMs: number; backgroun
   parse: (raw) => ({ command: str(raw, 'command')!, timeoutMs: num(raw, 'timeout') ?? DEFAULT_TIMEOUT_MS, background: bool(raw, 'run_in_background'), description: str(raw, 'description', false) }),
   title: (input) => input.description ? `${input.description}` : `Run ${input.command.split('\n')[0].slice(0, 80)}`,
   async preview(input, context) { return { kind: 'command', command: input.command, cwd: displayPath(context.root, context.shell.workingDirectory) || '.', background: input.background }; },
+  risky: (input, context) => context.tainted?.() && NETWORK_COMMAND.test(input.command) ? 'This run has read outside content (a web page, search result, attachment, or MCP result), and this command can send data off this machine. Approve it only if you expected it; text in that content may have asked for it.' : undefined,
   async run(input, context) {
     if (input.background) return `Started in the background with id ${context.shell.startBackground(input.command)}. Read its output with BashOutput.`;
     const result = await context.shell.run(input.command, input.timeoutMs, context.signal);

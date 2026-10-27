@@ -8,7 +8,8 @@ import { readZip } from './zip';
 // from their XML. Only the extracted text is sent on, through the same checks as typed text.
 
 export type DocumentFormat = 'pdf' | 'docx' | 'pptx' | 'xlsx';
-export interface DocumentText { text: string; pages?: number; note?: string }
+/** `hiddenParts`: hidden text, slides, sheets, or rows that were left out (a place to plant instructions). */
+export interface DocumentText { text: string; pages?: number; note?: string; hiddenParts?: number }
 
 const MAX_TEXT_CHARS = 200_000;
 const MAX_PDF_PAGES = 500;
@@ -95,7 +96,12 @@ function relationships(xml: string | undefined, folder: string): Map<string, { t
 function officeText(bytes: Buffer, format: Exclude<DocumentFormat, 'pdf'>, name: string): DocumentText {
   const zip = readZip(bytes, name);
   const read = (entry: string) => zip.get(entry)?.().toString('utf8');
-  if (format === 'docx') return { text: wordText(read('word/document.xml') ?? missing(name, 'word/document.xml')) };
+  if (format === 'docx') {
+    let hidden = 0;
+    // Runs formatted as hidden (w:vanish) are not shown in Word, so they are not read either.
+    const xml = (read('word/document.xml') ?? missing(name, 'word/document.xml')).replace(/<w:r(?:\s[^>]*)?>(?:(?!<\/w:r>)[\s\S])*?<w:vanish(?:\s+w:val="(?:true|1|on)")?\s*\/>[\s\S]*?<\/w:r>/g, () => { hidden += 1; return ''; });
+    return { text: wordText(xml), ...(hidden ? { hiddenParts: hidden } : {}) };
+  }
   if (format === 'pptx') return slidesText(read, name);
   return sheetsText(read, name);
 }
@@ -133,15 +139,17 @@ function slidesText(read: (entry: string) => string | undefined, name: string): 
   const presentation = read('ppt/presentation.xml') ?? missing(name, 'ppt/presentation.xml');
   const rels = relationships(read('ppt/_rels/presentation.xml.rels'), 'ppt');
   const slides = [...presentation.matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"/g)].map((match) => rels.get(match[1])?.target).filter((target): target is string => Boolean(target));
+  let hidden = 0;
   const parts = slides.map((slide, index) => {
     const xml = read(slide) ?? '';
+    if (/<p:sld\b[^>]*\bshow="(?:0|false)"/.test(xml)) { hidden += 1; return ''; }
     const own = relationships(read(path.posix.join(path.posix.dirname(slide), '_rels', `${path.posix.basename(slide)}.rels`)), path.posix.dirname(slide));
     const notesPart = [...own.values()].find((rel) => rel.type.endsWith('/notesSlide'))?.target;
     // Skip the placeholders for the slide image, slide number, header, footer, and date.
     const notes = notesPart ? [...(read(notesPart) ?? '').matchAll(/<p:sp\b[\s\S]*?<\/p:sp>/g)].filter((shape) => !/<p:ph\b[^>]*type="(?:sldImg|sldNum|hdr|ftr|dt)"/.test(shape[0])).map((shape) => drawingText(shape[0])).join('\n').trim() : '';
     return `## Slide ${index + 1}\n${drawingText(xml)}${notes ? `\n\nNotes: ${notes}` : ''}`;
   });
-  return { text: parts.join('\n\n'), pages: slides.length };
+  return { text: parts.filter(Boolean).join('\n\n'), pages: slides.length, ...(hidden ? { hiddenParts: hidden } : {}) };
 }
 
 function columnIndex(reference: string): number {
@@ -155,14 +163,16 @@ function sheetsText(read: (entry: string) => string | undefined, name: string): 
   const rels = relationships(read('xl/_rels/workbook.xml.rels'), 'xl');
   const shared = [...(read('xl/sharedStrings.xml') ?? '').matchAll(/<si>([\s\S]*?)<\/si>/g)].map((item) => [...item[1].replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t(?:\s[^>]*)?>([^<]*)<\/t>/g)].map((run) => decodeXml(run[1])).join(''));
   const notes: string[] = [];
-  const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].map((match) => ({ title: decodeXml(/\bname="([^"]*)"/.exec(match[0])?.[1] ?? 'Sheet'), part: rels.get(/\br:id="([^"]+)"/.exec(match[0])?.[1] ?? '')?.target }));
+  let hidden = 0;
+  const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].filter((match) => { const hide = /\bstate="(?:hidden|veryHidden)"/.test(match[0]); if (hide) hidden += 1; return !hide; }).map((match) => ({ title: decodeXml(/\bname="([^"]*)"/.exec(match[0])?.[1] ?? 'Sheet'), part: rels.get(/\br:id="([^"]+)"/.exec(match[0])?.[1] ?? '')?.target }));
   const parts = sheets.map((sheet) => {
     const xml = (sheet.part && read(sheet.part)) || '';
     const rows: string[] = [];
-    for (const row of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    for (const row of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
+      if (/\bhidden="(?:1|true)"/.test(row[1])) { hidden += 1; continue; }
       if (rows.length >= MAX_SHEET_ROWS) { notes.push(`Only the first ${MAX_SHEET_ROWS} rows of sheet "${sheet.title}" were read.`); break; }
       const cells: string[] = [];
-      for (const cell of row[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      for (const cell of row[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
         const attributes = cell[1];
         const body = cell[2] ?? '';
         const type = /\bt="([^"]+)"/.exec(attributes)?.[1];
@@ -180,5 +190,5 @@ function sheetsText(read: (entry: string) => string | undefined, name: string): 
     }
     return `## Sheet: ${sheet.title}\n${rows.join('\n')}`;
   });
-  return { text: parts.join('\n\n'), pages: sheets.length, ...(notes.length ? { note: notes.join(' ') } : {}) };
+  return { text: parts.join('\n\n'), pages: sheets.length, ...(notes.length ? { note: notes.join(' ') } : {}), ...(hidden ? { hiddenParts: hidden } : {}) };
 }

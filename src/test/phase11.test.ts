@@ -101,9 +101,10 @@ test('attachments: text inlines, images are read by a vision model when the chos
   };
   const prepared = await prepareAttachments(staged, { client: client as never, model: 'z-ai/glm-5.3', models: [{ id: 'z-ai/glm-5.3', inputModalities: ['text'] }, { id: 'z-ai/glm-5.3-flash', inputModalities: ['text', 'image'] }, { id: 'openai/whisper-large-v3', inputModalities: ['audio'] }] as never, visionModel: 'z-ai/glm-5.3-flash', transcriptionModel: 'openai/whisper-large-v3', question: 'what is wrong?' });
   assert.deepEqual(calls, ['vision:z-ai/glm-5.3-flash:data:image/png;base64,', 'audio:openai/whisper-large-v3:memo.wav']);
-  assert.match(prepared.text, /<attachment name="notes.md" kind="text">\n# Notes\nship friday/);
-  assert.match(prepared.text, /read-by="z-ai\/glm-5.3-flash">\nA login form/);
-  assert.match(prepared.text, /transcribed-by="openai\/whisper-large-v3">\nRemember to update/);
+  // Each attachment is fenced as outside content, naming the model that read it.
+  assert.match(prepared.text, /source="attachment notes\.md \(text file\)">\n# Notes\nship friday/);
+  assert.match(prepared.text, /source="attachment shot\.png \(image, described by z-ai\/glm-5\.3-flash\)">\nA login form/);
+  assert.match(prepared.text, /source="attachment memo\.wav \(audio, transcribed by openai\/whisper-large-v3\)">\nRemember to update/);
   assert.deepEqual(prepared.notes, ['shot.png was read by z-ai/glm-5.3-flash, because z-ai/glm-5.3 does not read images.', 'memo.wav was transcribed by openai/whisper-large-v3.']);
 });
 

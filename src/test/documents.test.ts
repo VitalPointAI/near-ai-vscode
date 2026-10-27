@@ -25,7 +25,7 @@ test('a scanned PDF with no text layer says so instead of passing on nothing', a
   assert.equal(staged.text, '');
   assert.match(staged.note ?? '', /scanned\.pdf has no text layer/);
   const prepared = await prepareAttachments([staged], { client: {} as never, model: 'm', models: [], visionModel: 'v', transcriptionModel: 't', question: 'q' });
-  assert.match(prepared.text, /<attachment name="scanned\.pdf" kind="document">\n\(No text could be read\. scanned\.pdf has no text layer/);
+  assert.match(prepared.text, /<untrusted-content id="[0-9a-f]{8}" source="attachment scanned\.pdf \(document\)">\n\(No text could be read\. scanned\.pdf has no text layer/);
   assert.deepEqual(prepared.notes, [staged.note]);
 });
 

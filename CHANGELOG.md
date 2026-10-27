@@ -35,6 +35,12 @@ runtime in between.
   reasoning, and tool calls with per-agent tokens, cost, speed, and failures;
   pause, filter, search, and export. In memory only, time- and size-limited,
   and streamed only while visible.
+- **Web search and prompt-injection defenses.** WebSearch (SearXNG, Brave,
+  or Tavily), WebFetch for pages and documents, and CheckCitations for every
+  agent. Hidden content is removed, likely injections are flagged and shown in
+  Agent Activity, outside content is fenced, and after reading it, network
+  commands, data-carrying URLs, and research agents' writes outside
+  `.planning/` always ask, even in fully-autonomous mode.
 - **SBOM and vulnerability checks.** A CycloneDX SBOM per project from its
   lockfiles (npm, pnpm, yarn, Python, Go, Rust, PHP, Ruby, .NET, Java), checked
   on OSV.dev with runtimes on endoflife.date; Problems entries, a status-bar

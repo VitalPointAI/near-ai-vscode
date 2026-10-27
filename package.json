@@ -153,6 +153,12 @@
         "command": "nearAi.addScanWorkflow",
         "title": "Add Dependency Scan Workflow (GitHub Actions)",
         "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.setUpWebSearch",
+        "title": "Set Up Web Search",
+        "category": "NEAR AI",
+        "icon": "$(search)"
       }
     ],
     "viewsContainers": {
@@ -411,6 +417,28 @@
           ],
           "default": "ask",
           "description": "Check a NEAR AI project's dependencies and runtimes for known vulnerabilities (OSV.dev, endoflife.date) when it opens. Only package names and versions are sent."
+        },
+        "nearAi.webSearch.provider": {
+          "type": "string",
+          "enum": [
+            "off",
+            "searxng",
+            "brave",
+            "tavily"
+          ],
+          "enumDescriptions": [
+            "Agents cannot search; they can still fetch pages they know.",
+            "A SearXNG instance you run (nearAi.webSearch.searxngUrl).",
+            "Brave Search API (key set with NEAR AI: Set Up Web Search).",
+            "Tavily (key set with NEAR AI: Set Up Web Search)."
+          ],
+          "default": "off",
+          "description": "Which search provider the agents' WebSearch tool uses. Queries go to that provider."
+        },
+        "nearAi.webSearch.searxngUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL of your SearXNG instance (https, or http for localhost), with JSON output enabled."
         }
       }
     },
@@ -480,6 +508,11 @@
           "command": "nearAi.securityScan",
           "when": "view == nearAiChatView",
           "group": "overflow@3"
+        },
+        {
+          "command": "nearAi.setUpWebSearch",
+          "when": "view == nearAiChatView",
+          "group": "overflow@4"
         }
       ]
     }

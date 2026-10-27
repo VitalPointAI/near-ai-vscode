@@ -166,6 +166,43 @@ high or critical finding in shipped code. Build-only tools are not shipped;
 `@azure/identity`, which does not yet accept the fixed 7.x) is a known
 build-time exception: the affected authorization-code flow is not used.
 
+## Outside content and prompt injection
+
+Web pages (WebFetch), search results (WebSearch), attached files, and MCP results
+can contain text written to steer an agent. They pass through layered defenses;
+no single one is relied on:
+
+1. **Hidden content is removed.** HTML elements hidden by `hidden`,
+   `aria-hidden`, or inline styles (display, visibility, zero opacity or size,
+   off-screen), comments, templates, scripts, and styles; zero-width, Unicode
+   tag, and bidi-control characters; hidden Word text, hidden slides, and
+   hidden sheets and rows. What was removed is noted.
+2. **Likely injections are flagged** in visible text as well: instructions to
+   ignore earlier instructions, role changes, chat or tool-call markup, requests
+   to run commands, download-and-run commands, requests to send secrets, and
+   requests to hide something from the user. The flag is shown to the model and
+   recorded in Agent Activity with where it came from. Detection is pattern
+   based and can miss new phrasing, which is why the next layers exist.
+3. **Everything is fenced** in `<untrusted-content>` blocks with a random id the
+   content cannot forge, and the system prompt says text inside is information,
+   never instructions.
+4. **The run is marked tainted** once it reads outside content. From then on,
+   shell commands that can send data off the machine (curl, wget, nc, ssh, …),
+   fetches of URLs that could carry data (long query strings, encoded path
+   segments), and research agents' writes outside `.planning/` ask for approval
+   **even in fully-autonomous mode**, and an earlier "allow for this run" does
+   not cover them. A declined action is reported as blocked.
+5. **Citations are checked.** CheckCitations confirms each quoted passage
+   appears in the page actually fetched, so a report cannot rest on text a
+   source never contained.
+
+Agent Activity counts, per agent, injections flagged, hidden content removed,
+and actions held and blocked, with an entry for each showing the source.
+
+Web search sends queries to the provider you choose with **NEAR AI: Set Up Web
+Search**: a SearXNG instance you run (queries stay on your infrastructure),
+Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
+
 ## Checking your project's dependencies
 
 **NEAR AI: Scan Dependencies for Vulnerabilities** (and, once you agree, every

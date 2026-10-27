@@ -47,6 +47,8 @@ export function isAutoAllowed(command: string, allowCommands: string[]): boolean
 export class RunGrants {
   public edits = false;
   public readonly commands = new Set<string>();
+  /** Set once the run reads outside content; some actions then always ask. */
+  public tainted = false;
 }
 
 /**

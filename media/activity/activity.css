@@ -51,3 +51,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px s
 .body.collapsed { max-height: 16.5em; overflow: hidden; mask-image: linear-gradient(to bottom, black 75%, transparent); }
 .kind-reasoning .body { color: var(--muted); font-style: italic; }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+.kind-security { border-left-color: var(--vscode-editorWarning-foreground, #cca700); }
+.kind-security .kind, .kind-security .title { color: var(--vscode-editorWarning-foreground, #cca700); font-weight: 600; }
+.security-cell.flagged { color: var(--vscode-editorWarning-foreground, #cca700); font-weight: 600; }

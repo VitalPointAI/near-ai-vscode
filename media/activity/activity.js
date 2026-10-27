@@ -10,7 +10,7 @@
   const follow = $('follow');
   const MAX_ROWS = 1500;
   const COLLAPSE_LINES = 14;
-  const KIND_LABEL = { system: 'System prompt', prompt: 'Prompt', text: 'Reply', reasoning: 'Reasoning', tool: 'Tool', retry: 'Retry', notice: 'Notice', 'agent-start': 'Started', 'agent-end': 'Finished' };
+  const KIND_LABEL = { system: 'System prompt', prompt: 'Prompt', text: 'Reply', reasoning: 'Reasoning', tool: 'Tool', retry: 'Retry', notice: 'Notice', security: 'Security', 'agent-start': 'Started', 'agent-end': 'Finished' };
   const rows = new Map();
   const names = new Map();
   const pauseButton = $('pause');
@@ -73,6 +73,16 @@
     row.hidden = (box && !box.checked) || (filterAgent.value && row.dataset.agent !== filterAgent.value) || (query && !row.dataset.search.includes(query));
   }
 
+  function securityParts(stat) {
+    return [[stat.injections, 'injection', 'injections'], [stat.hiddenRemoved, 'hidden removal', 'hidden removals'], [stat.held, 'held', 'held'], [stat.blocked, 'blocked', 'blocked']].filter(([count]) => count).map(([count, one, many]) => count + ' ' + (count === 1 ? one : many));
+  }
+  function securityCell(stat) {
+    const parts = securityParts(stat);
+    const cell = el('td', parts.length ? 'security-cell flagged' : 'security-cell', parts.length ? parts.join(' · ') : '–');
+    if (stat.injections) cell.title = 'Possible prompt injections were found in outside content this agent read; they were fenced and flagged, not followed.';
+    return cell;
+  }
+
   function renderStats(usage) {
     stats = stats.sort((a, b) => a.startedAt - b.startedAt);
     $('empty-agents').hidden = stats.length > 0;
@@ -85,13 +95,13 @@
       name.append(el('span', 'dot'), el('span', '', (stat.parentId ? '↳ ' : '') + stat.agent));
       tr.append(name, el('td', 'model', stat.model), el('td', 'status', stat.status === 'max-turns' ? 'turn limit' : stat.status),
         el('td', 'num', number(stat.turns)), el('td', 'num', number(stat.inputTokens)), el('td', 'num', number(stat.outputTokens)), el('td', 'num', speed ? speed.toFixed(1) : '–'),
-        el('td', 'num', money(stat.costUsd)), el('td', 'num', number(stat.toolCalls) + (stat.toolErrors ? ' (' + stat.toolErrors + ' failed)' : '')), el('td', 'num', number(stat.retries)),
+        el('td', 'num', money(stat.costUsd)), el('td', 'num', number(stat.toolCalls) + (stat.toolErrors ? ' (' + stat.toolErrors + ' failed)' : '')), el('td', 'num', number(stat.retries)), securityCell(stat),
         el('td', 'num', duration((stat.endedAt || now) - stat.startedAt)));
       return tr;
     }));
     const running = stats.filter((stat) => stat.status === 'running').length;
     const sum = (key) => stats.reduce((total, stat) => total + stat[key], 0);
-    const totals = [['Agents', running ? running + ' running / ' + stats.length : String(stats.length)], ['Tokens in', number(sum('inputTokens'))], ['Tokens out', number(sum('outputTokens'))], ['Est. cost', money(sum('costUsd'))], ['Tool calls', number(sum('toolCalls')) + (sum('toolErrors') ? ' (' + sum('toolErrors') + ' failed)' : '')], ['Retries', number(sum('retries'))]];
+    const totals = [['Agents', running ? running + ' running / ' + stats.length : String(stats.length)], ['Tokens in', number(sum('inputTokens'))], ['Tokens out', number(sum('outputTokens'))], ['Est. cost', money(sum('costUsd'))], ['Tool calls', number(sum('toolCalls')) + (sum('toolErrors') ? ' (' + sum('toolErrors') + ' failed)' : '')], ['Retries', number(sum('retries'))], ['Security', [sum('injections') + ' injection' + (sum('injections') === 1 ? '' : 's') + ' flagged', sum('hiddenRemoved') + ' hidden removed', sum('held') + ' held', sum('blocked') + ' blocked'].join(' · ')]];
     $('totals').replaceChildren(...totals.flatMap(([label, value]) => { const wrap = el('div', 'total'); wrap.append(el('dt', '', label), el('dd', '', value)); return [wrap]; }));
     const seen = new Set();
     for (const stat of stats) { seen.add(stat.agentId); if (!names.has(stat.agentId)) { names.set(stat.agentId, stat.agent); const option = el('option', '', stat.agent + ' · ' + stat.agentId.slice(-6)); option.value = stat.agentId; filterAgent.append(option); } }

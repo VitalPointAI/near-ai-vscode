@@ -145,6 +145,12 @@ copy of Open-GSD to a project that doesn't already have one.
 
 ## Security and privacy
 
+- **Web research with guard rails.** Agents search with the provider you pick
+  (**NEAR AI: Set Up Web Search**: your own SearXNG, Brave Search, or Tavily),
+  read pages and documents with WebFetch, and verify quotes with
+  CheckCitations. Hidden text is stripped, likely prompt injections are
+  flagged, outside content is fenced as data, and after reading it, commands
+  that could send data out always ask. Agent Activity shows each detection.
 - **Dependency checks.** **NEAR AI: Scan Dependencies for Vulnerabilities**
   writes an SBOM (`sbom.cdx.json`, CycloneDX) from your lockfiles and checks
   every package on OSV.dev and your runtimes on endoflife.date, after asking

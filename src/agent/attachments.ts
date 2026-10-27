@@ -3,12 +3,14 @@ import { readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ModelInfo, NearAiClient, UsageMetadata } from '../services/nearAiClient';
 import { DocumentFormat, documentText } from './documents';
+import type { SecurityEvent } from './tools';
+import { fenceUntrusted } from './untrusted';
 import { ToolError } from './workspace';
 
 export type AttachmentKind = 'image' | 'audio' | 'text' | 'document';
 
 /** `text` is the extracted text of a document, read when it is attached; `note` says what could not be read. */
-export interface StagedAttachment { id: string; name: string; kind: AttachmentKind; mime: string; size: number; bytes: Buffer; text?: string; note?: string }
+export interface StagedAttachment { id: string; name: string; kind: AttachmentKind; mime: string; size: number; bytes: Buffer; text?: string; note?: string; hiddenParts?: number }
 
 const TYPES: Record<string, { kind: AttachmentKind; mime: string }> = {
   png: { kind: 'image', mime: 'image/png' }, jpg: { kind: 'image', mime: 'image/jpeg' }, jpeg: { kind: 'image', mime: 'image/jpeg' }, gif: { kind: 'image', mime: 'image/gif' }, webp: { kind: 'image', mime: 'image/webp' },
@@ -36,10 +38,11 @@ export async function stageAttachment(file: string): Promise<StagedAttachment> {
   const bytes = await readFile(file);
   if (type.kind === 'text' && bytes.subarray(0, 8000).includes(0)) throw new ToolError(`${name} looks binary, not text.`);
   const extracted = type.kind === 'document' ? await documentText(bytes, last as DocumentFormat, name) : undefined;
-  return { id: `att-${randomBytes(6).toString('hex')}`, name, kind: type.kind, mime: type.mime, size: info.size, bytes, ...(extracted ? { text: extracted.text, ...(extracted.note ? { note: extracted.note } : {}) } : {}) };
+  return { id: `att-${randomBytes(6).toString('hex')}`, name, kind: type.kind, mime: type.mime, size: info.size, bytes, ...(extracted ? { text: extracted.text, ...(extracted.note ? { note: extracted.note } : {}), ...(extracted.hiddenParts ? { hiddenParts: extracted.hiddenParts } : {}) } : {}) };
 }
 
-export interface PreparedAttachments { text: string; usage: UsageMetadata[]; notes: string[] }
+/** `security`: where hidden content was removed or a likely injection was found, for Agent Activity. */
+export interface PreparedAttachments { text: string; usage: UsageMetadata[]; notes: string[]; security: SecurityEvent[] }
 
 /**
  * Turns staged attachments into text the agent can use: text files inline; images described by a
@@ -50,27 +53,36 @@ export async function prepareAttachments(attachments: StagedAttachment[], option
   const blocks: string[] = [];
   const usage: UsageMetadata[] = [];
   const notes: string[] = [];
+  const security: SecurityEvent[] = [];
+  // Attached files are outside content too: fenced, with hidden text removed and injections flagged.
+  const fence = (attachment: StagedAttachment, label: string, content: string, extra: string[] = []) => {
+    const hidden = attachment.hiddenParts ?? 0;
+    const fenced = fenceUntrusted(`attachment ${attachment.name} (${label})`, content, [...extra, ...(hidden ? [`${hidden} hidden part${hidden === 1 ? '' : 's'} left out`] : [])]);
+    if (fenced.warnings.length) security.push({ kind: 'injection', source: `attachment ${attachment.name}`, detail: fenced.warnings.join('; ') });
+    if (hidden || fenced.removedInvisible) security.push({ kind: 'hidden-content', source: `attachment ${attachment.name}`, detail: [hidden ? `${hidden} hidden part${hidden === 1 ? '' : 's'}` : '', fenced.removedInvisible ? `${fenced.removedInvisible} invisible characters` : ''].filter(Boolean).join(' and ') + ' removed' });
+    blocks.push(fenced.text);
+  };
   const reads = (id: string, modality: 'image' | 'audio') => (options.models.find((model) => model.id === id)?.inputModalities ?? []).includes(modality);
   for (const attachment of attachments) {
     if (attachment.kind === 'text') {
-      blocks.push(`<attachment name="${attachment.name}" kind="text">\n${attachment.bytes.toString('utf8')}\n</attachment>`);
+      fence(attachment, 'text file', attachment.bytes.toString('utf8'));
     } else if (attachment.kind === 'document') {
       if (attachment.note) notes.push(attachment.note);
-      blocks.push(`<attachment name="${attachment.name}" kind="document">\n${attachment.text || `(No text could be read. ${attachment.note ?? ''})`.trim()}\n</attachment>`);
+      fence(attachment, 'document', attachment.text || `(No text could be read. ${attachment.note ?? ''})`.trim());
     } else if (attachment.kind === 'image') {
       const model = reads(options.model, 'image') ? options.model : options.visionModel;
       if (!options.models.some((candidate) => candidate.id === model)) throw new ToolError(`No image-reading model is available for ${attachment.name}. Set nearAi.agent.visionModel to a model your provider offers that reads images.`);
       const result = await options.client.describeImage(model, `data:${attachment.mime};base64,${attachment.bytes.toString('base64')}`, `The user attached this image (${attachment.name}) with the message below. Describe everything relevant to it in detail, and transcribe any text, code, diagrams, or UI exactly.\n\nUser message: ${options.question.slice(0, 2000)}`, options.signal);
       usage.push(result.usage);
       if (model !== options.model) notes.push(`${attachment.name} was read by ${model}, because ${options.model} does not read images.`);
-      blocks.push(`<attachment name="${attachment.name}" kind="image" read-by="${model}">\n${result.text}\n</attachment>`);
+      fence(attachment, `image, described by ${model}`, result.text);
     } else {
       if (!options.models.some((candidate) => candidate.id === options.transcriptionModel)) throw new ToolError(`No speech-to-text model is available for ${attachment.name}. Set nearAi.agent.transcriptionModel to one your provider offers.`);
       const result = await options.client.transcribeAudio(options.transcriptionModel, new Uint8Array(attachment.bytes), attachment.name, attachment.mime, options.signal);
       usage.push(result.usage);
       notes.push(`${attachment.name} was transcribed by ${options.transcriptionModel}.`);
-      blocks.push(`<attachment name="${attachment.name}" kind="audio" transcribed-by="${options.transcriptionModel}">\n${result.text}\n</attachment>`);
+      fence(attachment, `audio, transcribed by ${options.transcriptionModel}`, result.text);
     }
   }
-  return { text: blocks.join('\n\n'), usage, notes };
+  return { text: blocks.join('\n\n'), usage, notes, security };
 }

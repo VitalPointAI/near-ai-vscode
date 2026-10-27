@@ -8,6 +8,8 @@ import { PermissionRules, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
+import { checkCitationsTool, webFetchTool, webSearchTool } from '../agent/webTools';
+import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
 import { AgentTool, CORE_TOOLS, ToolContext } from '../agent/tools';
 import { displayPath } from '../agent/workspace';
@@ -71,6 +73,8 @@ export interface AgentTurnRequest {
   reputation?: ReputationStore;
   /** Dependency vulnerability checks for the SecurityScan tool. */
   security?: SecurityAccess;
+  /** The WebSearch tool's provider; without one, WebSearch says search is not set up. */
+  webSearch?: SearchProvider;
 }
 
 type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
@@ -157,7 +161,10 @@ export class AgentConversation {
     for (const note of request.attachments?.notes ?? []) this.post({ type: 'notice', text: note });
     const record: Record_ = (event) => request.activity ? request.activity.store.append(request.activity.sessionId, event).catch(() => undefined) : Promise.resolve();
     const grants = new RunGrants();
-    const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [] };
+    // Attached files are outside content, so the run starts out treated as having read some.
+    if (request.attachments?.text) grants.tainted = true;
+    for (const event of request.attachments?.security ?? []) this.activity?.security(mainId, event);
+    const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [] };
     const tools = this.toolsFor(request, context, grants, extraUsage, record, abort.signal, runId);
     const run = new AgentRun({
       client: request.client,
@@ -341,7 +348,7 @@ export class AgentConversation {
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
-    const base = [...CORE_TOOLS, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...memoryFor()];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...memoryFor()];
     const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : [])];
     if (!agents.length) return base;
     const gsd = request.gsd;
@@ -382,7 +389,8 @@ export class AgentConversation {
             const agentRoot = worktree?.path ?? this.root;
             // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
             shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {});
-            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>() };
+            // Research agents gather outside content; their writes belong in .planning/ (others ask).
+            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), ...(/research|synthesi/i.test(label) ? { writeScope: '.planning' } : {}) };
             const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}. Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
             const base = `${this.systemPrompt({ ...request, model }, agentRoot)}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
@@ -500,6 +508,7 @@ export class AgentConversation {
     else if (event.type === 'tool-end') feed.toolEnded(agentId, event.callId, event.ok, event.output);
     else if (event.type === 'turn') feed.turn(agentId, event.usage);
     else if (event.type === 'retry') feed.retry(agentId, retryNotice(event));
+    else if (event.type === 'security') feed.security(agentId, event);
   }
 
   private forward(event: AgentEvent, model: string, record: Record_): void {

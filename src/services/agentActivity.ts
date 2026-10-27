@@ -6,7 +6,7 @@ import type { UsageMetadata } from './nearAiClient';
 // Entries older than the retention window, or beyond the size budget, are dropped oldest first;
 // statistics survive that. Listeners are told about changes only while someone is subscribed.
 
-export type ActivityKind = 'system' | 'prompt' | 'text' | 'reasoning' | 'tool' | 'retry' | 'notice' | 'agent-start' | 'agent-end';
+export type ActivityKind = 'system' | 'prompt' | 'text' | 'reasoning' | 'tool' | 'retry' | 'notice' | 'security' | 'agent-start' | 'agent-end';
 
 export interface ActivityEntry {
   seq: number;
@@ -43,6 +43,11 @@ export interface AgentStats {
   toolCalls: number;
   toolErrors: number;
   retries: number;
+  /** Defenses that acted for this agent: likely injections flagged, hidden content removed, risky actions held for approval or declined. */
+  injections: number;
+  hiddenRemoved: number;
+  held: number;
+  blocked: number;
 }
 
 export interface ActivityLimits { maxAgeMs: number; maxBytes: number }
@@ -101,7 +106,7 @@ export class ActivityFeed {
   }
 
   public agentStarted(agent: { agentId: string; agent: string; runId: string; model: string; parentId?: string }, prompt?: string, system?: string): void {
-    this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: this.now(), turns: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, toolCalls: 0, toolErrors: 0, retries: 0 });
+    this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: this.now(), turns: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0 });
     for (const stale of [...this.stats.keys()].slice(0, Math.max(0, this.stats.size - MAX_AGENTS))) this.stats.delete(stale);
     const base = { runId: agent.runId, agentId: agent.agentId, agent: agent.agent };
     this.add({ ...base, kind: 'agent-start', title: `${agent.agent} started on ${agent.model}` });
@@ -175,6 +180,19 @@ export class ActivityFeed {
 
   public retry(agentId: string, text: string): void {
     this.withAgent(agentId, (base, stat) => { stat.retries += 1; this.closeText(agentId); this.add({ ...base, kind: 'retry', title: 'Retrying', text }); });
+  }
+
+  /** A defense that acted, with where it happened (a URL, search, attachment, or action). */
+  public security(agentId: string, event: { kind: 'injection' | 'hidden-content' | 'held' | 'blocked'; source: string; detail: string }): void {
+    this.withAgent(agentId, (base, stat) => {
+      if (event.kind === 'injection') stat.injections += 1;
+      else if (event.kind === 'hidden-content') stat.hiddenRemoved += 1;
+      else if (event.kind === 'held') stat.held += 1;
+      else stat.blocked += 1;
+      const label = { injection: 'Possible prompt injection', 'hidden-content': 'Hidden content removed', held: 'Held for approval', blocked: 'Blocked' }[event.kind];
+      this.closeText(agentId);
+      this.add({ ...base, kind: 'security', title: `${label} · ${event.source}`, text: event.detail });
+    });
   }
 
   public notice(agentId: string, text: string): void { this.withAgent(agentId, (base) => this.add({ ...base, kind: 'notice', text })); }
