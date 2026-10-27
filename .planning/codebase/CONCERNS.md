@@ -1,216 +1,184 @@
+---
+last_mapped_commit: 0dd12e6e15b0daf804d8c3d1d896241992426082
+last_mapped_at: 2026-10-27
+---
 # Codebase Concerns
 
-**Analysis Date:** 2026-10-26
+**Analysis Date:** 2026-10-27
+
+Sources: direct inspection of `src/` (about 9.8k lines of TypeScript in `src/services`, `src/agent`, `src/gsd`, `src/domain`), `media/chat/*.js`, `package.json`, and the prior delivery audit in `.planning/AUDIT-2026-10-26.md`. Where the audit was written against v0.3.1 and the current tree no longer matches, this is noted.
 
 ## Tech Debt
 
-**Auto-install of an unpinned external runtime on every activation:**
-- Issue: `GsdUpdater` runs `npx --yes @opengsd/gsd-core@latest --codex --global` (and `--local` in the workspace) whenever the installed version is missing or older than the registry's `latest`. The `nearAi.autoInstallGsd` setting is declared in `package.json` and exposed through `readSettings()` in `src/services/settings.ts`, but nothing reads it before the install path runs.
-- Files: `src/services/gsdUpdater.ts`, `src/extension.ts` (line `new GsdUpdater().start(context)`), `src/services/settings.ts`, `package.json` (`nearAi.autoInstallGsd`)
-- Impact: The user-facing toggle is a no-op. Installs and updates happen without consent, and the version is unpinned, so the package's current `latest` runs with the user's privileges.
-- Fix approach: Gate `GsdUpdater.start()` on `readSettings().autoInstallGsd`, or on the boolean from `vscode.workspace.getConfiguration('nearAi').get('autoInstallGsd')`. Pin to a verified version or a checksum, and show an explicit confirm step before the first global install.
+**Webview UI is generated as large inline string blobs inside TypeScript:**
+- Issue: Substantial webview markup and client script are built as single-line template/string literals in TypeScript rather than shipped as separate files. The chat view HTML and its inline `<script>` are assembled in `src/services/chat.ts` (the main HTML builder begins around line 840 and the memory, generation, and fleet sections are each a single `innerHTML` string on lines 844-847). The same file also contains a full client-side renderer for graph, memory table, and publication review.
+- Files: `src/services/chat.ts` (951 lines), `src/services/panelView.ts`, `src/services/onboarding.ts`, `media/chat/chat.js`, `media/chat/markdown.js`
+- Impact: Lines are hundreds of characters long, so diffs and code review are hard. Client logic cannot be linted or type-checked, and the same UI is partly duplicated between `media/chat/chat.js` and the inline script in `chat.ts`. Escaping mistakes in these strings are easy to introduce.
+- Fix approach: Move webview client code into `media/` files loaded through the webview URI and a nonce-based CSP, and keep only the HTML shell in TypeScript. Add a type-checked client build or at least a lint step over `media/`.
 
-**Dead and duplicated setup code in the extension entry point:**
-- Issue: `runSetup()` in `src/extension.ts` (lines around 77-108) is never referenced. It duplicates the flow of `configureApiKey()`, and both route to `saveProfileCredential()`.
-- Files: `src/extension.ts`
-- Impact: Two divergent setup paths, one of them unreachable, invite drift. The "NEAR account sign-in" branch of `runSetup` is a non-functional message.
-- Fix approach: Delete `runSetup` (or wire it to a command deliberately) and keep a single credential entry path.
+**Oversized service modules:**
+- Issue: A few modules own too many responsibilities.
+- Files: `src/services/chat.ts` (951 lines), `src/services/chatBridge.ts` (830), `src/services/nearAiClient.ts` (754), `src/services/agentSession.ts` (576), `src/services/generationService.ts` (395), `src/agent/tools.ts` (374), `src/services/profileStore.ts` (341)
+- Impact: Changes to the chat send path touch the same file as UI rendering, bridge messages, and persistence, which raises regression risk for every feature change.
+- Fix approach: Split `chatBridge.ts` into message routing and per-feature handlers; split `nearAiClient.ts` into transport (fetch, retry, SSE/stream parsing) and API-surface modules.
 
-**Very large files containing inline HTML, CSS and JavaScript as TypeScript strings:**
-- Issue: `src/services/chat.ts` (887 lines) and `src/services/chatBridge.ts` (750 lines) embed the entire webview UI as template strings. Many lines in `chat.ts` exceed several hundred characters (for example the `renderCommands`, memory, generation, and fleet blocks around lines 754-790), and the script is effectively uncompiled and untyped.
-- Files: `src/services/chat.ts`, `src/services/chatBridge.ts`, `src/services/onboarding.ts`, `src/services/panelView.ts`
-- Impact: Front-end changes cannot be linted, type-checked, or diffed meaningfully. Accessibility and CSP regressions are hard to spot in review.
-- Fix approach: Move webview scripts into separate `.js` (or bundled `.ts`) assets loaded via `webview.asWebviewUri`, keep the nonce-based CSP, and add a lint step for the webview bundle.
+**Silent error swallowing:**
+- Issue: There are 13 empty or ignored `catch` blocks in non-test source (`grep -rn "catch {}\|catch (_\|catch {$"` over `src/`). Failures in these paths produce no log and no user-visible status.
+- Files: run `grep -rn "catch" src --include=*.ts | grep -v src/test` to list them; they are concentrated in the store and bridge layers (`src/services/activityStore.ts`, `src/services/contextGraphStore.ts`, `src/services/agentOrchestrator.ts`, `src/services/resumableExecution.ts`).
+- Impact: Persistence failures (activity history, agent ledger, resumable snapshots) can go unnoticed, so users may believe state was saved when it was not.
+- Fix approach: At minimum, route each to the existing output channel with a short message. Where a failure is expected, comment why it is safe to ignore.
 
-**Loose typing on process interfaces:**
-- Issue: `GsdProcess.once` in `src/services/gsdRunner.ts` uses `(...args: any[]) => void`, and the repository has no other `@ts-ignore` markers, so `any` is confined to this seam.
-- Files: `src/services/gsdRunner.ts`
-- Impact: Low, but it removes type checking from process exit and error handling.
-- Fix approach: Type listeners as `(code: number | null) => void` for `close` and `(err: Error) => void` for `error`.
+**Persistence writes whole snapshots on every change:**
+- Issue: `persist()` rewrites the full state on each mutation rather than appending or batching.
+- Files: `src/services/agentOrchestrator.ts` (line ~182), `src/services/resumableExecution.ts` (line ~17), `src/services/generationService.ts` (line ~349), `src/services/activityStore.ts` (queued writes around line ~110)
+- Impact: Write amplification grows with history size. Concurrent mutations rely on the serialized write queue in `activityStore.ts`; the other stores do not show the same queueing, so overlapping calls can race.
+- Fix approach: Serialize all store writes through one queue helper (as `activityStore.ts` does) and use temp-file-then-rename consistently (as `contextGraphStore.ts` line ~148 already does).
 
-**Repeated hand-rolled atomic-write pattern across stores:**
-- Issue: At least eight services implement the same write-to-temp-then-rename sequence with a per-service write queue or none at all. Examples: `src/services/activityStore.ts`, `src/services/reputation.ts`, `src/services/teamStudio.ts`, `src/services/projectInitialization.ts`, `src/services/agentProfiles.ts`, `src/services/profileStore.ts`, `src/services/contextGraphStore.ts`, `src/services/multimodalOrchestrator.ts`, `src/services/generationService.ts`, `src/services/auditStore.ts`, `src/services/resumableExecution.ts`. Some use `${pid}` temp suffixes, others a fixed `.tmp` suffix; `src/services/handoff.ts` writes non-atomically.
-- Files: listed above
-- Impact: Concurrency and crash-safety behavior differs by store. `multimodalOrchestrator.ts` and `generationService.ts` do not clean up the temp file on failure.
-- Fix approach: Extract one `atomicWriteJson(file, value)` helper in `src/services/` that uses a unique temp name and a best-effort cleanup, and migrate the stores to it.
+**Legacy panel code still shipped behind the Tools tab:**
+- Issue: `src/services/chat.ts` still carries the pre-rebuild webview (`chatHtml2`, `teamStudioEnhancementHtml`, `memoryExplorerEnhancementHtml`) and its message handlers for team studio, multimodal "operations", generation previews, memory explorer, and wallet/staking (`src/services/teamStudio.ts`, `src/services/multimodalOrchestrator.ts`, `src/services/generationService.ts`, `src/services/stakingService.ts`, `src/services/walletAuthorization.ts`). `toolsHtml()` hides those sections with CSS, so users cannot reach them; the working versions of teams, attachments, image generation, and memory run in the sidebar chat (`media/chat/chat.js`, `src/services/agentSession.ts`). The hidden team studio still hard-codes `member-studio0001`, which `teamStudio.ts` rejects.
+- Impact: Dead code and handlers that look live in review; a CSS change would expose controls that do not work. Wallet/staking is `StakingService.unavailable()`.
+- Fix approach: Remove the hidden sections and their handlers from `chat.ts`, keep only the Tools tab's analytics, artifacts, and history, and delete the unused services once nothing imports them.
 
-**Stub staking subsystem wired into the live chat path:**
-- Issue: `StakingService.unavailable()` is constructed in `src/services/chat.ts` (line 68) and in `src/extension.ts` status output. Its RPC and entitlement dependencies are "unavailable" stubs, so the wallet and staking surface always reports unavailable.
-- Files: `src/services/stakingService.ts`, `src/services/walletAuthorization.ts`, `src/domain/staking.ts`, `src/services/chat.ts`
-- Impact: Users can reach UI that cannot function. Code and tests exist for behavior that is never exercised in production wiring.
-- Fix approach: Either hide the staking panel behind a feature flag until the RPC and entitlement providers exist, or document the stub explicitly in the UI.
+**Verified on 2026-10-27 (previously reported in `.planning/AUDIT-2026-10-26.md` against 0.3.1, now resolved):**
+- GSD runs on the native runner (`src/services/agentSession.ts` with `src/gsd/tools.ts`) through `NearAiClient`; there is no `codex exec` bridge. `/gsd-map-codebase` ran live end to end on NEAR AI.
+- Actual cost uses `POST /v1/billing/costs` keyed by the `inference-id` header (`NearAiClient.actualCostsUsd`), confirmed live.
+- The header-based "TEE verified" badge is gone; **Verify signature** checks NEAR's signature and a TDX quote (`src/services/attestation.ts`), confirmed live against NEAR's gateway key.
+- The privacy, spend, and action-policy guard (`OutboundGuard`) and the emergency stop run on every sidebar send (`src/services/chat.ts`, send handler). The spend limit is checked per message, not between turns of one run (documented in `SECURITY.md`).
+- The Open-GSD runtime (`src/gsd/runtime.ts`) installs only when a workflow runs and none is present, into a per-version directory; updates are checked at startup and daily in NEAR AI projects. No reinstall loop.
+
+## Known Bugs
+
+No confirmed open bugs in the shipped paths as of this analysis. Earlier reports are listed above with their resolution.
 
 ## Security Considerations
 
-**API keys can be sent over plaintext HTTP:**
-- Risk: The bearer token is sent to whatever base URL the profile stores. Both `safeBaseUrl` implementations accept `http:` as well as `https:`: `src/services/profileStore.ts` (line ~302-305) and `src/services/chatBridge.ts` (line ~692). `NearAiClient.request()` in `src/services/nearAiClient.ts` attaches `authorization: Bearer <key>` to every request with no scheme check.
-- Files: `src/services/nearAiClient.ts`, `src/services/profileStore.ts`, `src/services/chatBridge.ts`, `src/services/providerFactory.ts`
-- Current mitigation: `safeBaseUrl` rejects strings containing "api key", "token", "secret", or "password", and rejects invalid URLs. Keys are kept in VS Code SecretStorage, not in project files.
-- Recommendations: Require `https:` for any profile that carries a credential, with an explicit, logged opt-in for `http://localhost` only. Consider also rejecting a base URL changed through the `profile-update` message path without re-validation.
+**Agent shell inherits the full parent environment:**
+- Risk: Commands the agent runs receive every variable from the extension host, including any API keys or tokens present in `process.env`.
+- Files: `src/agent/shell.ts` (`shellEnv`, around lines 120-127; spawn at lines 40 and 112)
+- Current mitigation: `ELECTRON_RUN_AS_NODE` is removed, `CI` is preserved, and pager and terminal variables are normalized.
+- Recommendations: Allowlist the environment (PATH, HOME, LANG, TERM, and explicitly needed variables) instead of spreading `process.env`. Confirm that NEAR API keys are never placed in `process.env` by the extension.
 
-**Caller headers can override the authorization header:**
-- Risk: In `NearAiClient.request()`, `headers: { authorization: ..., ...(init.headers ?? {}) }` lets any caller-supplied `authorization` key replace the bearer token. Current callers are internal, but the pattern is fragile.
-- Files: `src/services/nearAiClient.ts` (`request` method)
-- Current mitigation: Only internal call sites exist.
-- Recommendations: Put `authorization` last so it cannot be overridden, or strip caller-supplied auth headers.
+**Sensitive-file guard covers file tools but not shell commands:**
+- Risk: The agent can read `.env`, `.near-credentials`, `.ssh`, or key files with `cat` or `grep` in a shell command, bypassing the guard.
+- Files: `src/agent/tools.ts` (`SENSITIVE_FILE` pattern, line ~45), `src/agent/shell.ts`, `src/agent/permissions.ts`
+- Current mitigation: `SENSITIVE_FILE` blocks direct file-tool access to credential paths. `src/services/privacyPreflight.ts` checks outbound content for `.near-credentials` paths.
+- Recommendations: Apply the same path policy to shell command arguments, or require explicit approval for any shell command that names a sensitive path. Treat the preflight check as a best-effort filter, not a boundary.
 
-**Supply-chain exposure from `npx` with an unpinned `@latest` tag:**
-- Risk: See the auto-install item under Tech Debt. Any compromise of the `@opengsd/gsd-core` publish path is executed on activation with `--global`, and the Codex runtime (`gsdRunner.ts` spawns `codex exec`) then runs against the workspace.
-- Files: `src/services/gsdUpdater.ts`, `src/services/gsdRunner.ts`
-- Current mitigation: `GSD_PACKAGE` is a constant, the version string is validated as `\d+\.\d+\.\d+`, and `execFile` is used without a shell.
-- Recommendations: Pin a reviewed version range, verify integrity, and make network installs opt-in.
+**Installer runs an external package at runtime:**
+- Risk: The GSD installer runs `npx --yes @opengsd/gsd-core@<version> --claude --global` with the extension's environment, and the version is read from `npm view @latest`. A compromised or unexpected release is installed and executed without a checksum.
+- Files: `src/gsd/runtime.ts` (lines ~53 and ~83)
+- Current mitigation: The version is pinned to the value just looked up; there is a 300-second timeout and an abort signal.
+- Recommendations: Pin a known-good version in the extension, verify the package integrity hash, and require explicit user consent before the first install.
 
-**Runtime state may be committed to git:**
-- Risk: The extension writes `.planning/.near-ai/` (`auth-profiles.json`, `activity.json`, `audit.json`, `context-graphs.json`, `generation.json`, `generated/*.bin`) into the user's workspace. `/.gitignore` does not exclude `.planning/`, and it excludes only `node_modules/`, `dist/`, `*.vsix`, `.env*`, `.vscode-test/`, `.git-unusable-archive/`. Generated binary artifacts and profile metadata could be committed by mistake.
-- Files: `src/services/profileStore.ts` (`filePath`), `src/services/generationService.ts` (`managedPath`, `ledgerPath`), `src/services/activityStore.ts`, `src/services/auditStore.ts`, `src/services/contextGraphStore.ts`, `src/services/handoff.ts` (`.planning/HANDOFF.json`), `.gitignore`
-- Current mitigation: Credentials themselves go to SecretStorage, not files. `redactSecrets` in `src/domain/redaction.ts` and the prompt-redaction regexes in `activityStore.ts` and `analyticsStore.ts` scrub obvious secrets from stored text.
-- Recommendations: Add `.planning/.near-ai/` to `.gitignore`, and consider writing this directory with mode `0o600`.
+**Webview content security policy is present:**
+- Positive note: `src/services/panelView.ts`, `src/services/chat.ts`, and `src/services/onboarding.ts` each set a CSP with `default-src 'none'` and a per-load nonce. Keep this when moving webview scripts to files (see Tech Debt). The `style-src 'unsafe-inline'` in `chat.ts` and `onboarding.ts` should be tightened to a nonce or hash if styles are moved out of inline strings.
 
-**Regex-based secret redaction is heuristic:**
-- Risk: `src/domain/redaction.ts`, `src/services/chatBridge.ts` (lines ~147, 590-591, 634), `src/services/contextGraphMemory.ts` (line ~91), `src/services/memoryApproval.ts` (line ~15), and `src/services/stakingService.ts` (line ~219) each maintain separate, overlapping "unsafe text" regexes. They can drift, and a key format the regex does not recognize passes through to memory graphs and audit logs.
-- Files: listed above
-- Current mitigation: Multiple layers, and known key-name keywords are caught.
-- Recommendations: Centralize into one exported pattern set in `src/domain/redaction.ts` and test it against sample key shapes.
-
-**Webview content security policy is present but broad:**
-- Risk: Both webviews set a CSP (`src/services/chat.ts` line ~747 and ~781, `src/services/onboarding.ts` line ~35) with a nonce-based `script-src`, which is good. `chat.ts` and `onboarding.ts` also set `retainContextWhenHidden: true`, and `panelView.ts` enables scripts with no CSP visible in the grep results.
-- Files: `src/services/chat.ts`, `src/services/onboarding.ts`, `src/services/panelView.ts`
-- Current mitigation: `default-src 'none'`, nonce scripts, `textContent` used for model output.
-- Recommendations: Verify that `src/services/panelView.ts` sets a CSP, and check any `innerHTML` assignments (the `chat.ts` memory and generation sections use `innerHTML` with static markup only, but this should be re-audited on each change).
-
-**Command-line invocation depends on PATH:**
-- Risk: `officialGsdInvocation` in `src/services/gsdRunner.ts` executes the bare name `codex`, and `GsdUpdater` executes bare `npm` and `npx`. A malicious binary earlier in `PATH` would run.
-- Files: `src/services/gsdRunner.ts`, `src/services/gsdUpdater.ts`
-- Current mitigation: `shell: false` and fixed argument arrays.
-- Recommendations: Resolve absolute binary paths where possible and surface the resolved path in the status output.
-
-## Known Bugs and Functional Gaps
-
-**Documented setting does not take effect:**
-- Symptoms: Users who set `nearAi.autoInstallGsd` to `false` still see automatic installs.
-- Files: `src/services/gsdUpdater.ts`, `src/extension.ts`, `src/services/settings.ts`
-- Trigger: Any activation with `autoInstallGsd: false`.
-- Workaround: None in the extension.
-
-**NEAR account sign-in is not functional:**
-- Symptoms: `nearAi.authMode` offers `nearAccount`, and `runSetup()` sets it, but the sign-in path reports that token exchange is "not yet configured". `ProfileStore` and `providerFactory.ts` throw "NEAR account sign-in is pending provider token exchange" for that mode.
-- Files: `src/services/auth.ts` (`REFRESH_TOKEN_SECRET`), `src/services/providerFactory.ts`, `src/services/profileStore.ts`, `package.json`
-- Trigger: Selecting "NEAR account sign-in" in setup or setting `nearAi.authMode` to `nearAccount`.
-- Workaround: Use an API key (`nearAi.authMode: apiKey`).
-
-**Unbounded HTTP requests with no timeout:**
-- Symptoms: A stalled NEAR AI endpoint can leave a request pending indefinitely. Retries apply only to thrown errors and retryable status codes, not to timeouts.
-- Files: `src/services/nearAiClient.ts` (`request` method, no `AbortSignal.timeout` or equivalent)
-- Trigger: Network stall or a hung provider response.
-- Workaround: The user can press Stop in the chat, which sends `assistant-cancelled`, but model-listing calls from setup have no such control.
-
-**Legacy key migration path remains reachable:**
-- Symptoms: `AuthService.importLegacyCredentials()` in `src/services/auth.ts` copies the unscoped `nearAi.apiKey` and `nearAi.refreshToken` secrets into project-scoped slots, but the legacy secrets are never deleted.
-- Files: `src/services/auth.ts`
-- Trigger: Explicit `confirmed` migration call.
-- Workaround: None needed; the legacy secret remains readable in SecretStorage until removed manually.
+**Credentials storage:**
+- Positive note: API keys and refresh tokens are kept in VS Code `SecretStorage` through `src/services/auth.ts`, scoped per organization and project, and the code does not read `~/.near-credentials`. Keep it that way.
 
 ## Performance Bottlenecks
 
-**Full-file rewrite on every persisted mutation:**
-- Problem: Every store serializes its entire ledger and rewrites the JSON file on each change. `activityStore.ts`, `teamStudio.ts`, `agentProfiles.ts`, `reputation.ts`, `projectInitialization.ts`, and `profileStore.ts` all do this, and `auditStore.ts` keeps `MAX_EVENTS` entries.
-- Files: listed above
-- Cause: Chosen storage format (single JSON document per store) with a write queue per instance.
-- Improvement path: Append-only JSONL for activity and audit events, with periodic compaction.
+**Stream idle and response timeouts:**
+- Problem: Streaming responses rely on two timers (response timeout and idle timeout) with retry and backoff.
+- Files: `src/services/nearAiClient.ts` (lines ~500, ~725, ~744)
+- Cause: A stalled stream is detected only after the idle window elapses, so each attempt can wait the full idle period before retrying.
+- Improvement path: Tune the idle window per model and surface a "stalled, retrying" state in the webview. Check that aborted attempts release their readers.
 
-**Layout of the graph view is O(n) per render and fixed to 720x420:**
-- Problem: `renderGraph` in `src/services/chat.ts` (line ~865) rebuilds the SVG on every selection change and caps edges at 96, but node positions use a fixed 6-column grid. Large context graphs will overlap.
-- Files: `src/services/chat.ts`
-- Cause: Inline webview script with no virtualization or layout algorithm.
-- Improvement path: Cap nodes in the server-side preview (already bounded in `contextGraph.ts`) and update the SVG incrementally.
+**Whole-state persistence on every mutation:**
+- Problem: See Tech Debt. Stores rewrite full JSON on each change.
+- Files: `src/services/agentOrchestrator.ts`, `src/services/resumableExecution.ts`, `src/services/generationService.ts`
+- Cause: No incremental write or debounce.
+- Improvement path: Debounce writes (for example 250 ms) and coalesce mutations during a single turn.
 
 ## Fragile Areas
 
-**Webview message protocol duplicated on both sides:**
-- Files: `src/services/chatBridge.ts` (message parsing around lines 250-690), `src/services/chat.ts` (inline script, `window.addEventListener('message', ...)` around line 761)
-- Why fragile: Message type strings (`assistant-delta`, `generation-preview`, `memory-slice-preview`, and others) are typed as a union in `chatBridge.ts` but hand-written as string literals in the webview script. A rename breaks the UI silently.
-- Safe modification: Export the message type names from one module and reference them in both places, or add a contract test that parses the inline script.
-- Test coverage: `src/test/chatBridge.test.ts` and `src/test/chat.test.ts` cover the bridge but not the inline script.
+**Chat webview script generated from TypeScript:**
+- Files: `src/services/chat.ts`, `media/chat/chat.js`
+- Why fragile: Two copies of client behavior exist, and the inline copy is not type-checked. Changing a message name in `chatBridge.ts` requires matching edits in both places with no compiler check.
+- Safe modification: Define message types in one shared module imported by both host and client code, and change them there first.
+- Test coverage: `src/test/sidebarChat.test.ts` and `src/test/chatSendPath.test.ts` check source text and structure rather than behavior in a running webview.
 
-**Profile and project scoping identifiers:**
-- Files: `src/domain/auth.ts` (`deriveProfileId`, `isProjectCredentialScope`), `src/services/auth.ts` (`scopedSecret`), `src/extension.ts` (`saveProfileCredential`)
-- Why fragile: Secret keys are built from `projectId` and `profileId` by string interpolation (`nearAi.v2.<project>.<profile>.<kind>`). Scope validation happens in `assertScope`, but a stored `profileId` derived from a user-entered display name can collide after normalization.
-- Safe modification: Keep scope validation as the only gate, and test collision behavior in `src/test/auth.test.ts`.
+**Chat bridge message routing:**
+- Files: `src/services/chatBridge.ts`
+- Why fragile: One switch-style dispatcher handles many message types, and several handlers depend on state that some paths never set (the audit cites team and generation flows).
+- Safe modification: Add a test per message type that starts from the state the real UI produces, not from seeded state.
+- Test coverage: Gaps for message types that are routed but never reached from the UI.
 
-**Single-instance runner state:**
-- Files: `src/services/gsdRunner.ts` (`active`, `activeCommand`)
-- Why fragile: `GsdRunner.run()` throws if any process is active, and state is held on the instance. If the chat panel is disposed mid-run, the child process is not killed by `deactivate()`, which is an empty function in `src/extension.ts`.
-- Safe modification: Track child processes in `context.subscriptions` and kill them on deactivate.
+**Shell process group handling:**
+- Files: `src/agent/shell.ts` (spawns with `detached: true`, kills by process group in `killGroup`)
+- Why fragile: Killing `-pid` with SIGKILL depends on the child being a process-group leader. Child processes that call `setsid` or daemonize can survive cancellation.
+- Safe modification: Test cancellation with a child that spawns a grandchild. Keep the cleanup in `stopShell` and `killGroup` together.
+- Test coverage: `src/test/agentTools.test.ts` covers basic shell use; no test was found for orphaned grandchildren.
 
-**Incomplete teardown in `deactivate`:**
-- Files: `src/extension.ts` (`deactivate`)
-- Why fragile: Body is a comment only, so the `GsdUpdater` interval, any active `GsdRunner` process, and in-flight generation polling are not cleaned up. `GsdUpdater.start()` does register its interval through `context.subscriptions`, so it is cleaned up by VS Code; the risk is limited to child processes.
+**Source-text regex tests:**
+- Files: `src/test/chatBridge.test.ts`, `src/test/staking.test.ts`, `src/test/walletAuthorization.test.ts`, `src/test/contextGraphProtocol.test.ts`
+- Why fragile: These tests pass when source text matches a pattern, not when behavior is correct. They have passed for features that do not run (see Unreachable features above).
+- Safe modification: Replace them with behavior tests that call the exported function and assert on output.
 
 ## Scaling Limits
 
-**Persisted history is capped by constants, not by budget:**
-- Current capacity: `activityStore` and `agentOrchestrator` persist the last 50 agents and 20 events per agent; `generationService` keeps the last 50 operations and 50 artifacts; `multimodalOrchestrator` keeps 50 operations.
-- Limit: Caps are counts, not bytes, so large prompts or artifact metadata can grow each file substantially.
-- Scaling path: Add byte-size caps and truncate `safeText` fields more aggressively.
+**Context graph and activity history:**
+- Current capacity: No bound is enforced on activity or graph size in the stores reviewed.
+- Limit: Full-file rewrite on every change means latency grows with history size.
+- Scaling path: Rotate activity files by month and cap graph node count, as the memory-slice UI already implies with its "bounded" wording.
 
-**Generated artifacts stored inline in the workspace:**
-- Current capacity: `generationService.ts` writes binary outputs under `.planning/.near-ai/generated/` with `flag: 'wx'`, with no size ceiling in the code paths reviewed.
-- Limit: Large video outputs can fill the workspace; the size of downloaded outputs is not bounded before `writeFile` in `generationService.ts`.
-- Scaling path: Enforce a maximum artifact size before writing and stream writes for large payloads.
+**Agent fleet:**
+- Current capacity: The fleet view always shows 0 agents, per the audit, so the real limit is unmeasured.
+- Limit: Unknown; `src/services/agentOrchestrator.ts` persists the full agent list on every change.
+- Scaling path: Measure with a synthetic fleet of 50 to 100 agents before exposing parallel runs.
 
 ## Dependencies at Risk
 
-**Build and test rely on `vsce` and `@types/vscode` 1.90 range:**
-- Risk: `package.json` pins `@vscode/vsce` `^3.2.2` and `@types/vscode` `^1.90.0`, while `engines.vscode` is `>=1.90.0`. The VS Code fork ecosystem (the README says the panel targets "VS Code forks") may not expose `vscode.chat` at the minimum version; `extension.ts` guards this with `typeof vscode.chat?.createChatParticipant === 'function'`.
-- Impact: Chat participant registration silently disappears on older hosts.
-- Migration plan: Raise the minimum engine version when the chat participant API is required, or keep the guard and test the fallback path.
+**Runtime `npx` install of Open-GSD:**
+- Risk: See Security Considerations. The package is fetched at runtime, not bundled.
+- Impact: Offline or network-restricted users cannot run GSD, and the install can change between runs.
+- Migration plan: Vendor a pinned copy or document the install and its version in the extension settings.
 
-**Source tree includes compiled and packaged artifacts:**
-- Risk: The project root contains 12 committed-looking `near-ai-vscode-0.1.x`/`0.2.x` `.vsix` files totaling several megabytes, plus `dist/`. `.gitignore` excludes `*.vsix` and `dist/`, but the files are present in the working tree and inflate every full-directory scan.
-- Impact: Repository hygiene and accidental publication of stale builds.
-- Migration plan: Move old `.vsix` builds to a release location outside the repository or keep only the latest one.
-
-**Repository metadata is split:**
-- Risk: The project root contains an empty `.git/` directory, a populated `.git-real/` directory, and an empty `.git-unusable-archive/`. `git` commands run from the project root report "not a git repository", and `.gitignore` references `.git-real/` and `.git-unusable-archive/` (which should not be in version control).
-- Impact: Version control state is ambiguous, and tooling that relies on `git` at the root fails.
-- Migration plan: Restore a single `.git` directory at the project root, and remove the archive directories once history is confirmed.
+**VS Code engine floor:**
+- Risk: `package.json` sets `engines.vscode` to `>=1.101.0` (Node 22+), required by pdf.js 6; the e2e suite runs against current stable VS Code, not the floor.
+- Impact: Incompatibility on older VS Code builds.
+- Migration plan: Run `npm run check` against the minimum engine version in CI.
 
 ## Missing Critical Features
 
-**No request timeout or cancellation for model listing:**
-- Problem: `NearAiClient.listModels()` and `listModelsWithPricing()` accept an optional `AbortSignal` but no caller in the setup path passes a timeout.
-- Blocks: Reliable validation in `ProfileStore.validate()` and `validateNearAiProvider()` in `src/services/providerFactory.ts`.
+**Scanned PDFs and legacy Office formats:**
+- Problem: Attachments read text from PDFs (text layer) and from .docx, .pptx, and .xlsx; scanned PDFs without a text layer and the binary .doc, .ppt, and .xls formats are not read.
+- Blocks: Attaching scanned contracts or old spreadsheets; the user is told to export or re-save.
 
-**No secret-scanning gate before publication of generated artifacts:**
-- Problem: `generationService.ts` publishes outputs to a workspace path after a separate approval, but no content check runs on the published bytes.
-- Blocks: Safe publication of generated content that may echo prompt text containing secrets.
+**Vector graphics from images:**
+- Problem: The agent can write SVG markup with its file tools and generate raster images (`GenerateImage`, PNG only), but there is no tracing tool that turns a supplied raster image into SVG, and no built-in way to assemble a .pptx.
+- Blocks: "Vectorize this logo" and slide-deck output without the user's own tooling.
+
+**Real local runtimes are not exercised in tests:**
+- Problem: Local and hybrid profiles (`src/services/providerFactory.ts`) are covered by unit tests and an end-to-end test against a fake OpenAI-compatible server, not against Ollama, LM Studio, or vLLM.
+- Blocks: Confidence in tool calling on local models, whose tool-call support varies.
 
 ## Test Coverage Gaps
 
-**Untested modules with security or lifecycle impact:**
-- What's not tested: `src/extension.ts` (activation, setup flows, `saveProfileCredential`), `src/services/gsdUpdater.ts` (install and version logic, auto-install gating), `src/services/handoff.ts` (checkpoint writing), `src/services/settings.ts` (`autoInstallGsd` read path), `src/services/panelView.ts`, `src/services/onboarding.ts`, `src/services/fleetView.ts`, `src/services/contextGraphMemory.ts`, `src/services/multimodalOrchestrator.ts`, `src/services/stakingService.ts`, `src/services/contextGraphStore.ts`.
-- Files: as listed
-- Risk: The auto-install bug and the unused setting were not caught because no test covers `gsdUpdater` activation. Credential-handling changes in `extension.ts` go unverified.
-- Priority: High for `gsdUpdater.ts` and `extension.ts`; Medium for the rest.
+**Live and end-to-end tests:**
+- What's not tested: `src/test/live.test.ts` and `src/test/e2e/suite.ts` require a live NEAR AI key or `xvfb-run`; they are not part of the default `npm test` run (`node --test dist/test/*.test.js`).
+- Files: `src/test/live.test.ts`, `src/test/e2e/run.ts`, `src/test/e2e/suite.ts`
+- Risk: Regressions in the real provider path or the VS Code webview may pass CI.
+- Priority: High
 
-**Domain modules without direct tests:**
-- What's not tested: `src/domain/privacy.ts`, `src/domain/redaction.ts`, `src/domain/approval.ts`, `src/domain/routing.ts`, `src/domain/generation.ts`, `src/domain/multimodal.ts`, `src/domain/version.ts`, `src/domain/capabilities.ts`, `src/domain/analytics.ts`, `src/domain/agents.ts`.
-- Files: as listed (tests for some of these behaviors may live in aggregate suites such as `src/test/policy.test.ts`)
-- Risk: `redaction.ts` is the central secret filter, and its regressions would not be isolated.
-- Priority: High for `redaction.ts` and `privacy.ts`; Medium for the rest.
+**Webview behavior:**
+- What's tested: `src/test/e2e/suite.ts` drives the real sidebar webview in VS Code (load under CSP, model list, a streamed agent reply with usage, an approval and Revert).
+- What's not tested: Keyboard navigation and screen-reader live regions; the retry notice (`assistant-retry`) and Verify signature UI outside unit tests.
+- Files: `media/chat/chat.js`
+- Priority: Medium
 
-**Webview inline script:**
-- What's not tested: The browser-side script embedded in `src/services/chat.ts` and `src/services/onboarding.ts` has no automated tests.
-- Files: `src/services/chat.ts`, `src/services/onboarding.ts`
-- Risk: Message-type mismatches and accessibility regressions (keyboard handling, `aria-live` updates) ship unnoticed.
-- Priority: Medium.
+**Coverage measurement:**
+- What's not tested: No coverage tool is configured in `package.json`, so coverage is unknown.
+- Files: `package.json`
+- Risk: Untested branches in `src/services/nearAiClient.ts` and `src/services/auth.ts` cannot be identified.
+- Priority: Medium
 
-**Test runner convention:**
-- What's not tested: `npm test` compiles to `dist/` and runs `node --test dist/test/*.test.js`. Test files live under `src/test/` and must match `*.test.ts` to be picked up. Any file that is not compiled is silently skipped.
-- Files: `package.json` (`scripts.test`), `tsconfig.json`
-- Risk: New test files placed outside `src/test/` will not run in CI.
-- Priority: Low.
+**Shell cancellation and grandchild processes:**
+- What's not tested: Orphaned children after cancellation.
+- Files: `src/agent/shell.ts`
+- Risk: Background processes keep running after the user stops an agent.
+- Priority: Medium
 
 ---
 
-*Concerns audit: 2026-10-26*
+*Concerns audit: 2026-10-27*

@@ -1,122 +1,147 @@
+---
+last_mapped_commit: 0dd12e6e15b0daf804d8c3d1d896241992426082
+last_mapped_at: 2026-10-27
+---
 # Coding Conventions
 
-**Analysis Date:** 2026-10-26
+**Analysis Date:** 2026-10-27
 
 ## Naming Patterns
 
 **Files:**
-- Source and test files use camelCase `.ts` names, one concept per file: `src/services/approvalService.ts`, `src/services/nearAiClient.ts`, `src/domain/gsdCommands.ts`.
-- Test files mirror the module name with a `.test.ts` suffix and live in `src/test/`: `src/test/approvalService.test.ts` tests `src/services/approvalService.ts`.
-- Domain type/policy modules are named by concept (`src/domain/approval.ts`, `src/domain/policy.ts`, `src/domain/privacy.ts`); service classes with I/O or state live under `src/services/`.
-- The only non-camelCase entry is the top-level `src/extension.ts` (VS Code activation entry point; compiled to `dist/extension.js`).
+- Source modules use camelCase `.ts` names grouped by layer: `src/services/nearAiClient.ts`, `src/services/activityStore.ts`, `src/domain/redaction.ts`, `src/agent/worktree.ts`.
+- Test files mirror the module they cover with a `.test.ts` suffix in one flat directory: `src/test/nearAiClient.test.ts`, `src/test/worktreeIsolation.test.ts`.
+- The end-to-end harness lives in its own folder: `src/test/e2e/run.ts`, `src/test/e2e/suite.ts`.
+- Scripts in `scripts/` use kebab-case `.mjs` names: `scripts/verify-release-content.mjs`.
 
 **Functions:**
-- camelCase verbs: `preview`, `decide`, `dispatch`, `recordLifecycle`, `normalizeCost`, `redactSecrets`, `decideAction`.
-- Module-private helper functions are declared at the bottom of the file, after the class or main export, and are not exported: see `normalizeCost`, `state`, `safe`, `clone` at the end of `src/services/approvalService.ts`.
-- Boolean-returning checks use `is`/`has` prefixes: `isStopped`, `isAbortError`.
+- camelCase for functions and methods: `createDefaultSettings()`, `normalizePolicyMode()`, `isSecureEndpoint()`, `compareVersions()` (`src/domain/config.ts`, `src/domain/version.ts`).
+- Predicates use `is`/`has` prefixes: `isSecureEndpoint`, `isProfileId` (`src/domain/auth.ts`).
+- Factories use `create` prefixes: `createDefaultSettings`, `createProjectCredentialScope`.
+- Helper functions inside a file are declared with `function` at module scope and kept private (not exported) unless tests need them, e.g. `imageResult` in `src/services/nearAiClient.ts`.
 
 **Variables:**
-- camelCase; short local names are common for hot helper bodies (`ttl`, `cost`, `preview`, `record`).
-- Module-level constants use camelCase `const` sets/maps, not SCREAMING_CASE: `const risky = new Set<ActionCapability>([...])` in `src/services/approvalService.ts`. Exported catalogs use SCREAMING_CASE: `GSD_COMMANDS` in `src/domain/gsdCommands.ts`.
-- Private class fields are declared `private readonly` with no underscore prefix: `private readonly pending`, `private readonly limits`. (One `_value` exists in the codebase; do not copy it.)
+- camelCase for locals and parameters. Short names are common in small callbacks (`(error) =>`, `(line) =>`).
+- Module-level constants that are configuration values use UPPER_SNAKE_CASE: `DEFAULT_BASE_URL`, `DEFAULT_MODEL` (`src/domain/config.ts`), `API_KEY_SECRET`, `REFRESH_TOKEN_SECRET` (`src/services/auth.ts`), `DEFAULT_RULES` (`src/agent/permissions.ts`).
+- Private-looking loopback sets and similar lookup tables are `const` `Set`s with UPPER_SNAKE names, e.g. `LOOPBACK_HOSTS` in `src/domain/config.ts`.
 
-**Types and interfaces:**
-- `PascalCase` for interfaces and type aliases. Interfaces are the dominant form for data shapes (about 234 `export interface` declarations vs. about 101 `export type`).
-- Discriminant and status unions are string-literal types, not enums. The codebase has no `enum` declarations. Example: `export type ApprovalDecision = 'approved' | 'denied' | 'expired' | 'stale' | 'pending';` in `src/domain/approval.ts`.
-- Versioned payloads carry a literal version field: `version: 1` on `ApprovalPreview`, `AuditEvent`, and attribution snapshots.
-- Options bags are named `*Options` and are optional at the call site with defaults applied in the constructor: `ApprovalServiceOptions` in `src/domain/approval.ts`, consumed in `src/services/approvalService.ts`.
+**Types:**
+- `interface` for object shapes that are extended or implemented: `ChatMessage`, `ToolCall`, `ModelInfo`, `NearAiSettings` (`src/services/nearAiClient.ts`, `src/domain/config.ts`). `SecretStorageLike` is an interface implemented by test doubles (`src/test/auth.test.ts`).
+- `type` aliases for unions and derived types: `AgentMessage`, `CompletionEvent`, `AuthMode`, `ActionPolicyMode`.
+- Discriminated unions with a literal `type` or `role` field are the standard way to model events and messages (`CompletionEvent` uses `type: 'text' | 'reasoning' | 'done'`).
+- Use `import type { ... }` for type-only imports: `src/services/nearAiClient.ts` imports `type ResponseEvidence` inline with value imports, and `src/test/worktreeIsolation.test.ts` uses `import type { AgentMessage, ... }`.
+- Classes use PascalCase: `ActivityStore` (`src/services/activityStore.ts`), `NearAiClient`, `AgentConversation`, `RunCheckpoints`, `ShellSession`.
+- Error classes extend `Error` and carry status metadata: `NearAiError(status, message, retryable, requestId?)` in `src/services/nearAiClient.ts`.
 
 ## Code Style
 
 **Formatting:**
-- No formatter configuration is committed. There is no `.prettierrc`, `.editorconfig`, or `biome.json` in the repo root.
-- Observed style, which new code should match: 2-space indentation, single quotes, semicolons on statements, trailing commas are not used consistently.
-- Line length is not enforced. Many service files pack several statements on one line separated by `;` (for example `src/services/approvalService.ts`, `src/services/agentOrchestrator.ts`). Domain and test files are usually one statement per line. For new code, prefer one statement per line and keep lines under roughly 120 characters; this matches the style of the more recently written modules (`src/domain/gsdCommands.ts`, `src/services/nearAiClient.ts`).
-- Code is written in a dense, one-line-per-method style on constructors and short getters. Do not reformat existing dense blocks as part of unrelated work.
+- No Prettier or Biome configuration is present in the repository. Formatting is manual and consistent in practice.
+- Indentation is 2 spaces. Lines are long where a single-line helper keeps related logic together (some lines exceed 150 characters); do not reflow existing code just for width.
+- Single quotes for strings and imports (`import path from 'node:path';`).
+- Semicolons are used at statement ends.
+- Trailing commas are not used in multi-line object literals in the main code path; match the surrounding file.
+- Short one-line arrow functions and inline object literals are common in tests and helpers: `const json = (value: unknown) => ...`.
 
 **Linting:**
-- No ESLint configuration is present. The effective "lint" gate is the TypeScript compiler in strict mode:
-  - `npm run lint` runs `tsc -p tsconfig.json --noEmit` (see `package.json`).
-  - `tsconfig.json` sets `"strict": true`, `"target": "ES2022"`, `"module": "commonjs"`, `"rootDir": "src"`.
-- Hygiene findings to respect: one `: any` / `as any` in non-test source, no `@ts-ignore` or `eslint-disable` comments, and no `TODO`/`FIXME` markers in `src/`. Keep it that way; prefer typed `unknown` with narrowing over `any`.
+- No ESLint configuration is present. The effective static check is the TypeScript compiler in strict mode.
+- `tsconfig.json` sets `"strict": true`, `"target": "ES2022"`, `"module": "commonjs"`, `"rootDir": "src"`, `"outDir": "dist"`, `"skipLibCheck": true`.
+- `npm run lint` runs `tsc -p tsconfig.json --noEmit`.
+- Type-suppression comments are essentially absent: there is one `@ts-ignore`/`eslint-disable` occurrence in `src/`. Prefer narrowing with type guards over casts.
+- `any` is almost never written explicitly. Narrow `unknown` values instead (see `imageResult(value: unknown, ...)` in `src/services/nearAiClient.ts`).
 
-**TypeScript patterns:**
-- Prefer `import type { ... }` for type-only imports: `src/services/approvalService.ts` imports `ActionCapability`, `ApprovalDecision`, etc., with `import type`. Use inline `type` modifiers when mixing value and type imports: `import { normalizeAttribution, UNKNOWN_ATTRIBUTION, type AttributionSnapshot } from '../domain/activity';`.
-- Use `readonly` on fields, parameters and arrays that are not mutated. `readonly` tuples/arrays appear in catalogs: `export const GSD_COMMANDS: readonly GsdCommandDefinition[]`.
-- Use `??` for defaults (`options.now ?? Date.now`) and `?.` for optional chaining. Non-null assertions (`!`) are rare (about 4 occurrences in non-test source); avoid adding more.
-- Numeric separators are used for readable large literals: `1_700_000_000_000`, `5 * 60_000`.
-- Copy-on-return for shared state: `clone()` (JSON round-trip) is applied before returning stored previews and records (`src/services/approvalService.ts`). Follow this for any service that hands out internal objects.
+**Type Assertions:**
+- Use `as const` for literal tables and union-typed fixtures. About 100 occurrences across `src/`.
+- Cast externals with `as` only at boundaries: `(await response.json())` is handled by runtime checks, and `globalThis.fetch = fakeNear(calls) as typeof fetch;` is the pattern used in tests.
 
 ## Import Organization
 
-**Order (observed convention):**
-1. Node built-ins using the `node:` prefix, always: `import { randomUUID } from 'node:crypto';`, `import * as path from 'node:path';`, `import { tmpdir } from 'node:os';`, `import * as fs from 'node:fs/promises';`.
-2. The `vscode` module, when needed, as `import * as vscode from 'vscode';` (only in runtime modules such as `src/extension.ts`; tests never import it directly).
-3. Relative imports, domain before services, with type-only imports interleaved by the module they came from. There is no enforced grouping or blank-line separation.
+**Order (as observed in the source and tests):**
+1. Node built-ins using the `node:` prefix: `import { execFile } from 'node:child_process';`, `import path from 'node:path';`
+2. Third-party packages: `import { runTests } from '@vscode/test-electron';`, and `vscode` (available only inside the extension host).
+3. Relative project imports, grouped after built-ins: `import { ... } from '../services/agentSession';`
 
 **Path Aliases:**
-- None. `tsconfig.json` has no `paths` or `baseUrl`. Always use relative imports (`../domain/policy`, `./privacyPreflight`).
+- None. All project imports are relative (`../domain/config`, `./attestation`). Do not introduce a path alias without updating `tsconfig.json` and the test runner (`node --test dist/test/*.test.js` runs compiled output).
 
-**Layering:**
-- `src/domain/*` holds pure types, policies, and deterministic helpers (no `vscode` import, no I/O). `src/services/*` holds stateful classes and I/O. Keep this split: domain modules are imported by services and tests and should not import services. One exception exists: `src/domain/auth.ts` has a type-only import of `NearAiClient` from `src/services/nearAiClient.ts`. Use `import type` for any such dependency and do not add more.
+**Barrel Files:**
+- Not used. Import from the defining module directly.
+
+**Module system:**
+- CommonJS output (`"module": "commonjs"`). Use `import`/`export` syntax in source; `require` appears only in test-time module interception (see TESTING.md).
+- `export` named declarations are standard. Default exports appear only for Node built-ins (`import path from 'node:path'`, `import Module from 'node:module'`).
 
 ## Error Handling
 
-**Patterns:**
-- Programmer and precondition errors throw plain `Error` with a short, sentence-style message ending in a period: `throw new Error('Unknown approval preview.');`, `throw new Error('Agent concurrency limit reached.');` (see `src/services/approvalService.ts`, `src/services/agentOrchestrator.ts`). There are no custom error classes.
-- Policy and budget denials are NOT thrown. They return a discriminated result: `{ allowed: false, reason, preview }` from `ApprovalService.dispatch` / `denied()`. Use this result-object pattern for expected business denials; reserve `throw` for invalid input or unknown identifiers.
-- Abort is cooperative. Streaming code checks `signal?.aborted || isAbortError(error)` before rethrowing (`src/services/nearAiClient.ts`, around lines 184-206). Do not treat aborts as failures.
-- Retries are explicit loops with a `maxRetries` bound (`src/services/nearAiClient.ts`, around line 264).
-- `catch` blocks are used for resilience (about 82 `catch` sites outside tests). When swallowing an error, return a typed fallback value or emit an audit event; do not leave an empty `catch`.
+**Strategy:** Throw typed errors with a user-readable message and retry metadata. Convert low-level failures at the boundary.
 
-**Redaction at the boundary:**
-- Any string that may reach the UI, an audit log, or a provider payload must pass through `redactSecrets` (`src/domain/redaction.ts`) or the local `safe()` helper in `src/services/approvalService.ts`. Credential-shaped values (`apiKey=`, `token:`, `Bearer ...`) must be replaced with `[REDACTED]`.
+**Patterns:**
+- Network and API failures become `NearAiError` with HTTP status, a `retryable` flag, and optional `requestId`. Example from `src/services/nearAiClient.ts`:
+  ```typescript
+  throw new NearAiError(0, `NEAR AI request failed: ${error instanceof Error ? error.message : 'network error'}.`, true);
+  ```
+- Timeouts and aborts are explicit. Timeouts raise `NearAiError(408, ..., true)`. Aborts rethrow `new DOMException('The operation was aborted.', 'AbortError')`.
+- Messages never include secrets. Tests assert this directly (`src/test/nearAiClient.test.ts` checks that errors do not contain `secret` or `Bearer`). Pass error text through `src/domain/redaction.ts` (`redactSecrets`) before surfacing it to the UI or transcripts.
+- Best-effort cleanup swallows errors with a `.catch(() => undefined)` on stream readers and similar resources: `await reader.cancel().catch(() => undefined);`.
+- Optional catch binding is used when the error value is not needed: `try { chunk = JSON.parse(payload); } catch { throw new NearAiError(...); }`. Roughly 57 `catch {` blocks and 52 `catch (error)` blocks exist in `src/`.
+- Validate at the boundary and fall back to safe defaults rather than throwing for user settings: `normalizePolicyMode` returns `'approve-risky'` for unknown values (`src/domain/config.ts`).
+- Security-sensitive checks fail closed: `isSecureEndpoint` rejects remote plain HTTP; `NearAiClient` refuses non-HTTPS endpoints before sending any request.
+
+**Async:**
+- `async`/`await` throughout. Public service methods are `public async` (about 170 occurrences).
+- Cancellation flows through `AbortSignal` parameters, typically the last optional argument: `generateImage(model, prompt, options = {}, signal?)`.
 
 ## Logging
 
-**Framework:** None in product code. Zero `console.*` calls exist under `src/` outside tests.
+**Framework:** None in application code. `console.log` and `console.error` appear only in the test harness and live tests (`src/test/live.test.ts`, `src/test/e2e/run.ts`, `src/test/e2e/suite.ts`).
 
 **Patterns:**
-- Operational history goes to structured audit events, not logs: `AuditStore` (`src/services/auditStore.ts`) and `ApprovalService.emit(...)`. Each event carries `version: 1`, a generated `id`, an ISO `timestamp`, and an `attribution` snapshot (`UNKNOWN_ATTRIBUTION` when absent).
-- Activity and analytics use dedicated stores: `src/services/activityStore.ts`, `src/services/analyticsStore.ts`.
-- Do not add `console.log` to product code; surface user-facing status through the VS Code APIs or the webview panel (`src/services/panelView.ts`).
+- Do not add `console.*` calls in `src/` runtime code. Surface status through the extension's services (activity and audit stores: `src/services/activityStore.ts`, `src/services/auditStore.ts`) and the chat/status UI.
+- Never log API keys, bearer tokens, or account credentials. Redact with `src/domain/redaction.ts`.
 
 ## Comments
 
 **When to Comment:**
-- Comments are sparse and explain intent or a platform constraint, not the mechanics. Example from `src/extension.ts`: the comment explains why the panel view provider is the supported surface in VS Code forks.
-- Document security or privacy invariants inline where they are enforced (for example that emergency stop still allows terminal bookkeeping in `ApprovalService.emergencyStop`).
+- Explain why a rule exists, especially security and compatibility rules. Examples: the header comment in `src/test/worktreeIsolation.test.ts` documents how Open-GSD treats the runner as a `harness-worktree` host; the comment above `isSecureEndpoint` explains that plain HTTP is only for local runtimes.
+- Test files begin with a short block comment describing the behavior under test and any opt-in environment variables (`src/test/live.test.ts`).
+- Avoid comments that restate the code.
 
 **JSDoc/TSDoc:**
-- Not used. No `@param` / `@returns` blocks exist. Document contracts with the TypeScript type itself (named options interfaces, literal unions).
+- Use `/** ... */` on exported types and constants that carry non-obvious contracts: `/** A tool call as the OpenAI-compatible API returns it; \`arguments\` is a JSON string. */` (`src/services/nearAiClient.ts`), `/** 0 means no limit. */` (`src/domain/config.ts`).
+- Single-line `//` comments are used for section notes inside functions.
 
 ## Function Design
 
-**Size:** Functions are short where they are methods of a class with one responsibility. Some methods are very long single lines (e.g. `ApprovalService.preview` in `src/services/approvalService.ts`); when adding logic, extract a named private helper rather than extending the line further.
+**Size:** Keep helpers small. Long methods exist in orchestration code (`src/agent/loop.ts`, `src/services/nearAiClient.ts`), so when extending them, prefer extracting a module-level helper rather than adding another branch inline.
 
 **Parameters:**
-- Prefer a single request object for functions with more than three inputs: `ApprovalService.preview(request: ApprovalRequest)`, `ApprovalService.recordLifecycle(previewId, type, values)`.
-- Dependencies are injected through constructors with optional overrides, not module singletons: `new ApprovalService(policy, { now, audit, requestLimitUsd, ... })`. Time is always injected as `now: () => number` so tests can control it.
-- `Pick<...>` / `Omit<...>` on interfaces to narrow inputs: `Pick<AuditEvent, 'outcome' | 'reason' | ...>`.
+- Positional parameters for required inputs, followed by an `options` object with defaults: `generateImage(model, prompt, options: ImageGenerationOptions = {}, signal?: AbortSignal)`.
+- Optional trailing `signal?: AbortSignal` on any network or long-running method.
+- Use an inline object type for small option bags: `trust: { trustedRoot?: string; now?: Date } = {}`.
 
 **Return Values:**
-- Services return cloned plain objects (`clone(preview)`), never live references to internal maps.
-- Async service methods return `Promise<...>`; synchronous lookups return `T | undefined` (`getDecision`).
-- Use `undefined` for "not found"; throw only when the caller cannot continue.
+- Return typed results (`ImageGenerationResult`, `VerificationResult`) rather than tuples or ad hoc objects.
+- Functions that can legitimately find nothing return `undefined` (for example `imageResult` helpers) instead of `null`. `null` appears only where an external API uses it.
 
 ## Module Design
 
 **Exports:**
-- Named exports only. `export default` is not used. One primary class or function per module, plus its supporting `export interface` / `export type` declarations in the same file or in the matching `src/domain/*.ts` module.
-- Helpers used only inside a module are not exported.
+- Export the types and functions that other layers consume. Keep helpers unexported.
+- Service classes expose `public` methods explicitly (`public async generateImage(...)`). Use `private` for internal state and helpers (about 50 `private` members in `src/`).
+- Prefer constructor injection of dependencies for testability: `new AuthService(secrets)` takes a `SecretStorageLike`; `AgentConversation` and `AgentRun` take their collaborators.
 
-**Barrel Files:**
-- None. There is no `index.ts` re-export layer; import directly from the module file.
+**Layering:**
+- `src/domain/` holds pure types, defaults, and validation with no `vscode` import (`config.ts`, `policy.ts`, `redaction.ts`, `version.ts`). Keep it free of side effects so it can be tested under plain Node.
+- `src/services/` holds stateful clients and stores; these may depend on `src/domain/`.
+- `src/agent/` holds tool execution, shell, checkpoints, and worktree logic.
+- `src/gsd/` holds the Open-GSD runtime integration.
+- Modules that need the extension host API import `vscode` directly (about 10 files under `src/`). Tests that need `vscode` intercept module loading (see TESTING.md).
 
-**Domain/service split:**
-- Put new data shapes in `src/domain/<concept>.ts` and the class that operates on them in `src/services/<concept>Service.ts` or `src/services/<concept>.ts`. Example pair: `src/domain/approval.ts` (types) and `src/services/approvalService.ts` (behavior).
-- New VS Code commands are registered in `src/extension.ts` inside the `context.subscriptions.push(...)` block; keep that pattern.
+## Where Conventions Are Not Yet Uniform
+
+- Some older modules pass plain objects while newer ones use named interfaces. When editing, follow the local file rather than refactoring.
+- Scripts in `scripts/` are `.mjs` ESM while `src/` is CommonJS-compiled TypeScript. Do not mix the two.
 
 ---
 
-*Convention analysis: 2026-10-26*
+*Convention analysis: 2026-10-27*

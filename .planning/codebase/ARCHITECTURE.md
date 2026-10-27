@@ -1,262 +1,250 @@
-<!-- refreshed: 2026-10-26 -->
+---
+last_mapped_commit: 0dd12e6e15b0daf804d8c3d1d896241992426082
+last_mapped_at: 2026-10-27
+---
+<!-- refreshed: 2026-10-27 -->
+
 # Architecture
 
-**Analysis Date:** 2026-10-26
+**Analysis Date:** 2026-10-27
 
 ## System Overview
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│                  VS Code Extension Host (Node, CJS)                   │
-│                         `src/extension.ts`                            │
-├───────────────────┬──────────────────────┬───────────────────────────┤
-│ Commands / Setup  │  Webview surfaces    │  Chat participant         │
-│ `src/services/    │  `src/services/      │  `vscode.chat.create-     │
-│  onboarding.ts`   │   panelView.ts`      │   ChatParticipant`        │
-│  `gsdCommands.ts` │  `src/services/      │  (in extension.ts)        │
-│  `gsdUpdater.ts`  │   chat.ts` (HTML +   │                           │
-│                   │   message router)    │                           │
-├───────────────────┴──────────┬───────────┴───────────────────────────┤
-│  Application services        │  Orchestration                         │
-│  `src/services/auth.ts`      │  `agentOrchestrator.ts`, `gsdRunner.ts`│
-│  `profileStore.ts`           │  `multimodalOrchestrator.ts`           │
-│  `providerFactory.ts`        │  `generationService.ts`                │
-│  `nearAiClient.ts`           │  `resumableExecution.ts`               │
-│  `stakingService.ts`         │  `capabilityRouter.ts`                 │
-├──────────────────────────────┴────────────────────────────────────────┤
-│  Policy / safety gates                                                 │
-│  `policyGate.ts`, `approvalService.ts`, `privacyPreflight.ts`,         │
-│  `memoryApproval.ts`, `walletAuthorization.ts`                         │
-├────────────────────────────────────────────────────────────────────────┤
-│  Pure domain model (no `vscode` import)  `src/domain/*.ts`             │
-├───────────────────────────────┬────────────────────────────────────────┤
-│  Local persistence            │  External systems                       │
-│  `<workspace>/.planning/      │  NEAR AI Cloud OpenAI-compatible API    │
-│   .near-ai/*.json`            │  Open-GSD CLI (child process, spawn)    │
-│  VS Code `SecretStorage`      │  npm registry (`@opengsd/gsd-core`)     │
-│  `<workspace>/.planning/      │  VS Code external URI opener            │
-│   HANDOFF.json`               │                                         │
-└───────────────────────────────┴────────────────────────────────────────┘
+│                     VS Code Extension Host (Node)                     │
+│  `src/extension.ts` (activate: commands, views, chat participant)     │
+├───────────────┬──────────────────────┬───────────────────────────────┤
+│  UI Adapters  │   Services (orchestr.)│   GSD Integration             │
+│ `services/    │ `services/chat.ts`   │ `gsd/runtime.ts`, `gsd/host.ts`│
+│  panelView.ts`│ `services/agentSession.ts`│ `gsd/library.ts`, `gsd/tools.ts`│
+│ `services/    │ `services/agentOrch…ts`│                               │
+│  chatParticipant.ts`│ `services/nearAiClient.ts` │                    │
+├───────────────┴──────────────────────┴───────────────────────────────┤
+│                 Agent Runtime  `src/agent/`                           │
+│  loop.ts (AgentRun) · tools.ts · permissions.ts · workspace.ts ·      │
+│  shell.ts · checkpoints.ts · context.ts · teams.ts · worktree.ts      │
+├──────────────────────────────────────────────────────────────────────┤
+│                 Domain Models & Pure Policy  `src/domain/`            │
+│  policy.ts · auth.ts · routing.ts · privacy.ts · redaction.ts · …      │
+├──────────────────────────────────────────────────────────────────────┤
+│  Persistence (VS Code storage / files)                                │
+│  `services/profileStore.ts` · `transcripts.ts` · `activityStore.ts`   │
+│  `analyticsStore.ts` · `auditStore.ts` · `contextGraphStore.ts`       │
+└──────────────────────────────────────────────────────────────────────┘
+        │ HTTPS (TEE-backed NEAR AI endpoints)     │ child processes
+        ▼                                          ▼
+   NEAR AI model API (`services/nearAiClient.ts`)  `agent/shell.ts`, `gsd/runtime.ts`
 ```
+
+Webview UI (`media/chat/chat.js`, `markdown.js`, `chat.css`) runs in a sandboxed VS Code webview and communicates with the host only through typed `postMessage` payloads defined in `src/services/chatBridge.ts` (`ChatWebviewMessage`, `ContextGraphWebviewMessage`, `MultimodalWebviewMessage`, `TeamWebviewMessage`).
 
 ## Pattern Overview
 
-**Overall:** Layered VS Code extension with a pure domain core, a service layer that owns I/O and side effects, and a webview message router that acts as the only UI boundary. Policy gates sit between requested actions and execution.
+**Overall:** Layered VS Code extension with a host-side agent runtime. Orchestration services sit on top of a pure-TypeScript agent loop and a domain layer of policy and data types. The UI is a set of webviews driven by message passing.
 
 **Key Characteristics:**
-- Single entry point (`src/extension.ts`) that wires services into VS Code commands, a webview view provider, and an optional chat participant. There is no DI container; services are constructed inline with explicit arguments.
-- Domain modules in `src/domain/` are pure TypeScript (types, validators, pure builders, redaction). Verified: no file under `src/domain/` imports `vscode`. This is the layer to put business rules that must be unit-testable without the host.
-- Services in `src/services/` depend on `vscode` (UI, secrets, webviews) and `node:fs`/`node:child_process`. Persistence classes take an injectable `fileSystem` object (for example `activityStore.ts`, `profileStore.ts`, `teamStudio.ts`, `contextGraphStore.ts`) so tests can replace disk I/O.
-- The chat webview is the full workspace UI. All UI→host traffic is a typed message (`parseChatWebviewMessage` in `src/services/chatBridge.ts`) dispatched by a large `onDidReceiveMessage` switch in `src/services/chat.ts`. Host→UI replies are built by pure message builders in `chatBridge.ts` (for example `multimodalStatusMessage`, `generationStatusMessage`, `walletStatusMessage`) and then sanitized before `postMessage`.
-- Side-effecting operations follow a preview → approve → execute pattern: `generationService.ts` (`preview`, `approve`, `publishOperation`), `multimodalOrchestrator.ts` (prepare/approve/cancel), `memoryApproval.ts` (`MemoryApprovalRegistry.create`), `stakingService.ts` (`createPreview`, `confirmPreview` with fingerprint), and `approvalService.ts`. The UI receives the preview, the user confirms, and the host re-checks a fingerprint before acting.
-- Writes to the workspace go through "managed boundary" paths under `.planning/.near-ai/`, and writes use temp-file-then-rename for atomicity (for example `activityStore.ts` line ~110, `auditStore.ts` line ~50, `resumableExecution.ts` `persist`).
+- Single compiled CommonJS bundle path: `tsc -p tsconfig.json` emits `src/**` to `dist/` (no bundler). Entry point is `dist/extension.js` (`package.json` `main`).
+- Activation is gated: `activationEvents` is `workspaceContains:.planning/.near-ai/**`, so the extension only loads in NEAR AI-initialized projects; commands contributed in `package.json` still register through `activate()`.
+- Pure-ish layers: `src/domain/*` and `src/agent/*` are free of `vscode` imports (verified: no `from 'vscode'` in `src/domain` or `src/agent`), which keeps them testable with `node --test` against `dist/test/*.test.js`.
+- Ports-and-adapters flavor for I/O: `ProcessRunner` (`src/gsd/runtime.ts`), `ShellSession` (`src/agent/shell.ts`), and `NearAiClient` (`src/services/nearAiClient.ts`) are injected into higher layers.
+- Policy gating before side effects: every agent tool call passes `decidePermission` (`src/agent/permissions.ts`) and action capability policy (`src/domain/policy.ts`, `src/services/policyGate.ts`) before execution; emergency stop (`src/services/emergencyStop.ts`) is checked globally.
+- Event-driven streaming: the agent loop emits `AgentEvent`s (`src/agent/loop.ts`) that the chat service forwards to the webview as incremental messages.
 
 ## Layers
 
-**Extension bootstrap / host integration:**
-- Purpose: Register commands, the secondary-sidebar webview, and the chat participant; construct long-lived services.
+**Extension Shell (composition root):**
+- Purpose: Register commands, webview providers, chat participant, and wire stores/services together.
 - Location: `src/extension.ts`
-- Contains: `activate`, `deactivate`, command handlers, setup input flows (`configureApiKey`, `saveProfileCredential`), `showStatus`, `saveCheckpoint`.
-- Depends on: `services/auth`, `services/profileStore`, `services/gsdUpdater`, `services/settings`, `services/onboarding`, `services/chat`, `services/gsdCommands`, `services/stakingService`, `services/chatBridge` (for `walletStatusCopy`), `services/panelView`, `services/handoff`, `domain/redaction`, `domain/auth`.
-- Used by: VS Code extension host (via `package.json` `main: ./dist/extension.js`).
+- Contains: `activate()` / `deactivate()`, `registerCommand` calls, `registerWebviewViewProvider`, `registerChatParticipant`, `registerWorkspaceCommands`, `initEmergencyStop`.
+- Depends on: `services/*`, `gsd/runtime`, `domain/config`, `domain/auth`
+- Used by: VS Code host only. Exports `NearAiTestApi` (`{ auth, sidebar }`) for tests.
 
-**Webview surfaces:**
-- Purpose: Host the chat UI either as a secondary-sidebar view or as an editor-column panel.
-- Location: `src/services/panelView.ts` (`NearAiPanelViewProvider`, view id `nearAiChatView`), `src/services/chat.ts` (`openChat`, `attachChatToView`, `initializeChat`, inline HTML in `chatHtml2`), `src/services/onboarding.ts` (onboarding HTML).
-- Contains: HTML template strings with inline script; message switch; wallet status panel wrapper (`withWalletStatusPanel`).
-- Depends on: nearly every service (chat.ts imports ~40 modules), `services/chatBridge.ts` for message types and builders.
-- Used by: `extension.ts` only.
+**UI Adapters (services layer, VS Code-facing):**
+- Purpose: Own VS Code objects (webviews, chat participant, tree/quick picks, commands).
+- Location: `src/services/panelView.ts`, `src/services/chat.ts` (webview panels via `attachChatToView`, `openTools`), `src/services/chatParticipant.ts`, `src/services/workspaceCommands.ts`, `src/services/onboarding.ts`, `src/services/handoff.ts`
+- Contains: `NearAiPanelViewProvider` (sidebar `WebviewViewProvider`, `retainContextWhenHidden: true`), HTML generators (`sidebarHtml`, `chatWebviewHtmlForTest`).
+- Depends on: `services/chat`, `services/chatBridge`, `services/auth`
+- Used by: `src/extension.ts`
 
-**Message contract (UI boundary):**
-- Purpose: Define and validate every message between webview and host; shape host→UI payloads and strip sensitive fields.
-- Location: `src/services/chatBridge.ts` (~750 lines), `src/domain/chatProgress.ts` (`normalizePrompt`, `PromptResponse`, `safeProgressText`).
-- Contains: `ChatWebviewMessage`, `TeamWebviewMessage`, `parseChatWebviewMessage`, `*Message` builders, `sanitizeContextGraphNode`, `cloneWallet`, `walletErrorMessage`, `profileStatusMessage`.
-- Depends on: domain types only, plus `CapabilityRouter`, `validateMemberContract`.
-- Used by: `chat.ts`, and tests in `src/test/chatBridge.test.ts`, `src/test/chatProgress.test.ts`.
+**Chat / Session Orchestration (services layer):**
+- Purpose: Route webview messages to agent sessions, providers, and stores; render transcripts, progress cards, and approvals.
+- Location: `src/services/chat.ts` (951 lines, largest service; handles `postMessage` dispatch at ~line 111), `src/services/chatBridge.ts` (message types and message builders), `src/services/agentSession.ts` (`AgentConversation` class at ~line 90)
+- Contains: `AgentConversation` (multi-turn state, compaction, subagent spawning at ~line 378), `GsdContext`, `AgentTurnRequest`, `findSkill`, `visibleTurns`.
+- Depends on: `agent/loop`, `agent/context`, `gsd/host`, `services/nearAiClient`, `services/providerCache`, `services/outboundGuard`, stores
+- Used by: `services/panelView.ts`, `services/chatParticipant.ts`
 
-**Application services:**
-- Purpose: Implement features that run on the host.
-- Location: `src/services/*.ts` (36 files).
-- Contains: auth and credential handling, provider factory and NEAR AI client, agent orchestration, routing, memory, multimodal intake, generation, staking, team studio, analytics, audit, reputation, GSD runner and updater.
-- Depends on: `domain/*`, `node:fs/promises`, `node:child_process`, `vscode` where UI is needed.
-- Used by: `chat.ts`, `extension.ts`, and other services (for example `agentOrchestrator.ts` composes `AgentProfileStore`, `PolicyGate`, `CapabilityRouter`, `ContextGraphMemory`, `TeamStudioStore`, `PrivacyPreflight`).
+**Agent Runtime (agent layer):**
+- Purpose: Execute the model-driven tool loop with retries, approvals, checkpoints, and limits.
+- Location: `src/agent/`
+- Contains:
+  - `loop.ts`: `AgentRun` class (`run(messages, signal)`), `RETRY_DELAYS_MS`, `RunOutcome` (`completed | max-turns | cancelled`), `ApprovalRequest` / `ApprovalReply`.
+  - `tools.ts`: `AgentTool<I>` interface and `CORE_TOOLS` (read, write, edit, glob, grep, bash, bash_output, kill_shell, todo).
+  - `extraTools.ts`: additional tools, including project memory scope (`projectMemoryScope`).
+  - `permissions.ts`: `decidePermission`, `PermissionRules`, `RunGrants`.
+  - `workspace.ts`: `resolveInWorkspace`, `displayPath`, `ToolError` (path containment).
+  - `shell.ts`: `ShellSession`, `truncate`, timeouts (`DEFAULT_TIMEOUT_MS`, `MAX_TIMEOUT_MS`).
+  - `checkpoints.ts`, `diff.ts`, `glob.ts`, `attachments.ts`, `context.ts` (token estimation, compaction), `systemPrompt.ts`, `teams.ts`, `worktree.ts`.
+- Depends on: `domain/policy` (types), `services/nearAiClient` (types only; `import type`)
+- Used by: `services/agentSession.ts`, `services/chat.ts`
 
-**Policy and approval gates:**
-- Purpose: Decide whether an action may run, and require explicit user approval for writes, network, shell, git, wallet, and memory mutations.
-- Location: `src/domain/policy.ts` (`defaultActionPolicy`, `ActionCapability`), `src/services/policyGate.ts`, `src/services/approvalService.ts`, `src/services/privacyPreflight.ts`, `src/services/memoryApproval.ts`, `src/services/walletAuthorization.ts`, `src/services/capabilityRouter.ts`.
-- Contains: capability checks, approval registries keyed by operation id, fingerprinted previews.
-- Depends on: `domain/policy`, `domain/capabilities`, `domain/privacy`.
-- Used by: `agentOrchestrator.ts`, `multimodalOrchestrator.ts`, `generationService.ts`, `chat.ts`.
+**Domain (pure models and policy):**
+- Purpose: Types, decision functions, and redaction/privacy rules shared across layers.
+- Location: `src/domain/`
+- Contains: `policy.ts` (`ActionCapability`, `decideAction`, `defaultActionPolicy`), `routing.ts`, `agents.ts`, `teamStudio.ts`, `capabilities.ts`, `privacy.ts`, `redaction.ts`, `contextGraph.ts`, `continuity.ts`, `gsdStatus.ts`, `gsdCommands.ts`, `chatProgress.ts`, `config.ts` (`createDefaultSettings`, `isSecureEndpoint`), `auth.ts`, `version.ts`, `staking.ts`, `multimodal.ts`, `generation.ts`, `motion.ts`, `activity.ts`, `analytics.ts`.
+- Depends on: nothing in `services` except one `import type` in `domain/auth.ts` (`NearAiClient`).
+- Used by: every layer above.
 
-**Provider / inference layer:**
-- Purpose: Talk to NEAR AI Cloud (OpenAI-compatible) and map errors and usage.
-- Location: `src/services/nearAiClient.ts` (`NearAiClient`, `NearAiError`, ~480 lines), `src/services/providerFactory.ts` (`createNearAiProvider` resolves a scoped credential via `AuthService` and a `ResolvedProvider`), `src/services/generationService.ts` (`NearAiGenerationAdapter`).
-- Depends on: `services/auth`, `domain/auth`, `domain/generation`.
-- Used by: `chat.ts`, `multimodalOrchestrator.ts`, `generationService.ts`.
+**Services (infrastructure and stores):**
+- Purpose: Talk to the NEAR AI API, persist state, enforce outbound and spend rules, manage wallets/staking/attestation.
+- Location: `src/services/`
+- Contains:
+  - Provider/transport: `nearAiClient.ts` (`NearAiClient`, `NearAiError`, `StreamInterruptedError`, `estimateCostUsd`), `providerFactory.ts` (`createNearAiProvider`, `validateNearAiProvider`), `providerCache.ts` (`activeProvider`, `clientFor`, `clearProviderCache`), `attestation.ts` (response verification).
+  - Auth & identity: `auth.ts` (`AuthService`), `profileStore.ts`, `walletAuthorization.ts`, `onboarding.ts`.
+  - Policy & safety: `policyGate.ts` (`PolicyGate`), `privacyPreflight.ts`, `outboundGuard.ts` (`OutboundGuard`, `spentTodayUsd`), `approvalService.ts`, `memoryApproval.ts`, `emergencyStop.ts`.
+  - Agents & teams: `agentOrchestrator.ts` (`AgentOrchestrator`, `invokeBoundTeam`), `agentProfiles.ts`, `agentTeams.ts`, `capabilityRouter.ts`, `reputation.ts`, `fleetView.ts`, `teamStudio.ts` (`TeamStudioStore`), `resumableExecution.ts`.
+  - Memory & data: `contextGraphStore.ts`, `contextGraphMemory.ts`, `transcripts.ts` (`TranscriptStore`), `activityStore.ts`, `analyticsStore.ts`, `auditStore.ts`, `handoff.ts`.
+  - Multimodal & generation: `multimodalIntake.ts`, `multimodalOrchestrator.ts`, `generationService.ts`, `stakingService.ts`.
+  - Settings & project: `settings.ts` (`readSettings`, `readAgentLimits`, `readModelTiers`), `projectInitialization.ts`, `gsdCommands.ts` (`chooseGsdCommand`).
+- Depends on: `domain/*`, `agent/*` (types and rules), VS Code APIs (`vscode.workspace`, `vscode.SecretStorage` via `auth.ts`).
+- Used by: `chat.ts`, `extension.ts`, `agentOrchestrator.ts`.
 
-**Domain model:**
-- Purpose: Types, pure builders, validators, and policy data, with no VS Code dependency.
-- Location: `src/domain/*.ts` (22 files, for example `auth.ts`, `agents.ts`, `routing.ts`, `policy.ts`, `contextGraph.ts`, `multimodal.ts`, `generation.ts`, `staking.ts`, `teamStudio.ts`, `gsdStatus.ts`, `gsdCommands.ts`, `redaction.ts`, `privacy.ts`, `version.ts`).
-- Depends on: nothing inside the project (types are imported by services and by `chatBridge.ts`).
-- Used by: every other layer.
-
-**Open-GSD integration:**
-- Purpose: Run Open-GSD commands and read `.planning/` state.
-- Location: `src/services/gsdRunner.ts` (`GsdRunner`, `spawn` with `shell: false` and `buildInvocation` argv builder), `src/services/gsdUpdater.ts` (`GsdUpdater.start` checks the stable `@opengsd/gsd-core` channel at startup and periodically), `src/services/gsdCommands.ts` (VS Code quick pick), `src/domain/gsdCommands.ts` (`GSD_COMMANDS` catalog), `src/domain/gsdStatus.ts` (`parseGsdPlanningState`, `formatGsdStatusLine`).
-- Depends on: `node:child_process`, `domain/gsdCommands`, `domain/chatProgress`.
-- Used by: `chat.ts`, `extension.ts`.
+**GSD Integration (gsd layer):**
+- Purpose: Install, version-check, and expose the external `@opengsd/gsd-core` package (`GSD_PACKAGE` in `src/gsd/runtime.ts`) as commands, skills, and agents.
+- Location: `src/gsd/`
+- Contains:
+  - `runtime.ts`: `GsdRuntime` (install/update), `startRuntimeUpdates` (24h interval, `UPDATE_INTERVAL_MS`), `selfTest`, `gsdShellEnv`, `isNearAiProject`, `ProcessRunner`.
+  - `host.ts`: `GsdHost` (exposes command list `GsdCommandInfo`, builds `GsdContext`).
+  - `library.ts`: `loadAgents`, `loadSkills` (reads GSD skill/agent markdown).
+  - `tools.ts`: GSD-specific tool wiring.
+- Depends on: `domain/version`, `services/agentSession` (type `GsdContext`).
+- Used by: `extension.ts`, `services/chat.ts`.
 
 ## Data Flow
 
-### Primary Request Path (chat prompt dispatch)
+### Primary Request Path (chat message to model reply)
 
-1. Webview posts a message; `parseChatWebviewMessage` in `src/services/chatBridge.ts` validates it.
-2. `initializeChat` message switch in `src/services/chat.ts` (`panel.webview.onDidReceiveMessage`, around line 84) routes by `message.type`.
-3. Active profile and scoped credential are resolved through `ProfileStore` (`src/services/profileStore.ts`) and `AuthService` (`src/services/auth.ts`), then `createNearAiProvider` (`src/services/providerFactory.ts`) builds a `NearAiClient` (`src/services/nearAiClient.ts`).
-4. Privacy and policy checks run (`src/services/privacyPreflight.ts`, `src/services/policyGate.ts`); the request is streamed to NEAR AI.
-5. Progress and assistant turns are appended via `appendAssistantTurn` / `appendUserTurn` and posted back as sanitized messages (`chatBridge.ts` builders).
-6. Usage and activity are recorded through `ActivityStore` (`src/services/activityStore.ts`) and `AnalyticsStore` (`src/services/analyticsStore.ts`).
+1. Webview posts a `ChatWebviewMessage` (e.g., send prompt) handled in `src/services/chat.ts` `panel.webview.onDidReceiveMessage` (~line 111).
+2. Attachments are staged via `src/agent/attachments.ts` (`prepareAttachments`, `stageAttachment`); multimodal intake via `src/services/multimodalIntake.ts`.
+3. `chat.ts` resolves the active provider (`src/services/providerCache.ts` → `providerFactory.ts` → `auth.ts`) and checks `outboundGuard.ts` budget and `emergencyStop.ts`.
+4. `AgentConversation` (`src/services/agentSession.ts`) builds the system prompt (`src/agent/systemPrompt.ts`) and creates an `AgentRun` (`src/agent/loop.ts`, constructed at ~line 153).
+5. `AgentRun.run()` calls `NearAiClient` (`src/services/nearAiClient.ts`) for streamed completions; tool calls are gated by `decidePermission` (`src/agent/permissions.ts`), approval prompts emitted as `ApprovalRequest`, and executed via `CORE_TOOLS` (`src/agent/tools.ts`).
+6. Retries use `RETRY_DELAYS_MS` (2s to 60s); stream stalls raise `StreamInterruptedError` and are recovered without user input (per commit 7a1ac30).
+7. `AgentEvent`s stream back; `chat.ts` posts `notice`, progress, and transcript messages to the webview; `TranscriptStore` and `AnalyticsStore` persist the turn and cost (`estimateCostUsd`).
 
-### Open-GSD command path
+### Subagent / Team Path
 
-1. User picks a command via `nearAi.gsdCommand` (`src/services/gsdCommands.ts`) or a chat message.
-2. `chat.ts` creates a `GsdRunner` (`src/services/gsdRunner.ts`) and calls `buildInvocation` to produce argv (no shell string).
-3. `GsdRunner` spawns the installed Open-GSD runtime; events are emitted as `GsdProgressEvent` and mapped through `progressCardFromEvent` (`src/domain/chatProgress.ts`).
-4. Planning artifacts under `.planning/` are read by `discoverGsdArtifacts` and `parseGsdPlanningState`.
+1. `AgentConversation` spawns child `AgentRun` instances (`src/services/agentSession.ts` ~line 378) bounded by `readAgentLimits().maxParallelAgents`.
+2. `AgentOrchestrator` (`src/services/agentOrchestrator.ts`) performs routing (`capabilityRouter.ts`, `domain/routing.ts`), privacy preflight (`privacyPreflight.ts`), and policy checks (`policyGate.ts`) before deploying an `OrchestratedAgent`.
+3. Team invocations bind to `TeamStudioStore` (`src/services/teamStudio.ts`) via `invokeBoundTeam`.
 
-### Preview → approve → execute (multimodal, generation, memory, wallet)
+### GSD Command Path
 
-1. Service creates a record and a preview with a fingerprint (`MultimodalOrchestrator.prepare`, `GenerationService.preview`, `MemoryApprovalRegistry.create`, `StakingService.createPreview`).
-2. Host posts the preview to the UI (`*PreviewMessage` builders).
-3. User confirms; UI echoes the fingerprint; host verifies it and calls `approve` / `confirmPreview({ explicit: true })`.
-4. Execution writes into a managed boundary (for example `.planning/.near-ai/multimodal/<id>.bin`, `src/services/multimodalIntake.ts` line ~108) and updates the operation record.
-
-### Agent team invocation
-
-1. `TeamStudioStore` (`src/services/teamStudio.ts`) holds accepted teams and a ledger.
-2. `invokeBoundTeam` in `src/services/agentOrchestrator.ts` checks `validateTeamBinding`, `PrivacyPreflight`, `CapabilityRouter.route`, and `PolicyGate`, then emits `AgentLifecycleEvent` values (`src/domain/routing.ts`).
+1. `nearAi.gsdCommand` / `nearAi.gsdProgress` commands (`src/extension.ts` ~lines 55-59) post `open-command` to the sidebar (`panelView.ts`).
+2. `chat.ts` resolves the GSD command via `GSD_COMMANDS` (`src/domain/gsdCommands.ts`) and `GsdHost` (`src/gsd/host.ts`), then runs it through the agent loop with GSD skill prompts from `src/gsd/library.ts`.
+3. Runtime installation and self-test run through `GsdRuntime` (`src/gsd/runtime.ts`), which shells out via `defaultProcessRunner`.
 
 **State Management:**
-- Extension-global secrets: VS Code `context.secrets` through `AuthService` (`src/services/auth.ts`). Keys are scoped per profile (`scopedSecret`).
-- Workspace state: JSON files under `<workspace>/.planning/.near-ai/` (`profileStore`, `agentOrchestrator`, `contextGraphStore`, `activityStore`, `auditStore`, `teamStudio`, `multimodal`, `resumableExecution`, `agent-profiles`). Each writes via temp file and rename.
-- Continuity handoffs: `src/services/handoff.ts` writes `<workspace>/.planning/HANDOFF.json`.
-- In-memory: per-panel `state` object in `initializeChat` (`chat.ts`) holds the abort controller, selected model, and conversation history.
+- Session state lives in memory inside `AgentConversation` and `AgentOrchestrator` instances, rebuilt per chat panel.
+- Durable state lives in VS Code `globalState`/`SecretStorage` (profiles, credentials via `auth.ts`/`profileStore.ts`) and in project files under `.planning/.near-ai/` (activation marker and project data).
+- Emergency stop is a process-wide flag in `src/services/emergencyStop.ts` with change events (`onDidChangeEmergencyStop`).
 
 ## Key Abstractions
 
-**`AuthService` and scoped credentials:**
-- Purpose: Store and retrieve API keys and refresh tokens in VS Code SecretStorage, keyed per profile scope.
-- Examples: `src/services/auth.ts`, `src/domain/auth.ts` (`OrganizationProfile`, `ProjectCredentialScope`, `deriveProfileId`).
-- Pattern: Secret-store wrapper; never write credentials to workspace files.
+**AgentTool:**
+- Purpose: Uniform description of a tool the model can call (schema, capability, preview, execute).
+- Examples: `src/agent/tools.ts` (`readTool`, `bashTool`), `src/agent/extraTools.ts`
+- Pattern: Generic interface `AgentTool<I>` with a typed input record; registry is the `CORE_TOOLS` array plus extras.
 
-**`ProfileStore`:**
-- Purpose: Per-workspace project profiles (organization, base URL, validation status, active profile).
-- Examples: `src/services/profileStore.ts` (persists to `.planning/.near-ai/auth-profiles.json`).
-- Pattern: Repository with injectable `fileSystem`; `validate()` calls the provider.
+**AgentRun / AgentConversation:**
+- Purpose: `AgentRun` is one bounded model-tool loop; `AgentConversation` is the multi-turn session that owns messages, compaction, and child runs.
+- Examples: `src/agent/loop.ts`, `src/services/agentSession.ts`
+- Pattern: Event emitter via typed `AgentEvent` union; `AbortSignal` for cancellation.
 
-**`NearAiClient` and `NearAiError`:**
-- Purpose: Typed client for NEAR AI Cloud chat, models, and usage endpoints.
-- Examples: `src/services/nearAiClient.ts`.
-- Pattern: Adapter over OpenAI-compatible HTTP; errors normalized through `NearAiError` and `providerErrorMessage`.
+**ActionCapability / ActionPolicy:**
+- Purpose: Classify every side effect (file write, shell, network, spend) and decide allow / approval-required / deny.
+- Examples: `src/domain/policy.ts` (`decideAction`), `src/services/policyGate.ts`
+- Pattern: Pure decision function over a policy mode (`approve-risky`, `mostly-autonomous`, `fully-autonomous`).
 
-**`PolicyGate` and `ActionCapability`:**
-- Purpose: Map requested actions (file write, shell, network, git, wallet) to allow/ask/deny under `ActionPolicy` from `src/domain/policy.ts`.
-- Examples: `src/services/policyGate.ts`, `src/domain/policy.ts`.
-- Pattern: Policy object plus gate function; settings-driven mode through `src/services/settings.ts`.
+**Provider / Client:**
+- Purpose: Abstract the NEAR AI endpoint behind a validated, cached client.
+- Examples: `src/services/nearAiClient.ts` (`NearAiClient`), `src/services/providerFactory.ts`, `src/services/providerCache.ts`
+- Pattern: Factory + cache keyed by profile; endpoint must pass `isSecureEndpoint` (`src/domain/config.ts`).
 
-**`ContextGraphMemory`:**
-- Purpose: Local graph of project memory with scopes, slices for agent tasks, and approval-gated mutations.
-- Examples: `src/services/contextGraphMemory.ts`, `src/services/contextGraphStore.ts`, `src/domain/contextGraph.ts`, `src/services/memoryApproval.ts`.
-- Pattern: Store + service + approval registry; slices filter by `localOnly` and `providerBoundary`.
-
-**`MultimodalOrchestrator` and `GenerationService`:**
-- Purpose: Long-running, resumable operations (attachments and media generation) with status records.
-- Examples: `src/services/multimodalOrchestrator.ts`, `src/services/generationService.ts`, `src/services/multimodalIntake.ts`, `src/services/resumableExecution.ts`.
-- Pattern: Operation record state machine with `operationId`; approval before publish or write.
-
-**`StakingService`:**
-- Purpose: Wallet entitlement status and staking previews. Currently constructed as `StakingService.unavailable()` in `extension.ts` (the status copy reports that writes are disabled).
-- Examples: `src/services/stakingService.ts`, `src/domain/staking.ts`, `src/services/walletAuthorization.ts`.
-- Pattern: Preview/confirm with fingerprint; history stored through the same operation model.
+**Store classes:**
+- Purpose: Persist one concern each (profiles, transcripts, activity, analytics, audit, context graph, team studio, reputation).
+- Examples: `src/services/profileStore.ts`, `src/services/transcripts.ts`, `src/services/auditStore.ts`, `src/services/contextGraphStore.ts`
+- Pattern: Class per store, injected into `chat.ts` / `AgentOrchestrator`.
 
 ## Entry Points
 
 **Extension activation:**
-- Location: `src/extension.ts` (`activate`), compiled to `dist/extension.js` (`package.json` `main`).
-- Triggers: `onStartupFinished`, `onCommand:nearAi.*`, `onView:nearAiChatView`, `onChatParticipant:nearAi` (see `package.json` `activationEvents`).
-- Responsibilities: Construct `AuthService`, start `GsdUpdater`, register commands, register the webview provider, register the chat participant when `vscode.chat.createChatParticipant` exists.
+- Location: `src/extension.ts` `activate(context)` (compiled to `dist/extension.js`)
+- Triggers: `workspaceContains:.planning/.near-ai/**` activation event, or command invocation.
+- Responsibilities: Create `AuthService`, `ProfileStore`, `GsdRuntime`; register sidebar, commands, chat participant, workspace commands; start GSD update timer.
 
-**Webview view provider:**
-- Location: `src/services/panelView.ts` (`NearAiPanelViewProvider.resolveWebviewView`).
-- Triggers: VS Code opening the secondary sidebar container `nearAiSecondaryViewContainer`.
-- Responsibilities: Enable scripts and delegate to `attachChatToView`.
+**Sidebar webview:**
+- Location: `src/services/panelView.ts` (`NearAiPanelViewProvider.viewId`), assets in `media/chat/`
+- Triggers: VS Code view container activity.
+- Responsibilities: Host chat UI; relays messages to `chat.ts`.
 
 **Chat participant:**
-- Location: inline in `src/extension.ts` (participant id `nearAi`).
-- Triggers: Native chat requests to `@nearAi`.
-- Responsibilities: Execute `nearAi.openChat` and return a button to the workspace.
+- Location: `src/services/chatParticipant.ts` (`registerChatParticipant`)
+- Triggers: Chat participant invocation in VS Code chat.
+- Responsibilities: Forwards requests to the sidebar via `sidebar.request({ type: 'open-command', ... })`.
 
-**Command handlers:**
-- Location: `src/extension.ts` `registerCommand` calls for `nearAi.setup`, `nearAi.status`, `nearAi.openChat`, `nearAi.gsdCommand`, `nearAi.gsdProgress`, `nearAi.saveCheckpoint`.
-
-**Build and release scripts:**
-- Location: `scripts/install-global-extension.mjs`, `scripts/verify-release-content.mjs`, `scripts/generate-near-ai-icon.mjs`, `scripts/generate-marketplace-gifs.mjs`.
-- Triggers: `npm run install:global`, `npm run verify:release`, `npm run generate:icon`.
+**Test entry:**
+- Location: `src/test/*.test.ts` compiled to `dist/test/*.test.js`, run by `npm test` (`node --test`); e2e harness at `src/test/e2e/run.ts` and `suite.ts` (`npm run test:e2e`, needs xvfb).
 
 ## Architectural Constraints
 
-- **Threading:** Single-threaded VS Code extension host (Node event loop). Long work is `async`; the Open-GSD runtime runs as a child process (`gsdRunner.ts`) so it does not block the host. `AbortController` is used for cancellation in `chat.ts` (`state.abort`).
-- **Global state:** Module-level singletons are avoided; the only process-wide objects are the VS Code `ExtensionContext` passed through `activate`, and per-panel `state` objects created inside `initializeChat`. `StakingService.unavailable()` is constructed per status call in `extension.ts`.
-- **Circular imports:** None observed in the import headers of `src/extension.ts`, `src/services/chatBridge.ts`, or `src/services/agentOrchestrator.ts`. `chat.ts` imports `type` declarations from `chatBridge.ts` and `chatBridge.ts` imports `CapabilityRouter`/`validateMemberContract` from services, so keep type-only imports in `chatBridge.ts` to avoid cycles. Not exhaustively verified across all 36 services.
-- **Domain purity:** `src/domain/` must not import `vscode`, `node:fs`, or `node:child_process`. Verified for current files via grep for `vscode` imports; keep it that way.
-- **Build output:** Compiled from `src/**/*.ts` to `dist/` with `tsconfig.json` (`rootDir: src`, `module: commonjs`, `target: ES2022`, `strict: true`). Tests compile into `dist/test/` and run with `node --test`.
-- **Workspace boundary:** All extension-owned workspace writes live under `.planning/` (`.planning/.near-ai/`, `.planning/HANDOFF.json`). Keys must never be written to workspace files.
+- **Threading:** Single-threaded VS Code extension host event loop. Concurrency is async/await; parallel agents are bounded by `maxParallelAgents`. Shell tasks run as child processes via `ShellSession`.
+- **Global state:** Module-level emergency-stop state (`src/services/emergencyStop.ts`), provider cache (`src/services/providerCache.ts`), and process-wide `ShellSession` registry (`src/agent/shell.ts`).
+- **Layering rule (observed, not enforced):** `src/domain` must not import `vscode` (currently holds). Known exceptions where lower layers import services for types or behavior:
+  - `src/domain/auth.ts` → `src/services/nearAiClient.ts` (type only)
+  - `src/agent/attachments.ts`, `src/agent/context.ts`, `src/agent/loop.ts`, `src/agent/extraTools.ts` → `src/services/nearAiClient.ts` / `contextGraphMemory.ts` (types only)
+  - `src/agent/teams.ts` → `src/services/agentTeams.ts` (runtime import, not type-only)
+- **Circular imports:** Not catalogued. `agent/*` and `services/*` reference each other across the type boundary; avoid adding runtime cycles.
+- **Build output:** Compiled with `tsc` without bundling; all `src` files are shipped as individual `dist/` modules. Do not add non-Node runtime imports to `src/domain` or `src/agent`.
+- **Webview security:** Webview HTML uses a CSP with `cspSource`; messages must be validated by `parseChatWebviewMessage` in `src/services/chatBridge.ts` before use.
 
 ## Anti-Patterns
 
-### Oversized chat controller
+### Growing `chat.ts` as the catch-all dispatcher
 
-**What happens:** `src/services/chat.ts` (~890 lines) holds the entire webview HTML (`chatHtml2`, line ~779), the message switch for every feature (memory, multimodal, generation, wallet, team, GSD), and per-panel state.
-**Why it's wrong:** Every new feature adds branches to one `onDidReceiveMessage` handler, which increases the risk of cross-feature regressions and makes the HTML and TypeScript hard to review together.
-**Do this instead:** Add a feature-specific handler module under `src/services/` that exports a function taking `(message, host, deps)` and returns a message to post. Register it in the switch in `chat.ts` with one line. Put any new message type in `chatBridge.ts` with a parser and a builder.
+**What happens:** `src/services/chat.ts` (951 lines) handles every webview message type (chat, attachments, teams, wallet, memory, multimodal, generation) inside one `onDidReceiveMessage` handler.
+**Why it's wrong:** Every new feature widens one file that also owns session lifecycle and provider resolution, making regressions likely and tests coupled.
+**Do this instead:** Add a dedicated module under `src/services/` (like `teamStudio.ts` or `multimodalOrchestrator.ts`) exposing a handler, and register its message types in `src/services/chatBridge.ts` with a single delegating case in `chat.ts`.
 
-### Message builders that also parse
+### Runtime import from agent layer into services
 
-**What happens:** `src/services/chatBridge.ts` mixes type definitions, `parseChatWebviewMessage` validation, outbound builders, and display copy helpers (`walletStatusCopy`, `walletErrorMessage`).
-**Why it's wrong:** The file is ~750 lines and imported by both the host and `extension.ts`, so changes to copy couple to the message contract.
-**Do this instead:** Keep new outbound copy helpers near the feature domain module (for example `src/domain/staking.ts`), and keep `chatBridge.ts` focused on the message schema.
+**What happens:** `src/agent/teams.ts` imports `recommendAgentTeam` from `src/services/agentTeams.ts` at runtime.
+**Why it's wrong:** It inverts the intended direction (agent runtime should not depend on orchestration services) and is the only runtime edge of this kind.
+**Do this instead:** Move the pure recommendation logic into `src/domain/agents.ts` or `src/domain/teamStudio.ts` and import it from both sides.
 
-### Services that read `vscode` directly for logic
+### Module-level mutable state for shared resources
 
-**What happens:** `src/services/settings.ts`, `src/services/onboarding.ts`, and `src/services/gsdCommands.ts` import `vscode` and contain business decisions (action policy mode, quick pick filtering).
-**Why it's wrong:** Those decisions can only be tested with the VS Code host and cannot run in the pure domain test path.
-**Do this instead:** Move the decision into a pure function in `src/domain/` (for example `src/domain/config.ts` already holds config shape) and pass the already-read `vscode` values in as arguments.
-
-### Inline webview HTML and scripts
-
-**What happens:** Webview markup and client script are template strings in `src/services/chat.ts` (`chatHtml2`) and `src/services/onboarding.ts`.
-**Why it's wrong:** No type checking or linting for the client script; CSP and nonce handling are not separated from the logic.
-**Do this instead:** When changing the chat UI, keep the message names in sync with `chatBridge.ts` types and add a test in `src/test/chatBridge.test.ts` or `src/test/contextGraphUi.test.ts`.
+**What happens:** `providerCache.ts`, `emergencyStop.ts`, and the `ShellSession` registry hold singleton state at module scope.
+**Why it's wrong:** Tests must reset state between cases, and multiple panels share the same provider cache.
+**Do this instead:** Prefer instance state owned by `AuthService` or the extension composition root in `src/extension.ts`, and pass it down; when a singleton is required, expose an explicit reset used by tests (as `clearProviderCache` does).
 
 ## Error Handling
 
-**Strategy:** Typed error classes per service, converted to user-safe messages before crossing into the webview. Errors never carry raw provider payloads or secrets.
+**Strategy:** Typed errors with user-safe messages, retries for transient failures, and explicit approval/deny outcomes instead of thrown exceptions for policy decisions.
 
 **Patterns:**
-- Service-specific error classes: `NearAiError` (`nearAiClient.ts`), `GenerationError` (`generationService.ts`), `MultimodalOperationError` and `MultimodalIntakeError` (`multimodalOrchestrator.ts`, `multimodalIntake.ts`), `ContextGraphError` (`contextGraphMemory.ts`), `MemoryApprovalError` (`memoryApproval.ts`).
-- Message mapping through `safe*Error` helpers in `chat.ts` (for example `safeMultimodalError`, `safeGenerationError`, `safeMemoryError`) and `redactSecrets` (`src/domain/redaction.ts`) in `extension.ts`.
-- Writes are best-effort in some stores: failures remove the temporary file and continue (for example `resumableExecution.ts` `persist`, `auditStore.ts`). Generation storage failures are surfaced as `output-storage-failed`.
+- `NearAiError` and `StreamInterruptedError` (`src/services/nearAiClient.ts`) carry retryability; `classifyRetryableFailure(status, signal)` decides retry.
+- `ToolError` (`src/agent/workspace.ts`) for workspace containment and tool misuse; returned to the model as tool results rather than crashing the loop.
+- `providerErrorMessage` (`src/services/chatBridge.ts`) converts provider failures to UI notices.
+- `AgentRunError` (`src/agent/loop.ts`) for unrecoverable loop failures; `RunOutcome` reports `max-turns` and `cancelled` without throwing.
 
 ## Cross-Cutting Concerns
 
-**Logging:** No structured logger. Status is surfaced through `vscode.window` messages and `activityStore` / `auditStore` events. Analytics and audit are local JSON stores.
-
-**Validation:** Message validation in `chatBridge.ts` (`parseChatWebviewMessage`, `isPromptId`, `isSessionId`, `isProfileId`); path containment through `isSafeArtifactPath` and `normalizePrompt`; teams through `validateTeamBinding`.
-
-**Authentication:** API keys in VS Code SecretStorage via `AuthService`; project profile selection is explicit in Chat Setup before dispatch. NEAR account sign-in is staged but the token exchange is not configured (`extension.ts` `runSetup` message).
-
-**Redaction:** `src/domain/redaction.ts` (`redactSecrets`) is applied to any error text that reaches the UI or `showErrorMessage`.
+**Logging:** Transcripts (`src/services/transcripts.ts`) and activity events (`src/services/activityStore.ts`) instead of a logger; output routed to the chat panel.
+**Validation:** Webview message parsing in `src/services/chatBridge.ts` (`parseChatWebviewMessage`); endpoint validation via `isSecureEndpoint` (`src/domain/config.ts`); path containment via `resolveInWorkspace` (`src/agent/workspace.ts`); sensitive path blocking via `isSensitivePath` (`src/agent/tools.ts`).
+**Authentication:** Profile-based credentials held in `AuthService` (`src/services/auth.ts`) with derived profile IDs (`deriveProfileId` in `src/domain/auth.ts`); wallet authorization in `src/services/walletAuthorization.ts`.
+**Redaction and privacy:** `redactSecrets` (`src/domain/redaction.ts`) applied before outbound payloads; `OutboundGuard` (`src/services/outboundGuard.ts`) and `PrivacyPreflight` enforce privacy boundaries.
 
 ---
 
-*Architecture analysis: 2026-10-26*
+*Architecture analysis: 2026-10-27*

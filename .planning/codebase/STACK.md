@@ -1,104 +1,122 @@
+---
+last_mapped_commit: 0dd12e6e15b0daf804d8c3d1d896241992426082
+last_mapped_at: 2026-10-27
+---
 # Technology Stack
 
-**Analysis Date:** 2026-10-26
+**Analysis Date:** 2026-10-27
 
 ## Languages
 
 **Primary:**
-- TypeScript ^5.7.2 (devDependency, `package.json`) - all extension source under `src/` (about 11.7k lines across `src/domain/`, `src/services/`, `src/extension.ts`)
+- TypeScript 5.x (`^5.7.2`, devDependency) - All extension source under `src/` (`src/extension.ts`, `src/services/`, `src/domain/`, `src/agent/`, `src/gsd/`)
 
 **Secondary:**
-- JavaScript (ES modules, `.mjs`) - build and release helper scripts in `scripts/` (`scripts/verify-release-content.mjs`, `scripts/install-global-extension.mjs`, `scripts/generate-near-ai-icon.mjs`, `scripts/generate-marketplace-gifs.mjs`)
-- JavaScript (CommonJS) - compiled output in `dist/` (generated, not hand-edited)
-- SVG - webview markup built inline in `src/services/chat.ts` and `media/near-ai-vscode-icon.svg`
+- JavaScript (CommonJS output) - Compiled extension in `dist/` (entry `dist/extension.js`); webview scripts `media/chat/chat.js` and `media/chat/markdown.js`
+- CSS - Webview styling `media/chat/chat.css`
+- Markdown - Open-GSD planning artifacts under `.planning/` and docs under `docs/`
+- Node.js `.mjs` scripts - `scripts/generate-near-ai-icon.mjs`, `scripts/install-global-extension.mjs`, `scripts/verify-release-content.mjs`, `scripts/generate-marketplace-screenshots.mjs`
 
 ## Runtime
 
 **Environment:**
-- VS Code extension host, `engines.vscode` `>=1.90.0` (`package.json`)
-- Node.js runtime provided by VS Code's extension host; `@types/node` ^22.10.0 is used for typings
-- Compile target ES2022, module `commonjs` (`tsconfig.json`)
+- VS Code extension host (Electron-based), minimum `vscode >=1.101.0` (`package.json` `engines.vscode`), which runs extensions on Node 22 or later
+- Node.js runtime provided by the VS Code extension host; `@types/node` `^22.10.0` is used for typings
+- Extension activation: `workspaceContains:.planning/.near-ai/**` (`package.json` `activationEvents`)
+- Compile target: ES2022, module `commonjs` (`tsconfig.json`)
 
 **Package Manager:**
-- npm
-- Lockfile: present (`package-lock.json`, lockfileVersion tracked in repo)
+- npm (lockfile present: `package-lock.json`, `lockfileVersion: 3`)
+- Lockfile: present
 
 ## Frameworks
 
 **Core:**
-- VS Code Extension API (`vscode` module, `@types/vscode` ^1.90.0) - activation, commands, secondary-sidebar webview view (`nearAiChatView`), chat participant (`nearAi`), configuration, SecretStorage. Entry point `src/extension.ts`, compiled to `dist/extension.js` (`package.json` `main`).
-- Webviews - hand-rolled HTML with a per-load nonce and strict CSP (`src/services/onboarding.ts`, `src/services/panelView.ts`). No frontend framework.
+- VS Code Extension API (`vscode` module, `@types/vscode` `1.101.0`) - Commands, webview views, chat participant (`nearAi`), secondary sidebar container, configuration, SecretStorage
+- No UI framework: the chat UI is a hand-written webview (`media/chat/chat.js`, `media/chat/markdown.js`, `media/chat/chat.css`)
 
 **Testing:**
-- Node built-in test runner (`node --test`), no third-party test framework. Tests live in `src/test/*.test.ts`, compiled to `dist/test/` and run by `npm test`.
+- Node.js built-in test runner (`node:test`, `node:assert/strict`) - Run via `node --test dist/test/*.test.js` (`npm test`)
+- `@vscode/test-electron` `2.5.2` - Electron-hosted VS Code test harness used by the e2e suite (`src/test/e2e/run.ts`, `src/test/e2e/suite.ts`)
+- Headless e2e runs under `xvfb-run` (`npm run test:e2e`)
 
 **Build/Dev:**
-- TypeScript compiler `tsc` ^5.7.2 - `npm run compile` / `npm run watch` / `npm run lint` (`lint` is `tsc --noEmit`; there is no ESLint or Prettier config)
-- `@vscode/vsce` ^3.2.2 - packaging to `.vsix` (`npm run package`, `npm run verify:release`)
-- No bundler (no webpack, esbuild, or rollup config); `tsc` emits plain files to `dist/`
+- TypeScript compiler `tsc` - `npm run compile` / `npm run lint` (`--noEmit` type check)
+- `@vscode/vsce` `^3.2.2` - Packaging to `.vsix` (`npm run package`, `npm run verify:release`)
+- No bundler: `tsc` emits one JS file per source file into `dist/`
 
 ## Key Dependencies
 
 **Runtime dependencies:**
-- None declared. `package.json` has no `dependencies` block; `vsce` is run with `--no-dependencies`. The extension depends only on the VS Code host and Node built-ins.
+- None declared. `package.json` has no `dependencies` block; the extension uses only Node.js built-ins and the `vscode` API at runtime. Packages are bundled into the `.vsix` only through the `vsce` packaging step (`--no-dependencies` flag).
 
-**Node built-ins used (imported with the `node:` prefix):**
-- `node:crypto` - `randomUUID` for wallet state and nonces, hashing for digests (about 20 files)
-- `node:fs/promises`, `node:fs`, `node:path` - workspace file I/O for `.planning/` and Open-GSD state (about 25 files)
-- `node:child_process` - `spawn` in `src/services/gsdRunner.ts`, `execFile` in `src/services/gsdUpdater.ts`
-- `node:util` - `promisify` for `execFile`
-- Global `fetch`, `FormData`, `Blob`, `AbortSignal` - HTTP client in `src/services/nearAiClient.ts` (no HTTP library)
+**Node built-ins used heavily (from `src/**/*.ts`):**
+- `node:path`, `node:fs/promises`, `node:fs`, `node:os`, `node:crypto` - File access, project state, randomness/hashing
+- `node:child_process` - Shell tool, git worktree isolation, Open-GSD install (`src/agent/shell.ts`, `src/agent/tools.ts`, `src/agent/worktree.ts`, `src/gsd/runtime.ts`)
+- `node:net`, `node:dns/promises`, `node:http` - Endpoint and loopback validation (`src/domain/config.ts`, `src/gsd/tools.ts`)
+- `node:vm`, `node:module` - Sandboxed evaluation and module loading paths used by tests and tooling
 
-**Infrastructure / tooling (devDependencies):**
-- `@types/node` ^22.10.0 - Node typings
-- `@types/vscode` ^1.90.0 - VS Code typings, matches the `engines` floor
-- `@vscode/vsce` ^3.2.2 - extension packager
-- `typescript` ^5.7.2 - compiler
+**Dev dependencies (`package.json`):**
+- `@types/node` `^22.10.0` - Node typings
+- `@types/vscode` `1.101.0` - VS Code typings (pinned to the engine floor)
+- `pdfjs-dist` `6.4.299` - PDF text extraction; copied into `vendor/pdfjs` by `scripts/vendor-pdfjs.mjs` during `npm run compile` and shipped in the VSIX (the only third-party code at runtime)
+- `@vscode/test-electron` `2.5.2` - Electron test host
+- `@vscode/vsce` `^3.2.2` - Extension packager
+- `typescript` `^5.7.2` - Compiler
 
-**External CLIs invoked at runtime (not bundled):**
-- `codex` - Open-GSD runtime executable, spawned as `codex exec --cd <workspace> $gsd-<command>` (`src/services/gsdRunner.ts`, default executable name `'codex'`)
-- `npm` and `npx` - used to query and install `@opengsd/gsd-core` (`src/services/gsdUpdater.ts`)
+**External runtime tooling invoked as subprocesses:**
+- `npm` - `npm view @opengsd/gsd-core@latest version --json` to find the latest Open-GSD release (`src/gsd/runtime.ts`)
+- `npx --yes @opengsd/gsd-core@<version> --claude --global` - Installs Open-GSD into extension storage (`src/gsd/runtime.ts`)
+- `git` - Worktree isolation for sub-agents (`src/agent/worktree.ts`), with `GIT_TERMINAL_PROMPT=0`
 
 ## Configuration
 
-**Extension settings (`package.json` `contributes.configuration`):**
-- `nearAi.baseUrl` - default `https://cloud-api.near.ai/v1` (also defined in `src/domain/config.ts` as `DEFAULT_BASE_URL`)
-- `nearAi.authMode` - `apiKey` (default) or `nearAccount`
-- `nearAi.defaultModel` - optional model id
-- `nearAi.actionPolicy` - `approve-risky` (default), `mostly-autonomous`, `fully-autonomous`
-- `nearAi.autoInstallGsd` - boolean, default `true`
-
-**Secrets:**
-- Stored through VS Code `SecretStorage`, not on disk. Keys are defined in `src/services/auth.ts`: `nearAi.apiKey`, `nearAi.refreshToken`, plus per-project scoped keys (`scopedSecret(...)`, versioned by `SCOPED_SECRET_VERSION = 2`).
-
 **Environment:**
-- `.gitignore` excludes `.env` and `.env.*`. No `.env` file was present at the project root during analysis; its contents were not read.
-- The source does not read `process.env` for configuration.
+- Extension settings are declared in `package.json` under `contributes.configuration` with the `nearAi.*` prefix. Key settings:
+  - `nearAi.baseUrl` - default `https://cloud-api.near.ai/v1` (`src/domain/config.ts` `DEFAULT_BASE_URL`)
+  - `nearAi.defaultModel` - default `z-ai/glm-5.3` (`DEFAULT_MODEL`)
+  - `nearAi.privacyMode` - `standard` or `tee-only`
+  - `nearAi.actionPolicy` - `approve-risky` | `mostly-autonomous` | `fully-autonomous`
+  - `nearAi.agent.*` - sub-agent model tiers, parallelism (1-16), turn limit, command allow/deny lists, transcript saving, vision/transcription/image model IDs
+  - `nearAi.dailySpendLimitUsd` - client-side spend cap (0 = unlimited)
+  - `nearAi.autoInstallGsd` - default `true`
+- Environment variables read by code (no secret values recorded here):
+  - `NEAR_AI_API_KEY` - API key override used in tests and live runs
+  - `NEAR_AI_BASE_URL` - base URL override
+  - `NEAR_GSD_HOME` - Open-GSD home directory override (4 references in `src/`)
+  - `NEAR_LIVE_EVAL`, `NEAR_LIVE_EVAL_OUT`, `NEAR_LIVE_GSD`, `NEAR_LIVE_TRACE` - Opt-in live test switches (`src/test/live.test.ts`)
+  - `CI`, `VSCODE_TEST_VERSION`, `PATH` - Test and process environment
+- Credentials are stored in VS Code SecretStorage, not in files (`src/services/auth.ts`, `src/domain/auth.ts`)
+- `.env` and `.env.*` are git-ignored (`.gitignore`); `.aws/` directory exists at repo root (not read)
 
 **Build:**
 - `tsconfig.json` - `strict: true`, `rootDir: src`, `outDir: dist`, `sourceMap: true`, `skipLibCheck: true`, `include: ["src/**/*.ts"]`
-- `.vscodeignore` - excludes `src/**`, `scripts/**`, `.planning/**`, `.codex/**`, `.agents/**`, `dist/test/**`, source maps, and `node_modules/**` from the `.vsix`
-- `.gitignore` - excludes `node_modules/`, `dist/`, `*.vsix`, `.env*`, `.vscode-test/`, `.git-unusable-archive/`, `.git-real/`
+- `.vscodeignore` - Excludes `src/**`, `test/**`, `scripts/**`, `.planning/**`, `.codex/**`, `.agents/**`, `node_modules/**`, maps, and `*.tsbuildinfo` from the `.vsix`
+- `.gitignore` - Excludes `node_modules/`, `dist/`, `*.vsix`, `.env*`, `.vscode-test/`, `.planning/.near-ai/`, `.planning/HANDOFF.json`
 
-**Project tooling directories (not part of the product build):**
-- `.planning/` - GSD planning state (`config.json`, `state.json`, `ROADMAP.md`, `codebase/`)
-- `.codex/` - Codex/GSD installed runtime (`gsd-core/`, `hooks/`, `scripts/`, `config.toml`, `hooks.json`)
-- `.agents/` - GSD planning mirror and agent config
-- `.aws/` - present in the repo root; existence noted only, contents not read
+**Package scripts (`package.json`):**
+- `compile` - `tsc -p tsconfig.json`
+- `lint` - `tsc -p tsconfig.json --noEmit`
+- `test` - compile then `node --test dist/test/*.test.js`
+- `check` - `lint` then `test`
+- `package` - compile then `vsce package`
+- `verify:release` - package then `scripts/verify-release-content.mjs`
+- `test:e2e` - compile then headless VS Code e2e under `xvfb-run`
+- `generate:icon`, `generate:screenshots`, `install:global` - Asset and local-install helpers
 
 ## Platform Requirements
 
 **Development:**
-- Node.js and npm (version not pinned; no `.nvmrc` or `engines.node` present)
-- VS Code >= 1.90.0 for running the extension
-- `codex` CLI on `PATH` for Open-GSD commands
-- Commands: `npm install`, `npm run compile`, `npm test`, `npm run check` (lint + test)
+- Node.js and npm compatible with TypeScript 5.7 and `@types/node` 22
+- VS Code >= 1.101.0 for running the extension
+- `git` on PATH (worktree isolation, shell tool)
+- `xvfb-run` on Linux for `npm run test:e2e`
+- Optional: a local OpenAI-compatible runtime (`hybrid` or `local` provider profiles, `localBaseUrl`), reachable on `http://localhost` or `http://127.0.0.1`
 
-**Production / Distribution:**
-- Published as a VS Code extension `near-ai-vscode` version `0.2.1`, publisher `VitalPoint` (`package.json`)
-- Packaged as `.vsix` via `npm run package`; prebuilt `near-ai-vscode-*.vsix` artifacts for 0.1.0 through 0.2.1 are checked into the repo root
-- Entry point `dist/extension.js`; `"license": "MIT"`
+**Production:**
+- Distributed as a VS Code extension `.vsix` (publisher `VitalPoint`, name `near-ai-vscode`, version `0.4.0` in `package.json`)
+- Marketplace-installable; no server-side deployment. The extension runs entirely in the user's VS Code host.
 
 ---
 
-*Stack analysis: 2026-10-26*
+*Stack analysis: 2026-10-27*

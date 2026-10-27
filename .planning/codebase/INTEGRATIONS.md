@@ -1,115 +1,136 @@
+---
+last_mapped_commit: 0dd12e6e15b0daf804d8c3d1d896241992426082
+last_mapped_at: 2026-10-27
+---
 # External Integrations
 
-**Analysis Date:** 2026-10-26
+**Analysis Date:** 2026-10-27
 
 ## APIs & External Services
 
 **NEAR AI Cloud (primary inference provider):**
-- Base URL: `https://cloud-api.near.ai/v1` by default, overridable via `nearAi.baseUrl` (`src/domain/config.ts`, `package.json`)
-- Client: hand-written wrapper `NearAiClient` in `src/services/nearAiClient.ts` using global `fetch` (injectable via `fetchFn` option for tests)
-- Auth: `Authorization: Bearer <api key>` header, sent in `request()` in `src/services/nearAiClient.ts`
-- Endpoints called:
-  - `GET /models` - model catalog (`listModels`)
-  - `GET /models/pricing` - pricing metadata
-  - `POST /chat/completions` - non-streaming and streaming chat (`streamChat`, `streamChatEvents`; body sets `stream: true` for streaming)
-  - `POST /images/generations` - image generation (`generateImage`)
-  - `POST /images/edits` - multipart image edit (`editImage`, `FormData` with an `image` part)
-  - `GET /usage/{requestId}` - post-hoc usage and cost reconciliation (`reconcileUsage`)
-- Response metadata: request id, provider, token counts, and verification or attestation status are read from response headers and bodies (`metadataFromHeaders`, `usageFromPayload`, `normalizeModelInfo` in `src/services/nearAiClient.ts`). Models can report TEE/verification fields (`verification_status`, `tee_status`, `attestation_status`).
-- Provider wiring: `src/services/providerFactory.ts` (`createNearAiProvider`) resolves a provider from a validated organization profile. Dispatch is refused for `nearAccount` mode until token exchange exists.
+- Service: NEAR AI Cloud OpenAI-compatible API, default base URL `https://cloud-api.near.ai/v1` (`src/domain/config.ts` `DEFAULT_BASE_URL`; overridable via `nearAi.baseUrl` and `NEAR_AI_BASE_URL`)
+- Client: custom `fetch`-based client `NearAiClient` in `src/services/nearAiClient.ts` (no SDK package)
+- Endpoints used (paths relative to base URL):
+  - `GET /models` - model catalog (`nearAiClient.ts`, ~line 167)
+  - `GET /models/pricing` - preferred pricing source when it returns rows (~line 210)
+  - `POST /chat/completions` - chat and streaming completions (~line 247)
+  - `POST /images/generations` - image generation for the `GenerateImage` agent tool (~line 226)
+  - `POST /audio/transcriptions` - multipart speech-to-text (~line 237)
+  - `GET /signature/{chat_id}?model=&signing_algo=ecdsa` - per-response signature (`src/services/attestation.ts`)
+  - `GET /attestation/report?model=&nonce=&signing_algo=ecdsa&signing_address=` - TEE attestation report (`src/services/attestation.ts`)
+  - A billing/costs path under `/billing/costs` is referenced in tests (`src/test/`) for spend reconciliation
+- Auth: API key stored in VS Code SecretStorage; sent as a bearer credential by `NearAiClient`. Key entered through the `nearAi.setup` flow (`src/extension.ts`, `src/services/auth.ts`)
+- Routing metadata: responses carry the upstream provider (e.g. `anthropic`, `openrouter.ai`) so the UI can label a model as private (TEE) or forwarded (`src/services/nearAiClient.ts` line ~59)
+- Privacy enforcement: `nearAi.privacyMode = tee-only` blocks forwarded models (`src/services/privacyPreflight.ts`, `src/services/outboundGuard.ts`)
+- Model defaults (from `package.json` configuration):
+  - Chat: `z-ai/glm-5.3`
+  - Deep sub-agent tier: `moonshotai/kimi-k3`
+  - Standard sub-agent tier: `z-ai/glm-5.3`
+  - Fast sub-agent tier: `z-ai/glm-5.3-flash`
+  - Vision: `z-ai/glm-5.3-flash`
+  - Transcription: `openai/whisper-large-v3`
+  - Image generation: `black-forest-labs/FLUX.2-klein-4B`
 
-**NEAR AI Cloud (console, web only):**
-- `https://cloud.near.ai/` is opened with `vscode.env.openExternal` from `openApiKeyPortal()` in `src/extension.ts` so the user can create an API key. The extension does not call this host programmatically.
+**Local OpenAI-compatible runtime (optional):**
+- Service: any user-run OpenAI-compatible server on loopback (`http://localhost` or `http://127.0.0.1`)
+- Config: `localBaseUrl` on `local` or `hybrid` profiles (`src/services/providerFactory.ts`, `src/domain/auth.ts`)
+- Client: same `NearAiClient`; calls `GET /models` to list local models, all labelled as running on this machine (`nearAiClient.ts` ~line 183)
+- Non-loopback `http://` URLs are rejected (`isSecureEndpoint` in `src/extension.ts`, `src/domain/config.ts`)
 
-**NEAR blockchain (staking and entitlement, not live):**
-- Domain model and guarded services exist in `src/domain/staking.ts` and `src/services/stakingService.ts`. The config carries `networkId`, `rpcEndpoint`, `validatorAccount`, and `entitlementEndpoint`. Endpoints must be `https:` (`safeEndpoint` in `src/domain/staking.ts`).
-- `ReadOnlyStakingRpc` and `EntitlementReader` are interfaces (`src/services/stakingService.ts`). No concrete RPC or entitlement client was found in `src/`.
-- The only runtime instance is `StakingService.unavailable()`, used in `src/services/chat.ts` and `src/extension.ts`. Status reads and staking writes therefore return "unavailable" in the shipped code path.
-- Writes are gated: a fingerprinted transaction preview, explicit confirmation matching the fingerprint, a fresh approval, and a non-expired wallet session are all required before `signAndSend` (`src/services/stakingService.ts`).
+**Open-GSD package registry (npm):**
+- Service: npm registry, package `@opengsd/gsd-core`
+- Used for: discovering latest version (`npm view @opengsd/gsd-core@latest version --json`) and installing via `npx --yes @opengsd/gsd-core@<version> --claude --global` (`src/gsd/runtime.ts` lines ~53, ~83)
+- Install target: extension storage, with `CLAUDE_CONFIG_DIR` set to the extension-managed directory; the user's `~/.claude` is not modified
+- Controlled by `nearAi.autoInstallGsd` (default `true`)
 
-**External wallet (NEAR account sign-in, stubbed):**
-- `ExternalWalletAuthorizationBridge` in `src/services/walletAuthorization.ts` wraps an `ExternalWalletAdapter`. It creates a `wallet-state-*` UUID, a TTL of 5 minutes (clamped 1 s to 15 min), and tracks pending states.
-- `UnavailableWalletAuthorization` is used when no adapter exists. No concrete wallet adapter is wired in the extension.
-- `nearAi.authMode = nearAccount` reports `pending-near-sign-in` (`src/services/auth.ts`) and is not usable for inference.
+**Remote web fetch (agent tool):**
+- `src/gsd/tools.ts` lets the agent fetch `https://` URLs only; `http:` and other schemes are refused (lines ~133, ~159). Private/internal address targets are blocked by the same tool's guard.
 
-**Open-GSD runtime (local process, not a network service):**
-- `codex` CLI is spawned with `spawn` (no shell) in `src/services/gsdRunner.ts` to run `$gsd-<command>` inside the workspace. Commands are restricted to the catalog in `src/domain/gsdCommands.ts`.
-- Output is parsed as JSON lines and redacted (`redactSecrets` in `src/domain/redaction.ts`).
+**NEAR blockchain RPC and staking (read-only, currently gated):**
+- Staking domain: `src/domain/staking.ts`, `src/services/stakingService.ts`
+- Requires verified `rpcEndpoint` and `entitlementEndpoint` values (both must be `https:`), otherwise staking reports "unavailable"
+- Read calls: `readNativeBalance`, `readPoolBalance`, `readTransactionStatus` via a `ReadOnlyStakingRpc` interface
+- Default state: `StakingService.unavailable()` wires unavailable RPC and entitlement stubs; no default RPC URL is hard-coded
+- Wallet bridge: `src/services/walletAuthorization.ts` is an external-wallet-only interface. Its default implementation throws on `connect()` and `signAndSend()`; no keys are managed by the extension
 
-**npm registry (`@opengsd/gsd-core`):**
-- `src/services/gsdUpdater.ts` runs `npm list --global @opengsd/gsd-core --depth=0 --json`, `npm view @opengsd/gsd-core@latest version --json`, and `npx --yes @opengsd/gsd-core@latest --codex --global` (or `--local` in the workspace root).
-- Checks run at activation and every 24 hours (`GSD_CHECK_INTERVAL_MS`). Controlled by `nearAi.autoInstallGsd` (default `true`).
-- Requires network access to the npm registry and an installed npm/npx on the host.
+**Browser hand-off:**
+- `https://cloud.near.ai/` opened via `vscode.env.openExternal` for account/key management (`src/extension.ts` line ~217)
+
+**Attestation verification (local):**
+- `src/services/attestation.ts` verifies Intel TDX quotes locally against a trusted root (`trustedRoot` option). Platform TCB status, certificate revocation collateral, enclave measurements, and NVIDIA GPU attestation are explicitly not checked (`NOT_CHECKED_IN_EDITOR`).
 
 ## Data Storage
 
 **Databases:**
-- None. No database client, ORM, or SQL/NoSQL driver is present in `package.json` or `src/`.
+- None. No database client or ORM is present in `package.json` or `src/`.
 
-**Local persistent state (JSON files, not a database):**
-- File-backed stores that use `node:fs/promises` include `src/services/activityStore.ts`, `src/services/auditStore.ts`, `src/services/contextGraphStore.ts`, `src/services/profileStore.ts`, `src/services/resumableExecution.ts`, and `src/services/projectInitialization.ts`. `src/services/analyticsStore.ts` is a separate store for usage analytics.
-- Project planning state is read and written under `.planning/` (`src/services/gsdStatus.ts`, `src/services/projectInitialization.ts`).
+**Local persistent state (filesystem):**
+- Per-project runtime state: `.planning/.near-ai/` (profile metadata, activity, audit). Git-ignored (`.gitignore`). Services: `src/services/profileStore.ts`, `src/services/activityStore.ts`, `src/services/auditStore.ts`, `src/services/analyticsStore.ts`, `src/services/contextGraphStore.ts`
+- Handoff file: `.planning/HANDOFF.json` (git-ignored)
+- Chat transcripts: VS Code extension storage on the local machine, never inside the project (`nearAi.agent.saveTranscripts`; `src/services/transcripts.ts`)
+- Checkpoints: `src/agent/checkpoints.ts`
+- Open-GSD runtime: extension storage under `NEAR_GSD_HOME` override or default extension path (`src/gsd/runtime.ts`, `src/gsd/host.ts`)
 
 **File Storage:**
-- Local filesystem only. Multimodal intake stages images and other files for upload (`src/services/multimodalIntake.ts`). Staged image bytes are kept out of durable telemetry, per the comment on `editImage`.
+- Local filesystem only. Attachments handled by `src/agent/attachments.ts` and `src/services/multimodalIntake.ts`.
 
 **Caching:**
-- In-memory model cache in `NearAiClient` (`this.models`, `rememberModels`). No external cache service.
+- In-memory and provider cache: `src/services/providerCache.ts`
+- No external cache service (no Redis or Memcached)
 
 ## Authentication & Identity
 
 **Auth Provider:**
-- NEAR AI Cloud API key, stored in VS Code `SecretStorage` (`src/services/auth.ts`, key `nearAi.apiKey`).
-  - Saved and removed through `saveApiKey` / `removeApiKey` in `src/services/auth.ts`; the Setup UI that calls them is in `src/services/onboarding.ts` and `src/extension.ts`.
-  - Per-project scoped keys (`saveScopedApiKey` / `getScopedApiKey`, `SCOPED_SECRET_VERSION = 2`) are defined in `src/services/auth.ts` and scope validation in `src/domain/auth.ts`.
-- NEAR account sign-in: `nearAi.refreshToken` secret slot exists in `src/services/auth.ts`; the token exchange is pending.
-- Credential handling: `trim()` and non-empty checks before storage; secrets never written to settings or the `.planning/` files.
-
-**Webview security:**
-- Webviews use a nonce-based CSP `default-src 'none'; script-src 'nonce-...'` (`src/services/onboarding.ts`).
+- NEAR AI Cloud API key, with optional refresh-token flow
+  - Stored in VS Code SecretStorage (`src/services/auth.ts`, `SecretStorageLike` interface)
+  - Refresh token stored under its own secret slot (`REFRESH_TOKEN_SECRET`)
+  - Hybrid profiles keep the local runtime's optional key in a separate slot (`localKeyScope` in `src/domain/auth.ts`)
+  - Project-scoped credential scopes: `ProjectCredentialScope` (`src/domain/auth.ts`)
+- Organization/team profiles: `src/domain/auth.ts` `OrganizationProfile`, team management via `src/services/agentTeams.ts`, `src/services/teamStudio.ts`
+- No OAuth provider, SSO, or identity vendor SDK in use
+- Credentials are never written to project files or sent to agents as configuration text (per onboarding copy in `src/services/onboarding.ts`)
 
 ## Monitoring & Observability
 
 **Error Tracking:**
-- None. No Sentry, Datadog, or similar SDK found.
+- None. No Sentry, Datadog, or similar SDK detected.
 
 **Logs:**
-- Local audit and activity stores (`src/services/auditStore.ts`, `src/services/activityStore.ts`) and analytics (`src/services/analyticsStore.ts`). Text is passed through `src/domain/redaction.ts` before display or storage.
-- Per-request usage and verification metadata are attached to chat responses (`UsageMetadata` in `src/services/nearAiClient.ts`).
+- VS Code output/console logging from the extension host
+- Local audit log: `src/services/auditStore.ts` (stored under `.planning/.near-ai/`)
+- Spend and analytics recorded locally: `src/services/analyticsStore.ts`; `nearAi.dailySpendLimitUsd` enforced client-side
 
 ## CI/CD & Deployment
 
 **Hosting:**
-- VS Code Marketplace / `.vsix` distribution. Publisher `VitalPoint`, name `near-ai-vscode` (`package.json`). No marketplace upload script found in the repo.
-- Local install helper: `scripts/install-global-extension.mjs`.
+- VS Code Marketplace distribution as `.vsix` (`near-ai-vscode-0.4.0.vsix` present at repo root; `.vsix` files are git-ignored)
+- Publisher: `VitalPoint`
 
 **CI Pipeline:**
-- Not detected. No `.github/workflows/`, `.gitlab-ci.yml`, or similar config in the repository root.
-
-**Release verification:**
-- `npm run verify:release` runs `npm run package` then `scripts/verify-release-content.mjs` to check packaged contents.
+- No CI configuration file detected in the repository root (no `.github/workflows` checked in this scope). Release verification is local: `npm run verify:release`.
 
 ## Environment Configuration
 
-**Required configuration at runtime:**
-- NEAR AI Cloud API key (entered through Setup; stored in SecretStorage). Required for `apiKey` mode.
-- `codex` CLI on PATH for Open-GSD commands.
-- Network access to `cloud-api.near.ai` (inference), `cloud.near.ai` (key portal, browser only), and the npm registry (GSD auto-install).
-
-**Optional settings:**
-- `nearAi.baseUrl`, `nearAi.defaultModel`, `nearAi.actionPolicy`, `nearAi.autoInstallGsd`
+**Required env vars:**
+- None required for normal extension use. Configuration is entered through VS Code settings and the Set Up command.
+- Optional for tests and live runs: `NEAR_AI_API_KEY`, `NEAR_AI_BASE_URL`, `NEAR_LIVE_EVAL`, `NEAR_LIVE_GSD`, `NEAR_LIVE_TRACE`, `NEAR_LIVE_EVAL_OUT`, `NEAR_GSD_HOME`
 
 **Secrets location:**
-- VS Code SecretStorage (OS keychain-backed) for API keys and refresh tokens. Nothing is stored in `.env` by the extension. The repo's `.aws/` directory exists at the project root; its contents were not read and it is not referenced by the source.
+- VS Code SecretStorage (API key, refresh token, hybrid local key)
+- Repo-level `.env` and `.env.*` are git-ignored. Their presence is noted only; contents were not read.
+- `.aws/` directory exists at repo root; contents not read or recorded.
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-- None. The extension exposes no HTTP server or webhook receiver.
+- None. The extension exposes no HTTP server endpoints. `node:http` is used only in tests and loopback validation.
 
 **Outgoing:**
-- NEAR AI Cloud HTTPS endpoints listed above. No other outbound webhooks found.
+- NEAR AI Cloud REST calls listed above (`/chat/completions`, `/models`, `/models/pricing`, `/images/generations`, `/audio/transcriptions`, attestation and signature endpoints)
+- npm registry calls for Open-GSD version and install
+- Arbitrary `https://` fetches only when the agent invokes the web-fetch tool (`src/gsd/tools.ts`)
 
 ---
 
-*Integration audit: 2026-10-26*
+*Integration audit: 2026-10-27*
