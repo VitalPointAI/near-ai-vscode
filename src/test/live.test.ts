@@ -15,6 +15,7 @@ import { CORE_TOOLS } from '../agent/tools';
 import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 import { DEFAULT_ROLE_MODELS, loadAgents, loadSkills } from '../gsd/library';
 import { gsdShellEnv } from '../gsd/runtime';
+import { ActivityFeed, timeBreakdown } from '../services/agentActivity';
 import { AgentConversation, findSkill } from '../services/agentSession';
 import { gradePlan, gradeResearch, PLAN_PROMPT, PLAN_SPEC, RESEARCH_PROMPT, RESEARCH_SOURCES } from './evalGraders';
 import { NearAiClient, type ModelInfo, type UsageMetadata } from '../services/nearAiClient';
@@ -172,6 +173,8 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
   const started = Date.now();
   const open = new Map<string, { title: string; at: number }>();
   const spans: Array<{ title: string; startS: number; seconds: number }> = [];
+  // The same feed Agent Activity shows, so the run prints where each agent's time went.
+  const feed = new ActivityFeed({ maxAgeMs: 24 * 3_600_000, maxBytes: 64 * 1_048_576 });
   const conversation: AgentConversation = new AgentConversation(root, (message) => {
     const value = message as { type: string; id?: string; callId?: string; title?: string; text?: string; preview?: unknown; questions?: Array<{ question: string; options: Array<{ label: string }> }> };
     posted.push(value);
@@ -190,7 +193,7 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
       console.log(`  held for approval, declined (unattended): ${String(value.title)} — ${String(preview?.text ?? '').split('\n')[0].slice(0, 200)}`);
       conversation.answerApproval(String(value.callId), { decision: 'deny', feedback: 'Nobody answered (the user may be away). Continue without this action if you can, and report what still needs their approval.' });
     }
-  }, path.join(context.storage, 'checkpoints'));
+  }, path.join(context.storage, 'checkpoints'), undefined, undefined, feed);
   // Production defaults (domain/agentDefaults.ts), the same the extension uses; fully-autonomous
   // is the mode a user picks for an unattended run, which is what this simulates.
   const budget = { maxCostUsd: process.env.NEAR_LIVE_BUDGET_USD ? Number(process.env.NEAR_LIVE_BUDGET_USD) : AGENT_DEFAULTS.maxRunCostUsd, maxTokens: AGENT_DEFAULTS.maxRunTokens };
@@ -206,7 +209,13 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
   const spend = conversation.runSpend;
   console.log(`/${skill!.name} ${args}: ${seconds} s, ${spans.length} tool calls, ${agents} sub-agent(s), estimated $${spend.costUsd.toFixed(2)} for ${spend.totalTokens.toLocaleString('en-US')} tokens (${spend.totalTokens ? Math.round((100 * spend.cachedTokens) / spend.totalTokens) : 0}% cached); slowest tool calls:`);
   for (const span of [...spans].sort((a, b) => b.seconds - a.seconds).slice(0, 10)) console.log(`  ${span.seconds} s at +${span.startS} s  ${span.title.slice(0, 120)}`);
-  if (process.env.NEAR_LIVE_TRACE) await writeFile(`${process.env.NEAR_LIVE_TRACE}.${skill!.name}.json`, JSON.stringify(spans, null, 2));
+  console.log('  where the time went, per agent (wait = before each reply starts; generate = streaming it; tools = everything else):');
+  for (const stat of feed.agentStats()) {
+    const time = timeBreakdown(stat);
+    const s = (ms: number) => `${Math.round(ms / 1000)} s`;
+    console.log(`  ${stat.agent.padEnd(34).slice(0, 34)} ${stat.model.replace(/^.*\//, '').padEnd(14)} ${s(time.elapsedMs).padStart(7)} total: wait ${s(time.waitMs)}, generate ${s(time.generateMs)}, tools ${s(time.otherMs)} · ${stat.turns} turns · ${stat.outputTokens.toLocaleString('en-US')} out (${time.reasoningShare === undefined ? '?' : Math.round(100 * time.reasoningShare)}% reasoning${stat.reasoningEstimated ? ', est.' : ''}) at ${time.tokensPerSecond?.toFixed(0) ?? '?'} tok/s · $${stat.costUsd.toFixed(3)}`);
+  }
+  if (process.env.NEAR_LIVE_TRACE) await writeFile(`${process.env.NEAR_LIVE_TRACE}.${skill!.name}.json`, JSON.stringify({ spans, agents: feed.agentStats() }, null, 2));
   assert.ok(posted.some((message) => message.type === 'assistant-done'), `/${skill!.name} finished`);
   return { posted, seconds };
 }

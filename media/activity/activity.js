@@ -90,11 +90,18 @@
     agentsBody.replaceChildren(...stats.map((stat) => {
       const tr = el('tr', 'status-' + stat.status);
       tr.style.setProperty('--hue', String(hue(stat.agentId)));
-      const speed = stat.modelMs > 0 ? stat.outputTokens / (stat.modelMs / 1000) : 0;
+      // Matches timeBreakdown in agentActivity.ts.
+      const elapsed = Math.max(0, (stat.endedAt || now) - stat.startedAt);
+      const wait = Math.min(stat.waitMs || 0, stat.modelMs);
+      const generate = stat.modelMs - wait;
+      const speed = generate > 0 ? stat.outputTokens / (generate / 1000) : 0;
+      const pct = (part) => (elapsed ? Math.round((100 * part) / elapsed) : 0) + '%';
+      const split = elapsed && stat.turns ? 'wait ' + pct(wait) + ' · generate ' + pct(generate) + ' · tools ' + pct(Math.max(0, elapsed - stat.modelMs)) : '–';
+      const reasoning = stat.outputTokens ? Math.round((100 * Math.min(stat.reasoningTokens || 0, stat.outputTokens)) / stat.outputTokens) + '%' + (stat.reasoningEstimated ? ' (est.)' : '') : '–';
       const name = el('td', 'agent-cell');
       name.append(el('span', 'dot'), el('span', '', (stat.parentId ? '↳ ' : '') + stat.agent));
       tr.append(name, el('td', 'model', stat.model), el('td', 'status', stat.status === 'max-turns' ? 'turn limit' : stat.status),
-        el('td', 'num', number(stat.turns)), el('td', 'num', number(stat.inputTokens)), el('td', 'num', stat.inputTokens ? Math.round((100 * (stat.cachedTokens || 0)) / stat.inputTokens) + '%' : '–'), el('td', 'num', number(stat.outputTokens)), el('td', 'num', speed ? speed.toFixed(1) : '–'),
+        el('td', 'num', number(stat.turns)), el('td', 'num', number(stat.inputTokens)), el('td', 'num', stat.inputTokens ? Math.round((100 * (stat.cachedTokens || 0)) / stat.inputTokens) + '%' : '–'), el('td', 'num', number(stat.outputTokens)), el('td', 'num', reasoning), el('td', 'num', speed ? speed.toFixed(1) : '–'), el('td', 'split', split),
         el('td', 'num', money(stat.costUsd)), el('td', 'num', number(stat.toolCalls) + (stat.toolErrors ? ' (' + stat.toolErrors + ' failed)' : '')), el('td', 'num', number(stat.retries)), securityCell(stat),
         el('td', 'num', duration((stat.endedAt || now) - stat.startedAt)));
       return tr;

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import * as vscode from 'vscode';
-import { ActivityEntry, ActivityFeed, AgentStats } from './agentActivity';
+import { ActivityEntry, ActivityFeed, AgentStats, timeBreakdown } from './agentActivity';
 import { readActivityLimits } from './settings';
 
 // The Agent Activity page: a live stream of every agent's prompts, replies, reasoning, and tool
@@ -102,8 +102,12 @@ async function exportActivity(activity: ActivityFeed, format: 'markdown' | 'json
 export function activityMarkdown(entries: ActivityEntry[], stats: AgentStats[]): string {
   const time = (at: number) => new Date(at).toISOString().slice(11, 19);
   const fence = (text: string) => `\`\`\`\`\n${text}\n\`\`\`\``;
-  const lines = ['# Agent activity', '', '| Agent | Model | Status | Turns | Tokens in | Tokens out | Est. cost | Tool calls (errors) | Retries | Injections flagged | Hidden removed | Held | Blocked |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
-  for (const stat of stats) lines.push(`| ${stat.agent} | ${stat.model} | ${stat.status} | ${stat.turns} | ${stat.inputTokens} | ${stat.outputTokens} | $${stat.costUsd.toFixed(4)} | ${stat.toolCalls} (${stat.toolErrors}) | ${stat.retries} | ${stat.injections} | ${stat.hiddenRemoved} | ${stat.held} | ${stat.blocked} |`);
+  const seconds = (ms: number) => `${Math.round(ms / 1000)} s`;
+  const lines = ['# Agent activity', '', '| Agent | Model | Status | Turns | Tokens in | Tokens out | Reasoning | Tok/s | Waiting | Generating | Tools and other | Est. cost | Tool calls (errors) | Retries | Injections flagged | Hidden removed | Held | Blocked |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
+  for (const stat of stats) {
+    const time = timeBreakdown(stat);
+    lines.push(`| ${stat.agent} | ${stat.model} | ${stat.status} | ${stat.turns} | ${stat.inputTokens} | ${stat.outputTokens} | ${time.reasoningShare === undefined ? '–' : `${Math.round(100 * time.reasoningShare)}%${stat.reasoningEstimated ? ' (est.)' : ''}`} | ${time.tokensPerSecond?.toFixed(1) ?? '–'} | ${seconds(time.waitMs)} | ${seconds(time.generateMs)} | ${seconds(time.otherMs)} | $${stat.costUsd.toFixed(4)} | ${stat.toolCalls} (${stat.toolErrors}) | ${stat.retries} | ${stat.injections} | ${stat.hiddenRemoved} | ${stat.held} | ${stat.blocked} |`);
+  }
   lines.push('');
   for (const entry of entries) {
     lines.push(`### ${time(entry.at)} · ${entry.agent} · ${entry.kind}${entry.title ? ` · ${entry.title}` : ''}${entry.ok === false ? ' (failed)' : ''}`, '');
@@ -124,7 +128,7 @@ function activityHtml(webview: vscode.Webview, media: vscode.Uri): string {
   <dl id="totals" class="totals" aria-label="Totals"></dl>
 </header>
 <section class="agents" aria-labelledby="agents-heading"><h2 id="agents-heading">Agents</h2><div class="table-wrap"><table id="agents"><thead><tr>
-  <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">Status</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tokens in</th><th scope="col" class="num" title="Share of input tokens NEAR served from its prompt cache, billed at the lower cache-read price">Cache</th><th scope="col" class="num">Tokens out</th><th scope="col" class="num">Tok/s</th><th scope="col" class="num">Est. cost</th><th scope="col" class="num">Tools</th><th scope="col" class="num">Retries</th><th scope="col">Security</th><th scope="col" class="num">Time</th>
+  <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">Status</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tokens in</th><th scope="col" class="num" title="Share of input tokens NEAR served from its prompt cache, billed at the lower cache-read price">Cache</th><th scope="col" class="num">Tokens out</th><th scope="col" class="num" title="Of tokens out, the share spent reasoning (estimated from the streamed text when NEAR does not report it)">Reasoning</th><th scope="col" class="num" title="Generation speed, not counting the wait for each reply's first token">Tok/s</th><th scope="col" title="Where the time went: waiting for replies to start, generating them, and tools and sub-agents">Time split</th><th scope="col" class="num">Est. cost</th><th scope="col" class="num">Tools</th><th scope="col" class="num">Retries</th><th scope="col">Security</th><th scope="col" class="num">Time</th>
 </tr></thead><tbody></tbody></table></div><p id="empty-agents" class="hint">No agents have run yet. Send a message or run a workflow in the NEAR AI chat.</p></section>
 <section class="stream-section" aria-labelledby="stream-heading">
   <div class="toolbar" role="toolbar" aria-label="Stream filters">

@@ -42,6 +42,8 @@ export interface AgentTool<I = Record<string, unknown>> {
   description: string;
   parameters: Record<string, unknown>;
   capability: ActionCapability;
+  /** Changes nothing, so it can run alongside other lookups from the same turn even though it is not a read (e.g. a web fetch). */
+  concurrent?: boolean;
   /** Validates the model's arguments; throws ToolError with a message the model can act on. */
   parse(raw: Record<string, unknown>): I;
   /** A short title for the activity row, e.g. "Read src/extension.ts". */

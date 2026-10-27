@@ -10,6 +10,10 @@ workflows.
 - **See progress as it happens.** Each running agent shows what it is doing,
   how long it has run, and its tool calls. Click one to open its activity. A
   progress line in the chat sums up long, quiet stretches.
+- **Fewer, faster turns.** Web searches and page fetches an agent asks for
+  together now run in parallel, like file reads, and agents are told to batch
+  independent lookups. Agent Activity shows where each agent's time goes
+  (waiting, generating, tools) and how much of its output is reasoning.
 
 - **Agent in the sidebar.** It reads, searches, edits and runs commands in your
   project, with approval cards that show diffs and commands, per-run grants,

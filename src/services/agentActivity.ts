@@ -42,6 +42,11 @@ export interface AgentStats {
   outputTokens: number;
   costUsd: number;
   modelMs: number;
+  /** Of modelMs, waiting for the first token of each reply; the rest is generating. */
+  waitMs: number;
+  /** Of outputTokens, reasoning: as NEAR reports it, or estimated from the streamed characters when `reasoningEstimated`. */
+  reasoningTokens: number;
+  reasoningEstimated?: boolean;
   toolCalls: number;
   toolErrors: number;
   retries: number;
@@ -50,6 +55,24 @@ export interface AgentStats {
   hiddenRemoved: number;
   held: number;
   blocked: number;
+}
+
+/**
+ * Where an agent's time went: waiting for each reply's first token, generating, and everything
+ * else (tools, sub-agents, approvals); generation speed excludes the wait.
+ */
+export function timeBreakdown(stat: AgentStats, now = Date.now()): { elapsedMs: number; waitMs: number; generateMs: number; otherMs: number; tokensPerSecond?: number; reasoningShare?: number } {
+  const elapsedMs = Math.max(0, (stat.endedAt ?? now) - stat.startedAt);
+  const waitMs = Math.min(stat.waitMs, stat.modelMs);
+  const generateMs = stat.modelMs - waitMs;
+  return {
+    elapsedMs,
+    waitMs,
+    generateMs,
+    otherMs: Math.max(0, elapsedMs - stat.modelMs),
+    tokensPerSecond: generateMs > 0 && stat.outputTokens ? stat.outputTokens / (generateMs / 1000) : undefined,
+    reasoningShare: stat.outputTokens ? Math.min(1, stat.reasoningTokens / stat.outputTokens) : undefined
+  };
 }
 
 export interface ActivityLimits { maxAgeMs: number; maxBytes: number }
@@ -108,7 +131,7 @@ export class ActivityFeed {
   }
 
   public agentStarted(agent: { agentId: string; agent: string; runId: string; model: string; parentId?: string }, prompt?: string, system?: string): void {
-    this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: this.now(), turns: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0 });
+    this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: this.now(), turns: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, waitMs: 0, reasoningTokens: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0 });
     for (const stale of [...this.stats.keys()].slice(0, Math.max(0, this.stats.size - MAX_AGENTS))) this.stats.delete(stale);
     const base = { runId: agent.runId, agentId: agent.agentId, agent: agent.agent };
     this.add({ ...base, kind: 'agent-start', title: `${agent.agent} started on ${agent.model}` });
@@ -177,6 +200,12 @@ export class ActivityFeed {
     stat.outputTokens += usage.outputTokens ?? 0;
     stat.costUsd += usage.estimatedCostUsd ?? 0;
     stat.modelMs += usage.latencyMs ?? 0;
+    stat.waitMs += usage.firstTokenMs ?? 0;
+    if (usage.reasoningTokens !== undefined) stat.reasoningTokens += usage.reasoningTokens;
+    else if (usage.reasoningChars && usage.outputTokens) {
+      stat.reasoningTokens += Math.round((usage.outputTokens * usage.reasoningChars) / (usage.reasoningChars + (usage.answerChars ?? 0)));
+      stat.reasoningEstimated = true;
+    }
     this.closeText(agentId);
     this.changed([]);
   }

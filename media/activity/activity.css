@@ -21,6 +21,7 @@ th { font-weight: 600; font-size: 0.85em; color: var(--muted); background: var(-
 tr:last-child td { border-bottom: none; }
 .num { text-align: right; }
 .model { color: var(--muted); }
+.split { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dot { display: inline-block; width: 9px; height: 9px; margin-right: 7px; border-radius: 50%; background: hsl(var(--hue) 65% 55%); }
 .status-running .status { color: var(--vscode-progressBar-background, #0e70c0); font-weight: 600; }
 .status-failed .status { color: var(--vscode-errorForeground); }

@@ -78,6 +78,13 @@ export interface UsageMetadata {
   actualCostUsd?: number;
   verificationStatus: VerificationStatus;
   latencyMs: number;
+  /** Time from sending the request to the first streamed token (queueing and prompt processing). */
+  firstTokenMs?: number;
+  /** Of outputTokens, reasoning, when NEAR reports it (completion_tokens_details.reasoning_tokens). */
+  reasoningTokens?: number;
+  /** Characters of reasoning and of answer (text plus tool-call arguments) streamed, to estimate the reasoning share when it is not reported. */
+  reasoningChars?: number;
+  answerChars?: number;
   /** Hashes for checking NEAR's signature on this completion later. */
   evidence?: ResponseEvidence;
 }
@@ -400,6 +407,9 @@ export class NearAiClient {
     let text = '';
     let finishReason = 'stop';
     let buffer = '';
+    let firstTokenAt: number | undefined;
+    let reasoningChars = 0;
+    let answerChars = 0;
     const idleTimeoutMs = options.idleTimeoutMs ?? this.idleTimeoutMs;
     try {
       for (;;) {
@@ -425,10 +435,12 @@ export class NearAiClient {
           if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason;
           const delta = choice.delta ?? {};
           const reasoning = stringValue(delta.reasoning_content) ?? stringValue(delta.reasoning);
-          if (reasoning) yield { type: 'reasoning', text: reasoning };
           const content = stringValue(delta.content);
-          if (content) { text += content; yield { type: 'text', text: content }; }
+          if ((reasoning || content || delta.tool_calls?.length) && firstTokenAt === undefined) firstTokenAt = Date.now();
+          if (reasoning) { reasoningChars += reasoning.length; yield { type: 'reasoning', text: reasoning }; }
+          if (content) { text += content; answerChars += content.length; yield { type: 'text', text: content }; }
           for (const fragment of delta.tool_calls ?? []) {
+            if (typeof fragment.function?.arguments === 'string') answerChars += fragment.function.arguments.length;
             const index = typeof fragment.index === 'number' ? fragment.index : calls.length;
             const call = calls[index] ?? (calls[index] = { id: '', name: '', arguments: '' });
             if (typeof fragment.id === 'string' && fragment.id) call.id = fragment.id;
@@ -447,7 +459,7 @@ export class NearAiClient {
       type: 'done',
       message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
       finishReason,
-      usage: { ...usage, latencyMs: Date.now() - started, ...(chatId ? { evidence: { chatId, requestHash: sha256Hex(requestBody), responseHash: rawResponse.digest('hex') } } : {}) }
+      usage: { ...usage, latencyMs: Date.now() - started, ...(firstTokenAt !== undefined ? { firstTokenMs: firstTokenAt - started } : {}), reasoningChars, answerChars, ...(chatId ? { evidence: { chatId, requestHash: sha256Hex(requestBody), responseHash: rawResponse.digest('hex') } } : {}) }
     };
   }
 
@@ -675,6 +687,8 @@ function usageFromPayload(payload: Record<string, unknown>, base: UsageMetadata,
   const details = objectValue(payload.prompt_tokens_details ?? payload.input_tokens_details);
   const cached = numberValue(details.cached_tokens ?? payload.cached_tokens);
   if (cached !== undefined) next.cachedInputTokens = cached;
+  const reasoning = numberValue(objectValue(payload.completion_tokens_details ?? payload.output_tokens_details).reasoning_tokens);
+  if (reasoning !== undefined) next.reasoningTokens = reasoning;
   const verification = stringValue(payload.verification_status ?? payload.verificationStatus ?? payload.tee_status ?? payload.teeStatus);
   if (verification === 'verified' || verification === 'true') next.verificationStatus = 'verified';
   if (verification === 'unverified' || verification === 'false') next.verificationStatus = 'unverified';

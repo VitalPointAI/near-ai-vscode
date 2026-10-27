@@ -64,6 +64,9 @@ export interface AgentRunOptions {
 export interface RunResult { outcome: RunOutcome; messages: AgentMessage[]; usage: UsageMetadata[] }
 
 /** A run that failed for a reason retrying cannot fix; carries the transcript so the work is not lost. */
+/** Lookups from one turn that run at the same time. */
+const MAX_TOGETHER = 8;
+
 export class AgentRunError extends Error {
   public constructor(public readonly cause: unknown, public readonly messages: AgentMessage[]) {
     super(cause instanceof Error ? cause.message : String(cause));
@@ -204,13 +207,13 @@ export class AgentRun {
     return undefined;
   }
 
-  /** Runs consecutive read-only calls together; anything that changes state runs alone, in order. */
+  /** Runs consecutive lookups (reads, searches, fetches) together, up to MAX_TOGETHER; anything that changes state runs alone, in order. */
   private async executeCalls(calls: ToolCall[], signal: AbortSignal): Promise<AgentMessage[]> {
     const results: AgentMessage[] = [];
     let index = 0;
     while (index < calls.length) {
       const batch = [calls[index]];
-      if (this.isReadOnly(calls[index])) while (index + batch.length < calls.length && this.isReadOnly(calls[index + batch.length])) batch.push(calls[index + batch.length]);
+      if (this.canRunTogether(calls[index])) while (batch.length < MAX_TOGETHER && index + batch.length < calls.length && this.canRunTogether(calls[index + batch.length])) batch.push(calls[index + batch.length]);
       const outputs = await Promise.all(batch.map((call) => this.executeCall(call, signal)));
       batch.forEach((call, offset) => results.push({ role: 'tool', tool_call_id: call.id, content: outputs[offset] }));
       index += batch.length;
@@ -218,9 +221,9 @@ export class AgentRun {
     return results;
   }
 
-  private isReadOnly(call: ToolCall): boolean {
-    const capability = this.byName.get(call.function.name)?.capability;
-    return capability === 'read' || capability === 'plan';
+  private canRunTogether(call: ToolCall): boolean {
+    const tool = this.byName.get(call.function.name);
+    return tool?.capability === 'read' || tool?.capability === 'plan' || tool?.concurrent === true;
   }
 
   private async executeCall(call: ToolCall, signal: AbortSignal): Promise<string> {
