@@ -16,7 +16,7 @@ import { AgentTool, CORE_TOOLS, ToolContext } from '../agent/tools';
 import { displayPath } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
-import { expandPrompt, GsdAgent, GsdSkill, modelForTier } from '../gsd/library';
+import { expandPrompt, GsdAgent, GsdSkill, modelForTier, roleModelFor } from '../gsd/library';
 import { gsdTools, Question } from '../gsd/tools';
 import type { ActivityFeed } from './agentActivity';
 import type { ActivityStore } from './activityStore';
@@ -88,6 +88,8 @@ export interface AgentTurnRequest {
   shellEnvAllow?: string[];
   /** Output tokens one reply may use (nearAi.agent.maxOutputTokens). */
   maxOutputTokens?: number;
+  /** Model or tier per agent role (nearAi.agent.roleModels); a team member's own model line wins. */
+  roleModels?: Record<string, string>;
 }
 
 type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
@@ -381,7 +383,11 @@ export class AgentConversation {
       ask: (questions, askSignal) => this.askQuestions(questions, askSignal),
       spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;
-        const wanted = modelForTier(spawn.model ?? spawn.agent?.model, request.tiers ?? { deep: request.model, standard: request.model, fast: request.model }, request.model);
+        const tiers = request.tiers ?? { deep: request.model, standard: request.model, fast: request.model };
+        // A team member's own model line wins; then the role's configured model; then the tier the workflow asked for.
+        const teamMember = Boolean(spawn.agent && (!gsd || !spawn.agent.file.startsWith(gsd.home)));
+        const roleModel = spawn.agent && !(teamMember && spawn.agent.model) ? roleModelFor(label, request.roleModels ?? {}) : undefined;
+        const wanted = modelForTier(roleModel ?? spawn.model ?? spawn.agent?.model, tiers, request.model);
         const model = !request.availableModels || request.availableModels.includes(wanted) ? wanted : request.model;
         const agentBody = spawn.agent ? (gsd ? await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root }) : spawn.agent.body) : undefined;
         // Each sub-agent's Remember/Recall also reach its own private memory.

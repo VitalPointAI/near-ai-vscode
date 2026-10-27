@@ -12,7 +12,7 @@ import { AgentRun } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { CORE_TOOLS } from '../agent/tools';
-import { loadAgents, loadSkills } from '../gsd/library';
+import { DEFAULT_ROLE_MODELS, loadAgents, loadSkills } from '../gsd/library';
 import { gsdShellEnv } from '../gsd/runtime';
 import { AgentConversation, findSkill } from '../services/agentSession';
 import { gradePlan, gradeResearch, PLAN_PROMPT, PLAN_SPEC, RESEARCH_PROMPT, RESEARCH_SOURCES } from './evalGraders';
@@ -191,7 +191,7 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
     }
   }, path.join(context.storage, 'checkpoints'));
   try {
-    await conversation.send({ text: `/${skill!.name}${args ? ` ${args}` : ''}`, skill: { name: skill!.name, args }, gsd: context.gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, availableModels: models.map((candidate) => candidate.id), contextWindows: Object.fromEntries(models.filter((candidate) => candidate.contextLength).map((candidate) => [candidate.id, candidate.contextLength!])), maxParallelAgents: 4, maxTurns: 120, budget: { maxCostUsd: Number(process.env.NEAR_LIVE_BUDGET_USD ?? 3), maxTokens: 8_000_000 } });
+    await conversation.send({ text: `/${skill!.name}${args ? ` ${args}` : ''}`, skill: { name: skill!.name, args }, gsd: context.gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, roleModels: DEFAULT_ROLE_MODELS, availableModels: models.map((candidate) => candidate.id), contextWindows: Object.fromEntries(models.filter((candidate) => candidate.contextLength).map((candidate) => [candidate.id, candidate.contextLength!])), maxParallelAgents: 4, maxTurns: 120, budget: { maxCostUsd: Number(process.env.NEAR_LIVE_BUDGET_USD ?? 3), maxTokens: 8_000_000 } });
   } finally {
     // The conversation keeps a shell open between turns; close it so the test process can exit.
     conversation.dispose();

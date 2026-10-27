@@ -96,6 +96,12 @@ runtime in between.
   - Sub-agents never use a less private model than the one you picked.
   - Keys are bound to their endpoint.
 - **Default model:** GLM 5.3, which runs in NEAR's TEE.
+- **Models per agent role** (`nearAi.agent.roleModels`): GSD's research,
+  synthesis, and mapping roles default to the fast tier (GLM 5.3 Flash, also
+  TEE-attested). In a live comparison it matched GLM 5.3 on coding, research,
+  and planning tasks at about a twentieth of the cost, though more slowly;
+  planners, executors, verifiers, and red teams keep their tiers. A team
+  member's own `model:` line wins.
 
 ## 0.3.1
 

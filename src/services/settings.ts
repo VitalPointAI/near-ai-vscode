@@ -1,3 +1,4 @@
+import { DEFAULT_ROLE_MODELS } from '../gsd/library';
 import * as vscode from 'vscode';
 import { createDefaultSettings, NearAiSettings } from '../domain/config';
 import { ActionPolicyMode } from '../domain/policy';
@@ -36,6 +37,13 @@ export function readAgentRules(): PermissionRules {
 }
 
 /** NEAR models for Open-GSD's model tiers (opus → deep, sonnet → standard, haiku → fast). */
+/** Model or tier per agent role, defaulting research and mapping roles to the fast tier. */
+export function readRoleModels(): Record<string, string> {
+  const value = vscode.workspace.getConfiguration('nearAi').get<unknown>('agent.roleModels', DEFAULT_ROLE_MODELS);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_ROLE_MODELS };
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0).map(([role, model]) => [role.trim(), model.trim()]));
+}
+
 export function readModelTiers(): { deep: string; standard: string; fast: string } {
   const configuration = vscode.workspace.getConfiguration('nearAi');
   const pick = (key: string, fallback: string) => {

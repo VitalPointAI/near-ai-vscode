@@ -487,6 +487,19 @@
           "minimum": 1000,
           "maximum": 1000000,
           "description": "Most output tokens (reasoning included) one agent reply may use, never more than the model allows. A reply cut off at the limit is followed by a request to continue more concisely."
+        },
+        "nearAi.agent.roleModels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {
+            "gsd-*-researcher": "fast",
+            "gsd-research-synthesizer": "fast",
+            "gsd-codebase-mapper": "fast",
+            "gsd-pattern-mapper": "fast"
+          },
+          "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier (GLM 5.3 Flash). A team member's own `model:` line wins, and an agent never uses a model less private than the chat's."
         }
       }
     },

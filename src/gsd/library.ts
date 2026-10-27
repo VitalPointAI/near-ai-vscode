@@ -185,6 +185,21 @@ export async function expandPrompt(body: string, options: { args?: string; home:
 }
 
 /** Maps a GSD model tier or ID onto the configured NEAR models; unknown values fall back to the run's model. */
+/** Roles that mostly read and summarize large inputs in parallel: the cheaper fast tier by default. */
+export const DEFAULT_ROLE_MODELS: Record<string, string> = {
+  'gsd-*-researcher': 'fast',
+  'gsd-research-synthesizer': 'fast',
+  'gsd-codebase-mapper': 'fast',
+  'gsd-pattern-mapper': 'fast'
+};
+
+/** The model or tier configured for an agent role: an exact name first, then the longest matching * pattern. */
+export function roleModelFor(role: string, roleModels: Record<string, string>): string | undefined {
+  if (typeof roleModels[role] === 'string') return roleModels[role];
+  const matches = Object.entries(roleModels).filter(([pattern, value]) => pattern.includes('*') && typeof value === 'string' && new RegExp(`^${pattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`).test(role));
+  return matches.sort((a, b) => b[0].length - a[0].length)[0]?.[1];
+}
+
 export function modelForTier(value: string | undefined, tiers: { deep: string; standard: string; fast: string }, current: string): string {
   const tier = (value ?? '').trim().toLowerCase();
   if (!tier || tier === 'inherit' || tier === 'default') return current;
