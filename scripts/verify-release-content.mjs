@@ -85,6 +85,7 @@ const required = [
   'extension/vendor/fonts/DejaVuSans-Bold.ttf',
   'extension/vendor/fonts/LICENSE',
   'extension/vendor/manifest.json',
+  'extension/sbom.cdx.json',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];
 const missing = required.filter((entry) => !entrySet.has(entry));

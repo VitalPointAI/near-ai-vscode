@@ -9,3 +9,4 @@ dist/
 .planning/.near-ai/
 .planning/HANDOFF.json
 vendor/
+sbom.cdx.json

@@ -2,7 +2,7 @@
 // extension is packaged without node_modules), and writes vendor/manifest.json, from which the
 // extension's own SBOM is built. Run as part of `npm run compile`. Every source is a pinned
 // devDependency.
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,11 +31,16 @@ copy('dejavu-fonts-ttf', [['ttf/DejaVuSans.ttf'], ['ttf/DejaVuSans-Bold.ttf'], [
 
 // pptxgenjs and its runtime dependencies, bundled into one CommonJS file.
 mkdirSync(path.join(vendor, 'pptxgenjs'), { recursive: true });
-await build({ entryPoints: [require.resolve('pptxgenjs')], bundle: true, platform: 'node', format: 'cjs', target: 'node22', minify: true, legalComments: 'none', outfile: path.join(vendor, 'pptxgenjs', 'pptxgen.cjs'), logLevel: 'error' });
-const licenses = [['pptxgenjs', 'LICENSE'], ['jszip', 'LICENSE.markdown'], ['image-size', 'LICENSE']].map(([name, file]) => `== ${name} ${version(name)} ==\n${readFileSync(path.join(packageDir(name), file), 'utf8')}`);
+const result = await build({ entryPoints: [require.resolve('pptxgenjs')], bundle: true, platform: 'node', format: 'cjs', target: 'node22', minify: true, legalComments: 'none', metafile: true, outfile: path.join(vendor, 'pptxgenjs', 'pptxgen.cjs'), logLevel: 'error' });
+// The manifest lists exactly the packages whose code esbuild put in the bundle (nested copies included).
+const bundledDirs = [...new Set(Object.keys(result.metafile.inputs).map((input) => /^(.*node_modules\/(?:@[^/]+\/)?[^/]+)\//.exec(input)?.[1]).filter(Boolean))].sort();
+const licenses = [];
+for (const dir of bundledDirs) {
+  const meta = JSON.parse(readFileSync(path.join(root, dir, 'package.json'), 'utf8'));
+  const file = readdirSync(path.join(root, dir)).find((name) => /^(?:licen[cs]e|copying)/i.test(name));
+  licenses.push(`== ${meta.name} ${meta.version} ==\n${file ? readFileSync(path.join(root, dir, file), 'utf8') : `${meta.license} (the package ships no license file)`}`);
+  manifest.push({ name: meta.name, version: meta.version, license: typeof meta.license === 'string' ? meta.license : 'see LICENSES.txt', purl: `pkg:npm/${meta.name.replace('@', '%40')}@${meta.version}`, path: 'vendor/pptxgenjs', ...(meta.name === 'pptxgenjs' ? {} : { bundledIn: 'pptxgenjs' }) });
+}
 writeFileSync(path.join(vendor, 'pptxgenjs', 'LICENSES.txt'), licenses.join('\n\n'));
-manifest.push({ name: 'pptxgenjs', version: version('pptxgenjs'), license: 'MIT', purl: `pkg:npm/pptxgenjs@${version('pptxgenjs')}`, path: 'vendor/pptxgenjs' });
-manifest.push({ name: 'jszip', version: version('jszip'), license: 'MIT', purl: `pkg:npm/jszip@${version('jszip')}`, path: 'vendor/pptxgenjs', bundledIn: 'pptxgenjs' });
-manifest.push({ name: 'image-size', version: version('image-size'), license: 'MIT', purl: `pkg:npm/image-size@${version('image-size')}`, path: 'vendor/pptxgenjs', bundledIn: 'pptxgenjs' });
 
 writeFileSync(path.join(vendor, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);

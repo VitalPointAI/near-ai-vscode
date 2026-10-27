@@ -146,11 +146,52 @@ opening the view writes nothing to the project.
 
 ## Dependencies
 
-`package.json` declares no runtime dependencies; the shipped extension contains
-only its own compiled code and assets. Development tools (`typescript`,
-`@types/node`, `@types/vscode`, `@vscode/vsce`) are pinned with integrity hashes
-in `package-lock.json`. `npm audit --omit=dev --audit-level=high` reports 0
-vulnerabilities for the shipped tree.
+`package.json` declares no runtime dependencies. The third-party code the
+extension runs is vendored into `vendor/` at build time from pinned
+devDependencies by `scripts/vendor-libs.mjs`, each with its license, and listed
+in `vendor/manifest.json` from esbuild's record of what it bundled:
+
+| Package | Version | License | Used for |
+| --- | --- | --- | --- |
+| pdf.js (`pdfjs-dist`) | 6.4.299 | Apache-2.0 | Text of attached PDFs |
+| resvg (`@resvg/resvg-wasm`) | 2.6.2 | MPL-2.0 | Rendering SVG; decoding images for tracing |
+| imagetracer.js | 1.2.6 | Unlicense | Tracing images into SVG |
+| pptxgenjs (with jszip and 12 small helpers) | 4.0.1 | MIT | Writing .pptx decks |
+| DejaVu Sans | 2.37.3 | Bitstream Vera | Text in rendered SVG |
+
+Every release carries `sbom.cdx.json` (CycloneDX 1.6) for those components.
+`npm run sbom` builds it and checks each one on OSV.dev; the release fails on a
+high or critical finding in shipped code. Build-only tools are not shipped;
+`@azure/msal-node` 6.0.1 (CVE-2026-109461, pulled in by `@vscode/vsce` through
+`@azure/identity`, which does not yet accept the fixed 7.x) is a known
+build-time exception: the affected authorization-code flow is not used.
+
+## Checking your project's dependencies
+
+**NEAR AI: Scan Dependencies for Vulnerabilities** (and, once you agree, every
+time a NEAR AI project opens or a lockfile changes) writes `sbom.cdx.json` for
+the project and checks it:
+
+- **What is sent, and to whom:** the names and versions of dependencies from
+  lockfiles to [OSV.dev](https://osv.dev) (Google's open vulnerability
+  database), and the runtime versions the project declares or that are
+  installed (Node.js, Python, PHP, Go, Ruby, Rust, .NET) to
+  [endoflife.date](https://endoflife.date). No code, file contents, or project
+  names are sent.
+- **Consent:** asked once per project before anything is sent;
+  `nearAi.security.scanOnOpen` (`ask`, `always`, `never`) controls automatic
+  checks.
+- **Results:** Problems entries on the lockfile line of each affected package
+  (linking to the advisory), a status-bar shield, the **NEAR AI Security**
+  output, and the SBOM's `vulnerabilities` with ratings, CVE aliases, and
+  fixed versions. If a service can't be reached, the SBOM says the check was
+  incomplete rather than clean.
+- **Agents** run the `SecurityScan` tool after changing dependencies and are
+  told to fix high and critical findings or say why they remain, and never to
+  claim no known vulnerabilities without a fresh scan.
+- **CI:** **NEAR AI: Add Dependency Scan Workflow** writes a GitHub Actions
+  workflow running OSV-Scanner (pinned by commit) on pushes, pull requests,
+  and weekly.
 
 ## Verify it yourself
 

@@ -145,6 +145,13 @@ copy of Open-GSD to a project that doesn't already have one.
 
 ## Security and privacy
 
+- **Dependency checks.** **NEAR AI: Scan Dependencies for Vulnerabilities**
+  writes an SBOM (`sbom.cdx.json`, CycloneDX) from your lockfiles and checks
+  every package on OSV.dev and your runtimes on endoflife.date, after asking
+  once per project; only names and versions are sent. Findings appear in
+  Problems and the status bar, it re-checks when the project opens and when
+  lockfiles change, and agents run the same check after changing
+  dependencies. **Add Dependency Scan Workflow** adds a GitHub Actions scan.
 - API keys live in VS Code's encrypted **SecretStorage**, scoped to each
   project. They are never written to settings, workspace files, logs, history,
   or exports.

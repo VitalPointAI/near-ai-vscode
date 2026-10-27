@@ -35,6 +35,12 @@ runtime in between.
   reasoning, and tool calls with per-agent tokens, cost, speed, and failures;
   pause, filter, search, and export. In memory only, time- and size-limited,
   and streamed only while visible.
+- **SBOM and vulnerability checks.** A CycloneDX SBOM per project from its
+  lockfiles (npm, pnpm, yarn, Python, Go, Rust, PHP, Ruby, .NET, Java), checked
+  on OSV.dev with runtimes on endoflife.date; Problems entries, a status-bar
+  shield, checks on open and on lockfile changes, an agent `SecurityScan`
+  tool, and a GitHub Actions workflow. Asks once per project before sending
+  package names and versions. The extension ships its own SBOM.
 - **Graphics and decks.** Agents can trace images into SVG, render SVG to
   PNG, and build PowerPoint decks with sharp SVG images, all on this machine.
 - **Resumable chats.** Conversation history is kept on this machine.

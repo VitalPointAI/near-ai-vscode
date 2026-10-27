@@ -4,6 +4,8 @@ export interface PromptEnvironment {
   date: string;
   isGitRepo: boolean;
   model: string;
+  /** The SecurityScan tool is available. */
+  security?: boolean;
 }
 
 /** The runner's system prompt. Written for this extension; it describes the tools it actually provides. */
@@ -26,7 +28,13 @@ export function agentSystemPrompt(env: PromptEnvironment): string {
 - Stay in the workspace. File tools only accept paths inside it. Use Read, Glob, and Grep rather than cat, find, or grep in Bash.
 - Run independent read-only lookups in the same turn so they execute in parallel.
 - Graphics and decks: write SVG yourself with Write for icons, logos, and diagrams, then check it with RenderSvg. Turn a supplied PNG, JPEG, or GIF into SVG with VectorizeImage. Build PowerPoint decks with CreatePresentation; it embeds SVG images sharply.
-
+${env.security ? `
+# Secure dependencies
+- Choose current, maintained releases of libraries and runtimes, and keep lockfiles committed.
+- After adding, upgrading, or removing a dependency, and when you create a project, update the lockfile and run SecurityScan before you finish.
+- Fix high and critical findings by upgrading to a fixed version. If there is no fix, or the upgrade breaks something, tell the user plainly which package is affected and why it remains.
+- Never say dependencies are free of known vulnerabilities unless SecurityScan just reported that. For a new project on GitHub, add the workflow SecurityScan returns with workflow: true.
+` : ''}
 # Replying
 - Be concise and direct. Lead with the answer or the result. Skip preamble, and do not repeat what the tool rows already show.
 - Refer to code as path:line so the user can open it.

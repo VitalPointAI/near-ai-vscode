@@ -8,6 +8,7 @@ import { PermissionRules, RunGrants } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
+import { SecurityAccess, securityTool } from '../agent/securityTool';
 import { AgentTool, CORE_TOOLS, ToolContext } from '../agent/tools';
 import { displayPath } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
@@ -68,6 +69,8 @@ export interface AgentTurnRequest {
   /** The provider's image model, when it has one; enables GenerateImage. */
   imageModel?: ModelInfo;
   reputation?: ReputationStore;
+  /** Dependency vulnerability checks for the SecurityScan tool. */
+  security?: SecurityAccess;
 }
 
 type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
@@ -288,7 +291,7 @@ export class AgentConversation {
   public dispose(): void { this.reset(); }
 
   private systemPrompt(request: AgentTurnRequest, root = this.root): string {
-    const base = agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model });
+    const base = agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model });
     if (!request.gsd) return base;
     return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
   }
@@ -338,7 +341,7 @@ export class AgentConversation {
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
-    const base = [...CORE_TOOLS, ...GRAPHICS_TOOLS, ...media, ...memoryFor()];
+    const base = [...CORE_TOOLS, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...memoryFor()];
     const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : [])];
     if (!agents.length) return base;
     const gsd = request.gsd;

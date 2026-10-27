@@ -142,6 +142,17 @@
         "title": "Open Agent Activity",
         "category": "NEAR AI",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "nearAi.securityScan",
+        "title": "Scan Dependencies for Vulnerabilities",
+        "category": "NEAR AI",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "nearAi.addScanWorkflow",
+        "title": "Add Dependency Scan Workflow (GitHub Actions)",
+        "category": "NEAR AI"
       }
     ],
     "viewsContainers": {
@@ -385,6 +396,21 @@
           "minimum": 1,
           "maximum": 64,
           "description": "The most memory Agent Activity uses for entries, in MB. The oldest entries are dropped first; per-agent totals are kept."
+        },
+        "nearAi.security.scanOnOpen": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Ask once per project before the first check.",
+            "Check every NEAR AI project when it opens and when its lockfiles change.",
+            "Never check automatically; the command still works after you agree."
+          ],
+          "default": "ask",
+          "description": "Check a NEAR AI project's dependencies and runtimes for known vulnerabilities (OSV.dev, endoflife.date) when it opens. Only package names and versions are sent."
         }
       }
     },
@@ -449,6 +475,11 @@
           "command": "nearAi.emergencyStop",
           "when": "view == nearAiChatView",
           "group": "overflow@9"
+        },
+        {
+          "command": "nearAi.securityScan",
+          "when": "view == nearAiChatView",
+          "group": "overflow@3"
         }
       ]
     }
@@ -458,13 +489,14 @@
     "watch": "tsc -p tsconfig.json --watch",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run compile && node --test dist/test/*.test.js",
-    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
+    "package": "npm run compile && npm run sbom && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
     "generate:icon": "node scripts/generate-near-ai-icon.mjs",
     "install:global": "node scripts/install-global-extension.mjs",
     "verify:release": "npm run package && node scripts/verify-release-content.mjs",
     "check": "npm run lint && npm test",
     "test:e2e": "npm run compile && env -u ELECTRON_RUN_AS_NODE xvfb-run -a node dist/test/e2e/run.js",
-    "generate:screenshots": "npm run compile && node scripts/generate-marketplace-screenshots.mjs"
+    "generate:screenshots": "npm run compile && node scripts/generate-marketplace-screenshots.mjs",
+    "sbom": "node scripts/extension-sbom.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-wasm": "2.6.2",
@@ -478,5 +510,8 @@
     "pdfjs-dist": "6.4.299",
     "pptxgenjs": "4.0.1",
     "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "image-size": "2.0.3"
   }
 }
