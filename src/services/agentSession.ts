@@ -9,6 +9,7 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt } from '../agent/systemPrompt';
 import { AgentTool, CORE_TOOLS, ToolContext } from '../agent/tools';
 import { displayPath } from '../agent/workspace';
+import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
 import { expandPrompt, GsdAgent, GsdSkill, modelForTier } from '../gsd/library';
 import { gsdTools, Question } from '../gsd/tools';
@@ -113,6 +114,9 @@ export class AgentConversation {
     private readonly ripgrepPath?: string,
     private readonly transcripts?: TranscriptStore
   ) {}
+
+  /** Where sub-agents' git worktrees live: the extension's storage, never the project. */
+  private get worktreeDir(): string { return path.join(path.dirname(this.checkpointDir), 'worktrees'); }
 
   public get running(): boolean { return Boolean(this.abort); }
   public get runningAgents(): number { return this.agents.size; }
@@ -275,8 +279,8 @@ export class AgentConversation {
 
   public dispose(): void { this.reset(); }
 
-  private systemPrompt(request: AgentTurnRequest): string {
-    const base = agentSystemPrompt({ root: this.root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(this.root, '.git')), model: request.model });
+  private systemPrompt(request: AgentTurnRequest, root = this.root): string {
+    const base = agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model });
     if (!request.gsd) return base;
     return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
   }
@@ -341,7 +345,7 @@ export class AgentConversation {
         const label = spawn.agent?.name ?? spawn.type;
         const wanted = modelForTier(spawn.model ?? spawn.agent?.model, request.tiers ?? { deep: request.model, standard: request.model, fast: request.model }, request.model);
         const model = !request.availableModels || request.availableModels.includes(wanted) ? wanted : request.model;
-        const system = spawn.agent ? `${gsd ? await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root }) : spawn.agent.body}\n\n${this.systemPrompt({ ...request, model })}` : this.systemPrompt({ ...request, model });
+        const agentBody = spawn.agent ? (gsd ? await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root }) : spawn.agent.body) : undefined;
         // Each sub-agent's Remember/Recall also reach its own private memory.
         const privateMemory = memoryFor({ kind: 'private-agent', id: `agent-${label}`.slice(0, 80) }, `${runId}-${label}`.slice(0, 100));
         const pool = [...all.filter((tool) => tool.name !== 'Remember' && tool.name !== 'Recall'), ...privateMemory];
@@ -354,15 +358,23 @@ export class AgentConversation {
         const execute = async (): Promise<string> => {
           await this.acquireSlot(request.maxParallelAgents ?? 4, agent.abort.signal);
           const releaseSlot = () => this.releaseSlot();
-          // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
-          const shell = new ShellSession(this.root, undefined, request.gsd?.shellEnv ?? {});
-          const agentContext = { ...context, shell, readFiles: new Set<string>() };
+          let shell: ShellSession | undefined;
+          let worktree: AgentWorktree | undefined;
+          let worktreeState: 'removed' | 'kept' | undefined;
           this.agents.set(agent.id, agent);
           this.postAgents();
           const started = Date.now();
           const usage: UsageMetadata[] = [];
           void record({ status: 'running', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} started.` });
           try {
+            if (spawn.isolation === 'worktree') worktree = await createAgentWorktree(this.root, this.worktreeDir, agent.id);
+            const agentRoot = worktree?.path ?? this.root;
+            // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
+            shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {});
+            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>() };
+            const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}. Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
+            const base = `${this.systemPrompt({ ...request, model }, agentRoot)}${isolationNote}`;
+            const system = agentBody ? `${agentBody}\n\n${base}` : base;
             const child = new AgentRun({
               client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, maxTurns: request.maxTurns,
               beforeTurn: async (transcript, lastUsage, signal) => {
@@ -382,14 +394,19 @@ export class AgentConversation {
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
             await this.recordReputation(request.reputation, label, result.outcome === 'completed' ? 1 : result.outcome === 'max-turns' ? 0 : -1, agent.id);
             void record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} ${result.outcome}.`, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCostUsd: total.estimatedCostUsd, durationMs: Date.now() - started });
-            if (result.outcome === 'cancelled') return `${label} was stopped before it finished.`;
-            return typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`;
+            shell.dispose();
+            worktreeState = worktree ? await finishAgentWorktree(worktree).catch(() => 'kept' as const) : undefined;
+            const isolated = worktree && worktreeState ? `\n\n${worktreeReport(worktree, worktreeState)}` : '';
+            if (result.outcome === 'cancelled') return `${label} was stopped before it finished.${isolated}`;
+            return `${typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`}${isolated}`;
           } catch (error) {
             await this.recordReputation(request.reputation, label, -1, agent.id);
             void record({ status: 'failed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
             throw error;
           } finally {
-            shell.dispose();
+            shell?.dispose();
+            // A failed agent's empty worktree is removed too; one with changes stays for recovery.
+            if (worktree && !worktreeState) await finishAgentWorktree(worktree).catch(() => undefined);
             parent.removeEventListener('abort', onParentAbort);
             this.agents.delete(agent.id);
             releaseSlot();
@@ -405,7 +422,7 @@ export class AgentConversation {
         return `Started ${label} in the background as ${agent.id}. Its report will arrive in a later message when it finishes; there is no output file to poll. Continue with other work, or end your turn to wait; do not sleep.`;
       }
     });
-    all = [...base, ...extra.filter((tool) => gsd || tool.name !== 'Skill')];
+    all = [...base, ...extra.filter((tool) => gsd || (tool.name !== 'Skill' && tool.name !== 'SlashCommand'))];
     return all;
   }
 

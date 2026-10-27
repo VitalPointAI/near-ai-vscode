@@ -11,7 +11,10 @@ runtime in between.
 - **Open-GSD workflows on NEAR AI.** `/gsd-…` commands run on the native runner
   with sub-agents (including background ones you can pause or stop), questions,
   and context management. Open-GSD is installed per user and checked against
-  each new release.
+  each new release. Parallel executors each work in their own git worktree on
+  a `worktree-agent-…` branch (kept in the extension's storage, not your
+  project), and GSD merges them back. Workflows that chain to the next command
+  (`--auto`, `/gsd-next`) work too.
 - **Agent teams.** Teams are Markdown files you edit, version, duplicate,
   archive and import. Run one with `/team:<name>`. **Set Up Project Team**
   drafts one from a few questions.

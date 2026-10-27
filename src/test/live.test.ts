@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import { prepareAttachments, stageAttachment } from '../agent/attachments';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { AgentRun } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
@@ -19,7 +20,9 @@ import { NearAiClient, type ModelInfo, type UsageMetadata } from '../services/ne
 // Live tests against NEAR AI Cloud. They spend real money (cents), so they are opt-in:
 //   NEAR_AI_API_KEY=...                      tool round trip, signature verification, billing
 //   NEAR_LIVE_EVAL=1                         also compare default-model candidates on fixed coding tasks
-//   NEAR_LIVE_GSD=1 NEAR_GSD_HOME=<runtime>  also run /gsd-map-codebase end to end on a sample repo
+//   (with the key alone, also: image and voice-note attachments and image generation)
+//   NEAR_LIVE_GSD=1 NEAR_GSD_HOME=<runtime>  also run /gsd-map-codebase on a sample repo and a full
+//                                            GSD cycle (new-project, plan, execute in worktrees)
 const key = process.env.NEAR_AI_API_KEY;
 const baseUrl = process.env.NEAR_AI_BASE_URL ?? 'https://cloud-api.near.ai/v1';
 const skip = key ? false : 'set NEAR_AI_API_KEY to run live NEAR AI tests';
@@ -116,46 +119,146 @@ test('live eval: default-model candidates on fixed coding tasks', { skip: skip |
   assert.ok(rows.length > 0);
 });
 
-test('live GSD: /gsd-map-codebase runs end to end on a sample repository', { skip: skip || (process.env.NEAR_LIVE_GSD && process.env.NEAR_GSD_HOME ? false : 'set NEAR_LIVE_GSD=1 and NEAR_GSD_HOME'), timeout: 3_600_000 }, async () => {
-  const home = process.env.NEAR_GSD_HOME!;
-  const { client: near, models } = await client();
-  const model = pick(models, /^z-ai\/glm-5\.3$/i)!;
-  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-gsd-live-'));
-  for (const task of TASKS) for (const [name, content] of Object.entries(task.files)) await writeFile(path.join(root, name), content);
-  await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'sample', version: '1.0.0', scripts: { test: 'node --test' } }, null, 2));
-  await run('git', ['init', '-q'], { cwd: root });
+type Posted = { type: string; [key: string]: unknown };
+type GsdContextFor = Awaited<ReturnType<typeof gsdFor>>;
+
+async function gsdFor(home: string) {
   const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gsd-storage-'));
-  const gsd = { home, skills: await loadSkills(home), agents: await loadAgents(home), shellEnv: await gsdShellEnv(home, storage, true) };
-  const skill = findSkill(gsd.skills, 'gsd-map-codebase');
-  assert.ok(skill, 'the runtime has gsd-map-codebase');
-  const posted: Array<{ type: string; [key: string]: unknown }> = [];
-  // A timeline of tool calls, so a slow run shows where the time went.
+  return { storage, gsd: { home, skills: await loadSkills(home), agents: await loadAgents(home), shellEnv: await gsdShellEnv(home, storage, true) } };
+}
+
+/**
+ * Runs one GSD command in a fresh conversation, answering every question with its first
+ * (recommended) option, and prints the slowest tool calls so a slow run shows where time went.
+ */
+async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: string, context: GsdContextFor, command: string, args = ''): Promise<{ posted: Posted[]; seconds: number }> {
+  const model = pick(models, /^z-ai\/glm-5\.3$/i)!;
+  const skill = findSkill(context.gsd.skills, command);
+  assert.ok(skill, `the runtime has ${command}`);
+  const posted: Posted[] = [];
   const started = Date.now();
   const open = new Map<string, { title: string; at: number }>();
   const spans: Array<{ title: string; startS: number; seconds: number }> = [];
-  // Answer any question with its first option, as a user accepting the recommendation would.
   const conversation: AgentConversation = new AgentConversation(root, (message) => {
-    const value = message as { type: string; id?: string; callId?: string; title?: string; questions?: Array<{ question: string; options: Array<{ label: string }> }> };
+    const value = message as { type: string; id?: string; callId?: string; title?: string; text?: string; questions?: Array<{ question: string; options: Array<{ label: string }> }> };
     posted.push(value);
     if (value.type === 'tool-start' && value.callId) open.set(value.callId, { title: String(value.title), at: Date.now() });
     if (value.type === 'tool-end' && value.callId && open.has(value.callId)) {
       const span = open.get(value.callId)!;
       spans.push({ title: span.title, startS: Math.round((span.at - started) / 1000), seconds: Math.round((Date.now() - span.at) / 1000) });
     }
+    if (value.type === 'notice' || value.type === 'assistant-retry') console.log(`  notice: ${String(value.text).slice(0, 200)}`);
     if (value.type === 'questions-request' && value.id && value.questions) conversation.answerQuestions(value.id, value.questions.map((question) => question.options[0]?.label ?? 'yes'));
-  }, path.join(storage, 'checkpoints'));
+  }, path.join(context.storage, 'checkpoints'));
   try {
-    await conversation.send({ text: '/gsd-map-codebase', skill: { name: skill!.name, args: '' }, gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, availableModels: models.map((candidate) => candidate.id), maxParallelAgents: 4, maxTurns: 80 });
+    await conversation.send({ text: `/${skill!.name}${args ? ` ${args}` : ''}`, skill: { name: skill!.name, args }, gsd: context.gsd, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, tiers: { deep: model, standard: model, fast: pick(models, /glm-5\.3-flash/i) ?? model }, availableModels: models.map((candidate) => candidate.id), maxParallelAgents: 4, maxTurns: 120 });
   } finally {
     // The conversation keeps a shell open between turns; close it so the test process can exit.
     conversation.dispose();
   }
-  const turns = posted.filter((message) => message.type === 'assistant-done').length;
-  console.log(`gsd run: ${Math.round((Date.now() - started) / 1000)} s, ${spans.length} tool calls, ${turns} run(s); slowest tool calls:`);
+  const seconds = Math.round((Date.now() - started) / 1000);
+  const agents = spans.filter((span) => /^gsd-[\w-]+: /.test(span.title)).length;
+  console.log(`/${skill!.name} ${args}: ${seconds} s, ${spans.length} tool calls, ${agents} sub-agent(s); slowest tool calls:`);
   for (const span of [...spans].sort((a, b) => b.seconds - a.seconds).slice(0, 10)) console.log(`  ${span.seconds} s at +${span.startS} s  ${span.title.slice(0, 120)}`);
-  if (process.env.NEAR_LIVE_TRACE) await writeFile(process.env.NEAR_LIVE_TRACE, JSON.stringify(spans, null, 2));
+  if (process.env.NEAR_LIVE_TRACE) await writeFile(`${process.env.NEAR_LIVE_TRACE}.${skill!.name}.json`, JSON.stringify(spans, null, 2));
+  assert.ok(posted.some((message) => message.type === 'assistant-done'), `/${skill!.name} finished`);
+  return { posted, seconds };
+}
+
+const gsdSkip = skip || (process.env.NEAR_LIVE_GSD && process.env.NEAR_GSD_HOME ? false : 'set NEAR_LIVE_GSD=1 and NEAR_GSD_HOME');
+
+test('live GSD: /gsd-map-codebase runs end to end on a sample repository', { skip: gsdSkip, timeout: 3_600_000 }, async () => {
+  const { client: near, models } = await client();
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-gsd-live-'));
+  for (const task of TASKS) for (const [name, content] of Object.entries(task.files)) await writeFile(path.join(root, name), content);
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'sample', version: '1.0.0', scripts: { test: 'node --test' } }, null, 2));
+  await run('git', ['init', '-q'], { cwd: root });
+  await runGsdCommand(near, models, root, await gsdFor(process.env.NEAR_GSD_HOME!), 'gsd-map-codebase');
   const docs = existsSync(path.join(root, '.planning', 'codebase')) ? await readdir(path.join(root, '.planning', 'codebase')) : [];
   console.log(`codebase docs: ${docs.join(', ')}`);
-  assert.ok(posted.some((message) => message.type === 'assistant-done'), 'the run finished');
   assert.ok(docs.length >= 4, `expected the mapper documents, got: ${docs.join(', ') || 'none'}`);
+});
+
+const IDEA = `# tempconv
+
+A tiny Node.js library with no dependencies.
+
+- \`tempconv.js\` exports \`cToF(c)\` and \`fToC(f)\`. Results are rounded to one decimal place.
+  Non-number input throws a TypeError.
+- \`tempconv.test.js\` tests both functions with \`node:test\`; \`npm test\` runs it.
+
+Scope: a single phase. No CLI, UI, network access, or packaging.
+`;
+
+async function filesUnder(dir: string, pattern: RegExp): Promise<string[]> {
+  if (!existsSync(dir)) return [];
+  const found: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true, recursive: true })) if (entry.isFile() && pattern.test(entry.name)) found.push(path.join(entry.parentPath, entry.name));
+  return found;
+}
+
+test('live GSD: idea to working code — new-project, plan-phase, and execute-phase in worktrees', { skip: gsdSkip, timeout: 7_200_000 }, async () => {
+  const { client: near, models } = await client();
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-gsd-cycle-'));
+  await run('git', ['init', '-q'], { cwd: root });
+  await run('git', ['config', 'user.email', 'live-test@example.invalid'], { cwd: root });
+  await run('git', ['config', 'user.name', 'Live test'], { cwd: root });
+  await writeFile(path.join(root, 'idea.md'), IDEA);
+  await run('git', ['add', 'idea.md'], { cwd: root });
+  await run('git', ['commit', '-qm', 'idea'], { cwd: root });
+  const context = await gsdFor(process.env.NEAR_GSD_HOME!);
+  const phases = path.join(root, '.planning', 'phases');
+  const steps: string[] = [];
+  // --auto chains new-project into discuss, plan, and execute by itself; each later command runs
+  // only if the chain stopped before reaching it, as a user would type it next.
+  steps.push(`new-project ${(await runGsdCommand(near, models, root, context, 'gsd-new-project', '--auto @idea.md')).seconds} s`);
+  assert.ok(existsSync(path.join(root, '.planning', 'PROJECT.md')), 'PROJECT.md was written');
+  assert.ok(existsSync(path.join(root, '.planning', 'ROADMAP.md')), 'ROADMAP.md was written');
+  if (!(await filesUnder(phases, /PLAN\.md$/)).length) steps.push(`plan-phase ${(await runGsdCommand(near, models, root, context, 'gsd-plan-phase', '1 --auto')).seconds} s`);
+  const plans = await filesUnder(phases, /PLAN\.md$/);
+  assert.ok(plans.length, 'a phase plan was written');
+  if (!(await filesUnder(phases, /SUMMARY\.md$/)).length) steps.push(`execute-phase ${(await runGsdCommand(near, models, root, context, 'gsd-execute-phase', '1')).seconds} s`);
+  console.log(`gsd cycle: ${steps.join(', ')}; plans: ${plans.map((file) => path.relative(root, file)).join(', ')}`);
+  assert.ok((await filesUnder(phases, /SUMMARY\.md$/)).length, 'execution wrote a summary');
+  // The work was merged back into the main checkout and works there.
+  assert.ok(existsSync(path.join(root, 'tempconv.js')), 'tempconv.js is in the main checkout');
+  const tests = await run('npm', ['test', '--silent'], { cwd: root }).catch((error: { stdout?: string; stderr?: string }) => { throw new Error(`npm test failed in the main checkout:\n${error.stdout ?? ''}${error.stderr ?? ''}`); });
+  console.log(tests.stdout.split('\n').filter((line) => /^ℹ (pass|fail)/.test(line)).join('; '));
+  const worktrees = (await run('git', ['worktree', 'list', '--porcelain'], { cwd: root })).stdout.split('\n').filter((line) => line.startsWith('worktree ')).length;
+  const branches = (await run('git', ['branch', '--list', 'worktree-agent-*', '--format=%(refname:short)'], { cwd: root })).stdout.split('\n').filter(Boolean);
+  for (const branch of branches) await run('git', ['merge-base', '--is-ancestor', branch, 'HEAD'], { cwd: root }).catch(() => { throw new Error(`${branch} has work that was never merged`); });
+  console.log(`worktrees left: ${worktrees - 1}; agent branches left (all merged): ${branches.length}`);
+  assert.equal(worktrees, 1, 'every executor worktree was merged and removed');
+  console.log((await run('git', ['log', '--oneline'], { cwd: root })).stdout.split('\n').slice(0, 15).join('\n'));
+});
+
+const FIXTURES = path.join(__dirname, '..', '..', 'test', 'fixtures', 'media');
+
+test('live media: an image and a voice note are read, and an image is generated', { skip, timeout: 600_000 }, async () => {
+  const { client: near, models } = await client();
+  const model = pick(models, /^z-ai\/glm-5\.3$/i)!;
+  const staged = [await stageAttachment(path.join(FIXTURES, 'build-code.png')), await stageAttachment(path.join(FIXTURES, 'secret-word.wav'))];
+  const question = 'What is the build code in the image, and what is the secret word in the voice note?';
+  const prepared = await prepareAttachments(staged, { client: near, model, models, visionModel: 'z-ai/glm-5.3-flash', transcriptionModel: 'openai/whisper-large-v3', question });
+  console.log(`attachments: ${prepared.notes.join(' ')}\n${prepared.text}`);
+  assert.match(prepared.text, /OTTER-5813/i, 'the image text was read');
+  assert.match(prepared.text, /pelican/i, 'the voice note was transcribed');
+  const imageModel = models.find((candidate) => candidate.id === 'black-forest-labs/FLUX.2-klein-4B' && (candidate.outputModalities ?? []).includes('image'));
+  assert.ok(imageModel, 'the default image model is listed with image output');
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-media-live-'));
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-media-storage-'));
+  const posted: Posted[] = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message as Posted), path.join(storage, 'checkpoints'));
+  try {
+    await conversation.send({ text: `${question} Then generate a simple flat icon of an otter and save it to icon.png.`, attachments: prepared, imageModel, client: near, model, privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, maxTurns: 12 });
+  } finally {
+    conversation.dispose();
+  }
+  const answer = posted.filter((message) => message.type === 'assistant-delta').map((message) => String(message.text)).join('');
+  console.log(`answer: ${answer.slice(-400)}`);
+  assert.match(answer, /OTTER-5813/i);
+  assert.match(answer, /pelican/i);
+  const icon = path.join(root, 'icon.png');
+  assert.ok(existsSync(icon), 'the agent generated icon.png');
+  assert.deepEqual([...(await readFile(icon)).subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], 'icon.png is a PNG');
 });

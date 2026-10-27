@@ -22,7 +22,7 @@ export interface GsdServices {
    * Runs a sub-agent. In the foreground it resolves with the final report; in the background it
    * resolves at once with the agent's id, and the report reaches the caller when it finishes.
    */
-  spawn(request: { type: string; agent?: GsdAgent; prompt: string; description: string; model?: string; background: boolean }, signal: AbortSignal): Promise<string>;
+  spawn(request: { type: string; agent?: GsdAgent; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree' }, signal: AbortSignal): Promise<string>;
 }
 
 const MAX_FETCH_BYTES = 2 * 1024 * 1024;
@@ -47,6 +47,20 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
       if (!skill) throw new ToolError(`No installed skill named "${input.name}".`);
       return `Follow these instructions for ${skill.name}:\n\n${await expandPrompt(skill.body, { args: input.args, home: services.home, root: services.root })}`;
     }
+  };
+
+  // Workflows chain to the next command with SlashCommand("/gsd-plan-phase 1 --auto").
+  const slashTool: AgentTool<{ name: string; args: string }> = {
+    ...skillTool,
+    name: 'SlashCommand',
+    description: 'Run an installed slash command, e.g. "/gsd-plan-phase 1 --auto": loads its instructions to follow now.',
+    parameters: { type: 'object', properties: { command: { type: 'string', description: 'The command with its arguments, starting with /.' } }, required: ['command'], additionalProperties: false },
+    parse: (raw) => {
+      const match = typeof raw.command === 'string' ? /^\/?([\w:.-]+)(?:\s+([\s\S]*))?$/.exec(raw.command.trim()) : null;
+      if (!match) throw new ToolError('command must look like "/gsd-progress" followed by any arguments.');
+      return { name: match[1], args: (match[2] ?? '').trim() };
+    },
+    title: (input) => `Run /${input.name}${input.args ? ` ${input.args}` : ''}`
   };
 
   const askTool: AgentTool<{ questions: Question[] }> = {
@@ -76,10 +90,10 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     }
   };
 
-  const agentRun = async (raw: { type: string; prompt: string; description: string; model?: string; background: boolean }, signal: AbortSignal) => {
+  const agentRun = async (raw: { type: string; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree' }, signal: AbortSignal) => {
     const agent = services.agents.find((candidate) => candidate.name === raw.type);
     if (!agent && raw.type && raw.type !== 'general-purpose') throw new ToolError(`No agent definition named "${raw.type}". Available: ${services.agents.map((candidate) => candidate.name).join(', ')}, or general-purpose.`);
-    return services.spawn({ type: raw.type || 'general-purpose', agent, prompt: raw.prompt, description: raw.description, model: raw.model, background: raw.background }, signal);
+    return services.spawn({ type: raw.type || 'general-purpose', agent, prompt: raw.prompt, description: raw.description, model: raw.model, background: raw.background, ...(raw.isolation ? { isolation: raw.isolation } : {}) }, signal);
   };
 
   const agentParse = (raw: Record<string, unknown>) => {
@@ -89,10 +103,11 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
       prompt: raw.prompt,
       description: typeof raw.description === 'string' ? raw.description.slice(0, 120) : '',
       model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : undefined,
-      background: raw.run_in_background === true
+      background: raw.run_in_background === true,
+      ...(raw.isolation === 'worktree' ? { isolation: 'worktree' as const } : {})
     };
   };
-  const agentParameters = { type: 'object', properties: { description: { type: 'string', description: 'Three to five words on the task.' }, prompt: { type: 'string', description: 'The complete task for the agent; it sees nothing else from this conversation.' }, subagent_type: { type: 'string', description: `One of: ${services.agents.map((agent) => agent.name).join(', ')}, or general-purpose.` }, model: { type: 'string', description: 'Optional tier or model ID.' }, run_in_background: { type: 'boolean' } }, required: ['prompt'], additionalProperties: false };
+  const agentParameters = { type: 'object', properties: { description: { type: 'string', description: 'Three to five words on the task.' }, prompt: { type: 'string', description: 'The complete task for the agent; it sees nothing else from this conversation.' }, subagent_type: { type: 'string', description: `One of: ${services.agents.map((agent) => agent.name).join(', ')}, or general-purpose.` }, model: { type: 'string', description: 'Optional tier or model ID.' }, run_in_background: { type: 'boolean' }, isolation: { type: 'string', enum: ['worktree'], description: 'Run the agent in its own git worktree on a new branch; its changes stay on that branch for you to merge.' } }, required: ['prompt'], additionalProperties: false };
   const agentTool: AgentTool<ReturnType<typeof agentParse>> = {
     name: 'Agent',
     description: 'Start a sub-agent with its own context to do a self-contained task, and get back its final report. Give it everything it needs in the prompt. Several Agent calls in one turn run in parallel. With run_in_background the call returns at once and the report arrives in a later message when the agent finishes.',
@@ -130,7 +145,7 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     }
   };
 
-  return [skillTool, askTool, agentTool, taskTool, webFetchTool];
+  return [skillTool, slashTool, askTool, agentTool, taskTool, webFetchTool];
 }
 
 /**
