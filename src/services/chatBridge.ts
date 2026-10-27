@@ -35,7 +35,7 @@ export type ChatWebviewMessage =
   | { type: 'history' }
   | { type: 'new-chat' }
   | { type: 'open-tools' }
-  | { type: 'open-activity' }
+  | { type: 'open-activity'; agentId?: string }
   | { type: 'select-profile' }
   | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'deny'; feedback?: string }
   | { type: 'revert-run'; runId: string }
@@ -518,7 +518,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'text')) return undefined;
     return { type: 'insert-code', text: message.text };
   }
-  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'open-activity' || message.type === 'select-profile') {
+  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'select-profile') {
     if (Object.keys(message).some((key) => key !== 'type')) return undefined;
     return { type: message.type };
   }
@@ -541,6 +541,11 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   }
   if (message.type === 'attach-files' && Object.keys(message).length === 1) return { type: 'attach-files' };
   if (message.type === 'attachment-remove' && typeof message.id === 'string' && /^att-[a-f0-9]{12}$/.test(message.id) && Object.keys(message).length === 2) return { type: 'attachment-remove', id: message.id };
+  if (message.type === 'open-activity') {
+    if (Object.keys(message).some((key) => key !== 'type' && key !== 'agentId')) return undefined;
+    if (message.agentId === undefined) return { type: 'open-activity' };
+    return typeof message.agentId === 'string' && /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i.test(message.agentId) ? { type: 'open-activity', agentId: message.agentId } : undefined;
+  }
   if (message.type === 'agent-control' && typeof message.agentId === 'string' && /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i.test(message.agentId) && (message.action === 'pause' || message.action === 'resume' || message.action === 'stop') && Object.keys(message).length === 3) {
     return { type: 'agent-control', agentId: message.agentId, action: message.action };
   }

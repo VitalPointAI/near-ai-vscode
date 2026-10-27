@@ -19,6 +19,8 @@ let panel: vscode.WebviewPanel | undefined;
 export const activityTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void } = {};
 
 /** The one feed every conversation writes to. */
+let focusAgent: string | undefined;
+
 export function sharedActivityFeed(): ActivityFeed {
   feed ??= new ActivityFeed(readActivityLimits());
   return feed;
@@ -26,13 +28,15 @@ export function sharedActivityFeed(): ActivityFeed {
 
 export function registerAgentActivity(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
-    vscode.commands.registerCommand('nearAi.openAgentActivity', () => openAgentActivity(context)),
+    vscode.commands.registerCommand('nearAi.openAgentActivity', (agentId?: unknown) => openAgentActivity(context, typeof agentId === 'string' ? agentId : undefined)),
     vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi.activity')) sharedActivityFeed().setLimits(readActivityLimits()); })
   );
 }
 
-export function openAgentActivity(context: vscode.ExtensionContext): void {
-  if (panel) { panel.reveal(); return; }
+/** Opens the page; with an agent ID, the stream is filtered to that agent. */
+export function openAgentActivity(context: vscode.ExtensionContext, agentId?: string): void {
+  focusAgent = agentId;
+  if (panel) { panel.reveal(); if (agentId) void panel.webview.postMessage({ type: 'focus-agent', agentId }); return; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'activity');
   const view = vscode.window.createWebviewPanel('nearAiAgentActivity', 'Agent Activity', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
   panel = view;
@@ -61,6 +65,7 @@ export function openAgentActivity(context: vscode.ExtensionContext): void {
     });
     subscription = subscribed;
     post({ type: 'snapshot', entries: subscribed.snapshot.slice(-SNAPSHOT_ENTRIES), ...status() });
+    if (focusAgent) { post({ type: 'focus-agent', agentId: focusAgent }); focusAgent = undefined; }
     statsTimer = setInterval(() => post({ type: 'stats', ...status() }), STATS_MS);
   };
   const stop = () => {

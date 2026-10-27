@@ -384,15 +384,33 @@
     announce('NEAR AI is asking you ' + (m.questions.length === 1 ? 'a question.' : m.questions.length + ' questions.'));
   }
 
-  // Running sub-agents with pause, resume, and stop.
+  // Running sub-agents with what each is doing, how long it has run, and pause, resume, and stop.
+  let agentClock;
+  const clock = (ms) => { const seconds = Math.max(0, Math.floor(ms / 1000)); return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm ' + String(seconds % 60).padStart(2, '0') + 's'; };
+  function updateAgentStatus(node) {
+    const now = Date.now();
+    const thinking = node.dataset.activity === 'Thinking' || node.dataset.activity === 'Writing';
+    node.textContent = node.dataset.activity + (thinking ? ' (' + clock(now - Number(node.dataset.since)) + ')' : '') + (node.dataset.after ? ' after ' + node.dataset.after : '') + ' · ' + clock(now - Number(node.dataset.startedAt)) + ' · ' + node.dataset.counts;
+  }
   function renderAgents(agents) {
     agentPanel.hidden = !agents.length;
     if (!agents.length) { agentPanel.replaceChildren(); return; }
     const list = el('ul');
     agents.forEach((agent) => {
       const item = el('li', 'agent' + (agent.paused ? ' paused' : ''));
-      const label = el('span', 'agent-label', agent.label + (agent.description ? ' · ' + agent.description : ''));
-      label.title = agent.model + (agent.background ? ' · background' : '');
+      const body = el('span', 'agent-body');
+      const label = el('button', 'agent-label link-button', agent.label + (agent.description ? ' · ' + agent.description : ''));
+      label.type = 'button';
+      label.title = 'Show what this agent is doing in Agent Activity · ' + agent.model + (agent.background ? ' · background' : '');
+      label.addEventListener('click', () => post({ type: 'open-activity', agentId: agent.id }));
+      const status = el('span', 'agent-status');
+      status.dataset.startedAt = String(agent.startedAt || Date.now());
+      status.dataset.since = String(agent.activitySince || Date.now());
+      status.dataset.activity = agent.paused ? 'Paused' : (agent.activity || 'Starting');
+      status.dataset.after = !agent.paused && agent.activity === 'Thinking' && agent.lastAction ? agent.lastAction : '';
+      status.dataset.counts = (agent.toolCalls || 0) + ' tool call' + (agent.toolCalls === 1 ? '' : 's') + ' · ' + (agent.turns || 0) + ' turn' + (agent.turns === 1 ? '' : 's');
+      updateAgentStatus(status);
+      body.append(label, status);
       const controls = el('span', 'agent-controls');
       controls.append(
         agent.paused
@@ -400,9 +418,10 @@
           : textButton('Pause', () => post({ type: 'agent-control', agentId: agent.id, action: 'pause' })),
         textButton('Stop', () => post({ type: 'agent-control', agentId: agent.id, action: 'stop' }))
       );
-      item.append(label, controls);
+      item.append(body, controls);
       list.append(item);
     });
+    agentClock ??= setInterval(() => { const rows = agentPanel.querySelectorAll('.agent-status'); if (!rows.length) { clearInterval(agentClock); agentClock = undefined; } rows.forEach(updateAgentStatus); }, 1000);
     const title = el('div', 'todo-title', `Agents running · ${agents.length} `);
     title.append(textButton('Activity', () => post({ type: 'open-activity' })));
     agentPanel.replaceChildren(title, list);
@@ -667,6 +686,12 @@
       case 'attachments-cleared': staged.clear(); renderChips(); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
+      case 'progress': {
+        const last = transcript.lastElementChild;
+        if (last && last.classList.contains('progress')) { last.firstChild.textContent = m.text || ''; announce(m.text || ''); }
+        else { notice(m.text || '', []); transcript.lastElementChild.classList.add('progress'); }
+        break;
+      }
       case 'agents':
         status.textContent = /Agents \d+/.test(status.textContent) ? status.textContent.replace(/Agents \d+/, 'Agents ' + m.count) : status.textContent;
         renderAgents(m.agents || []);

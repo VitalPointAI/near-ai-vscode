@@ -137,6 +137,11 @@
     }
     if (message.stats) { stats = message.stats; renderStats(message.usage); }
     if (message.type === 'snapshot' || message.type === 'entries') scrollIfFollowing();
+    if (message.type === 'focus-agent' && typeof message.agentId === 'string') {
+      if (![...filterAgent.options].some((option) => option.value === message.agentId)) { const option = el('option', '', message.agentId); option.value = message.agentId; filterAgent.append(option); }
+      filterAgent.value = message.agentId;
+      refilter();
+    }
   });
   const refilter = () => rows.forEach(applyFilter);
   document.querySelectorAll('input[data-kind]').forEach((box) => box.addEventListener('change', refilter));

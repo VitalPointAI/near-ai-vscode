@@ -103,7 +103,17 @@ interface LiveAgent {
   paused: boolean;
   resume?: () => void;
   background: boolean;
+  /** What it is doing now, for the agents strip and progress lines. */
+  activity: string;
+  activitySince: number;
+  /** The last tool it ran, shown while it thinks about the result. */
+  lastAction?: string;
+  startedAt: number;
+  toolCalls: number;
+  turns: number;
 }
+
+const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
 /**
  * One sidebar conversation with the agent. Keeps the message history (saved locally so it can be
@@ -131,6 +141,11 @@ export class AgentConversation {
   private slotWaiters: Array<() => void> = [];
   private slotsInUse = 0;
   private contextWarned = false;
+  private agentsTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastVisibleAt = Date.now();
+  private heartbeats = 0;
+  /** A progress line after this long without visible output, then at the longer interval while it stays quiet. */
+  public progressTiming = { firstMs: 60_000, everyMs: 120_000, checkMs: 15_000 };
   /** Estimated cost and tokens of the current run, across the agent and its sub-agents. */
   private spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
 
@@ -204,8 +219,11 @@ export class AgentConversation {
       },
       afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
       requestApproval: (approval) => this.askApproval(approval, abort.signal),
-      emit: (event) => { this.track(mainId, event); this.forward(event, request.model, record); }
+      emit: (event) => { this.track(mainId, event); if (event.type !== 'reasoning' && event.type !== 'turn') this.markVisible(); this.forward(event, request.model, record); }
     });
+    const runStartedAt = Date.now();
+    this.markVisible();
+    const heartbeat = setInterval(() => this.heartbeat(runStartedAt), this.progressTiming.checkMs);
     try {
       let result: RunResult;
       try {
@@ -244,6 +262,7 @@ export class AgentConversation {
         }
       }
     } finally {
+      clearInterval(heartbeat);
       if (this.abort === abort) this.abort = undefined;
       this.releasePending();
     }
@@ -395,7 +414,7 @@ export class AgentConversation {
         const pool = [...all.filter((tool) => tool.name !== 'Remember' && tool.name !== 'Recall'), ...privateMemory];
         // A listed tool, Task for Agent, and MCP tools by name, mcp:<server>, or a trailing-* pattern.
         const allowed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent')) || (tool.name.startsWith('mcp__') && grantsMcpTool(spawn.agent!.tools, tool.name))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
-        const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background };
+        const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };
         // A background agent outlives the tool call but not the run; a foreground one ends with the call too.
         const parent = spawn.background ? runSignal : callSignal;
         const onParentAbort = () => agent.abort.abort();
@@ -406,6 +425,8 @@ export class AgentConversation {
           let shell: ShellSession | undefined;
           let worktree: AgentWorktree | undefined;
           let worktreeState: 'removed' | 'kept' | undefined;
+          agent.startedAt = Date.now();
+          this.setActivity(agent, 'Starting');
           this.agents.set(agent.id, agent);
           this.postAgents();
           const started = Date.now();
@@ -432,6 +453,7 @@ export class AgentConversation {
               requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal),
               emit: (event) => {
                 this.track(agent.id, event);
+                this.observe(agent, event);
                 if (event.type === 'tool-start') this.forward({ ...event, callId: `${agent.id}:${event.callId}`, title: `${label} › ${event.title}` }, model, record);
                 else if (event.type === 'tool-end') this.forward({ ...event, callId: `${agent.id}:${event.callId}` }, model, record);
                 else if (event.type === 'turn') { usage.push(event.usage); extraUsage.push(event.usage); this.forward(event, model, record); }
@@ -519,7 +541,51 @@ export class AgentConversation {
   }
 
   private postAgents(): void {
-    this.post({ type: 'agents', count: this.agents.size, agents: [...this.agents.values()].map((agent) => ({ id: agent.id, label: agent.label, description: agent.description, model: agent.model, paused: agent.paused, background: agent.background })) });
+    if (this.agentsTimer) { clearTimeout(this.agentsTimer); this.agentsTimer = undefined; }
+    this.post({ type: 'agents', count: this.agents.size, agents: [...this.agents.values()].map((agent) => ({ id: agent.id, label: agent.label, description: agent.description, model: agent.model, paused: agent.paused, background: agent.background, activity: agent.activity, activitySince: agent.activitySince, lastAction: agent.lastAction, startedAt: agent.startedAt, toolCalls: agent.toolCalls, turns: agent.turns })) });
+  }
+
+  /** Refreshes the agents strip at most once a second. */
+  private schedulePostAgents(): void {
+    this.agentsTimer ??= setTimeout(() => { this.agentsTimer = undefined; this.postAgents(); }, 1_000);
+  }
+
+  private setActivity(agent: LiveAgent, activity: string): void {
+    if (agent.activity === activity) return;
+    agent.activity = activity;
+    agent.activitySince = Date.now();
+  }
+
+  /** Keeps each sub-agent's live status current from its own events. */
+  private observe(agent: LiveAgent, event: AgentEvent): void {
+    if (event.type === 'tool-start') { agent.toolCalls += 1; agent.lastAction = event.title; this.setActivity(agent, event.title); }
+    else if (event.type === 'tool-end') this.setActivity(agent, 'Thinking');
+    else if (event.type === 'reasoning') { this.setActivity(agent, 'Thinking'); return void this.schedulePostAgents(); }
+    else if (event.type === 'text') this.setActivity(agent, 'Writing');
+    else if (event.type === 'turn') agent.turns += 1;
+    else if (event.type === 'retry') this.setActivity(agent, 'Retrying after NEAR AI went quiet');
+    this.schedulePostAgents();
+  }
+
+  /** A progress line in the chat when nothing has appeared there for a while (sub-agents show only in the strip), so long runs show they are moving. */
+  private heartbeat(runStartedAt: number): void {
+    const quietFor = Date.now() - this.lastVisibleAt;
+    const due = this.heartbeats === 0 ? this.progressTiming.firstMs : this.progressTiming.everyMs;
+    if (quietFor < due) return;
+    this.heartbeats += 1;
+    this.lastVisibleAt = Date.now();
+    // Consecutive progress lines replace each other in the chat, so a long quiet stretch is one updating line.
+    const agents = [...this.agents.values()];
+    const detail = agents.length
+      ? agents.map((agent) => `${agent.description || agent.label}: ${agent.paused ? 'paused' : agent.activity === 'Thinking' ? `thinking for ${minutesSince(agent.activitySince)}${agent.lastAction ? ` after ${agent.lastAction}` : ''}` : agent.activity} (${minutesSince(agent.startedAt)}, ${agent.toolCalls} tool call${agent.toolCalls === 1 ? '' : 's'})`).join(' · ')
+      : 'the agent is thinking';
+    const cost = this.spend.costUsd > 0 ? ` · about $${this.spend.costUsd.toFixed(2)} so far` : '';
+    this.post({ type: 'progress', text: `Still working (${minutesSince(runStartedAt)}): ${detail}${cost}.` });
+  }
+
+  private markVisible(): void {
+    this.lastVisibleAt = Date.now();
+    this.heartbeats = 0;
   }
 
   private async saveTranscript(model: string): Promise<void> {

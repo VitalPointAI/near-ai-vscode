@@ -180,7 +180,7 @@ async function runGsdCommand(near: NearAiClient, models: ModelInfo[], root: stri
       const span = open.get(value.callId)!;
       spans.push({ title: span.title, startS: Math.round((span.at - started) / 1000), seconds: Math.round((Date.now() - span.at) / 1000) });
     }
-    if (value.type === 'notice' || value.type === 'assistant-retry') console.log(`  notice: ${String(value.text).slice(0, 200)}`);
+    if (value.type === 'notice' || value.type === 'progress' || value.type === 'assistant-retry') console.log(`  notice: ${String(value.text).slice(0, 200)}`);
     if (value.type === 'questions-request' && value.id && value.questions) conversation.answerQuestions(value.id, value.questions.map((question) => question.options[0]?.label ?? 'yes'));
     // Unattended, as in production: an action held for approval (even in fully-autonomous mode, e.g.
     // a network command after reading web pages) ends declined once nobody answers. Decline it at

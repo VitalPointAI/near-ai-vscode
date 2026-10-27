@@ -126,8 +126,12 @@ details.agent-tool .state { color: var(--vscode-errorForeground); }
 #agents[hidden], #todos[hidden] { display: none; }
 #agents ul { margin: 0; padding: 0; list-style: none; }
 #agents .agent { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
-#agents .agent-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#agents .agent.paused .agent-label { color: var(--vscode-descriptionForeground); font-style: italic; }
+#agents .agent-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#agents .agent-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; padding: 0; border: none; background: none; color: var(--vscode-textLink-foreground); font: inherit; cursor: pointer; }
+#agents .agent-label:hover { text-decoration: underline; }
+#agents .agent-label:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+#agents .agent-status { color: var(--vscode-descriptionForeground); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#agents .agent.paused .agent-status { color: var(--vscode-descriptionForeground); font-style: italic; }
 #agents .text-button { padding: 0 6px; font-size: 11px; }
 #agents .todo-title, #todos .todo-title { color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
 #todos .todo-title { color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
