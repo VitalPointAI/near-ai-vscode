@@ -26,11 +26,16 @@ export function reviewPrompt(task: string): string {
   ].join('\n');
 }
 
-/** APPROVED on the first line passes; anything else, including no review, is a list of gaps. */
+/**
+ * APPROVED on the first line passes; anything else, including no review, is a list of gaps. Reviewers
+ * often open with a heading ("# Review of brief.md") before the verdict, so headings are read past.
+ */
 export function reviewVerdict(review: string | undefined): { approved: boolean; gaps: string } {
   const text = (review ?? '').trim();
   if (!text) return { approved: false, gaps: '' };
-  return /^\W*approved\b/i.test(text) ? { approved: true, gaps: '' } : { approved: false, gaps: text };
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const opening = lines.slice(0, lines.findIndex((line) => !line.startsWith('#')) + 1 || lines.length);
+  return opening.some((line) => /^\W*approved\b/i.test(line)) ? { approved: true, gaps: '' } : { approved: false, gaps: text };
 }
 
 export function fixPrompt(task: string, gaps: string): string {

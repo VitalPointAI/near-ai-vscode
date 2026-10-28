@@ -13,6 +13,11 @@ test('only APPROVED on the first line passes review; a missing review counts as 
   assert.deepEqual(reviewVerdict('1. test/search.test.js is missing: the plan asks for search tests.'), { approved: false, gaps: '1. test/search.test.js is missing: the plan asks for search tests.' });
   assert.deepEqual(reviewVerdict(undefined), { approved: false, gaps: '' });
   assert.equal(reviewVerdict('Not approved: 1. CRLF is not handled.').approved, false);
+  // From the review run: the verdict under a heading was read as gaps, and the builder was sent an approval to "fix".
+  assert.equal(reviewVerdict('# Review of brief.md\n\nAPPROVED\n\n## Checklist\n1. Cited. ✓').approved, true);
+  assert.equal(reviewVerdict('# Review\n## Verdict\nAPPROVED').approved, true);
+  assert.equal(reviewVerdict('# Review — changes required\n\nThe brief is not approvable as-is.\n\nAPPROVED once fixed.').approved, false);
+  assert.equal(reviewVerdict('NOT APPROVED\n\n1. csv.js reports the wrong line.').approved, false);
 });
 
 test('the review and fix prompts carry the task and the gaps', () => {

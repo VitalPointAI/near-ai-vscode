@@ -77,3 +77,12 @@ test('the graders do not penalize good behaviour seen in the execution-eval run'
   assert.ok(gradeResearch(GOOD_BRIEF.replace(/\[s2-trade-weekly\.md\]/g, '[s2-trade-weekly]').replace('[s4-local-news.md]', '[s4-local-news]')).misses.includes('at least four citations, all to real sources'));
   assert.ok(gradePlan(`${GOOD_PLAN}\n6. Add a graphical interface for browsing notes.\n`).misses.includes('stays within scope (no sync, encryption, or GUI work planned)'));
 });
+
+test('several sources cited in one bracket count, as in the review run', () => {
+  const combined = GOOD_BRIEF.replace('[s1-ministry.md] [s2-trade-weekly.md]', '[s1-ministry.md; s2-trade-weekly.md]');
+  assert.notEqual(combined, GOOD_BRIEF);
+  assert.deepEqual(gradeResearch(combined), { score: 10, misses: [] });
+  // Still caught: a combined citation naming a file that does not exist, or names without .md.
+  assert.ok(gradeResearch(GOOD_BRIEF.replace('[s1-ministry.md] [s2-trade-weekly.md]', '[s1-ministry.md; s9-wire.md]')).misses.includes('at least four citations, all to real sources'));
+  assert.ok(gradeResearch(GOOD_BRIEF.replace('[s1-ministry.md] [s2-trade-weekly.md]', '[s1-ministry; s2-trade-weekly]')).misses.includes('4.2 million TEU, cited to s1 or s2'));
+});
