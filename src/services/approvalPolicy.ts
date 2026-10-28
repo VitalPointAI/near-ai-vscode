@@ -12,12 +12,15 @@ export function isPolicyMode(value: unknown): value is ActionPolicyMode {
   return typeof value === 'string' && (POLICY_MODES as readonly string[]).includes(value);
 }
 
-/** Short labels for the composer, with the setting's enumDescriptions (package.json) as tooltips. */
-export const POLICY_OPTIONS: ReadonlyArray<{ mode: ActionPolicyMode; label: string; description: string; risky: boolean }> = [
-  { mode: 'approve-risky', label: 'Ask before edits', description: 'File edits and shell commands ask first; reads and searches run automatically.', risky: false },
-  { mode: 'mostly-autonomous', label: 'Edits auto', description: 'File edits run automatically; shell commands still ask unless allow-listed.', risky: false },
-  { mode: 'auto', label: 'Auto', description: 'Auto approve: file edits run, and shell commands run when they pass the safety check. Clear cases are decided by fixed rules (builds, tests, and read-only git run; pushes, deletes, publishing, and credential paths ask); only commands the rules cannot decide go to a private (TEE) model, and anything it cannot clear asks.', risky: false },
-  { mode: 'fully-autonomous', label: 'Full auto', description: 'Everything runs without asking except deny-listed commands. Use only in throwaway workspaces.', risky: true }
+/**
+ * The composer's picker: a short label, a one-line summary shown under it in the menu, and the
+ * setting's enumDescriptions (package.json, checked by the tests) as the full description.
+ */
+export const POLICY_OPTIONS: ReadonlyArray<{ mode: ActionPolicyMode; label: string; summary: string; description: string; risky: boolean }> = [
+  { mode: 'approve-risky', label: 'Ask before edits', summary: 'Reads run; edits and commands ask first.', description: 'File edits and shell commands ask first; reads and searches run automatically.', risky: false },
+  { mode: 'mostly-autonomous', label: 'Edits auto', summary: 'Edits run; commands ask unless on your allow list.', description: 'File edits run automatically; shell commands still ask unless allow-listed.', risky: false },
+  { mode: 'auto', label: 'Auto', summary: 'Edits and ordinary commands run; risky or unclear ones ask, with the reason.', description: 'Auto approve: file edits run, and shell commands run when they pass the safety check. Clear cases are decided by fixed rules (builds, tests, and read-only git run; pushes, deletes, publishing, and credential paths ask); only commands the rules cannot decide go to a private (TEE) model, and anything it cannot clear asks.', risky: false },
+  { mode: 'fully-autonomous', label: 'Full auto', summary: 'Everything runs except your deny list. Throwaway workspaces only.', description: 'Everything runs without asking except deny-listed commands. Use only in throwaway workspaces.', risky: true }
 ];
 
 /** The scope the effective value comes from. */
@@ -44,7 +47,7 @@ export interface PolicyStateMessage {
   mode: ActionPolicyMode;
   stopped: boolean;
   scope: PolicyScope;
-  options: Array<{ mode: ActionPolicyMode; label: string; description: string; risky: boolean }>;
+  options: Array<{ mode: ActionPolicyMode; label: string; summary: string; description: string; risky: boolean }>;
 }
 
 export function effectivePolicyScope(inspection: PolicyInspection | undefined): PolicyScope {

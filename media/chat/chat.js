@@ -644,41 +644,82 @@
   send.addEventListener('click', submit);
   profile.addEventListener('click', () => post({ type: profile.dataset.state === 'missing' ? 'open-setup' : 'select-profile' }));
   status.addEventListener('click', () => { if (!busy) runCommand('progress'); });
-  // The approval-policy picker: the host validates the choice, asks before Full auto, and writes
+  // The approval-policy picker: a button that opens a listbox of the modes, each with its label
+  // and a one-line summary. The host validates the choice, asks before Full auto, and writes
   // nearAi.actionPolicy; it then sends the effective state back, which is what this shows.
+  const policyMenu = $('policy-menu');
   let policyState;
   function renderPolicy(state) {
     policyState = state;
+    closePolicyMenu(policyMenu.contains(document.activeElement));
     const options = state.options || [];
     const current = options.find((option) => option.mode === state.mode) || {};
     if (state.stopped) {
-      const stopped = el('option', '', 'Stopped');
-      stopped.value = '';
-      policy.replaceChildren(stopped);
-      policy.value = '';
+      policy.textContent = 'Stopped';
       policy.disabled = true;
       policy.dataset.state = 'stopped';
       policy.dataset.risky = 'false';
+      policy.setAttribute('aria-label', 'Approval policy: stopped');
       policy.title = 'Emergency stop is on: NEAR AI sends and runs nothing. Run "NEAR AI: Resume" to continue (approval policy stays ' + (current.label || state.mode) + ').';
+      policyMenu.replaceChildren();
       return;
     }
-    policy.replaceChildren(...options.map((option) => {
-      const item = el('option', '', option.label + (option.risky ? ' ⚠' : ''));
-      item.value = option.mode;
-      item.title = option.description;
-      item.dataset.risky = option.risky ? 'true' : 'false';
-      return item;
-    }));
+    policy.textContent = (current.label || state.mode) + (current.risky ? ' ⚠' : '');
     policy.disabled = false;
-    policy.value = state.mode;
     policy.dataset.state = 'ready';
     policy.dataset.risky = current.risky ? 'true' : 'false';
+    policy.setAttribute('aria-label', 'Approval policy: ' + (current.label || state.mode));
     policy.title = 'Approval policy: ' + (current.label || state.mode) + ' — ' + (current.description || '') + (state.scope === 'workspace' || state.scope === 'workspaceFolder' ? ' (set in workspace settings)' : '');
+    policyMenu.replaceChildren(...options.map((option) => {
+      const item = el('div', 'policy-option');
+      item.id = 'policy-option-' + option.mode;
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', String(option.mode === state.mode));
+      item.tabIndex = -1;
+      item.dataset.mode = option.mode;
+      item.dataset.risky = option.risky ? 'true' : 'false';
+      item.title = option.description;
+      item.append(el('strong', '', option.label + (option.risky ? ' ⚠' : '')), el('span', '', option.summary || option.description));
+      item.addEventListener('click', () => choosePolicy(option.mode));
+      return item;
+    }));
   }
-  policy.addEventListener('change', () => {
-    if (!policy.value || !policyState || policy.value === policyState.mode) return;
-    post({ type: 'set-action-policy', mode: policy.value });
+  function policyItems() { return [...policyMenu.querySelectorAll('[role="option"]')]; }
+  function openPolicyMenu() {
+    const items = policyItems();
+    if (policy.disabled || !items.length) return;
+    policyMenu.hidden = false;
+    policy.setAttribute('aria-expanded', 'true');
+    (items.find((item) => item.getAttribute('aria-selected') === 'true') || items[0]).focus();
+  }
+  function closePolicyMenu(returnFocus) {
+    if (policyMenu.hidden) return;
+    policyMenu.hidden = true;
+    policy.setAttribute('aria-expanded', 'false');
+    if (returnFocus) policy.focus();
+  }
+  function choosePolicy(mode) {
+    closePolicyMenu(true);
+    if (!mode || !policyState || mode === policyState.mode) return;
+    post({ type: 'set-action-policy', mode });
+  }
+  policy.addEventListener('click', () => { if (policyMenu.hidden) openPolicyMenu(); else closePolicyMenu(true); });
+  policy.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); openPolicyMenu(); }
   });
+  policyMenu.addEventListener('keydown', (event) => {
+    const items = policyItems();
+    const at = items.indexOf(document.activeElement);
+    const move = (index) => { event.preventDefault(); items[(index + items.length) % items.length].focus(); };
+    if (event.key === 'ArrowDown') move(at + 1);
+    else if (event.key === 'ArrowUp') move(at - 1);
+    else if (event.key === 'Home') move(0);
+    else if (event.key === 'End') move(items.length - 1);
+    else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (at >= 0) choosePolicy(items[at].dataset.mode); }
+    else if (event.key === 'Escape') { event.preventDefault(); closePolicyMenu(true); }
+    else if (event.key === 'Tab') closePolicyMenu(false);
+  });
+  document.addEventListener('mousedown', (event) => { if (!policyMenu.hidden && !policyMenu.contains(event.target) && event.target !== policy) closePolicyMenu(false); });
   model.addEventListener('change', () => { saved.model = model.value; vscode.setState(saved); model.title = (modelInfo.get(model.value) || {}).label || ''; });
   document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => runCommand(button.dataset.command)));
 

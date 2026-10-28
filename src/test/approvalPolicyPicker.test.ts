@@ -56,6 +56,24 @@ test('picker labels cover every mode, and their tooltips are the setting\'s enum
   assert.match(POLICY_OPTIONS.find((option) => option.mode === 'fully-autonomous')!.description, /throwaway workspaces/);
 });
 
+test('the picker menu shows each mode as a label with a one-line summary, from the one shared list', () => {
+  assert.deepEqual(POLICY_OPTIONS.map((option) => [option.label, option.summary]), [
+    ['Ask before edits', 'Reads run; edits and commands ask first.'],
+    ['Edits auto', 'Edits run; commands ask unless on your allow list.'],
+    ['Auto', 'Edits and ordinary commands run; risky or unclear ones ask, with the reason.'],
+    ['Full auto', 'Everything runs except your deny list. Throwaway workspaces only.']
+  ]);
+  for (const option of POLICY_OPTIONS) assert.ok(option.summary.length <= 90 && !option.summary.includes('\n'), option.mode);
+  const configuration = { get: <T>(_key: string, fallback: T) => fallback, inspect: () => undefined, update: async () => undefined };
+  assert.deepEqual(policyStateMessage(configuration, false).options.map((option) => option.summary), POLICY_OPTIONS.map((option) => option.summary), 'the view gets the summaries');
+  const view = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'panelView.ts'), 'utf8');
+  assert.match(view, /<button id="policy" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="policy-menu"/);
+  assert.match(view, /<div id="policy-menu" role="listbox" aria-label="Approval policy" hidden><\/div>/);
+  const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  for (const key of ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', 'Escape', 'Tab']) assert.match(script, new RegExp(`event\\.key === '${key}'`), key);
+  assert.match(script, /option\.summary/);
+});
+
 test('a choice is written to user settings, or to the workspace or folder scope the effective value comes from', async () => {
   const confirm = async () => assert.fail('only Full auto asks');
   const fresh = new FakeConfiguration();
