@@ -520,21 +520,25 @@
       list.append(item);
     });
     agentClock ??= setInterval(() => { const rows = agentPanel.querySelectorAll('.agent-status'); if (!rows.length) { clearInterval(agentClock); agentClock = undefined; } rows.forEach(updateAgentStatus); }, 1000);
-    // The list can be collapsed to its title line; the choice is remembered across reloads.
     const title = el('div', 'todo-title');
-    const toggle = el('button', 'agents-toggle', `Agents running · ${agents.length}`);
-    toggle.type = 'button';
-    toggle.setAttribute('aria-controls', 'agents-list');
-    list.id = 'agents-list';
-    const applyCollapsed = () => {
-      list.hidden = !!saved.agentsCollapsed;
-      toggle.setAttribute('aria-expanded', String(!saved.agentsCollapsed));
-      toggle.title = saved.agentsCollapsed ? 'Show running agents' : 'Hide running agents';
-    };
-    toggle.addEventListener('click', () => { saved.agentsCollapsed = !saved.agentsCollapsed; vscode.setState(saved); applyCollapsed(); });
-    applyCollapsed();
-    title.append(toggle, ' ', textButton('Activity', () => post({ type: 'open-activity' })));
+    title.append(panelToggle(list, 'agents-list', 'agentsCollapsed', `Agents running · ${agents.length}`, 'running agents'), ' ', textButton('Activity', () => post({ type: 'open-activity' })));
     agentPanel.replaceChildren(title, list);
+  }
+
+  // A panel's list can be collapsed to its title line; the choice is remembered across reloads.
+  function panelToggle(list, listId, key, label, what) {
+    const toggle = el('button', 'panel-toggle', label);
+    toggle.type = 'button';
+    toggle.setAttribute('aria-controls', listId);
+    list.id = listId;
+    const applyCollapsed = () => {
+      list.hidden = !!saved[key];
+      toggle.setAttribute('aria-expanded', String(!saved[key]));
+      toggle.title = saved[key] ? 'Show ' + what : 'Hide ' + what;
+    };
+    toggle.addEventListener('click', () => { saved[key] = !saved[key]; vscode.setState(saved); applyCollapsed(); });
+    applyCollapsed();
+    return toggle;
   }
 
   function renderTodos(todos) {
@@ -546,7 +550,9 @@
       list.append(item);
     });
     const done = todos.filter((todo) => todo.status === 'completed').length;
-    todoPanel.replaceChildren(el('div', 'todo-title', `Tasks · ${done}/${todos.length}`), list);
+    const title = el('div', 'todo-title');
+    title.append(panelToggle(list, 'todos-list', 'todosCollapsed', `Tasks · ${done}/${todos.length}`, 'the task list'));
+    todoPanel.replaceChildren(title, list);
   }
   function onRunChanges(m) {
     const row = el('div', 'changes');

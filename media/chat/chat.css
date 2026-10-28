@@ -132,11 +132,12 @@ details.agent-tool .state { color: var(--vscode-errorForeground); }
 #agents, #todos { margin: 0 2px 6px; padding: 6px 8px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; font-size: 12px; }
 #agents[hidden], #todos[hidden] { display: none; }
 #agents ul { margin: 0; padding: 0; list-style: none; }
-#agents ul[hidden] { display: none; }
-#agents .agents-toggle { padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; }
-#agents .agents-toggle::before { content: '▾'; display: inline-block; width: 1em; color: var(--vscode-descriptionForeground); }
-#agents .agents-toggle[aria-expanded="false"]::before { content: '▸'; }
-#agents .agents-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+#agents ul[hidden], #todos ul[hidden] { display: none; }
+/* The collapse toggle in the running-agents and task-list titles. */
+.panel-toggle { padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; }
+.panel-toggle::before { content: '▾'; display: inline-block; width: 1em; color: var(--vscode-descriptionForeground); }
+.panel-toggle[aria-expanded="false"]::before { content: '▸'; }
+.panel-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 #agents .agent { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 #agents .agent-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #agents .agent-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; padding: 0; border: none; background: none; color: var(--vscode-textLink-foreground); font: inherit; cursor: pointer; }
