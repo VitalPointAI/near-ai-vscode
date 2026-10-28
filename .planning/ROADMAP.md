@@ -101,17 +101,20 @@
 **Plans**: TBD
 
 ### Phase 17: RAFT network and slices
-**Goal**: Analysts see the situation as a professional RAFT network diagram (Relationships, Actors, Functions, Tensions) and cut it into saved slices that agents can work within.
+**Goal**: Analysts explore the situation in an interactive, highly polished RAFT network diagram (Relationships, Actors, Functions, Tensions) and cut it into saved slices that agents can work within.
 **Depends on**: Phase 16
-**Requirements**: RAFT-01, RAFT-02, RAFT-03
+**Requirements**: RAFT-01, RAFT-02, RAFT-03, RAFT-04
 **Scope**: Actors, relationships, functions, and tensions (positive, negative, or neutral, with relative strength) are log entries linked to the claims that support them; agents and analysts propose them through the Phase 15 pipeline and a pure resolver computes the current tension. The panel renders a Cytoscape diagram with fCoSE layout, persisted so it is stable between sessions, and an edge-provenance view listing the supporting claims with their grades and sources. Slices are saved queries over geography (using Phase 15 geocodes), time window, topic, and set of actors. A slice-scoped agent run gets only the slice as context and cannot read or write outside it. The diagram always shows a capped slice with a truncation notice, never millions of nodes. Every diagram and slice has a table view.
 **Success Criteria** (what must be TRUE):
   1. An analyst opens the RAFT view and sees actors as nodes, relationships as edges marked by tension (positive, negative, neutral) and strength, and each actor's functions; selecting an edge lists the claims behind it with their grades and sources; reopening the view gives the same layout. (RAFT-01)
   2. An analyst slices the base by geography, time window, topic, or set of actors, saves the slice, and reopens it later; a slice cut from a very large base loads within the recorded budget and says when it was capped. (RAFT-02)
   3. A research run started on a slice sees only that slice: a canary entry outside the slice never reaches the agent's context or tool results, and anything the agent proposes carries the slice it worked in. (RAFT-02)
   4. Every diagram and slice has a table view with the same nodes, edges, tensions, and provenance, reachable by keyboard and announced correctly by a screen reader. (RAFT-03)
+  5. The network is fully interactive at the slice cap with smooth pan, zoom, and drag (frame rate measured and recorded): hovering an actor highlights its neighbourhood and dims the rest; clicking opens its functions, relationships, and supporting claims; the analyst expands and collapses neighbours, groups by role or region, pins and arranges nodes and the arrangement is kept; filtering by tension, strength, grade, or time animates rather than jumps. (RAFT-04)
+  6. The visual design follows the approved UI design contract (UI-SPEC.md) in light, dark, and high-contrast themes and with reduced motion, and the owner signs off on it in a hands-on review of the real view, not on screenshots or passing tests alone. (RAFT-04)
 **UI hint**: yes
-**Research flags**: Standard patterns. The brief's RAFT definition governs (the research marked the external definition low confidence): settle in discuss whether Functions are node attributes or their own entries. Layout stability and node caps at scale; `cytoscape-fcose` is MIT, while `elkjs` and `cytoscape-svg` are excluded by licence.
+**Before planning**: run `/gsd-ui-phase 17` to produce a UI design contract (layout, typography, colour and tension encoding, motion, every interaction and its feedback), reviewed by the owner.
+**Research flags**: Renderer choice for smooth interaction at the slice cap (Cytoscape canvas vs. its WebGL renderer vs. Sigma.js with graphology), animated layout transitions, and level-of-detail for labels. The brief's RAFT definition governs (the research marked the external definition low confidence): settle in discuss whether Functions are node attributes or their own entries. Layout stability and node caps at scale; `cytoscape-fcose` is MIT, while `elkjs` and `cytoscape-svg` are excluded by licence.
 **Plans**: TBD
 
 ### Phase 18: Standing feeds, unattended work, and alerts
@@ -181,7 +184,9 @@
   4. An analyst drags the timeline back and the timeline, network, and globe all show the base at that time; switching between "as it happened" and "as it was known" gives different results for an item reported late, and replay plays forward in order. (TIME-01)
   5. Selecting an actor or event in one view highlights it in the other two. (TIME-01)
   6. A reader who lacks a compartment sees no layer, point, or timeline event drawn from it, exactly as in a base that never had it. (extends ORG-01, owned by Phase 20)
+  7. The globe, layers, and timeline follow the approved UI design contract with smooth camera motion and transitions (frame rate measured and recorded), and the owner signs off on them in a hands-on review of the real view. (GEO-02)
 **UI hint**: yes
+**Before planning**: run `/gsd-ui-phase 22` to produce a UI design contract for the globe, layers, and timeline (camera motion, layer styling, picking feedback, transitions), reviewed by the owner.
 **Research flags**: The globe spike above (it gates the rest of the phase), including hover and click picking and smooth rotate and zoom with hundreds of thousands of points; NASA GIBS terms of use, rate limits, and attribution; whether to offer a one-time global overview download instead of live tiles; time-index design and replay performance at scale; WebGL availability in remote, WSL, and code-server hosts.
 **Plans**: TBD
 

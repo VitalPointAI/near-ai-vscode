@@ -22,3 +22,15 @@ The default is fairly verbose for developer-facing operational details. Users ma
 ## Privacy boundary
 
 Analytics store structured metadata by default—not raw prompts, source contents, secrets, or model reasoning traces. The UI may summarize activity and outcomes without claiming access to hidden chain-of-thought.
+
+## Visual analysis surfaces (knowledge base, v0.5.0)
+
+The RAFT network and the globe are the product's showpieces and should be a pleasure to use: an analyst manipulating them should feel the same awe.
+
+- Every manipulation is direct and smooth: pan, zoom, rotate, drag, and scrub respond immediately, with measured frame rates at the largest slice the view allows.
+- Every change animates: filtering, slicing, grouping, expanding, and replaying move things to their new places instead of redrawing from scratch, and respect reduced motion.
+- Hover explains, click opens, select connects: hovering shows a summary and highlights what is related, clicking opens the evidence (claims, grades, sources, times), and a selection in one view is highlighted in the others.
+- The analyst's arrangement is kept: pinned nodes, layer order and opacity, camera position, and saved slices persist.
+- The visual design is deliberate and consistent across views (typography, colour, tension and grade encoding, motion), works in light, dark, and high-contrast themes, and never relies on colour alone.
+- Each of these views gets a UI design contract (`/gsd-ui-phase`) reviewed by the owner before planning, and is accepted only after the owner's hands-on review of the real view.
+

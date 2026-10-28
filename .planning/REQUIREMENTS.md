@@ -58,6 +58,7 @@
 ### RAFT network and slices
 
 - [ ] **RAFT-01**: An analyst sees Actors, Relationships, Functions, and Tensions (positive, negative, or neutral, with relative strength) as a professional network diagram with a stable layout and the provenance of each edge.
+- [ ] **RAFT-04**: The RAFT network is fully interactive and polished to the same standard as the globe: smooth pan, zoom, and drag at the slice cap; hover to highlight an actor's neighbourhood and dim the rest; click to open an actor's functions, relationships, and supporting claims; expand and collapse neighbours, group by role or region, pin and arrange nodes and keep the arrangement; filter by tension, strength, grade, and time with animated transitions rather than jumps; and a visual design (typography, colour, tension encoding, motion) that works in light, dark, and high-contrast themes and respects reduced motion.
 - [ ] **RAFT-02**: An analyst can slice the base by geography, time window, topic, or set of actors, save slices, and run agents within a slice.
 - [ ] **RAFT-03**: Every diagram and slice has an accessible table view.
 
@@ -154,6 +155,7 @@ Roadmap created 2026-10-28 (Phases 13-24, see `.planning/ROADMAP.md`). Each requ
 | RAFT-01 | Phase 17 | Pending |
 | RAFT-02 | Phase 17 | Pending |
 | RAFT-03 | Phase 17 | Pending |
+| RAFT-04 | Phase 17 | Pending |
 | FEED-01 | Phase 18 | Pending |
 | FEED-02 | Phase 18 | Pending |
 | ALERT-01 | Phase 18 | Pending |
@@ -176,7 +178,7 @@ Roadmap created 2026-10-28 (Phases 13-24, see `.planning/ROADMAP.md`). Each requ
 | RELAY-01 | Phase 21 | Pending |
 | RELAY-02 | Phase 21 | Pending |
 
-**Coverage:** 55 requirements, 55 mapped to a phase, 0 unmapped, 0 mapped to more than one phase.
+**Coverage:** 56 requirements, 56 mapped to a phase, 0 unmapped, 0 mapped to more than one phase.
 
 | Phase | Name | Requirements | Count |
 |-------|------|--------------|-------|
@@ -184,7 +186,7 @@ Roadmap created 2026-10-28 (Phases 13-24, see `.planning/ROADMAP.md`). Each requ
 | 14 | Encrypted scalable store and search | STORE-01, STORE-02, SRCH-01 | 3 |
 | 15 | Source and claim intake with agent tools | INTAKE-01, INTAKE-02, INTAKE-03, INTAKE-04, INTAKE-05, GEO-01 | 6 |
 | 16 | Admiralty grading, thresholds, and reports | GRADE-01, GRADE-02, GRADE-03, GRADE-04, GRADE-05, GRADE-06, RPT-01, RPT-02, RPT-03, RPT-04 | 10 |
-| 17 | RAFT network and slices | RAFT-01, RAFT-02, RAFT-03 | 3 |
+| 17 | RAFT network and slices | RAFT-01, RAFT-02, RAFT-03, RAFT-04 | 4 |
 | 18 | Standing feeds, unattended work, and alerts | FEED-01, FEED-02, ALERT-01 | 3 |
 | 19 | Team sharing through git or a shared folder | SYNC-01, SYNC-02, SYNC-03 | 3 |
 | 20 | Organisation compartments, roles, and access | ORG-01, ORG-02, ORG-03, ORG-04, ORG-05 | 5 |
@@ -192,7 +194,7 @@ Roadmap created 2026-10-28 (Phases 13-24, see `.planning/ROADMAP.md`). Each requ
 | 22 | Globe, imagery, and timeline replay | GEO-02, GEO-03, TIME-01 | 3 |
 | 23 | Forecasting and calibration | FCST-01, FCST-02, FCST-03, FCST-04 | 4 |
 | 24 | End-to-end hardening and release | SOV-04 | 1 |
-| | **Total** | | **55** |
+| | **Total** | | **56** |
 
 **Where a requirement is owned by one phase but finished across several:**
 - SOV-04 (allowlist, and no other request leaves the machine) is owned by Phase 24, because the destinations it names (feeds, imagery, git remotes, relay) do not all exist until then. Phase 13 builds the allowlist and network-spy harness, and each later phase registers its destinations and extends the test.
