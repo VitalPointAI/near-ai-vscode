@@ -45,7 +45,7 @@ The first milestone includes onboarding, both API-key and NEAR sign-in authentic
 - Geospatial: an open-source 3D globe with open imagery, one layer per source or source type, and offline geocoding so place names never leave the machine.
 - Temporal: every item records when it happened, was reported, and was graded; the user can replay how events unfolded.
 - Prediction: scenario forecasts and RAFT tension trends with probabilities and their evidence, recalibrated as events arrive; the user chooses whether models train and run locally or on NEAR TEE models.
-- Small-team sharing: a signed, end-to-end encrypted, append-only event log in a git repository or shared folder the team controls; members are invited by public key and the base key rotates when a member is removed.
+- Team and organisation sharing: a signed, end-to-end encrypted, append-only event log with snapshots, synced through a git repository or shared folder (small teams) or an organisation-hosted relay that sees only ciphertext (larger ones); need-to-know compartments with their own keys and roles (reader, analyst, approver); members are invited by public key and keys rotate when a member is removed.
 - Sensitivity: knowledge-base projects use TEE-attested models only (including sub-agents, attachments, and embeddings), and the base is encrypted at rest with its key in SecretStorage.
 
 Requirements brief: `.planning/research/v0.5.0-trusted-source-knowledge-base.md`. Evidence-based model defaults (`.planning/research/v0.6.0-evidence-based-model-defaults.md`) follow in v0.6.0.
