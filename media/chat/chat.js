@@ -10,6 +10,7 @@
   const welcome = $('welcome');
   const input = $('input');
   const send = $('send');
+  const stopButton = $('stop');
   const model = $('model');
   const policy = $('policy');
   const profile = $('profile');
@@ -38,6 +39,8 @@
     check: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6.3 11.6-3.6-3.6.7-.7 2.9 2.9 6.3-6.3.7.7z"/></svg>'
   };
   $('attach').innerHTML = ICONS.attach;
+  send.innerHTML = ICONS.send;
+  stopButton.innerHTML = ICONS.stop;
 
   let busy = false;
   let current;
@@ -179,14 +182,55 @@
     renderPending();
   }
 
+  // The composer stays open during a run: Send queues the message for the running agent, and a
+  // separate Stop button (or Esc in an empty message box) stops the run.
   function setBusy(value) {
     busy = value;
-    send.innerHTML = ICONS[value ? 'stop' : 'send'];
-    send.title = value ? 'Stop' : 'Send (Enter)';
-    send.setAttribute('aria-label', value ? 'Stop' : 'Send');
+    stopButton.hidden = !value;
+    send.title = value ? 'Send to the running agent (Enter): it sees the message after its current step' : 'Send (Enter)';
+    send.setAttribute('aria-label', value ? 'Send to the running agent' : 'Send');
     updateSendState();
   }
-  function updateSendState() { send.disabled = !busy && !input.value.trim(); }
+  function updateSendState() { send.disabled = !input.value.trim(); }
+  function stopRun() { if (busy) post({ type: 'stop' }); }
+
+  // Messages sent during a run, by id: the bubble's state line says queued, delivered, or sent as a new message.
+  const steerBubbles = new Map();
+  const STEER_LABELS = { queued: 'Queued — the agent sees it after its current step', delivered: 'Delivered to the running agent', 'sent-new': 'Sent as a new message (the run had ended)', returned: 'Not sent — the run was stopped; it is back in the message box', blocked: 'Not sent' };
+  function steerId() {
+    const bytes = new Uint8Array(6);
+    crypto.getRandomValues(bytes);
+    return 'steer-' + [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+  function sendSteer(text) {
+    const id = steerId();
+    const node = append(el('div', 'turn user steer', text));
+    const line = el('span', 'steer-state', 'Sending…');
+    node.append(line);
+    steerBubbles.set(id, { node, line });
+    input.value = '';
+    autosize();
+    updateSendState();
+    if (staged.size) notice('Attachments stay staged: they go with your next message once this run ends.', []);
+    post({ type: 'steer', id, text });
+  }
+  function onSteerState(m) {
+    const bubble = steerBubbles.get(m.id);
+    if (bubble) {
+      bubble.line.textContent = m.state === 'blocked' && m.reason ? 'Not sent: ' + m.reason : STEER_LABELS[m.state] || '';
+      bubble.line.dataset.state = m.state;
+      // Once the agent has it, the message sits where the conversation took it in, and the reply follows it.
+      if (m.state === 'delivered' || m.state === 'sent-new') {
+        if (m.state === 'delivered') closeSegment();
+        append(bubble.node);
+        if (m.state === 'delivered' && busy) startAssistant();
+      }
+      if (m.state !== 'queued') steerBubbles.delete(m.id);
+    }
+    if (m.state === 'delivered' || m.state === 'sent-new' || m.state === 'blocked') announce(STEER_LABELS[m.state]);
+    // A message the run never took goes back to the composer, unless something new is being typed.
+    if ((m.state === 'returned' || m.state === 'blocked') && m.text && !input.value.trim()) { input.value = m.text; autosize(); updateSendState(); }
+  }
 
   // Assistant text is re-rendered from the full buffer so partial Markdown settles as it streams.
   function renderMarkdown(target, text) {
@@ -591,6 +635,8 @@
     return commands.find((command) => command.command === name) || commands.find((command) => command.command === 'gsd-' + name);
   }
   function runCommand(command, args) {
+    // A workflow needs the agent to itself: it is not queued behind, or mixed into, a running one.
+    if (busy) { notice('Finish or stop the current run first: /' + command + ' starts a new workflow. Your message stays in the box.', []); return; }
     input.value = '';
     input.placeholder = defaultPlaceholder;
     menu.hidden = true;
@@ -612,11 +658,12 @@
   }
 
   function submit() {
-    if (busy) { post({ type: 'stop' }); return; }
     const text = input.value.trim();
     if (!text) return;
     const slash = /^\/([\w:-]+)(?:\s+([\s\S]*))?$/.exec(text);
+    if (slash && slash[1] === 'stop' && !slash[2]) { input.value = ''; autosize(); updateSendState(); stopRun(); return; }
     const command = slash && findCommand(slash[1]);
+    if (busy && !command) { sendSteer(text); return; }
     if (command) { runCommand(command.command, (slash[2] || '').trim()); return; }
     const ids = [...staged.keys()];
     append(el('div', 'turn user', text + (ids.length ? '\n📎 ' + [...staged.values()].join(', ') : '')));
@@ -645,9 +692,12 @@
       if (event.key === 'Escape') { menu.hidden = true; return; }
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); }
+    // Esc in an empty message box stops the run, as in Claude Code; with text in it, Esc does nothing.
+    else if (event.key === 'Escape' && busy && !input.value.trim()) { event.preventDefault(); stopRun(); }
   });
   input.addEventListener('blur', () => { menu.hidden = true; });
   send.addEventListener('click', submit);
+  stopButton.addEventListener('click', stopRun);
   profile.addEventListener('click', () => post({ type: profile.dataset.state === 'missing' ? 'open-setup' : 'select-profile' }));
   status.addEventListener('click', () => { if (!busy) runCommand('progress'); });
   // The approval-policy picker: a button that opens a listbox of the modes, each with its label
@@ -778,7 +828,7 @@
         profile.dataset.state = active ? (active.validation && active.validation.status === 'valid' ? 'ready' : 'attention') : 'missing';
         break;
       }
-      case 'assistant-start': runInfo = { model: m.model, privacy: m.privacy }; if (!current) startAssistant(); if (m.status) status.textContent = m.status; break;
+      case 'assistant-start': runInfo = { model: m.model, privacy: m.privacy }; setBusy(true); if (!current) startAssistant(); if (m.status) status.textContent = m.status; break;
       case 'assistant-delta':
         if (!current) startAssistant();
         current.text += m.text || '';
@@ -905,6 +955,7 @@
         break;
       }
       case 'questions-request': onQuestions(m); break;
+      case 'steer-state': onSteerState(m); break;
       default: break;
     }
   });
