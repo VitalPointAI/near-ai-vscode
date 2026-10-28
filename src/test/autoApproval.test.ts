@@ -233,3 +233,52 @@ test('agent loop in auto: npm test runs without asking, git push asks with the r
     shell.dispose();
   }
 });
+
+test('auto: when the safety model cannot answer, the card says so and why the rules could not decide', async () => {
+  const busy: CommandSafetyCheck = { async check() { return { allow: false, reason: 'The safety check model is busy (rate limited by NEAR), so NEAR AI is asking you instead.' }; } };
+  const decided = await decide('npm install left-pad', { safety: busy });
+  assert.equal(decided.decision, 'ask');
+  const reason = decided.decision === 'ask' ? decided.reason ?? '' : '';
+  assert.match(reason, /^The safety check model is busy \(rate limited by NEAR\)/);
+  assert.match(reason, /the rules couldn't place this command \(npm install can install or run code the rules cannot check\)/);
+  const grants = new RunGrants();
+  grants.tainted = true;
+  const tainted = await decide('npm install left-pad', { grants, safety: busy });
+  assert.match(tainted.decision === 'ask' ? tainted.reason ?? '' : '', /read outside content .* so unclear commands ask instead of going to the safety model; the rules couldn't place this command/);
+});
+
+test('agent loop in auto: the managed Open-GSD runtime\'s gsd-tools runs without an approval', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-auto-gsd-'));
+  const home = await mkdtemp(path.join(tmpdir(), 'near-ai-auto-gsd-home-'));
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(path.join(home, 'gsd-core', 'bin'), { recursive: true });
+  const tools = path.join(home, 'gsd-core', 'bin', 'gsd-tools.cjs');
+  await writeFile(tools, 'console.log(JSON.stringify({ phase: process.argv.slice(2).join(" ") }));\n');
+  const model = scriptedModel([
+    { calls: [call('g1', 'Bash', { command: `INIT=$(node "${tools}" query init.plan-phase 3)` })] },
+    { calls: [call('g2', 'Bash', { command: `node "${tools}" query init.plan-phase 3` })] },
+    { calls: [call('g3', 'Bash', { command: `node "${path.join(path.dirname(home), 'gsd-evil', 'gsd-core', 'bin', 'gsd-tools.cjs')}" query x` })] },
+    { text: 'Planned.' }
+  ]);
+  const approvals: ApprovalRequest[] = [];
+  const safety = fakeSafety(false);
+  const shell = new ShellSession(root);
+  const run = new AgentRun({
+    client: model, model: 'z-ai/glm-5.3', tools: CORE_TOOLS,
+    context: { root, checkpoints: new RunCheckpoints('auto-gsd'), shell, readFiles: new Set(), readOnlyRoots: [home], trustedToolRoots: [home] },
+    policy: auto, rules: DEFAULT_RULES, safety: safety.check,
+    requestApproval: async (request) => { approvals.push(request); return { decision: 'deny' }; },
+    emit: () => undefined
+  });
+  try {
+    const result = await run.run([{ role: 'user', content: 'Plan phase 3' }], new AbortController().signal);
+    assert.equal(result.outcome, 'completed');
+    const ran = model.seen[2].at(-1);
+    assert.match(ran?.role === 'tool' ? ran.content : '', /"phase":"query init\.plan-phase 3"[\s\S]*exit code 0/, 'gsd-tools ran without an approval');
+    assert.equal(approvals.length, 1, 'only the look-alike path asked');
+    assert.match(approvals[0].title, /gsd-evil/);
+    assert.deepEqual(safety.asked.length, 1, 'only the look-alike went to the safety model');
+  } finally {
+    shell.dispose();
+  }
+});

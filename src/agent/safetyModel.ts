@@ -80,7 +80,7 @@ export class SafetyModelCheck implements CommandSafetyCheck {
     const cached = this.verdicts.get(key);
     if (cached) return cached;
     const now = this.options.now?.() ?? Date.now();
-    if (now < this.pausedUntil) return Promise.resolve({ allow: false, reason: 'The safety model was rate limited or unavailable a moment ago, so NEAR AI is asking you instead.' });
+    if (now < this.pausedUntil) return Promise.resolve({ allow: false, reason: 'The safety check model was busy (rate limited by NEAR) or unreachable a moment ago, so NEAR AI is asking you instead.' });
     const pending = this.ask(command, where, signal).then((outcome) => {
       // Only real answers are kept; a failure asks the user this time and may be checked again later.
       if (!outcome.answered) this.verdicts.delete(key);
@@ -121,7 +121,7 @@ export class SafetyModelCheck implements CommandSafetyCheck {
       if (timedOut) return { verdict: { allow: false, reason: `The safety model did not answer within ${Math.round(timeoutMs / 1000)} seconds, so NEAR AI is asking you instead.` }, answered: false };
       const status = (error as { status?: unknown }).status;
       if (status === 429 || (typeof status === 'number' && status >= 500)) this.pausedUntil = (this.options.now?.() ?? Date.now()) + (this.options.cooldownMs ?? COOLDOWN_MS);
-      return { verdict: { allow: false, reason: status === 429 ? 'The safety model is rate limited, so NEAR AI is asking you instead.' : 'The safety model could not be reached, so NEAR AI is asking you instead.' }, answered: false };
+      return { verdict: { allow: false, reason: status === 429 ? 'The safety check model is busy (rate limited by NEAR), so NEAR AI is asking you instead.' : 'The safety check model could not be reached, so NEAR AI is asking you instead.' }, answered: false };
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', forward);

@@ -105,10 +105,14 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
   if (policy.mode !== 'auto' || capability !== 'shell' || decided.decision !== 'ask' || !auto) return decided;
   const classified = classifyCommand(command ?? '', auto);
   if (classified.verdict !== 'unknown') return decided;
-  if (grants.tainted) return { decision: 'ask', reason: `${decided.reason} This run has read outside content (a web page, search result, attachment, or MCP result), so the safety model was not asked.` };
-  if (!auto.safety) return { decision: 'ask', reason: `${decided.reason} No private (TEE) safety model is available to check it.` };
+  // Say why the safety model did not let it run: skipped (tainted run, no private model), unable
+  // to answer (busy, unreachable, timed out), or answered no.
+  const unplaced = `the rules couldn't place this command (${classified.reason})`;
+  if (grants.tainted) return { decision: 'ask', reason: `This run read outside content (a web page, search result, attachment, or MCP result), so unclear commands ask instead of going to the safety model; ${unplaced}.` };
+  if (!auto.safety) return { decision: 'ask', reason: `No private (TEE) safety model is available to check it, and ${unplaced}.` };
   const verdict = await auto.safety.check((command ?? '').trim(), { root: auto.root, cwd: auto.cwd ?? auto.root }, auto.signal);
-  return verdict.allow ? { decision: 'allow' } : { decision: 'ask', reason: verdict.reason };
+  if (verdict.allow) return { decision: 'allow' };
+  return { decision: 'ask', reason: verdict.reason.startsWith('Safety model:') ? verdict.reason : `${verdict.reason} Without it, ${unplaced}.` };
 }
 
 export function normalizeCommand(command: string): string {
