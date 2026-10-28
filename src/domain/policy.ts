@@ -8,7 +8,11 @@ export type ActionCapability =
   | 'mediaGeneration'
   | 'mediaPublication';
 
-export type ActionPolicyMode = 'approve-risky' | 'mostly-autonomous' | 'fully-autonomous';
+/**
+ * `auto`: file edits run, and a shell command runs when it passes the safety check (deterministic
+ * rules first, then a private model for commands the rules cannot decide); anything else asks.
+ */
+export type ActionPolicyMode = 'approve-risky' | 'mostly-autonomous' | 'auto' | 'fully-autonomous';
 
 export type ActionDecision = 'allow' | 'approval-required' | 'deny';
 

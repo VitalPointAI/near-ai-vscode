@@ -29,7 +29,7 @@ export function createDefaultSettings(): NearAiSettings {
 }
 
 export function normalizePolicyMode(value: unknown): ActionPolicyMode {
-  if (value === 'mostly-autonomous' || value === 'fully-autonomous') return value;
+  if (value === 'mostly-autonomous' || value === 'auto' || value === 'fully-autonomous') return value;
   return 'approve-risky';
 }
 

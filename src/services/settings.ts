@@ -6,7 +6,7 @@ import { ActionPolicyMode } from '../domain/policy';
 import { isEmergencyStopped } from './emergencyStop';
 import { DEFAULT_RULES, PermissionRules } from '../agent/permissions';
 
-const POLICY_MODES: ActionPolicyMode[] = ['approve-risky', 'mostly-autonomous', 'fully-autonomous'];
+const POLICY_MODES: ActionPolicyMode[] = ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'];
 
 export function readSettings(): NearAiSettings {
   const configuration = vscode.workspace.getConfiguration('nearAi');

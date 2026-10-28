@@ -294,6 +294,7 @@
           "enum": [
             "approve-risky",
             "mostly-autonomous",
+            "auto",
             "fully-autonomous"
           ],
           "default": "approve-risky",
@@ -301,6 +302,7 @@
           "enumDescriptions": [
             "File edits and shell commands ask first; reads and searches run automatically.",
             "File edits run automatically; shell commands still ask unless allow-listed.",
+            "Auto approve: file edits run, and shell commands run when they pass the safety check. Clear cases are decided by fixed rules (builds, tests, and read-only git run; pushes, deletes, publishing, and credential paths ask); only commands the rules cannot decide go to a private (TEE) model, and anything it cannot clear asks.",
             "Everything runs without asking except deny-listed commands. Use only in throwaway workspaces."
           ]
         },
