@@ -90,7 +90,7 @@ async function runWith(model: ReturnType<typeof flakyModel>) {
   const shell = new ShellSession(root);
   try {
     const run = new AgentRun({
-      client: model, model: 'm', tools: CORE_TOOLS, retryDelaysMs: [1, 2], idleTimeoutMs: 1_000,
+      client: model, model: 'm', tools: CORE_TOOLS, retryDelaysMs: [1, 2], idleTimeoutMs: 1_000, random: () => 0.5,
       context: { root, checkpoints: new RunCheckpoints('recover'), shell, readFiles: new Set() },
       policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES,
       requestApproval: async () => ({ decision: 'allow' }), emit: (event) => events.push(event)
@@ -111,7 +111,7 @@ test('a failed turn is retried until it succeeds, past the list of delays, and t
   assert.equal(run.outcome, 'completed');
   assert.equal(run.messages.at(-1)?.content, 'all done');
   const retries = events.filter((event): event is Extract<AgentEvent, { type: 'retry' }> => event.type === 'retry');
-  assert.deepEqual(retries.map((event) => [event.attempt, event.delayMs]), [[1, 1], [2, 2], [3, 2], [4, 2], [5, 2]], 'the last delay repeats; there is no retry limit');
+  assert.deepEqual(retries.map((event) => [event.attempt, event.delayMs]), [[1, 1], [2, 2], [3, 2], [4, 2], [5, 2]], 'the last delay repeats (jitter factor 1 with random 0.5); short failures never hit the give-up limit');
   assert.ok(retries.every((event) => event.discardText === 'half an ans'.length), 'each failed attempt reports the partial text to discard');
   assert.deepEqual(model.idleTimeouts.slice(0, 4), [1_000, 2_000, 2_000, 4_000], 'each stall gives the next attempt a longer silence limit');
 });

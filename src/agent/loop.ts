@@ -46,8 +46,15 @@ export interface AgentRunOptions {
   policy: ActionPolicy;
   rules: PermissionRules;
   maxTurns?: number;
-  /** Waits before successive retries of a failed model turn; the last one repeats. */
+  /** Waits before successive retries of a failed model turn; the last one repeats. Each wait is at least NEAR's Retry-After and is jittered ×0.5–1.5. */
   retryDelaysMs?: number[];
+  /** How long a turn keeps retrying while NEAR answers 429 or 5xx before the run stops with a clear message (default RETRY_GIVE_UP_MS). */
+  giveUpAfterMs?: number;
+  /** Jitter source in [0, 1) (Math.random by default). */
+  random?: () => number;
+  /** Clock and sleep, for tests (Date.now and an abortable timer by default). */
+  now?: () => number;
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   /** The stream silence limit for a turn's first attempt; it doubles after each stall. */
   idleTimeoutMs?: number;
   /** Output tokens one reply may use (the client's default when unset). */
@@ -82,8 +89,28 @@ export class AgentRunError extends Error {
   }
 }
 
-/** Quick retries first, then once a minute for as long as it takes. */
+/** Quick retries first, then about once a minute (each wait jittered ×0.5–1.5, and never shorter than NEAR's Retry-After). */
 export const RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
+/** After this long of continuous 429/5xx answers for one turn, the run stops instead of retrying forever. */
+export const RETRY_GIVE_UP_MS = 4 * 60_000;
+
+/** A model turn that NEAR kept refusing (429 or 5xx) for RETRY_GIVE_UP_MS; the run stops with what it did so far. */
+export class ModelUnavailableError extends Error {
+  public readonly retryable = false;
+  public constructor(
+    public readonly model: string,
+    public readonly status: number,
+    public readonly elapsedMs: number,
+    public readonly attempts: number,
+    public readonly lastReason: string,
+    public readonly requestId?: string
+  ) {
+    const minutes = Math.max(1, Math.round(elapsedMs / 60_000));
+    const what = status === 429 ? 'rate limiting' : `answering HTTP ${status} for`;
+    super(`NEAR AI kept ${what} ${model} for about ${minutes} minute${minutes === 1 ? '' : 's'} (${attempts} attempts), so this run stopped retrying. Last error: ${lastReason} The work so far is kept: wait a few minutes and send a message to continue, switch to another model, or leave it stopped.${requestId ? ` Request ID: ${requestId}.` : ''}`);
+    this.name = 'ModelUnavailableError';
+  }
+}
 const MAX_TOOL_RESULT_CHARS = 40_000;
 const UI_OUTPUT_CHARS = 6_000;
 
@@ -151,13 +178,21 @@ export class AgentRun {
   }
 
   /**
-   * One model turn, tried again for as long as it fails for a reason that can pass (a stalled or
-   * dropped stream, a rate limit, a server error), so a directed run finishes without anyone
-   * having to step in. Only cancelling the run, or an error retrying cannot fix, ends it.
+   * One model turn, tried again when it fails for a reason that can pass (a stalled or dropped
+   * stream, a rate limit, a server error), so a directed run finishes without anyone having to step
+   * in. Cancelling the run, an error retrying cannot fix, or RETRY_GIVE_UP_MS of continuous 429/5xx
+   * answers ends it.
    */
   private async modelTurn(transcript: AgentMessage[], signal: AbortSignal): Promise<{ message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata; finishReason?: string }> {
     const delays = this.options.retryDelaysMs ?? RETRY_DELAYS_MS;
+    const now = this.options.now ?? Date.now;
+    const random = this.options.random ?? Math.random;
+    const sleep = this.options.sleep ?? wait;
+    const giveUpAfterMs = this.options.giveUpAfterMs ?? RETRY_GIVE_UP_MS;
     let idleTimeoutMs = this.options.idleTimeoutMs;
+    /** When the current run of 429/5xx answers began; any other outcome resets it. */
+    let refusedSince: number | undefined;
+    let refusals = 0;
     for (let attempt = 0; ; attempt += 1) {
       let streamed = 0;
       try {
@@ -175,11 +210,24 @@ export class AgentRun {
       } catch (error) {
         if (signal.aborted || (error as { retryable?: unknown }).retryable !== true) throw error;
         const reason = (error as Error).message;
-        const delayMs = delays[Math.min(attempt, delays.length - 1)] ?? 60_000;
+        const status = (error as { status?: unknown }).status;
+        const refused = status === 429 || (typeof status === 'number' && status >= 500);
+        if (refused) { refusedSince ??= now(); refusals += 1; } else { refusedSince = undefined; refusals = 0; }
+        const refusingFor = refusedSince === undefined ? 0 : now() - refusedSince;
+        if (refused && refusingFor >= giveUpAfterMs) {
+          const requestId = (error as { requestId?: unknown }).requestId;
+          throw new ModelUnavailableError(this.options.model, status as number, refusingFor, refusals, reason, typeof requestId === 'string' ? requestId : undefined);
+        }
+        // At least what NEAR asked for, jittered so parallel agents do not retry in lockstep.
+        const retryAfterMs = (error as { retryAfterMs?: unknown }).retryAfterMs;
+        const step = delays[Math.min(attempt, delays.length - 1)] ?? 60_000;
+        let delayMs = Math.round(Math.max(typeof retryAfterMs === 'number' ? retryAfterMs : 0, step) * (0.5 + random()));
+        // The last wait ends at the limit, so the final attempt happens there rather than past it.
+        if (refused) delayMs = Math.max(0, Math.min(delayMs, giveUpAfterMs - refusingFor));
         // A stall may be a slow server rather than a dead one: give the next attempt longer.
         if ((error as { stalled?: unknown }).stalled === true) idleTimeoutMs = Math.min(MAX_IDLE_TIMEOUT_MS, 2 * (idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS));
         this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs, reason, discardText: streamed });
-        await wait(delayMs, signal);
+        await sleep(delayMs, signal);
         if (signal.aborted) throw error;
       }
     }
