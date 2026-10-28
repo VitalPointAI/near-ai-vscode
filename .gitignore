@@ -10,3 +10,5 @@ dist/
 .planning/HANDOFF.json
 vendor/
 sbom.cdx.json
+.codex/
+.agents/
