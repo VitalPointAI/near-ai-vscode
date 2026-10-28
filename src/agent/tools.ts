@@ -24,6 +24,8 @@ export interface ToolContext {
   readOnlyRoots?: string[];
   /** The Open-GSD runtime NEAR AI installed and verified, whose gsd-tools the auto mode may run (see CommandContext). */
   trustedToolRoots?: string[];
+  /** The managed Open-GSD runtime and the workflow preambles it ships, for the auto mode's gsd_run check. */
+  gsdRuntime?: { home: string; preambles: string[] };
   /** Whether this run has read outside content (web pages, search results, attachments, MCP results). */
   tainted?(): boolean;
   /** Text of pages fetched in this run, by URL, for CheckCitations. */

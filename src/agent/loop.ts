@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
 import { AutoApprovalContext, decidePermissionAsync, PermissionRules, RunGrants } from './permissions';
+import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
 import { truncate } from './shell';
 import { describeWeakened, isTestFile, weakenedTests } from './testIntegrity';
@@ -336,7 +337,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     let sensitive: string | undefined;
     let risky: string | undefined;
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
-    const decided = await decidePermissionAsync(tool.capability, command, this.options.policy, this.options.rules, this.grants, command !== undefined && this.options.policy.mode === 'auto' ? await this.autoContext(context) : undefined);
+    const decided = await decidePermissionAsync(tool.capability, command, this.options.policy, this.options.rules, this.grants, command !== undefined && this.options.policy.mode === 'auto' ? await this.autoContext(context, command) : undefined);
     // A risky action asks in every mode, and an earlier "allow this command" does not cover it.
     const permission = decided.decision === 'deny' ? decided : risky ? { decision: 'ask' as const } : sensitive && decided.decision === 'allow' && this.options.policy.mode !== 'fully-autonomous' ? { decision: 'ask' as const } : decided;
     if (risky) context.onSecurity?.({ kind: 'held', source: title, detail: risky });
@@ -375,14 +376,20 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
   }
 
   /** Where a shell command would run, and what the project's npm scripts run, for the auto mode's checks. */
-  private async autoContext(context: ToolContext): Promise<AutoApprovalContext> {
+  private async autoContext(context: ToolContext, command = ''): Promise<AutoApprovalContext> {
     const root = context.root;
     let packageScripts: Record<string, string> | undefined;
     try {
       const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')) as { scripts?: unknown };
       if (manifest.scripts && typeof manifest.scripts === 'object' && !Array.isArray(manifest.scripts)) packageScripts = Object.fromEntries(Object.entries(manifest.scripts as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
     } catch { /* no package.json, or not JSON: scripts are not checked */ }
-    return { root, cwd: context.shell?.workingDirectory ?? root, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, safety: this.options.safety, signal: context.signal };
+    const cwd = context.shell?.workingDirectory ?? root;
+    // An Open-GSD preamble: check, for this shell, that its gsd_run would be the managed gsd-tools.
+    const runtime = context.gsdRuntime;
+    const gsd = runtime?.preambles.length && command.trimStart().startsWith(PREAMBLE_START)
+      ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
+      : {};
+    return { root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, ...gsd, safety: this.options.safety, signal: context.signal };
   }
 
   private finish(callId: string, ok: boolean, output: string): string {

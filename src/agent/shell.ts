@@ -76,6 +76,8 @@ export class ShellSession {
   }
 
   public get workingDirectory(): string { return this.cwd; }
+  /** The environment the shell starts with (later `export`s in the session are not reflected). */
+  public get environment(): NodeJS.ProcessEnv { return shellEnv(this.extraEnv, this.allowEnv); }
 
   private async execute(command: string, timeoutMs: number, signal?: AbortSignal): Promise<CommandResult> {
     if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');

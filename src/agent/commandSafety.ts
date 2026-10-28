@@ -27,6 +27,12 @@ export interface CommandContext {
    * A user-level install (~/.claude, …) is never one of these.
    */
   trustedToolRoots?: string[];
+  /** Open-GSD preambles shipped in the managed runtime (exact text); see src/gsd/preamble.ts. */
+  gsdPreambles?: string[];
+  /** Whether `gsd_run` as such a preamble defines it would run the managed runtime's gsd-tools, checked for this shell. */
+  gsdRun?: { trusted: boolean; reason?: string };
+  /** Set while classifying what follows a trusted preamble: `gsd_run` is the managed gsd-tools. */
+  gsdRunDefined?: boolean;
 }
 
 const safe = (reason: string): CommandClassification => ({ verdict: 'safe', reason });
@@ -592,6 +598,8 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   const words = args.map((arg) => arg.text);
   const flags = words.filter(looksLikeOption);
   const anyFlag = (pattern: RegExp) => flags.some((flag) => pattern.test(flag));
+  // `gsd_run` as a trusted Open-GSD preamble just defined it: the managed gsd-tools.
+  if (program === 'gsd_run' && context.gsdRunDefined) return classifyGsdTools(args, state, context);
   // The managed Open-GSD runtime's own launcher, named by its absolute path.
   if (program.includes('/') && isTrustedGsdTool({ text: program, quoted: false, glob: false, expansion: false }, state, context)) return classifyGsdTools(args, state, context);
   // Risky whatever the path.
@@ -746,6 +754,19 @@ function classifyText(command: string, context: CommandContext, depth: number): 
   if (depth > 4) return unknown('the command nests too deeply to check');
   if (/:\(\)\s*\{/.test(raw)) return risky('it defines a fork bomb');
   if (DOWNLOAD_TO_SHELL.test(raw)) return risky('it runs code downloaded from the network');
+  const preamble = depth === 0 ? (context.gsdPreambles ?? []).find((text) => raw.startsWith(text)) : undefined;
+  if (preamble) {
+    // What follows must be a new command: nothing, or a newline, `;`, or `&&` and then the call.
+    const rest = raw.slice(preamble.length);
+    const joined = /^[ \t]*(?:(?:\r?\n|;|&&)\s*)?/.exec(rest)?.[0] ?? '';
+    if (!rest.trim() || joined.trim() || /[\r\n]/.test(joined)) {
+      if (!context.gsdRun?.trusted) return unknown(`it starts with the Open-GSD preamble, but ${context.gsdRun?.reason ?? 'the shell it would run in was not checked'}`);
+      const remainder = rest.slice(joined.length).trim();
+      if (!remainder) return safe('it only runs the Open-GSD preamble, which picks the managed runtime\'s gsd-tools');
+      const inner = classifyText(remainder, { ...context, gsdRunDefined: true }, depth + 1);
+      return inner.verdict === 'safe' ? safe(`the Open-GSD preamble picks the managed runtime's gsd-tools, and ${inner.reason}`) : inner;
+    }
+  }
   const assigned = substitutionAssignment(raw);
   if (assigned !== undefined) {
     const inner = classifyText(assigned.inner, context, depth + 1);
