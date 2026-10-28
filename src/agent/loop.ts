@@ -2,8 +2,9 @@ import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
 import { decidePermission, PermissionRules, RunGrants } from './permissions';
 import { truncate } from './shell';
+import { describeWeakened, isTestFile, weakenedTests } from './testIntegrity';
 import type { AgentTool, SecurityEvent, Todo, ToolContext, ToolPreview } from './tools';
-import { ToolError } from './workspace';
+import { resolveInWorkspace, ToolError } from './workspace';
 
 /** Matches the client's DEFAULT_STREAM_IDLE_TIMEOUT_MS; the loop doubles it after a stall. */
 const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
@@ -119,6 +120,8 @@ export class AgentRun {
           continue;
         }
         if (!assistant.tool_calls?.length) {
+          const integrity = await this.testIntegrityCheck();
+          if (integrity) { transcript.push({ role: 'user', content: integrity }); continue; }
           const more = await this.options.afterAnswer?.(transcript, signal);
           if (!more?.length) return { outcome: 'completed', messages: transcript, usage };
           transcript.push(...more);
@@ -176,6 +179,31 @@ export class AgentRun {
   }
 
   private truncations = 0;
+  /** Test files this run wrote with the file tools, and whether it was reminded about weakening them. */
+  private readonly testsWritten = new Set<string>();
+  private integrityReminded = false;
+
+  /** Before an answer is accepted: once, if a test file this run edited is still weaker than before the run. */
+  private async testIntegrityCheck(): Promise<string | undefined> {
+    if (this.integrityReminded || !this.testsWritten.size) return undefined;
+    const found = await weakenedTests(this.options.context.checkpoints, this.testsWritten).catch(() => []);
+    if (!found.length) return undefined;
+    this.integrityReminded = true;
+    return `<test-integrity>Before you finish: tests that existed before this task are weaker now: ${describeWeakened(found, this.options.context.root)}. Weakening a test hides failures instead of fixing them. Unless the user asked for this change to the tests, restore what you removed and fix the code instead. If the change was asked for, say so in your answer.</test-integrity>`;
+  }
+
+  /** Right after a file tool writes a test: a note when it now has fewer tests or assertions than before the run. */
+  private async testWriteNote(tool: AgentTool<any>, input: unknown): Promise<string> {
+    const requested = (input as { path?: unknown }).path;
+    if (tool.capability !== 'workspaceWrite' || typeof requested !== 'string') return '';
+    const absolute = await resolveInWorkspace(this.options.context.root, requested).catch(() => undefined);
+    if (!absolute || !isTestFile(absolute)) return '';
+    this.testsWritten.add(absolute);
+    const found = await weakenedTests(this.options.context.checkpoints, [absolute]).catch(() => []);
+    return found.length ? `
+
+Note: this test existed before the task and is weaker now (${describeWeakened(found, this.options.context.root)}). Unless the user asked for it, restore what was removed and fix the code instead.` : '';
+  }
   private readonly recent: string[] = [];
   private nudged = false;
   private lastLoopKey = '';
@@ -283,7 +311,7 @@ export class AgentRun {
     try {
       const output = await tool.run(input, context);
       if (tool.untrusted) this.grants.tainted = true;
-      return this.finish(call.id, true, output);
+      return this.finish(call.id, true, output + await this.testWriteNote(tool, input));
     } catch (error) {
       if (signal.aborted) return this.finish(call.id, false, 'Cancelled.');
       return this.finish(call.id, false, `Error: ${(error as Error).message}`);

@@ -24,6 +24,13 @@ export class RunCheckpoints {
 
   public get changedFiles(): string[] { return [...this.snapshots.keys()]; }
 
+  /** A file's text before the run first changed it: null if the run created it, undefined if the run has not touched it. */
+  public original(absolutePath: string): string | null | undefined {
+    const snapshot = this.snapshots.get(absolutePath);
+    if (!snapshot) return undefined;
+    return snapshot.original === null ? null : Buffer.from(snapshot.original, 'base64').toString('utf8');
+  }
+
   /** Restores every captured file to its state before the run; files the run created are deleted. */
   public async revert(): Promise<string[]> {
     const restored: string[] = [];

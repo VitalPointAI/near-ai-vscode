@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 (unreleased)
+
+- **Tests stay honest.** When an agent edits a test that existed before the
+  task and it ends up with fewer tests or assertions, or more skipped cases,
+  the agent is told at once and reminded before it may finish. It restores
+  the test and fixes the code, or says why the change was asked for. In the
+  model eval, a cheaper model had "passed" a task by deleting the failing
+  assertion.
+
 ## 0.4.0
 
 A native agent that runs on NEAR AI's private models, with no proprietary
