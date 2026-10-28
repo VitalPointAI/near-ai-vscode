@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.4
+
+- **Prompts stay in view until you answer.** Approvals, agent questions and
+  Open-GSD choices are pinned above the message box instead of scrolling away.
+  When several wait, you step through them ("1 of 3 waiting"), each saying
+  which agent asks. The chat keeps a line where each was asked that records
+  the outcome. The sidebar shows a badge while anything waits, and a reloaded
+  chat shows the prompts again.
+- **Open-GSD runs without constant prompts in Auto.** The Open-GSD runtime the
+  extension installs is trusted, so its workflow tool calls run. They still
+  ask when a copy of the tool inside the workspace would run instead, or when
+  the command was edited or does something risky.
+- **Clearer reasons.** When Auto asks because the safety check was skipped or
+  NEAR was too busy to answer, the card says so.
+- **The approval menu says what each mode allows.** Each mode shows a
+  one-line summary, and the menu works from the keyboard.
+- **The task list collapses** like the running-agents panel.
+
 ## 0.4.3
 
 - **Approval mode in the chat bar.** A picker beside the model chooses how

@@ -2,7 +2,7 @@
   "name": "near-ai-vscode",
   "displayName": "NEAR AI for VS Code",
   "description": "Private AI agents for coding, research, presales, writing, and data work: TEE-backed NEAR AI models, Open-GSD project workflows, and the cost of every answer.",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-vscode-icon-128.png",
   "galleryBanner": {
