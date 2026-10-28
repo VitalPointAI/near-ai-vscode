@@ -26,6 +26,7 @@ import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './
 import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
 import { sharedActivityFeed } from './activityView';
 import { AGENT_DEFAULTS } from '../domain/agentDefaults';
+import type { ModelInfo } from './nearAiClient';
 import { RED_TEAM_WORKFLOW_STEP, redTeamEnabled } from '../agent/projectTypes';
 import { securityAccess } from './securityScan';
 import { webSearchProvider } from './webSearchSetup';
@@ -120,9 +121,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     ,attachments: new Map<string, StagedAttachment>()
     ,memory: undefined as ContextGraphMemory | undefined
     ,guardSettings: undefined as string | undefined
+    /** Message handlers for a turn (send or command) still in progress, from validation to the run's end. */
+    ,turns: 0
+    /** The catalog entry of the model the current turn uses, for checking messages sent to it mid-run. */
+    ,modelInfo: undefined as ModelInfo | undefined
   };
   panel.webview.html = html;
-  panel.webview.onDidReceiveMessage(async (value: unknown) => {
+  const handle = async (value: unknown): Promise<void> => {
     const message = parseChatWebviewMessage(value);
     if (!message) return;
     if (message.type === 'stop') {
@@ -557,6 +562,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     state.model = model;
+    state.modelInfo = modelInfo;
     state.providerProfileId = active.provider.profileId;
     const attribution = hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization);
     const session = await state.activity.start({ project: path.basename(root), attribution, model, ...(skill ? { plans: [skill.name] } : {}), summary: skill ? `/${skill.name} started.` : 'Agent conversation turn started.' });
@@ -596,7 +602,47 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await state.activity.append(session.sessionId, { status: 'failed', summary: 'Agent run failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
       panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
     }
-  }, undefined, context.subscriptions);
+  };
+  // A message typed while a turn is in progress steers it: the running agent sees it before its
+  // next model request. Once nothing is running it is an ordinary new message.
+  const steer = async (message: Extract<ChatWebviewMessage, { type: 'steer' }>): Promise<void> => {
+    if (!state.turns && !state.agent?.running) {
+      panel.webview.postMessage({ type: 'steer-state', id: message.id, state: 'sent-new' });
+      await receive({ type: 'send', text: message.text, ...(state.model ? { model: state.model } : {}) });
+      return;
+    }
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return;
+    // It goes to the provider like any message, so it passes the same outbound check.
+    let reason: string | undefined;
+    if (isEmergencyStopped()) reason = 'Emergency stop is on. Run "NEAR AI: Resume" to continue.';
+    else {
+      const guard = state.guard ?? new OutboundGuard(readSettings());
+      const verdict = guard.check({ model: state.model ?? '', modelInfo: state.modelInfo, text: message.text }, state.activity ? spentTodayUsd(await state.activity.list()) : 0);
+      if (verdict.outcome !== 'allow') reason = `${verdict.reason} It was not sent to the running agent; send it after the run to choose what to do.`;
+    }
+    if (reason) { panel.webview.postMessage({ type: 'steer-state', id: message.id, state: 'blocked', reason, text: message.text }); return; }
+    state.agent = state.agent ?? conversationFor(context, root, panel);
+    state.agent.steer(message.id, message.text);
+  };
+  const receive = async (value: unknown): Promise<void> => {
+    const message = parseChatWebviewMessage(value);
+    if (message?.type === 'steer') { await steer(message); return; }
+    const turn = message?.type === 'send' || message?.type === 'open-command';
+    if (turn) state.turns += 1;
+    try {
+      await handle(value);
+    } finally {
+      if (turn) state.turns -= 1;
+    }
+    // Messages queued for a run that ended before taking them become the next turn, in order.
+    if (!turn || state.turns || state.agent?.running) return;
+    const left = state.agent?.takeUndelivered() ?? [];
+    if (!left.length) return;
+    for (const item of left) panel.webview.postMessage({ type: 'steer-state', id: item.id, state: 'sent-new' });
+    await receive({ type: 'send', text: left.map((item) => item.text).join('\n\n'), ...(state.model ? { model: state.model } : {}) });
+  };
+  panel.webview.onDidReceiveMessage(receive, undefined, context.subscriptions);
   // The picker follows settings.json edits and the emergency stop; each run reads the setting afresh.
   const policyWatch = vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi.actionPolicy')) sendPolicyState(panel); });
   panel.onDidDispose(() => { state.abort?.abort(); state.agent?.dispose(); policyWatch.dispose(); }, undefined, context.subscriptions);

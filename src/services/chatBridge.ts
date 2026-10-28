@@ -21,6 +21,9 @@ import { CapabilityRouter } from './capabilityRouter';
 import { isPolicyMode } from './approvalPolicy';
 import { validateMemberContract } from './teamStudio';
 
+/** The longest message the composer may send to a running agent. */
+export const MAX_MESSAGE_CHARS = 100_000;
+
 export type ChatWebviewMessage =
   | { type: 'load-models' }
   | { type: 'open-setup' }
@@ -32,6 +35,8 @@ export type ChatWebviewMessage =
   | { type: 'resume-conversation'; id: string }
   | { type: 'open-artifact'; path: string; kind: GsdArtifactKind }
   | { type: 'send'; text: string; model?: string; overrideToken?: string; attachmentIds?: string[] }
+  /** A message typed while a run is going: queued for the running agent, or sent as a new turn if it has ended. */
+  | { type: 'steer'; id: string; text: string }
   | { type: 'attach-files' }
   | { type: 'attachment-remove'; id: string }
   | { type: 'stop' }
@@ -563,6 +568,12 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => !['type', 'id', 'answers'].includes(key))) return undefined;
     if (message.answers.length > 4 || message.answers.some((answer) => typeof answer !== 'string' || answer.length > 4000)) return undefined;
     return { type: 'questions-reply', id: message.id, answers: message.answers as string[] };
+  }
+  if (message.type === 'steer') {
+    if (Object.keys(message).some((key) => key !== 'type' && key !== 'id' && key !== 'text')) return undefined;
+    if (typeof message.id !== 'string' || !/^steer-[a-f0-9]{12}$/.test(message.id)) return undefined;
+    if (typeof message.text !== 'string' || !message.text.trim() || message.text.length > MAX_MESSAGE_CHARS) return undefined;
+    return { type: 'steer', id: message.id, text: message.text.trim() };
   }
   if (message.type !== 'send' || typeof message.text !== 'string' || !message.text.trim()) return undefined;
   if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model' && key !== 'overrideToken' && key !== 'attachmentIds')) return undefined;
