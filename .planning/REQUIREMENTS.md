@@ -1,5 +1,126 @@
 # Requirements
 
+## Milestone v0.5.0 requirements: Trusted-source knowledge base
+
+**Defined:** 2026-10-28
+**Core value:** Analysts get graded, sourced intelligence that agents keep current, without any of it leaving the TEE, the machine, or the team's control.
+**Sources:** `.planning/research/v0.5.0-trusted-source-knowledge-base.md` (owner's brief and decisions) and `.planning/research/SUMMARY.md`.
+
+### Knowledge-base projects and sovereignty
+
+- [ ] **SOV-01**: A user can create a knowledge-base project; the project's mode is recorded so that an agent editing workspace files cannot downgrade it.
+- [ ] **SOV-02**: In a knowledge-base project every model call — main agent, sub-agents, attachments, image generation, compaction, embeddings, extraction, grading, and forecasting — goes to a NEAR TEE-attested model or a local runtime; a forwarded model is refused at the model-client boundary with a clear reason, and a test fails if any client method bypasses the gate.
+- [ ] **SOV-03**: Web search and fetch are a per-project switch, on by default, and the setting explains that the search provider sees the topics researched.
+- [ ] **SOV-04**: Every network destination a knowledge-base project can reach (NEAR, local runtimes, search, feeds, imagery, git remotes, relay) is on a declared allowlist, and a test shows no other request leaves the machine.
+- [ ] **SOV-05**: In knowledge-base projects no claim text, entity names, or places are written in plaintext: transcripts and handoffs are encrypted, Agent Activity keeps ids and counts only, and agents record findings in the base rather than in `.planning/` files.
+- [ ] **SOV-06**: The legacy generation path either applies the user's privacy mode or is removed, so no model path ignores TEE-only mode.
+
+### Event log and post-quantum cryptography
+
+- [ ] **LOG-01**: Every change to a knowledge base is an attributed, append-only entry in an encrypted log that is never rewritten; current state, history, and replay are derived from it.
+- [ ] **LOG-02**: Every entry records when it happened (an interval with precision), when it was reported, when it was graded, and when it was recorded, so a user can view the base as it happened or as it was known at any past time.
+- [ ] **LOG-03**: Every entry carries its compartment label and key epoch from the first release, even before multiple compartments are offered.
+- [ ] **LOG-04**: Log segments are sealed with AES-256-GCM and signed with hybrid Ed25519 + ML-DSA signatures over each segment (or a hash tree of them); a tampered, reordered, truncated, or forked log is detected and reported.
+- [ ] **PQC-01**: Every key wrap uses hybrid ML-KEM-768 + X25519 encapsulation, and every signature (log segments, membership, capability tokens) is a hybrid classical + ML-DSA signature; the extension uses a vetted implementation on Node 22.
+- [ ] **PQC-02**: An analyst can erase an item by destroying its key (crypto-shredding); the item becomes unreadable for every member while the log stays verifiable, and the UI says that copies already read are not recalled.
+- [ ] **PQC-03**: A user's key is never regenerated silently: if it cannot be read, the base stays locked with a clear message, and a recovery export is created when the user's identity is created.
+
+### Store and search
+
+- [ ] **STORE-01**: A knowledge base with several million entries opens, filters, and slices within budgets measured by a benchmark, using a disk-backed, encrypted, partitioned index; nothing on disk is plaintext.
+- [ ] **STORE-02**: Corrupted or undecryptable data is reported and quarantined; the store never silently replaces it with an empty base.
+- [ ] **SRCH-01**: A user or agent can search the base by keywords and by meaning; semantic search uses a TEE-attested (e.g. Qwen3-Embedding) or local embedding model, and embeddings are encrypted at rest.
+
+### Intake
+
+- [ ] **INTAKE-01**: During a research run, agents add the sources they read and the claims they extract to the base as proposals, each claim tied to a verified quote in a stored snapshot of its source.
+- [ ] **INTAKE-02**: An analyst can add sources and claims by hand and grade or override them.
+- [ ] **INTAKE-03**: An analyst can import CSV, STIX 2.1, and GeoJSON with a mapping preview; an import can be retracted as a batch; imported confidence values are hints, never grades.
+- [ ] **INTAKE-04**: Stored claims and imported text are treated as untrusted on every read into an agent's context, so instructions inside them cannot steer agents.
+- [ ] **INTAKE-05**: Possible duplicate actors, places, and claims are proposed as links for an analyst to accept or undo; nothing is merged silently.
+
+### Grading
+
+- [ ] **GRADE-01**: Every source has a reliability grade (A–F) and every claim a credibility grade (1–6), stored separately and shown as a pair (e.g. "B2"); F and 6 are an "unrated" state, not the worst grade.
+- [ ] **GRADE-02**: Agents propose grades and keep revising them as information confirms or contradicts; every change keeps its evidence, reason, author, and time, and an analyst override is recorded the same way.
+- [ ] **GRADE-03**: Credibility 1 requires at least two independent origins; copies of one origin count once (echo detection), and agents alone cannot assign A or 1.
+- [ ] **GRADE-04**: Reliability can be scoped by topic (a source can be reliable on one subject and not another).
+- [ ] **GRADE-05**: An agent's grade change is shown as an evidence diff that an analyst can accept or reject in one action.
+- [ ] **GRADE-06**: Contradicting claims are detected and flagged for review.
+
+### Reports and thresholds
+
+- [ ] **RPT-01**: An analyst sets per-project minimum reliability and credibility; a claim is judged by its best independent origin, and below-threshold or unrated claims are excluded or marked unconfirmed per the setting.
+- [ ] **RPT-02**: Every claim in a research report shows its grade and sources, rendered from the base rather than written by the model, and a report whose grades do not match the base fails verification.
+- [ ] **RPT-03**: When a source is downgraded, the analyst sees which claims, reports, and forecasts change; before changing a threshold, they can preview its effect.
+- [ ] **RPT-04**: An analyst can export a report or slice, encrypted by default, carrying its grades, threshold, and compartment label.
+
+### RAFT network and slices
+
+- [ ] **RAFT-01**: An analyst sees Actors, Relationships, Functions, and Tensions (positive, negative, or neutral, with relative strength) as a professional network diagram with a stable layout and the provenance of each edge.
+- [ ] **RAFT-02**: An analyst can slice the base by geography, time window, topic, or set of actors, save slices, and run agents within a slice.
+- [ ] **RAFT-03**: Every diagram and slice has an accessible table view.
+
+### Standing feeds and alerts
+
+- [ ] **FEED-01**: An analyst can subscribe a project to RSS/Atom feeds, MCP sources, and watched folders; new items arrive ungraded in a triage inbox.
+- [ ] **FEED-02**: Background work (feed polling, regrading, forecasting) runs within per-run and per-day spending limits checked between turns, and the emergency stop halts it.
+- [ ] **ALERT-01**: An analyst can define tripwires (e.g. a tension crosses a level, a named actor appears in a region) and is alerted when new intake matches.
+
+### Geospatial and temporal
+
+- [ ] **GEO-01**: Places are geocoded on the machine from a bundled gazetteer; ambiguous names are shown as candidates, never resolved silently, and place names are never sent to a geocoding service.
+- [ ] **GEO-02**: An analyst sees geocoded information on a 3D globe with a layer per source or source type that can be turned on and off, with a 2D fallback where WebGL is unavailable.
+- [ ] **GEO-03**: Online imagery (e.g. NASA GIBS) is on by default and can be turned off per project; the setting says that the imagery host sees which areas are viewed, and a bundled offline basemap is always available.
+- [ ] **TIME-01**: An analyst can roll time back and replay how events unfolded on the timeline, network, and globe, in "as it happened" and "as it was known" modes, with views linked so a selection in one highlights the others.
+
+### Prediction
+
+- [ ] **FCST-01**: For a slice, an analyst gets scenario forecasts (mutually exclusive, summing to 100%, with a horizon and resolution criteria) and RAFT tension trends, each with probabilities and the evidence behind them.
+- [ ] **FCST-02**: Forecasts are recalibrated as events arrive and scored when they resolve (Brier score, reliability diagram); below a minimum of evidence the forecast says "insufficient basis" instead of a number.
+- [ ] **FCST-03**: The analyst chooses per project whether forecasting runs locally or with NEAR TEE models; displayed probabilities always come from the auditable calibration layer, not directly from a model.
+- [ ] **FCST-04**: Each forecast can be explained with an ACH matrix (hypotheses against evidence) and an evidence-contribution view, and a calibration dashboard shows forecasting accuracy over time.
+
+### Team sharing (git or shared folder)
+
+- [ ] **SYNC-01**: A team can share a base through a git repository or shared folder it controls; the host sees only ciphertext, and concurrent work by several analysts merges without conflicts.
+- [ ] **SYNC-02**: A member invites another by public key, with a fingerprint check; removing a member rotates the keys so they cannot read anything new, and the UI says what they keep.
+- [ ] **SYNC-03**: Conflicting grades or edits from different analysts are shown side by side with their authors, not silently resolved.
+
+### Organisation scale
+
+- [ ] **ORG-01**: An organisation can divide a base into need-to-know compartments, each with its own key; a reader without a compartment sees output indistinguishable from a base without it, including grades, search, and forecasts.
+- [ ] **ORG-02**: Members have roles (reader, analyst, approver, admin) that every client verifies; agent runs cannot write data into a less restricted compartment than they read from.
+- [ ] **ORG-03**: An admin manages compartments, members, and roles in an Access view, sees the effect before granting, and removes a member from many compartments in one rotation.
+- [ ] **ORG-04**: Key management stays practical into the hundreds of members per compartment.
+- [ ] **ORG-05**: Members load a base from signed snapshots plus later entries, so opening does not replay the whole history.
+- [ ] **RELAY-01**: An organisation can run a relay (a container image) that stores and forwards only ciphertext, checks signed append capabilities, and pushes updates to clients; clients re-verify everything, so a malicious relay can only withhold data, and withholding or rollback is detected.
+- [ ] **RELAY-02**: A team can move a base from git or a shared folder to a relay without losing history.
+
+## Future (after v0.5.0)
+
+- Evidence-based model defaults evaluated centrally (`v0.6.0-evidence-based-model-defaults.md`).
+- MLS group keys (behind the key-management interface) if per-member wrapping stops scaling.
+- Directory or SSO binding of member keys to people.
+
+## Out of scope for v0.5.0
+
+| Feature | Reason |
+|---------|--------|
+| A single blended confidence score | Admiralty reliability and credibility are separate judgements; blending hides which one is weak. |
+| Auto-raising reliability from volume or popularity | Repetition is not corroboration. |
+| Real-time co-editing | Entries are attributed and append-only; conflicts are shown, not merged live. |
+| Person-level targeting aids (e.g. facial recognition, tracking private individuals) | Outside the product's purpose and a misuse risk. |
+| Recalling data a removed member already read | Not technically possible; the UI says so instead. |
+| Forwarded (non-TEE cloud) models in knowledge-base projects | The base is sensitive; only TEE-attested or local models may see it. |
+
+## Traceability (v0.5.0)
+
+Filled in by the roadmap.
+
+
+# Earlier milestones
+
 ## v1 requirements
 
 - **ONB-01**: A first-run onboarding flow explains privacy, authentication choices, model access, and action approvals.
