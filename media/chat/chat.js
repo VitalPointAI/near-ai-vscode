@@ -550,7 +550,10 @@
       status.dataset.since = String(agent.activitySince || Date.now());
       status.dataset.activity = agent.paused ? 'Paused' : (agent.activity || 'Starting');
       status.dataset.after = !agent.paused && agent.activity === 'Thinking' && agent.lastAction ? agent.lastAction : '';
-      status.dataset.counts = (agent.toolCalls || 0) + ' tool call' + (agent.toolCalls === 1 ? '' : 's') + ' · ' + (agent.turns || 0) + ' turn' + (agent.turns === 1 ? '' : 's');
+      // The agent's own task list, as steps done of total and the step in progress (the line ellipsizes if it is long).
+      const steps = agent.steps && agent.steps.total ? ' · ' + agent.steps.done + '/' + agent.steps.total + ' steps' + (agent.steps.active ? ' · ' + agent.steps.active : '') : '';
+      status.dataset.counts = (agent.toolCalls || 0) + ' tool call' + (agent.toolCalls === 1 ? '' : 's') + ' · ' + (agent.turns || 0) + ' turn' + (agent.turns === 1 ? '' : 's') + steps;
+      if (agent.steps && agent.steps.active) status.title = agent.steps.active;
       updateAgentStatus(status);
       body.append(label, status);
       const controls = el('span', 'agent-controls');
