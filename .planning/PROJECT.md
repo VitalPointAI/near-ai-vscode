@@ -32,3 +32,40 @@ The first milestone includes onboarding, both API-key and NEAR sign-in authentic
 - Exact NEAR sign-in/token-exchange mechanics and the supported Open-GSD command integration boundary require validation during implementation research.
 - Open-GSD updates must be constrained to the official stable package/channel and must use the upstream installer/update contract rather than copying managed files blindly.
 - The MVP should favor a safe approval policy over unrestricted autonomy; autonomy can be expanded through explicit settings and budgets.
+
+## Current Milestone: v0.5.0 Trusted-source knowledge base
+
+**Goal:** Give research teams a private, self-improving knowledge base of graded sources and the intelligence collated from them, which augments agents with strategic, operational, and tactical context and shows it as a network, on a globe, over time, and as probabilistic forecasts.
+
+**Target features:**
+- Source intake: agents add sources and claims during research runs; analysts add or import directly (including CSV, STIX, and GeoJSON); standing feeds (RSS, MCP connections, watched folders).
+- NATO Admiralty grading (reliability A–F, credibility 1–6) on every source and claim; agents propose and keep revising grades with evidence and reasons; analyst overrides are recorded the same way.
+- Per-project grade thresholds: reports exclude or flag below-threshold claims and show each claim's grade and sources.
+- RAFT graph (Relationships, Actors, Functions, Tensions) as a professional network diagram, sliced by geography, time window, topic, or actors; agents work within a slice.
+- Geospatial: an open-source 3D globe with open imagery, one layer per source or source type, and offline geocoding so place names never leave the machine.
+- Temporal: every item records when it happened, was reported, and was graded; the user can replay how events unfolded.
+- Prediction: scenario forecasts and RAFT tension trends with probabilities and their evidence, recalibrated as events arrive; the user chooses whether models train and run locally or on NEAR TEE models.
+- Small-team sharing: a signed, end-to-end encrypted, append-only event log in a git repository or shared folder the team controls; members are invited by public key and the base key rotates when a member is removed.
+- Sensitivity: knowledge-base projects use TEE-attested models only (including sub-agents, attachments, and embeddings), and the base is encrypted at rest with its key in SecretStorage.
+
+Requirements brief: `.planning/research/v0.5.0-trusted-source-knowledge-base.md`. Evidence-based model defaults (`.planning/research/v0.6.0-evidence-based-model-defaults.md`) follow in v0.6.0.
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
+---
+*Last updated: 2026-10-28 after starting milestone v0.5.0*
