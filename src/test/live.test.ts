@@ -19,13 +19,15 @@ import { gsdShellEnv } from '../gsd/runtime';
 import { ActivityFeed, timeBreakdown } from '../services/agentActivity';
 import { AgentConversation, findSkill } from '../services/agentSession';
 import { gradeExecution, loadExecutionTasks, setUpExecutionTask, type ExecutionTask } from './evalExecution';
+import { fixPrompt, parseCandidate, REVIEW_FILE, reviewPrompt, reviewVerdict } from './evalReview';
 import { gradePlan, gradeResearch, PLAN_PROMPT, PLAN_SPEC, RESEARCH_PROMPT, RESEARCH_SOURCES } from './evalGraders';
 import { NearAiClient, type ModelInfo, type UsageMetadata } from '../services/nearAiClient';
 
 // Live tests against NEAR AI Cloud. They spend real money (cents), so they are opt-in:
 //   NEAR_AI_API_KEY=...                      tool round trip, signature verification, billing
 //   NEAR_LIVE_EVAL=1                         also compare models on coding, research, and planning tasks
-//                                            (NEAR_LIVE_EVAL_MODELS=a,b; NEAR_LIVE_EVAL_RUNS=2; NEAR_LIVE_EVAL_OUT=file.json)
+//                                            (NEAR_LIVE_EVAL_MODELS=a,b; NEAR_LIVE_EVAL_RUNS=2; NEAR_LIVE_EVAL_OUT=file.json;
+//                                            a+b: model a builds, model b reviews, a fixes the gaps)
 //   (with the key alone, also: image and voice-note attachments and image generation)
 //   NEAR_LIVE_GSD=1 NEAR_GSD_HOME=<runtime>  also run /gsd-map-codebase on a sample repo and a full
 //                                            GSD cycle (new-project, plan, execute in worktrees)
@@ -56,19 +58,20 @@ function pick(models: ModelInfo[], pattern: RegExp): string | undefined {
 }
 
 /** Runs the harness non-interactively in `root` and returns the outcome and usage. */
-async function agent(near: NearAiClient, model: string, root: string, prompt: string, maxTurns = 30): Promise<{ outcome: string; answer: string; usage: UsageMetadata[]; ms: number }> {
+async function agent(near: NearAiClient, model: string, root: string, prompt: string, maxTurns = 30): Promise<{ outcome: string; answer: string; usage: UsageMetadata[]; ms: number; changed: string[] }> {
   const shell = new ShellSession(root);
   const started = Date.now();
+  const checkpoints = new RunCheckpoints(`live-${Date.now()}`);
   try {
     const result = await new AgentRun({
       client: near, model, tools: CORE_TOOLS, maxTurns,
-      context: { root, checkpoints: new RunCheckpoints(`live-${Date.now()}`), shell, readFiles: new Set() },
+      context: { root, checkpoints, shell, readFiles: new Set() },
       policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES,
       requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined
     // The production system prompt, so the eval measures models as the extension runs them.
     }).run([{ role: 'system', content: agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: false, model }) }, { role: 'user', content: prompt }], new AbortController().signal);
     const answer = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content ?? '';
-    return { outcome: result.outcome, answer: String(answer), usage: result.usage, ms: Date.now() - started };
+    return { outcome: result.outcome, answer: String(answer), usage: result.usage, ms: Date.now() - started, changed: checkpoints.changedFiles };
   } finally {
     shell.dispose();
   }
@@ -116,7 +119,8 @@ const TASKS: Array<{ name: string; files: Record<string, string>; prompt: string
 test('live eval: models compared on coding, research, and planning tasks', { skip: skip || (process.env.NEAR_LIVE_EVAL ? false : 'set NEAR_LIVE_EVAL=1'), timeout: Infinity }, async () => {
   const { client: near, models } = await client();
   const wanted = (process.env.NEAR_LIVE_EVAL_MODELS ?? 'z-ai/glm-5.3,z-ai/glm-5.3-flash').split(',').map((id) => id.trim()).filter(Boolean);
-  const candidates = wanted.filter((id) => models.some((model) => model.id === id));
+  const offered = (id: string | undefined) => !id || models.some((model) => model.id === id);
+  const candidates = wanted.filter((spec) => { const { builder, reviewer } = parseCandidate(spec); return offered(builder) && offered(reviewer); });
   assert.ok(candidates.length, `none of ${wanted.join(', ')} is offered`);
   const runs = Math.max(1, Number(process.env.NEAR_LIVE_EVAL_RUNS ?? 2));
   const tasks: Array<{ name: string; kind: 'coding' | 'research' | 'planning' | 'execution'; files: Record<string, string>; prompt: string; execution?: ExecutionTask }> = [
@@ -127,8 +131,14 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
     ...(await loadExecutionTasks()).map((task) => ({ name: task.name, kind: 'execution' as const, files: {}, prompt: task.prompt, execution: task }))
   ];
   const total = candidates.length * tasks.length * runs;
-  const rows: Array<{ model: string; task: string; kind: string; run: number; score: number; outOf: number; outcome: string; turns: number; seconds: number; tokPerSec?: number; costUsd?: number; cachePct: number; misses: string }> = [];
+  const rows: Array<{ model: string; task: string; kind: string; run: number; score: number; outOf: number; outcome: string; review?: string; turns: number; seconds: number; tokPerSec?: number; costUsd?: number; reviewCostUsd?: number; cachePct: number; misses: string }> = [];
+  const costOf = async (usage: UsageMetadata[]) => {
+    const actual = await near.actualCostsUsd(usage.map((turn) => turn.requestId!).filter(Boolean)).catch(() => undefined);
+    const estimated = usage.reduce((sum, turn) => sum + (turn.estimatedCostUsd ?? 0), 0);
+    return { usd: actual ?? (estimated > 0 ? estimated : undefined), estimated: actual === undefined };
+  };
   for (const model of candidates) {
+    const { builder, reviewer } = parseCandidate(model);
     for (const task of tasks) {
       for (let attempt = 1; attempt <= runs; attempt += 1) {
         const root = await mkdtemp(path.join(tmpdir(), `near-ai-eval-${task.name}-`));
@@ -137,7 +147,29 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
         let outcome = 'error';
         let usage: UsageMetadata[] = [];
         let ms = 0;
-        try { ({ outcome, usage, ms } = await agent(near, model, root, task.prompt, task.kind === 'execution' ? 50 : 30)); } catch (error) { outcome = `error: ${(error as Error).message.slice(0, 80)}`; }
+        const turnLimit = task.kind === 'execution' ? 50 : 30;
+        try { ({ outcome, usage, ms } = await agent(near, builder, root, task.prompt, turnLimit)); } catch (error) { outcome = `error: ${(error as Error).message.slice(0, 80)}`; }
+        // With a reviewer: it lists gaps in REVIEW.md, and the builder gets one pass to fix them.
+        let review: string | undefined;
+        let reviewUsage: UsageMetadata[] = [];
+        if (reviewer && !outcome.startsWith('error')) {
+          try {
+            const checked = await agent(near, reviewer, root, reviewPrompt(task.prompt), 25);
+            reviewUsage = checked.usage;
+            ms += checked.ms;
+            const verdict = reviewVerdict(await readFile(path.join(root, REVIEW_FILE), 'utf8').catch(() => undefined));
+            const edited = checked.changed.filter((file) => path.basename(file) !== REVIEW_FILE);
+            review = verdict.approved ? 'approved' : verdict.gaps ? 'gaps' : 'none';
+            if (edited.length) review += ` (reviewer edited ${edited.map((file) => path.relative(root, file)).join(', ')})`;
+            if (!verdict.approved && verdict.gaps) {
+              const fixed = await agent(near, builder, root, fixPrompt(task.prompt, verdict.gaps), turnLimit);
+              usage = [...usage, ...fixed.usage];
+              ms += fixed.ms;
+              outcome = fixed.outcome;
+              review += ', fixed';
+            }
+          } catch (error) { review = `error: ${(error as Error).message.slice(0, 80)}`; }
+        }
         let score = 0;
         let outOf = 10;
         let misses: string[] = [];
@@ -156,18 +188,20 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
           ({ score, misses } = text ? (task.kind === 'research' ? gradeResearch(text) : gradePlan(text)) : { score: 0, misses: [`no ${path.basename(file)} written`] });
           outOf = 10;
         }
-        const cost = await near.actualCostsUsd(usage.map((turn) => turn.requestId!).filter(Boolean)).catch(() => undefined);
-        const input = usage.reduce((sum, turn) => sum + (turn.inputTokens ?? 0), 0);
-        const cachePct = input ? Math.round((100 * usage.reduce((sum, turn) => sum + (turn.cachedInputTokens ?? 0), 0)) / input) : 0;
+        const built = await costOf(usage);
+        const reviewed = reviewUsage.length ? await costOf(reviewUsage) : undefined;
+        const costUsd = built.usd === undefined && reviewed?.usd === undefined ? undefined : (built.usd ?? 0) + (reviewed?.usd ?? 0);
+        const estimatedCost = built.estimated || reviewed?.estimated === true;
+        const all = [...usage, ...reviewUsage];
+        const input = all.reduce((sum, turn) => sum + (turn.inputTokens ?? 0), 0);
+        const cachePct = input ? Math.round((100 * all.reduce((sum, turn) => sum + (turn.cachedInputTokens ?? 0), 0)) / input) : 0;
         // Generation speed, not counting the wait for each reply's first token.
-        const generatingMs = usage.reduce((sum, turn) => sum + Math.max(0, turn.latencyMs - (turn.firstTokenMs ?? 0)), 0);
-        const output = usage.reduce((sum, turn) => sum + (turn.outputTokens ?? 0), 0);
+        const generatingMs = all.reduce((sum, turn) => sum + Math.max(0, turn.latencyMs - (turn.firstTokenMs ?? 0)), 0);
+        const output = all.reduce((sum, turn) => sum + (turn.outputTokens ?? 0), 0);
         const tokPerSec = generatingMs > 0 && output ? Math.round(output / (generatingMs / 1000)) : undefined;
-        const estimated = usage.reduce((sum, turn) => sum + (turn.estimatedCostUsd ?? 0), 0);
-        const costUsd = cost ?? (estimated > 0 ? estimated : undefined);
-        rows.push({ model, task: task.name, kind: task.kind, run: attempt, score, outOf, outcome, turns: usage.length, seconds: Math.round(ms / 1000), ...(tokPerSec !== undefined ? { tokPerSec } : {}), ...(costUsd !== undefined ? { costUsd } : {}), cachePct, misses: misses.join('; ') });
+        rows.push({ model, task: task.name, kind: task.kind, run: attempt, score, outOf, outcome, ...(review ? { review } : {}), turns: all.length, seconds: Math.round(ms / 1000), ...(tokPerSec !== undefined ? { tokPerSec } : {}), ...(costUsd !== undefined ? { costUsd } : {}), ...(reviewed?.usd !== undefined ? { reviewCostUsd: reviewed.usd } : {}), cachePct, misses: misses.join('; ') });
         // Report each run as it finishes, so a long eval never looks hung.
-        console.log(`eval ${rows.length}/${total}: ${model} ${task.name} #${attempt}: ${score}/${outOf} (${outcome}, ${usage.length} turns, ${Math.round(ms / 1000)}s${tokPerSec !== undefined ? ` at ${tokPerSec} tok/s` : ''}${costUsd !== undefined ? `, $${costUsd.toFixed(4)}${cost === undefined ? ' est.' : ''}` : ''}, ${cachePct}% cached)${misses.length ? ` missed: ${misses.join('; ')}` : ''}`);
+        console.log(`eval ${rows.length}/${total}: ${model} ${task.name} #${attempt}: ${score}/${outOf} (${outcome}${review ? `, review: ${review}` : ''}, ${all.length} turns, ${Math.round(ms / 1000)}s${tokPerSec !== undefined ? ` at ${tokPerSec} tok/s` : ''}${costUsd !== undefined ? `, $${costUsd.toFixed(4)}${estimatedCost ? ' est.' : ''}${reviewed?.usd !== undefined ? ` incl. $${reviewed.usd.toFixed(4)} review` : ''}` : ''}, ${cachePct}% cached)${misses.length ? ` missed: ${misses.join('; ')}` : ''}`);
       }
     }
   }
@@ -177,8 +211,10 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
     const avg = (kind: string) => { const list = mine.filter((row) => row.kind === kind); return list.length ? Math.round((10 * list.reduce((sum, row) => sum + row.score, 0)) / list.length) / 10 : undefined; };
     const costs = mine.map((row) => row.costUsd).filter((value): value is number => value !== undefined);
     const speeds = mine.map((row) => row.tokPerSec).filter((value): value is number => value !== undefined);
-    const info = models.find((candidate) => candidate.id === model);
-    return { model, privacy: info?.privacyBoundary === 'tee' ? 'TEE' : `forwarded${info?.forwardedTo ? ` (${info.forwardedTo})` : ''}`, coding: `${mine.filter((row) => row.kind === 'coding' && row.score === 10).length}/${mine.filter((row) => row.kind === 'coding').length} passed`, research: avg('research'), planning: avg('planning'), execution: avg('execution'), totalCostUsd: costs.length ? Number(costs.reduce((sum, value) => sum + value, 0).toFixed(4)) : undefined, avgSeconds: Math.round(mine.reduce((sum, row) => sum + row.seconds, 0) / mine.length), avgTokPerSec: speeds.length ? Math.round(speeds.reduce((sum, value) => sum + value, 0) / speeds.length) : undefined, avgCachePct: Math.round(mine.reduce((sum, row) => sum + row.cachePct, 0) / mine.length) };
+    // A pair is only as private as its less private model.
+    const forwarded = Object.values(parseCandidate(model)).map((id) => models.find((candidate) => candidate.id === id)).find((info) => info?.privacyBoundary !== 'tee');
+    const reviews = mine.map((row) => row.reviewCostUsd).filter((value): value is number => value !== undefined);
+    return { model, privacy: forwarded ? `forwarded${forwarded.forwardedTo ? ` (${forwarded.forwardedTo})` : ''}` : 'TEE', coding: `${mine.filter((row) => row.kind === 'coding' && row.score === 10).length}/${mine.filter((row) => row.kind === 'coding').length} passed`, research: avg('research'), planning: avg('planning'), execution: avg('execution'), totalCostUsd: costs.length ? Number(costs.reduce((sum, value) => sum + value, 0).toFixed(4)) : undefined, ...(reviews.length ? { reviewCostUsd: Number(reviews.reduce((sum, value) => sum + value, 0).toFixed(4)), approved: `${mine.filter((row) => row.review?.startsWith('approved')).length}/${mine.length}` } : {}), avgSeconds: Math.round(mine.reduce((sum, row) => sum + row.seconds, 0) / mine.length), avgTokPerSec: speeds.length ? Math.round(speeds.reduce((sum, value) => sum + value, 0) / speeds.length) : undefined, avgCachePct: Math.round(mine.reduce((sum, row) => sum + row.cachePct, 0) / mine.length) };
   });
   console.log('summary (research, planning, and execution are average scores out of 10; execution is the share of hidden acceptance tests passed):');
   console.table(summary);
