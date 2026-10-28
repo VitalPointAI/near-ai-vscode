@@ -20,7 +20,7 @@ export interface GsdServices {
    * Runs a sub-agent. In the foreground it resolves with the final report; in the background it
    * resolves at once with the agent's id, and the report reaches the caller when it finishes.
    */
-  spawn(request: { type: string; agent?: GsdAgent; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree' }, signal: AbortSignal): Promise<string>;
+  spawn(request: { type: string; agent?: GsdAgent; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree'; task?: string }, signal: AbortSignal): Promise<string>;
 }
 
 
@@ -87,10 +87,10 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
     }
   };
 
-  const agentRun = async (raw: { type: string; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree' }, signal: AbortSignal) => {
+  const agentRun = async (raw: { type: string; prompt: string; description: string; model?: string; background: boolean; isolation?: 'worktree'; task?: string }, signal: AbortSignal) => {
     const agent = services.agents.find((candidate) => candidate.name === raw.type);
     if (!agent && raw.type && raw.type !== 'general-purpose') throw new ToolError(`No agent definition named "${raw.type}". Available: ${services.agents.map((candidate) => candidate.name).join(', ')}, or general-purpose.`);
-    return services.spawn({ type: raw.type || 'general-purpose', agent, prompt: raw.prompt, description: raw.description, model: raw.model, background: raw.background, ...(raw.isolation ? { isolation: raw.isolation } : {}) }, signal);
+    return services.spawn({ type: raw.type || 'general-purpose', agent, prompt: raw.prompt, description: raw.description, model: raw.model, background: raw.background, ...(raw.isolation ? { isolation: raw.isolation } : {}), ...(raw.task ? { task: raw.task } : {}) }, signal);
   };
 
   const agentParse = (raw: Record<string, unknown>) => {
@@ -101,13 +101,14 @@ export function gsdTools(services: GsdServices): AgentTool<any>[] {
       description: typeof raw.description === 'string' ? raw.description.slice(0, 120) : '',
       model: typeof raw.model === 'string' && raw.model.trim() ? raw.model.trim() : undefined,
       background: raw.run_in_background === true,
-      ...(raw.isolation === 'worktree' ? { isolation: 'worktree' as const } : {})
+      ...(raw.isolation === 'worktree' ? { isolation: 'worktree' as const } : {}),
+      ...(typeof raw.task === 'string' && raw.task.trim() ? { task: raw.task.slice(0, 300) } : {})
     };
   };
-  const agentParameters = { type: 'object', properties: { description: { type: 'string', description: 'Three to five words on the task.' }, prompt: { type: 'string', description: 'The complete task for the agent; it sees nothing else from this conversation.' }, subagent_type: { type: 'string', description: `One of: ${services.agents.map((agent) => agent.name).join(', ')}, or general-purpose.` }, model: { type: 'string', description: 'Optional tier or model ID.' }, run_in_background: { type: 'boolean' }, isolation: { type: 'string', enum: ['worktree'], description: 'Run the agent in its own git worktree on a new branch; its changes stay on that branch for you to merge.' } }, required: ['prompt'], additionalProperties: false };
+  const agentParameters = { type: 'object', properties: { description: { type: 'string', description: 'Three to five words on the task.' }, prompt: { type: 'string', description: 'The complete task for the agent; it sees nothing else from this conversation.' }, subagent_type: { type: 'string', description: `One of: ${services.agents.map((agent) => agent.name).join(', ')}, or general-purpose.` }, model: { type: 'string', description: 'Optional tier or model ID.' }, run_in_background: { type: 'boolean' }, isolation: { type: 'string', enum: ['worktree'], description: 'Run the agent in its own git worktree on a new branch; its changes stay on that branch for you to merge.' }, task: { type: 'string', description: 'The exact content of the task-list item this agent works on. The task list then shows it in progress while the agent runs and completed when it finishes.' } }, required: ['prompt'], additionalProperties: false };
   const agentTool: AgentTool<ReturnType<typeof agentParse>> = {
     name: 'Agent',
-    description: 'Start a sub-agent with its own context to do a self-contained task, and get back its final report. Give it everything it needs in the prompt. Several Agent calls in one turn run in parallel. With run_in_background the call returns at once and the report arrives in a later message when the agent finishes.',
+    description: 'Start a sub-agent with its own context to do a self-contained task, and get back its final report. Give it everything it needs in the prompt. Several Agent calls in one turn run in parallel. With run_in_background the call returns at once and the report arrives in a later message when the agent finishes. When the agent does an item from your task list, pass that item\'s exact content as task.',
     parameters: agentParameters,
     // Its own tool calls go through the same permission checks; the call itself only reads.
     capability: 'plan',

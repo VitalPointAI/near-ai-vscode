@@ -13,7 +13,8 @@ import { grantsMcpTool } from '../mcp/tools';
 import { checkCitationsTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
-import { AgentTool, CORE_TOOLS, ToolContext } from '../agent/tools';
+import { AgentTool, CORE_TOOLS, Todo, ToolContext } from '../agent/tools';
+import { TaskBoard } from '../agent/taskBoard';
 import { displayPath } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
@@ -115,6 +116,14 @@ interface LiveAgent {
   startedAt: number;
   toolCalls: number;
   turns: number;
+  /** The sub-agent's own TodoWrite list, shown as steps in its row (not in the main task list). */
+  todos?: Todo[];
+}
+
+/** A sub-agent's task list as its row shows it: done of total, and the step in progress. */
+export function agentSteps(todos: Todo[]): { done: number; total: number; active?: string } {
+  const active = todos.find((todo) => todo.status === 'in_progress');
+  return { done: todos.filter((todo) => todo.status === 'completed').length, total: todos.length, ...(active ? { active: active.activeForm || active.content } : {}) };
 }
 
 /** A message the user sent while a run was going. */
@@ -154,6 +163,8 @@ export class AgentConversation {
   private readonly agents = new Map<string, LiveAgent>();
   private readonly background = new Set<Promise<void>>();
   private notifications: AgentMessage[] = [];
+  /** The main run's task list; sub-agents started for one of its items move that item along. */
+  private readonly tasks = new TaskBoard();
   /** Messages the user sent while a run was going, oldest first, until a model request takes them. */
   private steering: SteerMessage[] = [];
   private readonly steerListeners = new Set<() => void>();
@@ -246,7 +257,12 @@ export class AgentConversation {
       afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
       input: this.steeringInput,
       requestApproval: (approval) => this.askApproval(approval, abort.signal),
-      emit: (event) => { this.track(mainId, event); if (event.type !== 'reasoning' && event.type !== 'turn') this.markVisible(); this.forward(event, request.model, record); }
+      emit: (event) => {
+        this.track(mainId, event);
+        if (event.type !== 'reasoning' && event.type !== 'turn') this.markVisible();
+        if (event.type === 'todos') this.post({ type: 'todos', todos: this.tasks.write(event.todos) });
+        else this.forward(event, request.model, record);
+      }
     });
     const runStartedAt = Date.now();
     this.markVisible();
@@ -388,6 +404,7 @@ export class AgentConversation {
   public reset(): void {
     this.halt();
     this.steering = [];
+    this.tasks.clear();
     this.messages = [];
     this.display = new Map();
     this.conversationId = newConversationId();
@@ -403,7 +420,7 @@ export class AgentConversation {
   private systemPrompt(request: AgentTurnRequest, root = this.root): string {
     const base = `${agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}`;
     if (!request.gsd) return base;
-    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
+    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). When the agent does an item on your task list, pass that item's exact content as the Agent call's task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
   }
 
   private shellFor(env: NodeJS.ProcessEnv): ShellSession {
@@ -476,6 +493,8 @@ export class AgentConversation {
         const pool = [...all.filter((tool) => tool.name !== 'Remember' && tool.name !== 'Recall'), ...privateMemory];
         // A listed tool, Task for Agent, and MCP tools by name, mcp:<server>, or a trailing-* pattern.
         const allowed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent')) || (tool.name.startsWith('mcp__') && grantsMcpTool(spawn.agent!.tools, tool.name))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
+        // The task-list item this agent does, when the call names one that is on the list.
+        const todo = spawn.task ? this.moveTask(spawn.task, 'in_progress') : undefined;
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };
         // A background agent outlives the tool call but not the run; a foreground one ends with the call too.
         const parent = spawn.background ? runSignal : callSignal;
@@ -531,9 +550,13 @@ export class AgentConversation {
             shell.dispose();
             worktreeState = worktree ? await finishAgentWorktree(worktree).catch(() => 'kept' as const) : undefined;
             const isolated = worktree && worktreeState ? `\n\n${worktreeReport(worktree, worktreeState)}` : '';
-            if (result.outcome === 'cancelled') return `${label} was stopped before it finished.${isolated}`;
-            return `${typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`}${isolated}`;
+            const done = result.outcome === 'completed';
+            if (todo) this.moveTask(todo, done ? 'completed' : 'pending');
+            const note = this.taskNote(todo, done);
+            if (result.outcome === 'cancelled') return `${label} was stopped before it finished.${isolated}${note}`;
+            return `${typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`}${isolated}${note}`;
           } catch (error) {
+            if (todo) this.moveTask(todo, 'pending');
             this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
             await this.recordReputation(request.reputation, label, -1, agent.id);
             void record({ status: 'failed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
@@ -548,10 +571,10 @@ export class AgentConversation {
             this.postAgents();
           }
         };
-        if (!spawn.background) return execute();
+        if (!spawn.background) return execute().catch((error: Error) => { throw new Error(`${error.message}${this.taskNote(todo, false)}`); });
         const task = execute()
           .then((report) => { this.notifications.push({ role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="finished">\n${report}\n</agent-notification>` }); })
-          .catch((error: Error) => { this.notifications.push({ role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="failed">\n${error.message}\n</agent-notification>` }); })
+          .catch((error: Error) => { this.notifications.push({ role: 'user', content: `<agent-notification id="${agent.id}" agent="${label}" status="failed">\n${error.message}${this.taskNote(todo, false)}\n</agent-notification>` }); })
           .finally(() => { this.background.delete(task); });
         this.background.add(task);
         return `Started ${label} in the background as ${agent.id}. Its report will arrive in a later message when it finishes; there is no output file to poll. Continue with other work, or end your turn to wait; do not sleep.`;
@@ -607,7 +630,7 @@ export class AgentConversation {
 
   private postAgents(): void {
     if (this.agentsTimer) { clearTimeout(this.agentsTimer); this.agentsTimer = undefined; }
-    this.post({ type: 'agents', count: this.agents.size, agents: [...this.agents.values()].map((agent) => ({ id: agent.id, label: agent.label, description: agent.description, model: agent.model, paused: agent.paused, background: agent.background, activity: agent.activity, activitySince: agent.activitySince, lastAction: agent.lastAction, startedAt: agent.startedAt, toolCalls: agent.toolCalls, turns: agent.turns })) });
+    this.post({ type: 'agents', count: this.agents.size, agents: [...this.agents.values()].map((agent) => ({ id: agent.id, label: agent.label, description: agent.description, model: agent.model, paused: agent.paused, background: agent.background, activity: agent.activity, activitySince: agent.activitySince, lastAction: agent.lastAction, startedAt: agent.startedAt, toolCalls: agent.toolCalls, turns: agent.turns, ...(agent.todos?.length ? { steps: agentSteps(agent.todos) } : {}) })) });
   }
 
   /** Refreshes the agents strip at most once a second. */
@@ -621,8 +644,25 @@ export class AgentConversation {
     agent.activitySince = Date.now();
   }
 
+  /** Moves a task-list item and shows the list at once, without waiting for sibling agents. */
+  private moveTask(task: string, status: Todo['status']): string | undefined {
+    const content = this.tasks.set(task, status);
+    if (content !== undefined) this.post({ type: 'todos', todos: this.tasks.list });
+    return content;
+  }
+
+  /** What an Agent result tells the main agent about its task list, so its next TodoWrite agrees with the host. */
+  private taskNote(task: string | undefined, done: boolean): string {
+    const lines: string[] = [];
+    if (task) lines.push(done ? `Task list: "${task}" is now marked completed.` : `Task list: "${task}" is back to pending, because the agent did not finish.`);
+    if (this.tasks.unfinished) lines.push('Update the task list with TodoWrite if this finished a task.');
+    return lines.length ? `\n\n${lines.join('\n')}` : '';
+  }
+
   /** Keeps each sub-agent's live status current from its own events. */
   private observe(agent: LiveAgent, event: AgentEvent): void {
+    // A step finishing is worth showing at once, unlike the stream of activity updates.
+    if (event.type === 'todos') { agent.todos = event.todos; return void this.postAgents(); }
     if (event.type === 'tool-start') { agent.toolCalls += 1; agent.lastAction = event.title; this.setActivity(agent, event.title); }
     else if (event.type === 'tool-end') this.setActivity(agent, 'Thinking');
     else if (event.type === 'reasoning') { this.setActivity(agent, 'Thinking'); return void this.schedulePostAgents(); }
