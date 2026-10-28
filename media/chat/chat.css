@@ -30,14 +30,21 @@ button { font: inherit; color: inherit; }
 .turn.assistant > :last-child { margin-bottom: 0; }
 .turn p { margin: 0 0 8px; }
 .turn ul, .turn ol { margin: 0 0 8px; padding-left: 20px; }
-.turn h3, .turn h4, .turn h5, .turn h6 { margin: 12px 0 6px; font-size: 1em; font-weight: 600; }
+/* markdown.js renders `#` as h3 and `##` as h4, so those carry the size steps. */
+.turn h3 { margin: 14px 0 6px; font-size: 1.2em; font-weight: 600; }
+.turn h4 { margin: 12px 0 6px; font-size: 1.08em; font-weight: 600; }
+.turn h5, .turn h6 { margin: 12px 0 6px; font-size: 1em; font-weight: 600; }
+.turn li { margin: 2px 0; }
+.turn strong { font-weight: 600; }
 .turn blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 2px solid var(--vscode-textBlockQuote-border, var(--vscode-panel-border)); color: var(--vscode-descriptionForeground); }
 .turn hr { border: 0; border-top: 1px solid var(--vscode-panel-border); margin: 10px 0; }
 .turn a { color: var(--vscode-textLink-foreground); text-decoration: none; }
 .turn a:hover { text-decoration: underline; color: var(--vscode-textLink-activeForeground); }
+/* Code reads smaller than prose and in its own colour, so it stands apart from chat text. */
 .turn code {
   font-family: var(--vscode-editor-font-family);
-  font-size: var(--vscode-editor-font-size, 0.92em);
+  font-size: 0.88em;
+  color: var(--vscode-textPreformat-foreground, inherit);
   background: var(--vscode-textCodeBlock-background, var(--vscode-textPreformat-background));
   padding: 1px 4px;
   border-radius: 3px;
@@ -51,8 +58,8 @@ button { font: inherit; color: inherit; }
   background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBarSectionHeader-background));
 }
 .code-block header span { flex: 1; }
-.code-block pre { margin: 0; padding: 8px 10px; overflow-x: auto; background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background)); }
-.code-block pre code { background: none; padding: 0; white-space: pre; }
+.code-block pre { margin: 0; padding: 8px 10px; overflow-x: auto; font-size: 0.88em; line-height: 1.45; background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background)); }
+.code-block pre code { font-size: inherit; color: var(--vscode-editor-foreground, inherit); background: none; padding: 0; white-space: pre; }
 .meta { margin-top: 4px; font-size: 11px; color: var(--vscode-descriptionForeground); }
 .notice { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--vscode-descriptionForeground); }
 .notice.error { color: var(--vscode-errorForeground); }
