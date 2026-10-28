@@ -13,32 +13,44 @@ export interface ActiveProvider {
 }
 
 const CATALOG_TTL_MS = 10 * 60_000;
-const cache = new Map<string, { provider: ResolvedProvider; models: Promise<ModelInfo[]>; loadedAt: number }>();
+/** After a failed refresh, the last good catalog is served and the refresh is tried again this much later. */
+const CATALOG_RETRY_AFTER_FAILURE_MS = 60_000;
+const cache = new Map<string, { provider: ResolvedProvider; models: Promise<ModelInfo[]>; loadedAt: number; last?: ModelInfo[] }>();
 
 /**
  * The project's active, validated provider with its model catalog. Reused across turns so the
  * client keeps pricing (needed for estimates); a profile change (new key, re-validation) gets a
- * fresh entry because the key includes when the profile was last updated.
+ * fresh entry because the key includes when the profile was last updated. A refresh that fails
+ * (NEAR rate limiting, a network blip) keeps serving the last good catalog; only a first load
+ * that fails is dropped, so the next call tries again.
  * Returns undefined when the project has no validated active profile.
  */
-export async function activeProvider(root: string, auth: AuthService): Promise<ActiveProvider | undefined> {
+export async function activeProvider(root: string, auth: AuthService, options: { now?: () => number } = {}): Promise<ActiveProvider | undefined> {
+  const now = options.now ?? Date.now;
   const profiles = new ProfileStore(root, auth);
   const profile = await profiles.getActiveProfile();
   const selection = await profiles.getActiveSelection();
   if (!profile || !selection || profile.validation.status !== 'valid') return undefined;
   const key = `${root}\u0000${profile.profileId}\u0000${profile.updatedAt}`;
   let entry = cache.get(key);
-  if (!entry || Date.now() - entry.loadedAt > CATALOG_TTL_MS) {
-    const provider = entry?.provider ?? await createNearAiProvider({ auth, profile, scope: profiles.getScope(selection.profileId) });
+  if (!entry || now() - entry.loadedAt > CATALOG_TTL_MS) {
+    const previous = entry;
+    const provider = previous?.provider ?? await createNearAiProvider({ auth, profile, scope: profiles.getScope(selection.profileId) });
     // A local runtime has no NEAR catalog, pricing, or billing; its models run on this machine.
-    const models = provider.provider === 'local'
+    const fresh = provider.provider === 'local'
       ? provider.client.listLocalModels()
       : provider.localClient
         ? Promise.all([provider.client.listModelsWithPricing(), provider.localClient.listLocalModels()]).then(([cloud, local]) => [...local, ...cloud])
         : provider.client.listModelsWithPricing();
-    entry = { provider, models, loadedAt: Date.now() };
-    cache.set(key, entry);
-    models.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
+    const last = previous?.last;
+    const created: NonNullable<typeof entry> = { provider, models: last ? fresh.catch(() => last) : fresh, loadedAt: now(), last };
+    entry = created;
+    cache.set(key, created);
+    fresh.then((models) => { created.last = models; }, () => {
+      if (cache.get(key) !== created) return;
+      if (created.last) created.loadedAt = now() - CATALOG_TTL_MS + CATALOG_RETRY_AFTER_FAILURE_MS;
+      else cache.delete(key);
+    });
   }
   return { profile, profiles, provider: entry.provider, models: await entry.models };
 }
