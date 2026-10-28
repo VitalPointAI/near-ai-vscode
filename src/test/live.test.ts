@@ -111,7 +111,9 @@ const TASKS: Array<{ name: string; files: Record<string, string>; prompt: string
   }
 ];
 
-test('live eval: models compared on coding, research, and planning tasks', { skip: skip || (process.env.NEAR_LIVE_EVAL ? false : 'set NEAR_LIVE_EVAL=1'), timeout: 4 * 3_600_000 }, async () => {
+// No overall timeout: the eval's length grows with models x runs (a slow model took ~4h alone), each run is
+// bounded by its turn limit, and progress prints per run.
+test('live eval: models compared on coding, research, and planning tasks', { skip: skip || (process.env.NEAR_LIVE_EVAL ? false : 'set NEAR_LIVE_EVAL=1'), timeout: Infinity }, async () => {
   const { client: near, models } = await client();
   const wanted = (process.env.NEAR_LIVE_EVAL_MODELS ?? 'z-ai/glm-5.3,z-ai/glm-5.3-flash').split(',').map((id) => id.trim()).filter(Boolean);
   const candidates = wanted.filter((id) => models.some((model) => model.id === id));

@@ -62,3 +62,18 @@ test('the graders do not penalize good behaviour seen in real runs', () => {
   assert.ok(gradePlan(`${GOOD_PLAN}\n\`\`\`\nconst add = (text) => text;\nmodule.exports = { add };\n\`\`\`\n`).misses.includes('no code written'));
   assert.ok(gradePlan(`${GOOD_PLAN}\n5. Add optional cloud sync so notes follow the user\n   across devices.\n`).misses.includes('stays within scope (no sync, encryption, or GUI work planned)'));
 });
+
+test('the graders do not penalize good behaviour seen in the execution-eval run', () => {
+  // The sports item set aside in a "Not used" note, and a "prepared on" date.
+  for (const aside of ['- [s5-sport.md] covers a regional cup won by Halden FC and contains no information about the port.', '- One source in the set (s5-sport.md, reporting that Halden FC won the regional cup) contains no information about the port.']) {
+    assert.deepEqual(gradeResearch(`${GOOD_BRIEF}${aside}\n`), { score: 10, misses: [] }, aside);
+  }
+  assert.deepEqual(gradeResearch(`**Prepared:** 2026-10-28\n${GOOD_BRIEF}`), { score: 10, misses: [] });
+  // A plan with its own runner, "lexicographically" (not a GUI), and a comment inside a shell verify block.
+  const ownRunner = GOOD_PLAN.replace('`node --test`', '`node test.js`').replace('newest first (R2).', 'newest first (R2); ISO strings sort lexicographically.') + '\n```bash\nnode -e "import(\'./src/storage.js\').then(m => console.log(m.readNotes()))"\n# → [] when notes.json is absent\n```\n';
+  assert.deepEqual(gradePlan(ownRunner), { score: 10, misses: [] });
+  // Still caught: a manual checklist instead of a test suite, a citation without its file name, and a graphical interface.
+  assert.ok(gradePlan(GOOD_PLAN.replace('Run the suite with `node --test`.', 'There is no test framework; run the commands by hand: `node notes.js list`.')).misses.includes('names the test command'));
+  assert.ok(gradeResearch(GOOD_BRIEF.replace(/\[s2-trade-weekly\.md\]/g, '[s2-trade-weekly]').replace('[s4-local-news.md]', '[s4-local-news]')).misses.includes('at least four citations, all to real sources'));
+  assert.ok(gradePlan(`${GOOD_PLAN}\n6. Add a graphical interface for browsing notes.\n`).misses.includes('stays within scope (no sync, encryption, or GUI work planned)'));
+});
