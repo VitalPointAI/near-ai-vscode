@@ -3,7 +3,7 @@
 // Keep these in step with the defaults declared in package.json (agentDefaults.test.ts checks it).
 
 export const AGENT_DEFAULTS = {
-  tiers: { deep: 'moonshotai/kimi-k3', standard: 'z-ai/glm-5.3', fast: 'z-ai/glm-5.3-flash' },
+  tiers: { deep: 'moonshotai/kimi-k3', standard: 'z-ai/glm-5.3', fast: 'Qwen/Qwen3.6-35B-A3B-FP8' },
   maxTurns: 60,
   maxParallelAgents: 4,
   maxRunCostUsd: 5,

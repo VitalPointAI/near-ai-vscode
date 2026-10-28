@@ -373,7 +373,7 @@
         },
         "nearAi.agent.fastModel": {
           "type": "string",
-          "default": "z-ai/glm-5.3-flash",
+          "default": "Qwen/Qwen3.6-35B-A3B-FP8",
           "description": "Model for Open-GSD sub-agents in the fast tier (haiku). If your provider does not offer it, the chat's model is used."
         },
         "nearAi.agent.maxParallelAgents": {
