@@ -1,6 +1,16 @@
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
+import { classifyCommand, CommandContext } from './commandSafety';
+import type { CommandSafetyCheck } from './safetyModel';
 
-export type PermissionDecision = { decision: 'allow' | 'ask' } | { decision: 'deny'; reason: string };
+/** `reason` on an ask says why it was not run automatically; the approval card shows it. */
+export type PermissionDecision = { decision: 'allow' } | { decision: 'ask'; reason?: string } | { decision: 'deny'; reason: string };
+
+/** What the `auto` mode needs to judge a shell command. */
+export interface AutoApprovalContext extends CommandContext {
+  /** The private safety model, for commands the rules cannot decide; without it they ask. */
+  safety?: CommandSafetyCheck;
+  signal?: AbortSignal;
+}
 
 export interface PermissionRules {
   /** Commands (leading words) that run without asking when written as plain words, e.g. "npm test". */
@@ -54,9 +64,11 @@ export class RunGrants {
 /**
  * Decides whether a tool call runs, asks first, or is refused. Reads, searches, and task lists
  * always run. File writes follow the action policy. Shell commands consult the deny list, the
- * per-run grants, the allow list (simple commands only), then the action policy.
+ * per-run grants, the allow list (simple commands only), then the action policy. In `auto` mode
+ * the command classifier then decides; this synchronous form asks for commands it cannot decide
+ * (decidePermissionAsync asks the safety model about those).
  */
-export function decidePermission(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants): PermissionDecision {
+export function decidePermission(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: CommandContext): PermissionDecision {
   if (policy.emergencyStop) return { decision: 'deny', reason: 'Emergency stop is on.' };
   if (capability === 'read' || capability === 'plan') return { decision: 'allow' };
   if (capability === 'workspaceWrite') {
@@ -71,9 +83,32 @@ export function decidePermission(capability: ActionCapability, command: string |
     if (grants.commands.has((command ?? '').trim())) return { decision: 'allow' };
     if (isAutoAllowed(command ?? '', rules.allowCommands)) return { decision: 'allow' };
     if (policy.mode === 'fully-autonomous') return { decision: 'allow' };
+    if (policy.mode === 'auto') {
+      if (!auto) return { decision: 'ask', reason: 'Auto approve could not check this command.' };
+      const classified = classifyCommand(command ?? '', auto);
+      if (classified.verdict === 'safe') return { decision: 'allow' };
+      return { decision: 'ask', reason: classified.verdict === 'risky' ? `Auto approve held this: ${classified.reason}.` : `The rules could not decide this command (${classified.reason}).` };
+    }
     return { decision: 'ask' };
   }
   return policy.mode === 'fully-autonomous' ? { decision: 'allow' } : { decision: 'ask' };
+}
+
+/**
+ * decidePermission, plus the `auto` mode's model check: a shell command the rules call `unknown`
+ * goes to the private safety model, unless the run has read outside content (which could have
+ * steered both the agent and the check) or no private model is available; then it asks. Every
+ * other mode decides exactly as decidePermission does.
+ */
+export async function decidePermissionAsync(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: AutoApprovalContext): Promise<PermissionDecision> {
+  const decided = decidePermission(capability, command, policy, rules, grants, auto);
+  if (policy.mode !== 'auto' || capability !== 'shell' || decided.decision !== 'ask' || !auto) return decided;
+  const classified = classifyCommand(command ?? '', auto);
+  if (classified.verdict !== 'unknown') return decided;
+  if (grants.tainted) return { decision: 'ask', reason: `${decided.reason} This run has read outside content (a web page, search result, attachment, or MCP result), so the safety model was not asked.` };
+  if (!auto.safety) return { decision: 'ask', reason: `${decided.reason} No private (TEE) safety model is available to check it.` };
+  const verdict = await auto.safety.check((command ?? '').trim(), { root: auto.root, cwd: auto.cwd ?? auto.root }, auto.signal);
+  return verdict.allow ? { decision: 'allow' } : { decision: 'ask', reason: verdict.reason };
 }
 
 export function normalizeCommand(command: string): string {

@@ -319,6 +319,8 @@
     } else if (preview.kind === 'note') {
       card.append(el('div', 'meta', preview.text));
     }
+    // Why it was not run automatically (auto approve's rules or safety model).
+    if (m.reason) card.append(el('div', 'meta approval-reason', 'Why this asks: ' + m.reason));
     const feedback = el('input');
     feedback.placeholder = 'Optional: tell NEAR AI what to do instead';
     feedback.setAttribute('aria-label', 'Instructions if you decline');

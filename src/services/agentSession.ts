@@ -5,6 +5,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextStatus, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, RunResult } from '../agent/loop';
 import { PermissionRules, RunGrants } from '../agent/permissions';
+import { SafetyModelCheck } from '../agent/safetyModel';
 import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
@@ -88,6 +89,8 @@ export interface AgentTurnRequest {
   shellEnvAllow?: string[];
   /** Output tokens one reply may use (nearAi.agent.maxOutputTokens). */
   maxOutputTokens?: number;
+  /** The auto mode's private safety model; without one, commands the rules cannot decide ask. */
+  safetyModel?: string;
   /** Model or tier per agent role (nearAi.agent.roleModels); a team member's own model line wins. */
   roleModels?: Record<string, string>;
 }
@@ -147,6 +150,8 @@ export class AgentConversation {
   /** A progress line after this long without visible output, then at the longer interval while it stays quiet. */
   public progressTiming = { firstMs: 60_000, everyMs: 120_000, checkMs: 15_000 };
   /** Estimated cost and tokens of the current run, across the agent and its sub-agents. */
+  /** The current run's auto-mode safety check, shared with its sub-agents. */
+  private runSafety: SafetyModelCheck | undefined;
   private spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
 
   public constructor(
@@ -201,6 +206,9 @@ export class AgentConversation {
     for (const event of request.attachments?.security ?? []) this.activity?.security(mainId, event);
     const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [] };
     const tools = this.toolsFor(request, context, grants, extraUsage, record, abort.signal, runId);
+    // One safety check per run, shared with sub-agents, so each command is asked about once.
+    const safety = request.policy.mode === 'auto' && request.safetyModel ? new SafetyModelCheck({ client: request.client, model: request.safetyModel, task: request.text, onUsage: (usage) => extraUsage.push(usage) }) : undefined;
+    this.runSafety = safety;
     const run = new AgentRun({
       client: request.client,
       model: request.model,
@@ -209,6 +217,7 @@ export class AgentConversation {
       policy: request.policy,
       rules: request.rules,
       grants,
+      safety,
       maxTurns: request.maxTurns,
       maxOutputTokens: request.maxOutputTokens,
       beforeTurn: async (transcript, lastUsage, signal) => {
@@ -444,7 +453,7 @@ export class AgentConversation {
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}` }, spawn.prompt, system);
             const child = new AgentRun({
-              client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
+              client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
                 while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
@@ -661,7 +670,7 @@ export class AgentConversation {
           settle({ decision: 'deny', feedback: `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'} (the user may be away). Continue without this action if you can, and report what still needs their approval.` });
         }, this.approvalTimeoutMs);
       }
-      this.post({ type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview });
+      this.post({ type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview, ...(request.reason ? { reason: request.reason } : {}) });
     });
   }
 
