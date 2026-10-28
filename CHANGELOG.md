@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.3
+
+- **Approval mode in the chat bar.** A picker beside the model chooses how
+  much the agent may do without asking: Ask before edits, Edits auto, Auto,
+  or Full auto. Full auto asks you to confirm first and shows in the warning
+  colour. The choice is saved to your user settings, or to the project's when
+  the project already sets it, and the next run uses it. During an emergency
+  stop the picker shows **Stopped**.
+- **No more pricing requests NEAR doesn't support.** The model list stops
+  asking NEAR AI Cloud for prices once it answers that the request is not
+  implemented.
+
 ## 0.4.2
 
 - **Auto approve.** A new `auto` value for `nearAi.actionPolicy` runs what
