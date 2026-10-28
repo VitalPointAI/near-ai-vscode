@@ -39,8 +39,21 @@ export type AgentEvent =
 
 export type RunOutcome = 'completed' | 'max-turns' | 'cancelled';
 
+/**
+ * Messages the user sends while a run is going (steering). The run takes them before every model
+ * request, retries included, so they land after the in-flight turn's tool calls and never cut off
+ * a streaming reply or a running tool.
+ */
+export interface RunInput {
+  pending(): boolean;
+  /** The queued messages, oldest first, as transcript entries; taking them marks them delivered. */
+  take(): AgentMessage[];
+  /** Called whenever a message is queued; returns an unsubscribe. */
+  subscribe(listener: () => void): () => void;
+}
+
 export interface AgentRunOptions {
-  client: { streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options?: { idleTimeoutMs?: number; maxOutputTokens?: number }): AsyncGenerator<CompletionEvent> };
+  client: { streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options?: { idleTimeoutMs?: number; maxOutputTokens?: number }): AsyncGenerator<CompletionEvent>; cooldownRemainingMs?(model: string): number };
   model: string;
   tools: AgentTool<any>[];
   context: Omit<ToolContext, 'signal' | 'onTodos'>;
@@ -73,6 +86,8 @@ export interface AgentRunOptions {
   beforeTurn?(transcript: AgentMessage[], lastUsage: UsageMetadata | undefined, signal: AbortSignal): Promise<AgentMessage[] | void>;
   /** Called when the model answers without a tool call; returning messages continues the run with them. */
   afterAnswer?(transcript: AgentMessage[], signal: AbortSignal): Promise<AgentMessage[] | undefined>;
+  /** The user's messages sent during the run; a retry wait, or a request still held by the model's cooldown, ends early when one arrives. */
+  input?: RunInput;
   requestApproval(request: ApprovalRequest): Promise<ApprovalReply>;
   emit(event: AgentEvent): void;
 }
@@ -155,6 +170,9 @@ export class AgentRun {
           continue;
         }
         if (!assistant.tool_calls?.length) {
+          // The user said something while this answer streamed: it is new direction, so keep going.
+          const steered = this.options.input?.take() ?? [];
+          if (steered.length) { transcript.push(...steered); continue; }
           const integrity = await this.testIntegrityCheck();
           if (integrity) { transcript.push({ role: 'user', content: integrity }); continue; }
           const more = await this.options.afterAnswer?.(transcript, signal);
@@ -194,11 +212,28 @@ export class AgentRun {
     /** When the current run of 429/5xx answers began; any other outcome resets it. */
     let refusedSince: number | undefined;
     let refusals = 0;
+    const input = this.options.input;
     for (let attempt = 0; ; attempt += 1) {
       let streamed = 0;
+      // Messages the user sent since the last request go into this one.
+      const steered = input?.take() ?? [];
+      if (steered.length) transcript.push(...steered);
+      // While the client still holds this request for the model's cooldown (nothing sent, nothing
+      // streamed), a new message cancels the hold so the request goes out with it.
+      const attemptAbort = new AbortController();
+      let received = false;
+      let cutForInput = false;
+      const onAbort = () => attemptAbort.abort();
+      signal.addEventListener('abort', onAbort, { once: true });
+      const unsubscribe = input?.subscribe(() => {
+        if (received || !(this.options.client.cooldownRemainingMs?.(this.options.model) ?? 0)) return;
+        cutForInput = true;
+        attemptAbort.abort();
+      });
       try {
         let reply: { message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata; finishReason?: string } | undefined;
-        for await (const event of this.options.client.streamCompletion(this.options.model, transcript, this.definitions, signal, { ...(idleTimeoutMs ? { idleTimeoutMs } : {}), ...(this.options.maxOutputTokens ? { maxOutputTokens: this.options.maxOutputTokens } : {}) })) {
+        for await (const event of this.options.client.streamCompletion(this.options.model, transcript, this.definitions, attemptAbort.signal, { ...(idleTimeoutMs ? { idleTimeoutMs } : {}), ...(this.options.maxOutputTokens ? { maxOutputTokens: this.options.maxOutputTokens } : {}) })) {
+          received = true;
           if (event.type === 'text') { streamed += event.text.length; this.options.emit({ type: 'text', text: event.text }); }
           else if (event.type === 'reasoning') this.options.emit({ type: 'reasoning', text: event.text });
           else reply = { message: event.message, usage: event.usage, finishReason: event.finishReason };
@@ -209,6 +244,7 @@ export class AgentRun {
         }
         throw Object.assign(new Error('The model ended its turn without a response.'), { retryable: true });
       } catch (error) {
+        if (cutForInput && !signal.aborted) { attempt -= 1; continue; }
         if (signal.aborted || (error as { retryable?: unknown }).retryable !== true) throw error;
         const reason = (error as Error).message;
         const status = (error as { status?: unknown }).status;
@@ -228,8 +264,18 @@ export class AgentRun {
         // A stall may be a slow server rather than a dead one: give the next attempt longer.
         if ((error as { stalled?: unknown }).stalled === true) idleTimeoutMs = Math.min(MAX_IDLE_TIMEOUT_MS, 2 * (idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS));
         this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs, reason, discardText: streamed });
-        await sleep(delayMs, signal);
+        // A message from the user ends the wait: the next attempt carries it.
+        if (!input?.pending()) {
+          const waitAbort = new AbortController();
+          const endWait = () => waitAbort.abort();
+          signal.addEventListener('abort', endWait, { once: true });
+          const stopListening = input?.subscribe(endWait);
+          try { await sleep(delayMs, waitAbort.signal); } finally { signal.removeEventListener('abort', endWait); stopListening?.(); }
+        }
         if (signal.aborted) throw error;
+      } finally {
+        signal.removeEventListener('abort', onAbort);
+        unsubscribe?.();
       }
     }
   }

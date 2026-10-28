@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextStatus, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
-import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, RunResult } from '../agent/loop';
+import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, RunInput, RunResult } from '../agent/loop';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { SafetyModelCheck } from '../agent/safetyModel';
 import { ShellSession } from '../agent/shell';
@@ -117,6 +117,14 @@ interface LiveAgent {
   turns: number;
 }
 
+/** A message the user sent while a run was going. */
+export interface SteerMessage { id: string; text: string }
+
+/** How a message sent during a run reaches the agent: marked, so it knows it is new direction. */
+export function steeringContent(text: string): string {
+  return `<user-message-during-run>\n${text}\n</user-message-during-run>\nThe user sent this while you were working. It is new direction: it takes precedence over your current plan, so adjust what you are doing (or stop and answer) and say briefly how you changed course.`;
+}
+
 const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
 /**
@@ -146,6 +154,9 @@ export class AgentConversation {
   private readonly agents = new Map<string, LiveAgent>();
   private readonly background = new Set<Promise<void>>();
   private notifications: AgentMessage[] = [];
+  /** Messages the user sent while a run was going, oldest first, until a model request takes them. */
+  private steering: SteerMessage[] = [];
+  private readonly steerListeners = new Set<() => void>();
   private slotWaiters: Array<() => void> = [];
   private slotsInUse = 0;
   private contextWarned = false;
@@ -175,7 +186,8 @@ export class AgentConversation {
   public get runningAgents(): number { return this.agents.size; }
 
   public async send(request: AgentTurnRequest): Promise<void> {
-    this.stop();
+    // Messages queued while this turn was being prepared stay queued: the run delivers them.
+    this.halt();
     const abort = new AbortController();
     this.abort = abort;
     this.spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
@@ -232,6 +244,7 @@ export class AgentConversation {
         return managed ?? (pending.length ? [...transcript, ...pending] : undefined);
       },
       afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
+      input: this.steeringInput,
       requestApproval: (approval) => this.askApproval(approval, abort.signal),
       emit: (event) => { this.track(mainId, event); if (event.type !== 'reasoning' && event.type !== 'turn') this.markVisible(); this.forward(event, request.model, record); }
     });
@@ -303,12 +316,46 @@ export class AgentConversation {
     return true;
   }
 
+  /** Stops the run and its sub-agents. Messages still queued for it go back to the composer. */
   public stop(): void {
+    this.halt();
+    for (const item of this.takeUndelivered()) this.post({ type: 'steer-state', id: item.id, state: 'returned', text: item.text });
+  }
+
+  private halt(): void {
     this.abort?.abort();
     this.abort = undefined;
     for (const agent of this.agents.values()) agent.abort.abort();
     this.releasePending();
   }
+
+  /**
+   * Queues a message the user sent while a run is going (or about to start). The run appends it to
+   * its transcript before its next model request; a retry wait ends early for it.
+   */
+  public steer(id: string, text: string): void {
+    this.steering.push({ id, text });
+    this.post({ type: 'steer-state', id, state: 'queued' });
+    for (const listener of [...this.steerListeners]) listener();
+  }
+
+  /** Queued messages no run took (it ended first), oldest first; the caller sends them as a new turn. */
+  public takeUndelivered(): SteerMessage[] {
+    const left = this.steering;
+    this.steering = [];
+    return left;
+  }
+
+  private readonly steeringInput: RunInput = {
+    pending: () => this.steering.length > 0,
+    take: () => this.takeUndelivered().map((item) => {
+      const content = steeringContent(item.text);
+      this.display.set(contentKey(content), item.text);
+      this.post({ type: 'steer-state', id: item.id, state: 'delivered' });
+      return { role: 'user', content };
+    }),
+    subscribe: (listener) => { this.steerListeners.add(listener); return () => { this.steerListeners.delete(listener); }; }
+  };
 
   /** Checks NEAR's signature and TDX attestation for a run's final answer. */
   public async verifyRun(runId: string): Promise<VerificationResult> {
@@ -339,7 +386,8 @@ export class AgentConversation {
   }
 
   public reset(): void {
-    this.stop();
+    this.halt();
+    this.steering = [];
     this.messages = [];
     this.display = new Map();
     this.conversationId = newConversationId();
@@ -533,8 +581,11 @@ export class AgentConversation {
     if (ready.length) return ready;
     if (!this.background.size || signal.aborted) return undefined;
     this.post({ type: 'notice', text: `Waiting for ${this.background.size} background agent${this.background.size === 1 ? '' : 's'} to finish…` });
-    await Promise.race([...this.background, new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))]);
-    return signal.aborted ? undefined : this.drainNotifications();
+    // A message from the user wakes the agent too.
+    let unsubscribe: (() => void) | undefined;
+    await Promise.race([...this.background, new Promise<void>((resolve) => { signal.addEventListener('abort', () => resolve(), { once: true }); unsubscribe = this.steeringInput.subscribe(resolve); })]);
+    unsubscribe?.();
+    return signal.aborted ? undefined : [...this.drainNotifications(), ...this.steeringInput.take()];
   }
 
   /** Reserves a slot in the same synchronous step as the check, so parallel spawns cannot overshoot the limit. */
