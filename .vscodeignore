@@ -16,3 +16,6 @@ node_modules/**
 .gitignore
 .vscode-test/**
 docs/*.pdf
+
+# Live model-eval results (NEAR_LIVE_EVAL_OUT)
+eval-*.json

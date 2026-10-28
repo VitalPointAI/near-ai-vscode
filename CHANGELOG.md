@@ -1,7 +1,14 @@
 # Changelog
 
-## 0.5.0 (unreleased)
+## 0.4.1
 
+- **Security fixes in the build tooling.** The packaging tool's dependencies
+  `undici` (TLS certificate check bypass, cross-origin cache disclosure, and
+  denial-of-service advisories) and `@azure/msal-node` (authorization code flow
+  disclosure) are updated to fixed versions (7.30.1 and 7.1.2). Neither is part
+  of the installed extension; they ran only when the extension was built.
+- **Eval output stays out of the package.** Live model-eval results are no
+  longer picked up when the extension is packaged.
 - **Tests stay honest.** When an agent edits a test that existed before the
   task and it ends up with fewer tests or assertions, or more skipped cases,
   the agent is told at once and reminded before it may finish. It restores

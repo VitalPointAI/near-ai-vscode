@@ -12,3 +12,7 @@ vendor/
 sbom.cdx.json
 .codex/
 .agents/
+
+# Live model-eval results (NEAR_LIVE_EVAL_OUT)
+eval-*.json
+.planning/research/.cache/
