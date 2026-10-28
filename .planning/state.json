@@ -1,12 +1,73 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v0.5.0",
-  "phases": [],
+  "milestone": "v0.5.0 — Trusted-source knowledge base",
+  "phases": [
+    {
+      "number": "13",
+      "name": "Sovereignty gate, post-quantum cryptography, and the encrypted event log",
+      "status": "pending"
+    },
+    {
+      "number": "14",
+      "name": "Encrypted scalable store and search",
+      "status": "pending"
+    },
+    {
+      "number": "15",
+      "name": "Source and claim intake with agent tools",
+      "status": "pending"
+    },
+    {
+      "number": "16",
+      "name": "Admiralty grading, thresholds, and reports",
+      "status": "pending"
+    },
+    {
+      "number": "17",
+      "name": "RAFT network and slices",
+      "status": "pending"
+    },
+    {
+      "number": "18",
+      "name": "Standing feeds, unattended work, and alerts",
+      "status": "pending"
+    },
+    {
+      "number": "19",
+      "name": "Team sharing through git or a shared folder",
+      "status": "pending"
+    },
+    {
+      "number": "20",
+      "name": "Organisation compartments, roles, and access",
+      "status": "pending"
+    },
+    {
+      "number": "21",
+      "name": "Ciphertext relay",
+      "status": "pending"
+    },
+    {
+      "number": "22",
+      "name": "Globe, imagery, and timeline replay",
+      "status": "pending"
+    },
+    {
+      "number": "23",
+      "name": "Forecasting and calibration",
+      "status": "pending"
+    },
+    {
+      "number": "24",
+      "name": "End-to-end hardening and release",
+      "status": "pending"
+    }
+  ],
   "next": {
-    "command": "/gsd:discuss-phase",
-    "label": "Discuss the first phase",
-    "reason": "Project initialized — plan your first phase"
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step (plan phase 13)",
+    "reason": "Phase 13 of 12 — needs a plan"
   },
-  "updated_at": "2026-10-28T15:04:47.999Z"
+  "updated_at": "2026-10-28T19:00:05.159Z"
 }
