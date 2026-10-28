@@ -44,6 +44,7 @@
 - The sharing chain (Phases 19-21) depends on grading (Phase 16) but not on Phases 17-18, and the globe and timeline (Phase 22) depend only on Phase 17, so either chain can be pulled earlier if the owner's priorities change. The ground rule on reader-relative views then applies to whichever lands second.
 
 ### Phase 13: Sovereignty gate, post-quantum cryptography, and the encrypted event log
+
 **Goal**: A user can create a knowledge-base project whose every model call is confined to TEE-attested or local models and whose changes are written to a signed, encrypted, append-only log protected by hybrid post-quantum cryptography, with keys that are never silently lost or regenerated.
 **Depends on**: Nothing (first phase of this milestone; builds on the shipped 0.4.x extension)
 **Requirements**: SOV-01, SOV-02, SOV-03, SOV-05, SOV-06, LOG-01, LOG-02, LOG-03, LOG-04, PQC-01, PQC-02, PQC-03
@@ -54,10 +55,42 @@
   3. After a run that reads and discusses a canary claim, no plaintext copy of the canary exists in transcripts, handoff files, Agent Activity, `.planning/`, logs, or the project-memory export: transcripts and handoffs are encrypted and Agent Activity shows ids and counts only. (SOV-05)
   4. Every change to a base is an attributed entry, carrying its four timestamps, compartment label, and key epoch, appended to an encrypted log that is never rewritten. Segments are sealed with AES-256-GCM and hybrid Ed25519 + ML-DSA signed; folding the log yields current state, history, and the base as it was known at any past time; a tampered, reordered, truncated, or forked log is detected and reported with what failed. (LOG-01, LOG-02, LOG-03, LOG-04)
   5. Key wraps use hybrid ML-KEM-768 + X25519 and signatures (segments, membership, capability tokens) are hybrid classical + ML-DSA, from a vetted implementation running on Node 22. Creating an identity forces a recovery export; if the key cannot be read from SecretStorage the base stays locked with a clear message and no new key is generated. Erasing an item destroys its key so it is unreadable while the log still verifies, and the UI says copies already read are not recalled. (PQC-01, PQC-02, PQC-03)
+
 **Research flags**: (1) Post-quantum library audit: audit status, Node 22 behaviour, bundle size, constant-time claims, and verification throughput of pure-JS ML-KEM-768 and ML-DSA candidates (e.g. the noble post-quantum family), and whether `age-encryption`'s hybrid recipients match the owner's ML-KEM-768 + X25519 choice, behind our own `KeyWrap` interface; decide per-segment signature versus hash tree given ML-DSA signatures of about 3.3 KB. (2) SecretStorage on Linux, WSL, containers, and code-server, which defines the recovery-export experience when no keyring exists. (3) Envelope freeze review before any code depends on it: erasure-key granularity and storage, hash chain with version vectors, HLC. (4) Data-flow inventory of every plaintext surface (Agent Activity, `HANDOFF.json`, transcripts, memory export, `.planning/`) before redaction work. (5) Confirm in the live NEAR catalog that `Qwen/Qwen3-Embedding-0.6B` and the reranker are attested (used from Phase 14).
-**Plans**: TBD (plan-phase may split into a sovereignty-gate wave and a crypto-and-log wave)
+**Plans:** 15 plans
+
+Plans:
+**Wave 1**
+- [ ] 13-01-PLAN.md — Vendored post-quantum primitives: PQ bundle, canonical JSON, hybrid Ed25519 + ML-DSA-65 signature, X-Wing key wrap, KATs (PQC-01)
+- [ ] 13-02-PLAN.md — KB mode record in globalState with fail-closed resolution and KB-safe settings (SOV-01, SOV-03)
+- [ ] 13-03-PLAN.md — ModelClient port, TeeGatedClient for every call class, embed/rerank, reflection test (SOV-02)
+- [ ] 13-04-PLAN.md — Declared-destination allowlist and NetworkSpy; ride-alongs S7 (shell arguments) and S4 (memory export path)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 13-05-PLAN.md — Identity from a 24-word phrase, scrypt key file, custody, lockout state machine (PQC-03, D-01..D-04)
+- [ ] 13-06-PLAN.md — Envelope freeze record, sealed and signed segments, genesis, epoch-1 keyring, no-clobber append (LOG-01, LOG-03, LOG-04)
+- [ ] 13-07-PLAN.md — Gate wired at the provider seam, legacy generation honours privacy mode, disabled forwarded models, user-confirmed re-route (SOV-02, SOV-06)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 13-08-PLAN.md — Log verification tamper matrix and read-only open (LOG-04, D-16)
+- [ ] 13-10-PLAN.md — Per-project web search/fetch switch and the persistent "TEE or local only" badge (SOV-03, D-07)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 13-09-PLAN.md — Reference fold (current, history, as known/as happened at T), per-item keys, crypto-shredding core (LOG-01, LOG-02, PQC-02)
+- [ ] 13-11-PLAN.md — Create Knowledge Base command with blocking recovery export; locked, restore, and tamper flows (SOV-01, PQC-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 13-12-PLAN.md — Erasure command and approval-gated KbEraseItem agent tool with the not-recalled notice (PQC-02, D-15)
+- [ ] 13-13-PLAN.md — Encrypted KB transcripts, ids-only Agent Activity, canary scan (SOV-05)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 13-14-PLAN.md — .planning/ write guard and sealed handoffs (SOV-05, D-08)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [ ] 13-15-PLAN.md — Memory off, attachments and generated media sealed at rest, audit redaction, full canary sweep, phase gate (SOV-05)
 
 ### Phase 14: Encrypted scalable store and search
+
 **Goal**: A knowledge base of several million entries opens, filters, slices, and is searchable by keyword and by meaning within measured budgets from a disk-backed encrypted index, and damaged data is reported instead of hidden.
 **Depends on**: Phase 13
 **Requirements**: STORE-01, STORE-02, SRCH-01
@@ -67,10 +100,12 @@
   2. After a run on a canary-seeded base, a scan of everything the extension wrote to disk finds no plaintext: not entries, index terms, snapshots, or embeddings. (STORE-01)
   3. Flipping bytes in a partition, snapshot, or log segment, or opening with the wrong key, produces a visible report naming what was damaged and quarantines it. The base is rebuilt from the log when possible or stays locked, and is never replaced by an empty base; deleting the index and reopening rebuilds it. (STORE-02)
   4. A user searches the base by keyword and by meaning from a command; a paraphrase query finds a seeded entry that shares no keywords with it; the embedding call reaches only a TEE-attested or local model and a forwarded embedding model is refused. (SRCH-01)
+
 **Research flags**: (1) Store benchmark and bake-off, gated by the owner's volume (several million entries and more); define cold-open, slice, search, and RAM budgets from the first run. (2) Vector index at scale: 1024-dimension embeddings times millions means quantisation or approximate search and a disk budget; confirm the embedding model and reranker in the live catalog and name the local fallback. (3) `node:sqlite` stays rejected on the client; confirm `sql.js` limits on the target extension host. (4) Worker-thread memory behaviour inside the extension host.
 **Plans**: TBD
 
 ### Phase 15: Source and claim intake with agent tools
+
 **Goal**: Agents and analysts can put sources and quote-verified claims into the base through one intake path (research runs, by hand, or CSV/STIX/GeoJSON import), stored text is treated as untrusted whenever it is read into an agent's context, and place names are geocoded on the machine.
 **Depends on**: Phase 14
 **Requirements**: INTAKE-01, INTAKE-02, INTAKE-03, INTAKE-04, INTAKE-05, GEO-01
@@ -81,11 +116,13 @@
   3. An analyst imports CSV, STIX 2.1, and GeoJSON files, sees a mapping preview before anything is written, sees imported confidence values labelled as hints rather than grades, and can retract the whole import as one batch; malformed input is reported, not half-applied. (INTAKE-03)
   4. A stored claim or imported text containing instructions reaches an agent only inside the untrusted fence, and a tool action it asks for still goes through the normal approval gate; this holds for agent search results as well as direct reads. (INTAKE-04)
   5. Possible duplicate actors, places, and claims are listed as proposed links the analyst accepts or undoes, and nothing is merged silently. A place name is geocoded from the bundled gazetteer on the machine, an ambiguous name shows ranked candidates for the analyst to choose, and a network trace shows no geocoding request. (INTAKE-05, GEO-01)
+
 **UI hint**: yes
 **Research flags**: Standard patterns, with these to settle: the STIX 2.1 mapping table (which objects become sources, claims, actors, relationships; confidence as hint only); GeoNames licence and attribution wording; snapshot storage (size, dedupe, interaction with per-item erasure keys); quote-span normalisation; reuse of the v0.4.0 untrusted-content fencing and injection detection.
 **Plans**: TBD
 
 ### Phase 16: Admiralty grading, thresholds, and reports
+
 **Goal**: Every source and claim carries a NATO Admiralty grade that agents propose and keep revising under strict rules, and every research report shows only what the project's thresholds allow, with grades and sources rendered from the base.
 **Depends on**: Phase 15
 **Requirements**: GRADE-01, GRADE-02, GRADE-03, GRADE-04, GRADE-05, GRADE-06, RPT-01, RPT-02, RPT-03, RPT-04
@@ -96,11 +133,13 @@
   3. Credibility 1 cannot be reached without two independent origins: three copies of one wire story count once and are shown as an echo. An agent alone can never assign A or 1. Contradicting claims are flagged for review. (GRADE-03, GRADE-06)
   4. An analyst sets a project's minimum reliability and credibility; a claim is judged by its best independent origin; below-threshold and unrated claims are excluded or marked unconfirmed per the setting. Every claim in a report shows its grade and sources, rendered from the base, and a report edited so its grades disagree with the base fails verification. (RPT-01, RPT-02)
   5. Downgrading a source shows which claims and reports change, and changing a threshold previews its effect before it is applied. Exporting a report or slice is encrypted by default and carries its grades, threshold, and compartment label. (RPT-03, RPT-04)
+
 **UI hint**: yes
 **Research flags**: (1) Independence heuristics: needs a labelled copy-chain fixture for echo detection; wire-story, quote-chain, and shared-author cases. (2) A grader gold set to measure agent proposals against analyst grades. (3) A table test over all 36 grade combinations. (4) Default thresholds (no doctrinal values exist; the brief's rule is best independent origin with F/6 unrated). (5) Re-verify ICD 203 band values quoted in the research. (6) Export formats and handling, and where reports are viewed without writing plaintext (SOV-05).
 **Plans**: TBD
 
 ### Phase 17: RAFT network and slices
+
 **Goal**: Analysts explore the situation in an interactive, highly polished RAFT network diagram (Relationships, Actors, Functions, Tensions) and cut it into saved slices that agents can work within.
 **Depends on**: Phase 16
 **Requirements**: RAFT-01, RAFT-02, RAFT-03, RAFT-04
@@ -112,12 +151,14 @@
   4. Every diagram and slice has a table view with the same nodes, edges, tensions, and provenance, reachable by keyboard and announced correctly by a screen reader. (RAFT-03)
   5. The network is fully interactive at the slice cap with smooth pan, zoom, and drag (frame rate measured and recorded): hovering an actor highlights its neighbourhood and dims the rest; clicking opens its functions, relationships, and supporting claims; the analyst expands and collapses neighbours, groups by role or region, pins and arranges nodes and the arrangement is kept; filtering by tension, strength, grade, or time animates rather than jumps. (RAFT-04)
   6. The visual design follows the approved UI design contract (UI-SPEC.md) in light, dark, and high-contrast themes and with reduced motion, and the owner signs off on it in a hands-on review of the real view, not on screenshots or passing tests alone. (RAFT-04)
+
 **UI hint**: yes
 **Before planning**: run `/gsd-ui-phase 17` to produce a UI design contract (layout, typography, colour and tension encoding, motion, every interaction and its feedback), reviewed by the owner.
 **Research flags**: Renderer choice for smooth interaction at the slice cap (Cytoscape canvas vs. its WebGL renderer vs. Sigma.js with graphology), animated layout transitions, and level-of-detail for labels. The brief's RAFT definition governs (the research marked the external definition low confidence): settle in discuss whether Functions are node attributes or their own entries. Layout stability and node caps at scale; `cytoscape-fcose` is MIT, while `elkjs` and `cytoscape-svg` are excluded by licence.
 **Plans**: TBD
 
 ### Phase 18: Standing feeds, unattended work, and alerts
+
 **Goal**: A project keeps itself current from RSS/Atom feeds, MCP sources, and watched folders without spending past its limits, and tells analysts when something they care about appears.
 **Depends on**: Phase 17
 **Requirements**: FEED-01, FEED-02, ALERT-01
@@ -126,11 +167,13 @@
   1. An analyst subscribes a project to an RSS/Atom feed, an MCP source, and a watched folder, and new items arrive in the triage inbox ungraded with duplicates collapsed; nothing enters the graded base until accepted. A feed host is contacted only after the analyst subscribes to it. (FEED-01)
   2. Background work (feed polling and regrading) stops with a visible reason when a per-run or per-day spending limit is reached, the limit being checked between turns, and the emergency stop halts it immediately. (FEED-02)
   3. An analyst defines a tripwire (for example a tension between two actors crossing a level, or a named actor appearing in a region) and is alerted, with the matching new intake listed, when new items match; an item that does not match raises no alert. (ALERT-01)
+
 **UI hint**: yes
 **Research flags**: Standard patterns. Re-verify the `fast-xml-parser` CVE ranges; polling politeness (ETag, back-off); the shape of v0.4.0 MCP feed bindings; watched-folder file types and size caps; budget semantics for unattended runs.
 **Plans**: TBD
 
 ### Phase 19: Team sharing through git or a shared folder
+
 **Goal**: A small team shares one base through a git repository or shared folder it controls, the host sees only ciphertext, and disagreements between analysts are shown rather than overwritten.
 **Depends on**: Phase 16
 **Requirements**: SYNC-01, SYNC-02, SYNC-03
@@ -140,11 +183,13 @@
   2. A host that rolls the repository back, forks it, withholds a segment, or reorders segments is detected and reported on the next sync, naming what was detected, and invalid segments are quarantined rather than applied. (SYNC-01)
   3. A member invites another by public key and both sides check the fingerprint before the invite is accepted. Removing a member rotates the keys so they cannot read entries written afterwards, and the UI says they keep what they already read. An item an analyst erases becomes unreadable on every member's device after sync. (SYNC-02)
   4. When two analysts grade the same claim differently while offline, both grades appear side by side after sync with their authors and times, and neither silently wins. (SYNC-03)
+
 **UI hint**: yes
 **Research flags**: Git edge cases: force-push, shallow clones, concurrent pushes, repository growth and `gc` with many segments, and the per-file cost of git at millions of entries. Rollback and fork detection design (version vectors plus device-local high-water marks). Shared-folder semantics on network drives and sync clients (partial writes, case-insensitivity). Version-gate protocol evolution. Out-of-band fingerprint UX.
 **Plans**: TBD
 
 ### Phase 20: Organisation compartments, roles, and access
+
 **Goal**: An organisation divides a base into need-to-know compartments with their own keys and roles, manages them in an Access view, keeps key management practical into the hundreds of members, and loads large bases from signed snapshots.
 **Depends on**: Phase 19
 **Requirements**: ORG-01, ORG-02, ORG-03, ORG-04, ORG-05
@@ -155,11 +200,13 @@
   3. An admin manages compartments, members, and roles in the Access view, sees who will gain or lose access before granting, and removes a member from many compartments in one rotation. (ORG-03)
   4. Adding or removing a member of a compartment with several hundred members completes within the time and size budgets this phase records. (ORG-04)
   5. A new member opens a multi-million-entry base from the latest signed snapshot plus later entries within the load budget, without replaying the whole history, and sees history only from their join epoch unless an admin grants earlier history. (ORG-05)
+
 **UI hint**: yes
 **Research flags**: Approval classes and the two-person rule for downgrades; admin-key recovery (m-of-n); join-history policy; cross-compartment references and moves; roles beyond the four named (an owner role); key-wrap cost, rotation batching, and signature-verification throughput at hundreds of members; indistinguishability test design for the acceptance criterion.
 **Plans**: TBD
 
 ### Phase 21: Ciphertext relay
+
 **Goal**: An organisation can run its own relay that stores and forwards only ciphertext, enforces who may append, and can do no worse than withhold data, and a team can move a base from git or a shared folder to it without losing history.
 **Depends on**: Phase 20
 **Requirements**: RELAY-01, RELAY-02
@@ -169,10 +216,12 @@
   2. The relay refuses an append without a valid, unexpired capability signed by an authorised admin, refuses a revoked or expired one, and pushes new entries to connected clients without polling. (RELAY-01)
   3. Against a malicious-relay harness that withholds, replays, rolls back, forks its view per client, reorders, or injects forged entries, clients reject the forged entries and report the withholding, rollback, or fork; the worst outcome is data being withheld. (RELAY-01)
   4. A team moves a base from git or a shared folder to the relay and every member continues with the same folded state and full history; the old transport stops cleanly. (RELAY-02)
+
 **Research flags**: Relay protocol and a security review before release (capability tokens, tree-head consistency, metadata exposure, padding and batching); hybrid post-quantum TLS support between the extension host's Node 22 and a Node 24 relay (application-layer protection holds even if TLS is not hybrid); `node:sqlite` on the relay image is unconfirmed, so plan a file-store fallback; deployment identity (OCI image versus npm, hosting, optional directory or SSO key binding); backpressure and load.
 **Plans**: TBD
 
 ### Phase 22: Globe, imagery, and timeline replay
+
 **Goal**: Analysts explore geocoded intelligence on an interactive open-source 3D globe with a layer per source or source type, and roll time back to replay how events unfolded across timeline, network, and globe.
 **Depends on**: Phase 17
 **Requirements**: GEO-02, GEO-03, TIME-01
@@ -185,12 +234,14 @@
   5. Selecting an actor or event in one view highlights it in the other two. (TIME-01)
   6. A reader who lacks a compartment sees no layer, point, or timeline event drawn from it, exactly as in a base that never had it. (extends ORG-01, owned by Phase 20)
   7. The globe, layers, and timeline follow the approved UI design contract with smooth camera motion and transitions (frame rate measured and recorded), and the owner signs off on them in a hands-on review of the real view. (GEO-02)
+
 **UI hint**: yes
 **Before planning**: run `/gsd-ui-phase 22` to produce a UI design contract for the globe, layers, and timeline (camera motion, layer styling, picking feedback, transitions), reviewed by the owner.
 **Research flags**: The globe spike above (it gates the rest of the phase), including hover and click picking and smooth rotate and zoom with hundreds of thousands of points; NASA GIBS terms of use, rate limits, and attribution; whether to offer a one-time global overview download instead of live tiles; time-index design and replay performance at scale; WebGL availability in remote, WSL, and code-server hosts.
 **Plans**: TBD
 
 ### Phase 23: Forecasting and calibration
+
 **Goal**: For a slice, analysts get probability forecasts they can audit, recalibrated as events arrive and scored when they resolve, running locally or on NEAR TEE models as the project chooses.
 **Depends on**: Phase 22, Phase 18
 **Requirements**: FCST-01, FCST-02, FCST-03, FCST-04
@@ -201,11 +252,13 @@
   3. An analyst chooses per project whether forecasting runs locally or on NEAR TEE models; with local chosen, no forecasting request goes to NEAR; either way the probability on screen comes from the calibration layer, never directly from a model, and is labelled uncalibrated until scored. (FCST-03)
   4. Each forecast opens an ACH matrix of hypotheses against evidence and an evidence-contribution view, and a calibration dashboard shows forecasting accuracy over time. (FCST-04)
   5. A reader who lacks a compartment sees forecasts, trends, and evidence views identical to those of a base that never had it. (extends ORG-01, owned by Phase 20)
+
 **UI hint**: yes
 **Research flags**: Forecast methods and calibration minimums (minimum evidence, Hawkes/EM identifiability, small-sample behaviour); the owner's decision on what "train on TEE" means (default: in-context scenario generation through the calibration layer, labelled uncalibrated until scored); backtest design that uses as-known time only; a gold set for scenario generation.
 **Plans**: TBD
 
 ### Phase 24: End-to-end hardening and release
+
 **Goal**: The whole milestone is shown to keep its promises under attack-style and at-scale checks, and the shipped copy says only what is true.
 **Depends on**: Phase 23
 **Requirements**: SOV-04
@@ -216,6 +269,7 @@
   3. A base of several million entries with a compartment of several hundred members opens, syncs, and rotates a key within the budgets recorded in Phases 14 and 20.
   4. The Knowledge Base panel (registers, network, globe, timeline, Access, forecast dashboard) passes a keyboard-only and screen-reader review and respects reduced motion.
   5. README, SECURITY.md, the Marketplace listing, and in-product text describe only behaviour that has been verified, and the 0.5.0 VSIX passes the release check.
+
 **Research flags**: Standard patterns. The relay's own security review belongs to Phase 21; this phase re-checks that listing claims match recorded evidence.
 **Plans**: TBD
 

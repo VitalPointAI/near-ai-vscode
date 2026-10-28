@@ -604,24 +604,24 @@ assert.equal(spy.calls.filter((c) => c.endsWith('/chat/completions')).length, 0)
 | A17 | X-Wing is stable enough to freeze (IRTF draft -10; vectors reproduced) | Pattern 4 | A final spec change would require a new `alg` id for new wraps |
 | A18 | Verify cost scales ~6-7 ms/segment on a typical dev machine | Pattern 5 | Slower hardware raises open time before Phase 14 watermarks |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Compartment field: id or label?** (affects the frozen envelope)
+1. **Compartment field: id or label?** (affects the frozen envelope) **RESOLVED:** opaque 128-bit id (13-06, DR-13-07).
    - What we know: LOG-03 says "compartment label"; P-07 in PITFALLS says compartment names should not appear in plaintext transport headers; the header needs something to select the key.
    - Unclear: whether the owner means a human label in every entry.
    - Recommendation: opaque `compartment` id in the header, label in encrypted genesis/admin data. Confirm before freeze.
-2. **Do `occurredAt`/`reportedAt` of an erased item survive in the tombstone?** D-14 lists only "item id, who, when, reason" and says "content, title, and places are gone".
+2. **Do `occurredAt`/`reportedAt` of an erased item survive in the tombstone?** D-14 lists only "item id, who, when, reason" and says "content, title, and places are gone". **RESOLVED:** tombstone keeps timestamps (13-09).
    - Recommendation: keep them (needed for consistent as-of views); owner confirms they are not "content".
-3. **Where does the log live?** Workspace `.near-kb/` (travels across WSL and code-server, can be committed as ciphertext, agents can reach the files) vs global storage (hidden from the workspace, tied to one host).
+3. **Where does the log live?** Workspace `.near-kb/` (travels across WSL and code-server, can be committed as ciphertext, agents can reach the files) vs global storage (hidden from the workspace, tied to one host). **RESOLVED:** workspace `.near-kb/` (13-06).
    - Recommendation: workspace, with the agent file tools and S7 guard protecting the path; confirm git-hygiene expectations (`.gitignore` default?).
-4. **WebFetch destination class.** WebFetch accepts any public https URL chosen by the model; SOV-04 cannot allowlist it by host.
+4. **WebFetch destination class.** WebFetch accepts any public https URL chosen by the model; SOV-04 cannot allowlist it by host. **RESOLVED:** `open-web-fetch` class active only while the switch is on (13-04).
    - Recommendation: declare class `open-web-fetch`, active only while the per-project switch is on, and say so in the copy; Phase 24 proves nothing else leaves.
-5. **Unix-socket local runtimes (D-12).** Needs a custom `fetchFn` (no undici export). In scope for this phase or follow-up? Default: loopback TCP only now, unix socket as a flagged task.
-6. **Defaults for other egress in KB mode:** MCP servers, SecurityScan/OSV, endoflife.date, GSD runtime installer, `git`. Recommendation: MCP and security scan off until enabled per project; installer allowed (no content); all listed in the allowlist classes.
-7. **Ambiguous catalog rows** (attested type with an external base URL, e.g. `moonshotai/kimi-k2.6`): treat as `unknown`/refused in KB mode until ruled on.
-8. **Passphrase policy.** Minimum length and whether to require a diceware-style passphrase; wording of the locked screen.
-9. **Argon2id vs scrypt** final call (A2).
-10. **Engine floor.** Run the crypto and e2e suites once on VS Code 1.101.0 (Electron 35); if BoringSSL on that version lacks any used `node:crypto` feature, the fallback is the bundled noble primitives.
+5. **Unix-socket local runtimes (D-12).** Needs a custom `fetchFn` (no undici export). In scope for this phase or follow-up? Default: loopback TCP only now, unix socket as a flagged task. **RESOLVED:** loopback rule accepts unix sockets; transport deferred (13-03).
+6. **Defaults for other egress in KB mode:** MCP servers, SecurityScan/OSV, endoflife.date, GSD runtime installer, `git`. Recommendation: MCP and security scan off until enabled per project; installer allowed (no content); all listed in the allowlist classes. **RESOLVED:** MCP and security scan off, installer allowed (13-02).
+7. **Ambiguous catalog rows** (attested type with an external base URL, e.g. `moonshotai/kimi-k2.6`): treat as `unknown`/refused in KB mode until ruled on. **RESOLVED:** refused in KB mode (13-03).
+8. **Passphrase policy.** Minimum length and whether to require a diceware-style passphrase; wording of the locked screen. **RESOLVED:** passphrase policy set in 13-05.
+9. **Argon2id vs scrypt** final call (A2). **RESOLVED:** scrypt N=2^17 with a `kdf` id (13-05, DR-13-06).
+10. **Engine floor.** Run the crypto and e2e suites once on VS Code 1.101.0 (Electron 35); if BoringSSL on that version lacks any used `node:crypto` feature, the fallback is the bundled noble primitives. **RESOLVED:** floor-version run at the 13-15 phase gate.
 
 ## Environment Availability
 
