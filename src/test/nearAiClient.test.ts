@@ -171,7 +171,7 @@ test('an unrecorded request stays without an actual cost instead of reporting $0
   assert.equal(usage.actualCostUsd, undefined);
 });
 
-test('transient failures use bounded exponential retry and cancellation stops retries', async () => {
+test('a momentary gateway failure gets one quick retry, and cancellation stops retries', async () => {
   let attempts = 0;
   const client = new NearAiClient({
     baseUrl: 'https://example.test/v1',
@@ -181,11 +181,16 @@ test('transient failures use bounded exponential retry and cancellation stops re
     fetchFn: async (url) => {
       if (String(url).endsWith('/model/list')) return new Response(JSON.stringify({ models: [] }), { status: 200 });
       attempts += 1;
-      return attempts < 3 ? new Response('', { status: 503 }) : new Response(JSON.stringify({ data: [] }), { status: 200 });
+      return attempts < 2 ? new Response('', { status: 502 }) : new Response(JSON.stringify({ data: [] }), { status: 200 });
     }
   });
   assert.deepEqual(await client.listModels(), []);
-  assert.equal(attempts, 3);
+  assert.equal(attempts, 2, 'one quick retry (maxRetries is capped at 1)');
+
+  let stuck = 0;
+  const twice = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'secret', maxRetries: 3, retryBaseDelayMs: 0, fetchFn: async () => { stuck += 1; return new Response('', { status: 502 }); } });
+  await assert.rejects(() => twice.listModels(), (error: NearAiError) => error.status === 502 && error.retryable);
+  assert.equal(stuck, 2, 'never more than one quick retry');
 
   const controller = new AbortController();
   let cancelledAttempts = 0;
@@ -193,7 +198,7 @@ test('transient failures use bounded exponential retry and cancellation stops re
     if (String(url).endsWith('/model/list')) return new Response(JSON.stringify({ models: [] }), { status: 200 });
     cancelledAttempts += 1;
     controller.abort();
-    return new Response('', { status: 503 });
+    return new Response('', { status: 502 });
   } });
   await assert.rejects(() => cancelled.listModels(controller.signal), (error: unknown) => error instanceof DOMException && error.name === 'AbortError');
   assert.equal(cancelledAttempts, 1);

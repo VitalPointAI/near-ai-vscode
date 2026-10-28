@@ -117,8 +117,15 @@ export interface NearAiClientOptions {
   baseUrl: string;
   apiKey: string;
   fetchFn?: typeof fetch;
+  /** Quick retries of one request after a dropped connection, a timeout, or a 500/502/504 (0 or 1; default 1). Never for 429 or 503. */
   maxRetries?: number;
   retryBaseDelayMs?: number;
+  /** A model's cooldown after a 429 or 503 that carries no Retry-After; it doubles while the model keeps refusing (default 5 s, at most 60 s). */
+  cooldownBaseMs?: number;
+  /** Jitter source in [0, 1) for the quick retry (Math.random by default). */
+  random?: () => number;
+  /** Milliseconds clock for model cooldowns (Date.now by default). */
+  now?: () => number;
   /** How long to wait for response headers. */
   responseTimeoutMs?: number;
   /** How long a started stream may go without sending anything before it counts as stalled. */
@@ -136,16 +143,77 @@ export function createNearAiClient(options: NearAiClientOptions): NearAiClient {
   return new NearAiClient(options);
 }
 
+/** Longest Retry-After the client honours; a larger value is treated as this. */
+export const MAX_RETRY_AFTER_MS = 60_000;
+export const DEFAULT_COOLDOWN_BASE_MS = 5_000;
+/** How much of an error body is read for NEAR's message; the rest is discarded. */
+const MAX_ERROR_BODY_BYTES = 16_384;
+const MAX_ERROR_DETAIL_CHARS = 300;
+
+export interface NearAiErrorDetails {
+  /** How long NEAR asked the client to wait (Retry-After, capped at MAX_RETRY_AFTER_MS). */
+  retryAfterMs?: number;
+  /** NEAR's own error message, type, and code from the response body (secrets redacted). */
+  detail?: string;
+  errorType?: string;
+  errorCode?: string;
+  /** Raised by this client without sending anything: the model is cooling down after a 429 or 503. */
+  cooling?: boolean;
+  /** The model the request was for. */
+  model?: string;
+}
+
 export class NearAiError extends Error {
+  public readonly retryAfterMs?: number;
+  public readonly detail?: string;
+  public readonly errorType?: string;
+  public readonly errorCode?: string;
+  public readonly cooling?: boolean;
+  public readonly model?: string;
+
   public constructor(
     public readonly status: number,
     message: string,
     public readonly retryable: boolean,
-    public readonly requestId?: string
+    public readonly requestId?: string,
+    details: NearAiErrorDetails = {}
   ) {
     super(redactSecrets(message));
     this.name = 'NearAiError';
+    if (details.retryAfterMs !== undefined) this.retryAfterMs = details.retryAfterMs;
+    if (details.detail) this.detail = redactSecrets(details.detail);
+    if (details.errorType) this.errorType = redactSecrets(details.errorType);
+    if (details.errorCode) this.errorCode = redactSecrets(details.errorCode);
+    if (details.cooling) this.cooling = true;
+    if (details.model) this.model = details.model;
   }
+}
+
+/**
+ * Milliseconds a Retry-After (or retry-after-ms) value asks for: delta-seconds or an HTTP-date,
+ * capped at MAX_RETRY_AFTER_MS. Undefined when absent or unreadable.
+ */
+export function parseRetryAfter(value: string | null | undefined, nowMs = Date.now(), unit: 's' | 'ms' = 's'): number | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  let ms: number;
+  if (/^\d+(?:\.\d+)?$/.test(text)) ms = Number(text) * (unit === 's' ? 1000 : 1);
+  else if (unit === 's' && /[a-z]/i.test(text)) {
+    const at = Date.parse(text);
+    if (!Number.isFinite(at)) return undefined;
+    ms = at - nowMs;
+  } else return undefined;
+  if (!Number.isFinite(ms)) return undefined;
+  return Math.max(0, Math.min(MAX_RETRY_AFTER_MS, Math.round(ms)));
+}
+
+/** Where rate-limit and error diagnostics go (the NEAR AI output channel in the extension). */
+let diagnosticsSink: ((line: string) => void) | undefined;
+export function setNearAiDiagnostics(sink: ((line: string) => void) | undefined): void {
+  diagnosticsSink = sink;
+}
+function diagnose(line: string): void {
+  try { diagnosticsSink?.(redactSecrets(line)); } catch { /* diagnostics never break a request */ }
 }
 
 /** A stream that stopped sending, or a connection that dropped mid-response. Always worth retrying. */
@@ -172,6 +240,13 @@ export function estimateCostUsd(model: ModelInfo, inputTokens = 0, outputTokens 
 export class NearAiClient {
   private readonly fetchFn: typeof fetch;
   private readonly models = new Map<string, ModelInfo>();
+  private pricingEndpointAbsent = false;
+  /**
+   * Models NEAR refused with a 429 or 503, shared by every caller of this client (the main agent,
+   * its sub-agents, and the auto mode's safety check): until `until`, nobody sends to the model;
+   * after it, one probe goes out while the others wait for its answer.
+   */
+  private readonly cooling = new Map<string, { until: number; strikes: number; probe?: Promise<void> }>();
 
   public constructor(private readonly options: NearAiClientOptions) {
     this.fetchFn = options.fetchFn ?? fetch;
@@ -220,12 +295,16 @@ export class NearAiClient {
 
   public async listModelsWithPricing(signal?: AbortSignal): Promise<ModelInfo[]> {
     // NEAR AI's /models already carries pricing; /models/pricing is preferred when it answers with rows.
+    // Once it is missing (404/405/410) or answers with no rows, this client stops asking for it.
+    if (this.pricingEndpointAbsent) return this.listModels(signal);
     try {
       const response = await this.request('/models/pricing', { method: 'GET', signal });
       const models = normalizeModelRows(await jsonRows(response), (this.options.clock ?? (() => new Date().toISOString()))(), '/models/pricing');
       if (models.length) return this.rememberModels(await this.withPrivacy(models, signal));
+      this.pricingEndpointAbsent = true;
     } catch (error) {
       if (signal?.aborted || isAbortError(error)) throw error;
+      if (error instanceof NearAiError && [404, 405, 410].includes(error.status)) this.pricingEndpointAbsent = true;
     }
     return this.listModels(signal);
   }
@@ -237,7 +316,7 @@ export class NearAiClient {
     if (options.count !== undefined) body.n = options.count;
     if (options.size !== undefined) body.size = options.size;
     if (options.quality !== undefined) body.quality = options.quality;
-    const response = await this.request('/images/generations', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const response = await this.request('/images/generations', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, { model });
     return imageResult(await response.json(), metadataFromHeaders(response.headers, started));
   }
 
@@ -248,7 +327,7 @@ export class NearAiClient {
     form.append('file', new Blob([audio], { type: mimeType }), fileName);
     form.append('model', model);
     form.append('response_format', 'json');
-    const response = await this.request('/audio/transcriptions', { method: 'POST', signal, body: form });
+    const response = await this.request('/audio/transcriptions', { method: 'POST', signal, body: form }, { model });
     const body = objectValue(await response.json());
     const text = stringValue(body.text);
     if (text === undefined) throw new NearAiError(0, 'The transcription service returned no text.', false);
@@ -263,7 +342,7 @@ export class NearAiClient {
       signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages: [{ role: 'user', content: [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: dataUrl } }] }] })
-    });
+    }, { model });
     const body = objectValue(await response.json());
     const choice = objectValue(Array.isArray(body.choices) ? body.choices[0] : undefined);
     const text = stringValue(objectValue(choice.message).content);
@@ -284,7 +363,7 @@ export class NearAiClient {
       signal: options.signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages, stream: false, max_tokens: Math.max(16, Math.floor(options.maxTokens)), temperature: 0 })
-    }, { maxRetries: 0 });
+    }, { maxRetries: 0, model, failFast: true });
     const body = objectValue(await response.json());
     const choice = objectValue(Array.isArray(body.choices) ? body.choices[0] : undefined);
     const text = stringValue(objectValue(choice.message).content) ?? '';
@@ -302,7 +381,7 @@ export class NearAiClient {
     form.set('image', new Blob([Buffer.from(image)], { type: 'application/octet-stream' }), 'source.bin');
     if (options.size !== undefined) form.set('size', options.size);
     if (options.quality !== undefined) form.set('quality', options.quality);
-    const response = await this.request('/images/edits', { method: 'POST', signal, body: form });
+    const response = await this.request('/images/edits', { method: 'POST', signal, body: form }, { model });
     return imageResult(await response.json(), metadataFromHeaders(response.headers, started));
   }
 
@@ -353,7 +432,7 @@ export class NearAiClient {
       signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
-    });
+    }, { model });
     const metadata = metadataFromHeaders(response.headers, started);
     if (!response.body) throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId);
 
@@ -380,7 +459,7 @@ export class NearAiClient {
       signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
-    });
+    }, { model });
     const metadata = metadataFromHeaders(response.headers, started);
     if (!response.body) throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId);
 
@@ -415,7 +494,7 @@ export class NearAiClient {
     const modelMax = this.models.get(model)?.maxOutputTokens;
     const maxTokens = Math.max(256, Math.min(options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS, modelMax ?? Number.POSITIVE_INFINITY));
     const requestBody = JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
-    const response = await this.request('/chat/completions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: requestBody });
+    const response = await this.request('/chat/completions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: requestBody }, { model });
     let usage = metadataFromHeaders(response.headers, started);
     // NEAR signs SHA-256 of the exact request body and raw response; keep both hashes for verification.
     const rawResponse = createHash('sha256');
@@ -528,50 +607,126 @@ export class NearAiClient {
     return models;
   }
 
-  private async request(path: string, init: RequestInit, overrides: { maxRetries?: number } = {}): Promise<Response> {
+  /** Milliseconds left in `model`'s cooldown after a 429 or 503 (0 when it is not cooling). */
+  public cooldownRemainingMs(model: string): number {
+    const state = this.cooling.get(model);
+    return state ? Math.max(0, state.until - this.now()) : 0;
+  }
+
+  /**
+   * Waits out `model`'s cooldown. Returns a release function when this caller is the one probe
+   * sent after a cooldown, undefined when the model is not cooling. Throws a local 429 (nothing
+   * sent) when the cooldown was renewed while this caller waited, so the caller's own backoff
+   * decides when to try again; `failFast` throws it at once instead of waiting.
+   */
+  private async admit(model: string | undefined, signal: AbortSignal | undefined, failFast: boolean): Promise<(() => void) | undefined> {
+    if (!model) return undefined;
+    let waited = false;
+    for (;;) {
+      if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+      const state = this.cooling.get(model);
+      if (!state) return undefined;
+      const remaining = state.until - this.now();
+      if ((failFast && (remaining > 0 || state.probe)) || (waited && remaining > 0)) throw coolingError(model, Math.max(0, remaining));
+      if (remaining > 0) { await sleepFor(remaining, signal); waited = true; continue; }
+      if (state.probe) { await untilSettled(state.probe, signal); waited = true; continue; }
+      let settle!: () => void;
+      const probe = new Promise<void>((resolve) => { settle = resolve; });
+      state.probe = probe;
+      return () => { if (state.probe === probe) state.probe = undefined; settle(); };
+    }
+  }
+
+  /** After a 429 or 503: the model cools for Retry-After, or for a base that doubles while it keeps refusing. */
+  private startCooling(model: string, retryAfterMs: number | undefined, wasProbe: boolean): number {
+    const existing = this.cooling.get(model);
+    const strikes = !existing ? 1 : wasProbe ? existing.strikes + 1 : existing.strikes;
+    const base = Math.max(1, this.options.cooldownBaseMs ?? DEFAULT_COOLDOWN_BASE_MS);
+    const durationMs = retryAfterMs ?? Math.min(MAX_RETRY_AFTER_MS, base * (2 ** (strikes - 1)));
+    const until = Math.max(existing?.until ?? 0, this.now() + durationMs);
+    if (existing) { existing.until = until; existing.strikes = strikes; } else this.cooling.set(model, { until, strikes });
+    return until - this.now();
+  }
+
+  private now(): number {
+    return (this.options.now ?? Date.now)();
+  }
+
+  private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean } = {}): Promise<Response> {
     const url = `${this.options.baseUrl.replace(/\/$/, '')}${path}`;
-    const maxRetries = Math.max(0, Math.min(3, overrides.maxRetries ?? this.options.maxRetries ?? 2));
-    const retryBaseDelayMs = Math.max(0, this.options.retryBaseDelayMs ?? 100);
+    // One retry layer: the agent loop backs off between model turns. Here, at most one quick retry,
+    // and only for failures that are usually momentary (never for 429 or 503).
+    const maxRetries = Math.max(0, Math.min(1, overrides.maxRetries ?? this.options.maxRetries ?? 1));
+    const retryBaseDelayMs = Math.max(0, this.options.retryBaseDelayMs ?? 250);
+    const random = this.options.random ?? Math.random;
     const responseTimeoutMs = Math.max(1, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
     if (!isSecureEndpoint(url)) throw new NearAiError(0, 'NEAR AI endpoint must use HTTPS; plain HTTP is only allowed for localhost.', false);
-    for (let attempt = 0; ; attempt += 1) {
-      let response: Response;
-      const attemptAbort = new AbortController();
-      const forwardAbort = () => attemptAbort.abort(init.signal?.reason);
-      if (init.signal?.aborted) forwardAbort(); else init.signal?.addEventListener('abort', forwardAbort, { once: true });
-      let timedOut = false;
-      const timer = setTimeout(() => { timedOut = true; attemptAbort.abort(); }, responseTimeoutMs);
-      try {
-        response = await this.fetchFn(url, {
-          ...init,
-          signal: attemptAbort.signal,
-          headers: { ...(this.options.apiKey ? { authorization: `Bearer ${this.options.apiKey}` } : {}), ...(init.headers ?? {}) }
-        });
-      } catch (error) {
-        if (init.signal?.aborted) throw error;
-        if (timedOut) {
-          if (attempt < maxRetries) { await waitForRetry(retryBaseDelayMs, attempt, init.signal ?? undefined); continue; }
-          throw new NearAiError(408, `NEAR AI did not respond within ${Math.round(responseTimeoutMs / 1000)} seconds.`, true);
+    const model = overrides.model;
+    const release = await this.admit(model, init.signal ?? undefined, overrides.failFast === true);
+    const quickRetry = () => waitForRetry(Math.round(retryBaseDelayMs * (0.5 + random())), 0, init.signal ?? undefined);
+    try {
+      for (let attempt = 0; ; attempt += 1) {
+        let response: Response;
+        const attemptAbort = new AbortController();
+        const forwardAbort = () => attemptAbort.abort(init.signal?.reason);
+        if (init.signal?.aborted) forwardAbort(); else init.signal?.addEventListener('abort', forwardAbort, { once: true });
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; attemptAbort.abort(); }, responseTimeoutMs);
+        try {
+          response = await this.fetchFn(url, {
+            ...init,
+            signal: attemptAbort.signal,
+            headers: { ...(this.options.apiKey ? { authorization: `Bearer ${this.options.apiKey}` } : {}), ...(init.headers ?? {}) }
+          });
+        } catch (error) {
+          if (init.signal?.aborted) throw error;
+          if (timedOut) {
+            if (attempt < maxRetries) { await quickRetry(); continue; }
+            throw new NearAiError(408, `NEAR AI did not respond within ${Math.round(responseTimeoutMs / 1000)} seconds.`, true, undefined, { model });
+          }
+          if (isAbortError(error)) throw error;
+          if (attempt < maxRetries) { await quickRetry(); continue; }
+          throw new NearAiError(0, `NEAR AI request failed: ${error instanceof Error ? error.message : 'network error'}.`, true, undefined, { model });
+        } finally {
+          clearTimeout(timer);
+          init.signal?.removeEventListener('abort', forwardAbort);
         }
-        if (isAbortError(error)) throw error;
-        if (attempt < maxRetries) {
-          await waitForRetry(retryBaseDelayMs, attempt, init.signal ?? undefined);
+        if (init.signal?.aborted) {
+          await response.body?.cancel().catch(() => undefined);
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+        if (response.ok) {
+          if (model) this.cooling.delete(model);
+          return response;
+        }
+        const failure = await this.failureFrom(response, init.method ?? 'GET', path, model, release !== undefined);
+        if (failure.retryable && attempt < maxRetries && [500, 502, 504].includes(response.status) && (failure.retryAfterMs ?? 0) <= 1_000) {
+          await quickRetry();
           continue;
         }
-        throw new NearAiError(0, `NEAR AI request failed: ${error instanceof Error ? error.message : 'network error'}.`, true);
-      } finally {
-        clearTimeout(timer);
+        throw failure;
       }
-      if (init.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-      if (response.ok) return response;
-      const requestId = metadataFromHeaders(response.headers, Date.now()).requestId;
-      const retryable = classifyRetryableFailure(response.status, init.signal ?? undefined);
-      if (retryable && attempt < maxRetries) {
-        await waitForRetry(retryBaseDelayMs, attempt, init.signal ?? undefined);
-        continue;
-      }
-      throw new NearAiError(response.status, `NEAR AI request failed with HTTP ${response.status}.`, retryable, requestId);
+    } finally {
+      release?.();
     }
+  }
+
+  /** Reads (and so releases) a failed response's body, logs it, and turns it into a NearAiError with NEAR's own message. */
+  private async failureFrom(response: Response, method: string, path: string, model: string | undefined, wasProbe: boolean): Promise<NearAiError> {
+    const status = response.status;
+    const headers = response.headers;
+    const requestId = headers.get('inference-id') ?? headers.get('x-request-id') ?? undefined;
+    const retryAfterMs = parseRetryAfter(headers.get('retry-after-ms'), this.now(), 'ms') ?? parseRetryAfter(headers.get('retry-after'), this.now());
+    const body = errorBodyDetails(await readErrorBody(response), this.options.apiKey);
+    const retryable = classifyRetryableFailure(status);
+    let cooldownMs: number | undefined;
+    if (model && (status === 429 || status === 503)) cooldownMs = this.startCooling(model, retryAfterMs, wasProbe);
+    const limits: string[] = [];
+    headers.forEach((value, name) => { if (/^(x-)?ratelimit|^retry-after/i.test(name)) limits.push(`${name}=${value.slice(0, 80)}`); });
+    diagnose(`HTTP ${status} ${method} ${path}${model ? ` model=${model}` : ''}${requestId ? ` request=${requestId}` : ''}${limits.length ? ` ${limits.join(' ')}` : ''}${body.errorType ? ` type=${body.errorType}` : ''}${body.errorCode ? ` code=${body.errorCode}` : ''}${body.detail ? ` message="${body.detail}"` : ''}${cooldownMs !== undefined ? ` cooldown=${Math.round(cooldownMs / 1000)}s` : ''}`);
+    const kind = [body.errorType, body.errorCode].filter(Boolean).join(', ');
+    const message = `NEAR AI request failed with HTTP ${status}${model ? ` for ${model}` : ''}${body.detail ? `: ${body.detail}` : ''}${kind ? ` (${kind})` : ''}.`;
+    return new NearAiError(status, message, retryable, requestId, { ...body, retryAfterMs, model });
   }
 }
 
@@ -802,4 +957,77 @@ async function waitForRetry(baseDelayMs: number, attempt: number, signal?: Abort
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+/** The local "still cooling down" error: status 429 so callers treat it as a rate limit, but nothing was sent. */
+function coolingError(model: string, remainingMs: number): NearAiError {
+  const seconds = Math.max(1, Math.ceil(remainingMs / 1000));
+  return new NearAiError(429, `NEAR AI is rate limiting ${model}; this client is holding requests to it for about ${seconds} s before trying again.`, true, undefined, { retryAfterMs: remainingMs, cooling: true, model });
+}
+
+function sleepFor(ms: number, signal?: AbortSignal): Promise<void> {
+  return waitForRetry(Math.max(0, ms), 0, signal);
+}
+
+/** Resolves when `promise` settles, or rejects with an AbortError as soon as `signal` aborts. */
+function untilSettled(promise: Promise<unknown>, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+    signal?.addEventListener('abort', onAbort, { once: true });
+    promise.then(() => resolve(), () => resolve()).finally(() => signal?.removeEventListener('abort', onAbort));
+  });
+}
+
+/** Up to MAX_ERROR_BODY_BYTES of an error body as text; the stream is always read or cancelled, never left open. */
+async function readErrorBody(response: Response): Promise<string> {
+  const body = response.body;
+  if (!body) return '';
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try { reader = body.getReader(); } catch { return ''; }
+  const decoder = new TextDecoder();
+  let text = '';
+  let size = 0;
+  try {
+    while (size < MAX_ERROR_BODY_BYTES) {
+      const next = await readWithin(reader, 5_000, undefined, undefined);
+      if (next.done) break;
+      size += next.value.byteLength;
+      text += decoder.decode(next.value, { stream: true });
+    }
+  } catch {
+    /* a body that stalls or drops still yields what arrived */
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    try { reader.releaseLock(); } catch { /* already released */ }
+  }
+  return text.slice(0, MAX_ERROR_BODY_BYTES);
+}
+
+/** NEAR's message, type, and code from an OpenAI-style (or plain-text) error body, secrets removed. */
+export function errorBodyDetails(text: string, apiKey?: string): Pick<NearAiErrorDetails, 'detail' | 'errorType' | 'errorCode'> {
+  const clean = (value: unknown): string | undefined => {
+    if (typeof value === 'number') value = String(value);
+    if (typeof value !== 'string') return undefined;
+    let out = value.replace(/\s+/g, ' ').trim().replace(/bearer\s+[^\s,;]+/gi, '[REDACTED]');
+    if (apiKey && apiKey.length >= 4) out = out.split(apiKey).join('[REDACTED]');
+    out = redactSecrets(out);
+    return out ? (out.length > MAX_ERROR_DETAIL_CHARS ? `${out.slice(0, MAX_ERROR_DETAIL_CHARS)}…` : out) : undefined;
+  };
+  const trimmed = text.trim();
+  if (!trimmed) return {};
+  let parsed: unknown;
+  try { parsed = JSON.parse(trimmed); } catch { parsed = undefined; }
+  if (parsed === undefined) return /^</.test(trimmed) ? {} : { detail: clean(trimmed) };
+  const root = objectValue(parsed);
+  const inner = typeof root.error === 'object' && root.error !== null ? objectValue(root.error) : {};
+  const detailList = Array.isArray(root.detail) ? root.detail.map((item) => stringValue(objectValue(item).msg) ?? (typeof item === 'string' ? item : undefined)).filter(Boolean).join('; ') : undefined;
+  const details: Pick<NearAiErrorDetails, 'detail' | 'errorType' | 'errorCode'> = {};
+  const detail = clean(inner.message ?? (typeof root.error === 'string' ? root.error : undefined) ?? root.message ?? (typeof root.detail === 'string' ? root.detail : detailList));
+  const errorType = clean(inner.type ?? root.type);
+  const errorCode = clean(inner.code ?? root.code);
+  if (detail) details.detail = detail;
+  if (errorType) details.errorType = errorType;
+  if (errorCode && errorCode !== errorType) details.errorCode = errorCode;
+  return details;
 }

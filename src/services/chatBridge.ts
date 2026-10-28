@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { ModelInfo, NearAiError } from './nearAiClient';
+import { redactSecrets } from '../domain/redaction';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { ActivitySessionSummary, AttributionSnapshot } from '../domain/activity';
 import { normalizePrompt, PromptResponse, StructuredPrompt, isPromptId, isSessionId, progressCardFromEvent, ProgressCard, safeProgressText } from '../domain/chatProgress';
@@ -839,8 +840,10 @@ export function providerErrorMessage(error: unknown): string {
   if (error instanceof NearAiError) {
     const request = error.requestId ? ` Request ID: ${error.requestId}.` : '';
     if (error.status === 401 || error.status === 403) return `NEAR AI rejected the request. Check your API key in Setup.${request}`;
-    if (error.status === 429) return `NEAR AI is rate limiting requests. Wait a moment and try again.${request}`;
+    if (error.status === 429) return `NEAR AI is rate limiting requests${error.model ? ` to ${error.model}` : ''}${error.detail ? ` (NEAR says: ${error.detail})` : ''}. Wait a moment and try again, or switch to another model.${request}`;
     return `${error.message}${request}`;
   }
+  // The agent loop gave up after NEAR kept refusing a model; its message already says what to do.
+  if (error instanceof Error && error.name === 'ModelUnavailableError') return redactSecrets(error.message);
   return 'The NEAR AI request could not be completed. Check your connection and try again.';
 }

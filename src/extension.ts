@@ -21,6 +21,7 @@ import { registerChatParticipant } from './services/chatParticipant';
 import { registerWorkspaceCommands } from './services/workspaceCommands';
 import { initEmergencyStop, setEmergencyStop } from './services/emergencyStop';
 import { clearProviderCache } from './services/providerCache';
+import { setNearAiDiagnostics } from './services/nearAiClient';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
@@ -28,6 +29,10 @@ export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProv
 export function activate(context: vscode.ExtensionContext): NearAiTestApi | undefined {
   const auth = new AuthService(context.secrets);
   initEmergencyStop(context);
+  // NEAR AI errors and rate-limit headers (status, model, request ID, Retry-After, NEAR's message), never keys or prompts.
+  const nearLog = vscode.window.createOutputChannel('NEAR AI');
+  setNearAiDiagnostics((line) => nearLog.appendLine(`[${new Date().toISOString()}] ${line}`));
+  context.subscriptions.push(nearLog, { dispose: () => setNearAiDiagnostics(undefined) });
   if (shouldAutoInstallGsd()) {
     void startRuntimeUpdates(new GsdRuntime(context.globalStorageUri.fsPath), vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, (message, failed) => {
       void (failed ? vscode.window.showWarningMessage(message) : vscode.window.showInformationMessage(message));

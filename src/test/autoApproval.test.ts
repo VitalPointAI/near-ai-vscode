@@ -151,9 +151,10 @@ test('safety model: malformed answers, errors, and timeouts fail closed', async 
 test('safety model: a 429 asks after exactly one request, and pauses further checks', async () => {
   let fetches = 0;
   const fetchFn = (async () => { fetches += 1; return new Response(JSON.stringify({ error: 'rate limited' }), { status: 429, headers: { 'content-type': 'application/json' } }); }) as typeof fetch;
-  // The client would normally retry a 429 twice; the safety check must not.
-  const client = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'test-key', fetchFn, maxRetries: 2, retryBaseDelayMs: 0 });
   let now = 1_000;
+  // The client never fast-retries a 429, and the safety check must not retry it either. The client's
+  // own cooldown for the model (shared with the agents) runs on the same clock as the check's pause.
+  const client = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'test-key', fetchFn, maxRetries: 2, retryBaseDelayMs: 0, now: () => now });
   const check = new SafetyModelCheck({ client, model: 'Qwen/Qwen3.6-35B-A3B-FP8', task: 'Update deps', now: () => now });
   const first = await check.check('npm install', { root: '/r', cwd: '/r' });
   assert.equal(first.allow, false);
