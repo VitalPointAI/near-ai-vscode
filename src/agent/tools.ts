@@ -22,6 +22,8 @@ export interface ToolContext {
   onTodos?: (todos: Todo[]) => void;
   /** Directories Read, Glob, and Grep may also use (the Open-GSD runtime); never writable. */
   readOnlyRoots?: string[];
+  /** The Open-GSD runtime NEAR AI installed and verified, whose gsd-tools the auto mode may run (see CommandContext). */
+  trustedToolRoots?: string[];
   /** Whether this run has read outside content (web pages, search results, attachments, MCP results). */
   tainted?(): boolean;
   /** Text of pages fetched in this run, by URL, for CheckCitations. */

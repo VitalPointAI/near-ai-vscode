@@ -21,6 +21,12 @@ export interface CommandContext {
   home?: string;
   /** The workspace package.json scripts, so `npm run x` can be checked against what x runs. */
   packageScripts?: Record<string, string>;
+  /**
+   * Absolute roots of tools the extension installed and verified itself: the managed Open-GSD
+   * runtime. Its gsd-tools may run and its files may be read; nothing may be written there.
+   * A user-level install (~/.claude, …) is never one of these.
+   */
+  trustedToolRoots?: string[];
 }
 
 const safe = (reason: string): CommandClassification => ({ verdict: 'safe', reason });
@@ -286,7 +292,7 @@ function lex(command: string): Lexed {
 // ---------------------------------------------------------------------------------------------
 // Paths
 
-interface PathFacts { absolute: string; inside: boolean; sensitive: boolean; protectedWrite: boolean; device: boolean }
+interface PathFacts { absolute: string; inside: boolean; sensitive: boolean; protectedWrite: boolean; device: boolean; trusted: boolean }
 
 const DEVICES = new Set(['/dev/null', '/dev/stdout', '/dev/stderr', '/dev/tty']);
 /** Credential and knowledge-base files, on top of the file tools' credential patterns. */
@@ -307,7 +313,20 @@ function pathFacts(text: string, cwd: string, context: CommandContext): PathFact
   const relative = path.relative(context.root, absolute).split(path.sep).join('/');
   const inside = isInside(context.root, absolute);
   const sensitive = isSensitivePath(text) || isSensitivePath(absolute) || KB_OR_SECRET.test(text) || KB_OR_SECRET.test(absolute.split(path.sep).join('/'));
-  return { absolute, inside, sensitive, protectedWrite: inside && PROTECTED_WRITE.test(relative), device: DEVICES.has(absolute) };
+  const trusted = trustedRoots(context).some((trustedRoot) => isInside(trustedRoot, absolute));
+  return { absolute, inside, sensitive, protectedWrite: inside && PROTECTED_WRITE.test(relative), device: DEVICES.has(absolute), trusted };
+}
+
+/** The trusted tool roots, absolute and normalised; relative or empty entries are ignored. */
+function trustedRoots(context: CommandContext): string[] {
+  return (context.trustedToolRoots ?? []).filter((root) => root && path.isAbsolute(root)).map((root) => path.resolve(root));
+}
+
+/** Open-GSD's command-line tool inside a trusted root: gsd-tools.cjs or the gsd_run launcher beside it. */
+function isTrustedGsdTool(word: Word | undefined, state: SegmentState, context: CommandContext): boolean {
+  if (!word || word.expansion || word.glob || word.text.startsWith('-')) return false;
+  const facts = pathFacts(word.text, state.cwd, context);
+  return trustedRoots(context).some((trustedRoot) => ['gsd-tools.cjs', 'gsd_run'].some((file) => facts.absolute === path.join(trustedRoot, 'gsd-core', 'bin', file)));
 }
 
 /** The value of `--opt=value`, or the word itself. */
@@ -354,8 +373,12 @@ function xargsCommand(args: Word[]): Word[] {
 
 function programName(text: string): string { return text.includes('/') ? text.slice(text.lastIndexOf('/') + 1) : text; }
 
-/** Checks the path arguments of a read-only command: credentials are risky, anything outside the workspace is unknown. */
-function checkReads(args: Word[], state: SegmentState, context: CommandContext, label: string): CommandClassification {
+/**
+ * Checks the path arguments of a read-only command: credentials are risky, anything outside the
+ * workspace is unknown. With `allowTrusted`, paths inside a trusted tool root may be read too.
+ */
+function checkReads(args: Word[], state: SegmentState, context: CommandContext, label: string, allowTrusted = false): CommandClassification {
+  let readsTrusted = false;
   for (const arg of args) {
     // --opt=value and -X/attached/value name paths too.
     const attached = /^-[A-Za-z]([/~.].*)$/.exec(arg.text)?.[1];
@@ -363,9 +386,39 @@ function checkReads(args: Word[], state: SegmentState, context: CommandContext, 
     if (!value || (looksLikeOption(arg.text) && value === arg.text)) continue;
     const facts = pathFacts(value, state.cwd, context);
     if (facts.sensitive) return risky(`${label} reads ${value}, which may hold credentials or knowledge-base keys`);
+    if (allowTrusted && facts.trusted && !facts.inside) { readsTrusted = true; continue; }
     if (!facts.inside && !facts.device) return unknown(`${label} names ${value}, which is outside the workspace`);
   }
-  return safe(`${label} only reads inside the workspace`);
+  return safe(readsTrusted ? `${label} only reads inside the workspace and the Open-GSD runtime NEAR AI installed` : `${label} only reads inside the workspace`);
+}
+
+/** gsd-tools verbs that act outside the workspace or contact the network. */
+const GSD_RISKY_VERBS = new Set(['pr-subrepo', 'commit-to-subrepo']);
+const GSD_UNCHECKED_VERBS = new Set(['worktree', 'websearch', 'package-legitimacy', 'restore-custom-files', 'graphify', 'loop']);
+
+/**
+ * The managed Open-GSD runtime's gsd-tools (`gsd-tools <verb> …` or `gsd-tools query <verb>.<sub> …`):
+ * it reads and updates .planning/ and commits inside the workspace. Verbs that push, publish, or
+ * work on another repository are risky; ones that reach the network or outside the workspace are
+ * not decided here; every path it is given must be inside the workspace or the runtime.
+ */
+function classifyGsdTools(args: Word[], state: SegmentState, context: CommandContext): CommandClassification {
+  const words = args.map((arg) => arg.text);
+  for (const [at, word] of words.entries()) {
+    const option = /^--(cwd|project-dir|config-dir)(?:=(.*))?$/.exec(word);
+    if (!option) continue;
+    if (option[1] === 'config-dir') return unknown('gsd-tools --config-dir works on another configuration folder');
+    const value = option[2] ?? words[at + 1];
+    if (!value || !pathFacts(value, state.cwd, context).inside) return unknown(`gsd-tools --${option[1]} points outside the workspace`);
+  }
+  const positional = words.filter((word) => !looksLikeOption(word));
+  const command = positional[0] === 'query' ? positional[1] ?? '' : positional[0] ?? '';
+  const verb = command.split('.')[0];
+  const label = `gsd-tools ${positional[0] === 'query' ? 'query ' : ''}${command}`.trim();
+  if (GSD_RISKY_VERBS.has(verb) || [...positional.slice(0, 3), ...command.split('.')].some((word) => RELEASE_NAME.test(word))) return risky(`${label} pushes, publishes, or changes another repository`);
+  if (GSD_UNCHECKED_VERBS.has(verb)) return unknown(`${label} can reach the network or folders outside the workspace`);
+  const reads = checkReads(args, state, context, label, true);
+  return reads.verdict === 'safe' ? safe(`${label} runs Open-GSD's own tool from the runtime NEAR AI installed`) : reads;
 }
 
 /** Checks the targets of a command that writes files: outside the workspace, credentials, or protected folders are risky. */
@@ -539,6 +592,8 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   const words = args.map((arg) => arg.text);
   const flags = words.filter(looksLikeOption);
   const anyFlag = (pattern: RegExp) => flags.some((flag) => pattern.test(flag));
+  // The managed Open-GSD runtime's own launcher, named by its absolute path.
+  if (program.includes('/') && isTrustedGsdTool({ text: program, quoted: false, glob: false, expansion: false }, state, context)) return classifyGsdTools(args, state, context);
   // Risky whatever the path.
   if (PRIVILEGE.has(name)) return risky(`${name} runs a command with elevated privileges`);
   if (POWER.has(name)) return risky(`${name} stops or restarts the machine`);
@@ -567,7 +622,7 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     if (words.some((word) => /^-f(?:print|print0|printf|ls)$/.test(word))) return unknown('find writes its results to a file');
     // The first arguments up to the first expression are the paths searched.
     // The paths searched and any file an expression names (-newer, -samefile) must be inside the workspace.
-    const reads = checkReads(args, state, context, 'find');
+    const reads = checkReads(args, state, context, 'find', true);
     if (reads.verdict !== 'safe') return reads;
     const named = args.find((arg) => !looksLikeOption(arg.text) && (KB_OR_SECRET.test(arg.text) || SENSITIVE_TEXT.test(arg.text)));
     return named ? risky(`find looks for ${named.text}, which may hold credentials`) : safe('find only lists files inside the workspace');
@@ -649,6 +704,7 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     }
     if (name === 'node') {
       if (words.length === 1 && (words[0] === '--version' || words[0] === '-v')) return safe('node --version');
+      if (isTrustedGsdTool(args[0], state, context) && programName(args[0].text) === 'gsd-tools.cjs') return classifyGsdTools(args.slice(1), state, context);
       if (words[0] === '--test' && !words.some((word) => /^--(?:import|require|loader|experimental-loader|eval|print)(?:=|$)|^-[erp]$/.test(word))) {
         const reads = checkReads(args.slice(1), state, context, 'node --test');
         return reads.verdict === 'safe' ? safe('node --test runs the project\'s tests') : reads;
@@ -666,7 +722,7 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   if (READ_ONLY.has(name) && program === name) {
     if ((name === 'sort' && anyFlag(/^-o|^--output/)) || (name === 'printf' && words.includes('-v')) || (name === 'rg' && anyFlag(/^--pre(?:=|$)|^--pre-glob/))) return unknown(`${name} with an option that writes or runs programs`);
     if (name === 'tail' && anyFlag(/^-[A-Za-z]*f/)) return unknown('tail -f does not finish');
-    return checkReads(args, state, context, name);
+    return checkReads(args, state, context, name, true);
   }
   if (WORKSPACE_WRITERS.has(name) && program === name) {
     if (name === 'cp' || name === 'mv') {
@@ -690,6 +746,12 @@ function classifyText(command: string, context: CommandContext, depth: number): 
   if (depth > 4) return unknown('the command nests too deeply to check');
   if (/:\(\)\s*\{/.test(raw)) return risky('it defines a fork bomb');
   if (DOWNLOAD_TO_SHELL.test(raw)) return risky('it runs code downloaded from the network');
+  const assigned = substitutionAssignment(raw);
+  if (assigned !== undefined) {
+    const inner = classifyText(assigned.inner, context, depth + 1);
+    if (inner.verdict === 'safe') return safe(`it stores the output of a safe command in ${assigned.name} (${inner.reason})`);
+    if (inner.verdict === 'risky') return risky(`a command inside a substitution is risky: ${inner.reason}`);
+  }
   const lexed = lex(raw);
   if (lexed.broken) {
     if (SENSITIVE_TEXT.test(raw)) return risky('it names a credential or knowledge-base path');
@@ -758,6 +820,20 @@ function classifyText(command: string, context: CommandContext, depth: number): 
   if (notSafe) return notSafe;
   if (!findings.length) return unknown('it runs nothing the rules recognise');
   return findings.length === 1 ? findings[0] : safe(`every part is safe (${findings.map((finding) => finding.reason).join('; ')})`);
+}
+
+/**
+ * `NAME=$(command)` or `NAME="$(command)"` and nothing else: the variable holds the command's
+ * output and nothing runs besides the command, so the whole is as safe as the command is.
+ */
+function substitutionAssignment(raw: string): { name: string; inner: string } | undefined {
+  const match = /^([A-Za-z_][A-Za-z0-9_]*)=("?)\$\(/.exec(raw);
+  if (!match || raw[match[0].length] === '(') return undefined;
+  const close = matchParen(raw, match[0].length);
+  if (close < 0) return undefined;
+  const rest = raw.slice(close + 1);
+  if (rest !== match[2]) return undefined;
+  return { name: match[1], inner: raw.slice(match[0].length, close) };
 }
 
 /**

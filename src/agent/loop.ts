@@ -382,7 +382,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')) as { scripts?: unknown };
       if (manifest.scripts && typeof manifest.scripts === 'object' && !Array.isArray(manifest.scripts)) packageScripts = Object.fromEntries(Object.entries(manifest.scripts as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
     } catch { /* no package.json, or not JSON: scripts are not checked */ }
-    return { root, cwd: context.shell?.workingDirectory ?? root, home: homedir(), packageScripts, safety: this.options.safety, signal: context.signal };
+    return { root, cwd: context.shell?.workingDirectory ?? root, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, safety: this.options.safety, signal: context.signal };
   }
 
   private finish(callId: string, ok: boolean, output: string): string {

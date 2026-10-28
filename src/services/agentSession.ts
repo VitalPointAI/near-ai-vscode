@@ -208,7 +208,7 @@ export class AgentConversation {
     // Attached files are outside content, so the run starts out treated as having read some.
     if (request.attachments?.text) grants.tainted = true;
     for (const event of request.attachments?.security ?? []) this.activity?.security(mainId, event);
-    const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [] };
+    const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [], trustedToolRoots: request.gsd ? [request.gsd.home] : [] };
     const tools = this.toolsFor(request, context, grants, extraUsage, record, abort.signal, runId);
     // One safety check per run, shared with sub-agents, so each command is asked about once.
     const safety = request.policy.mode === 'auto' && request.safetyModel ? new SafetyModelCheck({ client: request.client, model: request.safetyModel, task: request.text, onUsage: (usage) => extraUsage.push(usage) }) : undefined;
