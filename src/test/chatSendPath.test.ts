@@ -44,7 +44,7 @@ function fakeNear(calls: string[]) {
 // One stub object for the whole file: chat.ts is cached after the first require, so each test
 // points the shared workspace at its own project instead of building a new stub.
 const vscodeStub = {
-  workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback }) },
+  workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
   window: { showInformationMessage: () => undefined, showWarningMessage: () => undefined, activeTextEditor: undefined },
   commands: { executeCommand: async () => undefined },
   Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }

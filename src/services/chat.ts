@@ -13,6 +13,7 @@ import { AGENT_MEMORY_ACTOR, AgentConversation, findSkill, GsdContext } from './
 import { GsdHost } from '../gsd/host';
 import { findRipgrep } from '../agent/tools';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
+import { applyPolicyChoice, PolicyConfiguration, policyStateMessage } from './approvalPolicy';
 import { OutboundGuard, spentTodayUsd } from './outboundGuard';
 import { ProfileStore } from './profileStore';
 import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget } from './settings';
@@ -126,6 +127,17 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       state.abort = undefined;
       state.agent?.stop();
       panel.webview.postMessage({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
+      return;
+    }
+    // Only the user's own choice in the composer's picker changes the approval policy.
+    if (message.type === 'set-action-policy') {
+      try {
+        const result = await applyPolicyChoice(message.mode, policyConfiguration(), vscode.ConfigurationTarget, async (text) => await vscode.window.showWarningMessage(text, { modal: true }, FULL_AUTO_CONFIRM) === FULL_AUTO_CONFIRM);
+        panel.webview.postMessage({ type: 'notice', text: result.text });
+      } catch (error) {
+        panel.webview.postMessage({ type: 'notice', text: `The approval policy could not be saved: ${providerErrorMessage(error)}` });
+      }
+      sendPolicyState(panel);
       return;
     }
     if (message.type === 'questions-reply') {
@@ -450,6 +462,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     if (message.type === 'load-models') {
+      sendPolicyState(panel);
       await loadModels(panel, auth);
       return;
     }
@@ -575,14 +588,18 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
     }
   }, undefined, context.subscriptions);
-  panel.onDidDispose(() => { state.abort?.abort(); state.agent?.dispose(); }, undefined, context.subscriptions);
+  // The picker follows settings.json edits and the emergency stop; each run reads the setting afresh.
+  const policyWatch = vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi.actionPolicy')) sendPolicyState(panel); });
+  panel.onDidDispose(() => { state.abort?.abort(); state.agent?.dispose(); policyWatch.dispose(); }, undefined, context.subscriptions);
   onDidChangeEmergencyStop(async (engaged) => {
+    sendPolicyState(panel);
     if (!engaged) return;
     state.abort?.abort();
     state.abort = undefined;
     state.agent?.stop();
     panel.webview.postMessage({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
   }, undefined, context.subscriptions);
+  sendPolicyState(panel);
   if (initialPrompt) panel.webview.postMessage({ type: 'prefill', text: initialPrompt });
   panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine() });
   panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHostFor(context), context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath) });
@@ -840,6 +857,16 @@ async function sendStakingStatus(panel: ChatHost, staking: StakingService, refre
   panel.webview.postMessage(walletStatusMessage(status));
 }
 
+
+const FULL_AUTO_CONFIRM = 'Switch to Full auto';
+
+function policyConfiguration(): PolicyConfiguration {
+  return vscode.workspace.getConfiguration('nearAi');
+}
+
+function sendPolicyState(panel: ChatHost): void {
+  panel.webview.postMessage(policyStateMessage(policyConfiguration(), isEmergencyStopped()));
+}
 
 async function loadModels(panel: ChatHost, auth: AuthService): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;

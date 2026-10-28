@@ -11,13 +11,14 @@ import { AuthMode, isSecureEndpoint } from '../domain/config';
 import { isProfileId, OrganizationProfile } from '../domain/auth';
 import type { EntitlementStatusView, StakeHistoryEntry, StakingOperation, TransactionPreviewView } from '../domain/staking';
 import type { AgentCapability, AgentRole } from '../domain/agents';
-import type { ActionCapability } from '../domain/policy';
+import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import type { MemberCapabilityContract, ReusableAgentTeam, TeamBinding, TeamPreview } from '../domain/teamStudio';
 import type { CapabilityRequirement } from '../domain/capabilities';
 import type { AttachmentPreview, MultimodalApprovalPreview, MultimodalOperation, MultimodalOperationRecord } from '../domain/multimodal';
 import type { GenerationOperationRecord, GenerationPreview, PublicationPreview } from '../domain/generation';
 import type { ContextGraphEdgeDto, ContextGraphPreviewDto, ContextGraphNodeDto, MemoryApprovalOperation, MemoryApprovalPreviewDto, MemoryScope, MemorySlice } from '../domain/contextGraph';
 import { CapabilityRouter } from './capabilityRouter';
+import { isPolicyMode } from './approvalPolicy';
 import { validateMemberContract } from './teamStudio';
 
 export type ChatWebviewMessage =
@@ -33,6 +34,8 @@ export type ChatWebviewMessage =
   | { type: 'attach-files' }
   | { type: 'attachment-remove'; id: string }
   | { type: 'stop' }
+  /** The user's choice in the composer's approval-policy picker. */
+  | { type: 'set-action-policy'; mode: ActionPolicyMode }
   | { type: 'history' }
   | { type: 'new-chat' }
   | { type: 'open-tools' }
@@ -504,6 +507,10 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   if (generationMessage) return generationMessage;
   const memoryMessage = parseContextGraphWebviewMessage(message);
   if (memoryMessage) return memoryMessage;
+  if (message.type === 'set-action-policy') {
+    if (Object.keys(message).length !== 2 || !isPolicyMode(message.mode)) return undefined;
+    return { type: 'set-action-policy', mode: message.mode };
+  }
   if (message.type === 'set-quiet-mode' && typeof message.quiet === 'boolean' && Object.keys(message).length === 2) return { type: 'set-quiet-mode', quiet: message.quiet };
   if (message.type === 'agent-drill-down' && typeof message.agentId === 'string' && /^[A-Za-z0-9._:-]{1,120}$/.test(message.agentId) && Object.keys(message).length === 2) return { type: 'agent-drill-down', agentId: message.agentId };
   if (message.type === 'approval-reply') {
