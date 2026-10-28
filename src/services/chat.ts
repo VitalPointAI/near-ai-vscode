@@ -140,6 +140,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       sendPolicyState(panel);
       return;
     }
+    // A reloaded view asks again for the prompts still waiting, so they are pinned again.
+    if (message.type === 'chat-ready') {
+      for (const prompt of state.agent?.waitingPrompts() ?? []) panel.webview.postMessage(prompt);
+      showWaitingBadge(panel, state.agent?.waitingPrompts().length ?? 0);
+      return;
+    }
     if (message.type === 'questions-reply') {
       state.agent?.answerQuestions(message.id, message.answers);
       return;
@@ -646,15 +652,26 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
   const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root, sharedTranscriptKey(context.secrets)) : undefined;
   const post = (outbound: Record<string, unknown>) => {
     void panel.webview.postMessage(outbound);
-    // An agent held for approval waits; say so when the chat isn't on screen.
-    if (outbound.type === 'approval-request' && (panel as { visible?: boolean }).visible === false) {
-      void vscode.window.showWarningMessage(`An agent is waiting for your approval: ${String(outbound.title ?? 'an action')}`, 'Show chat').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAiChatView.focus'); });
+    // An agent held for approval or an answer waits; say so when the chat isn't on screen.
+    if ((outbound.type === 'approval-request' || outbound.type === 'questions-request') && (panel as { visible?: boolean }).visible === false) {
+      const text = outbound.type === 'approval-request' ? `An agent is waiting for your approval: ${String(outbound.title ?? 'an action')}` : 'NEAR AI has a question for you and is waiting for the answer.';
+      void vscode.window.showWarningMessage(text, 'Show chat').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAiChatView.focus'); });
     }
   };
   const conversation = new AgentConversation(root, post, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts, sharedActivityFeed());
+  conversation.onWaitingChange = (count) => showWaitingBadge(panel, count);
   const minutes = vscode.workspace.getConfiguration('nearAi').get<number>('agent.approvalTimeoutMinutes', AGENT_DEFAULTS.approvalTimeoutMinutes);
   conversation.approvalTimeoutMs = Math.max(0, Math.min(1_440, typeof minutes === 'number' && Number.isFinite(minutes) ? minutes : AGENT_DEFAULTS.approvalTimeoutMinutes)) * 60_000;
   return conversation;
+}
+
+/** The view's badge while prompts wait for the user; the Tools tab (a panel) has no badge. */
+export function waitingBadge(count: number): { value: number; tooltip: string } | undefined {
+  return count > 0 ? { value: count, tooltip: 'NEAR AI is waiting for you' } : undefined;
+}
+
+function showWaitingBadge(panel: ChatHost, count: number): void {
+  if ('badge' in panel) (panel as { badge?: { value: number; tooltip: string } }).badge = waitingBadge(count);
 }
 
 /** One GSD host per extension storage folder, shared by the sidebar and the Tools tab. */

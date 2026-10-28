@@ -135,8 +135,12 @@ export class AgentConversation {
   private shellEnvAllow: string[] = [];
   private shellEnvKey = '';
   private abort: AbortController | undefined;
-  private readonly approvals = new Map<string, (reply: ApprovalReply) => void>();
-  private readonly questions = new Map<string, (answers: string[]) => void>();
+  private readonly approvals = new Map<string, (reply: ApprovalReply, cancelled?: boolean) => void>();
+  private readonly questions = new Map<string, (answers: string[], cancelled?: boolean) => void>();
+  /** Approvals and questions waiting for the user, oldest first, as they were posted (replayed when the view reloads). */
+  private readonly waiting = new Map<string, Record<string, unknown>>();
+  /** Told how many prompts are waiting whenever that changes, so the host can badge the view. */
+  public onWaitingChange: ((count: number) => void) | undefined;
   private readonly runs = new Map<string, RunCheckpoints>();
   private readonly agents = new Map<string, LiveAgent>();
   private readonly background = new Set<Promise<void>>();
@@ -459,7 +463,7 @@ export class AgentConversation {
                 while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
                 return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
               },
-              requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal),
+              requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label),
               emit: (event) => {
                 this.track(agent.id, event);
                 this.observe(agent, event);
@@ -655,22 +659,40 @@ export class AgentConversation {
   /** How long an approval may wait before it is declined, so an unattended run carries on (0: wait indefinitely). */
   public approvalTimeoutMs = 15 * 60_000;
 
-  private askApproval(request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalReply> {
+  /** The prompts still waiting for the user, oldest first, marked as replays for a reloaded view. */
+  public waitingPrompts(): Array<Record<string, unknown>> {
+    return [...this.waiting.values()].map((message) => ({ ...message, replay: true }));
+  }
+
+  private openPrompt(id: string, message: Record<string, unknown>): void {
+    this.waiting.set(id, message);
+    this.post(message);
+    this.onWaitingChange?.(this.waiting.size);
+  }
+
+  /** Forgets a waiting prompt; one cancelled by a stop or the run ending is reported so the view unpins it. */
+  private closePrompt(id: string, cancelled = false): void {
+    if (!this.waiting.delete(id)) return;
+    if (cancelled) this.post({ type: 'prompt-closed', id, outcome: 'cancelled' });
+    this.onWaitingChange?.(this.waiting.size);
+  }
+
+  private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string): Promise<ApprovalReply> {
     if (signal.aborted) return Promise.resolve({ decision: 'deny' });
     return new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const settle = (reply: ApprovalReply) => { if (timer) clearTimeout(timer); resolve(reply); };
+      const settle = (reply: ApprovalReply, cancelled = false) => { if (timer) clearTimeout(timer); this.closePrompt(request.callId, cancelled); resolve(reply); };
       this.approvals.set(request.callId, settle);
-      signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) settle({ decision: 'deny' }); }, { once: true });
+      signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) settle({ decision: 'deny' }, true); }, { once: true });
       if (this.approvalTimeoutMs > 0) {
         timer = setTimeout(() => {
           if (!this.approvals.delete(request.callId)) return;
           const minutes = Math.round(this.approvalTimeoutMs / 60_000);
-          this.post({ type: 'approval-expired', callId: request.callId, text: `No one approved "${request.title}" within ${minutes} minute${minutes === 1 ? '' : 's'}, so it was declined and the agent continued without it.` });
+          this.post({ type: 'approval-expired', callId: request.callId, minutes, text: `No one approved "${request.title}" within ${minutes} minute${minutes === 1 ? '' : 's'}, so it was declined and the agent continued without it.` });
           settle({ decision: 'deny', feedback: `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'} (the user may be away). Continue without this action if you can, and report what still needs their approval.` });
         }, this.approvalTimeoutMs);
       }
-      this.post({ type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview, ...(request.reason ? { reason: request.reason } : {}) });
+      this.openPrompt(request.callId, { type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview, ...(request.reason ? { reason: request.reason } : {}), ...(agent ? { agent } : {}) });
     });
   }
 
@@ -678,16 +700,20 @@ export class AgentConversation {
     if (signal.aborted) return Promise.resolve([]);
     const id = `q-${randomBytes(6).toString('hex')}`;
     return new Promise((resolve) => {
-      this.questions.set(id, resolve);
-      this.post({ type: 'questions-request', id, questions });
+      const settle = (answers: string[], cancelled = false) => { this.closePrompt(id, cancelled); resolve(answers); };
+      this.questions.set(id, settle);
+      signal.addEventListener('abort', () => { if (this.questions.delete(id)) settle([], true); }, { once: true });
+      this.openPrompt(id, { type: 'questions-request', id, questions });
     });
   }
 
   private releasePending(): void {
-    for (const resolve of this.approvals.values()) resolve({ decision: 'deny' });
+    const approvals = [...this.approvals.values()];
+    const questions = [...this.questions.values()];
     this.approvals.clear();
-    for (const resolve of this.questions.values()) resolve([]);
     this.questions.clear();
+    for (const settle of approvals) settle({ decision: 'deny' }, true);
+    for (const settle of questions) settle([], true);
   }
 }
 

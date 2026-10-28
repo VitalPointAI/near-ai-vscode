@@ -25,6 +25,7 @@ export type ChatWebviewMessage =
   | { type: 'load-models' }
   | { type: 'open-setup' }
   | { type: 'refresh-status' }
+  | { type: 'chat-ready' }
   | { type: 'open-command'; command: string; args?: string; model?: string }
   | { type: 'questions-reply'; id: string; answers: string[] }
   | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' }
@@ -526,7 +527,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'text')) return undefined;
     return { type: 'insert-code', text: message.text };
   }
-  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'select-profile') {
+  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'select-profile' || message.type === 'chat-ready') {
     if (Object.keys(message).some((key) => key !== 'type')) return undefined;
     return { type: message.type };
   }
