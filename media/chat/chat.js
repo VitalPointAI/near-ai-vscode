@@ -422,8 +422,20 @@
       list.append(item);
     });
     agentClock ??= setInterval(() => { const rows = agentPanel.querySelectorAll('.agent-status'); if (!rows.length) { clearInterval(agentClock); agentClock = undefined; } rows.forEach(updateAgentStatus); }, 1000);
-    const title = el('div', 'todo-title', `Agents running · ${agents.length} `);
-    title.append(textButton('Activity', () => post({ type: 'open-activity' })));
+    // The list can be collapsed to its title line; the choice is remembered across reloads.
+    const title = el('div', 'todo-title');
+    const toggle = el('button', 'agents-toggle', `Agents running · ${agents.length}`);
+    toggle.type = 'button';
+    toggle.setAttribute('aria-controls', 'agents-list');
+    list.id = 'agents-list';
+    const applyCollapsed = () => {
+      list.hidden = !!saved.agentsCollapsed;
+      toggle.setAttribute('aria-expanded', String(!saved.agentsCollapsed));
+      toggle.title = saved.agentsCollapsed ? 'Show running agents' : 'Hide running agents';
+    };
+    toggle.addEventListener('click', () => { saved.agentsCollapsed = !saved.agentsCollapsed; vscode.setState(saved); applyCollapsed(); });
+    applyCollapsed();
+    title.append(toggle, ' ', textButton('Activity', () => post({ type: 'open-activity' })));
     agentPanel.replaceChildren(title, list);
   }
 
