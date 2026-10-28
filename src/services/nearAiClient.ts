@@ -295,7 +295,8 @@ export class NearAiClient {
 
   public async listModelsWithPricing(signal?: AbortSignal): Promise<ModelInfo[]> {
     // NEAR AI's /models already carries pricing; /models/pricing is preferred when it answers with rows.
-    // Once it is missing (404/405/410) or answers with no rows, this client stops asking for it.
+    // Once it is missing (404/405/410), not implemented (501, or an error typed not_implemented, as
+    // NEAR AI Cloud answers today), or answers with no rows, this client stops asking for it.
     if (this.pricingEndpointAbsent) return this.listModels(signal);
     try {
       const response = await this.request('/models/pricing', { method: 'GET', signal });
@@ -304,7 +305,7 @@ export class NearAiClient {
       this.pricingEndpointAbsent = true;
     } catch (error) {
       if (signal?.aborted || isAbortError(error)) throw error;
-      if (error instanceof NearAiError && [404, 405, 410].includes(error.status)) this.pricingEndpointAbsent = true;
+      if (error instanceof NearAiError && ([404, 405, 410, 501].includes(error.status) || [error.errorType, error.errorCode].includes('not_implemented'))) this.pricingEndpointAbsent = true;
     }
     return this.listModels(signal);
   }

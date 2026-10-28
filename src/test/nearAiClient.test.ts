@@ -240,6 +240,37 @@ test('model list falls back to /models when the pricing endpoint is unavailable'
   assert.equal(models[0]?.inputPricePerMillion, 0.27);
 });
 
+test('a 501 "not implemented" from /models/pricing is requested once, then never again on that client', async () => {
+  const seen: string[] = [];
+  const client = new NearAiClient({
+    baseUrl: 'https://example.test/v1', apiKey: 'secret', maxRetries: 2, retryBaseDelayMs: 0,
+    fetchFn: async (url) => {
+      seen.push(String(url).replace('https://example.test/v1', ''));
+      if (String(url).endsWith('/models/pricing')) return new Response(JSON.stringify({ error: { message: 'GET /v1/models/pricing is not implemented by NEAR AI Cloud yet', type: 'not_implemented' } }), { status: 501 });
+      if (String(url).endsWith('/model/list')) return new Response(JSON.stringify({ models: [] }), { status: 200 });
+      return new Response(JSON.stringify({ data: [{ id: 'z-ai/glm-5.3', pricing: { input: 1.8, output: 5.75 } }] }), { status: 200 });
+    }
+  });
+  for (let call = 0; call < 3; call += 1) assert.equal((await client.listModelsWithPricing())[0]?.id, 'z-ai/glm-5.3');
+  assert.equal(seen.filter((url) => url === '/models/pricing').length, 1);
+  assert.equal(seen.filter((url) => url === '/models').length, 3);
+});
+
+test('an error typed not_implemented from /models/pricing also stops the client asking for it', async () => {
+  const seen: string[] = [];
+  const client = new NearAiClient({
+    baseUrl: 'https://example.test/v1', apiKey: 'secret', maxRetries: 0,
+    fetchFn: async (url) => {
+      seen.push(String(url));
+      if (String(url).endsWith('/models/pricing')) return new Response(JSON.stringify({ error: { message: 'not yet', type: 'not_implemented' } }), { status: 400 });
+      return new Response(JSON.stringify({ data: [{ id: 'qwen' }] }), { status: 200 });
+    }
+  });
+  await client.listModelsWithPricing();
+  await client.listModelsWithPricing();
+  assert.equal(seen.filter((url) => url.endsWith('/models/pricing')).length, 1);
+});
+
 test('model privacy comes from /model/list: attested NEAR models are TEE, external ones are forwarded', async () => {
   const client = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'secret', fetchFn: async (url) => String(url).endsWith('/model/list')
     ? new Response(JSON.stringify({ models: [
