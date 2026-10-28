@@ -3,10 +3,10 @@ gsd_state_version: "1.0"
 milestone: v0.5.0
 milestone_name: Trusted-source knowledge base
 status: planning
-last_updated: "2026-10-28T15:04:47.993Z"
+last_updated: "2026-10-28T16:15:00.000Z"
 last_activity: 2026-10-28
 progress:
-  total_phases: 0
+  total_phases: 12
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,10 +17,11 @@ progress:
 
 ## Current position
 
-Phase: Not started (defining requirements)
+Phase: 13 (first of 12 in milestone v0.5.0, phases 13-24): Sovereignty gate, post-quantum cryptography, and the encrypted event log
 Plan: —
-Status: Defining requirements
-Last activity: 2026-10-28 — Milestone v0.5.0 started
+Status: Roadmap created; ready to discuss Phase 13
+Last activity: 2026-10-28 — Roadmap created for milestone v0.5.0 (12 phases, 55 of 55 requirements mapped)
+Next: /gsd-discuss-phase 13, then /gsd-plan-phase 13
 
 ## Decisions
 
@@ -114,6 +115,22 @@ Last activity: 2026-10-28 — Milestone v0.5.0 started
 - [2026-10-26] NEAR's Anthropic-compatible `/v1/messages` serves Anthropic-backed models only, and those are forwarded to Anthropic; it is not used.
 - [2026-10-26] A plan is complete only when its behavior is reachable from the UI and proven by a test of the real path (see `.planning/AUDIT-2026-10-26.md`).
 
+### Milestone v0.5.0 decisions (2026-10-28)
+
+Source: `.planning/research/v0.5.0-trusted-source-knowledge-base.md` (the owner's brief governs) and `.planning/research/SUMMARY.md`.
+
+- Scope: the whole brief ships in v0.5.0 (globe, temporal replay, prediction, organisation scale). Evidence-based model defaults move to v0.6.0.
+- Sensitivity: knowledge-base projects use NEAR TEE-attested or local models only (never forwarded ones, including sub-agents, attachments, and embeddings); the gate sits once at the model-client boundary. Local runtimes are allowed and labelled local. Web search and fetch are a per-project switch, on by default, with the provider-sees-topics note.
+- No sensitive plaintext in knowledge-base projects: transcripts and handoffs encrypted, Agent Activity ids and counts only, findings recorded in the base rather than `.planning/` files.
+- Storage: a signed, encrypted, append-only event log is the source of truth; views and indexes are disposable. Volume is several million entries and more, on a disk-backed encrypted, partitioned index (not in-memory only), so the store benchmark targets millions.
+- Cryptography is post-quantum ready throughout: hybrid ML-KEM-768 + X25519 for every key wrap, hybrid Ed25519 + ML-DSA signatures over sealed segments (or a hash tree of them), AES-256 and SHA-256/384 for symmetric parts. Node 22 has no ML-KEM or ML-DSA, so a vetted pure-JS implementation is needed (audit to confirm in Phase 13).
+- Erasure is crypto-shredding: erasable items get their own keys; destroying a key makes the item unreadable while the log stays verifiable; members keep what they already read.
+- Sharing: git repository or shared folder for small teams, an organisation-hosted ciphertext relay for larger ones; compartments with their own keys; roles reader, analyst, approver, admin; members invited by public key; keys rotate on removal. The relay sees pseudonymous key ids, opaque compartment ids, and signed capability tokens, not role names.
+- Grading: NATO Admiralty A-F and 1-6 stored separately; F and 6 are "unrated"; a claim is judged by its best independent origin; agents alone never assign A or 1; reliability can be scoped by topic. Imported confidence values are hints, never grades.
+- Semantic search is required, through a TEE-attested embedding model (e.g. `Qwen/Qwen3-Embedding-0.6B`) or a local one; embeddings are encrypted at rest and never synced.
+- Online imagery (e.g. NASA GIBS) is on by default and can be turned off per project; a bundled offline basemap is always available.
+- Roadmap shape (2026-10-28): 12 phases numbered 13-24 in the summary's reconciled order, with the panel shell moved to intake (Phase 15), semantic search placed with the store (Phase 14), the gazetteer with intake (Phase 15), and SOV-04 owned by the final hardening phase (Phase 24) because its destinations only all exist by then.
+
 ## Risks to resolve
 
 - Confirm exact NEAR sign-in and token exchange APIs available to a desktop VS Code extension.
@@ -122,6 +139,9 @@ Last activity: 2026-10-28 — Milestone v0.5.0 started
 - Design a secure approval boundary for shell, filesystem, network, and git operations.
 - Confirm the exact Open-GSD installer flags for the VS Code-hosted runtime before enabling production auto-update; the current adapter uses the documented package/channel and Codex global/local scope convention.
 - Confirm the host's native context-metrics bridge; Open-GSD's context monitor is authoritative where its lifecycle hooks are available, with extension-level checkpoint fallback required for hosts that do not expose those hooks.
+- v0.5.0, Phase 13: audit a vetted pure-JS ML-KEM-768 and ML-DSA implementation for Node 22 (audit status, size, throughput); check SecretStorage behaviour on Linux, WSL, containers, and code-server; freeze the entry envelope (compartment label, key epoch, erasable-item keys, timestamps, hash chain) before any code depends on it.
+- v0.5.0, Phase 14: the store benchmark and `ViewStore` bake-off at several million entries; vector index size for 1024-dimension embeddings; confirm the embedding model and reranker are attested in the live NEAR catalog.
+- v0.5.0, Phases 21-22: relay protocol security review before release (capability tokens, tree heads, metadata exposure); globe spike (MapLibre 6.x under the webview CSP, PMTiles via host messaging, zero third-party requests, 2D fallback) before building on it.
 
 ## Verification status
 
@@ -178,8 +198,8 @@ Last activity: 2026-10-28 — Milestone v0.5.0 started
 
 ## Session
 
-**Last session:** 2026-10-26T05:43:55.408Z
-**Stopped at:** Completed 06-11-PLAN.md
+**Last session:** 2026-10-28T16:15:00.000Z
+**Stopped at:** Roadmap for milestone v0.5.0 written (Phases 13-24); Phase 13 not yet discussed
 **Resume file:** None
 
 - 2026-10-26: Live eval confirmed GLM 5.3 as the default chat model. All three candidates passed; GLM 5.3 was fastest (41 s vs 685 s for Kimi K3) and private. DeepSeek V4.1 Flash was cheapest but forwarded, so it is not a private default.

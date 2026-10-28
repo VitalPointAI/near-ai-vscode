@@ -70,7 +70,7 @@
 ### Geospatial and temporal
 
 - [ ] **GEO-01**: Places are geocoded on the machine from a bundled gazetteer; ambiguous names are shown as candidates, never resolved silently, and place names are never sent to a geocoding service.
-- [ ] **GEO-02**: An analyst sees geocoded information on a 3D globe with a layer per source or source type that can be turned on and off, with a 2D fallback where WebGL is unavailable.
+- [ ] **GEO-02**: An analyst explores geocoded information on an interactive 3D globe — rotate, zoom, tilt, and pan; hover and click a point or area to see its claims, grades, sources, and times; select to filter, slice, or open it in the network and timeline — with a layer per source or source type that can be turned on and off, reordered, and given an opacity, and a 2D fallback with the same interactions where WebGL is unavailable.
 - [ ] **GEO-03**: Online imagery (e.g. NASA GIBS) is on by default and can be turned off per project; the setting says that the imagery host sees which areas are viewed, and a bundled offline basemap is always available.
 - [ ] **TIME-01**: An analyst can roll time back and replay how events unfolded on the timeline, network, and globe, in "as it happened" and "as it was known" modes, with views linked so a selection in one highlights the others.
 
@@ -116,7 +116,89 @@
 
 ## Traceability (v0.5.0)
 
-Filled in by the roadmap.
+Roadmap created 2026-10-28 (Phases 13-24, see `.planning/ROADMAP.md`). Each requirement maps to exactly one phase.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| SOV-01 | Phase 13 | Pending |
+| SOV-02 | Phase 13 | Pending |
+| SOV-03 | Phase 13 | Pending |
+| SOV-04 | Phase 24 | Pending |
+| SOV-05 | Phase 13 | Pending |
+| SOV-06 | Phase 13 | Pending |
+| LOG-01 | Phase 13 | Pending |
+| LOG-02 | Phase 13 | Pending |
+| LOG-03 | Phase 13 | Pending |
+| LOG-04 | Phase 13 | Pending |
+| PQC-01 | Phase 13 | Pending |
+| PQC-02 | Phase 13 | Pending |
+| PQC-03 | Phase 13 | Pending |
+| STORE-01 | Phase 14 | Pending |
+| STORE-02 | Phase 14 | Pending |
+| SRCH-01 | Phase 14 | Pending |
+| INTAKE-01 | Phase 15 | Pending |
+| INTAKE-02 | Phase 15 | Pending |
+| INTAKE-03 | Phase 15 | Pending |
+| INTAKE-04 | Phase 15 | Pending |
+| INTAKE-05 | Phase 15 | Pending |
+| GRADE-01 | Phase 16 | Pending |
+| GRADE-02 | Phase 16 | Pending |
+| GRADE-03 | Phase 16 | Pending |
+| GRADE-04 | Phase 16 | Pending |
+| GRADE-05 | Phase 16 | Pending |
+| GRADE-06 | Phase 16 | Pending |
+| RPT-01 | Phase 16 | Pending |
+| RPT-02 | Phase 16 | Pending |
+| RPT-03 | Phase 16 | Pending |
+| RPT-04 | Phase 16 | Pending |
+| RAFT-01 | Phase 17 | Pending |
+| RAFT-02 | Phase 17 | Pending |
+| RAFT-03 | Phase 17 | Pending |
+| FEED-01 | Phase 18 | Pending |
+| FEED-02 | Phase 18 | Pending |
+| ALERT-01 | Phase 18 | Pending |
+| GEO-01 | Phase 15 | Pending |
+| GEO-02 | Phase 22 | Pending |
+| GEO-03 | Phase 22 | Pending |
+| TIME-01 | Phase 22 | Pending |
+| FCST-01 | Phase 23 | Pending |
+| FCST-02 | Phase 23 | Pending |
+| FCST-03 | Phase 23 | Pending |
+| FCST-04 | Phase 23 | Pending |
+| SYNC-01 | Phase 19 | Pending |
+| SYNC-02 | Phase 19 | Pending |
+| SYNC-03 | Phase 19 | Pending |
+| ORG-01 | Phase 20 | Pending |
+| ORG-02 | Phase 20 | Pending |
+| ORG-03 | Phase 20 | Pending |
+| ORG-04 | Phase 20 | Pending |
+| ORG-05 | Phase 20 | Pending |
+| RELAY-01 | Phase 21 | Pending |
+| RELAY-02 | Phase 21 | Pending |
+
+**Coverage:** 55 requirements, 55 mapped to a phase, 0 unmapped, 0 mapped to more than one phase.
+
+| Phase | Name | Requirements | Count |
+|-------|------|--------------|-------|
+| 13 | Sovereignty gate, post-quantum cryptography, and the encrypted event log | SOV-01, SOV-02, SOV-03, SOV-05, SOV-06, LOG-01, LOG-02, LOG-03, LOG-04, PQC-01, PQC-02, PQC-03 | 12 |
+| 14 | Encrypted scalable store and search | STORE-01, STORE-02, SRCH-01 | 3 |
+| 15 | Source and claim intake with agent tools | INTAKE-01, INTAKE-02, INTAKE-03, INTAKE-04, INTAKE-05, GEO-01 | 6 |
+| 16 | Admiralty grading, thresholds, and reports | GRADE-01, GRADE-02, GRADE-03, GRADE-04, GRADE-05, GRADE-06, RPT-01, RPT-02, RPT-03, RPT-04 | 10 |
+| 17 | RAFT network and slices | RAFT-01, RAFT-02, RAFT-03 | 3 |
+| 18 | Standing feeds, unattended work, and alerts | FEED-01, FEED-02, ALERT-01 | 3 |
+| 19 | Team sharing through git or a shared folder | SYNC-01, SYNC-02, SYNC-03 | 3 |
+| 20 | Organisation compartments, roles, and access | ORG-01, ORG-02, ORG-03, ORG-04, ORG-05 | 5 |
+| 21 | Ciphertext relay | RELAY-01, RELAY-02 | 2 |
+| 22 | Globe, imagery, and timeline replay | GEO-02, GEO-03, TIME-01 | 3 |
+| 23 | Forecasting and calibration | FCST-01, FCST-02, FCST-03, FCST-04 | 4 |
+| 24 | End-to-end hardening and release | SOV-04 | 1 |
+| | **Total** | | **55** |
+
+**Where a requirement is owned by one phase but finished across several:**
+- SOV-04 (allowlist, and no other request leaves the machine) is owned by Phase 24, because the destinations it names (feeds, imagery, git remotes, relay) do not all exist until then. Phase 13 builds the allowlist and network-spy harness, and each later phase registers its destinations and extends the test.
+- RPT-03 (what changes when a source is downgraded) is owned by Phase 16 for claims and reports; Phase 23 adds forecasts to the same preview.
+- ORG-01 (a reader without a compartment sees a base without it) is owned by Phase 20; Phases 22 and 23 extend the same indistinguishability test to the globe, timeline, and forecasts.
+- PQC-02 (erasure by crypto-shredding) is owned by Phase 13; Phase 19 re-checks that an erased item becomes unreadable on every member's device after sync.
 
 
 # Earlier milestones
