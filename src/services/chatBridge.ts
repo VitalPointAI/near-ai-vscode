@@ -791,6 +791,16 @@ export function modelsAsPrivateAs(models: ModelInfo[], chosen: ModelInfo | undef
   return boundary === 'tee' ? cloud.filter((model) => model.privacyBoundary === 'tee') : cloud;
 }
 
+/**
+ * The auto mode's safety model: the wanted model when it runs privately (in NEAR's TEE, or on a
+ * local runtime) on the same route as the chat, otherwise none, so unclear commands ask instead
+ * of going to a forwarded model.
+ */
+export function privateSafetyModel(models: ModelInfo[], chosen: ModelInfo | undefined, wanted: string): string | undefined {
+  const candidate = modelsAsPrivateAs(models, chosen).find((model) => model.id === wanted.trim());
+  return candidate && (candidate.privacyBoundary === 'tee' || candidate.privacyBoundary === 'local') ? candidate.id : undefined;
+}
+
 /** Embedding, reranking, and speech models cannot hold a conversation. */
 export function isChatModel(model: Pick<ModelInfo, 'id'>): boolean {
   return model.id.trim().length > 0 && !/(?:embed|rerank|whisper|tts|speech|moderation)/i.test(model.id);

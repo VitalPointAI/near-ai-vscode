@@ -54,6 +54,12 @@ export function readModelTiers(): { deep: string; standard: string; fast: string
   return { deep: pick('agent.deepModel', AGENT_DEFAULTS.tiers.deep), standard: pick('agent.standardModel', AGENT_DEFAULTS.tiers.standard), fast: pick('agent.fastModel', AGENT_DEFAULTS.tiers.fast) };
 }
 
+/** The auto mode's safety model (nearAi.agent.safetyModel); empty means the fast tier's model. */
+export function readSafetyModel(tiers: { fast: string } = readModelTiers()): string {
+  const value = vscode.workspace.getConfiguration('nearAi').get<unknown>('agent.safetyModel', '');
+  return typeof value === 'string' && value.trim() ? value.trim() : tiers.fast;
+}
+
 /** Limits for agent runs and whether conversations are saved for resuming. */
 /** Caps for one run, including its sub-agents. */
 export function readRunBudget(): { maxCostUsd: number; maxTokens: number } {

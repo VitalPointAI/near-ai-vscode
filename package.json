@@ -378,6 +378,11 @@
           "default": "Qwen/Qwen3.6-35B-A3B-FP8",
           "description": "Model for Open-GSD sub-agents in the fast tier (haiku). If your provider does not offer it, the chat's model is used."
         },
+        "nearAi.agent.safetyModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model that checks shell commands the rules cannot decide when nearAi.actionPolicy is auto. Empty uses the fast tier (nearAi.agent.fastModel). It is used only when it runs privately (in NEAR's TEE or on a local runtime); otherwise those commands ask."
+        },
         "nearAi.agent.maxParallelAgents": {
           "type": "number",
           "default": 4,
