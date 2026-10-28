@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.2
+
+- **Auto approve.** A new `auto` value for `nearAi.actionPolicy` runs what
+  passes a safety check and asks only about the rest, with the reason on the
+  card. Ordinary build, test, lint, git and in-workspace file commands run.
+  Deleting, pushing, publishing or deploying, piping a download into a shell,
+  uploads, credential or knowledge-base paths, and writes outside the
+  workspace ask. A command the rules can't place goes to a private (TEE or
+  local) model, `nearAi.agent.safetyModel`; if it errors, times out, or no
+  private model is available, the command asks.
+- **Rate limits no longer turn into a storm.** A 429 from NEAR AI is no longer
+  retried within a fraction of a second. The agent waits as long as NEAR asks
+  (`Retry-After`), with some randomness, and agents using the same model share
+  one pause, so only one request checks whether the model is back. After about
+  four minutes of continuous rate limiting the run stops and keeps its work,
+  instead of retrying forever.
+- **NEAR's own error message.** Failed requests show what NEAR said and the
+  request ID, and the new **NEAR AI** output channel logs status, model,
+  request ID and rate-limit headers.
+- **The model list survives a failed refresh.** If NEAR is busy when the list
+  is refreshed, the last good list keeps working.
+- **Easier-to-read chat.** Code is smaller than the chat text and tinted, so it
+  stands apart, and `#` and `##` headings step up in size. The running-agents
+  panel collapses to one line, and stays collapsed across reloads.
+
 ## 0.4.1
 
 - **Security fixes in the build tooling.** The packaging tool's dependencies
