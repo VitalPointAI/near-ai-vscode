@@ -186,12 +186,17 @@ footer { padding: 6px 12px 8px; }
 }
 #input::placeholder { color: var(--vscode-input-placeholderForeground); }
 .composer .bar { display: flex; align-items: center; gap: 4px; padding: 2px 4px 4px 6px; }
-#model {
-  max-width: 60%; min-width: 0; padding: 1px 2px; border: 0; border-radius: 4px;
+#model, #policy {
+  min-width: 0; padding: 1px 2px; border: 0; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 11px; color: var(--vscode-descriptionForeground); background: transparent; cursor: pointer;
 }
-#model:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
-#model option { color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); }
+#model { max-width: 50%; flex: 0 1 auto; }
+/* The approval-policy picker gives up width first at narrow sidebar widths. */
+#policy { max-width: 34%; flex: 0 3 auto; }
+#model:hover, #policy:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+#model option, #policy option { color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); }
+#policy[data-risky="true"], #policy[data-risky="true"]:hover, #policy option[data-risky="true"] { color: var(--vscode-editorWarning-foreground, var(--vscode-errorForeground)); }
+#policy[data-state="stopped"] { color: var(--vscode-errorForeground); cursor: default; opacity: 1; }
 .composer .bar .spacer { flex: 1; }
 .chip {
   max-width: 35%; padding: 1px 6px; border: 0; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

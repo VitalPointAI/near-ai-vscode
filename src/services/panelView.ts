@@ -89,6 +89,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
     <div class="bar">
       <button id="profile" class="chip" type="button" title="Choose the NEAR AI profile for this project">Set up</button>
       <select id="model" aria-label="Model"><option value="">Loading models…</option></select>
+      <select id="policy" aria-label="Approval policy" title="How much the agent may do without asking"><option value="">Approval…</option></select>
       <span class="spacer"></span>
       <button id="attach" class="icon-button" type="button" aria-label="Attach files" title="Attach images, audio, or text files"></button>
       <button id="send" class="icon-button" type="button" aria-label="Send"></button>

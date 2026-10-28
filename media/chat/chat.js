@@ -11,6 +11,7 @@
   const input = $('input');
   const send = $('send');
   const model = $('model');
+  const policy = $('policy');
   const profile = $('profile');
   const status = $('status');
   const menu = $('commands');
@@ -548,6 +549,41 @@
   send.addEventListener('click', submit);
   profile.addEventListener('click', () => post({ type: profile.dataset.state === 'missing' ? 'open-setup' : 'select-profile' }));
   status.addEventListener('click', () => { if (!busy) runCommand('progress'); });
+  // The approval-policy picker: the host validates the choice, asks before Full auto, and writes
+  // nearAi.actionPolicy; it then sends the effective state back, which is what this shows.
+  let policyState;
+  function renderPolicy(state) {
+    policyState = state;
+    const options = state.options || [];
+    const current = options.find((option) => option.mode === state.mode) || {};
+    if (state.stopped) {
+      const stopped = el('option', '', 'Stopped');
+      stopped.value = '';
+      policy.replaceChildren(stopped);
+      policy.value = '';
+      policy.disabled = true;
+      policy.dataset.state = 'stopped';
+      policy.dataset.risky = 'false';
+      policy.title = 'Emergency stop is on: NEAR AI sends and runs nothing. Run "NEAR AI: Resume" to continue (approval policy stays ' + (current.label || state.mode) + ').';
+      return;
+    }
+    policy.replaceChildren(...options.map((option) => {
+      const item = el('option', '', option.label + (option.risky ? ' ⚠' : ''));
+      item.value = option.mode;
+      item.title = option.description;
+      item.dataset.risky = option.risky ? 'true' : 'false';
+      return item;
+    }));
+    policy.disabled = false;
+    policy.value = state.mode;
+    policy.dataset.state = 'ready';
+    policy.dataset.risky = current.risky ? 'true' : 'false';
+    policy.title = 'Approval policy: ' + (current.label || state.mode) + ' — ' + (current.description || '') + (state.scope === 'workspace' || state.scope === 'workspaceFolder' ? ' (set in workspace settings)' : '');
+  }
+  policy.addEventListener('change', () => {
+    if (!policy.value || !policyState || policy.value === policyState.mode) return;
+    post({ type: 'set-action-policy', mode: policy.value });
+  });
   model.addEventListener('change', () => { saved.model = model.value; vscode.setState(saved); model.title = (modelInfo.get(model.value) || {}).label || ''; });
   document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => runCommand(button.dataset.command)));
 
@@ -582,6 +618,7 @@
         model.title = (modelInfo.get(model.value) || {}).label || '';
         break;
       }
+      case 'action-policy': renderPolicy(m); break;
       case 'models-error': model.replaceChildren(el('option', '', 'Models unavailable')); model.title = m.text || ''; break;
       case 'auth-required':
         if (current) { current.node.remove(); current = undefined; }
