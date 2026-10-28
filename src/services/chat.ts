@@ -78,7 +78,10 @@ export async function openTools(context: vscode.ExtensionContext, auth: AuthServ
  * markup stays so the page's scripts keep working until the legacy panel is removed.
  */
 function toolsHtml(html: string): string {
-  const hidden = '#team-studio,[aria-labelledby="attachments-heading"],[aria-labelledby="generation-heading"],[aria-labelledby="memory-heading"],#attach,#multimodal-prepare{display:none!important}';
+  const hidden = '#team-studio,[aria-labelledby="attachments-heading"],[aria-labelledby="generation-heading"],[aria-labelledby="memory-heading"],#attach,#multimodal-prepare{display:none!important}'
+    // The page wraps each section in a collapsible <details>; hide the wrapper too, or an empty dropdown is left behind.
+    + '[aria-labelledby="team-lifecycle-heading"],[aria-labelledby="memory-actions-heading"],[aria-labelledby="memory-graph-heading"]{display:none!important}'
+    + 'details.advanced-section:has(>#team-studio,>[aria-labelledby="attachments-heading"],>[aria-labelledby="generation-heading"],>[aria-labelledby="memory-heading"],>[aria-labelledby="team-lifecycle-heading"],>[aria-labelledby="memory-actions-heading"],>[aria-labelledby="memory-graph-heading"]){display:none!important}';
   const note = '<p class="status" id="tools-note">Teams, attachments, image generation, and project memory are in the NEAR AI chat in the side bar: use /team:, the paperclip, or ask the agent.</p>';
   return html.replace('</style>', `${hidden}</style>`).replace('</header>', `${note}</header>`);
 }

@@ -187,6 +187,10 @@ test('the Tools tab hides features that do not run yet and keeps analytics and a
   }
   const hiddenRule = /#team-studio,\[aria-labelledby="attachments-heading"\],\[aria-labelledby="generation-heading"\],\[aria-labelledby="memory-heading"\],#attach,#multimodal-prepare\{display:none!important\}/;
   assert.match(html, hiddenRule);
+  // The collapsible wrappers around the hidden sections are hidden too, so no empty dropdowns remain.
+  for (const section of ['>#team-studio', '>[aria-labelledby="attachments-heading"]', '>[aria-labelledby="generation-heading"]', '>[aria-labelledby="memory-heading"]', '>[aria-labelledby="team-lifecycle-heading"]', '>[aria-labelledby="memory-actions-heading"]', '>[aria-labelledby="memory-graph-heading"]']) {
+    assert.ok(html.includes(section) && /details\.advanced-section:has\([^)]*\)\{display:none!important\}/.test(html), `wrapper for ${section} is hidden`);
+  }
   assert.match(html, /id="tools-note"/);
   assert.doesNotMatch(html, /fleet-heading[^}]*display:none/);
   assert.doesNotMatch(html, /wallet-entitlement-heading/);
