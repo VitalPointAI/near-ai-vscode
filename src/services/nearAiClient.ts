@@ -273,6 +273,26 @@ export class NearAiClient {
     return { text, usage };
   }
 
+  /**
+   * One short, non-streamed completion, sent exactly once: no retries on a rate limit, timeout, or
+   * server error. For quick checks (the auto mode's command safety check) that must fail fast.
+   */
+  public async completeOnce(model: string, messages: AgentMessage[], options: { maxTokens: number; signal?: AbortSignal }): Promise<{ text: string; usage: UsageMetadata }> {
+    const started = Date.now();
+    const response = await this.request('/chat/completions', {
+      method: 'POST',
+      signal: options.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, messages, stream: false, max_tokens: Math.max(16, Math.floor(options.maxTokens)), temperature: 0 })
+    }, { maxRetries: 0 });
+    const body = objectValue(await response.json());
+    const choice = objectValue(Array.isArray(body.choices) ? body.choices[0] : undefined);
+    const text = stringValue(objectValue(choice.message).content) ?? '';
+    const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
+    usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
+    return { text, usage };
+  }
+
   /** Official NEAR image-edit contract. The staged image bytes never enter durable telemetry. */
   public async editImage(model: string, prompt: string, image: Uint8Array, options: ImageGenerationOptions = {}, signal?: AbortSignal): Promise<ImageGenerationResult> {
     const started = Date.now();
@@ -508,9 +528,9 @@ export class NearAiClient {
     return models;
   }
 
-  private async request(path: string, init: RequestInit): Promise<Response> {
+  private async request(path: string, init: RequestInit, overrides: { maxRetries?: number } = {}): Promise<Response> {
     const url = `${this.options.baseUrl.replace(/\/$/, '')}${path}`;
-    const maxRetries = Math.max(0, Math.min(3, this.options.maxRetries ?? 2));
+    const maxRetries = Math.max(0, Math.min(3, overrides.maxRetries ?? this.options.maxRetries ?? 2));
     const retryBaseDelayMs = Math.max(0, this.options.retryBaseDelayMs ?? 100);
     const responseTimeoutMs = Math.max(1, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
     if (!isSecureEndpoint(url)) throw new NearAiError(0, 'NEAR AI endpoint must use HTTPS; plain HTTP is only allowed for localhost.', false);
