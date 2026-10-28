@@ -22,6 +22,8 @@
   const chips = $('chips');
   $('attach').addEventListener('click', () => post({ type: 'attach-files' }));
   const agentPanel = $('agents');
+  const pendingRegion = $('pending');
+  const pendingKit = window.nearPending;
   let contextLeft;
   // Replaced by the host with the installed Open-GSD skills.
   let commands = JSON.parse(document.body.dataset.commands || '[]');
@@ -85,6 +87,96 @@
     transcript.appendChild(node);
     scrollToEnd();
     return node;
+  }
+
+  // Prompts that block a run (approvals, questions, choices) are pinned above the composer until
+  // they are settled, so they cannot scroll away. The transcript keeps a line at the spot where
+  // each was asked, which becomes a record of the outcome. Only the shown prompt is in the DOM;
+  // the others keep their half-filled state until the user steps to them.
+  const pendingQueue = pendingKit.createPendingQueue();
+  const pendingCards = new Map();
+  const pendingHeader = el('div', 'pending-header');
+  const pendingTitle = el('strong', 'pending-title');
+  const pendingPrev = textButton('‹ Previous', () => stepPending(-1));
+  const pendingNext = textButton('Next ›', () => stepPending(1));
+  pendingPrev.setAttribute('aria-label', 'Show the previous waiting prompt');
+  pendingNext.setAttribute('aria-label', 'Show the next waiting prompt');
+  const pendingSteps = el('span', 'pending-steps');
+  pendingSteps.append(pendingPrev, pendingNext);
+  pendingHeader.append(pendingTitle, pendingSteps);
+  const pendingBody = el('div', 'pending-body');
+  pendingRegion.append(pendingHeader, pendingBody);
+
+  function renderPending() {
+    const item = pendingQueue.current();
+    pendingRegion.hidden = !item;
+    if (!item) { pendingBody.replaceChildren(); return; }
+    pendingTitle.textContent = pendingKit.headerText(item, pendingQueue.position(), pendingQueue.size);
+    pendingSteps.hidden = pendingQueue.size < 2;
+    const entry = pendingCards.get(item.id);
+    if (pendingBody.firstChild !== entry.card) pendingBody.replaceChildren(entry.card);
+  }
+  // Typing in the composer (or any field outside the pinned prompt) keeps its focus.
+  function userIsTyping() {
+    const active = document.activeElement;
+    if (!active || pendingRegion.contains(active)) return false;
+    if (active === input) return Boolean(input.value.trim());
+    return active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT';
+  }
+  function focusPending(id) {
+    if (!pendingQueue.select(id)) return;
+    renderPending();
+    const entry = pendingCards.get(id);
+    pendingRegion.scrollIntoView({ block: 'nearest' });
+    entry.primary.focus();
+  }
+  function stepPending(delta) {
+    const item = pendingQueue.step(delta);
+    renderPending();
+    if (item) announce(pendingTitle.textContent + ': ' + item.title);
+  }
+  /** Pins a prompt; false when it is already pinned (a replay to a view that did not reload). */
+  function addPending(item, card, primary, spoken) {
+    if (!pendingQueue.add(item)) return false;
+    const line = el('div', 'turn pending-line');
+    line.append(el('span', '', pendingKit.waitingText(item)));
+    const show = el('button', 'link', 'Show');
+    show.type = 'button';
+    show.setAttribute('aria-label', 'Show the waiting prompt: ' + item.title);
+    show.addEventListener('click', () => focusPending(item.id));
+    line.append(' ', show);
+    append(line);
+    pendingCards.set(item.id, { item, card, line, primary });
+    renderPending();
+    if (pendingQueue.size === 1 && !userIsTyping()) primary.focus();
+    announce(spoken + (pendingQueue.size > 1 ? ' ' + pendingQueue.size + ' prompts are waiting.' : ''));
+    return true;
+  }
+  /** Unpins a prompt and leaves its outcome in the transcript. */
+  function closePending(id, outcome, detail) {
+    const entry = pendingCards.get(id);
+    if (!entry) return false;
+    const active = document.activeElement;
+    const hadFocus = !active || active === document.body || pendingRegion.contains(active);
+    pendingQueue.resolve(id);
+    pendingCards.delete(id);
+    entry.line.className = 'turn pending-line resolved';
+    entry.line.replaceChildren(el('span', '', pendingKit.outcomeText(entry.item, outcome, detail)));
+    renderPending();
+    const next = pendingQueue.current();
+    if (hadFocus) {
+      if (next) pendingCards.get(next.id).primary.focus();
+      else input.focus();
+    }
+    return true;
+  }
+  function closeAllPending(outcome) {
+    pendingQueue.list().forEach((item) => closePending(item.id, outcome));
+  }
+  function clearPending() {
+    pendingQueue.clear();
+    pendingCards.clear();
+    renderPending();
   }
 
   function setBusy(value) {
@@ -212,14 +304,16 @@
     card.setAttribute('role', 'group');
     card.setAttribute('aria-label', prompt.question);
     card.append(el('p', '', prompt.question));
+    if (pendingQueue.has(prompt.promptId)) return;
     const choices = el('div', 'choices');
     const disable = () => card.querySelectorAll('button,input').forEach((node) => { node.disabled = true; });
     (prompt.choices || []).forEach((choice, index) => {
-      const button = textButton(choice.label, () => { disable(); post({ type: 'prompt-choice', sessionId: prompt.sessionId, promptId: prompt.promptId, choiceId: choice.id }); }, index === 0);
+      const button = textButton(choice.label, () => { disable(); post({ type: 'prompt-choice', sessionId: prompt.sessionId, promptId: prompt.promptId, choiceId: choice.id }); closePending(prompt.promptId, 'answered', choice.label); }, index === 0);
       if (choice.description) button.title = choice.description;
       choices.append(button);
     });
-    choices.append(textButton('Cancel', () => { disable(); post({ type: 'prompt-cancel', sessionId: prompt.sessionId, promptId: prompt.promptId }); }));
+    const cancel = textButton('Cancel', () => { disable(); post({ type: 'prompt-cancel', sessionId: prompt.sessionId, promptId: prompt.promptId }); closePending(prompt.promptId, 'deny'); });
+    choices.append(cancel);
     card.append(choices);
     if (prompt.freeForm && prompt.freeForm.enabled) {
       const answer = el('input');
@@ -229,11 +323,11 @@
         if (event.key !== 'Enter' || !answer.value.trim()) return;
         disable();
         post({ type: 'prompt-answer', sessionId: prompt.sessionId, promptId: prompt.promptId, text: answer.value.trim() });
+        closePending(prompt.promptId, 'answered', answer.value.trim());
       });
       card.append(answer);
     }
-    append(card);
-    announce('Open-GSD is asking: ' + prompt.question);
+    addPending({ id: prompt.promptId, kind: 'choice', agent: 'Open-GSD', title: prompt.question }, card, choices.querySelector('button') || cancel, 'Open-GSD is asking: ' + prompt.question);
   }
 
   // Key planning files from the host's artifact list, as links that open in the editor.
@@ -262,6 +356,7 @@
     agentRows.clear();
     renderTodos([]);
     renderAgents([]);
+    clearPending();
     transcript.replaceChildren(welcome);
     welcome.hidden = false;
     tools = new Map();
@@ -299,10 +394,11 @@
     row.state.textContent = m.ok ? '' : 'failed';
     row.log.textContent = m.output || '';
     if (!m.ok) row.details.open = true;
-    const card = document.getElementById('approval-' + m.callId);
-    if (card && !card.dataset.answered) card.remove();
+    // The call ended without an answer (declined elsewhere): nothing is waiting any more.
+    closePending(m.callId, 'closed');
   }
   function onApproval(m) {
+    if (pendingQueue.has(m.callId)) return;
     const card = el('div', 'question approval');
     card.id = 'approval-' + m.callId;
     card.setAttribute('role', 'group');
@@ -326,25 +422,23 @@
     feedback.placeholder = 'Optional: tell NEAR AI what to do instead';
     feedback.setAttribute('aria-label', 'Instructions if you decline');
     const choices = el('div', 'choices');
-    const answer = (decision, label) => {
-      card.dataset.answered = 'true';
+    const answer = (decision) => {
       card.querySelectorAll('button,input').forEach((node) => { node.disabled = true; });
-      choices.replaceChildren(el('span', 'meta', label));
       post({ type: 'approval-reply', callId: m.callId, decision, ...(decision === 'deny' && feedback.value.trim() ? { feedback: feedback.value.trim() } : {}) });
+      closePending(m.callId, decision);
     };
     const runLabel = m.tool === 'Bash' ? 'Allow this command for this run' : 'Allow edits for this run';
-    choices.append(
-      textButton('Allow', () => answer('allow', 'Allowed'), true),
-      textButton(runLabel, () => answer('allow-run', runLabel.replace('Allow', 'Allowed'))),
-      textButton('Deny', () => answer('deny', 'Declined'))
-    );
+    const allow = textButton('Allow', () => answer('allow'), true);
+    choices.append(allow, textButton(runLabel, () => answer('allow-run')), textButton('Deny', () => answer('deny')));
+    // Enter in the feedback box declines with those instructions.
+    feedback.addEventListener('keydown', (event) => { if (event.key === 'Enter' && feedback.value.trim()) { event.preventDefault(); answer('deny'); } });
     card.append(choices, feedback);
-    append(card);
-    announce('Approval needed: ' + m.title);
+    addPending({ id: m.callId, kind: 'approval', agent: m.agent, title: m.title }, card, allow, 'Approval needed: ' + m.title);
   }
   // AskUserQuestion: one block per question, options as buttons (or checkboxes when several may
   // apply) plus a free-text "Other", answered together.
   function onQuestions(m) {
+    if (pendingQueue.has(m.id)) return;
     const card = el('div', 'question questions');
     card.setAttribute('role', 'group');
     card.setAttribute('aria-label', 'NEAR AI has questions');
@@ -379,12 +473,13 @@
       const answers = readers.map((read) => read());
       if (answers.some((answer) => !answer)) { announce('Answer every question first.'); return; }
       card.querySelectorAll('button,input').forEach((node) => { node.disabled = true; });
-      submitButton.replaceWith(el('span', 'meta', 'Answered'));
       post({ type: 'questions-reply', id: m.id, answers });
+      closePending(m.id, 'answered', answers.join('; '));
     }, true);
     card.append(submitButton);
-    append(card);
-    announce('NEAR AI is asking you ' + (m.questions.length === 1 ? 'a question.' : m.questions.length + ' questions.'));
+    const first = m.questions[0] || { question: 'Questions' };
+    const title = first.question + (m.questions.length > 1 ? ' (+' + (m.questions.length - 1) + ' more)' : '');
+    addPending({ id: m.id, kind: 'questions', agent: m.agent, title }, card, card.querySelector('input') || submitButton, 'NEAR AI is asking you ' + (m.questions.length === 1 ? 'a question: ' + first.question : m.questions.length + ' questions.'));
   }
 
   // Running sub-agents with what each is doing, how long it has run, and pause, resume, and stop.
@@ -653,17 +748,11 @@
       case 'tool-start': onAgentToolStart(m); break;
       case 'tool-end': onAgentToolEnd(m); break;
       case 'approval-request': onApproval(m); break;
-      case 'approval-expired': {
-        const card = document.getElementById('approval-' + m.callId);
-        if (card && !card.dataset.answered) {
-          card.dataset.answered = 'true';
-          card.querySelectorAll('button,input').forEach((node) => { node.disabled = true; });
-          const choices = card.querySelector('.choices');
-          if (choices) choices.replaceChildren(el('span', 'meta', 'Declined: no one answered in time'));
-        }
-        notice(m.text || 'An approval request expired.', []);
+      case 'approval-expired':
+        if (closePending(m.callId, 'expired', m.minutes)) announce(m.text || 'An approval request expired.');
+        else notice(m.text || 'An approval request expired.', []);
         break;
-      }
+      case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' ? 'cancelled' : 'closed'); break;
       case 'todos': renderTodos(m.todos || []); break;
       case 'run-changes': onRunChanges(m); break;
       case 'run-reverted': {
@@ -709,6 +798,7 @@
         break;
       }
       case 'assistant-cancelled':
+        closeAllPending('cancelled');
         agentRows.forEach((row) => { if (row.spinner.isConnected) { row.spinner.remove(); row.state.textContent = 'stopped'; } });
         if (current) finishAssistant('Stopped');
         else setBusy(false);
@@ -720,6 +810,7 @@
         notice(m.text || 'Retrying…', []);
         break;
       case 'assistant-error':
+        closeAllPending('cancelled');
         finishAssistant();
         notice(m.text || 'The request failed.', [], true);
         break;
@@ -775,4 +866,6 @@
   autosize();
   post({ type: 'load-models' });
   post({ type: 'refresh-status' });
+  // After a reload the host re-sends any prompt that is still waiting.
+  post({ type: 'chat-ready' });
 })();

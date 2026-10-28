@@ -82,6 +82,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
   <section id="agents" aria-label="Running agents" aria-live="polite" hidden></section>
   <section id="todos" aria-label="Task list" aria-live="polite" hidden></section>
   <nav id="project-links" aria-label="Planning files" hidden></nav>
+  <section id="pending" aria-label="Waiting for your input" hidden></section>
   <div class="composer">
     <div id="commands" role="listbox" aria-label="Open-GSD commands" hidden></div>
     <div id="chips" class="chips" hidden></div>
@@ -99,6 +100,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 </footer>
 <div id="live" class="visually-hidden" aria-live="polite"></div>
 <script nonce="${nonce}" src="${asset('markdown.js')}"></script>
+<script nonce="${nonce}" src="${asset('pending.js')}"></script>
 <script nonce="${nonce}" src="${asset('chat.js')}"></script>
 </body>
 </html>`;

@@ -53,21 +53,22 @@ const vscodeStub = {
 async function openSidebar(root: string, auth: AuthService) {
   const posted: Array<Record<string, unknown>> = [];
   let receive: ((message: unknown) => Promise<void>) | undefined;
+  const view = {
+    badge: undefined as { value: number; tooltip: string } | undefined,
+    webview: { html: '', postMessage: async (message: Record<string, unknown>) => { posted.push(message); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } },
+    onDidDispose: () => ({ dispose() {} })
+  };
   vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }];
   const nodeModule = require('node:module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
   const originalLoad = nodeModule._load;
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try {
     const { attachChatToView } = require('../services/chat') as typeof import('../services/chat');
-    const view = {
-      webview: { html: '', postMessage: async (message: Record<string, unknown>) => { posted.push(message); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } },
-      onDidDispose: () => ({ dispose() {} })
-    };
     await attachChatToView({ subscriptions: [], globalStorageUri: { fsPath: path.join(root, '.global') }, extensionUri: { fsPath: root } } as never, auth, view as never, '<html></html>');
   } finally {
     nodeModule._load = originalLoad;
   }
-  return { posted, send: (message: unknown) => receive!(message) };
+  return { posted, view, send: (message: unknown) => receive!(message) };
 }
 
 async function projectWithProfile() {
@@ -168,6 +169,50 @@ test('an agent run through the sidebar reads, asks to edit with a diff, edits on
     assert.equal(await readFile(path.join(root, 'app.ts'), 'utf8'), 'export const port = 3000;\n');
     assert.deepEqual((sidebar.posted.find((message) => message.type === 'run-reverted') as { files: string[] }).files, ['app.ts']);
     assert.equal(calls.filter((call) => call === '/chat/completions').length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a waiting approval badges the view, is re-sent to a reloaded view, and clears once answered', async () => {
+  const { root, auth } = await projectWithProfile();
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(path.join(root, 'app.ts'), 'export const port = 3000;\n');
+  const turns = [
+    { tool_calls: [{ index: 0, id: 'call_write', function: { name: 'Write', arguments: '{"file_path":"notes.md","content":"x"}' } }] },
+    { content: 'Wrote the notes.' }
+  ];
+  let turn = 0;
+  const base = fakeNear([]);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (!String(input).endsWith('/chat/completions')) return base(input, init);
+    const delta = turns[turn++] ?? { content: 'done' };
+    const body = [`data: ${JSON.stringify({ choices: [{ delta, finish_reason: 'tool_calls' in delta ? 'tool_calls' : 'stop' }] })}`, 'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":10}}', 'data: [DONE]', ''].join('\n\n');
+    return new Response(body, { status: 200, headers: { 'inference-id': INFERENCE_ID } });
+  }) as typeof fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    await sidebar.send({ type: 'chat-ready' });
+    assert.equal(sidebar.posted.some((message) => message.type === 'approval-request'), false, 'nothing to replay before a run');
+    assert.equal(sidebar.view.badge, undefined);
+    const running = sidebar.send({ type: 'send', text: 'Write notes', model: 'z-ai/glm-5.3' });
+    let approval: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 200 && !approval; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      approval = sidebar.posted.find((message) => message.type === 'approval-request');
+    }
+    assert.ok(approval, 'the write waits for approval');
+    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'NEAR AI is waiting for you' });
+    await sidebar.send({ type: 'chat-ready' });
+    const replays = sidebar.posted.filter((message) => message.type === 'approval-request');
+    assert.equal(replays.length, 2);
+    assert.deepEqual(replays[1], { ...approval, replay: true }, 'the reloaded view pins the same prompt again');
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'deny' });
+    await running;
+    assert.equal(sidebar.view.badge, undefined, 'the badge clears once nothing waits');
+    await sidebar.send({ type: 'chat-ready' });
+    assert.equal(sidebar.posted.filter((message) => message.type === 'approval-request').length, 2, 'an answered prompt is not replayed');
   } finally {
     globalThis.fetch = originalFetch;
   }
