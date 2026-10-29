@@ -175,24 +175,13 @@ test('team lifecycle protocol round-trips bounded CRUD, version, import/export, 
   if (invocation.type === 'team-invocation-status') assert.equal(invocation.value.estimatedCostUsd, 1);
 });
 
-test('the Tools tab hides features that do not run yet and keeps analytics and artifacts', () => {
-  const nodeModule = require('node:module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
-  const originalLoad = nodeModule._load;
-  nodeModule._load = (request, parent, isMain) => request === 'vscode' ? { workspace: { workspaceFolders: undefined } } : originalLoad(request, parent, isMain);
-  let html: string;
-  try {
-    html = (require('../services/chat') as typeof import('../services/chat')).toolsWebviewHtmlForTest();
-  } finally {
-    nodeModule._load = originalLoad;
-  }
-  const hiddenRule = /#team-studio,\[aria-labelledby="attachments-heading"\],\[aria-labelledby="generation-heading"\],\[aria-labelledby="memory-heading"\],#attach,#multimodal-prepare\{display:none!important\}/;
-  assert.match(html, hiddenRule);
-  // The collapsible wrappers around the hidden sections are hidden too, so no empty dropdowns remain.
-  for (const section of ['>#team-studio', '>[aria-labelledby="attachments-heading"]', '>[aria-labelledby="generation-heading"]', '>[aria-labelledby="memory-heading"]', '>[aria-labelledby="team-lifecycle-heading"]', '>[aria-labelledby="memory-actions-heading"]', '>[aria-labelledby="memory-graph-heading"]']) {
-    assert.ok(html.includes(section) && /details\.advanced-section:has\([^)]*\)\{display:none!important\}/.test(html), `wrapper for ${section} is hidden`);
-  }
-  assert.match(html, /id="tools-note"/);
-  assert.doesNotMatch(html, /fleet-heading[^}]*display:none/);
-  assert.doesNotMatch(html, /wallet-entitlement-heading/);
+test('the Tools tab is a directory of what agents can use, with no retired sections or second chat', () => {
+  const { toolsPageHtml } = require('../services/toolsDirectory') as typeof import('../services/toolsDirectory');
+  const html = toolsPageHtml({ cspSource: 'vscode-webview://test', nonce: 'nonce-0001', script: 'tools.js', style: 'tools.css' });
+  // The old page's chat, composer, and its hidden sections (which left empty dropdowns) are gone, not hidden.
+  for (const id of ['messages', 'input', 'send', 'team-studio', 'tools-note', 'fleet', 'attachments', 'commands', 'history']) assert.doesNotMatch(html, new RegExp(`id="${id}"`), `no #${id}`);
+  assert.doesNotMatch(html, /display:none|advanced-section|<details|wallet-entitlement-heading/);
+  for (const section of ['skills', 'agents', 'tools', 'mcp', 'models']) assert.match(html, new RegExp(`<section aria-labelledby="${section}-title"><h2 id="${section}-title">`));
+  assert.match(html, /aria-label="Search workflows, agents, tools, MCP servers, and models"/);
 });
 

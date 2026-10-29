@@ -41,6 +41,11 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
     await this.request({ type: 'refresh-status' });
   }
 
+  /** Puts text in the composer (replacing a draft) and focuses it, without sending; e.g. "Use in chat" on the Tools tab. */
+  public async prefill(text: string): Promise<void> {
+    await this.post({ type: 'prefill', text });
+  }
+
   /** Asks the view to send a host-validated intent, so host actions reuse the view's own message flow. */
   public async request(payload: ChatWebviewMessage): Promise<void> {
     await this.post({ type: 'host-request', payload });

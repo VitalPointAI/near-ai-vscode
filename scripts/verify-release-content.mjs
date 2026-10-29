@@ -90,6 +90,8 @@ const required = [
   'extension/vendor/mcp/LICENSES.txt',
   'extension/media/activity/activity.js',
   'extension/media/mcp/mcp.js',
+  'extension/media/tools/tools.js',
+  'extension/media/tools/tools.css',
   'extension/sbom.cdx.json',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];

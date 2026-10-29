@@ -49,10 +49,11 @@ test('memory approval preview and one-shot confirmation messages are strict and 
   assert.equal(parseChatWebviewMessage({ type: 'memory-approve', approvalFingerprint: 'a'.repeat(63), explicit: true }), undefined);
 });
 
-test('memory explorer exposes interactive graph, table, outline fallback, and safe labels', async () => {
+// The memory explorer UI left with the old Tools page; the host keeps its approval-gated, local-only memory actions.
+test('memory actions stay approval-gated and local-only in the host after the explorer UI was retired', async () => {
   const source = await readFile('src/services/chat.ts', 'utf8');
-  for (const control of ['memory-preview', 'memory-approve', 'Interactive memory graph', 'Memory nodes with provenance confidence freshness tension and conflict', 'Accessible outline fallback', 'Preview correction', 'Preview merge of selected nodes', 'Preview retraction', 'Preview reset graph', 'Preview local export']) assert.match(source, new RegExp(control.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')));
-  assert.match(source, /role','button/);
-  assert.match(source, /textContent/);
-  assert.match(source, /local-only/);
+  for (const control of ['memory-preview', 'memory-approve', 'memoryApprovals.consume', 'local-only']) assert.ok(source.includes(control), control);
+  assert.match(source, /Memory actions remain local-only in this host path\./);
+  const page = await readFile('media/tools/tools.js', 'utf8');
+  for (const retired of ['memory-preview', 'memory-approve', 'Interactive memory graph']) assert.equal(page.includes(retired), false, `the Tools page has no ${retired}`);
 });

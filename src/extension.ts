@@ -12,7 +12,7 @@ import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerMcpConnections } from './services/mcpView';
-import { openTools } from './services/chat';
+import { openTools } from './services/toolsPage';
 import { sharedTranscriptKey, TranscriptStore } from './services/transcripts';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
@@ -67,7 +67,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     }),
     vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
     vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
-    vscode.commands.registerCommand('nearAi.openTools', () => openTools(context, auth)),
+    vscode.commands.registerCommand('nearAi.openTools', () => openTools(context, auth, sidebar)),
     vscode.commands.registerCommand('nearAi.showHistory', () => showHistory(context, sidebar)),
     vscode.commands.registerCommand('nearAi.gsdCommand', async () => {
       const selected = await chooseGsdCommand();
