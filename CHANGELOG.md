@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.5
+
+- **Team Studio.** **NEAR AI: Team Studio** shows your teams as cards (members,
+  roles, models with TEE / Local / Forwarded badges) and walks you through
+  building one: purpose and a starting point, members and roles, models, tools
+  and what each will run or ask, then instructions with a live preview of the
+  Markdown it saves. Existing teams open in tabs with version history, diffs
+  and restore. The Markdown file stays the source of truth: anything you wrote
+  by hand is kept, and edits made outside the studio are picked up. Leaving with
+  unsaved changes asks first, and closing the panel keeps them as a draft.
+- **A reply that stops is retried, then reported.** A model reply that NEAR cuts
+  off, or that stops sending anything, used to end the run silently with no
+  answer. It is now retried up to three times, and then the chat says which
+  model stopped responding and that your work is kept. Agent Activity shows the
+  run as failed instead of running. Stop now ends a reply immediately.
+- **Set up exact spend tracking from Settings.** The NEAR AI settings, the chat's
+  spend line, Spending Limits, Agent Activity and the Tools page link to **Set
+  usage reporting token**, with how to create one. The token is kept in
+  SecretStorage; one pasted into a setting by mistake is moved there.
+- **Agent Activity keeps up.** Runs that finished quickly could be missing from
+  History and the totals until something else changed. They now appear within
+  about a second.
+- Tool descriptions no longer stop short at "e.g.".
+
 ## 0.4.4
 
 - **Several conversations at once.** Tabs above the chat let you start a new
