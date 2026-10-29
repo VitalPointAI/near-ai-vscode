@@ -103,8 +103,14 @@ export const STATUS_TEXT: Record<ToolStatus, string> = {
 
 export function firstSentence(text: string): string {
   const clean = text.replace(/\s+/g, ' ').trim();
-  const match = /^(.{20,}?[.!?])(?:\s|$)/.exec(clean);
-  return (match ? match[1] : clean).slice(0, 240);
+  // A period after an abbreviation such as "e.g." doesn't end the sentence.
+  const end = /[.!?](?=\s|$)/g;
+  let match: RegExpExecArray | null;
+  while ((match = end.exec(clean))) {
+    const sentence = clean.slice(0, match.index + 1);
+    if (sentence.length >= 20 && !/\b(?:e\.g|i\.e|etc|vs|cf)\.$/i.test(sentence)) return sentence.slice(0, 240);
+  }
+  return clean.slice(0, 240);
 }
 
 function tierOf(value: string | undefined): string {

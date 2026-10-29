@@ -12,7 +12,7 @@ import { AuthService, SecretStorageLike } from '../services/auth';
 import { deriveProfileId } from '../domain/auth';
 import { ProfileStore } from '../services/profileStore';
 import type { McpServerStatus } from '../services/mcpRegistry';
-import { buildToolsDirectory, DirectoryInput, parseToolsPageMessage, skillGroup, ToolsDirectory, toolsPageHtml } from '../services/toolsDirectory';
+import { buildToolsDirectory, DirectoryInput, firstSentence, parseToolsPageMessage, skillGroup, ToolsDirectory, toolsPageHtml } from '../services/toolsDirectory';
 
 // The NEAR AI Tools tab: a directory of what agents can use, replacing the old second chat page.
 
@@ -417,4 +417,10 @@ test('"Use in chat" keeps a draft: empty, plain draft, and a draft that starts w
   assert.match(chat, /if \(m\.insert\) \{ const next = window\.nearComposer\.insertCommand\(input\.value, m\.text\); input\.value = next\.text; input\.focus\(\); input\.setSelectionRange\(next\.caret, next\.caret\);/);
   const panel = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'panelView.ts'), 'utf8');
   assert.ok(panel.indexOf("asset('composer.js')") < panel.indexOf("asset('chat.js')"), 'composer.js loads before chat.js');
+});
+
+test('a tool summary does not stop at an abbreviation such as "e.g."', () => {
+  assert.equal(firstSentence('Run an installed slash command, e.g. "/gsd-plan-phase 1 --auto": loads its instructions to follow now.'), 'Run an installed slash command, e.g. "/gsd-plan-phase 1 --auto": loads its instructions to follow now.');
+  assert.equal(firstSentence('Read a text file from the workspace. Lines are numbered.'), 'Read a text file from the workspace.');
+  assert.equal(firstSentence('Short. But this continues for a while.'), 'Short. But this continues for a while.');
 });
