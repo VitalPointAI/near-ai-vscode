@@ -570,3 +570,42 @@ test('sidebar: a reload reopens the conversation list, and a run it cut off show
     assert.equal(sessions.filter((entry) => entry.conversationId === cut).length, 2, 'the new run is in the same conversation window');
   });
 });
+
+test('sidebar: a conversation stopped or closed while its turn is still being prepared never starts its run', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  const near = fakeNear(() => ({ content: 'should not run' }));
+  // The model catalog is held, so each turn is still being prepared when it is stopped.
+  let releaseCatalog!: () => void;
+  let catalogAsked = false;
+  let holding = false;
+  const catalog = new Promise<void>((resolve) => { releaseCatalog = resolve; });
+  const held = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (holding && String(input).endsWith('/models')) { catalogAsked = true; await catalog; }
+    return near.fetch(input, init);
+  }) as typeof globalThis.fetch;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = held;
+  try {
+    const sidebar = await openSidebar(root, auth, shared);
+    // The catalog loaded for the model list is cached; the turn loads it afresh.
+    (require('../services/providerCache') as typeof import('../services/providerCache')).clearProviderCache();
+    holding = true;
+    const a = sidebar.summary()!.activeId;
+    const first = sidebar.send({ type: 'send', text: 'first', model: MODEL, conversationId: a });
+    await until(() => catalogAsked);
+    assert.equal(sidebar.item(a)?.status, 'running');
+    await sidebar.send({ type: 'stop', conversationId: a });
+    await sidebar.send({ type: 'new-chat' });
+    const b = sidebar.summary()!.activeId;
+    const second = sidebar.send({ type: 'send', text: 'second', model: MODEL, conversationId: b });
+    confirmClose = 'Stop and close';
+    await sidebar.send({ type: 'close-conversation', id: b });
+    releaseCatalog();
+    await Promise.all([first, second]);
+    assert.equal(near.requests.length, 0, 'no model request was made');
+    assert.equal(sidebar.item(a)?.status, 'stopped');
+    assert.equal(sidebar.item(b), undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

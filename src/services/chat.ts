@@ -74,6 +74,8 @@ interface ChatTab {
   unread: boolean;
   /** Closed while its run was still ending: the agent is disposed once it has. */
   closing: boolean;
+  /** Counts stops, so a turn still being prepared when its conversation is stopped never starts its run. */
+  stops: number;
   /** How each settled prompt ended, for the record left in its place when the conversation is shown again. */
   outcomes: Map<string, PromptOutcome>;
   /** What was typed for each queued steer, so a re-shown conversation shows its queued messages. */
@@ -112,11 +114,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   // The tab list: posted when it changes, and saved so a reload reopens the same conversations.
   let lastSummary = '';
   let lastSaved = '';
+  let lastBadge = '';
   const sendSummary = (force = false): void => {
     if (disposed) return;
     const items: ConversationSummary[] = tabs.map((tab) => ({ id: tab.id, title: tab.title, status: conversationStatus({ running: isRunning(tab), waiting: waitingCount(tab), outcome: tab.outcome }), unread: tab.unread, waiting: waitingCount(tab) }));
     const waiting = items.reduce((sum, item) => sum + item.waiting, 0);
-    showWaitingBadge(panel, waiting, items.filter((item) => item.waiting > 0).length);
+    const waitingIn = items.filter((item) => item.waiting > 0).length;
+    if (`${waiting}/${waitingIn}` !== lastBadge) { lastBadge = `${waiting}/${waitingIn}`; showWaitingBadge(panel, waiting, waitingIn); }
     const summary = { type: 'conversations', activeId: onScreen()?.id, items, waiting, max: MAX_OPEN_CONVERSATIONS };
     const json = JSON.stringify(summary);
     if (force || json !== lastSummary) { lastSummary = json; void panel.webview.postMessage(summary); }
@@ -125,7 +129,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   };
 
   const newTab = (id = newConversationId()): ChatTab => {
-    const tab: ChatTab = { id, log: new ConversationLog(), title: '', turns: 0, outcome: 'idle', unread: false, closing: false, outcomes: new Map(), steerTexts: new Map(), post: () => undefined };
+    const tab: ChatTab = { id, log: new ConversationLog(), title: '', turns: 0, outcome: 'idle', unread: false, closing: false, stops: 0, outcomes: new Map(), steerTexts: new Map(), post: () => undefined };
     tab.post = (message) => {
       tab.outcome = outcomeOf(message) ?? tab.outcome;
       if (message.type === 'approval-expired' && typeof message.callId === 'string') tab.outcomes.set(message.callId, { outcome: 'expired', ...(typeof message.minutes === 'number' ? { detail: message.minutes } : {}) });
@@ -133,6 +137,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const steerId = message.type === 'steer-state' ? String(message.id) : undefined;
       tab.log.add(steerId && message.state === 'queued' && tab.steerTexts.has(steerId) ? { ...message, text: tab.steerTexts.get(steerId) } : message);
       if (steerId && message.state !== 'queued') tab.steerTexts.delete(steerId);
+      if (disposed) return;
       if (tab.id === activeId && tabs.includes(tab)) void panel.webview.postMessage(message);
       else if (isOutput(message)) tab.unread = true;
       sendSummary();
@@ -201,6 +206,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (index === -1) return;
     tabs.splice(index, 1);
     tab.closing = true;
+    tab.stops += 1;
     tab.agent?.stop();
     if (!tab.turns && !tab.agent?.running) tab.agent?.dispose();
     if (!tabs.length) tabs.push(newTab());
@@ -261,8 +267,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
 
   const handle = async (message: ChatWebviewMessage, tab: ChatTab): Promise<void> => {
     if (message.type === 'stop') {
+      const was = isRunning(tab);
+      const outcome = tab.outcome;
+      tab.stops += 1;
       tab.agent?.stop();
       tab.post({ type: 'assistant-cancelled', status: await readGsdStatusLine() });
+      // Stopping a conversation that was not running leaves how its last turn ended.
+      if (!was) { tab.outcome = outcome; sendSummary(); }
       return;
     }
     // Only the user's own choice in the composer's picker changes the approval policy.
@@ -365,6 +376,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (message.type !== 'send' && message.type !== 'open-command') return;
     if (message.type === 'send' && !message.text?.trim()) return;
+    const stops = tab.stops;
+    /** Stopped (or closed) while this turn was still being prepared: its run never starts. */
+    const stopped = () => tab.closing || tab.stops !== stops;
     // What the user sent stays in the conversation's log (the view showed it as they sent it), and names a new conversation.
     const typed = message.type === 'send' ? message.text : `/${message.command}${message.args ? ` ${message.args}` : ''}`;
     if (!(message.type === 'send' && message.overrideToken)) {
@@ -457,6 +471,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.post({ type: 'outbound-blocked', text, model, reason: verdict.reason, overrideToken: message.type === 'send' ? verdict.overrideToken : undefined, confirm: verdict.outcome === 'confirm' });
       return;
     }
+    if (stopped()) return;
     tab.model = model;
     tab.modelInfo = modelInfo;
     const attribution = hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization);
@@ -492,6 +507,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         warnedSafetyModels.add(`${model}|${readSafetyModel()}`);
         tab.post({ type: 'notice', text: `Auto approve: ${readSafetyModel()} is not available as a private (TEE) model here, so commands the rules cannot decide will ask you.` });
       }
+      if (stopped()) { await state.activity.append(session.sessionId, { status: 'cancelled', summary: 'Stopped before the run started.' }); return; }
       await agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account }));
       await sendArtifacts(panel);
@@ -557,6 +573,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     for (const tab of [...tabs]) {
       const shown = tab.id === activeId;
       const was = isRunning(tab);
+      tab.stops += 1;
       tab.agent?.stop();
       if (was || shown) tab.post({ type: 'assistant-cancelled', status });
     }
