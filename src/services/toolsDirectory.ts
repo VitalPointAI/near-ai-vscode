@@ -101,7 +101,7 @@ export const STATUS_TEXT: Record<ToolStatus, string> = {
   stopped: 'Blocked: emergency stop is on'
 };
 
-function firstSentence(text: string): string {
+export function firstSentence(text: string): string {
   const clean = text.replace(/\s+/g, ' ').trim();
   const match = /^(.{20,}?[.!?])(?:\s|$)/.exec(clean);
   return (match ? match[1] : clean).slice(0, 240);
@@ -113,7 +113,7 @@ function tierOf(value: string | undefined): string {
   return marker.startsWith('\u0000') ? marker.slice(1) : 'model';
 }
 
-function resolveAgentModel(name: string, definitionModel: string | undefined, input: DirectoryInput, teamMember: boolean): { tier: string; model: string; source: DirectoryAgent['source'] } {
+export function resolveAgentModel(name: string, definitionModel: string | undefined, input: DirectoryInput, teamMember: boolean): { tier: string; model: string; source: DirectoryAgent['source'] } {
   // The same order a run uses: a team member's own model line wins; then the role's setting; then the definition.
   const roleModel = teamMember && definitionModel ? undefined : roleModelFor(name, input.settings.roleModels);
   const value = roleModel ?? definitionModel;
@@ -134,11 +134,11 @@ function toolEntry(tool: AgentTool<any>, input: DirectoryInput, available: { off
   return { name: tool.name, description: firstSentence(tool.description), capability: CAPABILITY_LABEL[tool.capability], status, statusText: STATUS_TEXT[status], notes, ...(available.setup ? { setup: available.setup } : {}) };
 }
 
-function privacyOf(model: ModelInfo): DirectoryModel['privacy'] {
+export function privacyOf(model: ModelInfo): DirectoryModel['privacy'] {
   return model.privacyBoundary === 'tee' ? 'tee' : model.privacyBoundary === 'local' ? 'local' : model.privacyBoundary === 'cloud' ? 'forwarded' : 'unknown';
 }
 
-const PRIVACY_TEXT: Record<DirectoryModel['privacy'], string> = { tee: 'TEE: runs privately in NEAR’s TEE', local: 'Local: runs on this machine', forwarded: 'Forwarded: not private', unknown: 'Privacy unknown' };
+export const PRIVACY_TEXT: Record<DirectoryModel['privacy'], string> = { tee: 'TEE: runs privately in NEAR’s TEE', local: 'Local: runs on this machine', forwarded: 'Forwarded: not private', unknown: 'Privacy unknown' };
 
 /** Builds the whole directory from what the host gathered. Pure: no I/O, no model calls. */
 export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
