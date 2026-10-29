@@ -41,9 +41,9 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
     await this.request({ type: 'refresh-status' });
   }
 
-  /** Puts text in the composer (replacing a draft) and focuses it, without sending; e.g. "Use in chat" on the Tools tab. */
+  /** Puts a command in the composer, keeping any draft, and focuses it without sending ("Use in chat" on the Tools tab). */
   public async prefill(text: string): Promise<void> {
-    await this.post({ type: 'prefill', text });
+    await this.post({ type: 'prefill', text, insert: true });
   }
 
   /** Asks the view to send a host-validated intent, so host actions reuse the view's own message flow. */
@@ -108,6 +108,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 <div id="live" class="visually-hidden" aria-live="polite"></div>
 <script nonce="${nonce}" src="${asset('markdown.js')}"></script>
 <script nonce="${nonce}" src="${asset('pending.js')}"></script>
+<script nonce="${nonce}" src="${asset('composer.js')}"></script>
 <script nonce="${nonce}" src="${asset('chat.js')}"></script>
 </body>
 </html>`;

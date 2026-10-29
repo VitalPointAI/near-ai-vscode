@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import test from 'node:test';
@@ -394,9 +395,26 @@ test('the sidebar prefill posts to the chat view the way host requests do', asyn
     const provider = new NearAiPanelViewProvider({} as never, {} as never);
     (provider as unknown as { view: unknown }).view = { webview: { postMessage: async (message: unknown) => { posted.push(message); return true; } } };
     await provider.prefill('/gsd-plan-phase ');
-    assert.deepEqual(posted, [{ type: 'prefill', text: '/gsd-plan-phase ' }]);
+    assert.deepEqual(posted, [{ type: 'prefill', text: '/gsd-plan-phase ', insert: true }], 'an insert, so the composer keeps a draft');
     assert.deepEqual(executed, ['nearAiChatView.focus']);
   } finally {
     nodeModule._load = originalLoad;
   }
+});
+
+test('"Use in chat" keeps a draft: empty, plain draft, and a draft that starts with a command', () => {
+  const { insertCommand } = require(path.join(__dirname, '..', '..', 'media', 'chat', 'composer.js')) as { insertCommand(draft: string, command: string): { text: string; caret: number } };
+  // Empty (or only spaces): the command, caret after it.
+  assert.deepEqual(insertCommand('', '/gsd-plan-phase '), { text: '/gsd-plan-phase ', caret: 16 });
+  assert.deepEqual(insertCommand('   \n', '/gsd-plan-phase '), { text: '/gsd-plan-phase ', caret: 16 });
+  // A draft: the command goes first and the draft is kept.
+  assert.deepEqual(insertCommand('fix the login bug', '/gsd-debug '), { text: '/gsd-debug fix the login bug', caret: 11 });
+  // A draft that starts with a command: only that command is replaced.
+  assert.deepEqual(insertCommand('/gsd-progress phase 3 please', '/gsd-plan-phase '), { text: '/gsd-plan-phase phase 3 please', caret: 16 });
+  assert.deepEqual(insertCommand('/team:web', '/gsd-debug '), { text: '/gsd-debug ', caret: 11 });
+  assert.deepEqual(insertCommand('/team:web\nsecond line', '/gsd-debug '), { text: '/gsd-debug\nsecond line', caret: 10 });
+  const chat = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  assert.match(chat, /if \(m\.insert\) \{ const next = window\.nearComposer\.insertCommand\(input\.value, m\.text\); input\.value = next\.text; input\.focus\(\); input\.setSelectionRange\(next\.caret, next\.caret\);/);
+  const panel = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'panelView.ts'), 'utf8');
+  assert.ok(panel.indexOf("asset('composer.js')") < panel.indexOf("asset('chat.js')"), 'composer.js loads before chat.js');
 });

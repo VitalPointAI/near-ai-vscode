@@ -793,7 +793,13 @@
     switch (m.type) {
       case 'host-request': post(m.payload); break;
       case 'reset': resetConversation(); post({ type: 'new-chat' }); break;
-      case 'prefill': input.value = m.text || ''; autosize(); updateSendState(); input.focus(); break;
+      case 'prefill': {
+        // "Use in chat" inserts a command and keeps the draft; other prefills (a resumed session) set the text.
+        if (m.insert) { const next = window.nearComposer.insertCommand(input.value, m.text); input.value = next.text; input.focus(); input.setSelectionRange(next.caret, next.caret); }
+        else { input.value = m.text || ''; input.focus(); }
+        autosize(); updateSendState();
+        break;
+      }
       case 'status': status.textContent = (m.value || '') + (status.dataset.context || ''); status.title = (m.value || '') + (m.tooltip ? '\n' + m.tooltip : '') + ' — click for detailed progress'; break;
       case 'models': {
         const models = m.models || [];
