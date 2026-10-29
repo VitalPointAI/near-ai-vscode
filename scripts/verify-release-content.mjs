@@ -93,6 +93,8 @@ const required = [
   'extension/media/mcp/mcp.js',
   'extension/media/tools/tools.js',
   'extension/media/tools/tools.css',
+  'extension/media/teams/teams.js',
+  'extension/media/teams/teams.css',
   'extension/sbom.cdx.json',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];
