@@ -593,6 +593,8 @@ export class NearAiClient {
       if (signal?.aborted || isAbortError(error)) return;
       throw error;
     } finally {
+      // A caller that stopped reading early leaves no listener on its signal behind.
+      this.streams.get(response)?.release();
       this.settleCharge(response, signal?.aborted ? 'aborted' : 'partial', latest, { streamedChars: chars });
     }
   }
@@ -631,6 +633,8 @@ export class NearAiClient {
       yield { type: 'status', status: 'completed', metadata: completed };
       yield { type: 'done', metadata: completed };
     } finally {
+      // A caller that stopped reading early leaves no listener on its signal behind.
+      this.streams.get(response)?.release();
       this.settleCharge(response, signal?.aborted ? 'aborted' : 'partial', latest, { streamedChars: chars });
     }
   }
