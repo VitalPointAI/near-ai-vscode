@@ -121,6 +121,23 @@ export class ActivityStore {
     await this.persist();
     return cloneSession(session);
   }
+  /**
+   * Ends every run still marked running: only a run of an earlier extension host can be, since
+   * this one has started none yet, so a reload cut it off. It is recorded as stopped, ending at
+   * its last activity, so the history does not show it running forever. Returns how many.
+   */
+  public async closeInterrupted(summary = 'Run stopped: VS Code reloaded before it finished.'): Promise<number> {
+    await this.load();
+    const open = this.ledger.sessions.filter((session) => session.outcome === 'running' && !session.runOutcome);
+    for (const session of open) {
+      const endedAt = session.updatedAt;
+      await this.append(session.sessionId, { status: 'cancelled', kind: 'session', summary });
+      const saved = this.ledger.sessions.find((candidate) => candidate.sessionId === session.sessionId);
+      if (saved) { saved.endedAt = endedAt; saved.runOutcome = 'cancelled'; }
+    }
+    if (open.length) await this.persist();
+    return open.length;
+  }
   /** Append provider-reported values without replacing or inventing the estimate. */
   public async reconcile(sessionId: string, usage: Pick<UsageMetadata, 'requestId' | 'inputTokens' | 'outputTokens' | 'actualCostUsd' | 'latencyMs'>): Promise<ActivitySessionSummary> {
     if (!usage.requestId) throw new Error('A provider request ID is required for reconciliation.');
@@ -135,6 +152,17 @@ export class ActivityStore {
     const payload = `${JSON.stringify(this.ledger)}\n`; const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}`;
     this.writeQueue = this.writeQueue.then(async () => { await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath); }); await this.writeQueue;
   }
+}
+const interrupted = new Map<string, Promise<number>>();
+/**
+ * Closes runs a reload cut off in this project's history, once per extension host: at
+ * activation, and before the chat starts any run of its own.
+ */
+export function closeInterruptedRuns(workspaceRoot: string): Promise<number> {
+  const key = path.resolve(workspaceRoot);
+  let done = interrupted.get(key);
+  if (!done) { done = new ActivityStore(key).closeInterrupted().catch(() => 0); interrupted.set(key, done); }
+  return done;
 }
 const RUN_OUTCOMES: RunOutcomeLabel[] = ['completed', 'max-turns', 'cancelled', 'failed'];
 function runFields(input: { runId?: unknown; conversationId?: unknown; title?: unknown; endedAt?: unknown; runOutcome?: unknown; stats?: unknown }): Partial<ActivitySessionSummary> {

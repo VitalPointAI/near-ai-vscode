@@ -24,6 +24,7 @@ import { registerWorkspaceCommands } from './services/workspaceCommands';
 import { initEmergencyStop, setEmergencyStop } from './services/emergencyStop';
 import { clearProviderCache } from './services/providerCache';
 import { setNearAiDiagnostics } from './services/nearAiClient';
+import { closeInterruptedRuns } from './services/activityStore';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
@@ -40,6 +41,10 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       void (failed ? vscode.window.showWarningMessage(message) : vscode.window.showInformationMessage(message));
     }).then((updates) => { if (updates) context.subscriptions.push(updates); });
   }
+
+  // A reload cut off any run still marked running in this project's history: record it as stopped.
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (projectRoot) void closeInterruptedRuns(projectRoot);
 
   const sidebar = new NearAiPanelViewProvider(context, auth);
   registerAgentActivity(context, sidebar);
