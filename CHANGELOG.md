@@ -2,6 +2,39 @@
 
 ## 0.4.4
 
+- **Several conversations at once.** Tabs above the chat let you start a new
+  conversation while others keep running in the background. Each tab shows
+  whether it is running, waiting for you, stopped or done, and a notice says
+  when a background conversation needs you. Switching brings back its prompts,
+  agents, tasks and draft. Stop stops only the conversation on screen; the
+  emergency stop still stops everything. Open conversations come back after a
+  reload, and a run cut off by the reload is marked stopped.
+- **Redirect a running agent.** The message box stays open during a run, with
+  separate Send and Stop buttons (Esc in an empty box also stops). A message
+  sent mid-run reaches the agent after its current step and takes precedence
+  over its plan. If the run ends first, it is sent as a new message.
+- **Spend that matches NEAR AI Cloud.** Every billable call is recorded once,
+  including sub-agents, Auto safety checks, summaries, attachments and images,
+  and NEAR confirms each request's actual cost. The status line, Agent
+  Activity, Spending Limits and reply footers all show the same figure:
+  confirmed plus pending, or NEAR's own total when you set a usage reporting
+  token (**NEAR AI: Set Usage Reporting Token**). "Today" is your local day
+  (`nearAi.spend.dayBoundary`), and the daily limit uses the same figure. NEAR's
+  spend-limit response is shown as "NEAR spend limit reached".
+- **Agent Activity is an overview.** Running agents with their state (including
+  "Rate limited · retry in 12s") and cost; totals for this conversation, today
+  or the last 7 days, with the time split, tool calls, approvals and problems by
+  model; and a history of past runs that opens each conversation. **Export
+  details** still saves the raw record.
+- **Export usage and activity.** **NEAR AI: Export Usage and Activity…** saves
+  CSV or JSON by project and date range, with no prompt text.
+- **The Tools page is a directory.** It lists the workflows, agents and teams,
+  built-in tools (and whether each runs or asks under your approval mode), MCP
+  servers and models the agents can use, with **Use in chat** buttons. The old
+  second chat is gone. **Use in chat** keeps what you had typed.
+- **Tasks keep up with sub-agents.** A listed task is marked done as soon as
+  the agent working on it finishes, and each sub-agent's own steps show in its
+  row ("1/2 steps").
 - **Prompts stay in view until you answer.** Approvals, agent questions and
   Open-GSD choices are pinned above the message box instead of scrolling away.
   When several wait, you step through them ("1 of 3 waiting"), each saying
