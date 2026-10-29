@@ -176,6 +176,16 @@
         "icon": "$(credit-card)"
       },
       {
+        "command": "nearAi.setUsageReportingToken",
+        "title": "Set Usage Reporting Token",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.clearUsageReportingToken",
+        "title": "Clear Usage Reporting Token",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.manageMcp",
         "title": "Manage MCP Connections",
         "category": "NEAR AI",
@@ -328,7 +338,20 @@
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "description": "Stop sending NEAR AI requests once today's recorded spend reaches this amount in USD. 0 means no limit."
+          "description": "Stop sending NEAR AI requests once today's spend reaches this amount in USD: NEAR AI Cloud's own total for your API key when a usage reporting token is set, or this computer's spend ledger (confirmed plus pending), whichever is higher. Checked before every request and every model turn. 0 means no limit."
+        },
+        "nearAi.spend.dayBoundary": {
+          "type": "string",
+          "enum": [
+            "local",
+            "utc"
+          ],
+          "enumDescriptions": [
+            "Today starts at midnight on this computer's clock.",
+            "Today starts at midnight UTC."
+          ],
+          "default": "local",
+          "description": "When \"today\" starts for spend figures and nearAi.dailySpendLimitUsd."
         },
         "nearAi.agent.allowCommands": {
           "type": "array",

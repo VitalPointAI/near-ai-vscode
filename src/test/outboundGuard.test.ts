@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { OutboundGuard, spentTodayUsd } from '../services/outboundGuard';
-import type { ActivitySessionSummary } from '../domain/activity';
+import { OutboundGuard } from '../services/outboundGuard';
 
 const standard = { privacyMode: 'standard' as const, dailySpendLimitUsd: 0, actionPolicy: { mode: 'approve-risky' as const, emergencyStop: false } };
 const tee = { privacyBoundary: 'tee' as const, id: 'z-ai/glm-5.3' };
@@ -50,8 +49,3 @@ test('emergency stop and the daily spend limit block before anything else', () =
   assert.match(over.outcome === 'block' ? over.reason : '', /daily limit of \$1\.00/);
 });
 
-test("today's spend sums today's sessions, preferring actual cost", () => {
-  const session = (updatedAt: string, estimatedCostUsd?: number, actualCostUsd?: number) => ({ updatedAt, estimatedCostUsd, actualCostUsd }) as ActivitySessionSummary;
-  const now = new Date('2026-10-26T18:00:00Z');
-  assert.equal(spentTodayUsd([session('2026-10-26T09:00:00Z', 0.5, 0.4), session('2026-10-26T10:00:00Z', 0.25), session('2026-10-25T23:00:00Z', 9)], now), 0.65);
-});

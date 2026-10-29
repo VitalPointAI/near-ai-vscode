@@ -10,6 +10,7 @@ import { registerAgentActivity } from './services/activityView';
 import { registerSecurityScanning } from './services/securityScan';
 import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
+import { registerSpendTracking } from './services/spendTracking';
 import { registerMcpConnections } from './services/mcpView';
 import { openTools } from './services/chat';
 import { sharedTranscriptKey, TranscriptStore } from './services/transcripts';
@@ -43,7 +44,8 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerAgentActivity(context);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
-  registerSpendingLimits(context);
+  registerSpendTracking(context);
+  registerSpendingLimits(context, auth);
   registerMcpConnections(context);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),

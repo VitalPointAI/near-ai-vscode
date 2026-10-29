@@ -72,7 +72,12 @@ export class SpendAccount implements SpendSink {
       }
     });
     if (config.timers !== false) { this.reconciler.start(); this.usage.start(); }
+    // What this and other windows recorded before (this month and last) is read at once.
+    this.ready = this.ledger.refresh();
   }
+
+  /** Settles once the ledger's earlier entries are read. */
+  public readonly ready: Promise<void>;
 
   public attach(api: BillingApi & Partial<ReportingApi>): void {
     this.reconciler.attach(api);

@@ -34,6 +34,8 @@ import type { MemoryScope } from '../domain/contextGraph';
 import type { AgentRole } from '../domain/agents';
 import type { ContextGraphMemory } from './contextGraphMemory';
 import type { ReputationStore } from './reputation';
+import { SpendAccount } from './spendAccount';
+import { nanoToUsd, totalNanoUsd, withSpendTag } from './spendLedger';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -95,6 +97,14 @@ export interface AgentTurnRequest {
   safetyModel?: string;
   /** Model or tier per agent role (nearAi.agent.roleModels); a team member's own model line wins. */
   roleModels?: Record<string, string>;
+  /** The run's ID, when the host already tagged spend for it (attachments read before the run). */
+  runId?: string;
+}
+
+/** The spend account of a client, when spend tracking is on for it. */
+export function spendAccountOf(client: unknown): SpendAccount | undefined {
+  const spend = (client as { spend?: unknown } | undefined)?.spend;
+  return spend instanceof SpendAccount ? spend : undefined;
 }
 
 type Record_ = (event: Parameters<ActivityStore['append']>[1]) => Promise<unknown>;
@@ -180,6 +190,8 @@ export class AgentConversation {
   /** The current run's auto-mode safety check, shared with its sub-agents. */
   private runSafety: SafetyModelCheck | undefined;
   private spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
+  /** The current run's ID and the key's spend ledger: run cost, the run budget, and progress lines read it. */
+  private runSpendSource: { runId: string; account: SpendAccount } | undefined;
 
   public constructor(
     private readonly root: string,
@@ -194,6 +206,10 @@ export class AgentConversation {
   private get worktreeDir(): string { return path.join(path.dirname(this.checkpointDir), 'worktrees'); }
 
   public get running(): boolean { return Boolean(this.abort); }
+  /** This conversation's ID (spend for "this conversation" is tagged with it). */
+  public get id(): string { return this.conversationId; }
+  /** A new run ID, for spend the host records before the run starts (attachments). */
+  public static newRunId(): string { return `run-${Date.now()}-${randomBytes(3).toString('hex')}`; }
   public get runningAgents(): number { return this.agents.size; }
 
   public async send(request: AgentTurnRequest): Promise<void> {
@@ -202,7 +218,9 @@ export class AgentConversation {
     const abort = new AbortController();
     this.abort = abort;
     this.spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
-    const runId = `run-${Date.now()}-${randomBytes(3).toString('hex')}`;
+    const runId = request.runId ?? AgentConversation.newRunId();
+    const account = request.local ? undefined : spendAccountOf(request.client);
+    this.runSpendSource = account ? { runId, account } : undefined;
     const checkpoints = new RunCheckpoints(runId, this.checkpointDir);
     this.runs.set(runId, checkpoints);
     this.shellEnvAllow = request.shellEnvAllow ?? [];
@@ -265,12 +283,14 @@ export class AgentConversation {
       }
     });
     const runStartedAt = Date.now();
+    let costAsked = false;
     this.markVisible();
     const heartbeat = setInterval(() => this.heartbeat(runStartedAt), this.progressTiming.checkMs);
     try {
       let result: RunResult;
       try {
-        result = await run.run(this.messages, abort.signal);
+        // Every NEAR request the run makes (sub-agents, safety checks, summaries included) is tagged with it.
+        result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => run.run(this.messages, abort.signal));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
         // Keep what the run did, so the next message continues from there.
@@ -281,11 +301,13 @@ export class AgentConversation {
       this.messages = result.messages;
       const allUsage = [...result.usage, ...extraUsage];
       const usage = sumUsage(allUsage);
+      // The run's cost is the ledger's sum over every request it made, not just its model turns.
+      if (account) usage.estimatedCostUsd = nanoToUsd(totalNanoUsd(account.totals({ runId })));
       const changed = checkpoints.changedFiles.map((file) => displayPath(this.root, file));
       if (result.outcome === 'cancelled') this.post({ type: 'assistant-cancelled' });
       else {
         if (result.outcome === 'max-turns') this.post({ type: 'assistant-delta', text: '\n\n_Stopped after reaching the turn limit. Send a message to continue._' });
-        this.post({ type: 'assistant-done', usage });
+        this.post({ type: 'assistant-done', usage, runId, ...(account ? { spend: spendLine(account.window('run', { runId })) } : {}) });
         const evidence = result.usage.at(-1)?.evidence;
         if (evidence && !request.local && request.privacy.startsWith('Private')) {
           this.verifiable.set(runId, { model: request.model, evidence, client: request.client });
@@ -297,7 +319,9 @@ export class AgentConversation {
       await record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'message', model: request.model, summary: `${request.skill ? `/${request.skill.name} run` : 'Agent run'} ${result.outcome}; ${changed.length} file(s) changed.`, estimatedCostUsd: usage.estimatedCostUsd, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
       await this.saveTranscript(request.model);
       const ids = allUsage.map((turn) => turn.requestId).filter((id): id is string => Boolean(id));
-      if (result.outcome !== 'cancelled' && ids.length && !request.local) {
+      if (account) {
+        if (result.outcome !== 'cancelled') { costAsked = true; await this.reportRunCost(account, runId, request.model, record); }
+      } else if (result.outcome !== 'cancelled' && ids.length && !request.local) {
         const actual = await request.client.actualCostsUsd(ids).catch(() => undefined);
         if (actual !== undefined) {
           this.post({ type: 'assistant-cost', actualCostUsd: actual });
@@ -308,7 +332,31 @@ export class AgentConversation {
       clearInterval(heartbeat);
       if (this.abort === abort) this.abort = undefined;
       this.releasePending();
+      // Stopped or failed runs are reconciled too: NEAR bills what they used.
+      if (account && !costAsked) void account.settleNow((entry) => entry.runId === runId);
     }
+  }
+
+  /**
+   * Asks NEAR for the run's actual cost at once; the footer shows it when every request is settled,
+   * now or (NEAR records usage a few seconds late) when the ledger's reconciliation settles them.
+   */
+  private async reportRunCost(account: SpendAccount, runId: string, model: string, record: Record_): Promise<void> {
+    await account.settleNow((entry) => entry.runId === runId);
+    const settled = () => { const totals = account.totals({ runId }); return totals.requests > 0 && totals.pendingNanoUsd === 0 && totals.estimatedNanoUsd === 0 ? totals : undefined; };
+    const report = async (late: boolean) => {
+      const totals = settled();
+      if (!totals) return false;
+      const actualCostUsd = nanoToUsd(totals.confirmedNanoUsd);
+      this.post(late ? { type: 'assistant-cost', actualCostUsd, runId } : { type: 'assistant-cost', actualCostUsd });
+      await record({ status: 'completed', kind: 'model', model, summary: 'Actual cost reported by NEAR AI.', actualCostUsd });
+      return true;
+    };
+    if (await report(false)) return;
+    let done = false;
+    const watch = account.onChange(() => { if (!done && settled()) { done = true; watch.dispose(); clearTimeout(expiry); void report(true); } });
+    const expiry = setTimeout(() => { done = true; watch.dispose(); }, 30 * 60_000);
+    expiry.unref?.();
   }
 
   public answerApproval(callId: string, reply: ApprovalReply): void {
@@ -541,7 +589,7 @@ export class AgentConversation {
                 else if (event.type === 'retry') this.post({ type: 'notice', text: `${label}: ${retryNotice(event)}` });
               }
             });
-            const result = await child.run([{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }], agent.abort.signal);
+            const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => child.run([{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }], agent.abort.signal));
             this.activity?.agentEnded(agent.id, result.outcome);
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
@@ -684,7 +732,8 @@ export class AgentConversation {
     const detail = agents.length
       ? agents.map((agent) => `${agent.description || agent.label}: ${agent.paused ? 'paused' : agent.activity === 'Thinking' ? `thinking for ${minutesSince(agent.activitySince)}${agent.lastAction ? ` after ${agent.lastAction}` : ''}` : agent.activity} (${minutesSince(agent.startedAt)}, ${agent.toolCalls} tool call${agent.toolCalls === 1 ? '' : 's'})`).join(' · ')
       : 'the agent is thinking';
-    const cost = this.spend.costUsd > 0 ? ` · about $${this.spend.costUsd.toFixed(2)} so far` : '';
+    const spent = this.runCostUsd();
+    const cost = spent > 0 ? ` · about $${spent.toFixed(2)} so far` : '';
     this.post({ type: 'progress', text: `Still working (${minutesSince(runStartedAt)}): ${detail}${cost}.` });
   }
 
@@ -709,19 +758,35 @@ export class AgentConversation {
 
   /** The current or last run's estimated cost and tokens, across its sub-agents. */
   public get runSpend(): { costUsd: number; totalTokens: number; cachedTokens: number; unpricedTokens: number } {
-    return { costUsd: this.spend.costUsd, totalTokens: this.spend.totalTokens, cachedTokens: this.spend.cachedTokens, unpricedTokens: this.spend.tokens };
+    return { costUsd: this.runCostUsd(), totalTokens: this.spend.totalTokens, cachedTokens: this.spend.cachedTokens, unpricedTokens: this.spend.tokens };
+  }
+
+  /** The run's cost so far: every request in the ledger tagged with it (sub-agents, safety checks, summaries), or the model turns' estimates without a ledger. */
+  private runCostUsd(): number {
+    const source = this.runSpendSource;
+    return source ? nanoToUsd(totalNanoUsd(source.account.totals({ runId: source.runId }))) : this.spend.costUsd;
   }
 
   /** Stops the whole run, keeping its work, once its estimated cost or tokens reach the budget. */
   private enforceBudget(request: AgentTurnRequest, abort: AbortController): void {
+    if (this.spend.stopped) return;
+    // The daily limit, before every model turn: NEAR's total for today when known, else this computer's ledger.
+    const reached = this.runSpendSource?.account.limitReached();
+    if (reached) {
+      this.spend.stopped = true;
+      this.post({ type: 'notice', text: `Stopped the run: today's NEAR AI spend ($${reached.spentUsd.toFixed(2)}${reached.source === 'near' ? ', from NEAR\'s usage summary' : ''}) reached your daily limit of $${reached.limitUsd.toFixed(2)} (nearAi.dailySpendLimitUsd). Everything it did is kept.` });
+      abort.abort();
+      return;
+    }
     const budget = request.budget;
-    if (!budget || this.spend.stopped) return;
-    const overCost = this.spend.costUsd >= budget.maxCostUsd;
+    if (!budget) return;
+    const costUsd = this.runCostUsd();
+    const overCost = costUsd >= budget.maxCostUsd;
     const overTokens = this.spend.tokens >= budget.maxTokens;
     if (!overCost && !overTokens) return;
     this.spend.stopped = true;
     this.post({ type: 'notice', text: overCost
-      ? `Stopped the run: its estimated cost reached $${this.spend.costUsd.toFixed(2)}, the limit for one run ($${budget.maxCostUsd.toFixed(2)}; nearAi.agent.maxRunCostUsd, and never more than what is left of nearAi.dailySpendLimitUsd). Everything it did is kept; send a message to continue.`
+      ? `Stopped the run: its estimated cost reached $${costUsd.toFixed(2)}, the limit for one run ($${budget.maxCostUsd.toFixed(2)}; nearAi.agent.maxRunCostUsd, and never more than what is left of nearAi.dailySpendLimitUsd). Everything it did is kept; send a message to continue.`
       : `Stopped the run: it used ${Math.round(this.spend.tokens).toLocaleString('en-US')} tokens on models without published prices, the limit for one run (nearAi.agent.maxRunTokens). Everything it did is kept; send a message to continue.` });
     abort.abort();
   }
@@ -859,6 +924,11 @@ function contentKey(content: string): string {
 
 function newConversationId(): string {
   return `conv-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
+}
+
+/** A spend figure for the webview: its text and what it means. */
+export function spendLine(view: { text: string; tooltip: string; source: string }): { text: string; tooltip: string; source: string } {
+  return { text: view.text, tooltip: view.tooltip, source: view.source };
 }
 
 function sumUsage(turns: UsageMetadata[]): UsageMetadata {

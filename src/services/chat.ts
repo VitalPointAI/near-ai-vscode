@@ -9,12 +9,15 @@ import { AuthService } from './auth';
 import { createNearAiProvider } from './providerFactory';
 import { activeProvider, clientFor } from './providerCache';
 import { projectMemoryScope } from '../agent/extraTools';
-import { AGENT_MEMORY_ACTOR, AgentConversation, findSkill, GsdContext } from './agentSession';
+import { AGENT_MEMORY_ACTOR, AgentConversation, findSkill, GsdContext, spendAccountOf } from './agentSession';
 import { GsdHost } from '../gsd/host';
 import { findRipgrep } from '../agent/tools';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { applyPolicyChoice, PolicyConfiguration, policyStateMessage } from './approvalPolicy';
-import { OutboundGuard, spentTodayUsd } from './outboundGuard';
+import { OutboundGuard } from './outboundGuard';
+import { configureSpendTracking, spendAccountForRoot } from './spendTracking';
+import { shownSpendAccount, showSpendAccount, SpendAccount } from './spendAccount';
+import { withSpendTag } from './spendLedger';
 import { ProfileStore } from './profileStore';
 import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget } from './settings';
 import { sharedTranscriptKey, TranscriptStore } from './transcripts';
@@ -92,6 +95,7 @@ export async function attachChatToView(context: vscode.ExtensionContext, auth: A
 }
 
 async function initializeChat(context: vscode.ExtensionContext, auth: AuthService, panel: ChatHost, html: string, initialPrompt?: string, initialGsdCommand?: string): Promise<void> {
+  configureSpendTracking(context);
   const state = {
     abort: undefined as AbortController | undefined,
     model: readSettings().defaultModel,
@@ -125,6 +129,21 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     ,turns: 0
     /** The catalog entry of the model the current turn uses, for checking messages sent to it mid-run. */
     ,modelInfo: undefined as ModelInfo | undefined
+    /** The spend account the status line follows, and its change subscription. */
+    ,spend: undefined as SpendAccount | undefined
+    ,spendWatch: undefined as { dispose(): void } | undefined
+    ,spendTimer: undefined as ReturnType<typeof setTimeout> | undefined
+  };
+  // The status line follows the key's ledger and NEAR's usage summary as they settle, at most once a second.
+  const followSpend = (account: SpendAccount | undefined): void => {
+    if (!account || account === state.spend) return;
+    showSpendAccount(account);
+    state.spendWatch?.dispose();
+    state.spend = account;
+    state.spendWatch = account.onChange(() => {
+      state.spendTimer ??= setTimeout(() => { state.spendTimer = undefined; void statusMessage({ agents: state.agent?.runningAgents ?? 0, account }).then((status) => panel.webview.postMessage(status)); }, 1_000);
+      state.spendTimer.unref?.();
+    });
   };
   panel.webview.html = html;
   const handle = async (value: unknown): Promise<void> => {
@@ -369,7 +388,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     if (message.type === 'refresh-status') {
-      panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine() });
+      panel.webview.postMessage(await statusMessage({ agents: state.agent?.runningAgents ?? 0, account: state.spend }));
       await sendProfileStatus(panel, auth);
       await sendStakingStatus(panel, state.staking);
       await sendArtifacts(panel);
@@ -552,7 +571,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     // Documents are checked by their extracted text, which is what is sent.
     const attachedText = staged.map((item) => item.kind === 'text' ? item.bytes.toString('utf8') : item.kind === 'document' ? item.text ?? '' : '').filter(Boolean).join('\n');
-    const spentToday = spentTodayUsd(await state.activity.list());
+    // Today's spend from the key's ledger (or NEAR's own total), never from activity history.
+    const account = spendAccountOf(active.provider.client);
+    followSpend(account);
+    // Picks up what other windows on this computer spent with the same key.
+    await account?.ledger.refresh();
+    const spentToday = account?.spentTodayUsd().usd ?? 0;
     const verdict = state.guard.check({ model, modelInfo, text: attachedText ? `${text}\n${attachedText}` : text, overrideToken: message.type === 'send' ? message.overrideToken : undefined }, spentToday);
     // One run, with all its sub-agents, may spend at most the per-run cap and what is left of today's limit.
     const runBudget = readRunBudget();
@@ -568,13 +592,16 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const session = await state.activity.start({ project: path.basename(root), attribution, model, ...(skill ? { plans: [skill.name] } : {}), summary: skill ? `/${skill.name} started.` : 'Agent conversation turn started.' });
     state.activeSessionId = session.sessionId;
     state.agent = state.agent ?? conversationFor(context, root, panel);
+    const runId = AgentConversation.newRunId();
+    const conversationId = state.agent.id;
     try {
       const route = clientFor(active, model);
       const limits = readAgentLimits();
       let attachments;
       if (staged.length) {
         try {
-          attachments = await prepareAttachments(staged, { client: route.client, model, models: active.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: text });
+          // Reading attachments (vision, transcription) is billed to the run they are for.
+          attachments = await withSpendTag({ kind: 'attachment', runId, conversationId }, () => prepareAttachments(staged, { client: route.client, model, models: active.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: text }));
         } catch (error) {
           panel.webview.postMessage({ type: 'assistant-error', text: providerErrorMessage(error) });
           return;
@@ -594,9 +621,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         warnedSafetyModels.add(`${model}|${readSafetyModel()}`);
         panel.webview.postMessage({ type: 'notice', text: `Auto approve: ${readSafetyModel()} is not available as a private (TEE) model here, so commands the rules cannot decide will ask you.` });
       }
-      await state.agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+      await state.agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       await sendHistory(panel, state.activity);
-      panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine({ agents: 0, activity: state.activity }) });
+      panel.webview.postMessage(await statusMessage({ agents: 0, account }));
       await sendArtifacts(panel);
     } catch (error) {
       await state.activity.append(session.sessionId, { status: 'failed', summary: 'Agent run failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
@@ -618,7 +645,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (isEmergencyStopped()) reason = 'Emergency stop is on. Run "NEAR AI: Resume" to continue.';
     else {
       const guard = state.guard ?? new OutboundGuard(readSettings());
-      const verdict = guard.check({ model: state.model ?? '', modelInfo: state.modelInfo, text: message.text }, state.activity ? spentTodayUsd(await state.activity.list()) : 0);
+      const verdict = guard.check({ model: state.model ?? '', modelInfo: state.modelInfo, text: message.text }, state.spend?.spentTodayUsd().usd ?? 0);
       if (verdict.outcome !== 'allow') reason = `${verdict.reason} It was not sent to the running agent; send it after the run to choose what to do.`;
     }
     if (reason) { panel.webview.postMessage({ type: 'steer-state', id: message.id, state: 'blocked', reason, text: message.text }); return; }
@@ -645,7 +672,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   panel.webview.onDidReceiveMessage(receive, undefined, context.subscriptions);
   // The picker follows settings.json edits and the emergency stop; each run reads the setting afresh.
   const policyWatch = vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi.actionPolicy')) sendPolicyState(panel); });
-  panel.onDidDispose(() => { state.abort?.abort(); state.agent?.dispose(); policyWatch.dispose(); }, undefined, context.subscriptions);
+  panel.onDidDispose(() => { state.abort?.abort(); state.agent?.dispose(); policyWatch.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
     if (!engaged) return;
@@ -656,7 +683,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   }, undefined, context.subscriptions);
   sendPolicyState(panel);
   if (initialPrompt) panel.webview.postMessage({ type: 'prefill', text: initialPrompt });
-  panel.webview.postMessage({ type: 'status', value: await readGsdStatusLine() });
+  followSpend(await spendAccountForRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, auth));
+  panel.webview.postMessage(await statusMessage({ agents: 0, account: state.spend }));
   panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHostFor(context), context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath) });
   await sendArtifacts(panel);
   state.activity = createActivityStore();
@@ -958,7 +986,15 @@ async function sendProfileStatus(panel: ChatHost, auth: AuthService, existing?: 
   panel.webview.postMessage({ type: 'profile-status', value });
 }
 
-async function readGsdStatusLine(live?: { agents: number; activity?: ActivityStore }): Promise<string> {
+/** The status line with today's spend from the key's ledger (or NEAR's total), and what the figure means. */
+async function statusMessage(live: { agents: number; account?: SpendAccount }): Promise<{ type: 'status'; value: string; tooltip?: string }> {
+  const account = live.account ?? shownSpendAccount();
+  const today = account?.today();
+  const shown = today && (today.near || today.totals.requests > 0) ? today : undefined;
+  return { type: 'status', value: await readGsdStatusLine({ agents: live.agents, spend: shown?.text }), ...(shown ? { tooltip: shown.tooltip } : {}) };
+}
+
+async function readGsdStatusLine(live?: { agents: number; spend?: string }): Promise<string> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return 'No workspace';
   const statePath = path.join(root, '.planning', 'STATE.md');
@@ -970,8 +1006,8 @@ async function readGsdStatusLine(live?: { agents: number; activity?: ActivitySto
   } catch {
     line = 'No GSD project yet · type /gsd-new-project to start · Agents 0';
   }
-  const spent = live?.activity ? spentTodayUsd(await live.activity.list().catch(() => [])) : 0;
-  return withLiveStatus(line, { agents: live?.agents ?? 0, spentTodayUsd: spent });
+  if (!live?.spend) { const today = shownSpendAccount()?.today(); if (today && (today.near || today.totals.requests > 0)) live = { agents: live?.agents ?? 0, spend: today.text }; }
+  return withLiveStatus(line, { agents: live?.agents ?? 0, spend: live?.spend });
 }
 
 function chatHtml2(_webview?: vscode.Webview): string {

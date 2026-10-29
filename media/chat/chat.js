@@ -45,6 +45,8 @@
   let busy = false;
   let current;
   let lastReply;
+  // Replies by run, so a cost NEAR settles later lands on the reply it belongs to.
+  const replies = new Map();
   let runInfo = {};
   const agentRows = new Map();
   let tools = new Map();
@@ -292,16 +294,20 @@
 
   // The reply footer: model, privacy, tokens, and cost. The estimate (~$) is replaced by the
   // actual charge when NEAR's billing API reports it.
-  function usageLine(usage, modelId, privacy, actualCostUsd) {
+  // With the spend ledger, the estimate is the run's pending total (every request it made), until
+  // NEAR confirms it.
+  function usageLine(usage, modelId, privacy, actualCostUsd, spend) {
     const parts = [];
     if (modelId) parts.push(modelId);
     if (privacy) parts.push(privacy);
     const tokens = (usage && (usage.inputTokens || 0) + (usage.outputTokens || 0)) || 0;
     if (tokens) parts.push(tokens.toLocaleString() + ' tokens');
-    if (actualCostUsd !== undefined) parts.push('$' + actualCostUsd.toFixed(4));
+    if (actualCostUsd !== undefined) parts.push('$' + actualCostUsd.toFixed(4) + (spend ? ' confirmed' : ''));
+    else if (spend && usage && usage.estimatedCostUsd !== undefined) parts.push('~$' + usage.estimatedCostUsd.toFixed(4) + ' pending');
     else if (usage && usage.estimatedCostUsd !== undefined) parts.push('~$' + usage.estimatedCostUsd.toFixed(4) + ' est.');
     return parts.join(' · ');
   }
+  const COST_TIP = 'Confirmed: NEAR\u2019s billing API reported the actual cost. Pending: the estimate, until NEAR reports it (usually within seconds to minutes). The run\u2019s cost includes its sub-agents, safety checks, and summaries.';
 
   // Open-GSD runs render like a tool call: one collapsible row per run with its log inside.
   function toolFor(event) {
@@ -788,7 +794,7 @@
       case 'host-request': post(m.payload); break;
       case 'reset': resetConversation(); post({ type: 'new-chat' }); break;
       case 'prefill': input.value = m.text || ''; autosize(); updateSendState(); input.focus(); break;
-      case 'status': status.textContent = (m.value || '') + (status.dataset.context || ''); status.title = (m.value || '') + ' — click for detailed progress'; break;
+      case 'status': status.textContent = (m.value || '') + (status.dataset.context || ''); status.title = (m.value || '') + (m.tooltip ? '\n' + m.tooltip : '') + ' — click for detailed progress'; break;
       case 'models': {
         const models = m.models || [];
         if (!models.length) {
@@ -840,8 +846,10 @@
       case 'assistant-done': {
         // A run is several text segments around tool rows; the footer goes after the last one.
         if (!current) startAssistant();
-        lastReply = { node: current.node, usage: m.usage, model: runInfo.model, privacy: runInfo.privacy };
-        finishAssistant(usageLine(m.usage, runInfo.model, runInfo.privacy));
+        lastReply = { node: current.node, usage: m.usage, model: runInfo.model, privacy: runInfo.privacy, spend: m.spend };
+        if (m.runId) { replies.set(m.runId, lastReply); if (replies.size > 50) replies.delete(replies.keys().next().value); }
+        finishAssistant(usageLine(m.usage, runInfo.model, runInfo.privacy, undefined, m.spend));
+        { const meta = lastReply.node.querySelector('.meta'); if (meta && m.spend) meta.title = COST_TIP; }
         announce('Response complete.');
         break;
       }
@@ -882,8 +890,9 @@
         break;
       }
       case 'assistant-cost': {
-        const meta = lastReply && lastReply.node.querySelector('.meta');
-        if (meta) meta.textContent = usageLine(lastReply.usage, lastReply.model, lastReply.privacy, m.actualCostUsd);
+        const reply = (m.runId && replies.get(m.runId)) || (!m.runId && lastReply);
+        const meta = reply && reply.node.querySelector('.meta');
+        if (meta) meta.textContent = usageLine(reply.usage, reply.model, reply.privacy, m.actualCostUsd, reply.spend);
         break;
       }
       case 'outbound-blocked': {

@@ -5,7 +5,9 @@ import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { ActivityStore } from './activityStore';
 import { AuthService } from './auth';
 import { ConversationTurn, defaultChatModel, modelPrivacyLabel, providerErrorMessage } from './chatBridge';
-import { OutboundGuard, spentTodayUsd } from './outboundGuard';
+import { OutboundGuard } from './outboundGuard';
+import { spendAccountOf } from './agentSession';
+import { nanoToUsd, withSpendTag } from './spendLedger';
 import { activeProvider, clientFor } from './providerCache';
 import { isEmergencyStopped } from './emergencyStop';
 import { UsageMetadata } from './nearAiClient';
@@ -76,7 +78,9 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   }
   const modelInfo = active.models.find((candidate) => candidate.id === model);
   const activity = new ActivityStore(root);
-  const verdict = new OutboundGuard(settings).check({ model, modelInfo, text: prompt }, spentTodayUsd(await activity.list()));
+  const account = spendAccountOf(active.provider.client);
+  await account?.ledger.refresh();
+  const verdict = new OutboundGuard(settings).check({ model, modelInfo, text: prompt }, account?.spentTodayUsd().usd ?? 0);
   if (verdict.outcome !== 'allow') {
     response.markdown(`${verdict.reason}\n\nNothing was sent.${verdict.overrideToken ? ' To send it anyway, use the NEAR AI sidebar, which can send a flagged message once.' : ''}`);
     return;
@@ -87,19 +91,33 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   response.progress(`Asking ${model}…`);
   try {
     const route = clientFor(active, model);
-    for await (const event of route.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
-      if (event.type === 'text') response.markdown(event.text);
-      else if (event.type === 'done') {
-        let actualCostUsd: number | undefined;
-        if (event.metadata.requestId && !route.local) {
-          try { actualCostUsd = (await route.client.reconcileUsage(event.metadata.requestId, abort.signal)).actualCostUsd; } catch { actualCostUsd = undefined; }
+    // Recorded in the key's spend ledger as a chat view request.
+    await withSpendTag({ kind: 'participant', conversationId: session.sessionId }, async () => {
+      for await (const event of route.client.streamChatEvents(model, [...history, { role: 'user', content: prompt }], abort.signal)) {
+        if (event.type === 'text') response.markdown(event.text);
+        else if (event.type === 'done') {
+          let actualCostUsd: number | undefined;
+          let pending = false;
+          const requestId = event.metadata.requestId;
+          if (requestId && !route.local && account) {
+            // The ledger asks NEAR's billing API; NEAR may need a few seconds to record the usage.
+            for (const delay of [0, 1_500]) {
+              if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+              await account.settleNow((entry) => entry.requestId === requestId);
+              const totals = account.totals({ requestId });
+              if (totals.requests && !totals.pendingRequests) { actualCostUsd = nanoToUsd(totals.confirmedNanoUsd); break; }
+            }
+            pending = actualCostUsd === undefined;
+          } else if (requestId && !route.local) {
+            try { actualCostUsd = (await route.client.reconcileUsage(requestId, abort.signal)).actualCostUsd; } catch { actualCostUsd = undefined; }
+          }
+          response.markdown(`\n\n${usageFooter(model, { ...event.metadata, actualCostUsd }, modelPrivacyLabel(modelInfo), pending)}`);
+          await activity.append(session.sessionId, { status: 'completed', kind: 'message', model, requestId, summary: 'Assistant response completed.', estimatedCostUsd: event.metadata.estimatedCostUsd, actualCostUsd, inputTokens: event.metadata.inputTokens, outputTokens: event.metadata.outputTokens, durationMs: event.metadata.latencyMs });
+        } else if (event.type === 'status' && event.status === 'cancelled') {
+          await activity.append(session.sessionId, { status: 'cancelled', summary: 'Chat request cancelled by the user.' });
         }
-        response.markdown(`\n\n${usageFooter(model, { ...event.metadata, actualCostUsd }, modelPrivacyLabel(modelInfo))}`);
-        await activity.append(session.sessionId, { status: 'completed', kind: 'message', model, requestId: event.metadata.requestId, summary: 'Assistant response completed.', estimatedCostUsd: event.metadata.estimatedCostUsd, actualCostUsd, inputTokens: event.metadata.inputTokens, outputTokens: event.metadata.outputTokens, durationMs: event.metadata.latencyMs });
-      } else if (event.type === 'status' && event.status === 'cancelled') {
-        await activity.append(session.sessionId, { status: 'cancelled', summary: 'Chat request cancelled by the user.' });
       }
-    }
+    });
   } catch (error) {
     if (!abort.signal.aborted) {
       await activity.append(session.sessionId, { status: 'failed', summary: 'Chat request failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
@@ -126,12 +144,13 @@ export function historyFromChatContext(turns: ReadonlyArray<vscode.ChatRequestTu
   return history.slice(-20);
 }
 
-export function usageFooter(model: string, usage: UsageMetadata, privacy?: string): string {
+/** The reply footer: `$X` once NEAR confirmed the cost, `~$X pending` while the ledger waits for NEAR, `~$X est.` otherwise. */
+export function usageFooter(model: string, usage: UsageMetadata, privacy?: string, pending = false): string {
   const parts = [model];
   if (privacy) parts.push(privacy);
   const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   if (tokens) parts.push(`${tokens.toLocaleString('en-US')} tokens`);
   if (usage.actualCostUsd !== undefined) parts.push(`$${usage.actualCostUsd.toFixed(4)}`);
-  else if (usage.estimatedCostUsd !== undefined) parts.push(`~$${usage.estimatedCostUsd.toFixed(4)} est.`);
+  else if (usage.estimatedCostUsd !== undefined) parts.push(`~$${usage.estimatedCostUsd.toFixed(4)} ${pending ? 'pending' : 'est.'}`);
   return `*${parts.join(' · ')}*`;
 }

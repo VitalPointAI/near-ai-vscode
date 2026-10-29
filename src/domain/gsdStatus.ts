@@ -99,7 +99,7 @@ export function formatGsdStatusLine(snapshot: GsdStatusSnapshot): string {
 }
 
 /** Live facts the runner knows that STATE.md does not: running sub-agents and today's spend. */
-export function withLiveStatus(line: string, live: { agents: number; spentTodayUsd: number }): string {
+export function withLiveStatus(line: string, live: { agents: number; spend?: string }): string {
   const withAgents = line.replace(/Agents \d+/, `Agents ${live.agents}`);
-  return live.spentTodayUsd > 0 ? `${withAgents} · $${live.spentTodayUsd.toFixed(2)} today` : withAgents;
+  return live.spend ? `${withAgents} · ${live.spend}` : withAgents;
 }

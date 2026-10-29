@@ -3,6 +3,8 @@ import { writeFile } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { ActivityEntry, ActivityFeed, AgentStats, timeBreakdown } from './agentActivity';
 import { readActivityLimits } from './settings';
+import { shownSpendAccount } from './spendAccount';
+import { nanoToUsd, totalNanoUsd } from './spendLedger';
 
 // The Agent Activity page: a live stream of every agent's prompts, replies, reasoning, and tool
 // calls with per-agent statistics. It streams only while visible: hiding the tab drops its page
@@ -48,7 +50,7 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   let statsTimer: ReturnType<typeof setInterval> | undefined;
   const post = (message: Record<string, unknown>) => { activityTap.toView?.(message); void view.webview.postMessage(message); };
-  const status = () => ({ stats: activity.agentStats(), usage: activity.usage });
+  const status = () => activityStatus(activity);
   const flush = () => {
     flushTimer = undefined;
     if (!pending.size) return;
@@ -87,11 +89,26 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
   view.onDidDispose(() => { stop(); panel = undefined; }, undefined, context.subscriptions);
 }
 
+/**
+ * The page's statistics. Costs come from the key's spend ledger: each agent's requests (its
+ * model turns, safety checks, and summaries), and today's total, labelled by how sure it is.
+ */
+export function activityStatus(activity: ActivityFeed, account = shownSpendAccount()): { stats: AgentStats[]; usage: ActivityFeed['usage']; spend?: { text: string; tooltip: string; source: string } } {
+  const stats = activity.agentStats();
+  if (!account) return { stats, usage: activity.usage };
+  for (const stat of stats) {
+    const totals = account.totals({ agentId: stat.agentId });
+    if (totals.requests) stat.costUsd = nanoToUsd(totalNanoUsd(totals));
+  }
+  const today = account.today();
+  return { stats, usage: activity.usage, spend: { text: today.text, tooltip: today.tooltip, source: today.source } };
+}
+
 async function exportActivity(activity: ActivityFeed, format: 'markdown' | 'json'): Promise<void> {
   const subscription = activity.subscribe(() => undefined);
   subscription.dispose();
   const entries = subscription.snapshot;
-  const stats = activity.agentStats();
+  const stats = activityStatus(activity).stats;
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`agent-activity-${stamp}.${format === 'json' ? 'json' : 'md'}`), filters: format === 'json' ? { JSON: ['json'] } : { Markdown: ['md'] }, title: 'Export agent activity' });
   if (!target) return;

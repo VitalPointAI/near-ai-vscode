@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ActivityStore } from './activityStore';
-import { spentTodayUsd } from './outboundGuard';
+import { AuthService } from './auth';
+import { spendAccountForRoot } from './spendTracking';
 import { readRunBudget, readSettings } from './settings';
 
 // NEAR AI: Spending Limits. Shows today's spend and the limits that stop requests and runs, and
@@ -14,18 +14,22 @@ const LIMITS: Limit[] = [
   { key: 'agent.maxRunTokens', label: 'Token limit per run', unit: 'tokens', min: 10_000, max: 100_000_000, describe: (value) => `${Math.round(value).toLocaleString('en-US')} tokens for one run` }
 ];
 
-export function registerSpendingLimits(context: vscode.ExtensionContext): void {
+export function registerSpendingLimits(context: vscode.ExtensionContext, auth: AuthService): void {
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.spendingLimits', async () => {
     for (;;) {
       const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      const spent = root ? spentTodayUsd(await new ActivityStore(root).list().catch(() => [])) : 0;
+      // The same figure as the chat's status line: NEAR's total with a reporting token, else this computer's ledger.
+      const account = await spendAccountForRoot(root, auth);
+      await account?.ledger.refresh();
+      const today = account?.today();
+      const spent = account?.spentTodayUsd().usd ?? 0;
       const settings = readSettings();
       const run = readRunBudget();
       const values: Record<string, number> = { dailySpendLimitUsd: settings.dailySpendLimitUsd, 'agent.maxRunCostUsd': run.maxCostUsd, 'agent.maxRunTokens': run.maxTokens };
       const remaining = settings.dailySpendLimitUsd > 0 ? Math.max(0, settings.dailySpendLimitUsd - spent) : undefined;
       const effective = remaining === undefined ? run.maxCostUsd : Math.min(run.maxCostUsd, remaining);
       const choice = await vscode.window.showQuickPick(LIMITS.map((limit) => ({ label: limit.label, description: limit.describe(values[limit.key]), limit })), {
-        title: `Spending limits · today so far: $${spent.toFixed(2)}${remaining !== undefined ? ` · $${remaining.toFixed(2)} left` : ''}`,
+        title: `Spending limits · ${today ? today.text : '$0.00 today'}${remaining !== undefined ? ` · $${remaining.toFixed(2)} left` : ''}`,
         placeHolder: `The next run may spend up to $${effective.toFixed(2)} (whichever limit is lower). Pick a limit to change it.`
       });
       if (!choice) return;

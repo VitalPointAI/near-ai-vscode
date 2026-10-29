@@ -1,4 +1,3 @@
-import type { ActivitySessionSummary } from '../domain/activity';
 import type { NearAiSettings } from '../domain/config';
 import type { DataClass, ProviderBoundary } from '../domain/privacy';
 import type { ModelInfo } from './nearAiClient';
@@ -54,10 +53,3 @@ export class OutboundGuard {
   }
 }
 
-/** Spend recorded today across sessions, preferring actual cost over the estimate. */
-export function spentTodayUsd(sessions: ActivitySessionSummary[], now = new Date()): number {
-  const day = now.toISOString().slice(0, 10);
-  return sessions
-    .filter((session) => session.updatedAt.slice(0, 10) === day)
-    .reduce((total, session) => total + (session.actualCostUsd ?? session.estimatedCostUsd ?? 0), 0);
-}

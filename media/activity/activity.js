@@ -83,6 +83,7 @@
     return cell;
   }
 
+  let lastSpend;
   function renderStats(usage) {
     stats = stats.sort((a, b) => a.startedAt - b.startedAt);
     $('empty-agents').hidden = stats.length > 0;
@@ -107,12 +108,14 @@
       return tr;
     }));
     const running = stats.filter((stat) => stat.status === 'running').length;
+    // Today's spend for this API key from the spend ledger (or NEAR's own total), the same figure as the chat's status line.
+    const spendText = lastSpend ? lastSpend.text : money(stats.reduce((total, stat) => total + stat.costUsd, 0)) + ' est. (agents shown)';
     const sum = (key) => stats.reduce((total, stat) => total + stat[key], 0);
-    const totals = [['Agents', running ? running + ' running / ' + stats.length : String(stats.length)], ['Tokens in', number(sum('inputTokens')) + (sum('inputTokens') ? ' (' + Math.round((100 * sum('cachedTokens')) / sum('inputTokens')) + '% cached)' : '')], ['Tokens out', number(sum('outputTokens'))], ['Est. cost', money(sum('costUsd'))], ['Tool calls', number(sum('toolCalls')) + (sum('toolErrors') ? ' (' + sum('toolErrors') + ' failed)' : '')], ['Retries', number(sum('retries'))], ['Security', [sum('injections') + ' injection' + (sum('injections') === 1 ? '' : 's') + ' flagged', sum('hiddenRemoved') + ' hidden removed', sum('held') + ' held', sum('blocked') + ' blocked'].join(' · ')]];
-    $('totals').replaceChildren(...totals.flatMap(([label, value]) => { const wrap = el('div', 'total'); wrap.append(el('dt', '', label), el('dd', '', value)); return [wrap]; }));
+    const totals = [['Agents', running ? running + ' running / ' + stats.length : String(stats.length)], ['Tokens in', number(sum('inputTokens')) + (sum('inputTokens') ? ' (' + Math.round((100 * sum('cachedTokens')) / sum('inputTokens')) + '% cached)' : '')], ['Tokens out', number(sum('outputTokens'))], ['Spend', spendText], ['Tool calls', number(sum('toolCalls')) + (sum('toolErrors') ? ' (' + sum('toolErrors') + ' failed)' : '')], ['Retries', number(sum('retries'))], ['Security', [sum('injections') + ' injection' + (sum('injections') === 1 ? '' : 's') + ' flagged', sum('hiddenRemoved') + ' hidden removed', sum('held') + ' held', sum('blocked') + ' blocked'].join(' · ')]];
+    $('totals').replaceChildren(...totals.flatMap(([label, value]) => { const wrap = el('div', 'total'); wrap.append(el('dt', '', label), el('dd', '', value)); if (label === 'Spend' && lastSpend) wrap.title = lastSpend.tooltip; return [wrap]; }));
     const seen = new Set();
     for (const stat of stats) { seen.add(stat.agentId); if (!names.has(stat.agentId)) { names.set(stat.agentId, stat.agent); const option = el('option', '', stat.agent + ' · ' + stat.agentId.slice(-6)); option.value = stat.agentId; filterAgent.append(option); } }
-    if (usage) $('usage').textContent = 'Keeping ' + number(usage.entries) + ' entries (' + (usage.bytes / 1048576).toFixed(1) + ' of ' + Math.round(usage.limits.maxBytes / 1048576) + ' MB) from the last ' + Math.round(usage.limits.maxAgeMs / 60000) + ' minutes, in memory only. Older entries are dropped; agent totals are kept.';
+    if (usage) $('usage').textContent = 'Keeping ' + number(usage.entries) + ' entries (' + (usage.bytes / 1048576).toFixed(1) + ' of ' + Math.round(usage.limits.maxBytes / 1048576) + ' MB) from the last ' + Math.round(usage.limits.maxAgeMs / 60000) + ' minutes, in memory only. Older entries are dropped; agent totals are kept. Spend comes from the API key\u2019s spend ledger on this computer, kept across reloads.';
   }
 
   function scrollIfFollowing() { if (follow.checked && !paused) window.scrollTo(0, document.body.scrollHeight); }
@@ -142,7 +145,7 @@
       if (paused) { for (const entry of message.entries || []) held.set(entry.seq, entry); while (held.size > 5 * MAX_ROWS) held.delete(held.keys().next().value); showPauseState(); }
       else (message.entries || []).forEach(render);
     }
-    if (message.stats) { stats = message.stats; renderStats(message.usage); }
+    if (message.stats) { stats = message.stats; lastSpend = message.spend; renderStats(message.usage); }
     if (message.type === 'snapshot' || message.type === 'entries') scrollIfFollowing();
     if (message.type === 'focus-agent' && typeof message.agentId === 'string') {
       if (![...filterAgent.options].some((option) => option.value === message.agentId)) { const option = el('option', '', message.agentId); option.value = message.agentId; filterAgent.append(option); }
