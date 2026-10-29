@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -131,4 +131,54 @@ test('a conversation records the main agent and its sub-agents, with prompts, to
   assert.deepEqual(of(planner.agentId), ['agent-start', 'system', 'prompt', 'tool', 'text', 'agent-end']);
   assert.equal(entries.find((entry) => entry.agentId === planner.agentId && entry.kind === 'prompt')!.text, 'Make a plan.');
   assert.match(entries.find((entry) => entry.agentId === main.agentId && entry.kind === 'tool')!.input!, /"subagent_type":"gsd-planner"/);
+});
+
+test('a run saves its agents\' counters (429s, approvals, tools, time) in its session, without content', async () => {
+  const { ActivityStore } = require('../services/activityStore') as typeof import('../services/activityStore');
+  const loop = require('../agent/loop') as typeof import('../agent/loop');
+  const delays = [...loop.RETRY_DELAYS_MS];
+  loop.RETRY_DELAYS_MS.splice(0, delays.length, ...delays.map(() => 5));
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-activity-persist-'));
+  const store = new ActivityStore(root);
+  const session = await store.start({ sessionId: 'session-persist-test-01', project: 'demo', runId: 'run-persist-abcdef', conversationId: 'conv-persist-123', title: 'Write the notes' });
+  const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+  let requests = 0;
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      requests += 1;
+      if (requests === 1) throw Object.assign(new Error('HTTP 429: Rate limit exceeded'), { retryable: true, status: 429, retryAfterMs: 0 });
+      if (!messages.some((message) => message.role === 'tool')) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('w1', 'Write', { file_path: 'notes.txt', content: 'SECRET-CONTENT' }), call('r1', 'Read', { file_path: 'notes.txt' })] }, finishReason: 'tool_calls', usage: usage(500, 10, 0.001) }; return; }
+      yield { type: 'text', text: 'Done.' };
+      yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage: usage(600, 4, 0.001) };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const feed = new ActivityFeed({ maxAgeMs: 60 * 60_000, maxBytes: 8 * 1024 * 1024 });
+  let conversation: AgentConversation | undefined;
+  const posted: Array<Record<string, unknown>> = [];
+  conversation = new AgentConversation(root, (message) => {
+    posted.push(message);
+    // The user declines the write while the agent waits.
+    if (message.type === 'approval-request') setTimeout(() => conversation!.answerApproval(String(message.callId), { decision: 'deny' }), 20);
+  }, path.join(root, '.ckpt'), undefined, undefined, feed);
+  const conversationId = conversation.id;
+  try {
+    await conversation.send({ text: 'Write the notes', client: near as never, model: 'z-ai/glm-5.3', privacy: 'Private · runs in NEAR TEE', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, activity: { store, sessionId: session.sessionId }, runId: 'run-persist-abcdef' });
+  } finally {
+    conversation.dispose();
+    loop.RETRY_DELAYS_MS.splice(0, delays.length, ...delays);
+  }
+  const main = feed.agentStats()[0];
+  assert.deepEqual([main.boundary, main.conversationId, main.persisted, main.phase], ['tee', conversationId, true, 'thinking']);
+  const saved = (await new ActivityStore(root).get(session.sessionId))!;
+  const s = saved.stats!;
+  assert.deepEqual([s.agents, s.turns, s.retries, s.rateLimited, s.approvalsAsked, s.approvalsDeclined, s.toolCalls, s.toolErrors], [1, 2, 1, 1, 1, 1, 2, 2]);
+  assert.deepEqual(s.tools, { Write: { calls: 1, errors: 1 }, Read: { calls: 1, errors: 1 } });
+  assert.deepEqual([s.models['z-ai/glm-5.3']?.rateLimited, s.models['z-ai/glm-5.3']?.turns], [1, 2]);
+  assert.ok(s.userWaitMs >= 10, `waited for the user ${s.userWaitMs} ms`);
+  assert.equal(saved.runOutcome, 'completed');
+  const file = await readFile(path.join(root, '.planning', '.near-ai', 'activity.json'), 'utf8');
+  assert.doesNotMatch(file, /SECRET-CONTENT|Done\./);
+  // The counters themselves carry tool and model names only.
+  assert.doesNotMatch(JSON.stringify(saved.stats), /notes\.txt/);
 });

@@ -3,7 +3,8 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextStatus, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
-import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, RunInput, RunResult } from '../agent/loop';
+import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, RunInput, RunOutcome, RunResult } from '../agent/loop';
+import { countersOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { SafetyModelCheck } from '../agent/safetyModel';
 import { ShellSession } from '../agent/shell';
@@ -21,7 +22,7 @@ import type { ActionPolicy } from '../domain/policy';
 import { expandPrompt, GsdAgent, GsdSkill, modelForTier, roleModelFor } from '../gsd/library';
 import { trustedPreambles } from '../gsd/preamble';
 import { gsdTools, Question } from '../gsd/tools';
-import type { ActivityFeed } from './agentActivity';
+import type { ActivityFeed, AgentBoundary } from './agentActivity';
 import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
@@ -242,7 +243,8 @@ export class AgentConversation {
     this.display.set(contentKey(prompt), request.text);
     this.messages.push({ role: 'user', content: prompt });
     const mainId = `main-${runId}`;
-    this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
+    const boundary = runBoundary(request);
+    this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
     for (const note of request.attachments?.notes ?? []) this.post({ type: 'notice', text: note });
     const record: Record_ = (event) => request.activity ? request.activity.store.append(request.activity.sessionId, event).catch(() => undefined) : Promise.resolve();
@@ -274,7 +276,7 @@ export class AgentConversation {
       },
       afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
       input: this.steeringInput,
-      requestApproval: (approval) => this.askApproval(approval, abort.signal),
+      requestApproval: (approval) => this.askApproval(approval, abort.signal, undefined, mainId),
       emit: (event) => {
         this.track(mainId, event);
         if (event.type !== 'reasoning' && event.type !== 'turn') this.markVisible();
@@ -293,11 +295,13 @@ export class AgentConversation {
         result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => run.run(this.messages, abort.signal));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
+        await this.persistAgent(request, mainId, 'failed');
         // Keep what the run did, so the next message continues from there.
         if (error instanceof AgentRunError) { this.messages = error.messages; throw error.cause; }
         throw error;
       }
       this.activity?.agentEnded(mainId, result.outcome);
+      await this.persistAgent(request, mainId, result.outcome);
       this.messages = result.messages;
       const allUsage = [...result.usage, ...extraUsage];
       const usage = sumUsage(allUsage);
@@ -376,6 +380,7 @@ export class AgentConversation {
     if (action === 'stop') agent.abort.abort();
     else if (action === 'pause') agent.paused = true;
     else { agent.paused = false; agent.resume?.(); agent.resume = undefined; }
+    if (action !== 'stop') this.activity?.setPaused(agentId, action === 'pause');
     this.postAgents();
     return true;
   }
@@ -571,7 +576,8 @@ export class AgentConversation {
             const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}. Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
             const base = `${this.systemPrompt({ ...request, model }, agentRoot)}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
-            this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}` }, spawn.prompt, system);
+            const boundary = runBoundary(request);
+            this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}`, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, spawn.prompt, system);
             const child = new AgentRun({
               client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               beforeTurn: async (transcript, lastUsage, signal) => {
@@ -579,7 +585,7 @@ export class AgentConversation {
                 while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
                 return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
               },
-              requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label),
+              requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id),
               emit: (event) => {
                 this.track(agent.id, event);
                 this.observe(agent, event);
@@ -591,6 +597,7 @@ export class AgentConversation {
             });
             const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => child.run([{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }], agent.abort.signal));
             this.activity?.agentEnded(agent.id, result.outcome);
+            await this.persistAgent(request, agent.id);
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
             await this.recordReputation(request.reputation, label, result.outcome === 'completed' ? 1 : result.outcome === 'max-turns' ? 0 : -1, agent.id);
@@ -606,6 +613,7 @@ export class AgentConversation {
           } catch (error) {
             if (todo) this.moveTask(todo, 'pending');
             this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
+            await this.persistAgent(request, agent.id);
             await this.recordReputation(request.reputation, label, -1, agent.id);
             void record({ status: 'failed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
             throw error;
@@ -791,16 +799,28 @@ export class AgentConversation {
     abort.abort();
   }
 
+  /**
+   * Saves an ended agent's counters (no content) in its run's session in the project's activity
+   * history, so the overview survives reloads; `outcome` is given for the run's main agent.
+   */
+  private async persistAgent(request: AgentTurnRequest, agentId: string, outcome?: RunOutcome | 'failed'): Promise<void> {
+    const stat = this.activity?.agentStat(agentId);
+    if (!stat || !request.activity) return;
+    const saved = await request.activity.store.addStats(request.activity.sessionId, countersOf(stat), outcome ? { outcome } : undefined).catch(() => undefined);
+    if (saved) this.activity?.markPersisted(agentId);
+  }
+
   /** Mirrors an agent's events into the Agent Activity feed. */
   private track(agentId: string, event: AgentEvent): void {
     const feed = this.activity;
     if (!feed) return;
     if (event.type === 'text' || event.type === 'reasoning') feed.stream(agentId, event.type, event.text);
-    else if (event.type === 'tool-start') feed.toolStarted(agentId, event.callId, event.title, event.input);
+    else if (event.type === 'tool-start') feed.toolStarted(agentId, event.callId, event.title, event.input, event.tool);
     else if (event.type === 'tool-end') feed.toolEnded(agentId, event.callId, event.ok, event.output);
     else if (event.type === 'turn') feed.turn(agentId, event.usage);
-    else if (event.type === 'retry') feed.retry(agentId, retryNotice(event));
+    else if (event.type === 'retry') feed.retry(agentId, retryNotice(event), { status: event.status, delayMs: event.delayMs });
     else if (event.type === 'security') feed.security(agentId, event);
+    else if (event.type === 'permission') feed.permission(agentId, event.decision);
   }
 
   private forward(event: AgentEvent, model: string, record: Record_): void {
@@ -834,17 +854,25 @@ export class AgentConversation {
     this.onWaitingChange?.(this.waiting.size);
   }
 
-  private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string): Promise<ApprovalReply> {
+  private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string, agentId?: string): Promise<ApprovalReply> {
     if (signal.aborted) return Promise.resolve({ decision: 'deny' });
+    if (agentId) this.activity?.approvalAsked(agentId);
     return new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const settle = (reply: ApprovalReply, cancelled = false) => { if (timer) clearTimeout(timer); this.closePrompt(request.callId, cancelled); resolve(reply); };
+      let expired = false;
+      const settle = (reply: ApprovalReply, cancelled = false) => {
+        if (timer) clearTimeout(timer);
+        this.closePrompt(request.callId, cancelled);
+        if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : expired ? 'expired' : reply.decision === 'deny' ? 'declined' : 'allowed');
+        resolve(reply);
+      };
       this.approvals.set(request.callId, settle);
       signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) settle({ decision: 'deny' }, true); }, { once: true });
       if (this.approvalTimeoutMs > 0) {
         timer = setTimeout(() => {
           if (!this.approvals.delete(request.callId)) return;
           const minutes = Math.round(this.approvalTimeoutMs / 60_000);
+          expired = true;
           this.post({ type: 'approval-expired', callId: request.callId, minutes, text: `No one approved "${request.title}" within ${minutes} minute${minutes === 1 ? '' : 's'}, so it was declined and the agent continued without it.` });
           settle({ decision: 'deny', feedback: `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'} (the user may be away). Continue without this action if you can, and report what still needs their approval.` });
         }, this.approvalTimeoutMs);
@@ -912,6 +940,14 @@ export function visibleTurns(messages: AgentMessage[], display = new Map<string,
     }
   }
   return turns;
+}
+
+/** Where the run's models run, for the Agent Activity badge; sub-agents use models at least as private. */
+function runBoundary(request: Pick<AgentTurnRequest, 'local' | 'privacy'>): AgentBoundary | undefined {
+  if (request.local || request.privacy.startsWith('Local')) return 'local';
+  if (request.privacy.startsWith('Private')) return 'tee';
+  if (request.privacy.startsWith('Not private')) return 'cloud';
+  return undefined;
 }
 
 export function retryNotice(event: Extract<AgentEvent, { type: 'retry' }>): string {

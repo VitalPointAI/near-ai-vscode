@@ -34,7 +34,9 @@ export type AgentEvent =
   | { type: 'todos'; todos: Todo[] }
   | { type: 'turn'; model: string; usage: UsageMetadata }
   /** A model turn failed and will be tried again; `discardText` characters streamed by the failed attempt are void. */
-  | { type: 'retry'; attempt: number; delayMs: number; reason: string; discardText: number }
+  | { type: 'retry'; attempt: number; delayMs: number; reason: string; discardText: number; status?: number }
+  /** A gated action (an edit, a command, a network call) the policy allowed without asking, or refused by a rule. */
+  | { type: 'permission'; tool: string; decision: 'auto-allowed' | 'denied' }
   | ({ type: 'security'; tool: string } & SecurityEvent);
 
 export type RunOutcome = 'completed' | 'max-turns' | 'cancelled';
@@ -263,7 +265,7 @@ export class AgentRun {
         if (refused) delayMs = Math.max(0, Math.min(delayMs, giveUpAfterMs - refusingFor));
         // A stall may be a slow server rather than a dead one: give the next attempt longer.
         if ((error as { stalled?: unknown }).stalled === true) idleTimeoutMs = Math.min(MAX_IDLE_TIMEOUT_MS, 2 * (idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS));
-        this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs, reason, discardText: streamed });
+        this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs, reason, discardText: streamed, ...(typeof status === 'number' ? { status } : {}) });
         // A message from the user ends the wait: the next attempt carries it.
         if (!input?.pending()) {
           const waitAbort = new AbortController();
@@ -387,6 +389,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     // A risky action asks in every mode, and an earlier "allow this command" does not cover it.
     const permission = decided.decision === 'deny' ? decided : risky ? { decision: 'ask' as const } : sensitive && decided.decision === 'allow' && this.options.policy.mode !== 'fully-autonomous' ? { decision: 'ask' as const } : decided;
     if (risky) context.onSecurity?.({ kind: 'held', source: title, detail: risky });
+    const gated = tool.capability !== 'read' && tool.capability !== 'plan';
+    if (gated && permission.decision !== 'ask') this.options.emit({ type: 'permission', tool: tool.name, decision: permission.decision === 'deny' ? 'denied' : 'auto-allowed' });
     if (permission.decision === 'deny') return this.finish(call.id, false, `Not allowed: ${permission.reason}`);
     if (permission.decision === 'ask') {
       let preview: ToolPreview | undefined;

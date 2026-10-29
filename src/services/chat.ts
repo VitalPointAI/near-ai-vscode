@@ -28,6 +28,7 @@ import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, m
 import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './chatBridge';
 import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
 import { sharedActivityFeed } from './activityView';
+import { runTitleFor } from './activityOverview';
 import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 import type { ModelInfo } from './nearAiClient';
 import { RED_TEAM_WORKFLOW_STEP, redTeamEnabled } from '../agent/projectTypes';
@@ -565,11 +566,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     state.modelInfo = modelInfo;
     state.providerProfileId = active.provider.profileId;
     const attribution = hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization);
-    const session = await state.activity.start({ project: path.basename(root), attribution, model, ...(skill ? { plans: [skill.name] } : {}), summary: skill ? `/${skill.name} started.` : 'Agent conversation turn started.' });
-    state.activeSessionId = session.sessionId;
     state.agent = state.agent ?? conversationFor(context, root, panel);
     const runId = AgentConversation.newRunId();
     const conversationId = state.agent.id;
+    const title = runTitleFor(text);
+    const session = await state.activity.start({ project: path.basename(root), attribution, model, runId, conversationId, ...(title ? { title } : {}), ...(skill ? { plans: [skill.name] } : {}), summary: skill ? `/${skill.name} started.` : 'Agent conversation turn started.' });
+    state.activeSessionId = session.sessionId;
     try {
       const route = clientFor(active, model);
       const limits = readAgentLimits();
@@ -914,7 +916,8 @@ async function loadCapabilityAwarePreview(preview: import('../domain/teamStudio'
 }
 
 async function sendHistory(panel: ChatHost, store: ActivityStore | undefined): Promise<void> {
-  panel.webview.postMessage({ type: 'history', sessions: store ? (await store.list()).map(sessionSummaryMessage) : [] });
+  // The newest runs; the Agent Activity page pages through all of them.
+  panel.webview.postMessage({ type: 'history', sessions: store ? (await store.list()).slice(0, 30).map(sessionSummaryMessage) : [] });
 }
 
 async function sendArtifacts(panel: ChatHost): Promise<void> {

@@ -2,7 +2,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { redactSecrets } from '../domain/redaction';
-import { ActivityApprovalSummary, ActivityEvent, ActivityLedger, ActivitySessionSummary, ActivityStatus, AttributionSnapshot, emptyAgentCounts, normalizeAttribution, sessionOutcome, summarizeAgentCounts } from '../domain/activity';
+import { ActivityApprovalSummary, ActivityEvent, ActivityLedger, ActivitySessionSummary, ActivityStatus, addSessionStats, AttributionSnapshot, emptyAgentCounts, normalizeAttribution, normalizeSessionStats, RunOutcomeLabel, sessionOutcome, SessionStats, summarizeAgentCounts } from '../domain/activity';
+import { redactForDisplay } from './agentActivity';
 import type { UsageMetadata } from './nearAiClient';
 
 export interface ActivityFileSystem {
@@ -19,8 +20,15 @@ const defaultFileSystem: ActivityFileSystem = {
 };
 const STORE_VERSION = 1 as const;
 const SESSION_ID = /^session-[a-z0-9-]{8,80}$/;
-export interface ActivityStoreOptions { clock?: () => string; fileSystem?: ActivityFileSystem; maxSessions?: number; maxEventsPerSession?: number; }
-export interface StartSessionInput { sessionId?: string; project: string; phase?: string; plans?: string[]; model?: string; summary?: string; attribution?: AttributionSnapshot; }
+const RUN_ID = /^run-[a-z0-9-]{6,80}$/;
+const CONVERSATION_ID = /^conv-[a-z0-9-]{6,60}$/;
+/**
+ * maxSessions bounds how many runs the history (and the Agent Activity overview) keeps; only the
+ * newest `maxSessionsWithEvents` keep their event lists, so the file stays small.
+ */
+export interface ActivityStoreOptions { clock?: () => string; fileSystem?: ActivityFileSystem; maxSessions?: number; maxEventsPerSession?: number; maxSessionsWithEvents?: number; }
+/** `title` must already be redacted and short (runTitleFor); it is stored as given, re-redacted on load. */
+export interface StartSessionInput { sessionId?: string; project: string; phase?: string; plans?: string[]; model?: string; summary?: string; attribution?: AttributionSnapshot; runId?: string; conversationId?: string; title?: string; }
 export interface ActivityUpdate {
   status: ActivityStatus;
   kind?: ActivityEvent['kind'];
@@ -52,17 +60,21 @@ export class ActivityStore {
   private readonly clock: () => string;
   private readonly maxSessions: number;
   private readonly maxEventsPerSession: number;
+  private readonly maxSessionsWithEvents: number;
   private ledger: ActivityLedger = { version: STORE_VERSION, sessions: [] };
   private loaded = false;
   private writeQueue: Promise<void> = Promise.resolve();
   public constructor(private readonly workspaceRoot: string, options: ActivityStoreOptions = {}) {
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.fileSystem = options.fileSystem ?? defaultFileSystem;
-    this.maxSessions = Math.max(1, Math.min(100, options.maxSessions ?? 30));
+    this.maxSessions = Math.max(1, Math.min(1_000, options.maxSessions ?? 300));
     this.maxEventsPerSession = Math.max(1, Math.min(500, options.maxEventsPerSession ?? 100));
+    this.maxSessionsWithEvents = Math.max(1, Math.min(100, options.maxSessionsWithEvents ?? 30));
   }
   public get filePath(): string { return path.join(this.workspaceRoot, '.planning', '.near-ai', 'activity.json'); }
   public async list(): Promise<ActivitySessionSummary[]> { await this.load(); return this.ledger.sessions.map(cloneSession); }
+  /** Reads the file again (another store instance, or another window, wrote it). For readers only. */
+  public async reload(): Promise<void> { await this.writeQueue.catch(() => undefined); this.loaded = false; await this.load(); }
   public async get(sessionId: string): Promise<ActivitySessionSummary | undefined> {
     if (!SESSION_ID.test(sessionId)) return undefined;
     await this.load();
@@ -76,7 +88,7 @@ export class ActivityStore {
     if (!SESSION_ID.test(sessionId)) throw new Error('Invalid activity session identifier.');
     const project = safeText(input.project, 160) ?? 'Unknown project';
     const attribution = normalizeAttribution(input.attribution, project);
-    const session: ActivitySessionSummary = { version: STORE_VERSION, sessionId, project, attribution, phase: safeText(input.phase, 120), plans: uniqueSafeText(input.plans ?? [], 120), agents: emptyAgentCounts(), models: input.model ? uniqueSafeText([input.model], 160) : [], approvals: emptyApprovals(), startedAt: now, updatedAt: now, outcome: 'running', continuationAvailable: true, context: { userTurns: 0, assistantTurns: 0 }, events: [] };
+    const session: ActivitySessionSummary = { version: STORE_VERSION, sessionId, project, attribution, phase: safeText(input.phase, 120), plans: uniqueSafeText(input.plans ?? [], 120), agents: emptyAgentCounts(), models: input.model ? uniqueSafeText([input.model], 160) : [], approvals: emptyApprovals(), startedAt: now, updatedAt: now, outcome: 'running', continuationAvailable: true, context: { userTurns: 0, assistantTurns: 0 }, events: [], ...runFields(input) };
     this.ledger.sessions = [session, ...this.ledger.sessions.filter((candidate) => candidate.sessionId !== sessionId)].slice(0, this.maxSessions);
     await this.persist();
     return input.summary ? this.append(sessionId, { status: 'running', summary: input.summary, kind: 'session' }) : cloneSession(session);
@@ -96,6 +108,19 @@ export class ActivityStore {
     session.context.lastEvent = event.summary; session.outcome = sessionOutcome(update.status); session.continuationAvailable = session.outcome !== 'running';
     await this.persist(); return cloneSession(session);
   }
+  /**
+   * Adds an agent's counters to its run's session (sums, never replaces, so every agent of a run,
+   * any window, and any reload add up). `end` marks the run's main agent finishing.
+   */
+  public async addStats(sessionId: string, delta: Partial<SessionStats>, end?: { outcome: RunOutcomeLabel }): Promise<ActivitySessionSummary | undefined> {
+    await this.load();
+    const session = this.ledger.sessions.find((candidate) => candidate.sessionId === sessionId);
+    if (!session) return undefined;
+    session.stats = addSessionStats(session.stats, delta);
+    if (end) { session.endedAt = this.clock(); session.runOutcome = end.outcome; }
+    await this.persist();
+    return cloneSession(session);
+  }
   /** Append provider-reported values without replacing or inventing the estimate. */
   public async reconcile(sessionId: string, usage: Pick<UsageMetadata, 'requestId' | 'inputTokens' | 'outputTokens' | 'actualCostUsd' | 'latencyMs'>): Promise<ActivitySessionSummary> {
     if (!usage.requestId) throw new Error('A provider request ID is required for reconciliation.');
@@ -106,9 +131,22 @@ export class ActivityStore {
     try { const parsed = JSON.parse(await this.fileSystem.readFile(this.filePath, 'utf8')) as Partial<ActivityLedger>; if (parsed.version !== STORE_VERSION || !Array.isArray(parsed.sessions)) throw new Error('Unsupported activity ledger.'); this.ledger = { version: STORE_VERSION, sessions: parsed.sessions.map(normalizeSession).filter((value): value is ActivitySessionSummary => Boolean(value)).slice(0, this.maxSessions) }; } catch { this.ledger = { version: STORE_VERSION, sessions: [] }; }
   }
   private async persist(): Promise<void> {
+    for (const session of this.ledger.sessions.slice(this.maxSessionsWithEvents)) if (session.events.length) session.events = [];
     const payload = `${JSON.stringify(this.ledger)}\n`; const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}`;
     this.writeQueue = this.writeQueue.then(async () => { await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath); }); await this.writeQueue;
   }
+}
+const RUN_OUTCOMES: RunOutcomeLabel[] = ['completed', 'max-turns', 'cancelled', 'failed'];
+function runFields(input: { runId?: unknown; conversationId?: unknown; title?: unknown; endedAt?: unknown; runOutcome?: unknown; stats?: unknown }): Partial<ActivitySessionSummary> {
+  const fields: Partial<ActivitySessionSummary> = {};
+  if (typeof input.runId === 'string' && RUN_ID.test(input.runId)) fields.runId = input.runId;
+  if (typeof input.conversationId === 'string' && CONVERSATION_ID.test(input.conversationId)) fields.conversationId = input.conversationId;
+  const title = typeof input.title === 'string' ? safeText(redactForDisplay(input.title), 100) : undefined;
+  if (title) fields.title = title;
+  if (typeof input.endedAt === 'string') fields.endedAt = input.endedAt.slice(0, 40);
+  if (RUN_OUTCOMES.includes(input.runOutcome as RunOutcomeLabel)) fields.runOutcome = input.runOutcome as RunOutcomeLabel;
+  if (input.stats !== undefined) fields.stats = normalizeSessionStats(input.stats);
+  return fields;
 }
 function emptyApprovals(): ActivityApprovalSummary { return { required: 0, approved: 0, pending: 0 }; }
 function safeText(value: string | undefined, max: number): string | undefined { if (!value) return undefined; const text = value.replace(/[\r\n\t]+/g, ' ').trim(); return text ? text.slice(0, max) : undefined; }
@@ -132,7 +170,7 @@ function normalizeSession(value: unknown): ActivitySessionSummary | undefined {
   const attribution = normalizeAttribution(session.attribution, project);
   const sessionId = session.sessionId;
   const events = Array.isArray(session.events) ? session.events.filter((event): event is ActivityEvent => Boolean(event && typeof event === 'object')).slice(-100).map((event) => normalizeEvent(event, sessionId, attribution)) : [];
-  return { version: STORE_VERSION, sessionId, project, attribution, phase: safeText(session.phase, 120), plans: uniqueSafeText(Array.isArray(session.plans) ? session.plans.filter((item): item is string => typeof item === 'string') : [], 120), agents: { ...emptyAgentCounts(), ...(session.agents ?? {}) }, models: uniqueSafeText(Array.isArray(session.models) ? session.models.filter((item): item is string => typeof item === 'string') : [], 160), estimatedCostUsd: safeNumber(session.estimatedCostUsd), actualCostUsd: safeNumber(session.actualCostUsd), approvals: { ...emptyApprovals(), ...(session.approvals ?? {}) }, startedAt: typeof session.startedAt === 'string' ? session.startedAt : new Date(0).toISOString(), updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date(0).toISOString(), outcome: session.outcome === 'completed' || session.outcome === 'failed' || session.outcome === 'cancelled' || session.outcome === 'setup-blocked' ? session.outcome : 'running', continuationAvailable: session.continuationAvailable !== false, context: { userTurns: session.context?.userTurns ?? 0, assistantTurns: session.context?.assistantTurns ?? 0, lastEvent: safeText(session.context?.lastEvent, 240) }, events };
+  return { version: STORE_VERSION, sessionId, project, attribution, phase: safeText(session.phase, 120), plans: uniqueSafeText(Array.isArray(session.plans) ? session.plans.filter((item): item is string => typeof item === 'string') : [], 120), agents: { ...emptyAgentCounts(), ...(session.agents ?? {}) }, models: uniqueSafeText(Array.isArray(session.models) ? session.models.filter((item): item is string => typeof item === 'string') : [], 160), estimatedCostUsd: safeNumber(session.estimatedCostUsd), actualCostUsd: safeNumber(session.actualCostUsd), approvals: { ...emptyApprovals(), ...(session.approvals ?? {}) }, startedAt: typeof session.startedAt === 'string' ? session.startedAt : new Date(0).toISOString(), updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date(0).toISOString(), outcome: session.outcome === 'completed' || session.outcome === 'failed' || session.outcome === 'cancelled' || session.outcome === 'setup-blocked' ? session.outcome : 'running', continuationAvailable: session.continuationAvailable !== false, context: { userTurns: session.context?.userTurns ?? 0, assistantTurns: session.context?.assistantTurns ?? 0, lastEvent: safeText(session.context?.lastEvent, 240) }, events, ...runFields(session) };
 }
 
 function normalizeEvent(value: ActivityEvent, sessionId: string, attribution: AttributionSnapshot): ActivityEvent {

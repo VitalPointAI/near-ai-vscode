@@ -97,6 +97,96 @@ export interface ActivitySessionSummary {
   continuationAvailable: boolean;
   context: ActivityContextSummary;
   events: ActivityEvent[];
+  /** The chat run this session is (spend for it is tagged with the run ID) and its conversation. */
+  runId?: string;
+  conversationId?: string;
+  /** The first line of what was asked, redacted and truncated (see runTitleFor). */
+  title?: string;
+  /** When the run's main agent ended, and how. */
+  endedAt?: string;
+  runOutcome?: RunOutcomeLabel;
+  /** Counters summed over every agent of the run, as each ends: ids, counts, tool and model names only. */
+  stats?: SessionStats;
+}
+
+export type RunOutcomeLabel = 'completed' | 'max-turns' | 'cancelled' | 'failed';
+
+/** Counters an agent adds to its run's session. Every field is summed, never replaced. */
+export interface SessionCounters {
+  agents: number;
+  turns: number;
+  toolCalls: number;
+  toolErrors: number;
+  retries: number;
+  rateLimited: number;
+  /** Agents that failed, and that were stopped (cancelled). */
+  errors: number;
+  stopped: number;
+  inputTokens: number;
+  outputTokens: number;
+  generateMs: number;
+  toolMs: number;
+  userWaitMs: number;
+  nearWaitMs: number;
+  approvalsAutoAllowed: number;
+  approvalsAsked: number;
+  approvalsDeclined: number;
+  approvalsExpired: number;
+}
+
+export interface ModelCounters { agents: number; turns: number; retries: number; rateLimited: number; errors: number; stopped: number; inputTokens: number; outputTokens: number }
+
+export interface SessionStats extends SessionCounters {
+  tools: Record<string, { calls: number; errors: number }>;
+  models: Record<string, ModelCounters>;
+}
+
+const COUNTER_KEYS: Array<keyof SessionCounters> = ['agents', 'turns', 'toolCalls', 'toolErrors', 'retries', 'rateLimited', 'errors', 'stopped', 'inputTokens', 'outputTokens', 'generateMs', 'toolMs', 'userWaitMs', 'nearWaitMs', 'approvalsAutoAllowed', 'approvalsAsked', 'approvalsDeclined', 'approvalsExpired'];
+const MODEL_KEYS: Array<keyof ModelCounters> = ['agents', 'turns', 'retries', 'rateLimited', 'errors', 'stopped', 'inputTokens', 'outputTokens'];
+const MAX_TOOLS = 80;
+const MAX_MODELS = 20;
+
+export function emptySessionStats(): SessionStats {
+  return { ...Object.fromEntries(COUNTER_KEYS.map((key) => [key, 0])) as unknown as SessionCounters, tools: {}, models: {} };
+}
+
+export function emptyModelCounters(): ModelCounters {
+  return Object.fromEntries(MODEL_KEYS.map((key) => [key, 0])) as unknown as ModelCounters;
+}
+
+const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0);
+const NAME = /^[A-Za-z0-9][\w./:@+-]{0,159}$/;
+
+/** `delta` added onto `base` (both normalized): the sum semantics every writer relies on. */
+export function addSessionStats(base: SessionStats | undefined, delta: Partial<SessionStats>): SessionStats {
+  const into = normalizeSessionStats(base);
+  for (const key of COUNTER_KEYS) into[key] += count(delta[key]);
+  for (const [name, value] of Object.entries(delta.tools ?? {})) {
+    if (!NAME.test(name) || (!(name in into.tools) && Object.keys(into.tools).length >= MAX_TOOLS)) continue;
+    const tool = (into.tools[name] ??= { calls: 0, errors: 0 });
+    tool.calls += count(value?.calls);
+    tool.errors += count(value?.errors);
+  }
+  for (const [name, value] of Object.entries(delta.models ?? {})) {
+    if (!NAME.test(name) || (!(name in into.models) && Object.keys(into.models).length >= MAX_MODELS)) continue;
+    const model = (into.models[name] ??= emptyModelCounters());
+    for (const key of MODEL_KEYS) model[key] += count(value?.[key]);
+  }
+  return into;
+}
+
+/** Counters read from disk: unknown fields dropped, negative or non-numeric values zeroed. */
+export function normalizeSessionStats(value: unknown): SessionStats {
+  const source = (value && typeof value === 'object' ? value : {}) as Partial<SessionStats>;
+  const stats = emptySessionStats();
+  for (const key of COUNTER_KEYS) stats[key] = count(source[key]);
+  for (const [name, tool] of Object.entries(source.tools && typeof source.tools === 'object' ? source.tools : {}).slice(0, MAX_TOOLS)) if (NAME.test(name)) stats.tools[name] = { calls: count(tool?.calls), errors: count(tool?.errors) };
+  for (const [name, model] of Object.entries(source.models && typeof source.models === 'object' ? source.models : {}).slice(0, MAX_MODELS)) {
+    if (!NAME.test(name)) continue;
+    stats.models[name] = emptyModelCounters();
+    for (const key of MODEL_KEYS) stats.models[name][key] = count(model?.[key]);
+  }
+  return stats;
 }
 export interface ActivityLedger { version: 1; sessions: ActivitySessionSummary[]; }
 
