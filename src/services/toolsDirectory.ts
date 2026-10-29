@@ -221,7 +221,7 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
 }
 
 /** Commands the page may run: existing NEAR AI commands only, and settings it may open. */
-export const PAGE_COMMANDS = ['nearAi.manageMcp', 'nearAi.manageTeams', 'nearAi.setupProjectTeam', 'nearAi.manageMemory', 'nearAi.setUpWebSearch', 'nearAi.securityScan', 'nearAi.openAgentActivity', 'nearAi.showHistory', 'nearAi.spendingLimits', 'nearAi.resume', 'nearAi.setup'] as const;
+export const PAGE_COMMANDS = ['nearAi.manageMcp', 'nearAi.manageTeams', 'nearAi.setupProjectTeam', 'nearAi.manageMemory', 'nearAi.setUpWebSearch', 'nearAi.securityScan', 'nearAi.openAgentActivity', 'nearAi.exportAnalytics', 'nearAi.showHistory', 'nearAi.spendingLimits', 'nearAi.resume', 'nearAi.setup'] as const;
 
 export type ToolsPageMessage =
   | { type: 'ready' }

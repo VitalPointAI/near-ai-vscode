@@ -7,6 +7,7 @@ import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
 import { readAgentLimits, readSettings, shouldAutoInstallGsd } from './services/settings';
 import { openOnboarding } from './services/onboarding';
 import { registerAgentActivity } from './services/activityView';
+import { registerUsageExport } from './services/usageExport';
 import { registerSecurityScanning } from './services/securityScan';
 import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
@@ -42,6 +43,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   const sidebar = new NearAiPanelViewProvider(context, auth);
   registerAgentActivity(context, sidebar);
+  registerUsageExport(context);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
   registerSpendTracking(context);

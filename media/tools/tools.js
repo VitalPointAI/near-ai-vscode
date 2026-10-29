@@ -208,7 +208,7 @@
     const root = $('elsewhere');
     root.replaceChildren();
     const list = el('ul', 'elsewhere');
-    [['Agent activity and analytics', 'nearAi.openAgentActivity'], ['Conversation history', 'nearAi.showHistory'], ['Project memory', 'nearAi.manageMemory'], ['Spending limits', 'nearAi.spendingLimits']].forEach(([label, command]) => {
+    [['Agent activity and analytics', 'nearAi.openAgentActivity'], ['Export usage and activity', 'nearAi.exportAnalytics'], ['Conversation history', 'nearAi.showHistory'], ['Project memory', 'nearAi.manageMemory'], ['Spending limits', 'nearAi.spendingLimits']].forEach(([label, command]) => {
       const line = el('li'); line.append(runCommand(label, command)); list.append(line);
     });
     root.append(el('p', 'hint', 'Planning files and the chat’s task list are in the NEAR AI chat in the side bar.'), list);

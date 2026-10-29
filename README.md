@@ -172,6 +172,16 @@ details** saves the prompts, replies, and tool calls still kept in memory (for
 `nearAi.activity.retentionMinutes`, 60, and up to `nearAi.activity.maxMegabytes`,
 8 MB; secrets masked) as Markdown or JSON, for debugging.
 
+**NEAR AI: Export Usage and Activity** (also on the Agent Activity page and in
+the Tools tab) saves usage for an organization, a project, or everything, over
+today, the last 7 or 30 days, or custom dates, as CSV or JSON: one row per run
+(time, organization, project, conversation and run IDs, the redacted first line,
+agents, models, tokens in and out, cost confirmed and pending, outcome) and per
+model (runs, requests, tokens, cost, 429s, retries, errors), with NEAR's own
+total for today when a usage reporting token is set. No prompt or reply
+content. The save dialog starts in Downloads, and it warns before saving into a
+git work tree.
+
 ### Spend
 
 Every billable NEAR AI response is recorded where the extension talks to NEAR,

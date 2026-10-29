@@ -153,6 +153,11 @@
         "icon": "$(pulse)"
       },
       {
+        "command": "nearAi.exportAnalytics",
+        "title": "Export Usage and Activity\u2026",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.securityScan",
         "title": "Scan Dependencies for Vulnerabilities",
         "category": "NEAR AI",
