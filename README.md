@@ -150,18 +150,27 @@ are stored in VS Code's encrypted secret storage.
 ### Agent Activity
 
 **NEAR AI: Open Agent Activity** (the pulse button on the chat view, or
-**Activity** next to running agents) opens a live page of what every agent is
-doing: prompts, replies, reasoning, and each tool call with its input and
-result, color-coded per agent, with a table of turns, tokens in and out, the
-share of output spent reasoning, generation speed, cost, tool calls
-and failures, retries, and time for each agent, split into waiting for replies
-to start, generating them, and tools. Filter by agent or kind, search, **Pause** (or press P) to read without
-the stream moving, and export to Markdown or JSON. It streams only while the
-tab is visible and keeps entries in memory only, for
-`nearAi.activity.retentionMinutes` (60) and up to
-`nearAi.activity.maxMegabytes` (8 MB); secrets are masked. Its spend total and
-each agent's cost come from the spend ledger (below), so they match the chat's
-status line and survive reloads.
+**Activity** next to running agents) is an overview of agent activity; the chat
+itself shows the work. **Now** lists the agents running: role, model (with a
+TEE, Local, or Forwarded badge), what each is doing (thinking, writing, running
+a tool, waiting for you, rate limited with the time until it retries, paused),
+elapsed time, turns, tool calls, and cost so far, with **Pause**/**Resume**
+(sub-agents), **Stop**, and **Show in chat**. Clicking an agent's label in the
+chat opens the page on its row. The overview for **This conversation**,
+**Today** (by `nearAi.spend.dayBoundary`), or the **Last 7 days** shows runs and
+agents, where the time went (generating, tools and sub-agents, waiting for you,
+waiting on NEAR), tokens in and out, cost (confirmed and pending, or NEAR's own
+figure today), tool calls by tool, approvals (auto-allowed, asked, declined,
+expired), and problems (429s, retries, errors, stopped runs) by model, so NEAR
+capacity trouble on one model stands out. **History** lists past runs, newest
+first: when, the first line of what was asked (redacted, about 80
+characters), agents, duration, cost, and outcome; clicking one opens that
+conversation in the chat. The page reads the project's activity history
+(`.planning/.near-ai/activity.json`: ids, counts, tool and model names, no
+content) and the spend ledger (below), so it survives reloads. **Export
+details** saves the prompts, replies, and tool calls still kept in memory (for
+`nearAi.activity.retentionMinutes`, 60, and up to `nearAi.activity.maxMegabytes`,
+8 MB; secrets masked) as Markdown or JSON, for debugging.
 
 ### Spend
 
@@ -210,7 +219,7 @@ If NEAR itself refuses a request with HTTP 402 (credits or the key's spend
 limit used up), the chat says "NEAR spend limit reached".
 
 **Agent Activity** shows each run's agents, models, tokens, and cost, and
-exports them as Markdown or JSON.
+**Export details** saves them as Markdown or JSON.
 
 ### Teams, attachments, images, and memory
 

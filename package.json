@@ -445,14 +445,14 @@
           "default": 60,
           "minimum": 5,
           "maximum": 1440,
-          "description": "How long Agent Activity keeps entries, in minutes. Entries are kept in memory only and dropped after this."
+          "description": "How long the agents' prompts, replies, and tool calls are kept for Agent Activity's \"Export details\", in minutes. They are kept in memory only and dropped after this; the overview's counts are kept in the project's activity history."
         },
         "nearAi.activity.maxMegabytes": {
           "type": "number",
           "default": 8,
           "minimum": 1,
           "maximum": 64,
-          "description": "The most memory Agent Activity uses for entries, in MB. The oldest entries are dropped first; per-agent totals are kept."
+          "description": "The most memory those entries use, in MB. The oldest are dropped first; per-agent totals are kept."
         },
         "nearAi.security.scanOnOpen": {
           "type": "string",
