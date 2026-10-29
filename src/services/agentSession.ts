@@ -962,7 +962,8 @@ function runBoundary(request: Pick<AgentTurnRequest, 'local' | 'privacy'>): Agen
 }
 
 export function retryNotice(event: Extract<AgentEvent, { type: 'retry' }>): string {
-  return `${event.reason} Retrying in ${Math.round(event.delayMs / 1000)} s (attempt ${event.attempt + 1}); the run continues from where it was.`;
+  const stall = event.stall ? `, retry ${event.stall.retry} of ${event.stall.of} before the run stops` : '';
+  return `${event.reason} Retrying in ${Math.round(event.delayMs / 1000)} s (attempt ${event.attempt + 1}${stall}); the run continues from where it was.`;
 }
 
 function contentKey(content: string): string {

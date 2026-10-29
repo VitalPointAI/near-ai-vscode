@@ -367,6 +367,15 @@ Read the full [security and trust report](SECURITY.md).
   local runtime.
 - **Local runtime unreachable:** start it (for example `ollama serve`) and
   check the URL ends in `/v1`, then run **NEAR AI: Set Up** again.
+- **A model goes quiet mid-reply:** a reply that sends nothing new for 2
+  minutes (keep-alive pings don't count; reasoning does), that NEAR cuts off
+  before it finishes, or that runs past an hour is stopped and its request
+  closed. The turn is tried again (each wait longer, and a stalled one gets
+  twice the time); after 3 retries the chat says, for example, "moonshotai/kimi-k3
+  stopped responding (no data for 240 s) — retried 3 times", Agent Activity
+  shows the run failed, and the work so far is kept: send a message to continue
+  or switch models. The cut-off requests are recorded with NEAR's request ID and
+  settled with what NEAR bills.
 - **The agent changed something you didn't want:** click **Revert** under the
   run. Changes made by shell commands it ran are not included; use git for
   those.

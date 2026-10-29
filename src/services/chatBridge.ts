@@ -389,7 +389,8 @@ export function providerErrorMessage(error: unknown): string {
   }
   // The daily limit (nearAi.dailySpendLimitUsd) stopped the request before it was sent.
   if (error instanceof SpendLimitError) return error.message;
-  // The agent loop gave up after NEAR kept refusing a model; its message already says what to do.
-  if (error instanceof Error && error.name === 'ModelUnavailableError') return redactSecrets(error.message);
+  // The agent loop gave up after NEAR kept refusing a model, or after the model kept going quiet
+  // mid-reply; its message already says what happened and what to do.
+  if (error instanceof Error && (error.name === 'ModelUnavailableError' || error.name === 'ModelStalledError')) return redactSecrets(error.message);
   return 'The NEAR AI request could not be completed. Check your connection and try again.';
 }

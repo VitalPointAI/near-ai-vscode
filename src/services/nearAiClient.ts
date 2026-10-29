@@ -131,8 +131,10 @@ export interface NearAiClientOptions {
   now?: () => number;
   /** How long to wait for response headers. */
   responseTimeoutMs?: number;
-  /** How long a started stream may go without sending anything before it counts as stalled. */
+  /** How long a started stream may go without progress (a delta of reasoning, text, a tool call, or usage; SSE keep-alive comments do not count) before it counts as stalled. */
   streamIdleTimeoutMs?: number;
+  /** The most one streamed model turn may take in total, however steadily it streams. */
+  streamTurnTimeoutMs?: number;
   clock?: () => string;
   /** Where every billable response is recorded (the key's spend ledger), and the daily limit. */
   spend?: SpendSink;
@@ -146,8 +148,16 @@ const BILLABLE_PATHS = new Set(['/chat/completions', '/images/generations', '/im
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
 /** Output tokens allowed in one agent reply unless nearAi.agent.maxOutputTokens says otherwise. */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
-/** Silence, not total time: every chunk restarts it, so a long answer that keeps arriving is never cut off. */
+/**
+ * Time without progress, not total time: every delta (reasoning included) restarts it, so a long
+ * answer that keeps arriving is never cut off. Keep-alive comments do not restart it, so a server
+ * that holds the connection open without generating anything still counts as stalled.
+ */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
+/** After [DONE], how long the connection may take to close before the reader stops waiting for it. */
+const STREAM_END_GRACE_MS = 2_000;
+/** The backstop for one streamed turn: a reply still going after an hour is stopped (the output cap normally ends it far sooner). */
+export const DEFAULT_STREAM_TURN_TIMEOUT_MS = 60 * 60_000;
 
 export function createNearAiClient(options: NearAiClientOptions): NearAiClient {
   return new NearAiClient(options);
@@ -226,12 +236,30 @@ function diagnose(line: string): void {
   try { diagnosticsSink?.(redactSecrets(line)); } catch { /* diagnostics never break a request */ }
 }
 
-/** A stream that stopped sending, or a connection that dropped mid-response. Always worth retrying. */
+/**
+ * How a started stream failed: no progress for the idle limit (`stalled`), the connection broke
+ * (`dropped`), the stream ended before the reply finished (`closed`), NEAR sent an error event
+ * mid-response (`error`), or the reply ran past the limit for one turn (`turn-limit`).
+ */
+export type StreamInterruption = 'stalled' | 'dropped' | 'closed' | 'error' | 'turn-limit';
+
+/** A stream that stopped sending, dropped, or ended early. Worth retrying, except a reply that ran past the turn limit. */
 export class StreamInterruptedError extends NearAiError {
-  public constructor(message: string, public readonly stalled: boolean, requestId?: string) {
-    super(0, message, true, requestId);
+  public readonly kind: StreamInterruption;
+  /** The idle limit that ran out (stalled). */
+  public readonly idleMs?: number;
+
+  public constructor(message: string, public readonly stalled: boolean, requestId?: string, details: { kind?: StreamInterruption; idleMs?: number; model?: string; detail?: string; retryable?: boolean } = {}) {
+    super(0, message, details.retryable ?? true, requestId, { ...(details.model ? { model: details.model } : {}), ...(details.detail ? { detail: details.detail } : {}) });
     this.name = 'StreamInterruptedError';
+    this.kind = details.kind ?? (stalled ? 'stalled' : 'dropped');
+    if (details.idleMs !== undefined) this.idleMs = details.idleMs;
   }
+}
+
+/** "0.4", "1.5", "120": seconds for messages, without rounding a short limit down to 0. */
+export function formatSeconds(ms: number): string {
+  return ms >= 10_000 ? String(Math.round(ms / 1000)) : String(Math.round(ms / 100) / 10);
 }
 
 export function classifyRetryableFailure(status: number, signal?: AbortSignal): boolean {
@@ -278,6 +306,8 @@ export class NearAiClient {
   private readonly cooling = new Map<string, { until: number; strikes: number; probe?: Promise<void> }>();
   /** The spend ledger entry of each billable response still being read. */
   private readonly charges = new WeakMap<Response, { finish: (result: Parameters<ReturnType<SpendSink['begin']>>[0]) => void; inputTokens: number; model?: string }>();
+  /** Each streamed response's connection: `abort` closes it, `release` unhooks the caller's signal once the body is done. */
+  private readonly streams = new WeakMap<Response, { abort: () => void; release: () => void }>();
 
   public constructor(private readonly options: NearAiClientOptions) {
     this.fetchFn = options.fetchFn ?? fetch;
@@ -542,15 +572,15 @@ export class NearAiClient {
       signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
-    }, { model });
+    }, { model, stream: true });
     const metadata = metadataFromHeaders(response.headers, started);
-    if (!response.body) { this.settleCharge(response, 'partial', metadata); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId); }
+    if (!response.body) { this.streams.get(response)?.release(); this.settleCharge(response, 'partial', metadata); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId); }
 
     let completed = false;
     let latest = metadata;
     let chars = 0;
     try {
-      for await (const event of this.readEvents(response.body, metadata, signal, this.models.get(model))) {
+      for await (const event of this.readEvents(response, response.body, metadata, signal, this.models.get(model))) {
         if (event.type === 'text') { if (event.metadata) latest = event.metadata; chars += event.text.length; yield { text: event.text, done: false, usage: event.metadata }; }
         if (event.type === 'done') {
           completed = true;
@@ -574,16 +604,16 @@ export class NearAiClient {
       signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
-    }, { model });
+    }, { model, stream: true });
     const metadata = metadataFromHeaders(response.headers, started);
-    if (!response.body) { this.settleCharge(response, 'partial', metadata); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId); }
+    if (!response.body) { this.streams.get(response)?.release(); this.settleCharge(response, 'partial', metadata); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId); }
 
     let latest = metadata;
     let chars = 0;
     try {
       yield { type: 'status', status: 'started', metadata };
       try {
-        for await (const event of this.readEvents(response.body, metadata, signal, this.models.get(model))) {
+        for await (const event of this.readEvents(response, response.body, metadata, signal, this.models.get(model))) {
           if (event.type === 'text') { if (event.metadata) latest = event.metadata; chars += event.text.length; }
           yield event;
         }
@@ -609,56 +639,78 @@ export class NearAiClient {
    * One streamed model turn with tools. Text and reasoning stream as they arrive; tool calls are
    * assembled from their indexed fragments and returned whole in the final `done` event.
    */
-  public async *streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options: { idleTimeoutMs?: number; maxOutputTokens?: number } = {}): AsyncGenerator<CompletionEvent> {
+  public async *streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options: { idleTimeoutMs?: number; turnTimeoutMs?: number; maxOutputTokens?: number } = {}): AsyncGenerator<CompletionEvent> {
     const started = Date.now();
     // Cap one reply's output (reasoning included), never above the model's own limit: a model that
     // keeps generating inside a single turn is otherwise bounded only by that limit.
     const modelMax = this.models.get(model)?.maxOutputTokens;
     const maxTokens = Math.max(256, Math.min(options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS, modelMax ?? Number.POSITIVE_INFINITY));
     const requestBody = JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) });
-    const response = await this.request('/chat/completions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: requestBody }, { model });
+    const response = await this.request('/chat/completions', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: requestBody }, { model, stream: true });
+    const connection = this.streams.get(response);
     let usage = metadataFromHeaders(response.headers, started);
     // NEAR signs SHA-256 of the exact request body and raw response; keep both hashes for verification.
     const rawResponse = createHash('sha256');
     let chatId: string | undefined;
-    if (!response.body) { this.settleCharge(response, 'partial', usage); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, usage.requestId); }
+    if (!response.body) { connection?.release(); this.settleCharge(response, 'partial', usage); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, usage.requestId); }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const calls: Array<{ id: string; name: string; arguments: string }> = [];
     let text = '';
     let finishReason = 'stop';
+    /** A choice said how it finished, and the stream said [DONE]: without either, it was cut off. */
+    let finished = false;
+    let ended = false;
+    let eof = false;
     let buffer = '';
     let firstTokenAt: number | undefined;
     let reasoningChars = 0;
     let answerChars = 0;
-    const idleTimeoutMs = options.idleTimeoutMs ?? this.idleTimeoutMs;
+    const idleTimeoutMs = Math.max(1, options.idleTimeoutMs ?? this.idleTimeoutMs);
+    const turnTimeoutMs = Math.max(1, options.turnTimeoutMs ?? this.options.streamTurnTimeoutMs ?? DEFAULT_STREAM_TURN_TIMEOUT_MS);
+    const watch = new StreamWatch(reader, { idleMs: idleTimeoutMs, turnMs: turnTimeoutMs, signal, requestId: usage.requestId, model, abortRequest: () => connection?.abort() });
     try {
     try {
       for (;;) {
-        const next = await readWithin(reader, idleTimeoutMs, signal, usage.requestId);
+        let next: ReadResult;
+        try {
+          next = await watch.next();
+        } catch (error) {
+          // After [DONE] the reply is whole; a connection that then lingers or drops changes nothing.
+          if (ended && error instanceof StreamInterruptedError) break;
+          throw error;
+        }
         if (next.value) rawResponse.update(next.value);
         buffer += next.done ? decoder.decode() : decoder.decode(next.value, { stream: true });
         const lines = buffer.split(/\r?\n/);
         buffer = next.done ? '' : (lines.pop() ?? '');
         for (const line of lines) {
           const value = line.trim();
+          // SSE comments (": keep-alive"), event names, and blank lines carry nothing: not progress.
           if (!value.startsWith('data:')) continue;
           const payload = value.slice(5).trim();
-          if (payload === '[DONE]') continue;
-          let chunk: { id?: unknown; choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; tool_calls?: Array<{ index?: number; id?: unknown; function?: { name?: unknown; arguments?: unknown } }> }; finish_reason?: unknown }>; usage?: Record<string, unknown> };
+          if (payload === '[DONE]') { ended = true; watch.progress(); watch.ending(); continue; }
+          let chunk: { id?: unknown; error?: unknown; choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; tool_calls?: Array<{ index?: number; id?: unknown; function?: { name?: unknown; arguments?: unknown } }> }; finish_reason?: unknown; error?: unknown }>; usage?: Record<string, unknown> };
           try { chunk = JSON.parse(payload); } catch { throw new NearAiError(0, 'NEAR AI returned malformed streaming data.', false, usage.requestId); }
+          if (chunk.error !== undefined && chunk.error !== null) throw streamErrorFrom(chunk.error, usage.requestId, model, this.options.apiKey);
           if (!chatId && typeof chunk.id === 'string' && chunk.id) chatId = chunk.id;
           if (chunk.usage) {
+            watch.progress();
             usage = usageFromPayload(chunk.usage, usage, usage.requestId, usage.provider);
             usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens) ?? usage.estimatedCostUsd;
           }
           const choice = chunk.choices?.[0];
           if (!choice) continue;
-          if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason;
+          if (choice.finish_reason === 'error') throw streamErrorFrom(choice.error ?? {}, usage.requestId, model, this.options.apiKey);
+          if (typeof choice.finish_reason === 'string') { finishReason = choice.finish_reason; finished = true; watch.progress(); }
           const delta = choice.delta ?? {};
           const reasoning = stringValue(delta.reasoning_content) ?? stringValue(delta.reasoning);
           const content = stringValue(delta.content);
-          if ((reasoning || content || delta.tool_calls?.length) && firstTokenAt === undefined) firstTokenAt = Date.now();
+          if (reasoning || content || delta.tool_calls?.length) {
+            // Any delta is progress, reasoning included: a model that is still thinking is not stalled.
+            watch.progress();
+            if (firstTokenAt === undefined) firstTokenAt = Date.now();
+          }
           if (reasoning) { reasoningChars += reasoning.length; yield { type: 'reasoning', text: reasoning }; }
           if (content) { text += content; answerChars += content.length; yield { type: 'text', text: content }; }
           for (const fragment of delta.tool_calls ?? []) {
@@ -670,11 +722,20 @@ export class NearAiClient {
             if (typeof fragment.function?.arguments === 'string') call.arguments += fragment.function.arguments;
           }
         }
-        if (next.done) break;
+        if (next.done) { eof = true; break; }
       }
+      // The body ended without the reply finishing (a gateway or proxy cut the stream, often at a
+      // fixed timeout): that is not an answer, and must not end the run as if it were one.
+      if (!finished && (!ended || (!text && !calls.length))) {
+        throw new StreamInterruptedError(ended ? 'NEAR AI ended the response without sending an answer.' : 'NEAR AI closed the stream before the reply finished.', false, usage.requestId, { kind: 'closed', model });
+      }
+    } catch (error) {
+      if (error instanceof StreamInterruptedError) diagnose(`STREAM ${error.kind} POST /chat/completions model=${model}${usage.requestId ? ` request=${usage.requestId}` : ''} after=${formatSeconds(watch.elapsedMs)}s quiet=${formatSeconds(watch.quietMs)}s reasoningChars=${reasoningChars} answerChars=${answerChars}`);
+      throw error;
     } finally {
-      if (signal?.aborted) await reader.cancel().catch(() => undefined);
-      reader.releaseLock();
+      if (!eof) watch.stop();
+      connection?.release();
+      try { reader.releaseLock(); } catch { /* a cancelled read may still hold it */ }
     }
     const toolCalls: ToolCall[] = calls.filter((call) => call.name).map((call, index) => ({ id: call.id || `call_${index}`, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
     this.settleCharge(response, 'completed', usage);
@@ -695,15 +756,17 @@ export class NearAiClient {
     return verifyResponse(evidence, model, async (path) => (await this.request(path, { method: 'GET', signal })).json(), trust);
   }
 
-  private async *readEvents(body: ReadableStream<Uint8Array>, initial: UsageMetadata, signal?: AbortSignal, model?: ModelInfo): AsyncGenerator<ChatStreamEvent> {
+  private async *readEvents(response: Response, body: ReadableStream<Uint8Array>, initial: UsageMetadata, signal?: AbortSignal, model?: ModelInfo): AsyncGenerator<ChatStreamEvent> {
+    const connection = this.streams.get(response);
     const reader = body.getReader();
+    const watch = new StreamWatch(reader, { idleMs: this.idleTimeoutMs, turnMs: Math.max(1, this.options.streamTurnTimeoutMs ?? DEFAULT_STREAM_TURN_TIMEOUT_MS), signal, requestId: initial.requestId, model: model?.id, abortRequest: () => connection?.abort() });
     const decoder = new TextDecoder();
     let buffer = '';
     let metadata = initial;
     let finished = false;
     try {
       while (!finished) {
-        const next = await readWithin(reader, this.idleTimeoutMs, signal, initial.requestId);
+        const next = await watch.next();
         if (next.done) {
           buffer += decoder.decode();
           finished = true;
@@ -714,15 +777,18 @@ export class NearAiClient {
         buffer = finished ? '' : (lines.pop() ?? '');
         for (const line of lines) {
           const event = parseSseLine(line, metadata, model);
+          // Keep-alive comments and empty chunks are not progress.
           if (!event) continue;
+          watch.progress();
           if (event.type === 'done') return;
           if (event.type === 'text' && event.metadata) metadata = event.metadata;
           yield event;
         }
       }
     } finally {
-      if (signal?.aborted) await reader.cancel().catch(() => undefined);
-      reader.releaseLock();
+      if (!finished) watch.stop();
+      connection?.release();
+      try { reader.releaseLock(); } catch { /* a cancelled read may still hold it */ }
     }
   }
 
@@ -810,7 +876,7 @@ export class NearAiClient {
     charge.finish({ status, ...(usage?.requestId ? { requestId: usage.requestId } : {}), ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}), ...(usage?.cachedInputTokens !== undefined ? { cachedInputTokens: usage.cachedInputTokens } : {}), ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}), ...(estimateUsd !== undefined ? { estimateNanoUsd: usdToNano(estimateUsd) } : {}) });
   }
 
-  private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean; spendKind?: SpendKind; secret?: string } = {}): Promise<Response> {
+  private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean; spendKind?: SpendKind; secret?: string; stream?: boolean } = {}): Promise<Response> {
     const url = `${this.options.baseUrl.replace(/\/$/, '')}${path}`;
     // One retry layer: the agent loop backs off between model turns. Here, at most one quick retry,
     // and only for failures that are usually momentary (never for 429 or 503).
@@ -834,6 +900,7 @@ export class NearAiClient {
         const attemptAbort = new AbortController();
         const forwardAbort = () => attemptAbort.abort(init.signal?.reason);
         if (init.signal?.aborted) forwardAbort(); else init.signal?.addEventListener('abort', forwardAbort, { once: true });
+        const unhook = () => init.signal?.removeEventListener('abort', forwardAbort);
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; attemptAbort.abort(); }, responseTimeoutMs);
         try {
@@ -843,6 +910,7 @@ export class NearAiClient {
             headers: { ...(this.options.apiKey ? { authorization: `Bearer ${this.options.apiKey}` } : {}), ...(init.headers ?? {}) }
           });
         } catch (error) {
+          unhook();
           // Sent but cancelled or timed out before NEAR answered: NEAR may still have done (and billed) the work.
           if (billable && (init.signal?.aborted || timedOut)) this.charge(path, init, model, overrides.spendKind, undefined, 'aborted');
           if (init.signal?.aborted) throw error;
@@ -855,9 +923,9 @@ export class NearAiClient {
           throw new NearAiError(0, `NEAR AI request failed: ${error instanceof Error ? error.message : 'network error'}.`, true, undefined, { model });
         } finally {
           clearTimeout(timer);
-          init.signal?.removeEventListener('abort', forwardAbort);
         }
         if (init.signal?.aborted) {
+          unhook();
           if (billable && response.ok) this.charge(path, init, model, overrides.spendKind, response, 'aborted');
           await response.body?.cancel().catch(() => undefined);
           throw new DOMException('The operation was aborted.', 'AbortError');
@@ -865,8 +933,13 @@ export class NearAiClient {
         if (response.ok) {
           if (model) this.cooling.delete(model);
           if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');
+          // A stream keeps the caller's stop wired to the connection while its body is read, and its
+          // reader can close the connection itself when the stream stalls; the reader releases it.
+          if (overrides.stream) this.streams.set(response, { abort: () => attemptAbort.abort(), release: unhook });
+          else unhook();
           return response;
         }
+        unhook();
         const failure = await this.failureFrom(response, init.method ?? 'GET', path, model, release !== undefined, overrides.secret);
         if (failure.retryable && attempt < maxRetries && [500, 502, 504].includes(response.status) && (failure.retryAfterMs ?? 0) <= 1_000) {
           await quickRetry();
@@ -1118,6 +1191,104 @@ async function readWithin(reader: ReadableStreamDefaultReader<Uint8Array>, idleM
     throw new StreamInterruptedError(`NEAR AI stopped sending the response (nothing for ${Math.round(idleMs / 1000)} seconds).`, true, requestId);
   }
   return next;
+}
+
+interface StreamWatchOptions {
+  /** How long the stream may go without progress. */
+  idleMs: number;
+  /** How long the whole stream may take. */
+  turnMs: number;
+  signal?: AbortSignal;
+  requestId?: string;
+  model?: string;
+  /** Closes the HTTP request itself, so a stalled connection is shut rather than left open. */
+  abortRequest?: () => void;
+}
+
+/**
+ * Reads a streamed body under two limits: `idleMs` without progress (the reader calls `progress()`
+ * for each delta of reasoning, text, a tool call, usage, or the end; SSE keep-alive comments and
+ * empty chunks are not progress) and `turnMs` in total. Running out of either, or the caller's
+ * signal, closes the request at once, even while no byte is arriving.
+ */
+class StreamWatch {
+  private readonly startedAt = Date.now();
+  private lastProgressAt = this.startedAt;
+  private stopped = false;
+
+  public constructor(private readonly reader: ReadableStreamDefaultReader<Uint8Array>, private readonly options: StreamWatchOptions) {}
+
+  public progress(): void { this.lastProgressAt = Date.now(); }
+
+  /** The stream said it is done: what is left (the connection closing) gets only `graceMs` more. */
+  public ending(graceMs = STREAM_END_GRACE_MS): void { this.endDue = Date.now() + graceMs; }
+  private endDue = Number.POSITIVE_INFINITY;
+
+  /** Milliseconds since the stream started, and since its last progress. */
+  public get elapsedMs(): number { return Date.now() - this.startedAt; }
+  public get quietMs(): number { return Date.now() - this.lastProgressAt; }
+
+  public async next(): Promise<ReadResult> {
+    const { signal, requestId, model } = this.options;
+    if (signal?.aborted) { this.stop(); throw abortError(); }
+    const idleDue = this.lastProgressAt + this.options.idleMs;
+    const turnDue = this.startedAt + this.options.turnMs;
+    const limit: 'stalled' | 'turn-limit' = turnDue <= idleDue ? 'turn-limit' : 'stalled';
+    // Checked before reading: a flood of keep-alive comments must not keep winning the race.
+    const waitMs = Math.min(idleDue, turnDue, this.endDue) - Date.now();
+    if (waitMs <= 0) throw this.limitReached(limit);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
+    let next: ReadResult | 'timeout' | 'aborted';
+    try {
+      next = await Promise.race([
+        this.reader.read() as Promise<ReadResult>,
+        new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), waitMs); }),
+        new Promise<'aborted'>((resolve) => { onAbort = () => resolve('aborted'); signal?.addEventListener('abort', onAbort, { once: true }); })
+      ]);
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw abortError();
+      this.stop();
+      throw new StreamInterruptedError(`The connection to NEAR AI dropped mid-response (${error instanceof Error ? error.message : 'network error'}).`, false, requestId, { kind: 'dropped', model });
+    } finally {
+      clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+    }
+    if (next === 'aborted' || signal?.aborted) { this.stop(); throw abortError(); }
+    if (next === 'timeout') throw this.limitReached(limit);
+    return next;
+  }
+
+  /** Closes the connection and the reader without waiting on either (a dead connection may never answer a cancel). */
+  public stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    try { this.options.abortRequest?.(); } catch { /* already closed */ }
+    void this.reader.cancel().catch(() => undefined);
+  }
+
+  private limitReached(limit: 'stalled' | 'turn-limit'): StreamInterruptedError {
+    this.stop();
+    const { requestId, model, idleMs, turnMs } = this.options;
+    if (limit === 'stalled') return new StreamInterruptedError(`NEAR AI stopped sending the response (no data for ${formatSeconds(idleMs)} seconds).`, true, requestId, { kind: 'stalled', idleMs, model });
+    const minutes = Math.max(1, Math.round(turnMs / 60_000));
+    return new StreamInterruptedError(`${model ?? 'The model'}'s reply was still streaming after ${minutes} minute${minutes === 1 ? '' : 's'}, the most one model turn may take, so it was stopped. Your work is kept: send a message to continue, or switch to another model.`, false, requestId, { kind: 'turn-limit', model, retryable: false });
+  }
+}
+
+/** NEAR's error event in the middle of a stream ({"error": {...}}, or a choice that finished with "error"). */
+function streamErrorFrom(value: unknown, requestId: string | undefined, model: string | undefined, apiKey: string): NearAiError {
+  const details = errorBodyDetails(JSON.stringify({ error: value ?? {} }), apiKey);
+  const code = Number(details.errorCode);
+  // A client error NEAR only noticed mid-stream cannot be fixed by sending the same request again.
+  if (Number.isInteger(code) && code >= 400 && code < 500 && code !== 408 && code !== 429) {
+    return new NearAiError(code, `NEAR AI request failed with HTTP ${code}${model ? ` for ${model}` : ''}${details.detail ? `: ${details.detail}` : ''}.`, false, requestId, { ...details, model });
+  }
+  return new StreamInterruptedError(`NEAR AI reported an error mid-response${details.detail ? `: ${details.detail}` : ''}.`, false, requestId, { kind: 'error', model, ...(details.detail ? { detail: details.detail } : {}) });
+}
+
+function abortError(): DOMException {
+  return new DOMException('The operation was aborted.', 'AbortError');
 }
 
 async function waitForRetry(baseDelayMs: number, attempt: number, signal?: AbortSignal): Promise<void> {

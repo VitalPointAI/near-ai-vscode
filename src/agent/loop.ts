@@ -33,8 +33,11 @@ export type AgentEvent =
   | { type: 'tool-end'; callId: string; ok: boolean; output: string }
   | { type: 'todos'; todos: Todo[] }
   | { type: 'turn'; model: string; usage: UsageMetadata }
-  /** A model turn failed and will be tried again; `discardText` characters streamed by the failed attempt are void. */
-  | { type: 'retry'; attempt: number; delayMs: number; reason: string; discardText: number; status?: number }
+  /**
+   * A model turn failed and will be tried again; `discardText` characters streamed by the failed
+   * attempt are void. `stall` counts retries after the model stopped responding, out of `of`.
+   */
+  | { type: 'retry'; attempt: number; delayMs: number; reason: string; discardText: number; status?: number; stall?: { retry: number; of: number } }
   /** A gated action (an edit, a command, a network call) the policy allowed without asking, or refused by a rule. */
   | { type: 'permission'; tool: string; decision: 'auto-allowed' | 'denied' }
   | ({ type: 'security'; tool: string } & SecurityEvent);
@@ -73,6 +76,8 @@ export interface AgentRunOptions {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   /** The stream silence limit for a turn's first attempt; it doubles after each stall. */
   idleTimeoutMs?: number;
+  /** Retries of a turn after the model stopped responding (a stalled, dropped, or cut-off stream, or no answer) before the run stops with a clear message (default STALL_RETRIES). */
+  stallRetries?: number;
   /** Output tokens one reply may use (the client's default when unset). */
   maxOutputTokens?: number;
   /** Repetitions of the same action, within the last 20 calls, before the agent is nudged and then stopped (default 8 and 14; 0 turns it off). */
@@ -129,6 +134,46 @@ export class ModelUnavailableError extends Error {
     this.name = 'ModelUnavailableError';
   }
 }
+/** Retries of one turn after the model stopped responding, before the run stops and says so. */
+export const STALL_RETRIES = 3;
+
+/**
+ * A model turn whose stream kept stalling, dropping, or ending before the reply finished, through
+ * every retry; the run stops with what it did so far, and says so instead of going quiet.
+ */
+export class ModelStalledError extends Error {
+  public readonly retryable = false;
+  public constructor(
+    public readonly model: string,
+    public readonly retries: number,
+    /** What the last attempt did, e.g. "no data for 240 s". */
+    public readonly symptom: string,
+    public readonly lastReason: string,
+    public readonly requestId?: string
+  ) {
+    super(`${model} stopped responding (${symptom}) — retried ${retries} time${retries === 1 ? '' : 's'}; your work is kept: resend your message to continue, switch to another model, or stop.${requestId ? ` Request ID: ${requestId}.` : ''}`);
+    this.name = 'ModelStalledError';
+  }
+}
+
+/** A failure that means the model stopped responding mid-turn (not a refusal, not a bad request). */
+function unresponsive(error: unknown): boolean {
+  const failure = error as { name?: unknown; status?: unknown; unresponsive?: unknown; retryable?: unknown };
+  return failure.retryable === true && (failure.name === 'StreamInterruptedError' || failure.status === 408 || failure.unresponsive === true);
+}
+
+/** What a stopped-responding failure looked like, for the message the user sees. */
+function symptomOf(error: unknown): string {
+  const failure = error as { kind?: unknown; idleMs?: unknown; detail?: unknown; status?: unknown; stalled?: unknown };
+  const seconds = (ms: number) => (ms >= 10_000 ? String(Math.round(ms / 1000)) : String(Math.round(ms / 100) / 10));
+  if (failure.kind === 'stalled' || failure.stalled === true) return typeof failure.idleMs === 'number' ? `no data for ${seconds(failure.idleMs)} s` : 'no data';
+  if (failure.kind === 'closed') return 'the stream closed before the reply finished';
+  if (failure.kind === 'dropped') return 'the connection dropped mid-response';
+  if (failure.kind === 'error') return `NEAR reported an error mid-response${typeof failure.detail === 'string' && failure.detail ? `: ${failure.detail}` : ''}`;
+  if (failure.status === 408) return 'no response to the request';
+  return 'no answer';
+}
+
 const MAX_TOOL_RESULT_CHARS = 40_000;
 const UI_OUTPUT_CHARS = 6_000;
 
@@ -214,6 +259,9 @@ export class AgentRun {
     /** When the current run of 429/5xx answers began; any other outcome resets it. */
     let refusedSince: number | undefined;
     let refusals = 0;
+    /** Retries after the model stopped responding; past the budget the run stops and says so. */
+    let stalls = 0;
+    const stallRetries = Math.max(0, this.options.stallRetries ?? STALL_RETRIES);
     const input = this.options.input;
     for (let attempt = 0; ; attempt += 1) {
       let streamed = 0;
@@ -244,7 +292,7 @@ export class AgentRun {
           this.options.emit({ type: 'turn', model: this.options.model, usage: reply.usage });
           return reply;
         }
-        throw Object.assign(new Error('The model ended its turn without a response.'), { retryable: true });
+        throw Object.assign(new Error('The model ended its turn without a response.'), { retryable: true, unresponsive: true });
       } catch (error) {
         if (cutForInput && !signal.aborted) { attempt -= 1; continue; }
         if (signal.aborted || (error as { retryable?: unknown }).retryable !== true) throw error;
@@ -253,9 +301,13 @@ export class AgentRun {
         const refused = status === 429 || (typeof status === 'number' && status >= 500);
         if (refused) { refusedSince ??= now(); refusals += 1; } else { refusedSince = undefined; refusals = 0; }
         const refusingFor = refusedSince === undefined ? 0 : now() - refusedSince;
+        const requestId = (error as { requestId?: unknown }).requestId;
         if (refused && refusingFor >= giveUpAfterMs) {
-          const requestId = (error as { requestId?: unknown }).requestId;
           throw new ModelUnavailableError(this.options.model, status as number, refusingFor, refusals, reason, typeof requestId === 'string' ? requestId : undefined);
+        }
+        const stalled = !refused && unresponsive(error);
+        if (stalled && ++stalls > stallRetries) {
+          throw new ModelStalledError(this.options.model, stallRetries, symptomOf(error), reason, typeof requestId === 'string' ? requestId : undefined);
         }
         // At least what NEAR asked for, jittered so parallel agents do not retry in lockstep.
         const retryAfterMs = (error as { retryAfterMs?: unknown }).retryAfterMs;
@@ -264,8 +316,12 @@ export class AgentRun {
         // The last wait ends at the limit, so the final attempt happens there rather than past it.
         if (refused) delayMs = Math.max(0, Math.min(delayMs, giveUpAfterMs - refusingFor));
         // A stall may be a slow server rather than a dead one: give the next attempt longer.
-        if ((error as { stalled?: unknown }).stalled === true) idleTimeoutMs = Math.min(MAX_IDLE_TIMEOUT_MS, 2 * (idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS));
-        this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs, reason, discardText: streamed, ...(typeof status === 'number' ? { status } : {}) });
+        // Doubled from the limit the stalled attempt actually had, when the client says (its own default may differ).
+        if ((error as { stalled?: unknown }).stalled === true) {
+          const used = (error as { idleMs?: unknown }).idleMs;
+          idleTimeoutMs = Math.min(MAX_IDLE_TIMEOUT_MS, 2 * (typeof used === 'number' && used > 0 ? used : idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS));
+        }
+        this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs, reason, discardText: streamed, ...(typeof status === 'number' ? { status } : {}), ...(stalled ? { stall: { retry: stalls, of: stallRetries } } : {}) });
         // A message from the user ends the wait: the next attempt carries it.
         if (!input?.pending()) {
           const waitAbort = new AbortController();
