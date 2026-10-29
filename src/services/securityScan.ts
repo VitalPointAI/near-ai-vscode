@@ -25,6 +25,12 @@ function scannerFor(context: vscode.ExtensionContext, root: string): SecuritySca
   return scanner;
 }
 
+/** Whether this project allowed dependency checks, without starting the scanner. */
+export function securityConsented(context: Pick<vscode.ExtensionContext, 'workspaceState'>): boolean {
+  if (vscode.workspace.getConfiguration('nearAi').get<string>('security.scanOnOpen', 'ask') === 'never') return false;
+  return context.workspaceState.get<string>(CONSENT_KEY) === 'granted';
+}
+
 /** The agent's view of the project's scanner, for the SecurityScan tool. */
 export function securityAccess(context: vscode.ExtensionContext, root: string): SecurityAccess {
   // Created on first use by the tool, not per message; if it can't be, the agent is told nothing was checked.
@@ -53,8 +59,7 @@ export class SecurityScanner implements vscode.Disposable {
   }
 
   public get consented(): boolean {
-    if (vscode.workspace.getConfiguration('nearAi').get<string>('security.scanOnOpen', 'ask') === 'never') return false;
-    return this.context.workspaceState.get<string>(CONSENT_KEY) === 'granted';
+    return securityConsented(this.context);
   }
 
   /** Asks once per project before anything is sent; a modal for explicit requests, a notification otherwise. */
