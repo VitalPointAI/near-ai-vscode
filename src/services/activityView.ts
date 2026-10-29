@@ -117,15 +117,35 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
   let subscription: { dispose(): void } | undefined;
   let spendWatch: { dispose(): void } | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // A read of the history the interval put off, made when it is up if nothing else made it first.
+  let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+  let reloadDue = false;
+  // The agents whose saved counters the loaded history includes.
+  let readSaved = '';
   let lastSent = 0;
   let lastJson = '';
   const post = (message: Record<string, unknown>) => { activityTap.toView?.(message); void view.webview.postMessage(message); };
+  const savedAgents = () => activity.agentStats().filter((stat) => stat.persisted).map((stat) => stat.agentId).join(',');
   const send = async (reload = false) => {
     timer = undefined;
-    if (store && (reload || Date.now() - loadedAt >= RELOAD_MS)) {
-      await store.reload().catch(() => undefined);
-      sessions = await store.list().catch(() => sessions);
-      loadedAt = Date.now();
+    if (store) {
+      const saved = savedAgents();
+      // The history is read at most every RELOAD_MS, and also as soon as an agent's counters are
+      // saved to it: they leave the live figures then, so a stale history would drop them (and a
+      // run that ended within the interval would not show at all).
+      if (reload || reloadDue || saved !== readSaved || Date.now() - loadedAt >= RELOAD_MS) {
+        if (reloadTimer) clearTimeout(reloadTimer);
+        reloadTimer = undefined;
+        reloadDue = false;
+        await store.reload().catch(() => undefined);
+        sessions = await store.list().catch(() => sessions);
+        loadedAt = Date.now();
+        readSaved = saved;
+      } else if (subscription) {
+        // Put off: read it when the interval is up even if no other change comes (a run's history
+        // row, its cost), through the same once-a-second update.
+        reloadTimer ??= setTimeout(() => { reloadTimer = undefined; reloadDue = true; schedule(); }, Math.max(0, RELOAD_MS - (Date.now() - loadedAt)));
+      }
     }
     if (!subscription) return;
     const message = overviewMessage({ feed: activity, sessions, spend: shownSpendAccount(), window, page, boundary: readDayBoundary(), hasProject: Boolean(store) });
@@ -153,6 +173,8 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
     spendWatch = undefined;
     if (timer) clearTimeout(timer);
     timer = undefined;
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = undefined;
     lastJson = '';
   };
   view.onDidChangeViewState((event) => { if (!event.webviewPanel.visible) stop(); }, undefined, context.subscriptions);
