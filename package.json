@@ -132,7 +132,7 @@
       },
       {
         "command": "nearAi.manageTeams",
-        "title": "Manage Teams\u2026",
+        "title": "Team Studio",
         "category": "NEAR AI",
         "icon": "$(organization)"
       },

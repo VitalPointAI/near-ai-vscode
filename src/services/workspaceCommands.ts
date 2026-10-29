@@ -1,22 +1,24 @@
-import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { matchingFacts, projectMemoryScope } from '../agent/extraTools';
-import { applyProjectType, PROJECT_TYPES, projectTypeTeam } from '../agent/projectTypes';
 import { parseTeam, TeamLibrary } from '../agent/teams';
 import type { MemoryScope } from '../domain/contextGraph';
 import { ContextGraphMemory } from './contextGraphMemory';
 import { MemoryApprovalRegistry } from './memoryApproval';
 
-// Native VS Code flows for teams and memory: quick picks, input boxes, and the editor itself.
+// Team commands (which open Team Studio), the team-file save hook, and the memory flow.
 
-export function registerWorkspaceCommands(context: vscode.ExtensionContext, runTeam: (slug: string) => Promise<void>): void {
+export function registerWorkspaceCommands(context: vscode.ExtensionContext, openStudio: (options: { wizard?: 'project' }) => void): void {
   const library = new TeamLibrary(context.globalStorageUri.fsPath);
   context.subscriptions.push(
-    vscode.commands.registerCommand('nearAi.manageTeams', () => manageTeams(library, runTeam)),
-    vscode.commands.registerCommand('nearAi.setupProjectTeam', () => setupProjectTeam(library)),
+    // Teams are built and managed in Team Studio; the Markdown files stay editable as before.
+    vscode.commands.registerCommand('nearAi.manageTeams', () => openStudio({})),
+    vscode.commands.registerCommand('nearAi.setupProjectTeam', () => {
+      if (!vscode.workspace.workspaceFolders?.length) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
+      openStudio({ wizard: 'project' });
+    }),
     vscode.commands.registerCommand('nearAi.manageMemory', () => manageMemory()),
     // Saving a team file checks it and records a version.
     vscode.workspace.onDidSaveTextDocument(async (document) => {
@@ -34,89 +36,6 @@ export function registerWorkspaceCommands(context: vscode.ExtensionContext, runT
       }
     })
   );
-}
-
-async function manageTeams(library: TeamLibrary, runTeam: (slug: string) => Promise<void>): Promise<void> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const teams = await library.list(root);
-  const archived = await library.archived();
-  const picked = await vscode.window.showQuickPick([
-    { label: '$(add) New team…', action: 'new' as const },
-    { label: '$(cloud-download) Import a team file…', action: 'import' as const },
-    ...(archived.length ? [{ label: `$(archive) Restore an archived team (${archived.length})…`, action: 'restore' as const }] : []),
-    ...teams.map((entry) => ({ label: `${entry.project ? '$(folder) ' : '$(organization) '}${entry.team?.name ?? path.basename(entry.file, '.md')}`, description: entry.error ? `needs fixing: ${entry.error}` : `${entry.team!.members.length} members${entry.project ? ' · this project' : ''}`, detail: entry.team?.description, action: 'team' as const, entry }))
-  ], { title: 'NEAR AI teams', placeHolder: 'Pick a team or create one' });
-  if (!picked) return;
-  if (picked.action === 'new') {
-    const name = await vscode.window.showInputBox({ title: 'New team', prompt: 'Team name', validateInput: (value) => value.trim() ? undefined : 'Enter a name.' });
-    if (name) await open(await library.create(name.trim()));
-    return;
-  }
-  if (picked.action === 'import') {
-    const [file] = await vscode.window.showOpenDialog({ filters: { 'Team file': ['md'] }, title: 'Import a NEAR AI team file' }) ?? [];
-    if (!file) return;
-    try { await open(await library.import(file.fsPath)); } catch (error) { void vscode.window.showErrorMessage(`That file isn't a usable team: ${(error as Error).message}`); }
-    return;
-  }
-  if (picked.action === 'restore') {
-    const choice = await vscode.window.showQuickPick(archived.map((file) => ({ label: path.basename(file, '.md'), file })), { title: 'Restore a team' });
-    if (choice) { try { await open(await library.restore(choice.file)); } catch (error) { void vscode.window.showErrorMessage((error as Error).message); } }
-    return;
-  }
-  const entry = picked.entry!;
-  const name = entry.team?.name ?? path.basename(entry.file, '.md');
-  const action = await vscode.window.showQuickPick([
-    ...(entry.team ? [{ label: '$(play) Run with a task…', id: 'run' }] : []),
-    { label: '$(edit) Edit', id: 'edit' },
-    ...(entry.project ? [] : [{ label: '$(copy) Duplicate…', id: 'duplicate' }, { label: '$(history) Versions…', id: 'versions' }, { label: '$(export) Export…', id: 'export' }, { label: '$(archive) Archive', id: 'archive' }, { label: '$(trash) Delete…', id: 'delete' }])
-  ], { title: name });
-  if (!action) return;
-  if (action.id === 'run' && entry.team) await runTeam(entry.project ? 'project' : entry.team.slug);
-  else if (action.id === 'edit') await open(entry.file);
-  else if (action.id === 'duplicate') {
-    const copy = await vscode.window.showInputBox({ title: 'Duplicate team', prompt: 'Name for the copy', value: `${name} copy` });
-    if (copy) await open(await library.duplicate(entry.file, copy.trim()));
-  } else if (action.id === 'versions') {
-    const versions = await library.versions(entry.file);
-    const version = await vscode.window.showQuickPick(versions.map((file) => ({ label: path.basename(file, '.md').replace(/T(\d\d)-(\d\d)-(\d\d)-\d+Z$/, ' $1:$2:$3'), file })), { title: `${name}: versions (newest first)`, placeHolder: 'Open a version to compare or copy from it' });
-    if (version) await open(version.file);
-  } else if (action.id === 'export') {
-    const target = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(root ?? '', `${path.basename(entry.file)}`)), filters: { 'Team file': ['md'] } });
-    if (target) await vscode.workspace.fs.copy(vscode.Uri.file(entry.file), target, { overwrite: true });
-  } else if (action.id === 'archive') {
-    await library.archive(entry.file);
-    void vscode.window.showInformationMessage(`Archived "${name}". Restore it from NEAR AI: Manage Teams.`);
-  } else if (action.id === 'delete') {
-    const confirm = await vscode.window.showWarningMessage(`Delete "${name}" and its version history? This can't be undone.`, { modal: true }, 'Delete');
-    if (confirm === 'Delete') await library.delete(entry.file);
-  }
-}
-
-/** ONB-04: a few questions, then a recommended team the user reviews and edits before using it. */
-async function setupProjectTeam(library: TeamLibrary): Promise<void> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
-  const type = await vscode.window.showQuickPick(PROJECT_TYPES.map((entry) => ({ label: entry.label, description: entry.description, detail: `Team: ${entry.members.map((member) => member.name).join(', ')}`, entry })), { title: 'Set up project (1/3): what kind of project is this?', placeHolder: 'Every type follows the same plan, execute, verify, audit, and release cycle', ignoreFocusOut: true });
-  if (!type) return;
-  const goal = await vscode.window.showInputBox({ title: 'Set up project (2/3)', prompt: 'What should the team help you achieve?', ignoreFocusOut: true, validateInput: (value) => value.trim() ? undefined : 'Describe the goal.' });
-  if (!goal) return;
-  const locality = await pick('Set up project (3/3)', 'Where may models run?', [['cloud', 'NEAR AI Cloud'], ['local', 'Local runtime only'], ['hybrid', 'Both']]);
-  if (!locality) return;
-  const file = TeamLibrary.projectTeamFile(root);
-  await mkdir(path.dirname(file), { recursive: true });
-  if (existsSync(file)) {
-    const replace = await vscode.window.showWarningMessage('This project already has a team. Replace it? Its earlier versions stay in the team history.', { modal: true }, 'Replace');
-    if (replace !== 'Replace') return;
-  }
-  await writeFile(file, projectTypeTeam(type.entry, goal.trim().slice(0, 400), locality as 'cloud' | 'local' | 'hybrid'), 'utf8');
-  await library.snapshot(file);
-  await applyProjectType(root, type.entry, goal.trim().slice(0, 400));
-  await open(file);
-  void vscode.window.showInformationMessage(`Set up a ${type.entry.label.toLowerCase()} project: the team is open to edit, and AGENTS.md now tells every agent how this kind of work goes through plan, execute, verify, audit, and release. Run the team with /team:project <task>, or a GSD workflow such as /gsd-new-project.`);
-}
-
-async function pick(title: string, placeHolder: string, options: Array<[string, string]>): Promise<string | undefined> {
-  return (await vscode.window.showQuickPick(options.map(([id, label]) => ({ label, id })), { title, placeHolder, ignoreFocusOut: true }))?.id;
 }
 
 /** MEM-04: inspect, search, correct, retract, export, and reset project memory; changes go through the memory approval flow. */

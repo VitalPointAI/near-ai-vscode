@@ -79,9 +79,9 @@
     root.replaceChildren();
     const teamsHead = el('h3', '', 'Teams'); teamsHead.id = 'teams-title';
     const teamActions = el('div', 'actions');
-    teamActions.append(runCommand('Manage teams', 'nearAi.manageTeams'), runCommand('Set up project team', 'nearAi.setupProjectTeam'));
+    teamActions.append(runCommand('Open Team Studio', 'nearAi.manageTeams', false), runCommand('Set up project team', 'nearAi.setupProjectTeam'));
     root.append(teamsHead, teamActions);
-    if (!data.teams.length) root.append(el('p', 'hint', 'No reusable teams yet. A team is a Markdown file listing its members; run one with /team:<name> <task>.'));
+    if (!data.teams.length) root.append(el('p', 'hint', 'No teams yet. Build one in Team Studio (or as a Markdown file listing its members); run it with /team:<name> <task>.'));
     const teams = el('ul', 'list'); teams.setAttribute('aria-labelledby', 'teams-title');
     for (const team of data.teams) {
       const item = row('li', [team.name, team.description, team.command, ...team.members.map((member) => member.name + ' ' + (member.role || '') + ' ' + member.model)]);

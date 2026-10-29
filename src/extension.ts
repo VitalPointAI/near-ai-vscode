@@ -14,6 +14,7 @@ import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerMcpConnections } from './services/mcpView';
 import { openTools } from './services/toolsPage';
+import { openTeamStudio } from './services/teamStudioPanel';
 import { sharedTranscriptKey, TranscriptStore } from './services/transcripts';
 import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
@@ -84,10 +85,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     vscode.commands.registerCommand('nearAi.saveCheckpoint', () => saveCheckpoint())
   );
 
-  registerWorkspaceCommands(context, async (slug) => {
-    const task = await vscode.window.showInputBox({ title: 'Run team', prompt: 'What should the team do?', ignoreFocusOut: true });
-    if (task?.trim()) await sidebar.request({ type: 'open-command', command: `team:${slug}`, args: task.trim() });
-  });
+  registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options));
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));

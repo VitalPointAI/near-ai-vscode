@@ -414,7 +414,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     try {
       if (message.type === 'open-command' && message.command.startsWith('team:')) {
         team = await new TeamLibrary(context.globalStorageUri.fsPath).find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
-        if (!team) { tab.post({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with NEAR AI: Manage Teams.` }); return; }
+        if (!team) { tab.post({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with NEAR AI: Team Studio.` }); return; }
         if (!message.args?.trim()) { tab.post({ type: 'assistant-error', text: `Tell the team what to do: /team:${team.slug} <task>` }); return; }
         gsd = await gsdHost.context();
       } else if (message.type === 'open-command') {
