@@ -94,6 +94,14 @@ as a row in the chat.
   LM Studio, from the input box, with pricing and privacy shown.
 - **New Chat**, **History**, **Tools**, and **Set Up** live in the view's title
   bar, just like other VS Code views.
+- **Tools** opens a directory of what the agents can use: every installed
+  workflow and skill (grouped and searchable, with **Use in chat** to put
+  `/name` in the chat box), agent roles and teams with the model each one
+  gets, the built-in tools with whether each runs or asks under your current
+  approval mode, your MCP servers and their tools, and the models your key
+  can use with their privacy (TEE, local, or forwarded), context length,
+  prices, and which settings use them. It updates when settings, the
+  approval mode, the emergency stop, or MCP servers change.
 - Keyboard-first, with screen-reader labels and reduced-motion support.
 
 ### Open-GSD workflows, one slash away
@@ -201,8 +209,8 @@ its work. `nearAi.agent.maxRunCostUsd` caps one run by its own ledger entries.
 If NEAR itself refuses a request with HTTP 402 (credits or the key's spend
 limit used up), the chat says "NEAR spend limit reached".
 
-Open **NEAR AI Tools** from the title bar for analytics: sessions, models,
-tokens, and spend by organization and project, exportable.
+**Agent Activity** shows each run's agents, models, tokens, and cost, and
+exports them as Markdown or JSON.
 
 ### Teams, attachments, images, and memory
 
