@@ -12,7 +12,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; padding: 0 20px 48px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.45; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
 main, .top, .banner { max-width: 1080px; }
-main:focus { outline: none; }
+main:focus, [tabindex="-1"]:focus { outline: none; }
 .skip { position: absolute; left: -9999px; }
 .skip:focus { left: 8px; top: 8px; z-index: 10; padding: 4px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 6px 16px; padding: 16px 0 10px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
