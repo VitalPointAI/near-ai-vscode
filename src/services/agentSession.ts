@@ -212,6 +212,15 @@ export class AgentConversation {
   /** A new run ID, for spend the host records before the run starts (attachments). */
   public static newRunId(): string { return `run-${Date.now()}-${randomBytes(3).toString('hex')}`; }
   public get runningAgents(): number { return this.agents.size; }
+  /** Nothing has been sent in this conversation yet. */
+  public get isEmpty(): boolean { return this.messages.length === 0; }
+  /** The conversation's title: the start of its first message, or of the saved transcript's. */
+  public get displayTitle(): string { return this.title; }
+
+  /** Takes a conversation ID chosen by the host (a tab it already lists), before anything is sent. */
+  public adopt(id: string): void {
+    if (!this.messages.length && !this.abort && /^conv-[a-z0-9-]{6,60}$/.test(id)) this.conversationId = id;
+  }
 
   public async send(request: AgentTurnRequest): Promise<void> {
     // Messages queued while this turn was being prepared stay queued: the run delivers them.
@@ -242,6 +251,8 @@ export class AgentConversation {
     if (remembered) prompt = `<project-memory>\n${remembered}\n</project-memory>\n\n${prompt}`;
     this.display.set(contentKey(prompt), request.text);
     this.messages.push({ role: 'user', content: prompt });
+    // Saved before the run, so a run a reload cuts off still keeps what was asked.
+    await this.saveTranscript(request.model);
     const mainId = `main-${runId}`;
     const boundary = runBoundary(request);
     this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
@@ -297,7 +308,7 @@ export class AgentConversation {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
         await this.persistAgent(request, mainId, 'failed');
         // Keep what the run did, so the next message continues from there.
-        if (error instanceof AgentRunError) { this.messages = error.messages; throw error.cause; }
+        if (error instanceof AgentRunError) { this.messages = error.messages; await this.saveTranscript(request.model); throw error.cause; }
         throw error;
       }
       this.activity?.agentEnded(mainId, result.outcome);
@@ -958,7 +969,8 @@ function contentKey(content: string): string {
   return createHash('sha256').update(content).digest('hex').slice(0, 24);
 }
 
-function newConversationId(): string {
+/** A new conversation ID (the host names a tab before its agent exists). */
+export function newConversationId(): string {
   return `conv-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
 }
 

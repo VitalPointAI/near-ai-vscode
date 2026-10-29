@@ -159,6 +159,8 @@ export class ActivityFeed {
   private readonly listeners = new Set<(change: ActivityChange) => void>();
   private readonly toolNames = new Map<string, string>();
   private conversation: string | undefined;
+  /** Set once the chat says which conversation is on screen. */
+  private focused = false;
   private seq = 0;
   private bytes = 0;
 
@@ -189,7 +191,7 @@ export class ActivityFeed {
   public agentStarted(agent: { agentId: string; agent: string; runId: string; model: string; parentId?: string; conversationId?: string; boundary?: AgentBoundary }, prompt?: string, system?: string): void {
     const now = this.now();
     this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: now, turns: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, waitMs: 0, reasoningTokens: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0, phase: 'starting', phaseSince: now, rateLimited: 0, coolMs: 0, userWaitMs: 0, approvals: { autoAllowed: 0, asked: 0, declined: 0, expired: 0 }, tools: {} });
-    if (agent.conversationId && !agent.parentId) this.conversation = agent.conversationId;
+    if (agent.conversationId && !agent.parentId && !this.focused) this.conversation = agent.conversationId;
     for (const stale of [...this.stats.keys()].slice(0, Math.max(0, this.stats.size - MAX_AGENTS))) this.stats.delete(stale);
     const base = { runId: agent.runId, agentId: agent.agentId, agent: agent.agent };
     this.add({ ...base, kind: 'agent-start', title: `${agent.agent} started on ${agent.model}` });
@@ -333,6 +335,17 @@ export class ActivityFeed {
 
   /** The conversation of the most recently started main agent: "this conversation" on the page. */
   public get currentConversation(): string | undefined { return this.conversation; }
+
+  /**
+   * The conversation on screen in the chat, which "this conversation" follows from then on
+   * (a run starting in a background conversation does not take it over).
+   */
+  public focusConversation(conversationId: string): void {
+    this.focused = true;
+    if (this.conversation === conversationId) return;
+    this.conversation = conversationId;
+    this.changed([]);
+  }
 
   /** Leaves the current phase, adding a finished wait to its total. */
   private enter(stat: AgentStats, phase: AgentPhase): void {
