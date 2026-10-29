@@ -8,8 +8,6 @@ import { NearAiClient } from '../services/nearAiClient';
 import { AgentProfileStore } from '../services/agentProfiles';
 import { AgentOrchestrator } from '../services/agentOrchestrator';
 import { ReputationStore } from '../services/reputation';
-import { capabilityAwareTeamPreview, parseChatWebviewMessage, teamPreviewMessage } from '../services/chatBridge';
-import type { TeamPreview } from '../domain/teamStudio';
 
 const NOW = '2026-10-26T00:00:00.000Z';
 const root = () => mkdtemp(path.join(tmpdir(), 'near-ai-capability-'));
@@ -96,21 +94,4 @@ test('orchestration exposes a capability route explanation and blocks unverified
   assert.equal(route.explanation.capabilityRequirementId, 'req-route');
   assert.equal(route.explanation.capabilityFreshness, 'current');
   assert.equal(route.explanation.candidatesConsidered[0].capability?.status, 'compatible');
-});
-
-test('team capability preview shows current model metadata and explicit unavailable states without catalog payloads', async () => {
-  const preview: TeamPreview = {
-    teamId: 'team-aaaaaaaaaaaa', version: 1, versionId: 'team-aaaaaaaaaaaa-v1', displayName: 'Multimodal Team', members: [{ memberId: 'member-aaaaaaaaaaaa', role: 'researcher', responsibilities: ['Analyze approved inputs.'], skills: ['read'], tools: ['read'], route: { provider: 'near-ai', model: 'vision-model', locality: 'cloud', privacyBoundary: 'cloud' }, personality: { personality: 'professional', tone: 'quiet', style: 'structured' }, autonomy: 'bounded', approval: 'risky', budget: { requestUsd: 1, sessionUsd: 2, projectUsd: 4 } }], privacyBoundary: 'cloud', coordinationTradeoff: 'bounded', estimatedRequestUsd: 1, estimatedProjectUsd: 4, bindingRequired: true
-  };
-  const current = await capabilityAwareTeamPreview(preview, await router([model()]));
-  assert.equal(current.capabilityRoutes[0].status, 'compatible');
-  assert.equal(current.capabilityRoutes[0].freshness, 'current');
-  assert.equal(JSON.stringify(current).includes('input_modalities'), false);
-  const unavailable = await capabilityAwareTeamPreview(preview);
-  assert.equal(unavailable.capabilityRoutes[0].status, 'refresh-required');
-  assert.deepEqual(unavailable.capabilityRoutes[0].reasons, ['unknown-model']);
-  const message = teamPreviewMessage(unavailable);
-  assert.equal(message.type, 'team-preview');
-  assert.equal(message.preview.capabilityRoutes[0].status, 'refresh-required');
-  assert.equal(parseChatWebviewMessage({ type: 'team-preview', teamId: preview.teamId, version: 1, capability: 'cloud' }), undefined);
 });

@@ -3,7 +3,6 @@ import { mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { parseChatWebviewMessage } from '../services/chatBridge';
 import { MultimodalIntake, MultimodalIntakeError } from '../services/multimodalIntake';
 import { PrivacyPreflight } from '../services/privacyPreflight';
 
@@ -59,14 +58,6 @@ async function expectCode(promise: Promise<unknown>, code: string): Promise<void
     assert.equal((error as MultimodalIntakeError).code, code);
   }
 }
-
-test('strict chat attachment protocol rejects paths, forged metadata, and scope escalation', () => {
-  assert.deepEqual(parseChatWebviewMessage({ type: 'attachment-select' }), { type: 'attachment-select' });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'attachment-cancel', artifactId: 'attachment-aaaaaaaaaaaaaaaaaaaa' }), { type: 'attachment-cancel', artifactId: 'attachment-aaaaaaaaaaaaaaaaaaaa' });
-  assert.equal(parseChatWebviewMessage({ type: 'attachment-add', sourcePath: '../secret.png' }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'attachment-cancel', artifactId: 'attachment-aaaaaaaaaaaaaaaaaaaa', sourcePath: '/tmp/secret' }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'multimodal-approve', operationId: 'multimodal-op-aaaaaaaaaaaaaaaaaaaa', approvalFingerprint: 'a'.repeat(64), explicit: true, rawBytes: 'secret' }), undefined);
-});
 
 test('validates image, video, audio, document, and structured data with detected content', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-intake-modalities-'));

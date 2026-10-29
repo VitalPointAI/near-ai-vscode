@@ -9,7 +9,6 @@ import { AgentProfileStore } from '../services/agentProfiles';
 import { AgentOrchestrator } from '../services/agentOrchestrator';
 import { invokeBoundTeam } from '../services/agentOrchestrator';
 import type { MemberCapabilityContract } from '../domain/teamStudio';
-import { parseChatWebviewMessage } from '../services/chatBridge';
 
 const answers = { goal: 'Ship a bounded team feature', riskLevel: 'high' as const, preferredProvider: 'near-ai', locality: 'local' as const, workShape: 'feature' as const };
 function member(): MemberCapabilityContract { return { memberId: 'member-bbbbbbbbbbbb', profileId: 'agent-bbbbbbbbbbbb', role: 'implementer', responsibilities: ['Implement the selected project change.'], skillIds: ['read', 'plan', 'write'], capabilities: ['read', 'plan', 'write'], tools: ['read', 'plan', 'workspaceWrite'], providerRoute: { provider: 'near-ai', model: 'coding-model', locality: 'local', privacyBoundary: 'local' }, personality: { personality: 'direct', tone: 'concise', style: 'checklist' }, autonomy: 'bounded', approval: { mode: 'risky', capabilities: ['workspaceWrite'] }, budget: { requestUsd: 2, sessionUsd: 8, projectUsd: 30, maxDurationMs: 3600000 } }; }
@@ -93,15 +92,6 @@ test('tampered persisted bindings are discarded and tampered in-memory snapshots
   }
 });
 
-test('team chat controls accept stable IDs only and reject authoritative or sensitive webview fields', () => {
-  assert.deepEqual(parseChatWebviewMessage({ type: 'team-list' }), { type: 'team-list' });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'team-preview', teamId: 'team-aaaaaaaaaaaa', version: 1 }), { type: 'team-preview', teamId: 'team-aaaaaaaaaaaa', version: 1 });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'team-bind', teamId: 'team-aaaaaaaaaaaa', version: 1 }), { type: 'team-bind', teamId: 'team-aaaaaaaaaaaa', version: 1 });
-  assert.equal(parseChatWebviewMessage({ type: 'team-bind', teamId: 'team-aaaaaaaaaaaa', version: 1, projectId: '/home/private' }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'team-preview', teamId: 'team-aaaaaaaaaaaa', costUsd: 0 }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'team-import', packageJson: '{"apiKey":"secret"}' }), undefined);
-});
-
 test('team invoke crosses the host seam with exact binding and host-derived lifecycle metadata', async () => {
   const project = await mkdtemp(path.join(tmpdir(), 'near-ai-team-chat-seam-'));
   const globalStorage = await mkdtemp(path.join(tmpdir(), 'near-ai-team-chat-seam-global-'));
@@ -113,9 +103,7 @@ test('team invoke crosses the host seam with exact binding and host-derived life
   await initialization.accept(recommendation, answers);
   const studio = new TeamStudioStore(globalStorage);
   const team = await studio.create({ displayName: 'Chat Seam Team', members: [member()] });
-  const parsed = parseChatWebviewMessage({ type: 'team-invoke', teamId: team.teamId, version: 1, role: 'implementer', task: 'Plan the accepted bounded change', requiredCapabilities: ['write'], actionCapability: 'plan' });
-  assert.equal(parsed?.type, 'team-invoke');
-  if (!parsed || parsed.type !== 'team-invoke') throw new Error('Expected a parsed team invocation.');
+  const parsed = { type: 'team-invoke' as const, teamId: team.teamId, version: 1, role: 'implementer' as const, task: 'Plan the accepted bounded change', requiredCapabilities: ['write' as const], actionCapability: 'plan' as const };
   const agent = await invokeBoundTeam(project, studio, parsed);
   const binding = await new ProjectInitialization(project).requireReusableBinding();
   assert.equal(agent.status, 'running');
@@ -134,9 +122,4 @@ test('team invoke fails before deployment when project acceptance or exact scope
   const team = await studio.create({ displayName: 'Needs Acceptance', members: [member()] });
   const request = { type: 'team-invoke' as const, teamId: team.teamId, version: 1, role: 'implementer' as const, task: 'Run a safe plan', requiredCapabilities: ['write' as const], actionCapability: 'plan' as const };
   await assert.rejects(() => invokeBoundTeam(project, studio, request), /Accept or customize/);
-  assert.equal(parseChatWebviewMessage({ ...request, projectId: '/forged/path' }), undefined);
-  assert.equal(parseChatWebviewMessage({ ...request, provider: 'forged-provider' }), undefined);
-  assert.equal(parseChatWebviewMessage({ ...request, privacyBoundary: 'local', costUsd: 0 }), undefined);
-  assert.equal(parseChatWebviewMessage({ ...request, teamId: 'team-aaaaaaaaaaa0', version: 0 }), undefined);
-  assert.equal(parseChatWebviewMessage({ ...request, task: 'Use private prompt and raw context' }), undefined);
 });

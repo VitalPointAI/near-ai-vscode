@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import test from 'node:test';
-import { appendAssistantTurn, appendUserTurn, modelOptions, parseChatWebviewMessage, providerErrorMessage, sessionSummaryMessage, promptResponseMessage, progressCardMessage, progressActivitySummary, promptMessage, profileStatusMessage, walletStatusCopy, walletStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage } from '../services/chatBridge';
+import { appendAssistantTurn, appendUserTurn, modelOptions, parseChatWebviewMessage, providerErrorMessage, sessionSummaryMessage, promptResponseMessage, progressCardMessage, progressActivitySummary, promptMessage, profileStatusMessage } from '../services/chatBridge';
 import { NearAiError } from '../services/nearAiClient';
 
 test('webview message parsing accepts only the typed chat protocol', () => {
@@ -21,27 +21,6 @@ test('webview message parsing accepts only the typed chat protocol', () => {
   assert.deepEqual(parseChatWebviewMessage({ type: 'prompt-choice', sessionId: 'session-test-001', promptId: 'next-step', choiceId: 'safe' }), { type: 'prompt-choice', sessionId: 'session-test-001', promptId: 'next-step', choiceId: 'safe' });
   assert.equal(parseChatWebviewMessage({ type: 'prompt-answer', sessionId: 'session-test-001', promptId: 'next-step', text: 'apiKey=secret' }), undefined);
   assert.equal(parseChatWebviewMessage({ type: 'prompt-resume', sessionId: 'session-test-001', promptId: 'next-step', extra: true }), undefined);
-  assert.deepEqual(parseChatWebviewMessage({ type: 'load-analytics', filter: { phase: '04', limit: 10 } }), { type: 'load-analytics', filter: { phase: '04', limit: 10, offset: 0 } });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'set-quiet-mode', quiet: true }), { type: 'set-quiet-mode', quiet: true });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'agent-drill-down', agentId: 'agent-1' }), { type: 'agent-drill-down', agentId: 'agent-1' });
-  assert.equal(parseChatWebviewMessage({ type: 'export-analytics', filter: { prompt: 'private prompt' } }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'load-analytics', filter: { limit: 100000 } }), undefined);
-  assert.deepEqual(parseChatWebviewMessage({ type: 'load-analytics', filter: { organizationProfileId: 'profile-company-a', projectId: 'project-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', limit: 10 } }), { type: 'load-analytics', filter: { organizationProfileId: 'profile-company-a', projectId: 'project-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', offset: 0, limit: 10 } });
-  assert.equal(parseChatWebviewMessage({ type: 'load-analytics', filter: { organizationProfileId: 'profile-company-a', actualUsd: 999 } }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'export-analytics', filter: { projectId: 'project-a', organizationProfileId: 'apiKey=secret' } }), undefined);
-});
-
-test('profile protocol accepts only allowlisted metadata and rejects secret-shaped or extra fields', () => {
-  assert.deepEqual(parseChatWebviewMessage({ type: 'profile-create', profileId: 'profile-company', displayName: 'Company Cloud', organization: 'Example Company', baseUrl: 'https://example.test/v1', authMode: 'apiKey' }), {
-    type: 'profile-create', profileId: 'profile-company', displayName: 'Company Cloud', organization: 'Example Company', baseUrl: 'https://example.test/v1', authMode: 'apiKey'
-  });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'profile-select', profileId: 'profile-company' }), { type: 'profile-select', profileId: 'profile-company' });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'profile-validate', profileId: 'profile-company' }), { type: 'profile-validate', profileId: 'profile-company' });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'profile-import-legacy', profileId: 'profile-company', confirm: true }), { type: 'profile-import-legacy', profileId: 'profile-company', confirm: true });
-  assert.equal(parseChatWebviewMessage({ type: 'profile-create', profileId: 'profile-company', displayName: 'Company', organization: 'Example', baseUrl: 'https://example.test/v1', authMode: 'apiKey', apiKey: 'secret' }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'profile-create', profileId: 'profile-company', displayName: 'apiKey=secret', organization: 'Example', baseUrl: 'https://example.test/v1', authMode: 'apiKey' }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'profile-select', profileId: 'profile-company', credential: 'secret' }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'profile-import-legacy', profileId: 'profile-company', confirm: false }), undefined);
 });
 
 test('profile status is a non-secret host-to-webview DTO', () => {
@@ -131,50 +110,6 @@ test('provider errors are actionable and never expose credential material', () =
   assert.match(providerErrorMessage(new Error('raw secret')), /try again/);
 });
 
-test('wallet protocol is strict and unavailable/stale UI copy is explicit without profile or secret material', () => {
-  assert.deepEqual(parseChatWebviewMessage({ type: 'wallet-connect' }), { type: 'wallet-connect' });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'entitlement-refresh' }), { type: 'entitlement-refresh' });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'stake-preview', operation: 'stake', amountYocto: '42' }), { type: 'stake-preview', operation: 'stake', amountYocto: '42' });
-  assert.equal(parseChatWebviewMessage({ type: 'stake-preview', operation: 'stake', amountYocto: '0' }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'stake-preview', operation: 'stake', amountYocto: 'api-key=secret' }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'stake-confirm', previewId: 'stake-preview-aaaaaaaaaaaaaaaa', fingerprint: 'b'.repeat(64), explicit: true, profileId: 'profile-company' }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'transaction-status', transactionId: '../private-key' }), undefined);
-  const status = { version: 1 as const, freshness: 'unavailable' as const, message: 'Verified endpoint missing', writesEnabled: false, accountLabel: 'External wallet not connected' };
-  const message = walletStatusMessage(status);
-  assert.match(walletStatusCopy(status), /unavailable|disabled/i);
-  assert.equal(message.type, 'wallet-status');
-  assert.doesNotMatch(JSON.stringify(message), /api[_ -]?key|refresh[-_ ]?token|seed|private|profile|prompt|context/i);
-});
-
-test('team lifecycle protocol round-trips bounded CRUD, version, import/export, bind, and invoke messages', () => {
-  const member = { memberId: 'member-aaaaaaaaaaaa', role: 'implementer', responsibilities: ['Implement the accepted change.'], skillIds: ['read', 'plan', 'write'], capabilities: ['read', 'plan', 'write'], tools: ['read', 'plan', 'workspaceWrite'], providerRoute: { provider: 'near-ai', model: 'coding-model', locality: 'local', privacyBoundary: 'local' }, personality: { personality: 'direct', tone: 'concise', style: 'checklist' }, autonomy: 'bounded', approval: { mode: 'risky', capabilities: ['workspaceWrite'] }, budget: { requestUsd: 1, sessionUsd: 5, projectUsd: 20, maxDurationMs: 3600000 } };
-  const teamId = 'team-aaaaaaaaaaaa';
-  const messages = [
-    { type: 'team-create', displayName: 'Bounded team', description: 'A safe team', members: [member] },
-    { type: 'team-update', teamId, displayName: 'Updated team' },
-    { type: 'team-duplicate', teamId, displayName: 'Copied team' },
-    { type: 'team-archive', teamId },
-    { type: 'team-restore', teamId },
-    { type: 'team-delete', teamId },
-    { type: 'team-select-version', teamId, version: 1 },
-    { type: 'team-preview', teamId, version: 1 },
-    { type: 'team-bind', teamId, version: 1 },
-    { type: 'team-export', teamId },
-    { type: 'team-import', packageJson: '{"packageVersion":1}' },
-    { type: 'team-invoke', teamId, version: 1, role: 'implementer', task: 'Plan the accepted change', requiredCapabilities: ['write'], actionCapability: 'plan' }
-  ];
-  assert.deepEqual(messages.map((message) => parseChatWebviewMessage(message)?.type), ['team-create', 'team-update', 'team-duplicate', 'team-archive', 'team-restore', 'team-delete', 'team-select-version', 'team-preview', 'team-bind', 'team-export', 'team-import', 'team-invoke']);
-  assert.equal(parseChatWebviewMessage({ type: 'team-update', teamId, displayName: 'Updated', costUsd: 0 }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'team-invoke', teamId, version: 1, role: 'implementer', task: 'Plan', requiredCapabilities: ['write'], route: { provider: 'forged' } }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'team-invoke', teamId, version: 51, role: 'implementer', task: 'Plan', requiredCapabilities: ['write'] }), undefined);
-  assert.equal(parseChatWebviewMessage({ type: 'team-create', displayName: 'Sensitive', members: [{ ...member, privatePrompt: 'do not persist' }] }), undefined);
-  const lifecycle = teamLifecycleMessage('updated', { version: 1, teamId, displayName: 'Safe', description: 'Safe', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', currentVersion: 2, versions: [] }, 'Updated safely.');
-  assert.equal(lifecycle.type, 'team-lifecycle');
-  const invocation = teamInvocationStatusMessage({ invocationId: 'agent-run-safe', teamId, versionId: `${teamId}-v1`, role: 'implementer', status: 'running', stage: 'running', provider: 'near-ai', locality: 'local', privacyBoundary: 'local', estimatedCostUsd: 1 });
-  assert.equal(invocation.type, 'team-invocation-status');
-  if (invocation.type === 'team-invocation-status') assert.equal(invocation.value.estimatedCostUsd, 1);
-});
-
 test('the Tools tab is a directory of what agents can use, with no retired sections or second chat', () => {
   const { toolsPageHtml } = require('../services/toolsDirectory') as typeof import('../services/toolsDirectory');
   const html = toolsPageHtml({ cspSource: 'vscode-webview://test', nonce: 'nonce-0001', script: 'tools.js', style: 'tools.css' });
@@ -183,5 +118,29 @@ test('the Tools tab is a directory of what agents can use, with no retired secti
   assert.doesNotMatch(html, /display:none|advanced-section|<details|wallet-entitlement-heading/);
   for (const section of ['skills', 'agents', 'tools', 'mcp', 'models']) assert.match(html, new RegExp(`<section aria-labelledby="${section}-title"><h2 id="${section}-title">`));
   assert.match(html, /aria-label="Search workflows, agents, tools, MCP servers, and models"/);
+});
+
+// The memory explorer, generation and multimodal studios, team studio, wallet, profile editor,
+// and analytics left with the old Tools page; no webview sends their messages, so the chat host
+// accepts none of them (the sidebar's profile status and the Agent Activity page are unaffected).
+test('retired studio messages are rejected by the chat protocol and have no host handler', async () => {
+  const fingerprint = 'a'.repeat(64);
+  const scope = { kind: 'project', id: 'project-aaaaaaaa' };
+  const retired: Array<Record<string, unknown>> = [
+    { type: 'memory-inspect', scope }, { type: 'memory-search', scope, query: 'x' }, { type: 'memory-approve', approvalFingerprint: fingerprint, explicit: true },
+    { type: 'memory-reset', scope, expectedGraphVersion: 1, approvalFingerprint: fingerprint, explicit: true }, { type: 'memory-export', scope, expectedGraphVersion: 1, approvalFingerprint: fingerprint, explicit: true },
+    { type: 'generation-preview', operation: 'image-generation', model: 'm', prompt: 'p' }, { type: 'generation-start', operationId: 'generation-op-aaaaaaaaaaaaaaaaaaaa', approvalFingerprint: fingerprint, explicit: true },
+    { type: 'attachment-select' }, { type: 'attachment-cancel', artifactId: 'attachment-aaaaaaaaaaaaaaaaaaaa' }, { type: 'multimodal-prepare', operation: 'inspect', sourceArtifactIds: ['attachment-aaaaaaaaaaaaaaaaaaaa'] }, { type: 'multimodal-status', operationId: 'multimodal-op-aaaaaaaaaaaaaaaaaaaa' },
+    { type: 'team-list' }, { type: 'team-status' }, { type: 'team-preview', teamId: 'team-aaaaaaaaaaaa', version: 1 }, { type: 'team-bind', teamId: 'team-aaaaaaaaaaaa', version: 1 }, { type: 'team-invoke', teamId: 'team-aaaaaaaaaaaa', version: 1, role: 'implementer', task: 'x', requiredCapabilities: ['write'] },
+    { type: 'wallet-connect' }, { type: 'entitlement-refresh' }, { type: 'staking-history' }, { type: 'stake-cancel', previewId: 'preview-aaaaaaaaaaaaaaaa' },
+    { type: 'profile-list' }, { type: 'profile-select', profileId: 'profile-aaaaaaaaaaaa' }, { type: 'profile-validate', profileId: 'profile-aaaaaaaaaaaa' },
+    { type: 'load-analytics', filter: {} }, { type: 'export-analytics' }, { type: 'set-quiet-mode', quiet: true }, { type: 'agent-drill-down', agentId: 'agent-1' }
+  ];
+  for (const message of retired) assert.equal(parseChatWebviewMessage(message), undefined, String(message.type));
+  const host = await readFile(path.join(__dirname, '..', '..', 'src', 'services', 'chat.ts'), 'utf8');
+  for (const type of new Set(retired.map((message) => String(message.type)))) assert.equal(host.includes(`'${type}'`), false, `chat.ts handles no ${type}`);
+  // What the sidebar still uses stays.
+  assert.deepEqual(parseChatWebviewMessage({ type: 'select-profile' }), { type: 'select-profile' });
+  assert.match(host, /sendProfileStatus/);
 });
 

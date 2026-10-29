@@ -1,12 +1,10 @@
 import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
-import { createHash } from 'node:crypto';
 import * as vscode from 'vscode';
 import { formatGsdStatusLine, parseGsdPlanningState, statusSnapshot, withLiveStatus } from '../domain/gsdStatus';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { AuthService } from './auth';
-import { createNearAiProvider } from './providerFactory';
 import { activeProvider, clientFor } from './providerCache';
 import { projectMemoryScope } from '../agent/extraTools';
 import { AGENT_MEMORY_ACTOR, AgentConversation, findSkill, GsdContext, spendAccountOf } from './agentSession';
@@ -24,9 +22,9 @@ import { sharedTranscriptKey, TranscriptStore } from './transcripts';
 import { prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
-import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, promptMessage, promptResponseMatches, progressActivitySummary, progressCardMessage, GsdArtifactLink, profileStatusMessage, walletStatusMessage, walletPreviewMessage, walletHistoryMessage, walletErrorMessage, teamListMessage, teamPreviewMessage, teamStatusMessage, teamLifecycleMessage, teamInvocationStatusMessage, capabilityAwareTeamPreview, generationPreviewMessage, generationStatusMessage, generationPublicationMessage, memoryInspectMessage, memorySliceMessage, memoryApprovalPreviewMessage, multimodalStatusMessage, sanitizeContextGraphNode } from './chatBridge';
-import type { ChatTeamMessage, ChatWebviewMessage, TeamWebviewMessage } from './chatBridge';
-import { PromptResponse, StructuredPrompt } from '../domain/chatProgress';
+import { modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, ConversationTurn, discoverGsdArtifacts, isSafeArtifactPath, sessionSummaryMessage, GsdArtifactLink, profileStatusMessage } from './chatBridge';
+import type { ChatWebviewMessage } from './chatBridge';
+import { StructuredPrompt } from '../domain/chatProgress';
 import { sharedActivityFeed } from './activityView';
 import { runTitleFor } from './activityOverview';
 import { AGENT_DEFAULTS } from '../domain/agentDefaults';
@@ -36,28 +34,9 @@ import { securityAccess } from './securityScan';
 import { webSearchProvider } from './webSearchSetup';
 import { mcpRegistry } from './mcpView';
 import { ActivityStore } from './activityStore';
-import { AnalyticsStore } from './analyticsStore';
-import { AuditStore } from './auditStore';
 import { ReputationStore } from './reputation';
-import { buildFleetView } from './fleetView';
 import { hostAttribution } from '../domain/activity';
-import { StakingService } from './stakingService';
-import { TeamStudioStore } from './teamStudio';
-import { ProjectInitialization } from './projectInitialization';
-import { invokeBoundTeam } from './agentOrchestrator';
-import { CapabilityRouter } from './capabilityRouter';
-import { MultimodalIntake, MultimodalIntakeError } from './multimodalIntake';
-import { MultimodalOperationError, MultimodalOrchestrator, multimodalCatalogRouter, selectMultimodalRoute } from './multimodalOrchestrator';
-import type { MultimodalExecutionInput, MultimodalExecutionOutput } from './multimodalOrchestrator';
-import { PrivacyPreflight } from './privacyPreflight';
-import { GenerationError, GenerationService, NearAiGenerationAdapter } from './generationService';
-import { ApprovalService } from './approvalService';
-import { PolicyGate } from './policyGate';
-import { defaultActionPolicy } from '../domain/policy';
-import { ContextGraphMemory, ContextGraphError } from './contextGraphMemory';
-import { MemoryApprovalError, MemoryApprovalRegistry } from './memoryApproval';
-import type { HostMemoryApprovalAuthorization } from './memoryApproval';
-import type { MemoryApprovalDescriptor, MemoryScope } from '../domain/contextGraph';
+import { ContextGraphMemory } from './contextGraphMemory';
 
 /** Chat model and safety model pairs already told that auto approve has no private safety model. */
 const warnedSafetyModels = new Set<string>();
@@ -80,23 +59,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     activity: undefined as ActivityStore | undefined,
     activeSessionId: undefined as string | undefined,
     prompt: undefined as StructuredPrompt | undefined,
-    progressIndex: 0
-    ,quiet: false,
-    providerProfileId: undefined as string | undefined,
-    staking: StakingService.unavailable(),
-    teams: new TeamStudioStore(context.globalStorageUri.fsPath)
-    ,intake: undefined as MultimodalIntake | undefined
-    ,multimodal: undefined as MultimodalOrchestrator | undefined
-    ,multimodalRoot: undefined as string | undefined
-    ,multimodalProfileId: undefined as string | undefined
-    ,multimodalAborts: new Map<string, AbortController>()
-    ,generation: undefined as GenerationService | undefined
-    ,generationRoot: undefined as string | undefined
-    ,generationProfileId: undefined as string | undefined
-    ,generationAbort: undefined as AbortController | undefined
-    ,contextMemory: undefined as ContextGraphMemory | undefined
-    ,memoryApprovals: undefined as MemoryApprovalRegistry | undefined
-    ,memorySessionId: undefined as string | undefined
+    progressIndex: 0,
+    providerProfileId: undefined as string | undefined
     ,guard: undefined as OutboundGuard | undefined
     ,agent: undefined as AgentConversation | undefined
     ,attachments: new Map<string, StagedAttachment>()
@@ -184,143 +148,6 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       panel.webview.postMessage(turns ? { type: 'transcript', turns } : { type: 'history-error', text: 'That conversation is no longer saved on this machine.' });
       return;
     }
-    if (message.type === 'attachment-select') {
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!root) { panel.webview.postMessage({ type: 'attachment-error', code: 'workspace-containment', text: 'Open a workspace before attaching a file.' }); return; }
-      const selected = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: 'Attach bounded local file', filters: { 'Supported multimodal files': ['png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'ogg', 'flac', 'm4a', 'pdf', 'txt', 'md', 'docx', 'json', 'csv'] } });
-      if (!selected?.[0]) return;
-      state.intake = state.intake ?? new MultimodalIntake(root, { privacy: new PrivacyPreflight() });
-      try {
-        const relative = path.relative(root, selected[0].fsPath).replaceAll(path.sep, '/');
-        const result = await state.intake.stage({ sourcePath: relative, sourceKind: 'user-selected-file', consent: true });
-        panel.webview.postMessage({ type: 'attachment-staged', preview: result.preview });
-      } catch (error) {
-        const code = error instanceof MultimodalIntakeError ? error.code : 'invalid-reference';
-        panel.webview.postMessage({ type: 'attachment-error', code, text: safeMultimodalError(error) });
-      }
-      return;
-    }
-    if (message.type === 'attachment-cancel') {
-      try {
-        const preview = state.intake?.cancel(message.artifactId);
-        if (!preview) throw new Error('Attachment is not available in this chat session.');
-        panel.webview.postMessage({ type: 'attachment-cancelled', preview });
-      } catch (error) { panel.webview.postMessage({ type: 'attachment-error', code: 'invalid-reference', text: safeMultimodalError(error) }); }
-      return;
-    }
-    if (message.type === 'multimodal-prepare' || message.type === 'multimodal-approve' || message.type === 'multimodal-status' || message.type === 'multimodal-cancel' || message.type === 'multimodal-recover') {
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!root) { panel.webview.postMessage({ type: 'multimodal-error', code: 'workspace-containment', text: 'Open a workspace before using attachment operations.' }); return; }
-      try {
-        const context = await getMultimodalContext(root, auth, state);
-        if (message.type === 'multimodal-prepare') {
-          const sourceRecords = message.sourceArtifactIds.map((artifactId) => state.intake?.get(artifactId));
-          if (sourceRecords.some((record) => !record)) throw new MultimodalOperationError('invalid-reference', 'Every selected attachment must be staged in this chat.');
-          const route = await selectMultimodalRoute(context.router, context.profile.provider, readSettings().defaultModel, message.operation, sourceRecords.map((record) => record!.modality));
-          const prepared = await context.orchestrator.prepare({ operation: message.operation, sourceArtifactIds: message.sourceArtifactIds, route, rawContentRequested: true, sessionId: state.activeSessionId ?? `session-multimodal-${Date.now()}`, projectId: projectIdForWorkspace(root), attribution: hostAttribution(context.profiles.projectScopeId, path.basename(root), context.profile.profileId, context.profile.organization) });
-          panel.webview.postMessage(multimodalStatusMessage(prepared));
-          if (prepared.approval) panel.webview.postMessage({ type: 'multimodal-approval-required', preview: prepared.approval });
-        }
-        if (message.type === 'multimodal-approve') {
-          const approved = await context.orchestrator.approve(message.operationId, message.approvalFingerprint);
-          panel.webview.postMessage(multimodalStatusMessage(approved));
-          const abort = new AbortController();
-          state.multimodalAborts.set(message.operationId, abort);
-          try {
-            const completed = await context.orchestrator.run(message.operationId, message.approvalFingerprint, abort.signal);
-            panel.webview.postMessage(multimodalStatusMessage(completed));
-          } finally {
-            if (state.multimodalAborts.get(message.operationId) === abort) state.multimodalAborts.delete(message.operationId);
-          }
-        }
-        if (message.type === 'multimodal-status') panel.webview.postMessage(multimodalStatusMessage(requireMultimodalOperation(context.orchestrator, message.operationId)));
-        if (message.type === 'multimodal-cancel') {
-          state.multimodalAborts.get(message.operationId)?.abort();
-          panel.webview.postMessage(multimodalStatusMessage(await context.orchestrator.cancel(message.operationId)));
-        }
-        if (message.type === 'multimodal-recover') {
-          const recovered = await context.orchestrator.recover(message.operationId);
-          panel.webview.postMessage(multimodalStatusMessage(recovered));
-          if (recovered.approval) panel.webview.postMessage({ type: 'multimodal-approval-required', preview: recovered.approval });
-        }
-      } catch (error) {
-        const code = error instanceof MultimodalOperationError ? error.code : 'provider-failed';
-        panel.webview.postMessage({ type: 'multimodal-error', code, text: safeMultimodalError(error) });
-      }
-      return;
-    }
-    if (message.type === 'memory-inspect' || message.type === 'memory-search' || message.type === 'memory-slice-preview' || message.type === 'memory-preview' || message.type === 'memory-approve' || message.type === 'memory-correct' || message.type === 'memory-merge' || message.type === 'memory-retract' || message.type === 'memory-reset' || message.type === 'memory-export') {
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!root) { panel.webview.postMessage({ type: 'memory-error', code: 'workspace-required', text: 'Open a workspace before inspecting local memory.' }); return; }
-      state.contextMemory = state.contextMemory ?? new ContextGraphMemory(root);
-      state.memoryApprovals = state.memoryApprovals ?? new MemoryApprovalRegistry();
-      state.memorySessionId = state.memorySessionId ?? state.activeSessionId ?? `session-memory-${Date.now()}`;
-      try {
-        if (message.type === 'memory-inspect') { panel.webview.postMessage(memoryInspectMessage(await state.contextMemory.inspect(message.scope, { localOnly: message.localOnly }))); return; }
-        if (message.type === 'memory-search') { panel.webview.postMessage({ type: 'memory-search', scope: message.scope, nodes: (await state.contextMemory.search(message.scope, message.query, { type: message.nodeType })).slice(0, 48).map(sanitizeContextGraphNode) }); return; }
-        if (message.type === 'memory-slice-preview') { panel.webview.postMessage(memorySliceMessage(await state.contextMemory.slice({ task: message.task, scopes: message.scopes, agentId: message.agentId, teamId: message.teamId, projectId: message.projectId, sharedId: message.sharedId, localOnly: message.localOnly === true, providerBoundary: 'local' }))); return; }
-        if (message.type === 'memory-preview') {
-          if (message.localOnly === false) throw new ContextGraphError('local-only', 'Memory actions remain local-only in this host path.');
-          const graph = await state.contextMemory.inspect(message.scope, { localOnly: true });
-          if (graph.graphVersion !== message.expectedGraphVersion) throw new ContextGraphError('stale-version', 'Graph changed; refresh before creating an approval preview.');
-          const descriptor = memoryApprovalDescriptor(message, graph.graphVersion, state.memorySessionId, projectIdForWorkspace(root));
-          panel.webview.postMessage(memoryApprovalPreviewMessage(state.memoryApprovals.create(descriptor)));
-          return;
-        }
-        if (message.type === 'memory-approve') {
-          const authorization = state.memoryApprovals.consume(message.approvalFingerprint);
-          const descriptor = authorization.descriptor;
-          const result = await executeApprovedMemoryAction(state.contextMemory, authorization, descriptor);
-          if (descriptor.operation === 'export') panel.webview.postMessage({ type: 'memory-export', scope: descriptor.scope, data: result as string });
-          else panel.webview.postMessage({ type: 'memory-updated', scope: descriptor.scope, graphVersion: (await state.contextMemory.inspect(descriptor.scope, { localOnly: true })).graphVersion, ...(typeof result === 'object' && result && 'nodeId' in result ? { nodeId: result.nodeId as string } : {}) });
-          return;
-        }
-        if (message.type === 'memory-correct' || message.type === 'memory-merge' || message.type === 'memory-retract' || message.type === 'memory-reset' || message.type === 'memory-export') {
-          const descriptor = memoryApprovalDescriptor(message, message.expectedGraphVersion, state.memorySessionId, projectIdForWorkspace(root));
-          const authorization = state.memoryApprovals.consume(message.approvalFingerprint, descriptor);
-          const result = await executeApprovedMemoryAction(state.contextMemory, authorization, descriptor);
-          if (descriptor.operation === 'export') panel.webview.postMessage({ type: 'memory-export', scope: descriptor.scope, data: result as string });
-          else panel.webview.postMessage({ type: 'memory-updated', scope: descriptor.scope, graphVersion: (await state.contextMemory.inspect(descriptor.scope, { localOnly: true })).graphVersion, ...(typeof result === 'object' && result && 'nodeId' in result ? { nodeId: result.nodeId as string } : {}) });
-          return;
-        }
-      } catch (error) { const code = error instanceof ContextGraphError || error instanceof MemoryApprovalError ? error.code : 'memory-unavailable'; panel.webview.postMessage({ type: 'memory-error', code, text: safeMemoryError(error) }); }
-      return;
-    }
-    if (message.type === 'generation-preview' || message.type === 'generation-start' || message.type === 'generation-status' || message.type === 'generation-cancel' || message.type === 'generation-publication-preview' || message.type === 'generation-publish') {
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!root) { panel.webview.postMessage({ type: 'generation-error', code: 'invalid-request', text: 'Open a workspace before using generation skills.' }); return; }
-      try {
-        const generation = await getGenerationService(root, auth, state);
-        if (message.type === 'generation-preview') {
-          const operation = message.operation;
-          const skill = operation === 'video-generation' ? 'generate_video' : 'generate_image';
-          const record = await generation.prepare({ operation, skill, provider: 'near-ai', model: message.model, prompt: message.prompt, sessionId: state.activeSessionId ?? `session-generation-${Date.now()}`, projectId: projectIdForWorkspace(root), attribution: await generationAttribution(root, auth), providerBoundary: 'cloud', privacyBoundary: 'cloud', sourceArtifactIds: message.sourceArtifactIds });
-          panel.webview.postMessage(generationPreviewMessage(generation.preview(record.operationId)));
-        }
-        if (message.type === 'generation-start') {
-          const approved = await generation.approve(message.operationId, message.approvalFingerprint);
-          state.generationAbort?.abort(); state.generationAbort = new AbortController();
-          panel.webview.postMessage(generationStatusMessage(approved));
-          const completed = await generation.run(message.operationId, message.approvalFingerprint, state.generationAbort.signal);
-          panel.webview.postMessage(generationStatusMessage(completed));
-        }
-        if (message.type === 'generation-status') {
-          const operation = generation.get(message.operationId);
-          if (!operation) throw new GenerationError('invalid-request', 'The generation operation is not available.');
-          panel.webview.postMessage(generationStatusMessage(operation));
-        }
-        if (message.type === 'generation-cancel') {
-          state.generationAbort?.abort();
-          panel.webview.postMessage(generationStatusMessage(await generation.cancel(message.operationId, state.generationAbort?.signal)));
-        }
-        if (message.type === 'generation-publication-preview') panel.webview.postMessage(generationPublicationMessage(await generation.preparePublication({ operationId: message.operationId, destination: message.destination, attribution: await generationAttribution(root, auth) })));
-        if (message.type === 'generation-publish') panel.webview.postMessage(generationStatusMessage(await generation.publishOperation(message.operationId, message.publicationFingerprint)));
-      } catch (error) {
-        const code = error instanceof GenerationError ? error.code : 'provider-failed';
-        panel.webview.postMessage({ type: 'generation-error', code, text: safeGenerationError(error) });
-      }
-      return;
-    }
     if (message.type === 'open-setup') {
       await vscode.commands.executeCommand('nearAi.setup');
       return;
@@ -367,89 +194,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'refresh-status') {
       panel.webview.postMessage(await statusMessage({ agents: state.agent?.runningAgents ?? 0, account: state.spend }));
       await sendProfileStatus(panel, auth);
-      await sendStakingStatus(panel, state.staking);
       await sendArtifacts(panel);
-      return;
-    }
-    if (message.type === 'wallet-connect' || message.type === 'wallet-disconnect' || message.type === 'entitlement-refresh' || message.type === 'stake-preview' || message.type === 'stake-confirm' || message.type === 'stake-cancel' || message.type === 'transaction-status' || message.type === 'staking-history') {
-      try {
-        if (message.type === 'wallet-connect') { await state.staking.connectWallet(); await sendStakingStatus(panel, state.staking); }
-        if (message.type === 'wallet-disconnect') { await state.staking.disconnectWallet(); await sendStakingStatus(panel, state.staking); }
-        if (message.type === 'entitlement-refresh') await sendStakingStatus(panel, state.staking, true);
-        if (message.type === 'stake-preview') panel.webview.postMessage(walletPreviewMessage(await state.staking.createPreview(message.operation, message.amountYocto)));
-        if (message.type === 'stake-confirm') panel.webview.postMessage({ type: 'wallet-outcome', outcome: await state.staking.confirmPreview(message.previewId, { fingerprint: message.fingerprint, explicit: true }) });
-        if (message.type === 'stake-cancel') { await state.staking.cancelPreview(message.previewId); await sendStakingStatus(panel, state.staking); }
-        if (message.type === 'transaction-status') panel.webview.postMessage({ type: 'wallet-transaction-status', outcome: await state.staking.transactionStatus(message.transactionId) });
-        if (message.type === 'staking-history') panel.webview.postMessage(walletHistoryMessage(await state.staking.history()));
-      } catch (error) {
-        panel.webview.postMessage({ type: 'wallet-error', text: walletErrorMessage(error) });
-        await sendStakingStatus(panel, state.staking);
-      }
-      return;
-    }
-    if (message.type === 'team-list' || message.type === 'team-create' || message.type === 'team-update' || message.type === 'team-duplicate' || message.type === 'team-archive' || message.type === 'team-restore' || message.type === 'team-delete' || message.type === 'team-preview' || message.type === 'team-select-version' || message.type === 'team-bind' || message.type === 'team-invoke' || message.type === 'team-status' || message.type === 'team-export' || message.type === 'team-import') {
-      try {
-        if (message.type === 'team-list') { panel.webview.postMessage(teamListMessage(await state.teams.list())); return; }
-        if (message.type === 'team-create') { const team = await state.teams.create(message); panel.webview.postMessage(teamLifecycleMessage('created', team, `Created ${team.displayName} at exact version ${team.versions.at(-1)?.versionId ?? 'v1'}.`)); await sendTeamStatus(panel, state.teams); return; }
-        if (message.type === 'team-update') { const { type: _type, teamId, ...input } = message; const team = await state.teams.update(teamId, input); panel.webview.postMessage(teamLifecycleMessage('updated', team, `Updated ${team.displayName} and created exact version ${team.versions.at(-1)?.versionId ?? `v${team.currentVersion}`}.`)); await sendTeamStatus(panel, state.teams); return; }
-        if (message.type === 'team-duplicate') { const team = await state.teams.duplicate(message.teamId, message.displayName); panel.webview.postMessage(teamLifecycleMessage('duplicated', team, `Duplicated ${team.displayName} at exact version ${team.versions.at(-1)?.versionId ?? 'v1'}.`)); await sendTeamStatus(panel, state.teams); return; }
-        if (message.type === 'team-archive') { const team = await state.teams.archive(message.teamId); panel.webview.postMessage(teamLifecycleMessage('archived', team, `Archived ${team.displayName}.`)); await sendTeamStatus(panel, state.teams); return; }
-        if (message.type === 'team-restore') { const team = await state.teams.restore(message.teamId); panel.webview.postMessage(teamLifecycleMessage('restored', team, `Restored ${team.displayName}.`)); await sendTeamStatus(panel, state.teams); return; }
-        if (message.type === 'team-delete') { const deleted = await state.teams.delete(message.teamId); panel.webview.postMessage(teamLifecycleMessage('deleted', undefined, deleted ? `Deleted ${message.teamId}.` : `Team ${message.teamId} was already unavailable.`)); await sendTeamStatus(panel, state.teams); return; }
-        if (message.type === 'team-import') { const team = await state.teams.importPackage(message.packageJson); panel.webview.postMessage(teamLifecycleMessage('imported', team, `Imported ${team.displayName} at exact version ${team.versions.at(-1)?.versionId ?? `v${team.currentVersion}`}.`)); await sendTeamStatus(panel, state.teams); return; }
-        if (message.type === 'team-export') { panel.webview.postMessage({ type: 'team-export', teamId: message.teamId, packageJson: await state.teams.export(message.teamId) }); return; }
-        if (message.type === 'team-invoke') {
-          const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          if (!root) throw new Error('Open a workspace before invoking a reusable team.');
-          panel.webview.postMessage(teamInvocationStatusMessage({ invocationId: `team-invoke-${createHash('sha256').update(`${root}:${message.teamId}:${message.version}:${Date.now()}`).digest('hex').slice(0, 16)}`, teamId: message.teamId, versionId: `${message.teamId}-v${message.version}`, role: message.role, status: 'binding', stage: 'binding' }));
-          panel.webview.postMessage(await invokeTeamFromHost(root, state.teams, message));
-          return;
-        }
-        const preview = message.type === 'team-preview' || message.type === 'team-select-version' ? await state.teams.preview(message.teamId, message.version) : undefined;
-        if (preview) { panel.webview.postMessage(teamPreviewMessage(await loadCapabilityAwarePreview(preview, auth))); return; }
-        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (message.type === 'team-status') { const initialization = root ? new ProjectInitialization(root) : undefined; panel.webview.postMessage(teamStatusMessage(await state.teams.list({ includeArchived: true }), initialization ? await initialization.getReusableBinding() : undefined)); return; }
-        if (!root) throw new Error('Open a workspace before binding a reusable team.');
-        const initialization = new ProjectInitialization(root);
-        const binding = await state.teams.bindProject(root, { teamId: message.teamId, version: message.version, projectId: projectIdForWorkspace(root) }, initialization);
-        panel.webview.postMessage(teamStatusMessage(await state.teams.list({ includeArchived: true }), binding));
-      } catch (error) {
-        if (message.type === 'team-invoke') panel.webview.postMessage(teamInvocationStatusMessage({ invocationId: `team-invoke-failed-${createHash('sha256').update(`${message.teamId}:${message.version}:${message.role}`).digest('hex').slice(0, 16)}`, teamId: message.teamId, versionId: `${message.teamId}-v${message.version}`, role: message.role, status: 'failed', stage: 'failed', reason: safeTeamError(error) }));
-        panel.webview.postMessage({ type: 'team-error', text: safeTeamError(error) });
-      }
-      return;
-    }
-    if (message.type === 'profile-list' || message.type === 'profile-create' || message.type === 'profile-update' || message.type === 'profile-select' || message.type === 'profile-validate' || message.type === 'profile-import-legacy') {
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!root) { panel.webview.postMessage({ type: 'profile-error', text: 'Open a workspace before configuring a project profile.' }); return; }
-      const profiles = new ProfileStore(root, auth);
-      try {
-        if (message.type === 'profile-create') await profiles.create(message);
-        if (message.type === 'profile-update') { const { type: _type, ...input } = message; await profiles.update(input); state.providerProfileId = undefined; }
-        if (message.type === 'profile-select') { await profiles.select(message.profileId); state.providerProfileId = undefined; }
-        if (message.type === 'profile-validate') await profiles.validate(message.profileId);
-        if (message.type === 'profile-import-legacy') { await profiles.importLegacy(message.profileId, message.confirm); state.providerProfileId = undefined; }
-        await sendProfileStatus(panel, auth, profiles);
-      } catch (error) {
-        panel.webview.postMessage({ type: 'profile-error', text: providerErrorMessage(error) });
-      }
       return;
     }
     if (message.type === 'history') {
       await sendHistory(panel, state.activity ?? createActivityStore());
-      return;
-    }
-    if (message.type === 'set-quiet-mode') { state.quiet = message.quiet; panel.webview.postMessage({ type: 'quiet-mode', quiet: state.quiet }); return; }
-    if (message.type === 'load-analytics' || message.type === 'export-analytics' || message.type === 'agent-drill-down') {
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!root) { panel.webview.postMessage({ type: 'analytics-error', text: 'Open a workspace to inspect local analytics.' }); return; }
-      const activity = state.activity ?? new ActivityStore(root); state.activity = activity;
-      state.contextMemory = state.contextMemory ?? new ContextGraphMemory(root);
-      const analytics = new AnalyticsStore({ sessions: await activity.list() }, new AuditStore(root), new ReputationStore(root), undefined, state.contextMemory);
-      const filter = message.type === 'agent-drill-down' ? { agentId: message.agentId, limit: 50 } : message.filter;
-      const result = await analytics.query(filter);
-      if (message.type === 'export-analytics') panel.webview.postMessage({ type: 'analytics-export', data: await analytics.export(filter) });
-      else panel.webview.postMessage({ type: 'analytics', result: buildFleetView(result.fleet, state.quiet) });
       return;
     }
     if (message.type === 'reopen-session' || message.type === 'continue-session') {
@@ -668,7 +417,6 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   state.activity = createActivityStore();
   await sendHistory(panel, state.activity);
   await sendProfileStatus(panel, auth);
-  await sendStakingStatus(panel, state.staking);
   await loadModels(panel, auth);
 }
 
@@ -756,165 +504,6 @@ function createActivityStore(): ActivityStore | undefined {
 }
 
 function projectIdForWorkspace(root: string): string { return projectMemoryScope(root).id; }
-export async function invokeTeamFromHost(workspaceRoot: string, teams: TeamStudioStore, request: Extract<TeamWebviewMessage, { type: 'team-invoke' }>): Promise<ChatTeamMessage> {
-  const agent = await invokeBoundTeam(workspaceRoot, teams, request);
-  const validatedBinding = await new ProjectInitialization(workspaceRoot).requireReusableBinding();
-  if (!validatedBinding) throw new Error('Bind a reusable team version to this project before invocation.');
-  return teamInvocationStatusMessage({ invocationId: agent.id, teamId: validatedBinding.teamId, versionId: validatedBinding.versionId, role: agent.role, status: agent.status === 'running' ? 'running' : 'failed', stage: agent.status === 'running' ? 'running' : 'failed', provider: agent.routeSnapshot?.provider, model: agent.routeSnapshot?.model ?? agent.model, locality: agent.routeSnapshot?.locality, privacyBoundary: agent.routeSnapshot?.privacyBoundary, estimatedCostUsd: agent.costUsd, startedAt: agent.startedAt, updatedAt: agent.updatedAt });
-}
-
-async function sendTeamStatus(panel: ChatHost, teams: TeamStudioStore): Promise<void> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const initialization = root ? new ProjectInitialization(root) : undefined;
-  panel.webview.postMessage(teamStatusMessage(await teams.list({ includeArchived: true }), initialization ? await initialization.getReusableBinding() : undefined));
-}
-function safeTeamError(error: unknown): string { const raw = error instanceof Error ? error.message : 'The team operation could not be completed.'; return raw.replace(/(?:api[_ -]?key|refresh[-_ ]?token|bearer|secret|password|private prompt|raw context|command)\s*[:=]?\s*[^\s,;]*/gi, '[REDACTED]').slice(0, 240); }
-function safeMultimodalError(error: unknown): string { const raw = error instanceof Error ? error.message : 'The attachment could not be staged.'; return raw.replace(/(?:api[_ -]?key|refresh[-_ ]?token|bearer|secret|password|private prompt|raw context|provider[_ -]?payload|raw[_ -]?handles?|managed[_ -]?path|contentHash)\s*[:=]?\s*[^\s,;]+/gi, '[REDACTED]').replace(/(?:^|[\s("'`])(?:\/|[A-Za-z]:[\\/]|\\\\)[^\s,;)}\]]+/g, '$1[PATH_REDACTED]').replace(/data:[^\s,;]+/gi, '[REDACTED]').replace(/[\r\n\t]+/g, ' ').slice(0, 240); }
-function safeGenerationError(error: unknown): string { const raw = error instanceof Error ? error.message : 'The generation operation could not be completed.'; return raw.replace(/(?:api[_ -]?key|refresh[-_ ]?token|bearer|secret|password|private prompt|raw context|data:[^\s,;]+)/gi, '[REDACTED]').replace(/[\r\n\t]+/g, ' ').slice(0, 240); }
-function safeMemoryError(error: unknown): string { const raw = error instanceof Error ? error.message : 'The memory operation could not be completed.'; return raw.replace(/(?:api[_ -]?key|refresh[-_ ]?token|bearer|secret|password|private prompt|raw context|raw media|data:[^\s,;]+)/gi, '[REDACTED]').replace(/[\r\n\t]+/g, ' ').slice(0, 240); }
-function userMemoryProvenance(value: string): { kind: 'user'; sourceId: string; sourceHash: string; capturedAt: string; evidenceClass: 'user-assertion'; actorId: 'user' } { return { kind: 'user', sourceId: 'chat-memory-edit', sourceHash: createHash('sha256').update(value).digest('hex'), capturedAt: new Date().toISOString(), evidenceClass: 'user-assertion', actorId: 'user' }; }
-
-type MemoryActionMessage = Extract<ChatWebviewMessage, { type: 'memory-preview' | 'memory-correct' | 'memory-merge' | 'memory-retract' | 'memory-reset' | 'memory-export' }>;
-
-function memoryApprovalDescriptor(message: MemoryActionMessage, expectedGraphVersion: number, sessionId = 'session-memory-host', projectId = 'project-host'): MemoryApprovalDescriptor {
-  let operation: MemoryApprovalDescriptor['operation'];
-  let nodeIds: string[] = [];
-  let sourceNodeIds: string[] = [];
-  let targetNodeId: string | undefined;
-  let summary: string | undefined;
-  if (message.type === 'memory-preview') {
-    operation = message.operation;
-    if (operation === 'correct' || operation === 'retract') nodeIds = [message.nodeId as string];
-    if (operation === 'merge') { targetNodeId = message.targetNodeId; sourceNodeIds = message.sourceNodeIds ?? []; summary = message.summary; }
-    if (operation === 'correct') summary = message.summary;
-  } else if (message.type === 'memory-correct') {
-    operation = 'correct'; nodeIds = [message.nodeId]; summary = message.summary;
-  } else if (message.type === 'memory-merge') {
-    operation = 'merge'; targetNodeId = message.targetNodeId; sourceNodeIds = message.sourceNodeIds;
-  } else if (message.type === 'memory-retract') {
-    operation = 'retract'; nodeIds = [message.nodeId];
-  } else if (message.type === 'memory-reset') {
-    operation = 'reset';
-  } else {
-    operation = 'export';
-  }
-  return {
-    operation,
-    scope: message.scope,
-    expectedGraphVersion,
-    nodeIds: operation === 'merge' ? [targetNodeId as string] : nodeIds,
-    sourceNodeIds,
-    ...(summary === undefined ? {} : { summary }),
-    localOnly: message.type === 'memory-preview' ? message.localOnly !== false : true,
-    providerBoundary: 'local',
-    sessionId,
-    projectId
-  };
-}
-
-async function executeApprovedMemoryAction(memory: ContextGraphMemory, authorization: HostMemoryApprovalAuthorization, descriptor: MemoryApprovalDescriptor): Promise<unknown> {
-  if (descriptor.operation === 'correct') return memory.correct({ scope: descriptor.scope, nodeId: descriptor.nodeIds[0], expectedGraphVersion: descriptor.expectedGraphVersion, summary: descriptor.summary as string, provenance: userMemoryProvenance(descriptor.summary as string), authoringActorId: 'user' }, authorization);
-  if (descriptor.operation === 'merge') return memory.merge({ scope: descriptor.scope, targetNodeId: descriptor.nodeIds[0], sourceNodeIds: descriptor.sourceNodeIds, expectedGraphVersion: descriptor.expectedGraphVersion, ...(descriptor.summary === undefined ? {} : { summary: descriptor.summary }), provenance: userMemoryProvenance(`${descriptor.nodeIds[0]}:${descriptor.sourceNodeIds.join(',')}`), authoringActorId: 'user' }, authorization);
-  if (descriptor.operation === 'retract') return memory.retract(descriptor.scope, descriptor.nodeIds[0], descriptor.expectedGraphVersion, authorization);
-  if (descriptor.operation === 'reset') return memory.reset(descriptor.scope, descriptor.expectedGraphVersion, authorization);
-  return memory.export(descriptor.scope, { expectedGraphVersion: descriptor.expectedGraphVersion, approval: authorization });
-}
-
-type MultimodalChatState = {
-  intake?: MultimodalIntake;
-  multimodal?: MultimodalOrchestrator;
-  multimodalRoot?: string;
-  multimodalProfileId?: string;
-  multimodalAborts: Map<string, AbortController>;
-  activity?: ActivityStore;
-};
-
-type GenerationChatState = { generation?: GenerationService; generationRoot?: string; generationProfileId?: string; generationAbort?: AbortController; activity?: ActivityStore; intake?: MultimodalIntake };
-
-async function getMultimodalContext(root: string, auth: AuthService, state: MultimodalChatState) {
-  const profiles = new ProfileStore(root, auth);
-  const profile = await profiles.getActiveProfile();
-  const selection = await profiles.getActiveSelection();
-  if (!profile || !selection || profile.validation.status !== 'valid') throw new MultimodalOperationError('approval-required', 'Select and validate a project provider profile before using attachment operations.');
-  const provider = await createNearAiProvider({ auth, profile, scope: profiles.getScope(selection.profileId) });
-  const router = multimodalCatalogRouter(await provider.client.listModelsWithPricing());
-  if (state.multimodal && state.multimodalRoot === root && state.multimodalProfileId === profile.profileId && state.intake) return { orchestrator: state.multimodal, router, profile, profiles };
-  const privacy = new PrivacyPreflight();
-  state.intake = state.intake ?? new MultimodalIntake(root, { privacy });
-  state.activity = state.activity ?? new ActivityStore(root);
-  const orchestrator = new MultimodalOrchestrator(root, {
-    intake: state.intake,
-    privacy,
-    policyGate: new PolicyGate(defaultActionPolicy(), privacy),
-    activity: state.activity,
-    audit: new AuditStore(root),
-    execute: hostMultimodalExecution
-  });
-  state.multimodal = orchestrator;
-  state.multimodalRoot = root;
-  state.multimodalProfileId = profile.profileId;
-  return { orchestrator, router, profile, profiles };
-}
-
-function requireMultimodalOperation(orchestrator: MultimodalOrchestrator, operationId: string) {
-  const operation = orchestrator.list().find((candidate) => candidate.operationId === operationId);
-  if (!operation) throw new MultimodalOperationError('invalid-reference', 'Unknown multimodal operation.');
-  return operation;
-}
-
-async function hostMultimodalExecution(input: MultimodalExecutionInput): Promise<MultimodalExecutionOutput> {
-  if (input.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-  if (input.route.providerBoundary !== 'local') throw new MultimodalOperationError('operation-not-supported', 'No documented host adapter is available for this provider boundary; cloud execution will not fall back locally.');
-  const kind: MultimodalExecutionOutput['kind'] = input.operation === 'transcribe' ? 'transcript' : input.operation === 'extract' ? 'extracted-text' : input.operation === 'summarize' ? 'summary' : input.operation === 'inspect' ? 'thumbnail' : 'transformed';
-  return { kind, label: `${kind} derived artifact`, safePreview: `${kind} derived from ${input.sourceArtifactIds.length} approved staged attachment(s)`, actualCostUsd: 0 };
-}
-
-async function getGenerationService(root: string, auth: AuthService, state: GenerationChatState): Promise<GenerationService> {
-  const profiles = new ProfileStore(root, auth);
-  const profile = await profiles.getActiveProfile();
-  const selection = await profiles.getActiveSelection();
-  if (!profile || !selection || profile.validation.status !== 'valid') throw new GenerationError('approval-required', 'Select and validate a project provider profile before using generation skills.');
-  if (state.generation && state.generationRoot === root && state.generationProfileId === profile.profileId) return state.generation;
-  const provider = await createNearAiProvider({ auth, profile, scope: profiles.getScope(selection.profileId) });
-  const privacy = new PrivacyPreflight();
-  state.activity = state.activity ?? new ActivityStore(root);
-  const service = new GenerationService(root, {
-    router: new CapabilityRouter({ catalog: await provider.client.listModelsWithPricing() }),
-    adapters: [new NearAiGenerationAdapter(provider.client)],
-    approval: new ApprovalService(new PolicyGate(defaultActionPolicy(), privacy), { audit: new AuditStore(root) }),
-    activity: state.activity,
-    intake: state.intake,
-    privacy
-  });
-  state.generation = service;
-  state.generationRoot = root;
-  state.generationProfileId = profile.profileId;
-  return service;
-}
-
-async function generationAttribution(root: string, auth: AuthService) {
-  const profiles = new ProfileStore(root, auth);
-  const profile = await profiles.getActiveProfile();
-  if (!profile) throw new GenerationError('approval-required', 'The selected provider profile is unavailable.');
-  return hostAttribution(profiles.projectScopeId, path.basename(root), profile.profileId, profile.organization);
-}
-
-async function loadCapabilityAwarePreview(preview: import('../domain/teamStudio').TeamPreview, auth: AuthService): Promise<import('./chatBridge').CapabilityAwareTeamPreview> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) return capabilityAwareTeamPreview(preview);
-  const profiles = new ProfileStore(root, auth);
-  const active = await profiles.getActiveProfile();
-  const selection = await profiles.getActiveSelection();
-  if (!active || !selection || active.validation.status !== 'valid') return capabilityAwareTeamPreview(preview);
-  try {
-    const provider = await createNearAiProvider({ auth, profile: active, scope: profiles.getScope(selection.profileId) });
-    const models = await provider.client.listModelsWithPricing();
-    return capabilityAwareTeamPreview(preview, new CapabilityRouter({ catalog: models }));
-  } catch {
-    return capabilityAwareTeamPreview(preview);
-  }
-}
-
 async function sendHistory(panel: ChatHost, store: ActivityStore | undefined): Promise<void> {
   // The newest runs; the Agent Activity page pages through all of them.
   panel.webview.postMessage({ type: 'history', sessions: store ? (await store.list()).slice(0, 30).map(sessionSummaryMessage) : [] });
@@ -925,10 +514,6 @@ async function sendArtifacts(panel: ChatHost): Promise<void> {
   panel.webview.postMessage({ type: 'artifacts', artifacts: root ? await discoverGsdArtifacts(root) : [] });
 }
 
-async function sendStakingStatus(panel: ChatHost, staking: StakingService, refresh = false): Promise<void> {
-  const status = refresh ? await staking.refreshStatus() : staking.getStatus();
-  panel.webview.postMessage(walletStatusMessage(status));
-}
 
 
 const FULL_AUTO_CONFIRM = 'Switch to Full auto';
