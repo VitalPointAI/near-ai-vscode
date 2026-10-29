@@ -13,6 +13,8 @@ import { onDidChangeEmergencyStop } from './emergencyStop';
 // team setup, starts the guided builder).
 
 const DRAFT_KEY = 'nearAi.teamStudio.draft';
+/** Unsaved work kept when the tab was closed (VS Code cannot ask before a webview panel closes). */
+const KEPT_KEY = 'nearAi.teamStudio.kept';
 let current: { panel: vscode.WebviewPanel; startWizard(target: StudioTarget): Promise<void> } | undefined;
 
 export function openTeamStudio(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill, options: { wizard?: StudioTarget } = {}): void {
@@ -36,11 +38,13 @@ export function openTeamStudio(context: vscode.ExtensionContext, auth: AuthServi
     openFile: async (file) => vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)), { preview: false, viewColumn: vscode.ViewColumn.Beside }),
     openSetting: (key) => Promise.resolve(vscode.commands.executeCommand('workbench.action.openSettings', key)),
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
+    choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
     ask: (prompt, value) => Promise.resolve(vscode.window.showInputBox({ title: 'Team Studio', prompt, value, validateInput: (text) => text.trim() ? undefined : 'Enter a name.' })),
     pickExportTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(root ?? context.globalStorageUri.fsPath, name)), filters: { 'Team file': ['md'] }, title: 'Export team' }))?.fsPath,
     pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'Team file': ['md'] }, title: 'Import a NEAR AI team file', canSelectMany: false }))?.[0]?.fsPath,
     applyProjectType: (projectRoot, type, goal) => applyProjectType(projectRoot, type, goal),
     drafts: { get: () => context.globalState.get(DRAFT_KEY), set: (value) => Promise.resolve(context.globalState.update(DRAFT_KEY, value)) },
+    kept: { get: () => context.globalState.get(KEPT_KEY), set: (value) => Promise.resolve(context.globalState.update(KEPT_KEY, value)) },
     watch: (listener) => {
       const watchers = [new vscode.RelativePattern(vscode.Uri.file(library.directory), '{*.md,.archived/*.md}'), ...(root ? [new vscode.RelativePattern(vscode.Uri.file(path.dirname(TeamLibrary.projectTeamFile(root))), 'team.md')] : [])]
         .map((pattern) => vscode.workspace.createFileSystemWatcher(pattern));

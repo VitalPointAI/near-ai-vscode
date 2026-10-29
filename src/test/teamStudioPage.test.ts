@@ -9,7 +9,7 @@ import { decidePermission, DEFAULT_RULES, RunGrants } from '../agent/permissions
 import { checkDraft, draftFromMarkdown, lineDiff, teamMarkdown, type TeamDraft } from '../agent/teamMarkdown';
 import { DEFAULT_TOOLS, parseTeam, renderTeam, TeamLibrary } from '../agent/teams';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
-import { attachTeamStudio, buildStudioContext, parseStudioMessage, reviewDraft, teamStudioHtml, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
+import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, parseStudioMessage, reviewDraft, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
 
 // Team Studio: a visual builder and manager for the Markdown team files, which stay the source of truth.
@@ -257,7 +257,7 @@ test('the page HTML is one nonce script and one stylesheet under a strict CSP', 
 
 // ---------- the host controller, on a real TeamLibrary ----------
 
-interface Harness { posted: Array<Record<string, any>>; send(message: unknown): Promise<void>; deps: TeamStudioDeps; storage: string; root: string; library: TeamLibrary; prefills: string[]; opened: string[]; applied: string[]; drafts: { value?: SavedWizard }; watch(file: string): void; confirmAnswer: { value: boolean }; askAnswer: { value: string | undefined }; exportTarget: { value?: string }; settle(): Promise<void> }
+interface Harness { posted: Array<Record<string, any>>; send(message: unknown): Promise<void>; deps: TeamStudioDeps; storage: string; root: string; library: TeamLibrary; prefills: string[]; opened: string[]; applied: string[]; drafts: { value?: SavedWizard }; watch(file: string): void; confirmAnswer: { value: boolean }; askAnswer: { value: string | undefined }; exportTarget: { value?: string }; settle(): Promise<void>; chooseAnswer: { value?: string }; asked: Array<{ message: string; actions: string[] }>; kept: { value?: KeptWork }; close(): void }
 
 async function harness(): Promise<Harness> {
   const base = await mkdtemp(path.join(tmpdir(), 'near-ai-studio-'));
@@ -271,6 +271,8 @@ async function harness(): Promise<Harness> {
   const prefills: string[] = []; const opened: string[] = []; const applied: string[] = [];
   const drafts: { value?: SavedWizard } = {};
   const confirmAnswer = { value: true }; const askAnswer: { value: string | undefined } = { value: 'Web copy' }; const exportTarget: { value?: string } = {};
+  const chooseAnswer: { value?: string } = {}; const asked: Array<{ message: string; actions: string[] }> = []; const kept: { value?: KeptWork } = {};
+  let disposed: (() => void) | undefined;
   const deps: TeamStudioDeps = {
     library, root,
     gather: async () => input(),
@@ -284,11 +286,13 @@ async function harness(): Promise<Harness> {
     pickImportSource: async () => undefined,
     applyProjectType: async (_root, type, goal) => { applied.push(`${type.id}:${goal}`); },
     drafts: { get: () => drafts.value, set: async (value) => { drafts.value = value; } },
+    choose: async (message, ...actions) => { asked.push({ message, actions }); return chooseAnswer.value; },
+    kept: { get: () => kept.value, set: async (value) => { kept.value = value; } },
     watch: (listener) => { watcher = listener; return { dispose() {} }; }
   };
-  attachTeamStudio({ webview: { postMessage: async (message) => { posted.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; } }, onDidDispose: () => ({ dispose() {} }) }, deps);
+  attachTeamStudio({ webview: { postMessage: async (message) => { posted.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; } }, onDidDispose: (listener) => { disposed = listener; return { dispose() {} }; } }, deps);
   const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
-  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, exportTarget, settle };
+  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, exportTarget, settle, chooseAnswer, asked, kept, close: () => disposed!() };
 }
 const last = (h: Harness, type: string) => [...h.posted].reverse().find((message) => message.type === type)!;
 
@@ -491,6 +495,121 @@ test('a project team\'s history belongs to its project', async () => {
   assert.equal((await library.versions(two)).length, 1);
 });
 
+// ---------- leaving with unsaved changes (the user decides) ----------
+
+const wizardState = (overrides: Partial<SavedWizard> = {}): SavedWizard => ({ draft: draft({ name: 'Half built' }), step: 2, target: 'user', startingPoint: 'empty', ...overrides });
+
+test('host: Cancel in the builder with changes asks Discard changes / Save draft; Discard leaves without saving', async () => {
+  const h = await harness();
+  await h.send({ type: 'ready' });
+  h.chooseAnswer.value = 'Discard changes';
+  await h.send({ type: 'leave-wizard', wizard: wizardState() });
+  assert.deepEqual(h.asked.map((question) => question.actions), [['Discard changes', 'Save draft']]);
+  assert.match(h.asked[0].message, /You have an unsaved team "Half built"\. Discard it, or save it as a draft to finish later\?/);
+  assert.deepEqual(last(h, 'left'), { type: 'left', choice: 'discard' });
+  assert.equal(h.drafts.value, undefined, 'nothing saved');
+  assert.deepEqual(await h.library.list(h.root), [], 'no team written');
+  // Dismissing the question (Esc, or Cancel in the modal) keeps the builder open.
+  h.chooseAnswer.value = undefined;
+  await h.send({ type: 'leave-wizard', wizard: wizardState() });
+  assert.deepEqual(last(h, 'left'), { type: 'left', choice: 'stay' });
+  assert.equal(h.drafts.value, undefined);
+});
+
+test('host: Save draft keeps the builder\'s draft, and the library offers to resume it', async () => {
+  const h = await harness();
+  await h.send({ type: 'ready' });
+  h.chooseAnswer.value = 'Save draft';
+  await h.send({ type: 'leave-wizard', wizard: wizardState() });
+  assert.deepEqual(h.drafts.value, wizardState());
+  const left = last(h, 'left');
+  assert.equal(left.choice, 'save-draft');
+  assert.deepEqual(left.savedDraft, wizardState());
+  assert.match(left.notice, /Draft saved/);
+  await h.send({ type: 'refresh' });
+  assert.deepEqual(last(h, 'state').savedDraft, wizardState());
+});
+
+test('host: leaving the editor with changes asks Discard changes / Save; Save writes the file first', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  const base = last(h, 'team').base;
+  const edited = draft({ description: 'Builds and ships pages' });
+  // Discard: the file is untouched.
+  h.chooseAnswer.value = 'Discard changes';
+  await h.send({ type: 'leave-editor', edit: { id: 'user:web-team', draft: edited, base } });
+  assert.deepEqual(h.asked.at(-1)!.actions, ['Discard changes', 'Save']);
+  assert.match(h.asked.at(-1)!.message, /You have unsaved changes to "Web team"\. Discard them, or save them before leaving\?/);
+  assert.deepEqual(last(h, 'left'), { type: 'left', choice: 'discard' });
+  assert.equal(await readFile(file, 'utf8'), teamMarkdown(draft()));
+  // Save: written and versioned, then back to the library.
+  await h.send({ type: 'open', id: 'user:web-team' });
+  h.chooseAnswer.value = 'Save';
+  await h.send({ type: 'leave-editor', edit: { id: 'user:web-team', draft: edited, base } });
+  assert.equal(await readFile(file, 'utf8'), teamMarkdown(edited));
+  const saved = last(h, 'left');
+  assert.equal(saved.choice, 'saved');
+  assert.match(saved.notice, /Saved "Web team" as version/);
+  // A draft that cannot be saved keeps the editor open, with the reason.
+  await h.send({ type: 'open', id: 'user:web-team' });
+  const before = h.posted.length;
+  await h.send({ type: 'leave-editor', edit: { id: 'user:web-team', draft: draft({ members: [] }), base: last(h, 'team').base } });
+  assert.ok(h.posted.slice(before).some((message) => message.type === 'save-failed'));
+  assert.deepEqual(last(h, 'left'), { type: 'left', choice: 'stay' });
+  assert.equal(await readFile(file, 'utf8'), teamMarkdown(edited));
+});
+
+test('host: closing the panel keeps unsaved work, and the next open says so', async () => {
+  // The builder: kept as its resumable draft.
+  const h = await harness();
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'unsaved', wizard: wizardState() });
+  h.close();
+  await h.settle();
+  assert.deepEqual(h.drafts.value, wizardState());
+  assert.deepEqual(h.kept.value, { kind: 'wizard', name: 'Half built' });
+  const reopened = await harness();
+  reopened.drafts.value = h.drafts.value;
+  reopened.kept.value = h.kept.value;
+  await reopened.send({ type: 'ready' });
+  const state = last(reopened, 'state');
+  assert.deepEqual(state.kept, { kind: 'wizard', text: KEPT_WIZARD_TEXT });
+  assert.equal(KEPT_WIZARD_TEXT, 'Your unsaved team was kept as a draft. Resume it below, or discard it.');
+  assert.deepEqual(state.savedDraft, wizardState());
+  assert.equal(reopened.kept.value, undefined, 'said once; the resumable draft stays');
+  await reopened.send({ type: 'refresh' });
+  assert.equal(last(reopened, 'state').kept, undefined);
+
+  // The editor: its changes are kept until reopened or discarded.
+  const e = await harness();
+  await e.library.create('Web team', teamMarkdown(draft()));
+  await e.send({ type: 'ready' });
+  await e.send({ type: 'open', id: 'user:web-team' });
+  const edit = { id: 'user:web-team', draft: draft({ description: 'Unsaved description' }), base: last(e, 'team').base };
+  await e.send({ type: 'unsaved', edit });
+  e.close();
+  await e.settle();
+  assert.deepEqual(e.kept.value, { kind: 'editor', name: 'Web team', ...edit });
+  await e.send({ type: 'refresh' });
+  const keptState = last(e, 'state').kept;
+  assert.deepEqual([keptState.kind, keptState.id, keptState.text], ['editor', 'user:web-team', 'Your unsaved changes to "Web team" were kept as a draft.']);
+  assert.deepEqual(keptState.draft, edit.draft);
+  await e.send({ type: 'discard-kept' });
+  assert.equal(e.kept.value, undefined);
+
+  // Nothing unsaved: nothing kept.
+  const n = await harness();
+  await n.send({ type: 'ready' });
+  await n.send({ type: 'unsaved', wizard: wizardState() });
+  await n.send({ type: 'unsaved' });
+  n.close();
+  await n.settle();
+  assert.equal(n.drafts.value, undefined);
+  assert.equal(n.kept.value, undefined);
+});
+
 // ---------- the page script in a small DOM ----------
 
 class FakeNode {
@@ -665,6 +784,108 @@ test('page: the editor tracks unsaved changes, saves with its base, and handles 
   for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
 });
 
+test('page: Cancel and "All teams" leave at once when nothing changed, and ask the host when something did', async () => {
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
+  // Nothing changed: no prompt.
+  page.byLabel('Create your first team')!.click();
+  page.byLabel('Cancel')!.click();
+  assert.match(page.text(), /Create your first team/);
+  assert.equal(page.posts.some((message) => message.type === 'leave-wizard'), false);
+  page.byLabel('Create your first team')!.click();
+  page.byLabel('Back to all teams')!.click();
+  assert.match(page.text(), /Create your first team/);
+  assert.equal(page.posts.some((message) => message.type === 'leave-wizard'), false);
+  // A change: the page asks the host and stays until it answers.
+  page.byLabel('Create your first team')!.click();
+  const name = page.doc.getElementById('f-name')!;
+  name.value = 'Half built'; name.fire('input');
+  assert.deepEqual(page.posts.at(-1), { type: 'unsaved', wizard: { draft: { name: 'Half built', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'recommend' } }, 'the host always knows what is unsaved');
+  page.byLabel('Cancel')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'leave-wizard', wizard: { draft: { name: 'Half built', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'recommend' } });
+  assert.match(page.text(), /1\. Purpose/, 'still in the builder');
+  page.dispatch({ type: 'left', choice: 'stay' });
+  assert.match(page.text(), /1\. Purpose/);
+  page.byLabel('Back to all teams')!.click();
+  assert.equal(page.posts.at(-1)!.type, 'leave-wizard');
+  page.dispatch({ type: 'left', choice: 'discard' });
+  assert.match(page.text(), /Create your first team/);
+  assert.deepEqual(page.posts.at(-1), { type: 'unsaved' }, 'nothing unsaved any more');
+  // Save draft: back to the library, with the draft to resume.
+  page.byLabel('Create your first team')!.click();
+  page.doc.getElementById('f-name')!.value = 'Kept'; page.doc.getElementById('f-name')!.fire('input');
+  page.byLabel('Cancel')!.click();
+  const saved = { draft: { name: 'Kept', description: '', members: [] }, step: 0, target: 'user', startingPoint: 'recommend' };
+  page.dispatch({ type: 'left', choice: 'save-draft', savedDraft: saved, notice: 'Draft saved. Pick it up again from Team Studio at any time.' });
+  assert.match(page.text(), /You have an unfinished team "Kept" \(step 1 of 5\)/);
+  assert.match(page.doc.getElementById('banner')!.textContent, /Draft saved/);
+  // Resuming and cancelling without a change does not ask.
+  page.byLabel('Resume')!.click();
+  const count = page.posts.length;
+  page.byLabel('Cancel')!.click();
+  assert.equal(page.posts.slice(count).some((message) => message.type === 'leave-wizard'), false);
+  // The footer's Save draft counts as saved: Cancel right after it does not ask.
+  page.byLabel('Resume')!.click();
+  page.doc.getElementById('f-name')!.value = 'Kept again'; page.doc.getElementById('f-name')!.fire('input');
+  page.byLabel('Save draft')!.click();
+  assert.equal(page.posts.at(-1)!.type, 'save-draft');
+  page.byLabel('Cancel')!.click();
+  assert.notEqual(page.posts.at(-1)!.type, 'leave-wizard');
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: leaving the editor with changes asks the host (Discard changes / Save) instead of an in-page banner', async () => {
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
+  const base = 'b'.repeat(64);
+  const open = () => page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base, versions: [] });
+  open();
+  page.byLabel('Back to all teams')!.click();
+  assert.match(page.text(), /Create your first team/, 'unchanged: leaves at once');
+  assert.equal(page.posts.some((message) => message.type === 'leave-editor'), false);
+  open();
+  const desc = page.doc.getElementById('f-desc')!;
+  desc.value = 'Changed'; desc.fire('input');
+  assert.deepEqual(page.posts.at(-1), { type: 'unsaved', edit: { id: 'user:web', draft: { ...draft(), description: 'Changed' }, base } });
+  page.byLabel('Back to all teams')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'leave-editor', edit: { id: 'user:web', draft: { ...draft(), description: 'Changed' }, base } });
+  assert.doesNotMatch(page.doc.getElementById('banner')!.hidden ? '' : page.doc.getElementById('banner')!.textContent, /unsaved/i, 'no in-page banner: the host asks with a modal');
+  assert.match(page.text(), /Unsaved changes/);
+  page.dispatch({ type: 'left', choice: 'stay' });
+  assert.match(page.text(), /Unsaved changes/);
+  page.byLabel('Back to all teams')!.click();
+  page.dispatch({ type: 'left', choice: 'saved', notice: 'Saved "Web team" as version 2026-10-29.' });
+  assert.match(page.text(), /Create your first team/);
+  assert.match(page.doc.getElementById('banner')!.textContent, /Saved "Web team"/);
+  for (const message of page.posts) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
+test('page: changes kept when the studio closed can be reopened (as unsaved changes) or discarded', async () => {
+  const page = await runPage();
+  const library = { teams: [{ id: 'user:web', kind: 'user', name: 'Web team', description: '', command: '/team:web ', file: '/s/web.md', members: [] }], archived: [] };
+  const base = 'b'.repeat(64);
+  const kept = { kind: 'editor', id: 'user:web', name: 'Web team', draft: { ...draft(), description: 'Kept edit' }, base, text: 'Your unsaved changes to "Web team" were kept as a draft.' };
+  page.dispatch({ type: 'state', context: context(), library, kept });
+  assert.match(page.doc.getElementById('banner')!.textContent, /Your unsaved changes to "Web team" were kept as a draft\./);
+  page.byLabel('Reopen with my changes')!.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'open', id: 'user:web' });
+  page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base, versions: [] });
+  assert.equal(page.doc.getElementById('f-desc')!.value, 'Kept edit');
+  assert.match(page.text(), /Unsaved changes/);
+  assert.ok(page.posts.some((message) => message.type === 'discard-kept'), 'used up');
+  // The wizard's notice, when its draft was kept.
+  const other = await runPage();
+  other.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] }, savedDraft: { draft: { name: 'Half', description: '', members: [] }, step: 1, target: 'user' }, kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } });
+  assert.match(other.doc.getElementById('banner')!.textContent, /Your unsaved team was kept as a draft/);
+  assert.match(other.text(), /You have an unfinished team "Half"/);
+  // Discard them.
+  const third = await runPage();
+  third.dispatch({ type: 'state', context: context(), library, kept });
+  third.byLabel('Discard them')!.click();
+  assert.deepEqual(third.posts.at(-1), { type: 'discard-kept' });
+  for (const message of [...page.posts, ...other.posts, ...third.posts]) assert.ok(parseStudioMessage(message), JSON.stringify(message));
+});
+
 // ---------- the real panel, with VS Code stubbed and no network ----------
 
 test('host path: Manage Teams opens one Team Studio tab; Set Up Project Team starts the guided builder', async () => {
@@ -727,6 +948,83 @@ test('host path: Manage Teams opens one Team Studio tab; Set Up Project Team sta
     assert.equal(revealed, 1);
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(posted.at(-1), { type: 'start-wizard', target: 'project' });
+  } finally {
+    nodeModule._load = originalLoad;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('host path: the questions are VS Code modals, and closing the tab with an unsaved team keeps it for next time', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-studio-close-'));
+  const storage = path.join(root, '.global');
+  await mkdir(path.join(storage, 'teams'), { recursive: true });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (request: string | URL | Request) => { throw new Error(`Team Studio must not call the network: ${String(request)}`); }) as typeof fetch;
+  const disposable = { dispose() {} };
+  const warnings: unknown[][] = [];
+  let answer: string | undefined = 'Discard changes';
+  const panels: Array<{ posted: Array<Record<string, any>>; receive?: (message: unknown) => Promise<void>; close(): void }> = [];
+  const makePanel = () => {
+    const closers: Array<() => void> = [];
+    const entry: { posted: Array<Record<string, any>>; receive?: (message: unknown) => Promise<void>; close(): void } = { posted: [], close: () => closers.forEach((close) => close()) };
+    panels.push(entry);
+    return {
+      webview: { html: '', cspSource: 'vscode-webview://test', asWebviewUri: (uri: { fsPath: string }) => ({ toString: () => uri.fsPath }), postMessage: async (message: Record<string, any>) => { entry.posted.push(message); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { entry.receive = handler; return disposable; } },
+      onDidDispose: (handler: () => void) => { closers.push(handler); return disposable; }, reveal: () => undefined, iconPath: undefined as unknown
+    };
+  };
+  const vscodeStub = {
+    workspace: {
+      workspaceFolders: [{ uri: { fsPath: root }, name: 'demo' }], name: 'demo',
+      getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }),
+      onDidChangeConfiguration: () => disposable, onDidSaveTextDocument: () => disposable,
+      createFileSystemWatcher: () => ({ onDidChange: () => disposable, onDidCreate: () => disposable, onDidDelete: () => disposable, dispose() {} })
+    },
+    window: { createWebviewPanel: () => makePanel(), createStatusBarItem: () => ({ show() {}, hide() {} }), showInformationMessage: () => undefined, showWarningMessage: async (...args: unknown[]) => { warnings.push(args); return answer; } },
+    commands: { executeCommand: async () => undefined, registerCommand: () => disposable },
+    RelativePattern: class { constructor(public base: unknown, public pattern: string) {} },
+    ThemeColor: class {}, StatusBarAlignment: { Left: 1, Right: 2 }, ViewColumn: { Active: -1, Beside: -2 },
+    Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }
+  };
+  const nodeModule = require('node:module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
+  const originalLoad = nodeModule._load;
+  nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
+  try {
+    // A fresh panel module: the earlier host-path test leaves its tab open in the shared one.
+    delete require.cache[require.resolve('../services/teamStudioPanel')];
+    const { openTeamStudio } = require('../services/teamStudioPanel') as typeof import('../services/teamStudioPanel');
+    const { initEmergencyStop } = require('../services/emergencyStop') as typeof import('../services/emergencyStop');
+    const { AuthService } = require('../services/auth') as typeof import('../services/auth');
+    const secrets = { values: new Map<string, string>(), get(key: string) { return Promise.resolve(this.values.get(key)); }, store(key: string, value: string) { this.values.set(key, value); return Promise.resolve(); }, delete(key: string) { this.values.delete(key); return Promise.resolve(); } };
+    const memento = () => { const values = new Map<string, unknown>(); return { get: (key: string) => values.get(key), update: async (key: string, value: unknown) => { values.set(key, value); }, keys: () => [...values.keys()] }; };
+    const context = { subscriptions: [] as unknown[], globalStorageUri: { fsPath: storage }, extensionUri: { fsPath: root }, secrets, globalState: memento(), workspaceState: memento() };
+    initEmergencyStop(context as never);
+    const auth = new AuthService(secrets);
+    const open = () => openTeamStudio(context as never, auth, { prefill: async () => undefined });
+    open();
+    const first = panels[0];
+    await first.receive!({ type: 'ready' });
+    // Cancel with changes: a modal with exactly these two choices (and VS Code's own Cancel).
+    await first.receive!({ type: 'leave-wizard', wizard: { draft: draft({ name: 'Half built', members: [] }), step: 1, target: 'user' } });
+    assert.deepEqual(warnings[0].slice(1), [{ modal: true }, 'Discard changes', 'Save draft']);
+    assert.deepEqual(first.posted.at(-1), { type: 'left', choice: 'discard' });
+    answer = undefined;
+    await first.receive!({ type: 'leave-editor', edit: { id: 'user:web', draft: draft(), base: 'a'.repeat(64) } });
+    assert.deepEqual(warnings[1].slice(1), [{ modal: true }, 'Discard changes', 'Save']);
+    assert.deepEqual(first.posted.at(-1), { type: 'left', choice: 'stay' });
+    // Closing the tab with an unsaved team: kept, without asking (VS Code cannot hold a panel open).
+    await first.receive!({ type: 'unsaved', wizard: { draft: draft({ name: 'Half built', members: [] }), step: 1, target: 'user' } });
+    first.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(warnings.length, 2, 'no question on close');
+    assert.equal((context.globalState.get('nearAi.teamStudio.draft') as SavedWizard).draft.name, 'Half built');
+    open();
+    const second = panels[1];
+    await second.receive!({ type: 'ready' });
+    const state = second.posted.find((message) => message.type === 'state')!;
+    assert.equal(state.savedDraft.draft.name, 'Half built');
+    assert.deepEqual(state.kept, { kind: 'wizard', text: 'Your unsaved team was kept as a draft. Resume it below, or discard it.' });
+    second.close();
   } finally {
     nodeModule._load = originalLoad;
     globalThis.fetch = originalFetch;

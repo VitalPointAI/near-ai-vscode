@@ -29,6 +29,11 @@
   let seq = 0;
   let reviewTimer = null;
   let flash = null;
+  // Changes to a team that were kept when the studio was closed, until reopened or discarded.
+  let keptEdit = null;
+  let keptShown = false;
+  // Nothing is unsaved when the page starts, so only a change is worth telling the host.
+  let lastUnsaved = JSON.stringify({ type: 'unsaved' });
 
   // ---------- small DOM helpers ----------
   const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined && text !== null) node.textContent = String(text); return node; };
@@ -107,6 +112,20 @@
   const emptyMember = (index) => ({ name: 'member-' + index, role: '', model: '', tools: null, instructions: '' });
   const roleById = (id) => (ctx ? ctx.roles : []).find((role) => role.id === id);
   const isDirty = () => Boolean(work && work.mode === 'editor' && JSON.stringify(work.draft) !== work.clean);
+  // The builder has unsaved changes once its draft differs from how it started (or was last saved as a draft).
+  const isWizardDirty = () => Boolean(work && work.mode === 'wizard' && JSON.stringify(work.draft) !== work.clean);
+  const wizardState = () => { const state = { draft: work.draft, step: work.step, target: work.target }; if (work.startingPoint) state.startingPoint = work.startingPoint; return state; };
+
+  // The host keeps what is unsaved if the panel is closed (it cannot ask then), so it always knows.
+  function reportUnsaved() {
+    const message = { type: 'unsaved' };
+    if (isWizardDirty()) message.wizard = wizardState();
+    else if (isDirty()) message.edit = { id: work.id, draft: work.draft, base: work.base };
+    const json = JSON.stringify(message);
+    if (json === lastUnsaved) return;
+    lastUnsaved = json;
+    vscode.postMessage(message);
+  }
   const memberLabel = (member, index) => (member.name || 'member ' + (index + 1)) + (member.role ? ' (' + member.role + ')' : '');
 
   function startWizard(target, resume) {
@@ -114,6 +133,7 @@
     work = resume
       ? { mode: 'wizard', target: resume.target, step: resume.step, maxStep: resume.step, draft: clone(resume.draft), startingPoint: resume.startingPoint || 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null }
       : { mode: 'wizard', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: { name: target === 'project' ? 'Project team' : '', description: '', members: [] }, startingPoint: 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null };
+    work.clean = JSON.stringify(work.draft);
     render();
     requestReview();
     focusMain();
@@ -121,6 +141,7 @@
 
   function changed(structural) {
     if (structural) render(); else updateDirty();
+    reportUnsaved();
     requestReview();
   }
 
@@ -129,6 +150,8 @@
     if (reviewTimer) clearTimeout(reviewTimer);
     reviewTimer = setTimeout(() => {
       reviewTimer = null;
+      // Left the builder or editor in the meantime: nothing to check.
+      if (!work) return;
       seq += 1;
       const message = { type: 'review', seq, draft: work.draft };
       if (work.mode === 'editor') message.id = work.id;
@@ -146,15 +169,10 @@
     $('title').textContent = work.mode === 'wizard' ? 'Build a team' : 'Edit team';
   }
 
+  // Cancel, and "All teams": with unsaved changes the host asks first (a modal), and the page waits for its answer.
   function leaveWork() {
-    if (isDirty()) {
-      showBanner('You have unsaved changes to "' + work.draft.name + '".', 'warning', [
-        button('Save', () => { hideBanner(); save(); }, { primary: true }),
-        button('Discard changes', () => { hideBanner(); work = null; render(); }, {}),
-        button('Keep editing', hideBanner, { link: true })
-      ]);
-      return;
-    }
+    if (isWizardDirty()) { vscode.postMessage({ type: 'leave-wizard', wizard: wizardState() }); return; }
+    if (isDirty()) { vscode.postMessage({ type: 'leave-editor', edit: { id: work.id, draft: work.draft, base: work.base } }); return; }
     work = null;
     render();
     focusMain();
@@ -651,7 +669,7 @@
     [sectionPurpose, sectionMembers, sectionModels, sectionTools, (node) => { sectionInstructions(node); sectionChecks(node, true); }][work.step](panel);
     root.append(panel);
     const footer = el('div', 'footer');
-    footer.append(button('Back', () => goStep(work.step - 1), { disabled: work.step === 0 }), button('Save draft', () => vscode.postMessage({ type: 'save-draft', draft: work.draft, step: work.step, target: work.target, startingPoint: work.startingPoint }), {}), button('Cancel', () => { work = null; render(); }, { link: true }));
+    footer.append(button('Back', () => goStep(work.step - 1), { disabled: work.step === 0 }), button('Save draft', () => { work.clean = JSON.stringify(work.draft); reportUnsaved(); vscode.postMessage({ type: 'save-draft', draft: work.draft, step: work.step, target: work.target, startingPoint: work.startingPoint }); }, {}), button('Cancel', leaveWork, { link: true }));
     const spacer = el('span', 'spacer'); footer.append(spacer);
     const count = el('span', 'hint'); count.id = 'error-count'; footer.append(count);
     if (work.step < STEPS.length - 1) footer.append(button('Next: ' + STEPS[work.step + 1], () => {
@@ -739,11 +757,24 @@
     else if (work.mode === 'wizard') renderWizard(main);
     else renderEditor(main);
     fillReview();
+    reportUnsaved();
     flash = null;
     const target = pendingFocus || active;
     pendingFocus = null;
     const node = target && $(target);
     if (node && node.focus) node.focus();
+  }
+
+  function showKept(kept) {
+    if (kept.kind === 'wizard') { showBanner(kept.text, 'info'); announce(kept.text); return; }
+    if (kept.kind !== 'editor' || keptShown || work) return;
+    keptShown = true;
+    keptEdit = kept;
+    showBanner(kept.text, 'info', [
+      button('Reopen with my changes', () => { hideBanner(); vscode.postMessage({ type: 'open', id: kept.id }); }, { primary: true }),
+      button('Discard them', () => { hideBanner(); keptEdit = null; vscode.postMessage({ type: 'discard-kept' }); }, { link: true })
+    ]);
+    announce(kept.text);
   }
 
   window.addEventListener('message', (event) => {
@@ -753,17 +784,40 @@
         ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null;
         render();
         if (work) requestReview();
+        if (message.kept) showKept(message.kept);
+        break;
+      case 'left':
+        // The host's answer to leaving with unsaved changes: stay, or go back to the library.
+        if (message.choice === 'stay' || !work) break;
+        work = null;
+        if (message.savedDraft) savedDraft = message.savedDraft;
+        render();
+        if (message.notice) { showBanner(message.notice, 'info'); announce(message.notice); }
+        focusMain();
         break;
       case 'library':
         lib = message.library;
         if (!work) render();
         break;
       case 'start-wizard':
-        if (isDirty()) { showBanner('Save or discard your changes first, then set up the project team.', 'warning'); break; }
+        if (isDirty() || isWizardDirty()) { showBanner('Save or discard your changes first, then set up the project team.', 'warning'); break; }
         startWizard(message.target);
         break;
       case 'team':
         openEditor(message, true);
+        if (keptEdit && keptEdit.id === message.id) {
+          // Reopening a team whose changes were kept: they come back as unsaved changes.
+          work.draft = clone(keptEdit.draft);
+          const moved = keptEdit.base !== message.base;
+          keptEdit = null;
+          vscode.postMessage({ type: 'discard-kept' });
+          savedDraft = null;
+          render();
+          requestReview();
+          showBanner(moved ? 'Your kept changes are back. The file changed since they were kept; check them before saving.' : 'Your kept changes are back. Save them, or Revert to the saved team.', moved ? 'warning' : 'info');
+          focusMain();
+          break;
+        }
         if (message.notice) { showBanner(message.notice, 'info'); announce(message.notice); }
         savedDraft = null;
         render();

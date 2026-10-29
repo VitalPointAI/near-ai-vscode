@@ -212,7 +212,13 @@ const WORK_SHAPES = ['feature', 'bugfix', 'refactor', 'research', 'release'] as 
 const RISKS = ['low', 'medium', 'high'] as const;
 
 export type StudioMessage =
-  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' }
+  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' }
+  /** Cancel or "All teams" in the guided builder with unsaved changes: the host asks Discard changes / Save draft. */
+  | { type: 'leave-wizard'; wizard: SavedWizard }
+  /** "All teams" in the editor with unsaved changes: the host asks Discard changes / Save. */
+  | { type: 'leave-editor'; edit: OpenEdit }
+  /** What is unsaved right now (nothing, the builder, or the editor), kept if the panel is closed. */
+  | { type: 'unsaved'; wizard?: SavedWizard; edit?: OpenEdit }
   | { type: 'open' | 'duplicate' | 'export' | 'archive' | 'restore' | 'use-in-chat' | 'open-markdown' | 'versions'; id: string }
   | { type: 'version-view' | 'version-restore'; id: string; ref: string }
   | { type: 'review'; seq: number; draft: TeamDraft; id?: string }
@@ -244,8 +250,22 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
   const message = value;
   const id = () => typeof message.id === 'string' && TEAM_ID.test(message.id);
   switch (message.type) {
-    case 'ready': case 'refresh': case 'import': case 'discard-draft':
+    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept':
       return exactKeys(message, ['type']) ? { type: message.type } : undefined;
+    case 'leave-wizard': {
+      const wizard = exactKeys(message, ['type', 'wizard']) ? savedWizard(message.wizard) : undefined;
+      return wizard ? { type: 'leave-wizard', wizard } : undefined;
+    }
+    case 'leave-editor': {
+      const edit = exactKeys(message, ['type', 'edit']) ? openEdit(message.edit) : undefined;
+      return edit ? { type: 'leave-editor', edit } : undefined;
+    }
+    case 'unsaved': {
+      if (!exactKeys(message, ['type'], ['wizard', 'edit']) || (message.wizard !== undefined && message.edit !== undefined)) return undefined;
+      if (message.wizard !== undefined) { const wizard = savedWizard(message.wizard); return wizard ? { type: 'unsaved', wizard } : undefined; }
+      if (message.edit !== undefined) { const edit = openEdit(message.edit); return edit ? { type: 'unsaved', edit } : undefined; }
+      return { type: 'unsaved' };
+    }
     case 'open': case 'duplicate': case 'export': case 'archive': case 'restore': case 'use-in-chat': case 'open-markdown': case 'versions':
       return exactKeys(message, ['type', 'id']) && id() ? { type: message.type, id: message.id as string } : undefined;
     case 'version-view': case 'version-restore':
@@ -300,6 +320,15 @@ export interface StudioHost {
 }
 
 export interface SavedWizard { draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string }
+/** Unsaved changes to a team open in the editor: its id, the draft, and the file version it started from. */
+export interface OpenEdit { id: string; draft: TeamDraft; base: string }
+/**
+ * What the studio kept when its panel was closed with unsaved work (VS Code cannot stop a panel
+ * closing): the builder's draft (saved as the resumable draft), or an open team's changes.
+ */
+export type KeptWork = { kind: 'wizard'; name: string } | ({ kind: 'editor'; name: string } & OpenEdit);
+
+export const KEPT_WIZARD_TEXT = 'Your unsaved team was kept as a draft. Resume it below, or discard it.';
 
 export interface TeamStudioDeps {
   library: TeamLibrary;
@@ -315,6 +344,10 @@ export interface TeamStudioDeps {
   pickImportSource(): Promise<string | undefined>;
   applyProjectType(root: string, type: ProjectType, goal: string): Promise<unknown>;
   drafts: { get(): unknown; set(value: SavedWizard | undefined): Promise<void> };
+  /** A modal question; resolves to the action chosen, or undefined when dismissed. */
+  choose?(message: string, ...actions: string[]): Promise<string | undefined>;
+  /** Unsaved work kept when the panel was closed, shown the next time the studio opens. */
+  kept?: { get(): unknown; set(value: KeptWork | undefined): Promise<void> };
   /** Team files changed on disk (by an editor, git, or another window). */
   watch(listener: (file: string) => void): { dispose(): void };
   onDidChangeSettings?(listener: () => void): { dispose(): void };
@@ -333,7 +366,12 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   let markReady: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => { markReady = resolve; });
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** What the page last said is unsaved; kept if the panel closes. */
+  let unsaved: { wizard?: SavedWizard; edit?: OpenEdit } = {};
   const post = (message: unknown) => { void host.webview.postMessage(message); };
+  const choose = (message: string, ...actions: string[]): Promise<string | undefined> => deps.choose
+    ? deps.choose(message, ...actions)
+    : deps.confirm(message, actions[0]).then((yes) => (yes ? actions[0] : undefined));
 
   const load = async () => {
     input = await deps.gather();
@@ -343,7 +381,11 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   const refresh = async () => {
     await load();
     const saved = savedWizard(deps.drafts.get());
-    post({ type: 'state', library, context, ...(saved ? { savedDraft: saved } : {}) });
+    const kept = keptWork(deps.kept?.get());
+    // The builder's draft is already the resumable draft: say once that it was kept. An open
+    // team's changes stay kept until the user reopens or discards them.
+    if (kept?.kind === 'wizard' || (kept?.kind === 'editor' && !library.teams.some((team) => team.id === kept.id))) await deps.kept?.set(undefined);
+    post({ type: 'state', library, context, ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
   };
   const refreshLibrary = async () => {
     if (!input) return;
@@ -388,6 +430,28 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     }
   };
 
+  /** Saves an open team's draft; undefined when it was not saved (the page was told why). */
+  const saveTeam = async (edit: OpenEdit): Promise<{ file: string; notice: string } | undefined> => {
+    const file = fileFor(edit.id);
+    if (!file) return undefined;
+    if (!input || !context) await load();
+    const disk = await readFile(file, 'utf8');
+    if (hash(disk) !== edit.base) {
+      // Someone else changed the file since the studio loaded it: the page asks reload or keep mine.
+      let draft: TeamDraft | undefined;
+      try { draft = draftFromMarkdown(disk, file); } catch { /* an unreadable file still conflicts */ }
+      open = { id: edit.id, file, text: disk, base: hash(disk) };
+      post({ type: 'external-change', id: edit.id, reason: 'conflict', base: open.base, versions: await versionsOf(file), ...(draft ? { draft } : {}) });
+      return undefined;
+    }
+    const review = reviewDraft(edit.draft, disk, input!, context!);
+    if (review.errors.length) { post({ type: 'save-failed', id: edit.id, errors: review.errors }); return undefined; }
+    await writeFile(file, review.markdown, 'utf8');
+    const version = await deps.library.snapshot(file);
+    await refreshLibrary();
+    return { file, notice: `Saved "${edit.draft.name.trim()}" as version ${version}.` };
+  };
+
   const startWizard = async (target: StudioTarget) => {
     if (!pageReady) { pendingWizard = target; return; }
     post({ type: 'start-wizard', target: target === 'project' && !deps.root ? 'user' : target });
@@ -422,25 +486,42 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'save': {
-        const file = fileFor(message.id);
-        if (!file || !input || !context) return;
-        const disk = await readFile(file, 'utf8');
-        if (hash(disk) !== message.base) {
-          // Someone else changed the file since the studio loaded it: the page asks reload or keep mine.
-          let draft: TeamDraft | undefined;
-          try { draft = draftFromMarkdown(disk, file); } catch { /* an unreadable file still conflicts */ }
-          open = { id: message.id, file, text: disk, base: hash(disk) };
-          post({ type: 'external-change', id: message.id, reason: 'conflict', base: open.base, versions: await versionsOf(file), ...(draft ? { draft } : {}) });
-          return;
-        }
-        const review = reviewDraft(message.draft, disk, input, context);
-        if (review.errors.length) { post({ type: 'save-failed', id: message.id, errors: review.errors }); return; }
-        await writeFile(file, review.markdown, 'utf8');
-        const version = await deps.library.snapshot(file);
-        await refreshLibrary();
-        await sendTeam(message.id, file, `Saved "${message.draft.name.trim()}" as version ${version}.`);
+        const saved = await saveTeam(message);
+        if (saved) await sendTeam(message.id, saved.file, saved.notice);
         return;
       }
+      case 'leave-wizard': {
+        const name = message.wizard.draft.name.trim();
+        const choice = await choose(`You have an unsaved team${name ? ` "${name}"` : ''}. Discard it, or save it as a draft to finish later?`, 'Discard changes', 'Save draft');
+        if (choice === 'Save draft') {
+          await deps.drafts.set(message.wizard);
+          unsaved = {};
+          post({ type: 'left', choice: 'save-draft', savedDraft: message.wizard, notice: 'Draft saved. Pick it up again from Team Studio at any time.' });
+        } else if (choice === 'Discard changes') {
+          unsaved = {};
+          post({ type: 'left', choice: 'discard' });
+        } else post({ type: 'left', choice: 'stay' });
+        return;
+      }
+      case 'leave-editor': {
+        const name = message.edit.draft.name.trim() || teamFor(message.edit.id)?.name || 'this team';
+        const choice = await choose(`You have unsaved changes to "${name}". Discard them, or save them before leaving?`, 'Discard changes', 'Save');
+        if (choice === 'Save') {
+          const saved = await saveTeam(message.edit);
+          // Not saved (a problem to fix, or the file changed meanwhile): the page stays on the editor, which says why.
+          if (!saved) { post({ type: 'left', choice: 'stay' }); return; }
+          open = undefined;
+          unsaved = {};
+          post({ type: 'left', choice: 'saved', notice: saved.notice });
+        } else if (choice === 'Discard changes') {
+          open = undefined;
+          unsaved = {};
+          post({ type: 'left', choice: 'discard' });
+        } else post({ type: 'left', choice: 'stay' });
+        return;
+      }
+      case 'unsaved': unsaved = { ...(message.wizard ? { wizard: message.wizard } : {}), ...(message.edit ? { edit: message.edit } : {}) }; return;
+      case 'discard-kept': await deps.kept?.set(undefined); return;
       case 'create': {
         if (!input || !context) await load();
         const review = reviewDraft(message.draft, undefined, input!, context!);
@@ -568,9 +649,39 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       try { await handle(message); } catch (error) { post({ type: 'error', text: (error as Error).message }); }
     })
   ];
-  const dispose = () => { if (timer) clearTimeout(timer); for (const subscription of subscriptions) subscription.dispose(); };
+  /** The panel closed: unsaved work is kept (the builder as its draft, an open team's changes as kept changes). */
+  const keepUnsaved = async () => {
+    const { wizard, edit } = unsaved;
+    unsaved = {};
+    if (wizard) {
+      await deps.drafts.set(wizard);
+      await deps.kept?.set({ kind: 'wizard', name: wizard.draft.name.trim() });
+    } else if (edit) {
+      await deps.kept?.set({ kind: 'editor', name: edit.draft.name.trim() || teamFor(edit.id)?.name || '', ...edit });
+    }
+  };
+  const dispose = () => {
+    if (timer) clearTimeout(timer);
+    for (const subscription of subscriptions) subscription.dispose();
+    void keepUnsaved().catch(() => undefined);
+  };
   host.onDidDispose(dispose);
   return { refresh, startWizard, dispose, ready };
+}
+
+function openEdit(value: unknown): OpenEdit | undefined {
+  if (!isPlain(value)) return undefined;
+  const parsed = parseStudioMessage({ ...value, type: 'save' });
+  return parsed?.type === 'save' ? { id: parsed.id, draft: parsed.draft, base: parsed.base } : undefined;
+}
+
+function keptWork(value: unknown): KeptWork | undefined {
+  if (!isPlain(value)) return undefined;
+  const name = typeof value.name === 'string' ? value.name.slice(0, 120) : '';
+  if (value.kind === 'wizard') return { kind: 'wizard', name };
+  if (value.kind !== 'editor') return undefined;
+  const edit = openEdit({ id: value.id, draft: value.draft, base: value.base });
+  return edit ? { kind: 'editor', name, ...edit } : undefined;
 }
 
 function savedWizard(value: unknown): SavedWizard | undefined {

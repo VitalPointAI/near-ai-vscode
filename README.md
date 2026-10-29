@@ -271,7 +271,10 @@ limit used up), the chat says "NEAR spend limit reached".
   sub-agents, each limited to its own tools. Saving a team file records a
   version. Teams can be duplicated, archived, restored, imported, and deleted.
   **Set Up Project Team** asks a few questions and drafts a team for the
-  project in `.planning/.near-ai/team.md` for you to review.
+  project in `.planning/.near-ai/team.md` for you to review. In Team Studio,
+  leaving the builder or the editor with unsaved changes asks first (Discard
+  changes, or Save draft / Save); closing the tab keeps the unsaved team as a
+  draft and says so the next time the studio opens.
 - **Attachments.** Attach images, audio, documents, and text files to a
   message. Images are read by the chosen model if it reads images, otherwise
   by a vision model (`nearAi.agent.visionModel`); audio is transcribed with
