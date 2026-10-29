@@ -145,15 +145,61 @@ are stored in VS Code's encrypted secret storage.
 **Activity** next to running agents) opens a live page of what every agent is
 doing: prompts, replies, reasoning, and each tool call with its input and
 result, color-coded per agent, with a table of turns, tokens in and out, the
-share of output spent reasoning, generation speed, estimated cost, tool calls
+share of output spent reasoning, generation speed, cost, tool calls
 and failures, retries, and time for each agent, split into waiting for replies
 to start, generating them, and tools. Filter by agent or kind, search, **Pause** (or press P) to read without
 the stream moving, and export to Markdown or JSON. It streams only while the
 tab is visible and keeps entries in memory only, for
 `nearAi.activity.retentionMinutes` (60) and up to
-`nearAi.activity.maxMegabytes` (8 MB); secrets are masked.
+`nearAi.activity.maxMegabytes` (8 MB); secrets are masked. Its spend total and
+each agent's cost come from the spend ledger (below), so they match the chat's
+status line and survive reloads.
 
-### Spend and activity
+### Spend
+
+Every billable NEAR AI response is recorded where the extension talks to NEAR,
+whatever sent it: the agent and its sub-agents (foreground and background),
+the auto mode's safety checks, context summaries, attachment reading
+(vision and transcription), image generation, and the `@nearAi` chat
+participant. Streams that break off or are stopped are recorded too, with
+NEAR's request ID. Each API key has its own spend ledger on this computer
+(in the extension's storage, shared by all VS Code windows; the key itself is
+never stored), and every spend figure is a sum over it: the chat's status
+line, **Spending Limits**, Agent Activity, the "about $X so far" progress
+line, and the cost under each answer.
+
+Each entry starts at its estimate (NEAR's per-token, per-request, and
+per-image prices) and is then settled with NEAR's actual cost from
+`/v1/billing/costs`: asked about 5 s, 30 s, 2 min, and 10 min after the
+response, in batches, even after a reload. Figures say how sure they are:
+
+- **confirmed**: NEAR's billing API reported the actual cost.
+- **pending** (`~$`): waiting for NEAR to report it; shown at the estimate.
+  A request NEAR still reports no usage for after 10 minutes is settled as $0.
+- **est.**: NEAR returned no request ID to check (for example a request
+  cancelled before NEAR answered), so only the estimate is known.
+- **(NEAR)**: NEAR AI Cloud's own total for your API key today, from every
+  computer using it. This needs a usage reporting token: an organization
+  owner or admin creates one (`rpt-…`, read-only, see NEAR's
+  [Usage Reporting API](https://docs.near.ai/)), and you add it with
+  **NEAR AI: Set Usage Reporting Token** (stored in VS Code's encrypted
+  secret storage; **Clear Usage Reporting Token** removes it). The extension
+  then asks NEAR once which organization and key ID your API key has
+  (`/v1/check_api_key`) and reads the key's usage summary every minute while
+  runs are going and every 5 minutes otherwise.
+
+Without a token the status line reads like "$0.40 confirmed + ~$0.02 pending
+today" for this computer; hover it for details. "Today" is the local calendar
+day (`nearAi.spend.dayBoundary`: `local`, or `utc`). A reply's footer shows the
+run's total (sub-agents, safety checks, and summaries included), replaced by
+NEAR's confirmed figure once every request in the run is settled.
+
+`nearAi.dailySpendLimitUsd` is checked before every request and before every
+model turn against the larger of NEAR's total (when a token is set) and this
+computer's confirmed plus pending spend; a run that reaches it stops and keeps
+its work. `nearAi.agent.maxRunCostUsd` caps one run by its own ledger entries.
+If NEAR itself refuses a request with HTTP 402 (credits or the key's spend
+limit used up), the chat says "NEAR spend limit reached".
 
 Open **NEAR AI Tools** from the title bar for analytics: sessions, models,
 tokens, and spend by organization and project, exportable.
@@ -260,7 +306,8 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.saveTranscripts` | `true` | Keep conversations on this machine so History can resume them. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
 | `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |
-| `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount. |
+| `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount: the larger of NEAR's own total for the key (with a usage reporting token) and this computer's spend ledger. |
+| `nearAi.spend.dayBoundary` | `local` | When "today" starts for spend figures and the daily limit: local midnight, or `utc`. |
 | `nearAi.autoInstallGsd` | `true` | Install Open-GSD when a workflow needs it and keep it current in NEAR AI projects. |
 
 ## Good to know
