@@ -1,18 +1,26 @@
 import { randomBytes } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import * as vscode from 'vscode';
+import type { ActivitySessionSummary } from '../domain/activity';
+import { buildWindowSummary, historyPage, nowRows, OverviewSpend, OverviewWindow } from './activityOverview';
+import { ActivityStore } from './activityStore';
 import { ActivityEntry, ActivityFeed, AgentStats, timeBreakdown } from './agentActivity';
+import type { ChatWebviewMessage } from './chatBridge';
 import { readActivityLimits } from './settings';
 import { shownSpendAccount } from './spendAccount';
-import { nanoToUsd, totalNanoUsd } from './spendLedger';
+import { DayBoundary, nanoToUsd, totalNanoUsd } from './spendLedger';
+import { readDayBoundary } from './spendTracking';
 
-// The Agent Activity page: a live stream of every agent's prompts, replies, reasoning, and tool
-// calls with per-agent statistics. It streams only while visible: hiding the tab drops its page
-// (retainContextWhenHidden is off) and the subscription; showing it again sends a fresh snapshot.
+// The Agent Activity page: an overview of agent activity, not a log (the chat shows the work
+// itself). Now: the agents running, what each is doing, and controls. A window (this
+// conversation, today, the last 7 days): runs, where the time went, tokens, cost, tool calls,
+// approvals, and problems by model. History: past runs, one line each, that open in the chat.
+// Figures come from the project's activity history and the key's spend ledger, plus the live
+// feed for agents still running. It updates at most once a second, only while visible; the raw
+// entries stay in memory for "Export details" only.
 
-const FLUSH_MS = 250;
-const STATS_MS = 1_000;
-const SNAPSHOT_ENTRIES = 1_500;
+const UPDATE_MS = 1_000;
+const RELOAD_MS = 3_000;
 
 let feed: ActivityFeed | undefined;
 let panel: vscode.WebviewPanel | undefined;
@@ -20,71 +28,151 @@ let panel: vscode.WebviewPanel | undefined;
 /** Set by the extension-host tests to observe the page's messages in both directions. */
 export const activityTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void } = {};
 
-/** The one feed every conversation writes to. */
-let focusAgent: string | undefined;
+/** The chat the page's controls act through (the sidebar). */
+export interface ActivityChat { request(payload: ChatWebviewMessage): Promise<void> }
 
+let focusAgent: string | undefined;
+let chat: ActivityChat | undefined;
+
+/** The one feed every conversation writes to. */
 export function sharedActivityFeed(): ActivityFeed {
   feed ??= new ActivityFeed(readActivityLimits());
   return feed;
 }
 
-export function registerAgentActivity(context: vscode.ExtensionContext): void {
+export function registerAgentActivity(context: vscode.ExtensionContext, sidebar?: ActivityChat): void {
+  chat = sidebar;
   context.subscriptions.push(
     vscode.commands.registerCommand('nearAi.openAgentActivity', (agentId?: unknown) => openAgentActivity(context, typeof agentId === 'string' ? agentId : undefined)),
     vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi.activity')) sharedActivityFeed().setLimits(readActivityLimits()); })
   );
 }
 
-/** Opens the page; with an agent ID, the stream is filtered to that agent. */
+/** What the page may ask for; anything else is ignored. */
+export type ActivityViewMessage =
+  | { type: 'ready' }
+  | { type: 'set-window'; window: OverviewWindow }
+  | { type: 'history-page'; page: number }
+  | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' }
+  | { type: 'show-in-chat' }
+  | { type: 'open-conversation'; conversationId: string }
+  | { type: 'export'; format: 'markdown' | 'json' }
+  | { type: 'export-usage' };
+
+const AGENT_ID = /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i;
+const WINDOWS: OverviewWindow[] = ['conversation', 'today', 'week'];
+
+export function parseActivityViewMessage(value: unknown): ActivityViewMessage | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const message = value as Record<string, unknown>;
+  if (message.type === 'ready' || message.type === 'show-in-chat' || message.type === 'export-usage') return { type: message.type };
+  if (message.type === 'set-window' && WINDOWS.includes(message.window as OverviewWindow)) return { type: 'set-window', window: message.window as OverviewWindow };
+  if (message.type === 'history-page' && Number.isInteger(message.page) && (message.page as number) >= 0 && (message.page as number) < 10_000) return { type: 'history-page', page: message.page as number };
+  if (message.type === 'agent-control' && typeof message.agentId === 'string' && AGENT_ID.test(message.agentId) && (message.action === 'pause' || message.action === 'resume' || message.action === 'stop')) return { type: 'agent-control', agentId: message.agentId, action: message.action };
+  if (message.type === 'open-conversation' && typeof message.conversationId === 'string' && /^conv-[a-z0-9-]{6,60}$/.test(message.conversationId)) return { type: 'open-conversation', conversationId: message.conversationId };
+  if (message.type === 'export') return { type: 'export', format: message.format === 'json' ? 'json' : 'markdown' };
+  return undefined;
+}
+
+/** Everything the page shows, in one message. */
+export function overviewMessage(input: { feed: ActivityFeed; sessions: ActivitySessionSummary[]; spend?: OverviewSpend; window: OverviewWindow; page: number; now?: number; boundary?: DayBoundary; hasProject?: boolean }): Record<string, unknown> {
+  const now = input.now ?? Date.now();
+  const boundary = input.boundary ?? 'local';
+  const live = input.feed.agentStats();
+  const conversationId = input.feed.currentConversation;
+  return {
+    type: 'overview',
+    now,
+    boundary,
+    hasProject: input.hasProject !== false,
+    running: nowRows(live, input.spend),
+    summary: buildWindowSummary({ sessions: input.sessions, live, spend: input.spend, window: input.window, now, boundary, conversationId }),
+    history: historyPage(input.sessions, input.page, input.spend, now)
+  };
+}
+
+/** Where the page scrolls for an agent the chat named: its row in Now, or its run in History once it ended. */
+export function focusMessage(activity: ActivityFeed, agentId: string): Record<string, unknown> {
+  const stat = activity.agentStat(agentId);
+  const runId = stat?.runId ?? (/^main-(run-.+)$/.exec(agentId)?.[1]);
+  return { type: 'focus-agent', agentId, ...(runId ? { runId } : {}), running: stat?.status === 'running' };
+}
+
+/** Opens the page; with an agent ID, that agent's row is highlighted and scrolled to. */
 export function openAgentActivity(context: vscode.ExtensionContext, agentId?: string): void {
   focusAgent = agentId;
-  if (panel) { panel.reveal(); if (agentId) void panel.webview.postMessage({ type: 'focus-agent', agentId }); return; }
+  const activity = sharedActivityFeed();
+  if (panel) { panel.reveal(); if (agentId) void panel.webview.postMessage(focusMessage(activity, agentId)); return; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'activity');
   const view = vscode.window.createWebviewPanel('nearAiAgentActivity', 'Agent Activity', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
   panel = view;
   view.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   view.webview.html = activityHtml(view.webview, media);
-  const activity = sharedActivityFeed();
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const store = root ? new ActivityStore(root) : undefined;
+  let sessions: ActivitySessionSummary[] = [];
+  let loadedAt = 0;
+  let window: OverviewWindow = 'today';
+  let page = 0;
   let subscription: { dispose(): void } | undefined;
-  let pending = new Map<number, ActivityEntry>();
-  let flushTimer: ReturnType<typeof setTimeout> | undefined;
-  let statsTimer: ReturnType<typeof setInterval> | undefined;
+  let spendWatch: { dispose(): void } | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let lastSent = 0;
+  let lastJson = '';
   const post = (message: Record<string, unknown>) => { activityTap.toView?.(message); void view.webview.postMessage(message); };
-  const status = () => activityStatus(activity);
-  const flush = () => {
-    flushTimer = undefined;
-    if (!pending.size) return;
-    const entries = [...pending.values()].map((entry) => ({ ...entry }));
-    pending = new Map();
-    post({ type: 'entries', entries, ...status() });
+  const send = async (reload = false) => {
+    timer = undefined;
+    if (store && (reload || Date.now() - loadedAt >= RELOAD_MS)) {
+      await store.reload().catch(() => undefined);
+      sessions = await store.list().catch(() => sessions);
+      loadedAt = Date.now();
+    }
+    if (!subscription) return;
+    const message = overviewMessage({ feed: activity, sessions, spend: shownSpendAccount(), window, page, boundary: readDayBoundary(), hasProject: Boolean(store) });
+    // Nothing changed: no message, so the page does not redraw.
+    const json = JSON.stringify({ ...message, now: 0 });
+    if (json === lastJson && !reload) return;
+    lastJson = json;
+    lastSent = Date.now();
+    post(message);
   };
+  // At most one update a second, however busy the agents are.
+  const schedule = () => { timer ??= setTimeout(() => void send(), Math.max(0, UPDATE_MS - (Date.now() - lastSent))); };
   const start = () => {
     if (subscription) return;
-    const subscribed = activity.subscribe((change) => {
-      if (change.cleared) { pending = new Map(); post({ type: 'cleared', ...status() }); }
-      for (const entry of change.entries) pending.set(entry.seq, entry);
-      flushTimer ??= setTimeout(flush, FLUSH_MS);
+    subscription = activity.subscribe(schedule);
+    spendWatch = shownSpendAccount()?.onChange(schedule);
+    void send(true).then(() => {
+      if (focusAgent) { post(focusMessage(activity, focusAgent)); focusAgent = undefined; }
     });
-    subscription = subscribed;
-    post({ type: 'snapshot', entries: subscribed.snapshot.slice(-SNAPSHOT_ENTRIES), ...status() });
-    if (focusAgent) { post({ type: 'focus-agent', agentId: focusAgent }); focusAgent = undefined; }
-    statsTimer = setInterval(() => post({ type: 'stats', ...status() }), STATS_MS);
   };
   const stop = () => {
     subscription?.dispose();
+    spendWatch?.dispose();
     subscription = undefined;
-    if (flushTimer) clearTimeout(flushTimer);
-    if (statsTimer) clearInterval(statsTimer);
-    flushTimer = undefined;
-    statsTimer = undefined;
-    pending = new Map();
+    spendWatch = undefined;
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    lastJson = '';
   };
   view.onDidChangeViewState((event) => { if (!event.webviewPanel.visible) stop(); }, undefined, context.subscriptions);
-  view.webview.onDidReceiveMessage(async (message: { type?: unknown; format?: unknown }) => {
-    activityTap.fromView?.(message);
-    if (message?.type === 'ready') { stop(); if (view.visible) start(); }
-    else if (message?.type === 'clear') activity.clear();
-    else if (message?.type === 'export') await exportActivity(activity, message.format === 'json' ? 'json' : 'markdown');
+  view.webview.onDidReceiveMessage(async (raw: unknown) => {
+    activityTap.fromView?.(raw);
+    const message = parseActivityViewMessage(raw);
+    if (!message) return;
+    if (message.type === 'ready') { stop(); if (view.visible) start(); }
+    else if (message.type === 'set-window') { window = message.window; await send(true); }
+    else if (message.type === 'history-page') { page = message.page; await send(true); }
+    else if (message.type === 'agent-control') {
+      // The main agent has no pause; stopping it stops the run, as the chat's Stop does.
+      if (message.agentId.startsWith('main-')) { if (message.action === 'stop') await chat?.request({ type: 'stop' }); }
+      else await chat?.request({ type: 'agent-control', agentId: message.agentId, action: message.action });
+      schedule();
+    }
+    else if (message.type === 'show-in-chat') await vscode.commands.executeCommand('nearAi.openChat');
+    else if (message.type === 'open-conversation') await chat?.request({ type: 'resume-conversation', id: message.conversationId });
+    else if (message.type === 'export') await exportActivity(activity, message.format);
+    else if (message.type === 'export-usage') await vscode.commands.executeCommand('nearAi.exportAnalytics');
   }, undefined, context.subscriptions);
   view.onDidDispose(() => { stop(); panel = undefined; }, undefined, context.subscriptions);
 }
@@ -134,38 +222,74 @@ export function activityMarkdown(entries: ActivityEntry[], stats: AgentStats[]):
   return `${lines.join('\n')}\n`;
 }
 
-function activityHtml(webview: vscode.Webview, media: vscode.Uri): string {
+export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspSource'>, media: vscode.Uri): string {
   const nonce = randomBytes(16).toString('base64');
   const asset = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${asset('activity.css')}"><title>Agent Activity</title></head><body>
 <header class="top">
-  <div class="heading"><h1>Agent activity</h1><span id="live" class="live" title="Updates stream while this tab is visible">Live</span></div>
-  <dl id="totals" class="totals" aria-label="Totals"></dl>
-</header>
-<section class="agents" aria-labelledby="agents-heading"><h2 id="agents-heading">Agents</h2><div class="table-wrap"><table id="agents"><thead><tr>
-  <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">Status</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tokens in</th><th scope="col" class="num" title="Share of input tokens NEAR served from its prompt cache, billed at the lower cache-read price">Cache</th><th scope="col" class="num">Tokens out</th><th scope="col" class="num" title="Of tokens out, the share spent reasoning (estimated from the streamed text when NEAR does not report it)">Reasoning</th><th scope="col" class="num" title="Generation speed, not counting the wait for each reply's first token">Tok/s</th><th scope="col" title="Where the time went: waiting for replies to start, generating them, and tools and sub-agents">Time split</th><th scope="col" class="num">Est. cost</th><th scope="col" class="num">Tools</th><th scope="col" class="num">Retries</th><th scope="col">Security</th><th scope="col" class="num">Time</th>
-</tr></thead><tbody></tbody></table></div><p id="empty-agents" class="hint">No agents have run yet. Send a message or run a workflow in the NEAR AI chat.</p></section>
-<section class="stream-section" aria-labelledby="stream-heading">
-  <div class="toolbar" role="toolbar" aria-label="Stream filters">
-    <h2 id="stream-heading">Stream</h2>
-    <label>Agent <select id="filter-agent"><option value="">All agents</option></select></label>
-    <label><input type="checkbox" data-kind="prompt" checked> Prompts</label>
-    <label><input type="checkbox" data-kind="text" checked> Replies</label>
-    <label><input type="checkbox" data-kind="reasoning"> Reasoning</label>
-    <label><input type="checkbox" data-kind="tool" checked> Tools</label>
-    <label><input type="checkbox" data-kind="system"> System prompts</label>
-    <label><input type="checkbox" data-kind="security" checked> Security</label>
-    <input id="search" type="search" placeholder="Search" aria-label="Search the stream">
-    <button id="pause" type="button" aria-pressed="false" title="Pause the stream to read it; new activity is held until you resume (P)">Pause</button>
-    <label><input id="follow" type="checkbox" checked> Follow</label>
-    <button id="export-md" type="button">Export</button>
-    <button id="export-json" type="button" class="secondary">JSON</button>
-    <button id="clear" type="button" class="secondary">Clear</button>
+  <h1>Agent activity</h1>
+  <div class="actions">
+    <button id="export-usage" type="button" class="secondary" title="Usage and activity per run and per model, as CSV or JSON, with no prompt content">Export usage and activity</button>
+    <button id="export-details" type="button" class="secondary" aria-haspopup="true" aria-expanded="false" title="Everything kept in memory for this window (prompts, replies, tool calls), for debugging">Export details</button>
+    <div id="export-menu" class="menu" role="menu" hidden>
+      <button type="button" role="menuitem" data-format="markdown">Markdown</button>
+      <button type="button" role="menuitem" data-format="json">JSON</button>
+    </div>
   </div>
-  <p id="usage" class="hint" aria-live="polite"></p>
-  <ol id="stream" class="stream" aria-live="off"></ol>
+</header>
+<main>
+<section aria-labelledby="now-heading">
+  <h2 id="now-heading">Now</h2>
+  <p id="now-empty" class="hint">No agents are running. Send a message or run a workflow in the NEAR AI chat.</p>
+  <div class="table-wrap" id="now-wrap" hidden><table id="now" aria-labelledby="now-heading"><thead><tr>
+    <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col" class="num">Elapsed</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tool calls</th><th scope="col" class="num">Cost so far</th><th scope="col"><span class="sr-only">Controls</span></th>
+  </tr></thead><tbody></tbody></table></div>
+  <p id="focus-note" class="hint" role="status" hidden></p>
 </section>
+<section aria-labelledby="summary-heading">
+  <div class="section-head">
+    <h2 id="summary-heading">Overview</h2>
+    <div class="segmented" role="radiogroup" aria-label="Period">
+      <button type="button" role="radio" data-window="conversation" aria-checked="false">This conversation</button>
+      <button type="button" role="radio" data-window="today" aria-checked="true">Today</button>
+      <button type="button" role="radio" data-window="week" aria-checked="false">Last 7 days</button>
+    </div>
+  </div>
+  <p id="summary-empty" class="hint" hidden></p>
+  <div id="summary">
+    <dl id="totals" class="totals"></dl>
+    <h3 id="time-heading">Where the time went</h3>
+    <div id="time-bar" class="bar" role="img" aria-labelledby="time-heading"></div>
+    <ul id="time-legend" class="legend"></ul>
+    <div class="columns">
+      <div>
+        <h3 id="tools-heading">Tool calls</h3>
+        <p id="tools-empty" class="hint" hidden>No tool calls.</p>
+        <div class="table-wrap"><table id="tools" aria-labelledby="tools-heading"><thead><tr><th scope="col">Tool</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Failed</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div>
+        <h3 id="approvals-heading">Approvals</h3>
+        <dl id="approvals" class="pairs" aria-labelledby="approvals-heading"></dl>
+      </div>
+    </div>
+    <h3 id="problems-heading">Problems by model</h3>
+    <p id="problems-summary" class="hint"></p>
+    <div class="table-wrap"><table id="models" aria-labelledby="problems-heading"><thead><tr>
+      <th scope="col">Model</th><th scope="col" class="num">Agents</th><th scope="col" class="num">Turns</th><th scope="col" class="num" title="NEAR answered 429: too many requests">Rate limited (429)</th><th scope="col" class="num">Retries</th><th scope="col" class="num">Errors</th><th scope="col" class="num">Stopped</th><th scope="col" class="num">Tokens in</th><th scope="col" class="num">Tokens out</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+<section aria-labelledby="history-heading">
+  <h2 id="history-heading">History</h2>
+  <p id="history-empty" class="hint" hidden>No runs recorded in this project yet.</p>
+  <div class="table-wrap"><table id="history" aria-labelledby="history-heading"><thead><tr>
+    <th scope="col">Started</th><th scope="col">Asked</th><th scope="col" class="num">Agents</th><th scope="col" class="num">Duration</th><th scope="col" class="num">Cost</th><th scope="col">Outcome</th>
+  </tr></thead><tbody></tbody></table></div>
+  <nav class="pager" aria-label="History pages"><button id="prev" type="button" class="secondary">Newer</button><span id="page" aria-live="polite"></span><button id="next" type="button" class="secondary">Older</button></nav>
+</section>
+<p class="hint">Figures come from this project's activity history and your API key's spend ledger on this computer, kept across reloads; nothing here includes prompt or reply content beyond each run's first line, redacted. Live agents update about once a second while this tab is visible.</p>
+</main>
 <script nonce="${nonce}" src="${asset('activity.js')}"></script></body></html>`;
 }

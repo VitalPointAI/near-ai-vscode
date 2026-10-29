@@ -41,7 +41,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   }
 
   const sidebar = new NearAiPanelViewProvider(context, auth);
-  registerAgentActivity(context);
+  registerAgentActivity(context, sidebar);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
   registerSpendTracking(context);
