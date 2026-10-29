@@ -9,7 +9,8 @@ import type { ChatWebviewMessage } from './chatBridge';
 import { readActivityLimits } from './settings';
 import { shownSpendAccount } from './spendAccount';
 import { DayBoundary, nanoToUsd, totalNanoUsd } from './spendLedger';
-import { readDayBoundary } from './spendTracking';
+import { currentReportingTokenHint, onReportingTokenChange, readDayBoundary, runReportingTokenHint } from './spendTracking';
+import { hintForView, ReportingTokenHint } from './reportingToken';
 
 // The Agent Activity page: an overview of agent activity, not a log (the chat shows the work
 // itself). Now: the agents running, what each is doing, and controls. A window (this
@@ -57,7 +58,9 @@ export type ActivityViewMessage =
   | { type: 'show-in-chat' }
   | { type: 'open-conversation'; conversationId: string }
   | { type: 'export'; format: 'markdown' | 'json' }
-  | { type: 'export-usage' };
+  | { type: 'export-usage' }
+  /** The cost header's token link; the host decides what it runs. */
+  | { type: 'reporting-token' };
 
 const AGENT_ID = /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i;
 const WINDOWS: OverviewWindow[] = ['conversation', 'today', 'week'];
@@ -65,7 +68,7 @@ const WINDOWS: OverviewWindow[] = ['conversation', 'today', 'week'];
 export function parseActivityViewMessage(value: unknown): ActivityViewMessage | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const message = value as Record<string, unknown>;
-  if (message.type === 'ready' || message.type === 'show-in-chat' || message.type === 'export-usage') return { type: message.type };
+  if (message.type === 'ready' || message.type === 'show-in-chat' || message.type === 'export-usage' || message.type === 'reporting-token') return { type: message.type };
   if (message.type === 'set-window' && WINDOWS.includes(message.window as OverviewWindow)) return { type: 'set-window', window: message.window as OverviewWindow };
   if (message.type === 'history-page' && Number.isInteger(message.page) && (message.page as number) >= 0 && (message.page as number) < 10_000) return { type: 'history-page', page: message.page as number };
   if (message.type === 'agent-control' && typeof message.agentId === 'string' && AGENT_ID.test(message.agentId) && (message.action === 'pause' || message.action === 'resume' || message.action === 'stop')) return { type: 'agent-control', agentId: message.agentId, action: message.action };
@@ -75,7 +78,7 @@ export function parseActivityViewMessage(value: unknown): ActivityViewMessage | 
 }
 
 /** Everything the page shows, in one message. */
-export function overviewMessage(input: { feed: ActivityFeed; sessions: ActivitySessionSummary[]; spend?: OverviewSpend; window: OverviewWindow; page: number; now?: number; boundary?: DayBoundary; hasProject?: boolean }): Record<string, unknown> {
+export function overviewMessage(input: { feed: ActivityFeed; sessions: ActivitySessionSummary[]; spend?: OverviewSpend; window: OverviewWindow; page: number; now?: number; boundary?: DayBoundary; hasProject?: boolean; token?: ReportingTokenHint }): Record<string, unknown> {
   const now = input.now ?? Date.now();
   const boundary = input.boundary ?? 'local';
   const live = input.feed.agentStats();
@@ -85,6 +88,8 @@ export function overviewMessage(input: { feed: ActivityFeed; sessions: ActivityS
     now,
     boundary,
     hasProject: input.hasProject !== false,
+    // With a NEAR AI Cloud key's ledger, the cost header links to the usage reporting token.
+    ...(input.spend && input.token ? { token: hintForView(input.token) } : {}),
     running: nowRows(live, input.spend),
     summary: buildWindowSummary({ sessions: input.sessions, live, spend: input.spend, window: input.window, now, boundary, conversationId }),
     history: historyPage(input.sessions, input.page, input.spend, now)
@@ -148,7 +153,7 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
       }
     }
     if (!subscription) return;
-    const message = overviewMessage({ feed: activity, sessions, spend: shownSpendAccount(), window, page, boundary: readDayBoundary(), hasProject: Boolean(store) });
+    const message = overviewMessage({ feed: activity, sessions, spend: shownSpendAccount(), window, page, boundary: readDayBoundary(), hasProject: Boolean(store), token: await currentReportingTokenHint() });
     // Nothing changed: no message, so the page does not redraw.
     const json = JSON.stringify({ ...message, now: 0 });
     if (json === lastJson && !reload) return;
@@ -158,10 +163,12 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
   };
   // At most one update a second, however busy the agents are.
   const schedule = () => { timer ??= setTimeout(() => void send(), Math.max(0, UPDATE_MS - (Date.now() - lastSent))); };
+  let tokenWatch: { dispose(): void } | undefined;
   const start = () => {
     if (subscription) return;
     subscription = activity.subscribe(schedule);
     spendWatch = shownSpendAccount()?.onChange(schedule);
+    tokenWatch = onReportingTokenChange(schedule);
     void send(true).then(() => {
       if (focusAgent) { post(focusMessage(activity, focusAgent)); focusAgent = undefined; }
     });
@@ -169,8 +176,10 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
   const stop = () => {
     subscription?.dispose();
     spendWatch?.dispose();
+    tokenWatch?.dispose();
     subscription = undefined;
     spendWatch = undefined;
+    tokenWatch = undefined;
     if (timer) clearTimeout(timer);
     timer = undefined;
     if (reloadTimer) clearTimeout(reloadTimer);
@@ -196,6 +205,7 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
     else if (message.type === 'open-conversation') await chat?.request({ type: 'resume-conversation', id: message.conversationId });
     else if (message.type === 'export') await exportActivity(activity, message.format);
     else if (message.type === 'export-usage') await vscode.commands.executeCommand('nearAi.exportAnalytics');
+    else if (message.type === 'reporting-token') await runReportingTokenHint();
   }, undefined, context.subscriptions);
   view.onDidDispose(() => { stop(); panel = undefined; }, undefined, context.subscriptions);
 }
@@ -280,6 +290,7 @@ export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
       <button type="button" role="radio" data-window="week" aria-checked="false">Last 7 days</button>
     </div>
   </div>
+  <p id="token-line" class="hint" hidden><button id="reporting-token" type="button" class="link"></button></p>
   <p id="summary-empty" class="hint" hidden></p>
   <div id="summary">
     <dl id="totals" class="totals"></dl>

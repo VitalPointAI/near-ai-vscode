@@ -11,6 +11,7 @@ import { securityConsented } from './securityScan';
 import { readAgentModels, readAgentRules, readModelTiers, readRoleModels, readSafetyModel, readSettings } from './settings';
 import { buildToolsDirectory, DirectoryInput, parseToolsPageMessage, ToolsDirectory, toolsPageHtml } from './toolsDirectory';
 import { webSearchProvider } from './webSearchSetup';
+import { currentReportingTokenHint, onReportingTokenChange } from './spendTracking';
 
 // The NEAR AI Tools tab: the directory of what the agents can use. It reads; the only things it
 // changes are through existing actions (switching an MCP server on for this project, which the
@@ -27,6 +28,8 @@ export interface ToolsPageDeps {
   /** Configuration, emergency stop, and visibility changes that should refresh the page. */
   onDidChangeConfiguration(listener: (event: { affectsConfiguration(section: string): boolean }) => void): { dispose(): void };
   onDidChangeEmergencyStop(listener: () => void): { dispose(): void };
+  /** The usage reporting token was set, cleared, or switched on or off (the Elsewhere row changes). */
+  onDidChangeReportingToken?(listener: () => void): { dispose(): void };
 }
 
 interface PageHost {
@@ -62,6 +65,7 @@ export function attachToolsPage(host: PageHost, deps: ToolsPageDeps): { refresh(
   const subscriptions = [
     deps.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi')) soon(); }),
     deps.onDidChangeEmergencyStop(() => soon()),
+    ...(deps.onDidChangeReportingToken ? [deps.onDidChangeReportingToken(() => soon())] : []),
     deps.mcp.onDidChange(() => soon()),
     ...(host.onDidChangeViewState ? [host.onDidChangeViewState((event) => { if (event.webviewPanel.visible) soon(); })] : []),
     host.webview.onDidReceiveMessage(async (value) => {
@@ -100,14 +104,15 @@ export async function gatherDirectoryInput(context: vscode.ExtensionContext, aut
   const agentModels = readAgentModels();
   const host = gsdHostFor(context);
   const mcp = mcpRegistry(context);
-  const [gsd, version, teams, webSearch, servers, catalog] = await Promise.all([
+  const [gsd, version, teams, webSearch, servers, catalog, reportingToken] = await Promise.all([
     host.context().catch(() => undefined),
     host.runtime.installedVersion().catch(() => null),
     new TeamLibrary(context.globalStorageUri.fsPath).list(root).catch(() => []),
     webSearchProvider(context.secrets).then((provider) => Boolean(provider), () => false),
     mcp.status().catch(() => []),
     // The catalog list (cached per profile); no completion is requested.
-    (root ? activeProvider(root, auth) : Promise.resolve(undefined)).then((active) => ({ models: active?.models, problem: active ? undefined : root ? 'Set up a NEAR AI profile for this project to see the models your key can use.' : 'Open a folder to see the models your key can use.' }), (error: unknown) => ({ models: undefined, problem: providerErrorMessage(error) }))
+    (root ? activeProvider(root, auth) : Promise.resolve(undefined)).then((active) => ({ models: active?.models, problem: active ? undefined : root ? 'Set up a NEAR AI profile for this project to see the models your key can use.' : 'Open a folder to see the models your key can use.' }), (error: unknown) => ({ models: undefined, problem: providerErrorMessage(error) })),
+    currentReportingTokenHint().catch(() => undefined)
   ]);
   return {
     ...(gsd ? { gsd: { skills: gsd.skills, agents: gsd.agents, ...(version ? { version } : {}) } } : {}),
@@ -119,7 +124,8 @@ export async function gatherDirectoryInput(context: vscode.ExtensionContext, aut
     mcp: servers,
     ...(catalog.models ? { models: catalog.models } : {}),
     ...(catalog.problem ? { modelsProblem: catalog.problem } : {}),
-    settings: { mainModel: settings.defaultModel, tiers, roleModels: readRoleModels(), visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, imageModel: agentModels.imageModel, safetyModel: readSafetyModel(tiers) }
+    settings: { mainModel: settings.defaultModel, tiers, roleModels: readRoleModels(), visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, imageModel: agentModels.imageModel, safetyModel: readSafetyModel(tiers) },
+    ...(reportingToken ? { reportingToken } : {})
   };
 }
 
@@ -141,7 +147,8 @@ export function openTools(context: vscode.ExtensionContext, auth: AuthService, s
     executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
     mcp: { setEnabledHere: (id, enabled) => mcp.setEnabledHere(id, enabled), connectServer: (id) => mcp.connectServer(id), onDidChange: (listener) => mcp.onDidChange(listener) },
     onDidChangeConfiguration: (listener) => vscode.workspace.onDidChangeConfiguration(listener),
-    onDidChangeEmergencyStop: (listener) => onDidChangeEmergencyStop(listener)
+    onDidChangeEmergencyStop: (listener) => onDidChangeEmergencyStop(listener),
+    onDidChangeReportingToken: (listener) => onReportingTokenChange(listener)
   });
   view.onDidDispose(() => { panel = undefined; }, undefined, context.subscriptions);
 }

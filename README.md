@@ -217,14 +217,34 @@ response, in batches, even after a reload. Figures say how sure they are:
 - **est.**: NEAR returned no request ID to check (for example a request
   cancelled before NEAR answered), so only the estimate is known.
 - **(NEAR)**: NEAR AI Cloud's own total for your API key today, from every
-  computer using it. This needs a usage reporting token: an organization
-  owner or admin creates one (`rpt-…`, read-only, see NEAR's
-  [Usage Reporting API](https://docs.near.ai/)), and you add it with
-  **NEAR AI: Set Usage Reporting Token** (stored in VS Code's encrypted
-  secret storage; **Clear Usage Reporting Token** removes it). The extension
-  then asks NEAR once which organization and key ID your API key has
-  (`/v1/check_api_key`) and reads the key's usage summary every minute while
-  runs are going and every 5 minutes otherwise.
+  computer using it, so the figure matches the NEAR AI console exactly. This
+  needs a usage reporting token, which you add with **Set Usage Reporting
+  Token** (stored in VS Code's encrypted secret storage, never in settings;
+  **Clear Usage Reporting Token** removes it). The extension then asks NEAR
+  once which organization and key ID your API key has (`/v1/check_api_key`)
+  and reads the key's usage summary every minute while runs are going and
+  every 5 minutes otherwise.
+
+**Where to set the usage reporting token.** Any of these runs **NEAR AI: Set
+Usage Reporting Token**:
+
+- **Settings** (search "NEAR AI" or "usage reporting"): `nearAi.spend.useNearUsageTotal`,
+  next to the daily limit, has **Set usage reporting token** and **Clear**
+  links. The setting itself is only an on/off switch (on by default) for using
+  NEAR's total once a token is set; a token pasted into any NEAR AI setting is
+  moved to secret storage and removed from settings.
+- **The chat**: below the status line, "Match the NEAR console exactly: set a
+  usage reporting token" (or "Using NEAR's total" once one is set).
+- **Spending Limits**: **Set usage reporting token…** and **Clear usage
+  reporting token**.
+- **Agent Activity**, above the overview's cost, and **Elsewhere** in the Tools tab.
+- The Command Palette: **NEAR AI: Set Usage Reporting Token**.
+
+**How to get one.** The token is not in the NEAR AI Cloud console's UI: an
+organization owner or admin creates it with
+`POST /v1/organizations/{org_id}/reporting-tokens`, authenticated with a
+console session token (see NEAR's [Usage Reporting API](https://docs.near.ai/)).
+It is read-only and starts with `rpt-`.
 
 Without a token the status line reads like "$0.40 confirmed + ~$0.02 pending
 today" for this computer; hover it for details. "Today" is the local calendar
@@ -346,6 +366,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |
 | `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount: the larger of NEAR's own total for the key (with a usage reporting token) and this computer's spend ledger. |
 | `nearAi.spend.dayBoundary` | `local` | When "today" starts for spend figures and the daily limit: local midnight, or `utc`. |
+| `nearAi.spend.useNearUsageTotal` | `true` | With a usage reporting token set, show NEAR's own total (and check the daily limit against it). Its description links to **Set usage reporting token** and **Clear**; the token itself lives in secret storage. |
 | `nearAi.autoInstallGsd` | `true` | Install Open-GSD when a workflow needs it and keep it current in NEAR AI projects. |
 
 ## Good to know

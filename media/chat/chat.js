@@ -15,6 +15,8 @@
   const policy = $('policy');
   const profile = $('profile');
   const status = $('status');
+  // Below the status line: set a usage reporting token, or that NEAR's total is in use.
+  const spendToken = $('spend-token');
   const menu = $('commands');
   const live = $('live');
   const defaultPlaceholder = input.placeholder;
@@ -745,6 +747,15 @@
   stopButton.addEventListener('click', stopRun);
   profile.addEventListener('click', () => post({ type: profile.dataset.state === 'missing' ? 'open-setup' : 'select-profile' }));
   status.addEventListener('click', () => { if (!busy) runCommand('progress'); });
+  if (spendToken) spendToken.addEventListener('click', () => post({ type: 'reporting-token' }));
+  function showSpendToken(token) {
+    if (!spendToken) return;
+    spendToken.hidden = !token;
+    if (!token) return;
+    spendToken.textContent = token.text;
+    spendToken.title = token.title;
+    spendToken.dataset.state = token.state;
+  }
   // The approval-policy picker: a button that opens a listbox of the modes, each with its label
   // and a one-line summary. The host validates the choice, asks before Full auto, and writes
   // nearAi.actionPolicy; it then sends the effective state back, which is what this shows.
@@ -959,7 +970,7 @@
         autosize(); updateSendState();
         break;
       }
-      case 'status': status.textContent = (m.value || '') + (status.dataset.context || ''); status.title = (m.value || '') + (m.tooltip ? '\n' + m.tooltip : '') + ' — click for detailed progress'; break;
+      case 'status': status.textContent = (m.value || '') + (status.dataset.context || ''); status.title = (m.value || '') + (m.tooltip ? '\n' + m.tooltip : '') + (m.token ? '\n' + m.token.text + ' (the link below)' : '') + ' — click for detailed progress'; showSpendToken(m.token); break;
       case 'models': {
         const models = m.models || [];
         if (!models.length) {

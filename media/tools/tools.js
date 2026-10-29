@@ -204,13 +204,22 @@
     root.append(head, list);
   }
 
-  function renderElsewhere() {
+  function renderElsewhere(data) {
     const root = $('elsewhere');
     root.replaceChildren();
     const list = el('ul', 'elsewhere');
     [['Agent activity and analytics', 'nearAi.openAgentActivity'], ['Export usage and activity', 'nearAi.exportAnalytics'], ['Conversation history', 'nearAi.showHistory'], ['Project memory', 'nearAi.manageMemory'], ['Spending limits', 'nearAi.spendingLimits']].forEach(([label, command]) => {
       const line = el('li'); line.append(runCommand(label, command)); list.append(line);
     });
+    // NEAR's usage reporting token: set one, or that NEAR's own total is in use.
+    const token = data && data.reportingToken;
+    if (token) {
+      const line = el('li', 'token');
+      const link = runCommand(token.text, token.command);
+      link.title = token.title;
+      line.append(link);
+      list.append(line);
+    }
     root.append(el('p', 'hint', 'Planning files and the chat’s task list are in the NEAR AI chat in the side bar.'), list);
   }
 
@@ -229,7 +238,7 @@
     renderTools(data);
     renderMcp(data);
     renderModels(data);
-    renderElsewhere();
+    renderElsewhere(data);
     applyFilter();
   }
 

@@ -14,6 +14,7 @@ import { mcpToolName } from '../mcp/tools';
 import type { ModelInfo, NearAiClient } from './nearAiClient';
 import type { ContextGraphMemory } from './contextGraphMemory';
 import { POLICY_OPTIONS } from './approvalPolicy';
+import { ReportingTokenHint, SET_REPORTING_TOKEN_COMMAND } from './reportingToken';
 
 // The NEAR AI Tools page: a read-mostly directory of what the agents can use. Everything here is
 // computed from the same sources a run uses (the installed Open-GSD library, team files, the
@@ -41,6 +42,8 @@ export interface ToolsDirectory {
   models: DirectoryModel[];
   modelsProblem?: string;
   settingsModels: Array<{ use: string; setting: string; model: string; available: boolean | undefined }>;
+  /** The Elsewhere row for NEAR's usage reporting token; `command` is a page command or `setting:<key>`. */
+  reportingToken?: { state: ReportingTokenHint['state']; text: string; title: string; command: string };
 }
 
 export interface DirectoryInput {
@@ -58,6 +61,8 @@ export interface DirectoryInput {
   models?: ModelInfo[];
   modelsProblem?: string;
   settings: { mainModel: string; tiers: { deep: string; standard: string; fast: string }; roleModels: Record<string, string>; visionModel: string; transcriptionModel: string; imageModel: string; safetyModel: string };
+  /** Whether a usage reporting token is set (from the host's secret storage; never the token). */
+  reportingToken?: ReportingTokenHint;
 }
 
 const CAPABILITY_LABEL: Record<ActionCapability, string> = {
@@ -222,12 +227,13 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
     policy: { mode: option.mode, label: option.label, summary: option.summary, stopped: input.policy.emergencyStop },
     skills, agents, teams, teamProblems, tools, mcp, models,
     ...(input.modelsProblem ? { modelsProblem: input.modelsProblem } : {}),
-    settingsModels: uses.map((use) => ({ ...use, available: input.models ? catalog.some((model) => model.id === use.model) : undefined }))
+    settingsModels: uses.map((use) => ({ ...use, available: input.models ? catalog.some((model) => model.id === use.model) : undefined })),
+    ...(input.reportingToken ? { reportingToken: { state: input.reportingToken.state, text: input.reportingToken.text, title: input.reportingToken.title, command: input.reportingToken.command === 'workbench.action.openSettings' ? `setting:${input.reportingToken.args[0]}` : input.reportingToken.command } } : {})
   };
 }
 
 /** Commands the page may run: existing NEAR AI commands only, and settings it may open. */
-export const PAGE_COMMANDS = ['nearAi.manageMcp', 'nearAi.manageTeams', 'nearAi.setupProjectTeam', 'nearAi.manageMemory', 'nearAi.setUpWebSearch', 'nearAi.securityScan', 'nearAi.openAgentActivity', 'nearAi.exportAnalytics', 'nearAi.showHistory', 'nearAi.spendingLimits', 'nearAi.resume', 'nearAi.setup'] as const;
+export const PAGE_COMMANDS = ['nearAi.manageMcp', 'nearAi.manageTeams', 'nearAi.setupProjectTeam', 'nearAi.manageMemory', 'nearAi.setUpWebSearch', 'nearAi.securityScan', 'nearAi.openAgentActivity', 'nearAi.exportAnalytics', 'nearAi.showHistory', 'nearAi.spendingLimits', SET_REPORTING_TOKEN_COMMAND, 'nearAi.resume', 'nearAi.setup'] as const;
 
 export type ToolsPageMessage =
   | { type: 'ready' }

@@ -93,7 +93,19 @@
     }, 'div');
   }
 
-  function renderSummary(summary, hasProject) {
+  // Under the overview's heading: set a usage reporting token, or that NEAR's total is in use.
+  function renderToken(token) {
+    const line = $('token-line');
+    if (!line) return;
+    line.hidden = !token;
+    if (!token) return;
+    const link = $('reporting-token');
+    setText(link, token.text);
+    link.title = token.title;
+    link.dataset.state = token.state;
+  }
+
+  function renderSummary(summary, hasProject, token) {
     const empty = summary.empty;
     $('summary').hidden = empty;
     $('summary-empty').hidden = !empty;
@@ -105,7 +117,7 @@
       ['Agents', number(summary.agents)],
       ['Tokens in', number(summary.tokens.input), summary.tokens.source === 'ledger' ? 'From the spend ledger: every NEAR request, including safety checks and summaries' : 'From the activity history'],
       ['Tokens out', number(summary.tokens.output)],
-      ['Cost', cost ? cost.text : 'Not tracked', cost ? cost.tooltip : 'No spend ledger for this API key (local models, or no key yet).']
+      ['Cost', cost ? cost.text : 'Not tracked', cost ? cost.tooltip + (token ? ' ' + token.text + ' (the link above).' : '') : 'No spend ledger for this API key (local models, or no key yet).']
     ]);
     const total = TIME.reduce((sum, [key]) => sum + (summary.time[key] || 0), 0);
     const bar = $('time-bar');
@@ -178,7 +190,8 @@
     if (message.type === 'overview') {
       state.last = message;
       renderNow(message.running || []);
-      renderSummary(message.summary, message.hasProject);
+      renderSummary(message.summary, message.hasProject, message.token);
+      renderToken(message.token);
       renderHistory(message.history);
     }
     if (message.type === 'focus-agent' && typeof message.agentId === 'string') {
@@ -211,5 +224,6 @@
   menu.querySelectorAll('[data-format]').forEach((item) => item.addEventListener('click', () => { closeMenu(); vscode.postMessage({ type: 'export', format: item.dataset.format }); }));
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !menu.hidden) { closeMenu(); details.focus(); } });
   $('export-usage').addEventListener('click', () => vscode.postMessage({ type: 'export-usage' }));
+  if ($('reporting-token')) $('reporting-token').addEventListener('click', () => vscode.postMessage({ type: 'reporting-token' }));
   vscode.postMessage({ type: 'ready' });
 })();

@@ -44,6 +44,8 @@ export type ChatWebviewMessage =
   /** Closes a conversation's tab; a running one is stopped first, once the user confirms. Its transcript stays in history. */
   | { type: 'close-conversation'; id: string }
   | { type: 'open-tools' }
+  /** The spend line's token link: the host decides what it runs (set the token, or turn NEAR's total back on). */
+  | { type: 'reporting-token' }
   | { type: 'open-activity'; agentId?: string }
   | { type: 'select-profile' }
   | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'deny'; feedback?: string; conversationId?: string }
@@ -258,7 +260,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'conversationId')) return undefined;
     return { type: 'stop', ...scoped };
   }
-  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'select-profile' || message.type === 'chat-ready') {
+  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'reporting-token' || message.type === 'select-profile' || message.type === 'chat-ready') {
     if (Object.keys(message).some((key) => key !== 'type')) return undefined;
     return { type: message.type };
   }

@@ -13,7 +13,8 @@ import { findRipgrep } from '../agent/tools';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
 import { applyPolicyChoice, PolicyConfiguration, policyStateMessage } from './approvalPolicy';
 import { OutboundGuard } from './outboundGuard';
-import { configureSpendTracking, spendAccountForRoot } from './spendTracking';
+import { configureSpendTracking, currentReportingTokenHint, onReportingTokenChange, runReportingTokenHint, spendAccountForRoot } from './spendTracking';
+import { hintForView } from './reportingToken';
 import { shownSpendAccount, showSpendAccount, SpendAccount } from './spendAccount';
 import { withSpendTag } from './spendLedger';
 import { ProfileStore } from './profileStore';
@@ -337,6 +338,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand('nearAi.openTools');
       return;
     }
+    if (message.type === 'reporting-token') {
+      await runReportingTokenHint();
+      return;
+    }
     if (message.type === 'approval-reply') {
       tab.outcomes.set(message.callId, { outcome: message.decision });
       tab.agent?.answerApproval(message.callId, { decision: message.decision, feedback: message.feedback });
@@ -564,7 +569,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   panel.webview.onDidReceiveMessage(receive, undefined, context.subscriptions);
   // The picker follows settings.json edits and the emergency stop; each run reads the setting afresh.
   const policyWatch = vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi.actionPolicy')) sendPolicyState(panel); });
-  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  // Setting or clearing the usage reporting token (anywhere) updates the spend line's link.
+  const tokenWatch = onReportingTokenChange(() => { void statusMessage({ agents: runningAgents(), account: state.spend }).then((status) => panel.webview.postMessage(status)); });
+  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -719,11 +726,13 @@ async function sendProfileStatus(panel: ChatHost, auth: AuthService, existing?: 
 }
 
 /** The status line with today's spend from the key's ledger (or NEAR's total), and what the figure means. */
-async function statusMessage(live: { agents: number; account?: SpendAccount }): Promise<{ type: 'status'; value: string; tooltip?: string }> {
+async function statusMessage(live: { agents: number; account?: SpendAccount }): Promise<{ type: 'status'; value: string; tooltip?: string; token?: ReturnType<typeof hintForView> }> {
   const account = live.account ?? shownSpendAccount();
   const today = account?.today();
   const shown = today && (today.near || today.totals.requests > 0) ? today : undefined;
-  return { type: 'status', value: await readGsdStatusLine({ agents: live.agents, spend: shown?.text }), ...(shown ? { tooltip: shown.tooltip } : {}) };
+  // With a NEAR AI Cloud key, the spend line links to the usage reporting token (local runtimes have no NEAR bill).
+  const hint = account ? await currentReportingTokenHint() : undefined;
+  return { type: 'status', value: await readGsdStatusLine({ agents: live.agents, spend: shown?.text }), ...(shown ? { tooltip: shown.tooltip } : {}), ...(hint ? { token: hintForView(hint) } : {}) };
 }
 
 async function readGsdStatusLine(live?: { agents: number; spend?: string }): Promise<string> {

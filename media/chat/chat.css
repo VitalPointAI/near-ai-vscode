@@ -327,6 +327,14 @@ footer { padding: 6px 12px 8px; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
 }
 #status:hover { color: var(--vscode-foreground); }
+#spend-token {
+  display: block; margin: 0 2px 2px; padding: 0; border: 0; background: transparent; cursor: pointer;
+  font-size: 11px; text-align: left; color: var(--vscode-textLink-foreground);
+}
+#spend-token[hidden] { display: none; }
+#spend-token:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
+#spend-token:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+#spend-token[data-state="set"] { color: var(--vscode-descriptionForeground); }
 
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

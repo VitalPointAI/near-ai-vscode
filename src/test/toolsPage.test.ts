@@ -258,6 +258,23 @@ test('the page script renders the directory, searches it, and "Use in chat" asks
   assert.equal(page.doc.getElementById('empty-search')!.hidden, false);
 });
 
+test('the Elsewhere row links to the usage reporting token and asks the host to run its command', async () => {
+  const { reportingTokenHint, SET_REPORTING_TOKEN_COMMAND, TOKEN_MISSING_TEXT, USE_NEAR_TOTAL_SETTING } = await import('../services/reportingToken');
+  const page = await runPageScript();
+  page.dispatch({ type: 'directory', directory: buildToolsDirectory(input({ reportingToken: reportingTokenHint('missing') })) });
+  const elsewhere = page.doc.getElementById('elsewhere')!;
+  assert.match(elsewhere.textContent, /Spending limits.*Match the NEAR console exactly: set a usage reporting token/);
+  const link = elsewhere.all().find((node) => node.tagName === 'button' && node.textContent === TOKEN_MISSING_TEXT)!;
+  assert.match(link.title, /reporting-tokens/);
+  link.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(page.posts.at(-1))), { type: 'run-command', command: SET_REPORTING_TOKEN_COMMAND });
+  page.dispatch({ type: 'directory', directory: buildToolsDirectory(input({ reportingToken: reportingTokenHint('off') })) });
+  page.doc.getElementById('elsewhere')!.all().find((node) => node.tagName === 'button' && /turn on NEAR's total/.test(node.textContent))!.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(page.posts.at(-1))), { type: 'open-setting', key: USE_NEAR_TOTAL_SETTING });
+  page.dispatch({ type: 'directory', directory: buildToolsDirectory(input()) });
+  assert.doesNotMatch(page.doc.getElementById('elsewhere')!.textContent, /usage reporting token/, 'no row without a NEAR AI Cloud key');
+});
+
 // The host path: openTools with VS Code stubbed and a fake NEAR that would fail on any completion.
 class MemorySecrets implements SecretStorageLike {
   private readonly values = new Map<string, string>();

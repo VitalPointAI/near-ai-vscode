@@ -109,6 +109,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
     </div>
   </div>
   <button id="status" type="button">Loading project status…</button>
+  <button id="spend-token" class="link" type="button" hidden></button>
 </footer>
 <div id="live" class="visually-hidden" aria-live="polite"></div>
 <script nonce="${nonce}" src="${asset('markdown.js')}"></script>

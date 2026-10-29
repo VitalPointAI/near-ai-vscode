@@ -343,6 +343,7 @@
           "type": "number",
           "default": 0,
           "minimum": 0,
+          "order": 1,
           "description": "Stop sending NEAR AI requests once today's spend reaches this amount in USD: NEAR AI Cloud's own total for your API key when a usage reporting token is set, or this computer's spend ledger (confirmed plus pending), whichever is higher. Checked before every request and every model turn. 0 means no limit."
         },
         "nearAi.spend.dayBoundary": {
@@ -356,7 +357,14 @@
             "Today starts at midnight UTC."
           ],
           "default": "local",
+          "order": 2,
           "description": "When \"today\" starts for spend figures and nearAi.dailySpendLimitUsd."
+        },
+        "nearAi.spend.useNearUsageTotal": {
+          "type": "boolean",
+          "default": true,
+          "order": 3,
+          "markdownDescription": "Match the NEAR AI console exactly by using NEAR's own usage total for your API key (in every spend figure and for `#nearAi.dailySpendLimitUsd#`) when a usage reporting token is set; off, figures are this computer's spend ledger. The token is stored in VS Code's encrypted secret storage, never in settings. [Set usage reporting token](command:nearAi.setUsageReportingToken) · [Clear](command:nearAi.clearUsageReportingToken) · How to create one: an organization owner or admin calls `POST /v1/organizations/{org_id}/reporting-tokens` with a NEAR AI Cloud console session token (it is not in the console UI); it starts with `rpt-`."
         },
         "nearAi.agent.allowCommands": {
           "type": "array",
