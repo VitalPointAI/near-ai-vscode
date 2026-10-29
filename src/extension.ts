@@ -104,7 +104,7 @@ async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPane
     description: `${conversation.turns} message${conversation.turns === 1 ? '' : 's'}`,
     detail: `${new Date(conversation.updatedAt).toLocaleString()} · ${conversation.model}`,
     id: conversation.id
-  })), { placeHolder: 'Resume a NEAR AI conversation with its full context', matchOnDescription: true, matchOnDetail: true });
+  })), { placeHolder: 'Open a NEAR AI conversation as a tab, with its full context', matchOnDescription: true, matchOnDetail: true });
   if (picked) await sidebar.request({ type: 'resume-conversation', id: picked.id });
 }
 

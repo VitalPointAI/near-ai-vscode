@@ -78,8 +78,8 @@ as a row in the chat.
   sums up the running agents and the spend so far.
 - **Long sessions stay on track.** Old tool output is trimmed and, near the
   model's limit, earlier history is summarized automatically (with a handoff
-  saved for GSD). **History** reopens any earlier conversation with its full
-  context.
+  saved for GSD). **History** opens any earlier conversation as a tab, with
+  its full context.
 - **Guard rails.** The agent can only touch files inside the workspace, asks
   before reading likely credential files (`.env`, keys), and never runs
   commands on your deny list.
@@ -92,6 +92,17 @@ as a row in the chat.
   on every code block.
 - Pick any model NEAR AI offers, or one from a local runtime such as Ollama or
   LM Studio, from the input box, with pricing and privacy shown.
+- **Several conversations at once**, as in Claude Code. Start a new one with
+  **+** while others keep running in the background; each has its own run,
+  approvals, queued messages, task list, model, spend, and draft. The tabs
+  above the chat show which are running, which are waiting for you (the view's
+  badge counts every waiting prompt, and a notice takes you there in one
+  click), which stopped, and which have new output. Ctrl+Shift+[ and ]
+  (Cmd on macOS) switch between them; Stop stops the one on screen, the
+  emergency stop stops them all. Up to eight are open; closing a running one
+  asks first, and its transcript stays in **History**. The open conversations
+  come back after a reload (a run cannot continue across one, so it shows as
+  stopped).
 - **New Chat**, **History**, **Tools**, and **Set Up** live in the view's title
   bar, just like other VS Code views.
 - **Tools** opens a directory of what the agents can use: every installed

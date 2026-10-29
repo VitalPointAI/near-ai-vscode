@@ -13,35 +13,43 @@ import { isPolicyMode } from './approvalPolicy';
 /** The longest message the composer may send to a running agent. */
 export const MAX_MESSAGE_CHARS = 100_000;
 
+/**
+ * Messages about one conversation may name it (`conversationId`): the view sends the one on
+ * screen, so a reply never reaches a conversation the user has switched away from. Without it
+ * (host requests, older callers) the message is for the conversation on screen.
+ */
 export type ChatWebviewMessage =
   | { type: 'load-models' }
   | { type: 'open-setup' }
   | { type: 'refresh-status' }
   | { type: 'chat-ready' }
-  | { type: 'open-command'; command: string; args?: string; model?: string }
-  | { type: 'questions-reply'; id: string; answers: string[] }
+  | { type: 'open-command'; command: string; args?: string; model?: string; conversationId?: string }
+  | { type: 'questions-reply'; id: string; answers: string[]; conversationId?: string }
   | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' }
+  /** Opens a saved conversation as a tab, or shows it if it is already open. */
   | { type: 'resume-conversation'; id: string }
   | { type: 'open-artifact'; path: string; kind: GsdArtifactKind }
-  | { type: 'send'; text: string; model?: string; overrideToken?: string; attachmentIds?: string[] }
+  | { type: 'send'; text: string; model?: string; overrideToken?: string; attachmentIds?: string[]; conversationId?: string }
   /** A message typed while a run is going: queued for the running agent, or sent as a new turn if it has ended. */
-  | { type: 'steer'; id: string; text: string }
+  | { type: 'steer'; id: string; text: string; conversationId?: string }
   | { type: 'attach-files' }
   | { type: 'attachment-remove'; id: string }
-  | { type: 'stop' }
+  /** Stops one conversation's run (the emergency stop stops them all). */
+  | { type: 'stop'; conversationId?: string }
   /** The user's choice in the composer's approval-policy picker. */
   | { type: 'set-action-policy'; mode: ActionPolicyMode }
-  | { type: 'history' }
+  /** Starts a new conversation alongside the open ones (or clears the one on screen if it is still empty). */
   | { type: 'new-chat' }
+  | { type: 'switch-conversation'; id: string }
+  /** Closes a conversation's tab; a running one is stopped first, once the user confirms. Its transcript stays in history. */
+  | { type: 'close-conversation'; id: string }
   | { type: 'open-tools' }
   | { type: 'open-activity'; agentId?: string }
   | { type: 'select-profile' }
-  | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'deny'; feedback?: string }
-  | { type: 'revert-run'; runId: string }
-  | { type: 'verify-response'; runId: string }
+  | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'deny'; feedback?: string; conversationId?: string }
+  | { type: 'revert-run'; runId: string; conversationId?: string }
+  | { type: 'verify-response'; runId: string; conversationId?: string }
   | { type: 'insert-code'; text: string }
-  | { type: 'reopen-session'; sessionId: string }
-  | { type: 'continue-session'; sessionId: string }
   | { type: 'prompt-choice'; sessionId: string; promptId: string; choiceId: string }
   | { type: 'prompt-answer'; sessionId: string; promptId: string; text: string }
   | { type: 'prompt-cancel'; sessionId: string; promptId: string }
@@ -215,33 +223,44 @@ export function promptResponseMessage(value: unknown): ChatPromptMessage | undef
   return undefined;
 }
 
+const CONVERSATION_ID = /^conv-[a-z0-9-]{6,60}$/;
+
+/** The optional `conversationId`: absent, or a well-formed one; anything else rejects the message. */
+function conversationOf(message: Record<string, unknown>): { ok: boolean; field: { conversationId?: string } } {
+  if (message.conversationId === undefined) return { ok: true, field: {} };
+  return typeof message.conversationId === 'string' && CONVERSATION_ID.test(message.conversationId) ? { ok: true, field: { conversationId: message.conversationId } } : { ok: false, field: {} };
+}
+
 export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const message = value as Record<string, unknown>;
+  const conversation = conversationOf(message);
+  if (!conversation.ok) return undefined;
+  const scoped = conversation.field;
   if (message.type === 'set-action-policy') {
     if (Object.keys(message).length !== 2 || !isPolicyMode(message.mode)) return undefined;
     return { type: 'set-action-policy', mode: message.mode };
   }
   if (message.type === 'approval-reply') {
-    if (Object.keys(message).some((key) => !['type', 'callId', 'decision', 'feedback'].includes(key))) return undefined;
+    if (Object.keys(message).some((key) => !['type', 'callId', 'decision', 'feedback', 'conversationId'].includes(key))) return undefined;
     if (typeof message.callId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(message.callId)) return undefined;
     if (message.decision !== 'allow' && message.decision !== 'allow-run' && message.decision !== 'deny') return undefined;
     if (message.feedback !== undefined && (typeof message.feedback !== 'string' || message.feedback.length > 2000)) return undefined;
-    return { type: 'approval-reply', callId: message.callId, decision: message.decision, ...(message.feedback ? { feedback: message.feedback as string } : {}) };
+    return { type: 'approval-reply', callId: message.callId, decision: message.decision, ...(message.feedback ? { feedback: message.feedback as string } : {}), ...scoped };
   }
-  if (message.type === 'revert-run' && typeof message.runId === 'string' && /^run-\d+-[a-f0-9]{6}$/.test(message.runId) && Object.keys(message).length === 2) return { type: 'revert-run', runId: message.runId };
-  if (message.type === 'verify-response' && typeof message.runId === 'string' && /^run-\d+-[a-f0-9]{6}$/.test(message.runId) && Object.keys(message).length === 2) return { type: 'verify-response', runId: message.runId };
+  if ((message.type === 'revert-run' || message.type === 'verify-response') && typeof message.runId === 'string' && /^run-\d+-[a-f0-9]{6}$/.test(message.runId) && Object.keys(message).every((key) => key === 'type' || key === 'runId' || key === 'conversationId')) return { type: message.type, runId: message.runId, ...scoped };
+  if ((message.type === 'switch-conversation' || message.type === 'close-conversation') && typeof message.id === 'string' && CONVERSATION_ID.test(message.id) && Object.keys(message).length === 2) return { type: message.type, id: message.id };
   if (message.type === 'insert-code' && typeof message.text === 'string' && message.text.length > 0 && message.text.length <= 100_000) {
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'text')) return undefined;
     return { type: 'insert-code', text: message.text };
   }
-  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'stop' || message.type === 'history' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'select-profile' || message.type === 'chat-ready') {
+  if (message.type === 'stop') {
+    if (Object.keys(message).some((key) => key !== 'type' && key !== 'conversationId')) return undefined;
+    return { type: 'stop', ...scoped };
+  }
+  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'select-profile' || message.type === 'chat-ready') {
     if (Object.keys(message).some((key) => key !== 'type')) return undefined;
     return { type: message.type };
-  }
-  if ((message.type === 'reopen-session' || message.type === 'continue-session') && typeof message.sessionId === 'string' && /^session-[a-z0-9-]{8,80}$/.test(message.sessionId)) {
-    if (Object.keys(message).some((key) => key !== 'type' && key !== 'sessionId')) return undefined;
-    return { type: message.type, sessionId: message.sessionId };
   }
   const promptResponse = promptResponseMessage(value);
   if (promptResponse) return promptResponse;
@@ -251,10 +270,10 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   }
   // Slash commands name an installed Open-GSD skill; the host checks it exists in the installed version.
   if (message.type === 'open-command' && typeof message.command === 'string' && /^[a-z0-9][a-z0-9:_-]{0,79}$/i.test(message.command)) {
-    if (Object.keys(message).some((key) => !['type', 'command', 'args', 'model'].includes(key))) return undefined;
+    if (Object.keys(message).some((key) => !['type', 'command', 'args', 'model', 'conversationId'].includes(key))) return undefined;
     if (message.args !== undefined && (typeof message.args !== 'string' || message.args.length > 4000)) return undefined;
     if (message.model !== undefined && (typeof message.model !== 'string' || message.model.length > 200)) return undefined;
-    return { type: 'open-command', command: message.command, ...(message.args ? { args: (message.args as string).trim() } : {}), ...(message.model ? { model: (message.model as string).trim() } : {}) };
+    return { type: 'open-command', command: message.command, ...(message.args ? { args: (message.args as string).trim() } : {}), ...(message.model ? { model: (message.model as string).trim() } : {}), ...scoped };
   }
   if (message.type === 'attach-files' && Object.keys(message).length === 1) return { type: 'attach-files' };
   if (message.type === 'attachment-remove' && typeof message.id === 'string' && /^att-[a-f0-9]{12}$/.test(message.id) && Object.keys(message).length === 2) return { type: 'attachment-remove', id: message.id };
@@ -268,18 +287,18 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   }
   if (message.type === 'resume-conversation' && typeof message.id === 'string' && /^conv-[a-z0-9-]{6,60}$/.test(message.id) && Object.keys(message).length === 2) return { type: 'resume-conversation', id: message.id };
   if (message.type === 'questions-reply' && typeof message.id === 'string' && /^q-[a-f0-9]{12}$/.test(message.id) && Array.isArray(message.answers)) {
-    if (Object.keys(message).some((key) => !['type', 'id', 'answers'].includes(key))) return undefined;
+    if (Object.keys(message).some((key) => !['type', 'id', 'answers', 'conversationId'].includes(key))) return undefined;
     if (message.answers.length > 4 || message.answers.some((answer) => typeof answer !== 'string' || answer.length > 4000)) return undefined;
-    return { type: 'questions-reply', id: message.id, answers: message.answers as string[] };
+    return { type: 'questions-reply', id: message.id, answers: message.answers as string[], ...scoped };
   }
   if (message.type === 'steer') {
-    if (Object.keys(message).some((key) => key !== 'type' && key !== 'id' && key !== 'text')) return undefined;
+    if (Object.keys(message).some((key) => key !== 'type' && key !== 'id' && key !== 'text' && key !== 'conversationId')) return undefined;
     if (typeof message.id !== 'string' || !/^steer-[a-f0-9]{12}$/.test(message.id)) return undefined;
     if (typeof message.text !== 'string' || !message.text.trim() || message.text.length > MAX_MESSAGE_CHARS) return undefined;
-    return { type: 'steer', id: message.id, text: message.text.trim() };
+    return { type: 'steer', id: message.id, text: message.text.trim(), ...scoped };
   }
   if (message.type !== 'send' || typeof message.text !== 'string' || !message.text.trim()) return undefined;
-  if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model' && key !== 'overrideToken' && key !== 'attachmentIds')) return undefined;
+  if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model' && key !== 'overrideToken' && key !== 'attachmentIds' && key !== 'conversationId')) return undefined;
   if (message.attachmentIds !== undefined && (!Array.isArray(message.attachmentIds) || message.attachmentIds.length > 10 || message.attachmentIds.some((id) => typeof id !== 'string' || !/^att-[a-f0-9]{12}$/.test(id)))) return undefined;
   if (message.overrideToken !== undefined && (typeof message.overrideToken !== 'string' || !/^privacy-[0-9a-f-]{36}$/.test(message.overrideToken))) return undefined;
   return {
@@ -287,7 +306,8 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     text: message.text.trim(),
     model: typeof message.model === 'string' ? message.model.trim() || undefined : undefined,
     ...(message.overrideToken ? { overrideToken: message.overrideToken as string } : {}),
-    ...(Array.isArray(message.attachmentIds) && message.attachmentIds.length ? { attachmentIds: message.attachmentIds as string[] } : {})
+    ...(Array.isArray(message.attachmentIds) && message.attachmentIds.length ? { attachmentIds: message.attachmentIds as string[] } : {}),
+    ...scoped
   };
 }
 

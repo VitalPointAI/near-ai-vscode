@@ -30,7 +30,7 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
     for (const message of this.pending.splice(0)) void webviewView.webview.postMessage(message);
   }
 
-  /** Clears the conversation, as the view's "New Chat" title action. */
+  /** Starts a new conversation alongside the open ones, as the view's "New Chat" title action. */
   public async newChat(): Promise<void> {
     await this.post({ type: 'reset' });
   }
@@ -74,6 +74,11 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 <title>NEAR AI</title>
 </head>
 <body data-commands="${escapeAttribute(commands)}">
+<nav id="conversations" aria-label="Conversations">
+  <div id="conversation-tabs" role="tablist" aria-label="Open conversations (Ctrl+Shift+[ and ] switch)"></div>
+  <button id="new-conversation" class="icon-button" type="button" aria-label="New conversation" title="New conversation: starts alongside the ones still running"></button>
+</nav>
+<div id="needs-you" role="status" hidden></div>
 <main id="transcript" aria-label="Conversation" aria-live="off">
   <section id="welcome">
     <h2>Private AI for this project</h2>

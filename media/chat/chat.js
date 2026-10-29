@@ -25,10 +25,22 @@
   const agentPanel = $('agents');
   const pendingRegion = $('pending');
   const pendingKit = window.nearPending;
+  const tabList = $('conversation-tabs');
+  const newConversationButton = $('new-conversation');
+  const needsYou = $('needs-you');
   let contextLeft;
   // Replaced by the host with the installed Open-GSD skills.
   let commands = JSON.parse(document.body.dataset.commands || '[]');
   const saved = vscode.getState() || {};
+  // Several conversations can be open; the host sends only the one on screen, and shows another
+  // by clearing the view and sending everything that one showed again (marked as a replay).
+  let activeId = typeof saved.activeConversation === 'string' ? saved.activeConversation : undefined;
+  let conversations = [];
+  let replaying = false;
+  // Each conversation keeps its own unsent draft. Drafts are saved only once a conversation is
+  // on screen, so a switch never files one conversation's draft under another.
+  let draftsLive = false;
+  saved.drafts = saved.drafts && typeof saved.drafts === 'object' ? saved.drafts : {};
 
   const ICONS = {
     send: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.7 1.3 15 8 1.7 14.7l1.6-5.9L10 8 3.3 7.2z"/></svg>',
@@ -36,11 +48,14 @@
     copy: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4V2.5A1.5 1.5 0 0 1 5.5 1h7A1.5 1.5 0 0 1 14 2.5v7a1.5 1.5 0 0 1-1.5 1.5H11v1.5A1.5 1.5 0 0 1 9.5 14h-7A1.5 1.5 0 0 1 1 12.5v-7A1.5 1.5 0 0 1 2.5 4zm1 0h4.5A1.5 1.5 0 0 1 11 5.5V10h1.5a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-7a.5.5 0 0 0-.5.5zM2.5 5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5z"/></svg>',
     insert: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1v8.3l2.6-2.6.7.7L7.5 11.2 3.7 7.4l.7-.7L7 9.3V1zM2 13h11v1H2z"/></svg>',
     attach: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5 5 9a1.5 1.5 0 0 0 2.1 2.1L12.6 5.6a2.5 2.5 0 0 0-3.5-3.5L3.4 7.8a3.5 3.5 0 0 0 5 5l4.2-4.2.7.7-4.2 4.2a4.5 4.5 0 0 1-6.4-6.4l5.7-5.7a3.5 3.5 0 0 1 4.9 4.9l-5.5 5.5a2.5 2.5 0 0 1-3.5-3.5l5.5-5.5z"/></svg>',
-    check: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6.3 11.6-3.6-3.6.7-.7 2.9 2.9 6.3-6.3.7.7z"/></svg>'
+    check: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6.3 11.6-3.6-3.6.7-.7 2.9 2.9 6.3-6.3.7.7z"/></svg>',
+    add: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.5 2h1v5.5H14v1H8.5V14h-1V8.5H2v-1h5.5z"/></svg>',
+    close: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 7.3 3.6-3.6.7.7L8.7 8l3.6 3.6-.7.7L8 8.7l-3.6 3.6-.7-.7L7.3 8 3.7 4.4l.7-.7z"/></svg>'
   };
   $('attach').innerHTML = ICONS.attach;
   send.innerHTML = ICONS.send;
   stopButton.innerHTML = ICONS.stop;
+  newConversationButton.innerHTML = ICONS.add;
 
   let busy = false;
   let current;
@@ -64,7 +79,10 @@
   }
 
   function post(message) { vscode.postMessage(message); }
-  function announce(text) { live.textContent = text; }
+  /** A message about the conversation on screen names it, so it never reaches one the user has left. */
+  function postFor(message) { post(activeId ? Object.assign({}, message, { conversationId: activeId }) : message); }
+  // A conversation shown again is not news: its replayed messages are not announced.
+  function announce(text) { if (!replaying) live.textContent = text; }
   function scrollToEnd() { transcript.scrollTop = transcript.scrollHeight; }
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -153,7 +171,7 @@
     append(line);
     pendingCards.set(item.id, { item, card, line, primary });
     renderPending();
-    if (pendingQueue.size === 1 && !userIsTyping()) primary.focus();
+    if (pendingQueue.size === 1 && !userIsTyping() && !replaying) primary.focus();
     announce(spoken + (pendingQueue.size > 1 ? ' ' + pendingQueue.size + ' prompts are waiting.' : ''));
     return true;
   }
@@ -194,7 +212,7 @@
     updateSendState();
   }
   function updateSendState() { send.disabled = !input.value.trim(); }
-  function stopRun() { if (busy) post({ type: 'stop' }); }
+  function stopRun() { if (busy) postFor({ type: 'stop' }); }
 
   // Messages sent during a run, by id: the bubble's state line says queued, delivered, or sent as a new message.
   const steerBubbles = new Map();
@@ -214,9 +232,16 @@
     autosize();
     updateSendState();
     if (staged.size) notice('Attachments stay staged: they go with your next message once this run ends.', []);
-    post({ type: 'steer', id, text });
+    postFor({ type: 'steer', id, text });
   }
   function onSteerState(m) {
+    // A conversation shown again brings back the messages still queued for its run.
+    if (m.replay && m.state === 'queued' && m.text && !steerBubbles.has(m.id)) {
+      const node = append(el('div', 'turn user steer', m.text));
+      const line = el('span', 'steer-state', '');
+      node.append(line);
+      steerBubbles.set(m.id, { node, line });
+    }
     const bubble = steerBubbles.get(m.id);
     if (bubble) {
       bubble.line.textContent = m.state === 'blocked' && m.reason ? 'Not sent: ' + m.reason : STEER_LABELS[m.state] || '';
@@ -231,7 +256,7 @@
     }
     if (m.state === 'delivered' || m.state === 'sent-new' || m.state === 'blocked') announce(STEER_LABELS[m.state]);
     // A message the run never took goes back to the composer, unless something new is being typed.
-    if ((m.state === 'returned' || m.state === 'blocked') && m.text && !input.value.trim()) { input.value = m.text; autosize(); updateSendState(); }
+    if (!m.replay && (m.state === 'returned' || m.state === 'blocked') && m.text && !input.value.trim()) { input.value = m.text; autosize(); updateSendState(); }
   }
 
   // Assistant text is re-rendered from the full buffer so partial Markdown settles as it streams.
@@ -404,6 +429,10 @@
 
   function resetConversation() {
     agentRows.clear();
+    replies.clear();
+    steerBubbles.clear();
+    lastReply = undefined;
+    runInfo = {};
     renderTodos([]);
     renderAgents([]);
     clearPending();
@@ -474,7 +503,7 @@
     const choices = el('div', 'choices');
     const answer = (decision) => {
       card.querySelectorAll('button,input').forEach((node) => { node.disabled = true; });
-      post({ type: 'approval-reply', callId: m.callId, decision, ...(decision === 'deny' && feedback.value.trim() ? { feedback: feedback.value.trim() } : {}) });
+      postFor({ type: 'approval-reply', callId: m.callId, decision, ...(decision === 'deny' && feedback.value.trim() ? { feedback: feedback.value.trim() } : {}) });
       closePending(m.callId, decision);
     };
     const runLabel = m.tool === 'Bash' ? 'Allow this command for this run' : 'Allow edits for this run';
@@ -523,7 +552,7 @@
       const answers = readers.map((read) => read());
       if (answers.some((answer) => !answer)) { announce('Answer every question first.'); return; }
       card.querySelectorAll('button,input').forEach((node) => { node.disabled = true; });
-      post({ type: 'questions-reply', id: m.id, answers });
+      postFor({ type: 'questions-reply', id: m.id, answers });
       closePending(m.id, 'answered', answers.join('; '));
     }, true);
     card.append(submitButton);
@@ -612,7 +641,7 @@
     row.id = 'changes-' + m.runId;
     row.append(el('span', '', `${m.files.length} file${m.files.length === 1 ? '' : 's'} changed`));
     row.title = m.files.join('\n') + '\n(Changes made by shell commands are not included.)';
-    row.append(textButton('Revert', () => { row.querySelector('button').disabled = true; post({ type: 'revert-run', runId: m.runId }); }));
+    row.append(textButton('Revert', () => { row.querySelector('button').disabled = true; postFor({ type: 'revert-run', runId: m.runId }); }));
     append(row);
   }
 
@@ -645,7 +674,7 @@
   }
   function runCommand(command, args) {
     // A workflow needs the agent to itself: it is not queued behind, or mixed into, a running one.
-    if (busy) { notice('Finish or stop the current run first: /' + command + ' starts a new workflow. Your message stays in the box.', []); return; }
+    if (busy) { notice('Finish or stop the current run first: /' + command + ' starts a new workflow. Your message stays in the box; or start it in a new conversation (+), which runs alongside this one.', []); return; }
     input.value = '';
     input.placeholder = defaultPlaceholder;
     menu.hidden = true;
@@ -653,7 +682,7 @@
     updateSendState();
     append(el('div', 'turn user', '/' + command + (args ? ' ' + args : '')));
     setBusy(true);
-    post({ type: 'open-command', command, ...(args ? { args } : {}), ...(model.value ? { model: model.value } : {}) });
+    postFor({ type: 'open-command', command, ...(args ? { args } : {}), ...(model.value ? { model: model.value } : {}) });
   }
   // Picking a command that takes arguments fills it in and shows its argument hint; others run at once.
   function chooseCommand(command) {
@@ -680,11 +709,18 @@
     autosize();
     setBusy(true);
     startAssistant();
-    post({ type: 'send', text, model: model.value || undefined, ...(ids.length ? { attachmentIds: ids } : {}) });
+    postFor({ type: 'send', text, model: model.value || undefined, ...(ids.length ? { attachmentIds: ids } : {}) });
   }
   function autosize() {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+    saveDraft();
+  }
+  function saveDraft() {
+    if (!draftsLive || !activeId) return;
+    if (input.value.trim()) saved.drafts[activeId] = input.value;
+    else delete saved.drafts[activeId];
+    vscode.setState(saved);
   }
 
   input.addEventListener('input', () => { autosize(); updateSendState(); menuIndex = 0; renderMenu(); });
@@ -788,11 +824,134 @@
   model.addEventListener('change', () => { saved.model = model.value; vscode.setState(saved); model.title = (modelInfo.get(model.value) || {}).label || ''; });
   document.querySelectorAll('[data-command]').forEach((button) => button.addEventListener('click', () => runCommand(button.dataset.command)));
 
+  // The conversation strip: one tab per open conversation with its status (running, waiting for
+  // you, stopped, done) and a dot for output that arrived while it was in the background.
+  const STATUS_TEXT = { idle: 'new', running: 'running', waiting: 'waiting for you', done: 'done', error: 'stopped with an error', stopped: 'stopped' };
+  let shownTab;
+  function titleOf(item) { return item.title || 'New conversation'; }
+  function switchConversation(id) { if (id && id !== activeId) post({ type: 'switch-conversation', id }); }
+  function closeConversation(id) { post({ type: 'close-conversation', id }); }
+  function stepConversation(delta) {
+    if (conversations.length < 2) return;
+    const at = conversations.findIndex((item) => item.id === activeId);
+    switchConversation(conversations[(at + delta + conversations.length) % conversations.length].id);
+  }
+  function conversationTab(item) {
+    const title = titleOf(item);
+    const selected = item.id === activeId;
+    const unseen = item.unread && !selected;
+    const tab = el('div', 'conversation-tab');
+    tab.id = 'conversation-' + item.id;
+    tab.dataset.id = item.id;
+    tab.dataset.status = item.status;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', String(selected));
+    tab.setAttribute('aria-controls', 'transcript');
+    tab.tabIndex = selected ? 0 : -1;
+    const described = title + ' — ' + (STATUS_TEXT[item.status] || item.status) + (item.waiting > 1 ? ' (' + item.waiting + ' prompts)' : '') + (unseen ? ', new output' : '');
+    tab.setAttribute('aria-label', described);
+    tab.title = described;
+    const dot = el('span', 'status-dot');
+    dot.setAttribute('aria-hidden', 'true');
+    const unread = el('span', 'unread-dot');
+    unread.setAttribute('aria-hidden', 'true');
+    unread.hidden = !unseen;
+    const close = el('button', 'tab-close');
+    close.type = 'button';
+    close.tabIndex = -1;
+    close.innerHTML = ICONS.close;
+    close.title = 'Close (Delete)' + (item.status === 'running' || item.status === 'waiting' ? ': stops its run first' : '');
+    close.setAttribute('aria-label', 'Close ' + title);
+    close.addEventListener('click', (event) => { event.stopPropagation(); closeConversation(item.id); });
+    tab.addEventListener('click', () => switchConversation(item.id));
+    tab.append(dot, el('span', 'tab-title', title), unread, close);
+    return tab;
+  }
+  function renderConversations(m) {
+    const before = new Map(conversations.map((item) => [item.id, item]));
+    conversations = Array.isArray(m.items) ? m.items : [];
+    if (m.activeId) activeId = m.activeId;
+    const focused = document.activeElement && tabList.contains(document.activeElement) ? document.activeElement.closest('[role="tab"]') : undefined;
+    tabList.replaceChildren(...conversations.map(conversationTab));
+    if (focused) { const again = document.getElementById(focused.id); if (again) again.focus(); }
+    if (shownTab !== activeId) { shownTab = activeId; const selected = document.getElementById('conversation-' + activeId); if (selected) selected.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+    newConversationButton.title = 'New conversation: starts alongside the ones still running (' + conversations.length + ' of ' + (m.max || 8) + ' open)';
+    // A background conversation's change of state is said aloud; the one on screen speaks for itself.
+    conversations.forEach((item) => {
+      const was = before.get(item.id);
+      if (!was || item.id === activeId || was.status === item.status) return;
+      if (item.status === 'waiting') announce('“' + titleOf(item) + '” needs you.');
+      else if (item.status === 'done') announce('“' + titleOf(item) + '” finished.');
+      else if (item.status === 'error' || item.status === 'stopped') announce('“' + titleOf(item) + '” stopped.');
+    });
+    // Prompts waiting in other conversations: answering one takes a switch, one click from here.
+    const others = conversations.filter((item) => item.id !== activeId && item.status === 'waiting');
+    needsYou.hidden = !others.length;
+    if (others.length) needsYou.replaceChildren(el('span', '', others.length === 1 ? '“' + titleOf(others[0]) + '” needs you' : others.length + ' conversations need you'), textButton('Show', () => switchConversation(others[0].id)));
+    else needsYou.replaceChildren();
+    // Drafts of closed conversations go.
+    const open = new Set(conversations.map((item) => item.id));
+    let pruned = false;
+    Object.keys(saved.drafts).forEach((id) => { if (!open.has(id)) { delete saved.drafts[id]; pruned = true; } });
+    if (pruned) vscode.setState(saved);
+  }
+  newConversationButton.addEventListener('click', () => post({ type: 'new-chat' }));
+  // Arrow keys move between tabs (and show the one reached), Home and End jump, Delete closes.
+  tabList.addEventListener('keydown', (event) => {
+    const tabs = [...tabList.querySelectorAll('[role="tab"]')];
+    const at = tabs.indexOf(document.activeElement);
+    if (at === -1) return;
+    const go = (index) => { event.preventDefault(); const target = tabs[(index + tabs.length) % tabs.length]; target.focus(); switchConversation(target.dataset.id); };
+    if (event.key === 'ArrowRight') go(at + 1);
+    else if (event.key === 'ArrowLeft') go(at - 1);
+    else if (event.key === 'Home') go(0);
+    else if (event.key === 'End') go(tabs.length - 1);
+    else if (event.key === 'Delete') { event.preventDefault(); closeConversation(tabs[at].dataset.id); }
+    else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); switchConversation(tabs[at].dataset.id); }
+  });
+  // Ctrl+Shift+[ and ] (Cmd on macOS) switch to the previous and next conversation from anywhere in the view.
+  document.addEventListener('keydown', (event) => {
+    if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey) return;
+    const delta = event.code === 'BracketLeft' || event.key === '[' || event.key === '{' ? -1 : event.code === 'BracketRight' || event.key === ']' || event.key === '}' ? 1 : 0;
+    if (!delta) return;
+    event.preventDefault();
+    stepConversation(delta);
+  });
+
   window.addEventListener('message', (event) => {
     const m = event.data || {};
     switch (m.type) {
       case 'host-request': post(m.payload); break;
-      case 'reset': resetConversation(); post({ type: 'new-chat' }); break;
+      // The view's "New Chat" action: a new conversation, alongside any still running.
+      case 'reset': post({ type: 'new-chat' }); break;
+      case 'conversations': renderConversations(m); break;
+      case 'conversation-show': {
+        draftsLive = false;
+        activeId = m.id;
+        saved.activeConversation = m.id;
+        vscode.setState(saved);
+        resetConversation();
+        replaying = true;
+        if (m.model && modelInfo.has(m.model)) { model.value = m.model; model.title = (modelInfo.get(m.model) || {}).label || ''; }
+        break;
+      }
+      case 'conversation-shown': {
+        replaying = false;
+        setBusy(Boolean(m.busy));
+        input.value = saved.drafts[m.id] || '';
+        draftsLive = true;
+        autosize();
+        updateSendState();
+        scrollToEnd();
+        break;
+      }
+      case 'user-turn': append(el('div', 'turn user', m.text || '')); break;
+      case 'prompt-record': {
+        const line = el('div', 'turn pending-line resolved');
+        line.append(el('span', '', pendingKit.outcomeText({ kind: m.kind, title: m.title || '' }, m.outcome, m.detail)));
+        append(line);
+        break;
+      }
       case 'prefill': {
         // "Use in chat" inserts a command and keeps the draft; other prefills (a resumed session) set the text.
         if (m.insert) { const next = window.nearComposer.insertCommand(input.value, m.text); input.value = next.text; input.focus(); input.setSelectionRange(next.caret, next.caret); }
@@ -880,7 +1039,7 @@
         if (!node) break;
         const row = el('div', 'verify');
         row.id = 'verify-' + m.runId;
-        row.append(textButton('Verify signature', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation\u2026')); post({ type: 'verify-response', runId: m.runId }); }));
+        row.append(textButton('Verify signature', () => { row.replaceChildren(el('span', '', 'Checking NEAR\u2019s signature and attestation\u2026')); postFor({ type: 'verify-response', runId: m.runId }); }));
         node.append(row);
         break;
       }
@@ -907,7 +1066,7 @@
         const actions = m.overrideToken ? [textButton(m.confirm ? 'Send anyway' : 'Send once anyway', () => {
           setBusy(true);
           startAssistant();
-          post({ type: 'send', text: m.text, model: m.model, overrideToken: m.overrideToken });
+          postFor({ type: 'send', text: m.text, model: m.model, overrideToken: m.overrideToken });
         }, false)] : [];
         notice(m.reason, actions, !m.confirm);
         break;
@@ -932,11 +1091,6 @@
       case 'command-progress': onCommandProgress(m); break;
       case 'structured-prompt': onPrompt(m.prompt); break;
       case 'prompt-error': notice(m.text || 'That answer could not be sent.', [], true); break;
-      case 'session-reopened': {
-        const actions = m.continuation ? [textButton('Continue', () => post({ type: 'continue-session', sessionId: m.session.sessionId }), true)] : [];
-        notice('Reopened ' + (m.session.plans && m.session.plans.length ? '/' + m.session.plans.join(', /') : 'session') + ' from ' + new Date(m.session.updatedAt).toLocaleString(), actions);
-        break;
-      }
       case 'history-error': notice(m.text, [], true); break;
       case 'artifacts': renderArtifacts(m.artifacts); break;
       case 'attachment-staged': staged.set(m.id, m.name); renderChips(); announce('Attached ' + m.name); break;
@@ -957,8 +1111,8 @@
         contextLeft = m.level === 'normal' ? undefined : m.remainingPercent;
         status.dataset.context = contextLeft === undefined ? '' : ` · context ${contextLeft}% left`;
         break;
+      // A saved conversation's turns, at the start of a conversation opened from history or after a reload.
       case 'transcript': {
-        resetConversation();
         (m.turns || []).forEach((turn) => {
           if (turn.role === 'user') append(el('div', 'turn user', turn.text));
           else {
@@ -969,7 +1123,7 @@
             if (turn.tools) node.append(el('div', 'meta', `${turn.tools} tool call${turn.tools === 1 ? '' : 's'}`));
           }
         });
-        notice('Resumed this conversation with its full context. Continue where you left off.', []);
+        notice(m.note || 'Resumed this conversation with its full context. Continue where you left off.', []);
         break;
       }
       case 'questions-request': onQuestions(m); break;

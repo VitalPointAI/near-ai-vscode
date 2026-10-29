@@ -165,7 +165,8 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
     else if (message.type === 'history-page') { page = message.page; await send(true); }
     else if (message.type === 'agent-control') {
       // The main agent has no pause; stopping it stops the run, as the chat's Stop does.
-      if (message.agentId.startsWith('main-')) { if (message.action === 'stop') await chat?.request({ type: 'stop' }); }
+      // It stops that run's own conversation, which need not be the one on screen.
+      if (message.agentId.startsWith('main-')) { if (message.action === 'stop') { const conversationId = activity.agentStat(message.agentId)?.conversationId; await chat?.request({ type: 'stop', ...(conversationId ? { conversationId } : {}) }); } }
       else await chat?.request({ type: 'agent-control', agentId: message.agentId, action: message.action });
       schedule();
     }

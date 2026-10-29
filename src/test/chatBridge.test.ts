@@ -15,9 +15,10 @@ test('webview message parsing accepts only the typed chat protocol', () => {
   assert.deepEqual(parseChatWebviewMessage({ type: 'open-artifact', path: '.planning/phases/03-demo', kind: 'directory' }), { type: 'open-artifact', path: '.planning/phases/03-demo', kind: 'directory' });
   assert.equal(parseChatWebviewMessage({ type: 'open-artifact', path: '.planning/STATE.md', kind: 'folder' }), undefined);
   assert.equal(parseChatWebviewMessage({ type: 'open-artifact', path: '../secrets.txt' }), undefined);
-  assert.deepEqual(parseChatWebviewMessage({ type: 'history' }), { type: 'history' });
-  assert.deepEqual(parseChatWebviewMessage({ type: 'reopen-session', sessionId: 'session-test-001' }), { type: 'reopen-session', sessionId: 'session-test-001' });
-  assert.equal(parseChatWebviewMessage({ type: 'reopen-session', sessionId: '../secret' }), undefined);
+  // The old session-history intents are gone: conversations open as tabs (resume-conversation) instead.
+  assert.equal(parseChatWebviewMessage({ type: 'history' }), undefined);
+  assert.equal(parseChatWebviewMessage({ type: 'reopen-session', sessionId: 'session-test-001' }), undefined);
+  assert.equal(parseChatWebviewMessage({ type: 'continue-session', sessionId: 'session-test-001' }), undefined);
   assert.deepEqual(parseChatWebviewMessage({ type: 'prompt-choice', sessionId: 'session-test-001', promptId: 'next-step', choiceId: 'safe' }), { type: 'prompt-choice', sessionId: 'session-test-001', promptId: 'next-step', choiceId: 'safe' });
   assert.equal(parseChatWebviewMessage({ type: 'prompt-answer', sessionId: 'session-test-001', promptId: 'next-step', text: 'apiKey=secret' }), undefined);
   assert.equal(parseChatWebviewMessage({ type: 'prompt-resume', sessionId: 'session-test-001', promptId: 'next-step', extra: true }), undefined);
