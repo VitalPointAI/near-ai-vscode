@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isSecureEndpoint } from '../domain/config';
 import { redactSecrets } from '../domain/redaction';
+import { currentSpendTag, SpendKind, SpendTag, usdToNano } from './spendLedger';
+import type { SpendSink } from './spendAccount';
+import type { BillingCostsAnswer } from './spendReconciler';
 import type { CapabilityMetadataStatus, CapabilityModality, CapabilityPrivacyBoundary, SkillCapability, ProviderOperation } from '../domain/capabilities';
 
 export interface ChatMessage {
@@ -131,7 +134,14 @@ export interface NearAiClientOptions {
   /** How long a started stream may go without sending anything before it counts as stalled. */
   streamIdleTimeoutMs?: number;
   clock?: () => string;
+  /** Where every billable response is recorded (the key's spend ledger), and the daily limit. */
+  spend?: SpendSink;
+  /** Tags every recorded response from this client carries (the project). */
+  spendTag?: Pick<SpendTag, 'projectId'>;
 }
+
+/** Endpoints NEAR bills for; every 2xx answer from one is recorded in the spend ledger. */
+const BILLABLE_PATHS = new Set(['/chat/completions', '/images/generations', '/images/edits', '/audio/transcriptions']);
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
 /** Output tokens allowed in one agent reply unless nearAi.agent.maxOutputTokens says otherwise. */
@@ -229,12 +239,31 @@ export function classifyRetryableFailure(status: number, signal?: AbortSignal): 
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-/** NEAR's prices: cached input tokens at the cache-read price when NEAR lists one, the rest at the input price. */
+/**
+ * NEAR's prices: cached input tokens at the cache-read price when NEAR lists one, the rest at the
+ * input price, plus the model's per-request price when it has one.
+ */
 export function estimateCostUsd(model: ModelInfo, inputTokens = 0, outputTokens = 0, cachedInputTokens = 0): number | undefined {
   if (model.inputPricePerMillion === undefined || model.outputPricePerMillion === undefined) return undefined;
   const cached = Math.min(Math.max(0, cachedInputTokens), inputTokens);
   const cachePrice = model.cachePricePerMillion ?? model.inputPricePerMillion;
-  return ((inputTokens - cached) * model.inputPricePerMillion + cached * cachePrice + outputTokens * model.outputPricePerMillion) / 1_000_000;
+  return ((inputTokens - cached) * model.inputPricePerMillion + cached * cachePrice + outputTokens * model.outputPricePerMillion) / 1_000_000 + (model.requestPricePerUnit ?? 0);
+}
+
+/** An image request's price: per image (NEAR's `pricing.image`) and per request, when NEAR lists them. */
+export function estimateImageCostUsd(model: ModelInfo, images = 1): number | undefined {
+  if (model.imagePricePerUnit === undefined && model.requestPricePerUnit === undefined) return undefined;
+  return (model.imagePricePerUnit ?? 0) * Math.max(1, images) + (model.requestPricePerUnit ?? 0);
+}
+
+/** A local daily-limit refusal: nothing was sent. */
+export class SpendLimitError extends Error {
+  public readonly status = 402;
+  public readonly retryable = false;
+  public constructor(public readonly spentUsd: number, public readonly limitUsd: number, public readonly source: 'near' | 'local') {
+    super(`Today's NEAR AI spend ($${spentUsd.toFixed(2)}${source === 'near' ? ', from NEAR\'s usage summary' : ''}) has reached your daily limit of $${limitUsd.toFixed(2)}. Raise nearAi.dailySpendLimitUsd to continue.`);
+    this.name = 'SpendLimitError';
+  }
 }
 
 export class NearAiClient {
@@ -247,9 +276,59 @@ export class NearAiClient {
    * after it, one probe goes out while the others wait for its answer.
    */
   private readonly cooling = new Map<string, { until: number; strikes: number; probe?: Promise<void> }>();
+  /** The spend ledger entry of each billable response still being read. */
+  private readonly charges = new WeakMap<Response, { finish: (result: Parameters<ReturnType<SpendSink['begin']>>[0]) => void; inputTokens: number; model?: string }>();
 
   public constructor(private readonly options: NearAiClientOptions) {
     this.fetchFn = options.fetchFn ?? fetch;
+    options.spend?.attach(this);
+  }
+
+  /** The key's spend account, when spend tracking is on for this client. */
+  public get spend(): SpendSink | undefined { return this.options.spend; }
+
+  /** True while any model is cooling down after a 429 or 503 (billing calls wait). */
+  public rateLimited(): boolean {
+    const now = this.now();
+    for (const state of this.cooling.values()) if (state.until > now) return true;
+    return false;
+  }
+
+  /** Raw POST /v1/billing/costs: nano-USD per inference-id, and whether NEAR warned that some matched nothing. */
+  public async billingCosts(requestIds: string[], signal?: AbortSignal): Promise<BillingCostsAnswer> {
+    const response = await this.request('/billing/costs', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestIds }) }, { maxRetries: 0 });
+    const body = objectValue(await response.json());
+    const rows = Array.isArray(body.requests) ? body.requests.map(objectValue) : [];
+    const costs = new Map<string, number>();
+    for (const row of rows) {
+      const id = stringValue(row.requestId);
+      const nano = numberValue(row.costNanoUsd);
+      if (id && nano !== undefined && nano >= 0) costs.set(id, nano);
+    }
+    return { costs, warning: Boolean(body.warning) };
+  }
+
+  /** POST /v1/check_api_key with this client's key: the organization and API key IDs (no secrets). */
+  public async checkApiKey(signal?: AbortSignal): Promise<{ organizationId: string; apiKeyId: string }> {
+    const response = await this.request('/check_api_key', { method: 'POST', signal }, { maxRetries: 0 });
+    const body = objectValue(await response.json());
+    const organizationId = stringValue(body.organization_id);
+    const apiKeyId = stringValue(body.api_key_id);
+    if (!organizationId || !apiKeyId) throw new NearAiError(0, 'NEAR AI did not say which organization this API key belongs to.', false);
+    return { organizationId, apiKeyId };
+  }
+
+  /**
+   * NEAR's usage summary for one API key (GET /v1/organizations/{org}/usage/summary) with a usage
+   * reporting token, which is sent only on this call. Returns totals.total_cost_nano_usd.
+   */
+  public async usageSummary(token: string, organizationId: string, query: { apiKeyId: string; startTime: string; endTime: string }, signal?: AbortSignal): Promise<number> {
+    const params = new URLSearchParams({ api_key_id: query.apiKeyId, start_time: query.startTime, end_time: query.endTime, source: 'all' });
+    const response = await this.request(`/organizations/${encodeURIComponent(organizationId)}/usage/summary?${params.toString()}`, { method: 'GET', signal, headers: { authorization: `Bearer ${token}` } }, { maxRetries: 0, secret: token });
+    const totals = objectValue(objectValue(await response.json()).totals);
+    const nano = numberValue(totals.total_cost_nano_usd);
+    if (nano === undefined || nano < 0) throw new NearAiError(0, 'NEAR AI\'s usage summary had no total.', false);
+    return nano;
   }
 
   public async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
@@ -318,7 +397,27 @@ export class NearAiClient {
     if (options.size !== undefined) body.size = options.size;
     if (options.quality !== undefined) body.quality = options.quality;
     const response = await this.request('/images/generations', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, { model });
-    return imageResult(await response.json(), metadataFromHeaders(response.headers, started));
+    return this.readImageResult(response, model, options.count ?? 1, started);
+  }
+
+  /** Reads an image answer and records its cost: tokens when NEAR reports them, else its per-image price. */
+  private async readImageResult(response: Response, model: string, count: number, started: number): Promise<ImageGenerationResult> {
+    let result: ImageGenerationResult;
+    try {
+      result = imageResult(await response.json(), metadataFromHeaders(response.headers, started));
+    } catch (error) {
+      this.settleCharge(response, 'partial');
+      throw error;
+    }
+    const info = this.models.get(model) ?? { id: '' };
+    const usage = result.usage!;
+    const tokenEstimate = usage.inputTokens !== undefined || usage.outputTokens !== undefined ? estimateCostUsd(info, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens) : undefined;
+    const imageEstimate = estimateImageCostUsd(info, count);
+    // Token prices (with the per-request price) plus the per-image price; without tokens, the image and request prices.
+    const estimate = tokenEstimate !== undefined ? tokenEstimate + (info.imagePricePerUnit ?? 0) * Math.max(1, count) : imageEstimate;
+    if (usage.estimatedCostUsd === undefined && estimate !== undefined) usage.estimatedCostUsd = estimate;
+    this.settleCharge(response, 'completed', usage, { estimateUsd: usage.estimatedCostUsd });
+    return result;
   }
 
   /** Speech to text through NEAR's `/audio/transcriptions` (multipart: file, model, response_format). */
@@ -329,10 +428,16 @@ export class NearAiClient {
     form.append('model', model);
     form.append('response_format', 'json');
     const response = await this.request('/audio/transcriptions', { method: 'POST', signal, body: form }, { model });
-    const body = objectValue(await response.json());
+    let body: Record<string, unknown>;
+    try { body = objectValue(await response.json()); } catch (error) { this.settleCharge(response, 'partial'); throw error; }
+    const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
+    const info = this.models.get(model);
+    const estimate = usage.inputTokens !== undefined || usage.outputTokens !== undefined ? estimateCostUsd(info ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens) : info?.requestPricePerUnit;
+    if (usage.estimatedCostUsd === undefined && estimate !== undefined) usage.estimatedCostUsd = estimate;
+    this.settleCharge(response, 'completed', usage);
     const text = stringValue(body.text);
     if (text === undefined) throw new NearAiError(0, 'The transcription service returned no text.', false);
-    return { text, usage: metadataFromHeaders(response.headers, started) };
+    return { text, usage };
   }
 
   /** Asks a vision model about an image (sent as a data URL) and returns its text answer. */
@@ -343,13 +448,15 @@ export class NearAiClient {
       signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages: [{ role: 'user', content: [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: dataUrl } }] }] })
-    }, { model });
-    const body = objectValue(await response.json());
+    }, { model, spendKind: 'attachment' });
+    let body: Record<string, unknown>;
+    try { body = objectValue(await response.json()); } catch (error) { this.settleCharge(response, 'partial'); throw error; }
+    const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
+    usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
+    this.settleCharge(response, 'completed', usage);
     const choice = objectValue(Array.isArray(body.choices) ? body.choices[0] : undefined);
     const text = stringValue(objectValue(choice.message).content);
     if (!text) throw new NearAiError(0, 'The vision model returned no description.', false);
-    const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
-    usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
     return { text, usage };
   }
 
@@ -365,11 +472,13 @@ export class NearAiClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, messages, stream: false, max_tokens: Math.max(16, Math.floor(options.maxTokens)), temperature: 0 })
     }, { maxRetries: 0, model, failFast: true });
-    const body = objectValue(await response.json());
+    let body: Record<string, unknown>;
+    try { body = objectValue(await response.json()); } catch (error) { this.settleCharge(response, options.signal?.aborted ? 'aborted' : 'partial'); throw error; }
     const choice = objectValue(Array.isArray(body.choices) ? body.choices[0] : undefined);
     const text = stringValue(objectValue(choice.message).content) ?? '';
     const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
     usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
+    this.settleCharge(response, 'completed', usage);
     return { text, usage };
   }
 
@@ -383,7 +492,7 @@ export class NearAiClient {
     if (options.size !== undefined) form.set('size', options.size);
     if (options.quality !== undefined) form.set('quality', options.quality);
     const response = await this.request('/images/edits', { method: 'POST', signal, body: form }, { model });
-    return imageResult(await response.json(), metadataFromHeaders(response.headers, started));
+    return this.readImageResult(response, model, 1, started);
   }
 
   /**
@@ -435,21 +544,26 @@ export class NearAiClient {
       body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
     }, { model });
     const metadata = metadataFromHeaders(response.headers, started);
-    if (!response.body) throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId);
+    if (!response.body) { this.settleCharge(response, 'partial', metadata); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId); }
 
     let completed = false;
+    let latest = metadata;
+    let chars = 0;
     try {
       for await (const event of this.readEvents(response.body, metadata, signal, this.models.get(model))) {
-        if (event.type === 'text') yield { text: event.text, done: false, usage: event.metadata };
+        if (event.type === 'text') { if (event.metadata) latest = event.metadata; chars += event.text.length; yield { text: event.text, done: false, usage: event.metadata }; }
         if (event.type === 'done') {
           completed = true;
+          this.settleCharge(response, 'completed', event.metadata);
           yield { text: '', done: true, usage: event.metadata };
         }
       }
-      if (!signal?.aborted && !completed) yield { text: '', done: true, usage: { ...metadata, latencyMs: Date.now() - started } };
+      if (!signal?.aborted && !completed) { this.settleCharge(response, 'completed', latest); yield { text: '', done: true, usage: { ...latest, latencyMs: Date.now() - started } }; }
     } catch (error) {
       if (signal?.aborted || isAbortError(error)) return;
       throw error;
+    } finally {
+      this.settleCharge(response, signal?.aborted ? 'aborted' : 'partial', latest, { streamedChars: chars });
     }
   }
 
@@ -462,26 +576,33 @@ export class NearAiClient {
       body: JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } })
     }, { model });
     const metadata = metadataFromHeaders(response.headers, started);
-    if (!response.body) throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId);
+    if (!response.body) { this.settleCharge(response, 'partial', metadata); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, metadata.requestId); }
 
-    yield { type: 'status', status: 'started', metadata };
     let latest = metadata;
+    let chars = 0;
     try {
-      for await (const event of this.readEvents(response.body, metadata, signal, this.models.get(model))) {
-        if (event.type === 'text' && event.metadata) latest = event.metadata;
-        yield event;
+      yield { type: 'status', status: 'started', metadata };
+      try {
+        for await (const event of this.readEvents(response.body, metadata, signal, this.models.get(model))) {
+          if (event.type === 'text') { if (event.metadata) latest = event.metadata; chars += event.text.length; }
+          yield event;
+        }
+      } catch (error) {
+        if (signal?.aborted || isAbortError(error)) {
+          this.settleCharge(response, 'aborted', latest, { streamedChars: chars });
+          yield { type: 'status', status: 'cancelled', metadata: { ...latest, latencyMs: Date.now() - started } };
+          return;
+        }
+        throw error;
       }
-    } catch (error) {
-      if (signal?.aborted || isAbortError(error)) {
-        yield { type: 'status', status: 'cancelled', metadata: { ...latest, latencyMs: Date.now() - started } };
-        return;
-      }
-      throw error;
+      // The completion carries the usage streamed with the response, not just the response headers.
+      const completed = { ...latest, latencyMs: Date.now() - started };
+      this.settleCharge(response, 'completed', completed);
+      yield { type: 'status', status: 'completed', metadata: completed };
+      yield { type: 'done', metadata: completed };
+    } finally {
+      this.settleCharge(response, signal?.aborted ? 'aborted' : 'partial', latest, { streamedChars: chars });
     }
-    // The completion carries the usage streamed with the response, not just the response headers.
-    const completed = { ...latest, latencyMs: Date.now() - started };
-    yield { type: 'status', status: 'completed', metadata: completed };
-    yield { type: 'done', metadata: completed };
   }
 
   /**
@@ -500,7 +621,7 @@ export class NearAiClient {
     // NEAR signs SHA-256 of the exact request body and raw response; keep both hashes for verification.
     const rawResponse = createHash('sha256');
     let chatId: string | undefined;
-    if (!response.body) throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, usage.requestId);
+    if (!response.body) { this.settleCharge(response, 'partial', usage); throw new NearAiError(response.status, 'NEAR AI returned no streaming body.', false, usage.requestId); }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const calls: Array<{ id: string; name: string; arguments: string }> = [];
@@ -511,6 +632,7 @@ export class NearAiClient {
     let reasoningChars = 0;
     let answerChars = 0;
     const idleTimeoutMs = options.idleTimeoutMs ?? this.idleTimeoutMs;
+    try {
     try {
       for (;;) {
         const next = await readWithin(reader, idleTimeoutMs, signal, usage.requestId);
@@ -555,12 +677,17 @@ export class NearAiClient {
       reader.releaseLock();
     }
     const toolCalls: ToolCall[] = calls.filter((call) => call.name).map((call, index) => ({ id: call.id || `call_${index}`, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
+    this.settleCharge(response, 'completed', usage);
     yield {
       type: 'done',
       message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
       finishReason,
       usage: { ...usage, latencyMs: Date.now() - started, ...(firstTokenAt !== undefined ? { firstTokenMs: firstTokenAt - started } : {}), reasoningChars, answerChars, ...(chatId ? { evidence: { chatId, requestHash: sha256Hex(requestBody), responseHash: rawResponse.digest('hex') } } : {}) }
     };
+    } finally {
+      // Stopped or broken off before the end: recorded with what arrived, and reconciled by its inference-id.
+      this.settleCharge(response, signal?.aborted ? 'aborted' : 'partial', usage, { streamedChars: reasoningChars + answerChars });
+    }
   }
 
   /** Checks NEAR's signature and attestation for a completion this client received. */
@@ -653,7 +780,37 @@ export class NearAiClient {
     return (this.options.now ?? Date.now)();
   }
 
-  private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean } = {}): Promise<Response> {
+  /**
+   * Records a billable response in the spend ledger, tagged with the caller's spend context: as
+   * open (a body still to read; the method that reads it finishes the entry) or already ended.
+   */
+  private charge(path: string, init: RequestInit, model: string | undefined, kind: SpendKind | undefined, response: Response | undefined, status: 'open' | 'aborted'): void {
+    const spend = this.options.spend;
+    if (!spend) return;
+    const tag = { ...(this.options.spendTag ?? {}), ...currentSpendTag() };
+    const info = model ? this.models.get(model) : undefined;
+    // Until the response says how many tokens it used, the request body (about 4 characters a token) is the estimate.
+    const inputTokens = typeof init.body === 'string' && path === '/chat/completions' ? Math.ceil(init.body.length / 4) : 0;
+    const images = path.startsWith('/images/') ? (typeof init.body === 'string' ? Math.max(1, Number(objectValue(safeJson(init.body)).n) || 1) : 1) : 0;
+    const estimateUsd = images ? estimateImageCostUsd(info ?? { id: '' }, images) : path === '/audio/transcriptions' ? info?.requestPricePerUnit : estimateCostUsd(info ?? { id: '' }, inputTokens, 0);
+    const resolved: SpendKind = kind ?? (path === '/audio/transcriptions' ? 'transcription' : path.startsWith('/images/') ? (tag.kind === 'generation' ? 'generation' : 'image') : tag.kind ?? 'main');
+    const finish = spend.begin({ ...tag, kind: resolved, path, model, requestId: response?.headers.get('inference-id') ?? undefined, status, estimateNanoUsd: usdToNano(estimateUsd) });
+    if (response && status === 'open') this.charges.set(response, { finish, inputTokens, model });
+  }
+
+  /** Ends a response's ledger entry: its final usage, or (broken off) what arrived. Only the first call counts. */
+  private settleCharge(response: Response, status: 'completed' | 'partial' | 'aborted', usage?: UsageMetadata, extra: { estimateUsd?: number; streamedChars?: number } = {}): void {
+    const charge = this.charges.get(response);
+    if (!charge) return;
+    this.charges.delete(response);
+    const info = charge.model ? this.models.get(charge.model) : undefined;
+    let estimateUsd = extra.estimateUsd ?? usage?.estimatedCostUsd;
+    // A stream that broke off before its usage chunk: the request plus what streamed (about 4 characters a token).
+    if (status !== 'completed' && usage?.outputTokens === undefined) estimateUsd = estimateCostUsd(info ?? { id: '' }, usage?.inputTokens ?? charge.inputTokens, Math.ceil((extra.streamedChars ?? 0) / 4), usage?.cachedInputTokens) ?? estimateUsd;
+    charge.finish({ status, ...(usage?.requestId ? { requestId: usage.requestId } : {}), ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}), ...(usage?.cachedInputTokens !== undefined ? { cachedInputTokens: usage.cachedInputTokens } : {}), ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}), ...(estimateUsd !== undefined ? { estimateNanoUsd: usdToNano(estimateUsd) } : {}) });
+  }
+
+  private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean; spendKind?: SpendKind; secret?: string } = {}): Promise<Response> {
     const url = `${this.options.baseUrl.replace(/\/$/, '')}${path}`;
     // One retry layer: the agent loop backs off between model turns. Here, at most one quick retry,
     // and only for failures that are usually momentary (never for 429 or 503).
@@ -663,6 +820,12 @@ export class NearAiClient {
     const responseTimeoutMs = Math.max(1, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
     if (!isSecureEndpoint(url)) throw new NearAiError(0, 'NEAR AI endpoint must use HTTPS; plain HTTP is only allowed for localhost.', false);
     const model = overrides.model;
+    const billable = BILLABLE_PATHS.has(path) && (init.method ?? 'GET') === 'POST' && this.options.spend !== undefined;
+    if (billable) {
+      // The daily limit is checked before every billable request, whoever sends it.
+      const reached = this.options.spend!.limitReached();
+      if (reached) throw new SpendLimitError(reached.spentUsd, reached.limitUsd, reached.source);
+    }
     const release = await this.admit(model, init.signal ?? undefined, overrides.failFast === true);
     const quickRetry = () => waitForRetry(Math.round(retryBaseDelayMs * (0.5 + random())), 0, init.signal ?? undefined);
     try {
@@ -680,6 +843,8 @@ export class NearAiClient {
             headers: { ...(this.options.apiKey ? { authorization: `Bearer ${this.options.apiKey}` } : {}), ...(init.headers ?? {}) }
           });
         } catch (error) {
+          // Sent but cancelled or timed out before NEAR answered: NEAR may still have done (and billed) the work.
+          if (billable && (init.signal?.aborted || timedOut)) this.charge(path, init, model, overrides.spendKind, undefined, 'aborted');
           if (init.signal?.aborted) throw error;
           if (timedOut) {
             if (attempt < maxRetries) { await quickRetry(); continue; }
@@ -693,14 +858,16 @@ export class NearAiClient {
           init.signal?.removeEventListener('abort', forwardAbort);
         }
         if (init.signal?.aborted) {
+          if (billable && response.ok) this.charge(path, init, model, overrides.spendKind, response, 'aborted');
           await response.body?.cancel().catch(() => undefined);
           throw new DOMException('The operation was aborted.', 'AbortError');
         }
         if (response.ok) {
           if (model) this.cooling.delete(model);
+          if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');
           return response;
         }
-        const failure = await this.failureFrom(response, init.method ?? 'GET', path, model, release !== undefined);
+        const failure = await this.failureFrom(response, init.method ?? 'GET', path, model, release !== undefined, overrides.secret);
         if (failure.retryable && attempt < maxRetries && [500, 502, 504].includes(response.status) && (failure.retryAfterMs ?? 0) <= 1_000) {
           await quickRetry();
           continue;
@@ -713,12 +880,14 @@ export class NearAiClient {
   }
 
   /** Reads (and so releases) a failed response's body, logs it, and turns it into a NearAiError with NEAR's own message. */
-  private async failureFrom(response: Response, method: string, path: string, model: string | undefined, wasProbe: boolean): Promise<NearAiError> {
+  private async failureFrom(response: Response, method: string, path: string, model: string | undefined, wasProbe: boolean, secret?: string): Promise<NearAiError> {
     const status = response.status;
     const headers = response.headers;
     const requestId = headers.get('inference-id') ?? headers.get('x-request-id') ?? undefined;
     const retryAfterMs = parseRetryAfter(headers.get('retry-after-ms'), this.now(), 'ms') ?? parseRetryAfter(headers.get('retry-after'), this.now());
-    const body = errorBodyDetails(await readErrorBody(response), this.options.apiKey);
+    let body = errorBodyDetails(await readErrorBody(response), this.options.apiKey);
+    if (secret) body = Object.fromEntries(Object.entries(body).map(([key, value]) => [key, typeof value === 'string' ? value.split(secret).join('[REDACTED]') : value]));
+    path = path.replace(/\?.*$/, '');
     const retryable = classifyRetryableFailure(status);
     let cooldownMs: number | undefined;
     if (model && (status === 429 || status === 503)) cooldownMs = this.startCooling(model, retryAfterMs, wasProbe);
@@ -726,9 +895,16 @@ export class NearAiClient {
     headers.forEach((value, name) => { if (/^(x-)?ratelimit|^retry-after/i.test(name)) limits.push(`${name}=${value.slice(0, 80)}`); });
     diagnose(`HTTP ${status} ${method} ${path}${model ? ` model=${model}` : ''}${requestId ? ` request=${requestId}` : ''}${limits.length ? ` ${limits.join(' ')}` : ''}${body.errorType ? ` type=${body.errorType}` : ''}${body.errorCode ? ` code=${body.errorCode}` : ''}${body.detail ? ` message="${body.detail}"` : ''}${cooldownMs !== undefined ? ` cooldown=${Math.round(cooldownMs / 1000)}s` : ''}`);
     const kind = [body.errorType, body.errorCode].filter(Boolean).join(', ');
-    const message = `NEAR AI request failed with HTTP ${status}${model ? ` for ${model}` : ''}${body.detail ? `: ${body.detail}` : ''}${kind ? ` (${kind})` : ''}.`;
+    // 402: the organization is out of credits or this key's spend limit on NEAR AI Cloud is reached.
+    const message = status === 402
+      ? `NEAR spend limit reached: NEAR AI Cloud refused the request because the organization's credits or this API key's spend limit are used up${body.detail ? ` (NEAR says: ${body.detail})` : ''}.`
+      : `NEAR AI request failed with HTTP ${status}${model ? ` for ${model}` : ''}${body.detail ? `: ${body.detail}` : ''}${kind ? ` (${kind})` : ''}.`;
     return new NearAiError(status, message, retryable, requestId, { ...body, retryAfterMs, model });
   }
+}
+
+function safeJson(text: string): unknown {
+  try { return JSON.parse(text); } catch { return undefined; }
 }
 
 async function jsonRows(response: Response): Promise<Array<Record<string, unknown>>> {
@@ -769,7 +945,7 @@ export function normalizeModelInfo(model: Record<string, unknown>, fetchedAt = n
   const imagePrice = numberValue(pricing.image_per_unit ?? pricing.imagePricePerUnit ?? pricing.image ?? model.image_price_per_unit ?? model.imagePricePerUnit);
   const videoPrice = numberValue(pricing.video_per_unit ?? pricing.videoPricePerUnit ?? pricing.video ?? model.video_price_per_unit ?? model.videoPricePerUnit);
   const requestPrice = numberValue(pricing.request_per_unit ?? pricing.requestPricePerUnit ?? pricing.request ?? model.request_price_per_unit ?? model.requestPricePerUnit);
-  const maxOutputTokens = numberValue(model.max_output_tokens ?? model.maxOutputTokens ?? model.max_tokens);
+  const maxOutputTokens = numberValue(model.max_output_tokens ?? model.max_output_length ?? model.maxOutputTokens ?? objectValue(model.top_provider).max_completion_tokens ?? model.max_tokens);
   if (name !== undefined) normalized.name = name;
   if (contextLength !== undefined) normalized.contextLength = contextLength;
   if (inputPrice !== undefined) normalized.inputPricePerMillion = inputPrice;

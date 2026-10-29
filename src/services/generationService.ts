@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ActivityStore } from './activityStore';
+import { withSpendTag } from './spendLedger';
 import type { ApprovalService } from './approvalService';
 import type { CapabilityRouter } from './capabilityRouter';
 import type { CapabilityEvaluation, ModelCapabilitySnapshot } from '../domain/capabilities';
@@ -357,14 +358,14 @@ export class NearAiGenerationAdapter implements GenerationProviderAdapter {
   public constructor(private readonly client: NearAiClient) {}
 
   public async createImage(input: GenerationProviderInput): Promise<ProviderGenerationResult> {
-    const result = await this.client.generateImage(input.model, input.prompt, { count: input.parameters.count, size: input.parameters.size, quality: input.parameters.quality }, input.signal);
+    const result = await withSpendTag({ kind: 'generation' }, () => this.client.generateImage(input.model, input.prompt, { count: input.parameters.count, size: input.parameters.size, quality: input.parameters.quality }, input.signal));
     return { status: result.bytes ? 'completed' : 'failed', requestId: result.requestId, bytes: result.bytes, usage: usageFromProvider(result.usage, result.requestId), errorCode: result.remoteUrlPresent && !result.bytes ? 'remote-url-not-stored' : undefined };
   }
 
   public async editImage(input: GenerationProviderInput): Promise<ProviderGenerationResult> {
     if (input.rawContentHandles.length !== 1) throw new GenerationError('raw-content-not-approved', 'Image edit requires exactly one host-managed source image.');
     const bytes = await fs.readFile(input.rawContentHandles[0].managedPath);
-    const result = await this.client.editImage(input.model, input.prompt, bytes, { size: input.parameters.size, quality: input.parameters.quality }, input.signal);
+    const result = await withSpendTag({ kind: 'generation' }, () => this.client.editImage(input.model, input.prompt, bytes, { size: input.parameters.size, quality: input.parameters.quality }, input.signal));
     return { status: result.bytes ? 'completed' : 'failed', requestId: result.requestId, bytes: result.bytes, usage: usageFromProvider(result.usage, result.requestId), errorCode: result.remoteUrlPresent && !result.bytes ? 'remote-url-not-stored' : undefined };
   }
 }

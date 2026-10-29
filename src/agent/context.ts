@@ -1,5 +1,6 @@
 import { contextLevel } from '../domain/continuity';
 import type { AgentMessage, CompletionEvent, ToolDefinition } from '../services/nearAiClient';
+import { withSpendTag } from '../services/spendLedger';
 
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 /** Open-GSD's defaults: warn when 35% of the window remains, act at 25%. */
@@ -67,8 +68,12 @@ export async function compactConversation(client: Client, model: string, message
     { role: 'system', content: 'You compress an agent conversation so the work can continue in a smaller context. Write a faithful summary, not a new answer.' },
     { role: 'user', content: `Summarize this conversation for the agent continuing it. Keep: the user's goal and constraints, decisions made, files read and changed (with paths), commands run and their results, errors still open, the current state, and the exact next steps. Be specific and concise.\n\n<conversation>\n${transcript}\n</conversation>` }
   ];
-  let summary = '';
-  for await (const event of client.streamCompletion(model, request, [], signal)) if (event.type === 'done') summary = event.message.content ?? '';
+  // Recorded in the spend ledger as a summary request of the run that needed it.
+  const summary = await withSpendTag({ kind: 'summary' }, async () => {
+    let text = '';
+    for await (const event of client.streamCompletion(model, request, [], signal)) if (event.type === 'done') text = event.message.content ?? '';
+    return text;
+  });
   if (!summary.trim()) throw new Error('The model returned an empty summary.');
   return [...system, { role: 'user', content: `<conversation-summary>\nEarlier parts of this conversation were summarized to save context:\n\n${summary.trim()}\n</conversation-summary>` }, { role: 'assistant', content: 'Understood. Continuing from the summary.' }, ...recent];
 }

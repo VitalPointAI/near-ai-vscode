@@ -1,6 +1,7 @@
 import { OrganizationProfile, ProjectCredentialScope, ResolvedProvider, isProjectCredentialScope, localKeyScope } from '../domain/auth';
 import { AuthService } from './auth';
 import { NearAiClient } from './nearAiClient';
+import { spendAccountFor } from './spendAccount';
 
 export interface CreateNearAiProviderOptions {
   auth: AuthService;
@@ -15,7 +16,9 @@ async function clientsFor(options: CreateNearAiProviderOptions): Promise<{ clien
   if (!isProjectCredentialScope(scope) || scope.profileId !== profile.profileId) throw new Error('The provider scope does not match the selected profile.');
   const apiKey = await auth.getScopedApiKeyFor(scope, profile.baseUrl) ?? '';
   if (!apiKey && profile.provider !== 'local') throw new Error('The selected profile has no configured credential.');
-  const client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn });
+  // Every billable response of a NEAR AI Cloud key goes to that key's spend ledger; a local runtime bills nothing.
+  const spend = profile.provider === 'local' ? undefined : spendAccountFor(profile.baseUrl, apiKey);
+  const client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn, ...(spend ? { spend, spendTag: { projectId: scope.projectId } } : {}) });
   if (profile.provider !== 'hybrid' || !profile.localBaseUrl) return { client };
   const localApiKey = await auth.getScopedApiKeyFor(localKeyScope(scope), profile.localBaseUrl) ?? '';
   return { client, localClient: new NearAiClient({ baseUrl: profile.localBaseUrl, apiKey: localApiKey, fetchFn }) };

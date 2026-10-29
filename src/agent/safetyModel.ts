@@ -1,4 +1,5 @@
 import type { AgentMessage, UsageMetadata } from '../services/nearAiClient';
+import { withSpendTag } from '../services/spendLedger';
 
 // The model half of the `auto` approval mode: a quick verdict from a private model on a shell
 // command the deterministic rules could not decide. It fails closed: an error, a timeout, a rate
@@ -109,7 +110,7 @@ export class SafetyModelCheck implements CommandSafetyCheck {
     try {
       this.requests += 1;
       const reply = await Promise.race([
-        this.options.client.completeOnce(this.options.model, messages, { maxTokens: this.options.maxTokens ?? SAFETY_MAX_TOKENS, signal: abort.signal }),
+        withSpendTag({ kind: 'safety' }, () => this.options.client.completeOnce(this.options.model, messages, { maxTokens: this.options.maxTokens ?? SAFETY_MAX_TOKENS, signal: abort.signal })),
         new Promise<never>((_resolve, reject) => abort.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
       ]);
       this.options.onUsage?.(reply.usage);
