@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
@@ -12,7 +13,8 @@ export interface TeamMember { name: string; role?: string; model?: string; tools
 export interface TeamDefinition { slug: string; name: string; description: string; members: TeamMember[]; file: string }
 
 const MEMBER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'Remember', 'Recall', 'VectorizeImage', 'RenderSvg', 'CreatePresentation'];
+/** The tools a member gets when its section has no `tools:` line. */
+export const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'Remember', 'Recall', 'VectorizeImage', 'RenderSvg', 'CreatePresentation'];
 const MAX_VERSIONS = 20;
 
 export function slugify(value: string): string {
@@ -109,6 +111,13 @@ export class TeamLibrary {
   private get archiveDir(): string { return path.join(this.directory, '.archived'); }
   private versionsDir(slug: string): string { return path.join(this.directory, '.versions', slug); }
 
+  /** A project team's versions are kept per project, so one project's history never shows another's. */
+  private versionKey(file: string): string {
+    const dir = path.dirname(file);
+    if (path.basename(file) === 'team.md' && path.basename(dir) === '.near-ai' && path.basename(path.dirname(dir)) === '.planning') return `project-${createHash('sha256').update(path.resolve(dir, '..', '..')).digest('hex').slice(0, 12)}`;
+    return slugify(path.basename(file, '.md'));
+  }
+
   public static projectTeamFile(root: string): string { return path.join(root, '.planning', '.near-ai', 'team.md'); }
 
   public async list(root?: string): Promise<Array<{ team?: TeamDefinition; file: string; error?: string; project: boolean }>> {
@@ -142,8 +151,7 @@ export class TeamLibrary {
 
   /** Records the file's current contents as a version; called on every save. */
   public async snapshot(file: string): Promise<number> {
-    const slug = slugify(path.basename(file, '.md'));
-    const dir = this.versionsDir(slug);
+    const dir = this.versionsDir(this.versionKey(file));
     await mkdir(dir, { recursive: true });
     await copyFile(file, path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.md`));
     const versions = (await readdir(dir)).sort();
@@ -152,13 +160,18 @@ export class TeamLibrary {
   }
 
   public async versions(file: string): Promise<string[]> {
-    const dir = this.versionsDir(slugify(path.basename(file, '.md')));
+    const dir = this.versionsDir(this.versionKey(file));
     return (await readdir(dir).catch(() => [])).sort().reverse().map((name) => path.join(dir, name));
   }
 
-  public async archive(file: string): Promise<void> {
+  /** Moves a team into the archive; an earlier archived team of the same name is kept, never overwritten. */
+  public async archive(file: string): Promise<string> {
     await mkdir(this.archiveDir, { recursive: true });
-    await rename(file, path.join(this.archiveDir, path.basename(file)));
+    const base = path.basename(file, '.md');
+    let target = path.join(this.archiveDir, `${base}.md`);
+    for (let n = 2; await exists(target); n += 1) target = path.join(this.archiveDir, `${base}-${n}.md`);
+    await rename(file, target);
+    return target;
   }
 
   public async archived(): Promise<string[]> {
@@ -174,7 +187,7 @@ export class TeamLibrary {
 
   public async delete(file: string): Promise<void> {
     await rm(file, { force: true });
-    await rm(this.versionsDir(slugify(path.basename(file, '.md'))), { recursive: true, force: true });
+    await rm(this.versionsDir(this.versionKey(file)), { recursive: true, force: true });
   }
 
   /** Imports a team file from anywhere after checking it parses. */
