@@ -1,4 +1,4 @@
-// Build-then-review for the live model eval: one model does the task, a second reviews the work
+// Build-then-review for the live model eval (live.test.ts only): one model does the task, a second reviews the work
 // against the task and lists gaps, and the first fixes them in one more pass, as GSD's verifier and
 // gap closure do. Measures whether a cheap builder plus a review matches a stronger builder alone.
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { gradePlan, gradeResearch } from './evalGraders';
+import { gradePlan, gradeResearch } from '../benchmark/graders';
 
 // The eval's graders must reward the right things and catch the planted failures.
 

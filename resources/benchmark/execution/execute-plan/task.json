@@ -1,0 +1,4 @@
+{
+  "prompt": "Execute PLAN.md in this repository: complete every task in it, run the tests, and finish with a summary of what you changed. Do not modify test/store.test.js.",
+  "visibleTests": ["test/store.test.js"]
+}

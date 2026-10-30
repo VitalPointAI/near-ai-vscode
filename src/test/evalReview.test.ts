@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fixPrompt, parseCandidate, reviewPrompt, reviewVerdict } from './evalReview';
+import { fixPrompt, parseCandidate, reviewPrompt, reviewVerdict } from '../benchmark/review';
 
 test('a candidate is a builder alone or a builder with a reviewer', () => {
   assert.deepEqual(parseCandidate('z-ai/glm-5.3'), { builder: 'z-ai/glm-5.3' });

@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { gradeExecution, loadExecutionTasks, setUpExecutionTask } from './evalExecution';
+import { gradeExecution, loadExecutionTasks, setUpExecutionTask } from '../benchmark/execution';
 
 // The execution graders are checked before they judge models: an untouched project scores low,
 // a reference solution scores 10, and changing the given tests scores 0.

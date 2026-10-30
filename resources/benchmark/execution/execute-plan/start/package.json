@@ -1,0 +1,7 @@
+{
+  "name": "notes",
+  "version": "1.0.0",
+  "private": true,
+  "bin": { "notes": "src/cli.js" },
+  "scripts": { "test": "node --test" }
+}
