@@ -4,8 +4,9 @@ milestone: 0.4.x
 milestone_name: line
 current_phase: null
 status: idle
-last_updated: "2026-10-30T22:30:53.435Z"
-state_head: dd2f3d22656fc4b86cb53e1920ec0b4abad693f2
+stopped_at: Phase 25 context gathered
+last_updated: "2026-10-30T23:48:08.860Z"
+state_head: 6fb1522794e0fc44eb16c49b8c63916902546f7c
 progress:
   total_phases: 1
   completed_phases: 0
@@ -13,7 +14,6 @@ progress:
   completed_plans: 0
   percent: 0
 last_activity: 2026-10-30
-stopped_at: v0.5.0 paused; 0.4.5 published
 last_activity_desc: Added Phase 25 (cybersecurity harness) to the 0.4.x line with 12 requirements
 ---
 
@@ -35,3 +35,9 @@ Next: `/gsd-plan-phase 25` (cybersecurity harness), or `/gsd-quick` for small ch
 
 - v0.5.0 (trusted-source knowledge base) is paused here and moving to a separate project. Archive: `.planning/milestones/v0.5.0-paused/`. Code: local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted` (not pushed).
 - Release checklist for 0.4.x: tsc, lint, full `npm test`, full `npm run test:e2e` (both scenarios), `npm run verify:release`, then publish only with the owner's OK for that version.
+
+## Session
+
+**Last session:** 2026-10-30T23:48:08.826Z
+**Stopped at:** Phase 25 context gathered
+**Resume file:** .planning/phases/25-cybersecurity-harness-with-offensive-and-defensive-scanning/25-CONTEXT.md
