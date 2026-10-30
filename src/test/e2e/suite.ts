@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import * as path from 'node:path';
@@ -110,6 +111,30 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       await page.next('fromView', (message) => message.type === 'ready', readyAt);
       const again = await page.next('toView', (message) => message.type === 'overview' && titles(message).includes('Say hi while hidden'), hidden);
       assert.ok(again, 'showing it again sends what happened meanwhile');
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }],
+    ['Compare Models opens, lists the key\'s models, and grades with the hidden tests inside VS Code', async () => {
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { comparisonTap } = require(path.join(extension.extensionPath, 'dist/services/modelComparisonPanel')) as typeof import('../../services/modelComparisonPanel');
+      const page = new Observer();
+      comparisonTap.toView = (message) => page.record(page.toView, message);
+      comparisonTap.fromView = (message) => page.record(page.fromView, message);
+      await vscode.commands.executeCommand('nearAi.compareModels');
+      await page.next('fromView', (message) => message.type === 'ready');
+      const state = (await page.next('toView', (message) => message.type === 'state')).state as { catalog: Array<{ id: string }>; leaderboard: unknown[]; taskSets: Array<{ id: string; tasks: unknown[] }> };
+      assert.deepEqual(state.catalog.map((entry) => entry.id), ['fake-coder']);
+      assert.deepEqual(state.leaderboard, []);
+      assert.deepEqual(state.taskSets.map((set) => [set.id, set.tasks.length]), [['full', 8], ['short', 4]]);
+      // The page asks for an estimate on load; one model is not enough to compare.
+      const estimate = await page.next('toView', (message) => message.type === 'estimate');
+      assert.match(String(estimate.problem), /at least 2/);
+      // The hidden-test grader runs Node.js from the extension host (Electron as Node.js), not from PATH.
+      const { gradeExecution, loadExecutionTasks, setUpExecutionTask } = require(path.join(extension.extensionPath, 'dist/benchmark/execution')) as typeof import('../../benchmark/execution');
+      const [task] = (await loadExecutionTasks()).filter((candidate) => candidate.name === 'spec-implement');
+      const root = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-grade-'));
+      await setUpExecutionTask(task, root, true);
+      const graded = await gradeExecution(task, root);
+      assert.deepEqual({ score: graded.score, misses: graded.misses }, { score: 10, misses: [] });
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     }],
     ['a file write asks for approval, applies on approval, and Revert removes it', async () => {

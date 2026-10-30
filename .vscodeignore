@@ -16,6 +16,8 @@ node_modules/**
 .gitignore
 .vscode-test/**
 docs/*.pdf
+# Reference solutions only check the benchmark's graders (evalExecution.test.ts); Compare Models never needs them.
+resources/benchmark/**/reference/**
 
 # Live model-eval results (NEAR_LIVE_EVAL_OUT)
 eval-*.json

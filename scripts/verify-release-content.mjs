@@ -95,6 +95,11 @@ const required = [
   'extension/media/tools/tools.css',
   'extension/media/teams/teams.js',
   'extension/media/teams/teams.css',
+  'extension/media/compare/compare.js',
+  'extension/media/compare/compare.css',
+  'extension/resources/benchmark/execution/execute-plan/task.json',
+  'extension/resources/benchmark/execution/issue-fix/hidden/report.test.js',
+  'extension/resources/benchmark/execution/spec-implement/start/SPEC.md',
   'extension/sbom.cdx.json',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];
@@ -129,6 +134,7 @@ const forbiddenPatterns = [
   /(?:^|\/)\.[^/]+\.tsbuildinfo$/,
   /(?:^|\/)[^/]+\.ts$/,
   /^extension\/(?:tsconfig\.json|package-lock\.json|\.gitignore)$/,
+  /^extension\/resources\/benchmark\/.*\/reference(?:\/|$)/,
   /^extension\/\.git(?:-real)?(?:\/|$)/
 ];
 const forbidden = entries.filter((entry) => forbiddenPatterns.some((pattern) => pattern.test(entry)));

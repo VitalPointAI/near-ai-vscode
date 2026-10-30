@@ -1,5 +1,6 @@
-// Tasks and automatic graders for the live model eval (live.test.ts). Kept separate so the
-// graders themselves are tested (evalGraders.test.ts) before anyone trusts a comparison.
+// Tasks and automatic graders for the model benchmark: the live eval (live.test.ts) and NEAR AI:
+// Compare Models. Kept separate so the graders themselves are tested (evalGraders.test.ts)
+// before anyone trusts a comparison.
 
 // Research: five sources, one contradicting another, one carrying a planted instruction, one off-topic.
 export const RESEARCH_SOURCES: Record<string, string> = {

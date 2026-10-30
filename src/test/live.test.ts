@@ -1,26 +1,21 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { prepareAttachments, stageAttachment } from '../agent/attachments';
-import { RunCheckpoints } from '../agent/checkpoints';
-import { AgentRun } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
-import { ShellSession } from '../agent/shell';
-import { agentSystemPrompt } from '../agent/systemPrompt';
-import { CORE_TOOLS } from '../agent/tools';
 import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 import { DEFAULT_ROLE_MODELS, loadAgents, loadSkills } from '../gsd/library';
 import { gsdShellEnv } from '../gsd/runtime';
 import { ActivityFeed, timeBreakdown } from '../services/agentActivity';
 import { AgentConversation, findSkill } from '../services/agentSession';
-import { gradeExecution, loadExecutionTasks, setUpExecutionTask, type ExecutionTask } from './evalExecution';
-import { fixPrompt, parseCandidate, REVIEW_FILE, reviewPrompt, reviewVerdict } from './evalReview';
-import { gradePlan, gradeResearch, PLAN_PROMPT, PLAN_SPEC, RESEARCH_PROMPT, RESEARCH_SOURCES } from './evalGraders';
+import { fixPrompt, parseCandidate, REVIEW_FILE, reviewPrompt, reviewVerdict } from '../benchmark/review';
+import { runAgentInFolder } from '../benchmark/runner';
+import { CODING_TASKS, costOf, gradeTask, loadBenchmarkTasks, runMetrics, setUpTask } from '../benchmark/tasks';
 import { NearAiClient, type ModelInfo, type UsageMetadata } from '../services/nearAiClient';
 
 // Live tests against NEAR AI Cloud. They spend real money (cents), so they are opt-in:
@@ -36,16 +31,6 @@ const baseUrl = process.env.NEAR_AI_BASE_URL ?? 'https://cloud-api.near.ai/v1';
 const skip = key ? false : 'set NEAR_AI_API_KEY to run live NEAR AI tests';
 const run = promisify(execFile);
 
-/**
- * Whether the task's tests pass. This file runs under `node --test`, whose NODE_TEST_CONTEXT makes
- * a child `node --test` exit 0 even when tests fail, so the child gets an environment without it.
- */
-async function testsPass(root: string): Promise<boolean> {
-  const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
-  return run(process.execPath, ['--test'], { cwd: root, env }).then(() => true, () => false);
-}
-
 async function client(): Promise<{ client: NearAiClient; models: ModelInfo[] }> {
   const near = new NearAiClient({ baseUrl, apiKey: key! });
   const models = await near.listModels();
@@ -59,22 +44,8 @@ function pick(models: ModelInfo[], pattern: RegExp): string | undefined {
 
 /** Runs the harness non-interactively in `root` and returns the outcome and usage. */
 async function agent(near: NearAiClient, model: string, root: string, prompt: string, maxTurns = 30): Promise<{ outcome: string; answer: string; usage: UsageMetadata[]; ms: number; changed: string[] }> {
-  const shell = new ShellSession(root);
-  const started = Date.now();
-  const checkpoints = new RunCheckpoints(`live-${Date.now()}`);
-  try {
-    const result = await new AgentRun({
-      client: near, model, tools: CORE_TOOLS, maxTurns,
-      context: { root, checkpoints, shell, readFiles: new Set() },
-      policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES,
-      requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined
-    // The production system prompt, so the eval measures models as the extension runs them.
-    }).run([{ role: 'system', content: agentSystemPrompt({ root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: false, model }) }, { role: 'user', content: prompt }], new AbortController().signal);
-    const answer = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content ?? '';
-    return { outcome: result.outcome, answer: String(answer), usage: result.usage, ms: Date.now() - started, changed: checkpoints.changedFiles };
-  } finally {
-    shell.dispose();
-  }
+  // The production system prompt and loop (shared with NEAR AI: Compare Models); every action is allowed here.
+  return runAgentInFolder(near, model, root, prompt, { maxTurns, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }) });
 }
 
 test('live: GLM 5.3 reads a file through a tool round trip, the response verifies, and billing reports the cost', { skip, timeout: 180_000 }, async () => {
@@ -96,23 +67,7 @@ test('live: GLM 5.3 reads a file through a tool round trip, the response verifie
   assert.ok(cost !== undefined && cost > 0);
 });
 
-const TASKS: Array<{ name: string; files: Record<string, string>; prompt: string }> = [
-  {
-    name: 'implement',
-    files: { 'slug.js': 'module.exports = function slugify(text) {\n  throw new Error("not implemented");\n};\n', 'slug.test.js': 'const test = require("node:test");\nconst assert = require("node:assert");\nconst slugify = require("./slug");\ntest("slugify", () => {\n  assert.equal(slugify("Hello, World!"), "hello-world");\n  assert.equal(slugify("  Many   spaces  "), "many-spaces");\n  assert.equal(slugify("Ünïcödé café"), "unicode-cafe");\n  assert.equal(slugify("---"), "");\n});\n' },
-    prompt: 'Implement slugify in slug.js so `node --test` passes. Do not change the test.'
-  },
-  {
-    name: 'fix-bug',
-    files: { 'cart.js': 'function total(items, discount) {\n  let sum = 0;\n  for (let i = 1; i < items.length; i++) sum += items[i].price * items[i].qty;\n  return discount ? sum - sum * discount : sum;\n}\nmodule.exports = { total };\n', 'cart.test.js': 'const test = require("node:test");\nconst assert = require("node:assert");\nconst { total } = require("./cart");\ntest("total", () => {\n  assert.equal(total([{ price: 2, qty: 3 }, { price: 1, qty: 1 }]), 7);\n  assert.equal(total([{ price: 10, qty: 1 }], 0.1), 9);\n  assert.equal(total([]), 0);\n});\n' },
-    prompt: 'The tests in cart.test.js fail. Find and fix the bug in cart.js; run `node --test` to confirm.'
-  },
-  {
-    name: 'refactor',
-    files: { 'a.js': 'const { fetchUser } = require("./api");\nmodule.exports = (id) => fetchUser(id).name;\n', 'b.js': 'const { fetchUser } = require("./api");\nmodule.exports = (id) => fetchUser(id).email;\n', 'api.js': 'exports.fetchUser = (id) => ({ id, name: "n" + id, email: id + "@x" });\n', 'rename.test.js': 'const test = require("node:test");\nconst assert = require("node:assert");\ntest("renamed", () => {\n  const api = require("./api");\n  assert.equal(typeof api.getUser, "function");\n  assert.equal(api.fetchUser, undefined);\n  assert.equal(require("./a")(1), "n1");\n  assert.equal(require("./b")(2), "2@x");\n});\n' },
-    prompt: 'Rename fetchUser to getUser everywhere (api.js and every caller) so `node --test` passes.'
-  }
-];
+const TASKS = CODING_TASKS;
 
 // No overall timeout: the eval's length grows with models x runs (a slow model took ~4h alone), each run is
 // bounded by its turn limit, and progress prints per run.
@@ -123,31 +78,21 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
   const candidates = wanted.filter((spec) => { const { builder, reviewer } = parseCandidate(spec); return offered(builder) && offered(reviewer); });
   assert.ok(candidates.length, `none of ${wanted.join(', ')} is offered`);
   const runs = Math.max(1, Number(process.env.NEAR_LIVE_EVAL_RUNS ?? 2));
-  const tasks: Array<{ name: string; kind: 'coding' | 'research' | 'planning' | 'execution'; files: Record<string, string>; prompt: string; execution?: ExecutionTask }> = [
-    ...TASKS.map((task) => ({ name: task.name, kind: 'coding' as const, files: task.files, prompt: task.prompt })),
-    { name: 'research-brief', kind: 'research' as const, files: RESEARCH_SOURCES, prompt: RESEARCH_PROMPT },
-    { name: 'phase-plan', kind: 'planning' as const, files: { 'spec.md': PLAN_SPEC }, prompt: PLAN_PROMPT },
-    // Building from a plan, an issue, or a spec in a multi-file project, scored by acceptance tests the model never sees.
-    ...(await loadExecutionTasks()).map((task) => ({ name: task.name, kind: 'execution' as const, files: {}, prompt: task.prompt, execution: task }))
-  ];
+  // Coding, research, planning, and building from a plan, an issue, or a spec in a multi-file project
+  // (scored by acceptance tests the model never sees): the same tasks and graders NEAR AI: Compare Models uses.
+  const tasks = (await loadBenchmarkTasks()).map((benchmark) => ({ name: benchmark.id, kind: benchmark.kind, prompt: benchmark.prompt, benchmark }));
   const total = candidates.length * tasks.length * runs;
   const rows: Array<{ model: string; task: string; kind: string; run: number; score: number; outOf: number; outcome: string; review?: string; turns: number; seconds: number; tokPerSec?: number; costUsd?: number; reviewCostUsd?: number; cachePct: number; misses: string }> = [];
-  const costOf = async (usage: UsageMetadata[]) => {
-    const actual = await near.actualCostsUsd(usage.map((turn) => turn.requestId!).filter(Boolean)).catch(() => undefined);
-    const estimated = usage.reduce((sum, turn) => sum + (turn.estimatedCostUsd ?? 0), 0);
-    return { usd: actual ?? (estimated > 0 ? estimated : undefined), estimated: actual === undefined };
-  };
   for (const model of candidates) {
     const { builder, reviewer } = parseCandidate(model);
     for (const task of tasks) {
       for (let attempt = 1; attempt <= runs; attempt += 1) {
         const root = await mkdtemp(path.join(tmpdir(), `near-ai-eval-${task.name}-`));
-        for (const [name, content] of Object.entries(task.files)) { await mkdir(path.dirname(path.join(root, name)), { recursive: true }); await writeFile(path.join(root, name), content); }
-        if (task.execution) await setUpExecutionTask(task.execution, root);
+        await setUpTask(task.benchmark, root);
         let outcome = 'error';
         let usage: UsageMetadata[] = [];
         let ms = 0;
-        const turnLimit = task.kind === 'execution' ? 50 : 30;
+        const turnLimit = task.benchmark.maxTurns;
         try { ({ outcome, usage, ms } = await agent(near, builder, root, task.prompt, turnLimit)); } catch (error) { outcome = `error: ${(error as Error).message.slice(0, 80)}`; }
         // With a reviewer: it lists gaps in REVIEW.md, and the builder gets one pass to fix them.
         let review: string | undefined;
@@ -170,35 +115,14 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
             }
           } catch (error) { review = `error: ${(error as Error).message.slice(0, 80)}`; }
         }
-        let score = 0;
-        let outOf = 10;
-        let misses: string[] = [];
-        if (task.execution) ({ score, misses } = await gradeExecution(task.execution, root));
-        else if (task.kind === 'coding') {
-          // Passing only counts if the tests are the ones it was given.
-          const changed = [];
-          for (const [name, content] of Object.entries(task.files)) if (/\.test\.js$/.test(name) && await readFile(path.join(root, name), 'utf8').catch(() => '') !== content) changed.push(name);
-          if (changed.length) misses = [`changed the test: ${changed.join(', ')}`];
-          else if (!await testsPass(root)) misses = ['tests fail'];
-          score = misses.length ? 0 : 10;
-        }
-        else {
-          const file = path.join(root, task.kind === 'research' ? 'brief.md' : 'PLAN.md');
-          const text = await readFile(file, 'utf8').catch(() => '');
-          ({ score, misses } = text ? (task.kind === 'research' ? gradeResearch(text) : gradePlan(text)) : { score: 0, misses: [`no ${path.basename(file)} written`] });
-          outOf = 10;
-        }
-        const built = await costOf(usage);
-        const reviewed = reviewUsage.length ? await costOf(reviewUsage) : undefined;
+        // Coding passes only with the tests it was given; research and planning are checked line by line; execution by hidden tests.
+        const { score, outOf, misses } = await gradeTask(task.benchmark, root);
+        const built = await costOf(near, usage);
+        const reviewed = reviewUsage.length ? await costOf(near, reviewUsage) : undefined;
         const costUsd = built.usd === undefined && reviewed?.usd === undefined ? undefined : (built.usd ?? 0) + (reviewed?.usd ?? 0);
         const estimatedCost = built.estimated || reviewed?.estimated === true;
         const all = [...usage, ...reviewUsage];
-        const input = all.reduce((sum, turn) => sum + (turn.inputTokens ?? 0), 0);
-        const cachePct = input ? Math.round((100 * all.reduce((sum, turn) => sum + (turn.cachedInputTokens ?? 0), 0)) / input) : 0;
-        // Generation speed, not counting the wait for each reply's first token.
-        const generatingMs = all.reduce((sum, turn) => sum + Math.max(0, turn.latencyMs - (turn.firstTokenMs ?? 0)), 0);
-        const output = all.reduce((sum, turn) => sum + (turn.outputTokens ?? 0), 0);
-        const tokPerSec = generatingMs > 0 && output ? Math.round(output / (generatingMs / 1000)) : undefined;
+        const { cachePct, tokPerSec } = runMetrics(all);
         rows.push({ model, task: task.name, kind: task.kind, run: attempt, score, outOf, outcome, ...(review ? { review } : {}), turns: all.length, seconds: Math.round(ms / 1000), ...(tokPerSec !== undefined ? { tokPerSec } : {}), ...(costUsd !== undefined ? { costUsd } : {}), ...(reviewed?.usd !== undefined ? { reviewCostUsd: reviewed.usd } : {}), cachePct, misses: misses.join('; ') });
         // Report each run as it finishes, so a long eval never looks hung.
         console.log(`eval ${rows.length}/${total}: ${model} ${task.name} #${attempt}: ${score}/${outOf} (${outcome}${review ? `, review: ${review}` : ''}, ${all.length} turns, ${Math.round(ms / 1000)}s${tokPerSec !== undefined ? ` at ${tokPerSec} tok/s` : ''}${costUsd !== undefined ? `, $${costUsd.toFixed(4)}${estimatedCost ? ' est.' : ''}${reviewed?.usd !== undefined ? ` incl. $${reviewed.usd.toFixed(4)} review` : ''}` : ''}, ${cachePct}% cached)${misses.length ? ` missed: ${misses.join('; ')}` : ''}`);

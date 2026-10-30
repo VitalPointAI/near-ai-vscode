@@ -10,8 +10,8 @@ import * as path from 'node:path';
 // that a later event overwrites. An entry starts with its estimate and is settled later with
 // NEAR's actual cost (from /v1/billing/costs) in a separate record keyed by its inference-id.
 
-/** What a request was for, so displays can show where the money went. */
-export type SpendKind = 'main' | 'sub-agent' | 'safety' | 'summary' | 'attachment' | 'transcription' | 'image' | 'generation' | 'participant';
+/** What a request was for, so displays can show where the money went (`eval`: NEAR AI: Compare Models). */
+export type SpendKind = 'main' | 'sub-agent' | 'safety' | 'summary' | 'attachment' | 'transcription' | 'image' | 'generation' | 'participant' | 'eval';
 /** `open` while a stream is still arriving; `partial` when it broke off; `aborted` when it was cancelled or timed out. */
 export type SpendStatus = 'open' | 'completed' | 'partial' | 'aborted';
 
@@ -346,7 +346,7 @@ function parseRecord(line: string): LedgerRecord | undefined {
   const num = (key: string) => (typeof record[key] === 'number' && Number.isFinite(record[key]) && (record[key] as number) >= 0 ? record[key] as number : undefined);
   const str = (key: string) => (typeof record[key] === 'string' && record[key] ? (record[key] as string).slice(0, 200) : undefined);
   const status = ['open', 'completed', 'partial', 'aborted'].includes(String(record.st)) ? record.st as SpendStatus : undefined;
-  const kinds: SpendKind[] = ['main', 'sub-agent', 'safety', 'summary', 'attachment', 'transcription', 'image', 'generation', 'participant'];
+  const kinds: SpendKind[] = ['main', 'sub-agent', 'safety', 'summary', 'attachment', 'transcription', 'image', 'generation', 'participant', 'eval'];
   const kind = kinds.includes(record.kind as SpendKind) ? record.kind as SpendKind : undefined;
   return stripUndefined({ t: 'e' as const, id: record.id, v: record.v, w: str('w'), at: num('at'), end: num('end'), rid: str('rid'), model: str('model'), path: str('path'), kind, run: str('run'), conv: str('conv'), proj: str('proj'), agent: str('agent'), st: status, in: num('in'), cin: num('cin'), out: num('out'), est: num('est') });
 }
