@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.4.6
+
+- **Auto approve asks far less.** The safety check's model often used up its
+  answer length thinking and never gave a verdict, so the command asked you
+  ("the safety model's answer could not be read"). It now answers directly,
+  falls back to a second private model when the first is busy, and the card
+  says exactly why a check failed. The rules also clear more everyday work on
+  their own: deleting single files and build output (dist, node_modules, …),
+  installs from the lockfile, git pull, fetch, switch, stash, merge, revert and
+  cherry-pick, sed and awk that only print or substitute, wildcards that can
+  only match inside the workspace, and the project's own node_modules tools.
+- **Always allow from the approval card.** "Always allow "git push" in this
+  workspace" adds the command to `nearAi.agent.allowCommands` and applies at
+  once, including to each part of `cd app && git push`. Entries stay narrow:
+  `npm run build` rather than all scripts, never `--force`, a typed URL, `rm`,
+  `curl`, or an interpreter like `node` or `bash`.
+- **After a web search or MCP result, the safety check still runs.** Unclear
+  commands go to the private safety model, which is told the run read outside
+  content and is stricter; commands that can reach the network still ask.
+- **NEAR AI: Compare Models.** A leaderboard ranks every model you have tested
+  (overall score out of 10, coding, research, planning and execution, pass
+  rate, speed, cost, stalls, privacy, and the roles it holds). Below it, pick
+  2–6 models, see a cost estimate before anything is spent, and either reuse
+  saved results (so only a new model is run) or run everything again. Every
+  comparison is saved. "Use as…" puts a model into the main, deep, standard or
+  fast slot or an agent role in one click, with Undo. Also on the Tools page.
+- **Agent Activity shows where costs come from.** A Spend section says whether
+  figures are actual NEAR billing (your usage reporting token works), reconciled
+  per request, or estimated from list prices, with **Test token now** and **Fix
+  token**. It shows spend for today, this week, this month and this year, the
+  7-day burn rate, and **Top up credits** (opens the NEAR AI Cloud console;
+  NEAR has no payment link that works without signing in, and its API does not
+  give the remaining balance to an API key or reporting token). A stored
+  reporting token is now used from the start, not only after the first chat.
+
 ## 0.4.5
 
 - **Team Studio.** **NEAR AI: Team Studio** shows your teams as cards (members,
