@@ -195,6 +195,12 @@
         "title": "Manage MCP Connections",
         "category": "NEAR AI",
         "icon": "$(plug)"
+      },
+      {
+        "command": "nearAi.compareModels",
+        "title": "Compare Models",
+        "category": "NEAR AI",
+        "icon": "$(beaker)"
       }
     ],
     "viewsContainers": {

@@ -14,6 +14,7 @@ import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerMcpConnections } from './services/mcpView';
 import { openTools } from './services/toolsPage';
+import { registerModelComparison } from './services/modelComparisonPanel';
 import { openTeamStudio } from './services/teamStudioPanel';
 import { sharedTranscriptKey, TranscriptStore } from './services/transcripts';
 import { chooseGsdCommand } from './services/gsdCommands';
@@ -55,6 +56,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerSpendTracking(context);
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
+  registerModelComparison(context, auth);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {

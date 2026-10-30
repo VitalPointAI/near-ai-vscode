@@ -181,7 +181,10 @@
       line.append(button('Change', () => vscode.postMessage({ type: 'open-setting', key: use.setting }), { secondary: true, label: 'Change the ' + use.use + ' model setting' }));
       uses.append(line);
     }
-    root.append(el('h3', '', 'Used by your settings'), uses);
+    // Compare Models tests models on the same tasks and can put the winner into one of these roles.
+    const compare = el('p', 'hint');
+    compare.append(document.createTextNode('Not sure which model to use? '), runCommand('Compare models', 'nearAi.compareModels'));
+    root.append(el('h3', '', 'Used by your settings'), uses, compare);
     if (data.modelsProblem) root.append(el('p', 'hint', data.modelsProblem));
     if (!data.models.length) return;
     const head = el('h3', '', 'Available to your key'); head.id = 'catalog-title';
