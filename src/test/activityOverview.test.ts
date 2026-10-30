@@ -141,6 +141,8 @@ test('history pages newest first, with cost from the ledger, and each row opens 
   assert.equal(parseActivityViewMessage({ type: 'history-page', page: -1 }), undefined);
   assert.deepEqual(parseActivityViewMessage({ type: 'set-window', window: 'week' }), { type: 'set-window', window: 'week' });
   assert.equal(parseActivityViewMessage({ type: 'set-window', window: 'year' }), undefined);
+  // The spend section's actions carry nothing the page could choose: the host decides what each opens.
+  for (const type of ['test-token', 'fix-token', 'open-console'] as const) assert.deepEqual(parseActivityViewMessage({ type, url: 'https://evil.example' }), { type });
   assert.deepEqual(parseActivityViewMessage({ type: 'agent-control', agentId: 'gsd-planner-bbbbbb', action: 'pause' }), { type: 'agent-control', agentId: 'gsd-planner-bbbbbb', action: 'pause' });
   assert.equal(parseActivityViewMessage({ type: 'agent-control', agentId: 'x', action: 'pause' }), undefined);
 });

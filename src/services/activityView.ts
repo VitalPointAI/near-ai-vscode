@@ -7,9 +7,10 @@ import { ActivityStore } from './activityStore';
 import { ActivityEntry, ActivityFeed, AgentStats, timeBreakdown } from './agentActivity';
 import type { ChatWebviewMessage } from './chatBridge';
 import { readActivityLimits } from './settings';
-import { shownSpendAccount } from './spendAccount';
+import { SpendAccount, shownSpendAccount } from './spendAccount';
+import type { SpendInsight } from './spendInsight';
 import { DayBoundary, nanoToUsd, totalNanoUsd } from './spendLedger';
-import { currentReportingTokenHint, onReportingTokenChange, readDayBoundary, runReportingTokenHint } from './spendTracking';
+import { currentReportingTokenHint, onReportingTokenChange, openConsoleBilling, openReportingTokenSetting, readDayBoundary, reportingTokenState, runReportingTokenHint, testReportingToken } from './spendTracking';
 import { hintForView, ReportingTokenHint } from './reportingToken';
 
 // The Agent Activity page: an overview of agent activity, not a log (the chat shows the work
@@ -60,7 +61,13 @@ export type ActivityViewMessage =
   | { type: 'export'; format: 'markdown' | 'json' }
   | { type: 'export-usage' }
   /** The cost header's token link; the host decides what it runs. */
-  | { type: 'reporting-token' };
+  | { type: 'reporting-token' }
+  /** Spend: check the stored token against NEAR now. */
+  | { type: 'test-token' }
+  /** Spend: the token is failing; open the setting that links to Set and Clear. */
+  | { type: 'fix-token' }
+  /** Spend: open the NEAR AI Cloud console to top up or see the remaining credits. */
+  | { type: 'open-console' };
 
 const AGENT_ID = /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i;
 const WINDOWS: OverviewWindow[] = ['conversation', 'today', 'week'];
@@ -68,7 +75,7 @@ const WINDOWS: OverviewWindow[] = ['conversation', 'today', 'week'];
 export function parseActivityViewMessage(value: unknown): ActivityViewMessage | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const message = value as Record<string, unknown>;
-  if (message.type === 'ready' || message.type === 'show-in-chat' || message.type === 'export-usage' || message.type === 'reporting-token') return { type: message.type };
+  if (message.type === 'ready' || message.type === 'show-in-chat' || message.type === 'export-usage' || message.type === 'reporting-token' || message.type === 'test-token' || message.type === 'fix-token' || message.type === 'open-console') return { type: message.type };
   if (message.type === 'set-window' && WINDOWS.includes(message.window as OverviewWindow)) return { type: 'set-window', window: message.window as OverviewWindow };
   if (message.type === 'history-page' && Number.isInteger(message.page) && (message.page as number) >= 0 && (message.page as number) < 10_000) return { type: 'history-page', page: message.page as number };
   if (message.type === 'agent-control' && typeof message.agentId === 'string' && AGENT_ID.test(message.agentId) && (message.action === 'pause' || message.action === 'resume' || message.action === 'stop')) return { type: 'agent-control', agentId: message.agentId, action: message.action };
@@ -78,7 +85,7 @@ export function parseActivityViewMessage(value: unknown): ActivityViewMessage | 
 }
 
 /** Everything the page shows, in one message. */
-export function overviewMessage(input: { feed: ActivityFeed; sessions: ActivitySessionSummary[]; spend?: OverviewSpend; window: OverviewWindow; page: number; now?: number; boundary?: DayBoundary; hasProject?: boolean; token?: ReportingTokenHint }): Record<string, unknown> {
+export function overviewMessage(input: { feed: ActivityFeed; sessions: ActivitySessionSummary[]; spend?: OverviewSpend; window: OverviewWindow; page: number; now?: number; boundary?: DayBoundary; hasProject?: boolean; token?: ReportingTokenHint; insight?: SpendInsight }): Record<string, unknown> {
   const now = input.now ?? Date.now();
   const boundary = input.boundary ?? 'local';
   const live = input.feed.agentStats();
@@ -90,6 +97,8 @@ export function overviewMessage(input: { feed: ActivityFeed; sessions: ActivityS
     hasProject: input.hasProject !== false,
     // With a NEAR AI Cloud key's ledger, the cost header links to the usage reporting token.
     ...(input.spend && input.token ? { token: hintForView(input.token) } : {}),
+    // Where the costs come from, totals by period, burn rate, credits, and top up (a NEAR AI Cloud key only).
+    ...(input.spend && input.insight ? { insight: input.insight } : {}),
     running: nowRows(live, input.spend),
     summary: buildWindowSummary({ sessions: input.sessions, live, spend: input.spend, window: input.window, now, boundary, conversationId }),
     history: historyPage(input.sessions, input.page, input.spend, now)
@@ -153,7 +162,9 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
       }
     }
     if (!subscription) return;
-    const message = overviewMessage({ feed: activity, sessions, spend: shownSpendAccount(), window, page, boundary: readDayBoundary(), hasProject: Boolean(store), token: await currentReportingTokenHint() });
+    const account = shownSpendAccount();
+    const insight = account ? await spendInsightFor(account, reload) : undefined;
+    const message = overviewMessage({ feed: activity, sessions, spend: account, window, page, boundary: readDayBoundary(), hasProject: Boolean(store), token: await currentReportingTokenHint(), insight });
     // Nothing changed: no message, so the page does not redraw.
     const json = JSON.stringify({ ...message, now: 0 });
     if (json === lastJson && !reload) return;
@@ -206,8 +217,31 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
     else if (message.type === 'export') await exportActivity(activity, message.format);
     else if (message.type === 'export-usage') await vscode.commands.executeCommand('nearAi.exportAnalytics');
     else if (message.type === 'reporting-token') await runReportingTokenHint();
+    else if (message.type === 'fix-token') await openReportingTokenSetting();
+    else if (message.type === 'open-console') await openConsoleBilling();
+    else if (message.type === 'test-token') {
+      post({ type: 'token-test', running: true, text: 'Asking NEAR\'s usage summary…' });
+      const result = await testReportingToken(shownSpendAccount());
+      post({ type: 'token-test', running: false, ok: result.ok, text: result.text });
+      await send(true);
+    }
   }, undefined, context.subscriptions);
   view.onDidDispose(() => { stop(); panel = undefined; }, undefined, context.subscriptions);
+}
+
+/** The spend section's figures; the ledgers are read again at most every few seconds (or at once on `fresh`). */
+const INSIGHT_MS = 5_000;
+let insightCache: { account: SpendAccount; at: number; insight: SpendInsight; state: string } | undefined;
+async function spendInsightFor(account: SpendAccount, fresh: boolean): Promise<SpendInsight | undefined> {
+  const state = await reportingTokenState() ?? 'missing';
+  if (!fresh && insightCache && insightCache.account === account && insightCache.state === state && Date.now() - insightCache.at < INSIGHT_MS) return insightCache.insight;
+  try {
+    const insight = await account.insight(state);
+    insightCache = { account, at: Date.now(), insight, state };
+    return insight;
+  } catch {
+    return insightCache?.account === account ? insightCache.insight : undefined;
+  }
 }
 
 /**
@@ -280,6 +314,24 @@ export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
     <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col" class="num">Elapsed</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tool calls</th><th scope="col" class="num">Cost so far</th><th scope="col"><span class="sr-only">Controls</span></th>
   </tr></thead><tbody></tbody></table></div>
   <p id="focus-note" class="hint" role="status" hidden></p>
+</section>
+<section id="spend-section" aria-labelledby="spend-heading" hidden>
+  <div class="section-head">
+    <h2 id="spend-heading">Spend</h2>
+    <div class="actions">
+      <button id="test-token" type="button" class="secondary" title="Ask NEAR AI Cloud's usage summary with the stored usage reporting token now, and say whether it works" hidden>Test token now</button>
+      <button id="top-up" type="button" class="secondary">Top up credits</button>
+    </div>
+  </div>
+  <p class="source-line"><span class="source-key">Cost source:</span> <strong id="source-label" class="source-badge"></strong> <span id="source-detail" class="hint-inline"></span></p>
+  <p id="token-status" class="hint"></p>
+  <div id="token-problem" class="problem" role="alert" hidden><span id="token-problem-text"></span> <button id="fix-token" type="button" class="link" title="Open the setting that links to Set usage reporting token and Clear">Fix token</button></div>
+  <p id="token-test" class="hint" role="status" aria-live="polite" hidden></p>
+  <h3 id="periods-heading">Spent</h3>
+  <dl id="periods" class="totals periods" aria-labelledby="periods-heading"></dl>
+  <h3 id="credits-heading">Credits</h3>
+  <dl id="credits" class="pairs credits" aria-labelledby="credits-heading"></dl>
+  <p id="credits-note" class="hint" hidden>NEAR's API does not give an API key or a usage reporting token the remaining credits, so the time until they run out is not shown. <button id="open-console" type="button" class="link" title="Opens the NEAR AI Cloud console in your browser; you may need to sign in">See them in the NEAR AI Cloud console</button></p>
 </section>
 <section aria-labelledby="summary-heading">
   <div class="section-head">
