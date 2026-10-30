@@ -33,6 +33,12 @@ export interface CommandContext {
   gsdRun?: { trusted: boolean; reason?: string };
   /** Set while classifying what follows a trusted preamble: `gsd_run` is the managed gsd-tools. */
   gsdRunDefined?: boolean;
+  /**
+   * Whether one simple command (plain words, no operators) is on the user's allow list
+   * (nearAi.agent.allowCommands, including "always allow" choices). Each part of a chained
+   * command is checked on its own, so `cd app && git push` is covered by "git push".
+   */
+  isAllowListed?(command: string): boolean;
 }
 
 const safe = (reason: string): CommandClassification => ({ verdict: 'safe', reason });
@@ -335,6 +341,19 @@ function isTrustedGsdTool(word: Word | undefined, state: SegmentState, context: 
   return trustedRoots(context).some((trustedRoot) => ['gsd-tools.cjs', 'gsd_run'].some((file) => facts.absolute === path.join(trustedRoot, 'gsd-core', 'bin', file)));
 }
 
+/**
+ * A wildcard that can only match inside the workspace: a relative pattern with no `..`, no braces
+ * (which can name any path), and no wildcard in a dot-name (`.*` can match `..`).
+ */
+function isWorkspaceGlob(word: Word, state: SegmentState, context: CommandContext): boolean {
+  const value = valuePart(word.text);
+  if (word.expansion || value.startsWith('/') || value.startsWith('~') || value.includes('{')) return false;
+  const parts = value.split('/');
+  if (parts.some((part) => part === '..' || (part.startsWith('.') && /[*?[]/.test(part)))) return false;
+  const facts = pathFacts(value, state.cwd, context);
+  return facts.inside && !facts.sensitive;
+}
+
 /** The value of `--opt=value`, or the word itself. */
 function valuePart(text: string): string {
   const match = /^--?[A-Za-z0-9][\w-]*=(.*)$/.exec(text);
@@ -357,7 +376,11 @@ const NETWORK_SENDERS = new Set(['nc', 'ncat', 'netcat', 'socat', 'telnet', 'ftp
 const DELETERS = new Set(['rm', 'rmdir', 'unlink', 'shred', 'srm', 'truncate']);
 const POWER = new Set(['shutdown', 'reboot', 'halt', 'poweroff']);
 /** Reads files and prints; never writes or runs anything (with the option checks below). */
-const READ_ONLY = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'egrep', 'fgrep', 'rg', 'pwd', 'echo', 'printf', 'true', 'false', 'which', 'file', 'stat', 'du', 'tree', 'sort', 'uniq', 'cut', 'tr', 'diff', 'cmp', 'basename', 'dirname', 'realpath', 'readlink', 'date', 'jq', 'nl', 'column', 'od', 'xxd', 'hexdump', 'sha256sum', 'sha1sum', 'md5sum', 'shasum', 'comm', 'paste', 'fold', 'rev', 'tac', 'test', '[', 'whoami', 'uname', 'seq', 'sleep']);
+const READ_ONLY = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'egrep', 'fgrep', 'rg', 'pwd', 'echo', 'printf', 'true', 'false', 'which', 'file', 'stat', 'du', 'tree', 'sort', 'uniq', 'cut', 'tr', 'diff', 'cmp', 'basename', 'dirname', 'realpath', 'readlink', 'date', 'jq', 'nl', 'column', 'od', 'xxd', 'hexdump', 'sha256sum', 'sha1sum', 'md5sum', 'shasum', 'comm', 'paste', 'fold', 'rev', 'tac', 'test', '[', 'whoami', 'uname', 'seq', 'sleep', 'ps', 'pgrep', 'df', 'free', 'nproc', 'id', 'hostname', 'uptime', 'groups']);
+/** Folders a build, test run, or install regenerates; `rm -rf` of one inside the workspace runs without asking. */
+const BUILD_OUTPUT = new Set(['dist', 'build', 'out', 'coverage', 'node_modules', '.next', '.nuxt', '.turbo', '.parcel-cache', '.vite', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.vscode-test', '.nyc_output']);
+/** Installing what the lockfile already declares: no package names, only these options. */
+const LOCKFILE_INSTALL_OPTIONS = /^--(?:frozen-lockfile|immutable|prefer-offline|offline|no-audit|no-fund|no-progress|silent|quiet|legacy-peer-deps|ignore-scripts|include=\w+|omit=\w+|production|prod|check-files|loglevel=\w+)$|^-(?:s|q)$/;
 /** Writes inside the workspace only (every path argument is checked). */
 const WORKSPACE_WRITERS = new Set(['mkdir', 'touch', 'cp', 'mv', 'tee']);
 /** Test, build, lint, and type-check tools that are run directly or through npx. */
@@ -463,10 +486,31 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
     case 'switch':
       if (has('-C', '--force-create', '-f', '--force', '--discard-changes')) return risky('git switch with force discards changes or resets a branch');
       if ((words[0] === '-c' || words[0] === '--create') && words.length === 2 && !looksLikeOption(words[1])) return safe('git switch -c creates a new branch');
+      // Without --force, git refuses to switch over uncommitted changes it would lose.
+      if (words.length === 1 && !looksLikeOption(words[0])) return safe('git switch changes branch and keeps uncommitted changes');
       return unknown('git switch changes the checked-out branch');
     case 'restore':
-      if ((has('--staged') || shortFlag('S')) && !has('--worktree') && !shortFlag('W')) return unknown('git restore --staged unstages changes');
+      if ((has('--staged') || shortFlag('S')) && !has('--worktree') && !shortFlag('W')) return safe('git restore --staged only unstages changes');
       return risky('git restore discards uncommitted changes');
+    case 'fetch': case 'pull': {
+      // Named remotes only: a URL on the command line could carry data out.
+      if (words.some((word) => !looksLikeOption(word) && /:\/\/|^[\w.-]+@[\w.-]+:|^\/|^\.\.?\//.test(word))) return unknown(`${label} from a URL or path instead of a named remote`);
+      if (writesOrEscapes || has('--force', '-f', '--rebase', '-r', '--prune', '-p', '--prune-tags', '--refmap', '--recurse-submodules')) return unknown(`${label} with options that can rewrite or remove local work`);
+      return safe(sub === 'fetch' ? 'git fetch downloads from a named remote and changes no local work' : 'git pull merges from a named remote; git stops before overwriting uncommitted changes');
+    }
+    case 'merge':
+      if (has('--abort', '--continue', '--quit')) return safe(`git merge ${words[0]} finishes or undoes a merge in progress`);
+      if (writesOrEscapes || has('-s', '--strategy', '-X', '--strategy-option', '--allow-unrelated-histories', '--squash')) return unknown('git merge with a strategy option');
+      return words.length && words.every((word) => !looksLikeOption(word) || ['--no-ff', '--ff-only', '--ff', '--no-edit', '--no-commit'].includes(word) || /^-m$/.test(word)) ? safe('git merge records a merge commit, which can be undone') : unknown('git merge');
+    case 'revert': case 'cherry-pick':
+      if (writesOrEscapes) return unknown(`${label} ${writesOrEscapes}`);
+      return safe(`${label} records a new commit locally`);
+    case 'mv': case 'rm': {
+      if (has('-f', '--force') || shortFlag('f')) return unknown(`${label} --force can lose uncommitted changes`);
+      const operands = rest.filter((arg) => !looksLikeOption(arg.text) && arg.text !== '--');
+      const writes = checkWrites(operands, state, context, label);
+      return writes.verdict === 'safe' ? safe(`${label} changes tracked files inside the workspace, which git can restore`) : writes;
+    }
     case 'branch':
       if (has('-d', '-D', '--delete', '-f', '--force', '-m', '-M', '--move', '-c', '-C', '--copy', '--set-upstream-to', '-u', '--unset-upstream', '--edit-description') || shortFlag('dDmMcCfu')) return risky('git branch deletes, moves, or force-updates a branch');
       if (words.every((word) => ['-a', '-r', '-v', '-vv', '--list', '--show-current', '--all', '--remotes', '--merged', '--no-merged', '--verbose'].includes(word))) return safe('git branch lists branches');
@@ -477,6 +521,7 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
     case 'stash':
       if (words[0] === 'drop' || words[0] === 'clear') return risky('git stash drop or clear deletes stashed work');
       if (words[0] === 'list' || words[0] === 'show') return safe(`git stash ${words[0]} only reads`);
+      if (!words.length || (['push', 'save', 'pop', 'apply'].includes(words[0]) && words.slice(1).every((word) => ['-m', '--message', '-u', '--include-untracked', '--index', '-q'].includes(word) || !looksLikeOption(word)))) return safe('git stash sets changes aside or brings them back, keeping them recoverable');
       return unknown('git stash changes the working tree');
     case 'remote':
       if (!words.length || (words.length === 1 && (words[0] === '-v' || words[0] === '--verbose'))) return safe('git remote lists remotes');
@@ -530,6 +575,9 @@ function classifyPackageManager(manager: string, args: Word[], state: SegmentSta
   if (['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'adduser', 'login', 'logout', 'token', 'access', 'team', 'org', 'star', 'hook', 'npm-publish'].includes(sub)) return risky(`${manager} ${sub} changes a package registry or your account`);
   if (sub === 'config' || sub === 'set') return risky(`${manager} ${sub} changes package-manager settings outside the workspace`);
   if (sub === 'version' && extra.length) return unknown(`${manager} version changes the version and may tag a release`);
+  // Installing exactly what the lockfile declares (no package names); adding packages goes to the safety model.
+  const installs = sub === 'ci' || sub === 'install' || sub === 'i' || (manager === 'yarn' && !sub);
+  if (installs && words.every((word) => word === sub || LOCKFILE_INSTALL_OPTIONS.test(word))) return safe(`${manager} ${sub || 'install'} installs what the project's lockfile already lists`);
   const extraCheck = checkReads(extra.filter((arg) => arg.text !== '--'), state, context, `${manager} ${sub}`);
   if (extraCheck.verdict !== 'safe') return extraCheck;
   if (['test', 't', 'tst'].includes(sub)) return checkScript('test', state, context, manager, depth);
@@ -554,6 +602,61 @@ function classifyNpx(args: Word[], state: SegmentState, context: CommandContext,
   if (/^(?:semantic-release|np|release-it|changeset|lerna|gh-pages|vercel|netlify|firebase|wrangler|serverless|sls|cdk)$/.test(tool) || RELEASE_NAME.test(rest.map((arg) => arg.text).join(' '))) return risky(`npx ${tool} can publish, release, or deploy`);
   if (!DEV_TOOLS.has(tool)) return unknown(`npx ${tool} may download and run a package`);
   return classifyWords([{ text: tool, quoted: false, glob: false, expansion: false }, ...rest], state, context, depth, true);
+}
+
+/** A tool in the workspace's own node_modules/.bin, run by path. */
+function isLocalBin(program: string, state: SegmentState, context: CommandContext): boolean {
+  if (!program.includes('/')) return false;
+  const facts = pathFacts(program, state.cwd, context);
+  return facts.inside && path.basename(path.dirname(facts.absolute)) === '.bin' && path.basename(path.dirname(path.dirname(facts.absolute))) === 'node_modules';
+}
+
+/** One sed address: a line number, `$`, or a /regex/. */
+const SED_ADDRESS = String.raw`(?:\d+|\$|/(?:[^/\\\n]|\\.)*/I?)`;
+/**
+ * sed scripts made only of printing, deleting, quitting, and s///: no `e` (runs commands), `w`
+ * or `W` (writes files), `r` or `R` (reads files), and no s flags that do those.
+ */
+const SED_SCRIPT = new RegExp(String.raw`^\s*(?:(?:${SED_ADDRESS}(?:\s*,\s*(?:${SED_ADDRESS}|\+\d+))?\s*!?\s*)?(?:[pdqQ=nNPDgGhHxl]|s([^\\\n\w\s])(?:(?!\1)[^\\\n]|\\.)*\1(?:(?!\1)[^\\\n]|\\.)*\1[gpiImM0-9]*)\s*(?:[;\n]\s*|$))+$`);
+
+function classifySed(args: Word[], state: SegmentState, context: CommandContext): CommandClassification {
+  const scripts: string[] = [];
+  const files: Word[] = [];
+  let inPlace = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const text = args[index].text;
+    if (text === '-e' || text === '--expression') { scripts.push(args[index + 1]?.text ?? ''); index += 1; continue; }
+    if (text.startsWith('--expression=')) { scripts.push(text.slice(13)); continue; }
+    if (/^-i(?:\.[\w.~-]+)?$|^--in-place(?:=[\w.~-]+)?$/.test(text)) { inPlace = true; continue; }
+    if (/^-[nErszu]+$|^--(?:quiet|silent|regexp-extended|separate|null-data|unbuffered|posix|debug|sandbox)$/.test(text)) continue;
+    if (looksLikeOption(text)) return unknown(`sed ${text} is an option the rules do not check`);
+    if (!scripts.length && !args.slice(0, index).some((arg) => arg.text === '-e' || arg.text === '--expression' || arg.text.startsWith('--expression='))) { scripts.push(text); continue; }
+    files.push(args[index]);
+  }
+  if (!scripts.length || scripts.some((script) => !SED_SCRIPT.test(script))) return unknown('sed with a script that may run commands or write other files');
+  if (!inPlace) return checkReads(files, state, context, 'sed', true);
+  if (!files.length) return unknown('sed -i without a file');
+  if (files.some((file) => file.glob || file.expansion)) return unknown('sed -i edits files matched at run time');
+  const writes = checkWrites(files, state, context, 'sed -i');
+  return writes.verdict === 'safe' ? safe('sed -i edits files inside the workspace') : writes;
+}
+
+/** awk programs that can run commands, write or read other files, or read the environment. */
+const AWK_UNSAFE = /system\s*\(|getline|\||\bprintf?\b[^;}\n]*>|ENVIRON|PROCINFO|@load|@include|close\s*\(|fflush/;
+
+function classifyAwk(args: Word[], state: SegmentState, context: CommandContext): CommandClassification {
+  let program: string | undefined;
+  const files: Word[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const text = args[index].text;
+    if (text === '-F' || text === '-v') { if (text === '-v' && !/^[A-Za-z_]\w*=/.test(args[index + 1]?.text ?? '')) return unknown('awk -v without an assignment'); index += 1; continue; }
+    if (/^-F.+|^-v[A-Za-z_]\w*=/.test(text)) continue;
+    if (looksLikeOption(text)) return unknown(`awk ${text} is an option the rules do not check`);
+    if (program === undefined) { program = text; continue; }
+    files.push(args[index]);
+  }
+  if (program === undefined || AWK_UNSAFE.test(program)) return unknown('awk with a program that may run commands or write files');
+  return checkReads(files.filter((file) => !/^[A-Za-z_]\w*=/.test(file.text)), state, context, 'awk', true);
 }
 
 /** Classifies one simple command (no operators). */
@@ -608,15 +711,25 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   if (DISK_DESTROYERS.has(name) || /^mkfs(?:\.|$)/.test(name)) return risky(`${name} can destroy file or disk contents beyond recovery`);
   if (NETWORK_SENDERS.has(name)) return risky(`${name} can send data off this machine`);
   if (name === 'rm' || name === 'rmdir' || name === 'unlink') {
-    if (name === 'rm' && anyFlag(/^-(?:[A-Za-z]*[rRf][A-Za-z]*)$|^--(?:recursive|force)$/)) {
-      const targets = args.filter((arg) => !looksLikeOption(arg.text));
-      const temporary = targets.length > 0 && targets.every((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return !arg.glob && !facts.sensitive && /^\/tmp\/[^/]+/.test(facts.absolute) && !facts.absolute.split('/').includes('..'); });
-      return temporary ? unknown('rm -r/-f of a temporary path') : risky('rm -r/-f deletes files beyond recovery');
-    }
-    const sensitive = args.find((arg) => pathFacts(arg.text, state.cwd, context).sensitive);
+    const targets = args.filter((arg) => !looksLikeOption(arg.text) && arg.text !== '--');
+    const sensitive = targets.find((arg) => pathFacts(arg.text, state.cwd, context).sensitive);
     if (sensitive) return risky(`${name} deletes ${sensitive.text}, which may hold credentials or knowledge-base keys`);
-    const outside = args.find((arg) => !looksLikeOption(arg.text) && !pathFacts(arg.text, state.cwd, context).inside);
-    return outside ? risky(`${name} deletes ${outside.text}, outside the workspace`) : unknown(`${name} deletes files`);
+    if (name === 'rm' && anyFlag(/^-(?:[A-Za-z]*[rR][A-Za-z]*)$|^--recursive$/)) {
+      const temporary = targets.length > 0 && targets.every((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return !arg.glob && /^\/tmp\/[^/]+/.test(facts.absolute) && !facts.absolute.split('/').includes('..'); });
+      if (temporary) return unknown('rm -r of a temporary path');
+      if (!targets.length || targets.some((arg) => arg.glob || arg.expansion || !pathFacts(arg.text, state.cwd, context).inside)) return risky('rm -r deletes folders beyond recovery, outside the workspace or decided at run time');
+      if (targets.some((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.protectedWrite || facts.absolute === path.resolve(context.root); })) return risky('rm -r deletes the whole workspace, .git, or .planning/.near-ai');
+      // Folders a build or install regenerates (dist, node_modules, …) can go; anything else inside the workspace goes to the safety model.
+      const regenerable = targets.every((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.absolute !== path.resolve(context.root) && !facts.protectedWrite && BUILD_OUTPUT.has(path.basename(facts.absolute)); });
+      return regenerable ? safe('rm -r only deletes build output inside the workspace, which a build or install recreates') : unknown('rm -r deletes folders inside the workspace');
+    }
+    if (!targets.length) return unknown(`${name} without a file`);
+    const outside = targets.find((arg) => !pathFacts(arg.text, state.cwd, context).inside);
+    if (outside) return risky(`${name} deletes ${outside.text}, outside the workspace`);
+    if (targets.some((arg) => arg.glob || arg.expansion)) return unknown(`${name} deletes files matched at run time`);
+    const guarded = targets.find((arg) => { const facts = pathFacts(arg.text, state.cwd, context); return facts.protectedWrite || facts.absolute === path.resolve(context.root); });
+    if (guarded) return risky(`${name} deletes ${guarded.text}, inside .git or .planning/.near-ai, where writes always ask`);
+    return safe(`${name} deletes ${targets.length === 1 ? 'a file' : 'files'} inside the workspace`);
   }
   if (name === 'find') {
     if (words.includes('-delete')) return risky('find -delete deletes files');
@@ -720,7 +833,9 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     }
     return unknown(`${name} runs code the rules cannot check`);
   }
-  if (DEV_TOOLS.has(name) && (viaNpx || program === name)) {
+  if ((name === 'sed' || name === 'gsed') && program === name) return classifySed(args, state, context);
+  if ((name === 'awk' || name === 'gawk' || name === 'mawk') && program === name) return classifyAwk(args, state, context);
+  if (DEV_TOOLS.has(name) && (viaNpx || program === name || isLocalBin(program, state, context))) {
     if (name === 'tsx') return unknown('tsx runs a script');
     const outputs = words.some((word) => /^--(?:outDir|outFile|out-file|output-file|o|declarationDir|rootDir|tsBuildInfoFile|cache-location|config|resolve-plugins-relative-to|rulesdir|plugin|require|c)(?:=|$)|^-[oc]$/.test(word));
     const reads = checkReads(args, state, context, name);
@@ -830,9 +945,13 @@ function classifyText(command: string, context: CommandContext, depth: number): 
       state.cwd = facts.absolute;
       continue;
     }
+    // A part the user put on their allow list runs as is (the deny list is checked before this).
+    const plain = segment.words.every((word) => !word.expansion && !word.glob && (!word.quoted || /^[\w.\/:=@+,%-]+$/.test(word.text)));
+    if (plain && context.isAllowListed?.(segment.words.map((word) => word.text).join(' '))) { findings.push(safe(`${segment.words.slice(0, 2).map((word) => word.text).join(' ')} is on your allow list`)); continue; }
     const result = classifyWords(segment.words, state, context, depth);
     if (result.verdict === 'risky') return result;
-    if (segment.words.some((word) => word.glob)) findings.push(unknown('it uses a wildcard the shell expands at run time'));
+    const wild = segment.words.find((word) => word.glob && !isWorkspaceGlob(word, state, context));
+    if (wild) findings.push(unknown(`it uses a wildcard (${wild.text}) that may match files outside the workspace`));
     findings.push(result);
   }
   if (SENSITIVE_TEXT.test(raw)) return risky('it names a credential or knowledge-base path');

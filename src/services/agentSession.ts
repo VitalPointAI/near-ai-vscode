@@ -96,6 +96,10 @@ export interface AgentTurnRequest {
   maxOutputTokens?: number;
   /** The auto mode's private safety model; without one, commands the rules cannot decide ask. */
   safetyModel?: string;
+  /** A second private model for the safety check, asked when the first is busy or gives no readable answer. */
+  safetyFallbackModel?: string;
+  /** Saves an approval card's "always allow" entry to the workspace allow list. */
+  rememberAllowRule?(rule: string): void | Promise<void>;
   /** Model or tier per agent role (nearAi.agent.roleModels); a team member's own model line wins. */
   roleModels?: Record<string, string>;
   /** The run's ID, when the host already tagged spend for it (attachments read before the run). */
@@ -266,7 +270,7 @@ export class AgentConversation {
     const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [], trustedToolRoots: request.gsd ? [request.gsd.home] : [], ...(request.gsd ? { gsdRuntime: { home: request.gsd.home, preambles: await trustedPreambles(request.gsd.home) } } : {}) };
     const tools = this.toolsFor(request, context, grants, extraUsage, record, abort.signal, runId);
     // One safety check per run, shared with sub-agents, so each command is asked about once.
-    const safety = request.policy.mode === 'auto' && request.safetyModel ? new SafetyModelCheck({ client: request.client, model: request.safetyModel, task: request.text, onUsage: (usage) => extraUsage.push(usage) }) : undefined;
+    const safety = request.policy.mode === 'auto' && request.safetyModel ? new SafetyModelCheck({ client: request.client, model: request.safetyModel, fallbackModel: request.safetyFallbackModel, task: request.text, onUsage: (usage) => extraUsage.push(usage) }) : undefined;
     this.runSafety = safety;
     const run = new AgentRun({
       client: request.client,
@@ -288,6 +292,7 @@ export class AgentConversation {
       afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
       input: this.steeringInput,
       requestApproval: (approval) => this.askApproval(approval, abort.signal, undefined, mainId),
+      rememberAllowRule: request.rememberAllowRule,
       emit: (event) => {
         this.track(mainId, event);
         if (event.type !== 'reasoning' && event.type !== 'turn') this.markVisible();
@@ -597,6 +602,7 @@ export class AgentConversation {
                 return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
               },
               requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id),
+              rememberAllowRule: request.rememberAllowRule,
               emit: (event) => {
                 this.track(agent.id, event);
                 this.observe(agent, event);
@@ -888,7 +894,7 @@ export class AgentConversation {
           settle({ decision: 'deny', feedback: `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'} (the user may be away). Continue without this action if you can, and report what still needs their approval.` });
         }, this.approvalTimeoutMs);
       }
-      this.openPrompt(request.callId, { type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview, ...(request.reason ? { reason: request.reason } : {}), ...(agent ? { agent } : {}) });
+      this.openPrompt(request.callId, { type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview, ...(request.reason ? { reason: request.reason } : {}), ...(request.allowRule ? { allowRule: request.allowRule } : {}), ...(agent ? { agent } : {}) });
     });
   }
 

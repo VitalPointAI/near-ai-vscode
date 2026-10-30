@@ -382,7 +382,7 @@
             "node --version",
             "npm --version"
           ],
-          "description": "Shell commands the agent may run without asking, matched by prefix. Commands that chain, redirect, or substitute (;, |, >, $( ), \u2026) always ask."
+          "description": "Shell commands the agent may run without asking, matched by their leading words (\"git push\" covers \"git push origin main\", but never --force or a URL). The approval card's \"Always allow\" adds entries here. In Auto approve mode each part of a chained command (cd app && git push) is matched on its own; in other modes, commands that chain, redirect, or substitute always ask. The deny list is checked first."
         },
         "nearAi.agent.denyCommands": {
           "type": "array",

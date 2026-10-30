@@ -508,12 +508,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const imageModel = delegable.find((candidate) => candidate.id === agentModels.imageModel && (candidate.outputModalities ?? []).includes('image'));
       // Auto approve's safety model must run privately; without one, unclear commands ask.
       const safetyModel = settings.actionPolicy.mode === 'auto' ? privateSafetyModel(active.models, modelInfo, readSafetyModel()) : undefined;
+      const safetyFallbackModel = safetyModel ? [readModelTiers().standard, model].map((candidate) => privateSafetyModel(active.models, modelInfo, candidate)).find((candidate) => candidate && candidate !== safetyModel) : undefined;
       if (settings.actionPolicy.mode === 'auto' && !safetyModel && !warnedSafetyModels.has(`${model}|${readSafetyModel()}`)) {
         warnedSafetyModels.add(`${model}|${readSafetyModel()}`);
         tab.post({ type: 'notice', text: `Auto approve: ${readSafetyModel()} is not available as a private (TEE) model here, so commands the rules cannot decide will ask you.` });
       }
       if (stopped()) { await state.activity.append(session.sessionId, { status: 'cancelled', summary: 'Stopped before the run started.' }); return; }
-      await agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
+      await agent.send({ text, skill, gsd, team, attachments, memory: { store: state.memory, projectScope: { kind: 'project', id: projectIdForWorkspace(root) } }, imageModel: route.local ? undefined : imageModel, reputation: new ReputationStore(root), tiers: readModelTiers(), roleModels: readRoleModels(), safetyModel, safetyFallbackModel, rememberAllowRule: (rule) => rememberAllowRule(rule, tab), availableModels: delegable.map((candidate) => candidate.id), contextWindows: Object.fromEntries(active.models.map((candidate) => [candidate.id, candidate.contextLength])), maxParallelAgents: limits.maxParallelAgents, maxTurns: limits.maxTurns, client: route.client, model, privacy: modelPrivacyLabel(modelInfo), policy: settings.actionPolicy, rules: readAgentRules(), activity: { store: state.activity, sessionId: session.sessionId }, local: route.local, security: securityAccess(context, root), webSearch: await webSearchProvider(context.secrets), budget: runBudget, mcpTools: mcp.tools, maxOutputTokens: Math.max(1_000, Math.min(1_000_000, Number(vscode.workspace.getConfiguration('nearAi').get<number>('agent.maxOutputTokens', AGENT_DEFAULTS.maxOutputTokens)) || AGENT_DEFAULTS.maxOutputTokens)), shellEnvAllow: vscode.workspace.getConfiguration('nearAi').get<string[]>('agent.shellEnvAllow', []).filter((name) => typeof name === 'string'), runId, ...(redTeamStep ? { skillAddendum: redTeamStep.addendum, projectAgents: redTeamStep.agents } : {}) });
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account }));
       await sendArtifacts(panel);
     } catch (error) {
@@ -749,4 +750,14 @@ async function readGsdStatusLine(live?: { agents: number; spend?: string }): Pro
   }
   if (!live?.spend) { const today = shownSpendAccount()?.today(); if (today && (today.near || today.totals.requests > 0)) live = { agents: live?.agents ?? 0, spend: today.text }; }
   return withLiveStatus(line, { agents: live?.agents ?? 0, spend: live?.spend });
+}
+
+/** Adds an approval card's "always allow" entry to this workspace's nearAi.agent.allowCommands. */
+async function rememberAllowRule(rule: string, tab: { post(message: unknown): void }): Promise<void> {
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const current = readAgentRules().allowCommands;
+  if (current.includes(rule)) return;
+  const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+  await configuration.update('agent.allowCommands', [...current, rule], target);
+  tab.post({ type: 'notice', text: `"${rule}" now runs without asking in this ${target === vscode.ConfigurationTarget.Workspace ? 'workspace' : 'VS Code profile'}. Remove it under Settings → NEAR AI › Agent: Allow Commands.` });
 }

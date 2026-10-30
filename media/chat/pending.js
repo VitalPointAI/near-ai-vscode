@@ -59,6 +59,7 @@
     switch (outcome) {
       case 'allow': return 'Approved: ' + title;
       case 'allow-run': return 'Approved for this run: ' + title;
+      case 'allow-always': return 'Always allowed in this workspace: ' + title;
       case 'deny': return 'Declined: ' + title;
       case 'expired': return (detail !== undefined && detail !== '' ? 'Expired after ' + detail + ' min' : 'Expired') + ', declined: ' + title;
       case 'answered': return 'Answered: ' + (detail || title);

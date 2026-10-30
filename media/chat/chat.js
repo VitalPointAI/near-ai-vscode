@@ -510,7 +510,10 @@
     };
     const runLabel = m.tool === 'Bash' ? 'Allow this command for this run' : 'Allow edits for this run';
     const allow = textButton('Allow', () => answer('allow'), true);
-    choices.append(allow, textButton(runLabel, () => answer('allow-run')), textButton('Deny', () => answer('deny')));
+    choices.append(allow, textButton(runLabel, () => answer('allow-run')));
+    // Adds the command's leading words to this workspace's allow list (nearAi.agent.allowCommands).
+    if (m.allowRule) choices.append(textButton('Always allow "' + m.allowRule + '" in this workspace', () => answer('allow-always')));
+    choices.append(textButton('Deny', () => answer('deny')));
     // Enter in the feedback box declines with those instructions.
     feedback.addEventListener('keydown', (event) => { if (event.key === 'Enter' && feedback.value.trim()) { event.preventDefault(); answer('deny'); } });
     card.append(choices, feedback);

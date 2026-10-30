@@ -30,9 +30,27 @@ test('classifier: ordinary build, test, lint, and read-only commands inside the 
 
 test('classifier: destructive file operations are risky', () => {
   table('risky', [
-    'rm -rf src', 'rm -rf .', 'rm -r build', 'rm -f important.db', 'rm -fr node_modules ~/', 'sudo rm -rf /var/lib', '/bin/rm -rf src',
+    'rm -rf .', 'rm -rf ./', 'rm -r .git', 'rm .git/config', 'rm -rf ../src', 'rm ../notes.txt', 'rm -fr node_modules ~/', 'sudo rm -rf /var/lib', 'rm -rf dist/*',
     'find . -name "*.ts" -delete', 'find . -type f -exec rm {} \\;', 'shred -u secrets.txt', 'truncate -s 0 data.db', 'dd if=/dev/zero of=/dev/sda', 'mkfs.ext4 /dev/sdb1',
-    'ls && rm -rf dist', 'npm test; rm -rf ~'
+    'npm test; rm -rf ~', 'sed -i s/a/b/ ../x', 'sed -i s/a/b/ .git/config', 'git mv a.ts ../b.ts'
+  ]);
+});
+
+test('classifier: everyday work inside the workspace is safe (deletes, lockfile installs, git sync, sed, awk, wildcards)', () => {
+  table('safe', [
+    // Single files, and folders a build or install recreates.
+    'rm file.txt', 'rm -f important.db', 'rm src/a.ts src/b.ts', 'rmdir empty', 'rm -r build', 'rm -rf dist', 'rm -rf node_modules', 'rm -rf packages/app/.next', 'ls && rm -rf dist',
+    // Installing exactly what the lockfile lists.
+    'npm install', 'npm ci', 'npm ci --no-audit', 'pnpm install --frozen-lockfile', 'yarn', 'yarn install --immutable',
+    // Git that keeps work recoverable and talks only to named remotes.
+    'git switch main', 'git pull', 'git pull origin main', 'git fetch', 'git fetch origin', 'git merge feature', 'git merge --abort', 'git stash', 'git stash pop', 'git stash push -m wip',
+    'git restore --staged a.ts', 'git revert HEAD', 'git cherry-pick abc123', 'git rm src/old.ts', 'git mv a.ts b.ts',
+    // sed and awk that only print or substitute, and sed -i on workspace files.
+    'sed -n 1,40p src/a.ts', "sed -n '/start/,/end/p' notes.md", "sed 's/foo/bar/g' a.txt", 'sed -i s/a/b/ file', "sed -i.bak -e 's|a|b|' -e '/x/d' file", "awk '{print}' f", "awk -F, '{print $1}' data.csv", "awk '$3 > 5 {n++} END {print n}' f",
+    // Wildcards that can only match inside the workspace.
+    'ls *.ts', 'wc -l src/*.ts', 'node --test dist/test/*.test.js', 'grep -n foo src/**/*.ts', 'git add src/*.ts',
+    // The project's own tools by path, and read-only system facts.
+    './node_modules/.bin/tsc', 'node_modules/.bin/eslint src', 'ps aux', 'df -h', 'nproc'
   ]);
 });
 
@@ -110,17 +128,17 @@ test('classifier: writes and redirects outside the workspace are risky', () => {
 test('classifier: commands the rules cannot decide are unknown, never safe', () => {
   table('unknown', [
     // Substitutions, variables, globs, here-documents, backgrounds, and subshells.
-    'echo $(date)', 'ls `pwd`', 'echo $HOME', 'echo "${PATH}"', 'cat <<EOF\nhi\nEOF', 'ls *.ts', 'node --test dist/test/*.test.js', 'npm test &', '(cd src && ls)', 'ls {a,b}',
+    'echo $(date)', 'ls `pwd`', 'echo $HOME', 'echo "${PATH}"', 'cat <<EOF\nhi\nEOF', 'npm test &', '(cd src && ls)', 'ls {a,b}', 'cat .*', 'cat ../*', 'ls ~/*', 'rm *.log',
     // Reads outside the workspace and leaving it.
     'cat /etc/hosts', 'ls ..', 'ls ../other-project', 'cd /tmp && ls', 'cd .. && npm test', 'cd && ls', 'cd - && ls', 'grep -r x /var/log',
     // Ordinary but not clearly safe.
-    'npm install', 'npm ci', 'npm install lodash', 'npx some-random-tool', 'node scripts/build.js', 'python3 script.py', 'node -e "console.log(1)"', 'bash -c "ls"',
-    'rm file.txt', 'rm -rf /tmp/build-cache', 'git reset HEAD~1', 'git checkout main', 'git switch main', 'git pull', 'git fetch', 'git merge feature', 'git commit --amend -m x',
-    'git commit --no-verify -m x', 'git branch feature', 'git stash', 'git -C ../other status', 'git restore --staged a.ts', 'git clean -n',
+    'npm install lodash', 'yarn add x', 'npm ci --prefix ../other', 'npx some-random-tool', 'node scripts/build.js', 'python3 script.py', 'node -e "console.log(1)"', 'bash -c "ls"',
+    'rm -rf src', '/bin/rm -rf src', 'rm -rf /tmp/build-cache', 'git reset HEAD~1', 'git checkout main', 'git switch --orphan fresh', 'git pull --rebase', 'git fetch https://x.example/r.git', 'git merge -s ours feature', 'git commit --amend -m x',
+    'git commit --no-verify -m x', 'git branch feature', 'git stash drop-not-a-verb', 'git -C ../other status', 'git rm -f a.ts', 'git clean -n',
     'curl https://example.com', 'wget https://example.com/file', 'docker build .', 'docker run --rm image', 'chmod +x scripts/run.sh', 'kill 1234', 'ln -s ../x link',
-    'export PATH=/tmp:$PATH', 'FOO=bar', 'LD_PRELOAD=/tmp/x.so npm test', 'NODE_OPTIONS=--require=/tmp/x.js npm test', 'env', 'printenv', 'sed -i s/a/b/ file', 'awk \'{print}\' f',
+    'export PATH=/tmp:$PATH', 'FOO=bar', 'LD_PRELOAD=/tmp/x.so npm test', 'NODE_OPTIONS=--require=/tmp/x.js npm test', 'env', 'printenv', 'sed s/a/b/e file', "sed 'w out' f", 'sed -f script.sed f', "awk 'BEGIN{system(\"id\")}'", "awk '{print > \"out\"}' f", "awk '{print | \"sh\"}' f",
     'make install', 'make -C ../other', 'gh pr view 12', 'gh pr list', 'near account view-account-summary alice.near', 'aws s3 ls', 'tail -f log.txt', 'xargs echo',
-    'cp /etc/hosts ./hosts', 'find . -newer /etc/passwd', 'git log -1 -o out.txt', 'ls | xargs -n 1 echo', 'npm --prefix ../other test', 'npm test -- ../outside', './gradlew test', './node_modules/.bin/tsc',
+    'cp /etc/hosts ./hosts', 'find . -newer /etc/passwd', 'git log -1 -o out.txt', 'ls | xargs -n 1 echo', 'npm --prefix ../other test', 'npm test -- ../outside', './gradlew test', '../node_modules/.bin/tsc',
     // Malformed: unterminated quotes or operators.
     'echo "unterminated', 'ls &&', 'ls | ', 'echo \'x'
   ]);
@@ -137,7 +155,7 @@ test('classifier: a shell already cd-ed outside the workspace makes nothing safe
 
 test('classifier: risky parts win over unknown parts, and substitutions are checked inside', () => {
   assert.equal(verdict('echo $(git push)').verdict, 'risky');
-  assert.equal(verdict('ls `rm -rf src`').verdict, 'risky');
+  assert.equal(verdict('ls `rm -rf ../src`').verdict, 'risky');
   assert.equal(verdict('npm install && npm publish').verdict, 'risky');
   assert.equal(verdict('cat <<EOF > /etc/x\nhi\nEOF').verdict, 'risky');
   assert.equal(verdict('ls\ngit push').verdict, 'risky', 'a newline is a separator');
@@ -147,7 +165,7 @@ test('classifier: risky parts win over unknown parts, and substitutions are chec
   assert.equal(verdict('g\\it push').verdict, 'risky', 'escaping does not hide it');
   assert.equal(verdict('time git push').verdict, 'risky');
   assert.equal(verdict('env FOO=1 git push').verdict, 'risky');
-  assert.equal(verdict('FOO=1 rm -rf src').verdict, 'risky');
+  assert.equal(verdict('FOO=1 rm -rf ../src').verdict, 'risky');
 });
 
 test('classifier: reasons explain the decision', () => {

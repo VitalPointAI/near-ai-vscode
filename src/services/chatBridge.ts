@@ -48,7 +48,7 @@ export type ChatWebviewMessage =
   | { type: 'reporting-token' }
   | { type: 'open-activity'; agentId?: string }
   | { type: 'select-profile' }
-  | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'deny'; feedback?: string; conversationId?: string }
+  | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'allow-always' | 'deny'; feedback?: string; conversationId?: string }
   | { type: 'revert-run'; runId: string; conversationId?: string }
   | { type: 'verify-response'; runId: string; conversationId?: string }
   | { type: 'insert-code'; text: string }
@@ -246,7 +246,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   if (message.type === 'approval-reply') {
     if (Object.keys(message).some((key) => !['type', 'callId', 'decision', 'feedback', 'conversationId'].includes(key))) return undefined;
     if (typeof message.callId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(message.callId)) return undefined;
-    if (message.decision !== 'allow' && message.decision !== 'allow-run' && message.decision !== 'deny') return undefined;
+    if (message.decision !== 'allow' && message.decision !== 'allow-run' && message.decision !== 'allow-always' && message.decision !== 'deny') return undefined;
     if (message.feedback !== undefined && (typeof message.feedback !== 'string' || message.feedback.length > 2000)) return undefined;
     return { type: 'approval-reply', callId: message.callId, decision: message.decision, ...(message.feedback ? { feedback: message.feedback as string } : {}), ...scoped };
   }

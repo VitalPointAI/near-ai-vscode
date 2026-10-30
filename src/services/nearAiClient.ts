@@ -494,22 +494,33 @@ export class NearAiClient {
    * One short, non-streamed completion, sent exactly once: no retries on a rate limit, timeout, or
    * server error. For quick checks (the auto mode's command safety check) that must fail fast.
    */
-  public async completeOnce(model: string, messages: AgentMessage[], options: { maxTokens: number; signal?: AbortSignal }): Promise<{ text: string; usage: UsageMetadata }> {
+  public async completeOnce(model: string, messages: AgentMessage[], options: { maxTokens: number; signal?: AbortSignal; noThinking?: boolean }): Promise<{ text: string; usage: UsageMetadata; reasoning?: string; finishReason?: string }> {
     const started = Date.now();
-    const response = await this.request('/chat/completions', {
+    // noThinking asks a reasoning model (Qwen, GLM, DeepSeek on vLLM) to answer directly, so a short
+    // max_tokens is not spent on thinking before the answer starts.
+    const send = (noThinking: boolean) => this.request('/chat/completions', {
       method: 'POST',
       signal: options.signal,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: false, max_tokens: Math.max(16, Math.floor(options.maxTokens)), temperature: 0 })
+      body: JSON.stringify({ model, messages, stream: false, max_tokens: Math.max(16, Math.floor(options.maxTokens)), temperature: 0, ...(noThinking ? { chat_template_kwargs: { enable_thinking: false, thinking: false } } : {}) })
     }, { maxRetries: 0, model, failFast: true });
+    let response: Response;
+    try { response = await send(options.noThinking === true); } catch (error) {
+      // A server that rejects the option is asked once more without it.
+      if (!options.noThinking || (error as { status?: unknown }).status !== 400) throw error;
+      response = await send(false);
+    }
     let body: Record<string, unknown>;
     try { body = objectValue(await response.json()); } catch (error) { this.settleCharge(response, options.signal?.aborted ? 'aborted' : 'partial'); throw error; }
     const choice = objectValue(Array.isArray(body.choices) ? body.choices[0] : undefined);
-    const text = stringValue(objectValue(choice.message).content) ?? '';
+    const message = objectValue(choice.message);
+    const text = stringValue(message.content) ?? '';
+    const reasoning = stringValue(message.reasoning_content) ?? stringValue(message.reasoning);
+    const finishReason = stringValue(choice.finish_reason);
     const usage = usageFromPayload(objectValue(body.usage), metadataFromHeaders(response.headers, started));
     usage.estimatedCostUsd = estimateCostUsd(this.models.get(model) ?? { id: '' }, usage.inputTokens, usage.outputTokens, usage.cachedInputTokens);
     this.settleCharge(response, 'completed', usage);
-    return { text, usage };
+    return { text, usage, ...(reasoning ? { reasoning } : {}), ...(finishReason ? { finishReason } : {}) };
   }
 
   /** Official NEAR image-edit contract. The staged image bytes never enter durable telemetry. */
