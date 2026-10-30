@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { AuthService } from './auth';
+import { NearAiClient } from './nearAiClient';
 import { ProfileStore } from './profileStore';
-import { CLEAR_REPORTING_TOKEN_COMMAND, movePastedReportingTokens, REPORTING_TOKEN_HOW_TO, ReportingTokenHint, reportingTokenHint, ReportingTokenState, SET_REPORTING_TOKEN_COMMAND } from './reportingToken';
+import { CLEAR_REPORTING_TOKEN_COMMAND, movePastedReportingTokens, REPORTING_TOKEN_HOW_TO, ReportingTokenHint, reportingTokenHint, ReportingTokenState, SET_REPORTING_TOKEN_COMMAND, USE_NEAR_TOTAL_SETTING } from './reportingToken';
 import { configureSpend, resetNearUsage, SpendAccount, spendAccountFor } from './spendAccount';
+import { CONSOLE_URL, tokenTestMessage } from './spendInsight';
 import type { DayBoundary } from './spendLedger';
 import { readSettings } from './settings';
 
@@ -126,9 +128,52 @@ export async function spendAccountForRoot(root: string | undefined, auth: AuthSe
     if (!profile || !selection || profile.provider === 'local') return undefined;
     const apiKey = await auth.getScopedApiKeyFor(profiles.getScope(selection.profileId), profile.baseUrl);
     const account = apiKey ? spendAccountFor(profile.baseUrl, apiKey) : undefined;
+    // NEAR's usage summary (and billing reconciliation) are asked through the key's client. Until
+    // a chat or run made one in this window, none was attached, so a stored reporting token was
+    // not used and pages showed only this computer's ledger. A client is cheap and makes no call
+    // until the next poll.
+    if (account && apiKey && !account.usage.attached) new NearAiClient({ baseUrl: profile.baseUrl, apiKey, spend: account });
     await account?.ledger.refresh();
     return account;
   } catch {
     return undefined;
   }
+}
+
+/** Opens the setting whose description links to Set and Clear usage reporting token. */
+export async function openReportingTokenSetting(): Promise<void> {
+  await vscode.commands.executeCommand('workbench.action.openSettings', USE_NEAR_TOTAL_SETTING);
+}
+
+/** Opens the NEAR AI Cloud console, where credits are bought (signing in may be needed). */
+export async function openConsoleBilling(): Promise<void> {
+  await vscode.env.openExternal(vscode.Uri.parse(CONSOLE_URL));
+}
+
+/**
+ * "Test token now": asks NEAR's usage summary with the stored token and says what happened,
+ * with "Fix token" when it failed. Returns the one-line result for a page to show too.
+ */
+export async function testReportingToken(account: SpendAccount | undefined): Promise<{ ok: boolean; text: string }> {
+  const state = await reportingTokenState() ?? 'missing';
+  if (state === 'missing') {
+    const text = 'No usage reporting token is set, so there is nothing to test.';
+    void vscode.window.showInformationMessage(text, 'Set token').then((choice) => { if (choice) void vscode.commands.executeCommand(SET_REPORTING_TOKEN_COMMAND); });
+    return { ok: false, text };
+  }
+  if (state === 'off') {
+    const text = `A usage reporting token is set, but ${USE_NEAR_TOTAL_SETTING} is off, so it is not used. Turn the setting on to test it.`;
+    void vscode.window.showInformationMessage(text, 'Open setting').then((choice) => { if (choice) void openReportingTokenSetting(); });
+    return { ok: false, text };
+  }
+  if (!account) {
+    const text = 'This project has no NEAR AI Cloud API key set up, so the token cannot be checked against one.';
+    void vscode.window.showWarningMessage(text);
+    return { ok: false, text };
+  }
+  const result = await account.testReportingToken();
+  const text = tokenTestMessage(result);
+  if (result.ok) void vscode.window.showInformationMessage(text);
+  else void vscode.window.showErrorMessage(text, 'Fix token').then((choice) => { if (choice) void openReportingTokenSetting(); });
+  return { ok: result.ok, text };
 }
