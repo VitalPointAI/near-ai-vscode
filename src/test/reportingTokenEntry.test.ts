@@ -119,7 +119,7 @@ const reset = () => { executed.length = 0; warnings.length = 0; infos.length = 0
 
 test('every entry point says the same thing: set a token to match the console, or that NEAR\'s total is in use', () => {
   const missing = reportingTokenHint('missing');
-  assert.equal(missing.text, 'Match the NEAR console exactly: set a usage reporting token');
+  assert.equal(missing.text, 'Match the NEAR console exactly: sign in to set up usage reporting');
   assert.equal(missing.command, SET_REPORTING_TOKEN_COMMAND);
   assert.match(missing.title, /POST \/v1\/organizations\/\{org_id\}\/reporting-tokens/);
   const set = reportingTokenHint('set');
@@ -338,4 +338,27 @@ test('Tools tab: the Elsewhere row links to the token (or to the switch when NEA
   const script = readFileSync(path.join(ROOT, 'media', 'tools', 'tools.js'), 'utf8');
   assert.match(script, /const token = data && data\.reportingToken;/);
   assert.match(script, /runCommand\(token\.text, token\.command\)/);
+});
+
+test('the command opens with sign-in (GitHub, Google) before pasting, and pasting still works', async () => {
+  reset();
+  secrets.values.clear();
+  // Registered again with an AuthService, as the extension does: the sign-in choices are offered.
+  tracking.registerSpendTracking(context as never, {} as never);
+  let shown: Array<Record<string, unknown>> = [];
+  let pickOptions: Record<string, unknown> = {};
+  quickPick = async (items, options) => { shown = items; pickOptions = options; return items.find((item) => item.choice === 'paste'); };
+  inputBox = async () => TOKEN;
+  await commands.get(SET_REPORTING_TOKEN_COMMAND)!();
+  assert.deepEqual(shown.map((item) => item.choice), ['github', 'google', 'paste']);
+  assert.match(String(shown[0].detail), /read-only usage token that does not expire, then signs that session out\. Needs an owner or admin/);
+  assert.equal(pickOptions.title, 'Set up NEAR AI usage reporting');
+  assert.equal(secrets.values.get(KEY), TOKEN);
+  quickPick = async () => undefined;
+  secrets.values.clear();
+  await commands.get(SET_REPORTING_TOKEN_COMMAND)!();
+  assert.equal(secrets.values.has(KEY), false, 'dismissing the choice changes nothing');
+  quickPick = undefined;
+  inputBox = undefined;
+  assert.equal(TOKEN_MISSING_TEXT, 'Match the NEAR console exactly: sign in to set up usage reporting');
 });

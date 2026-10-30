@@ -53,7 +53,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerUsageExport(context);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
-  registerSpendTracking(context);
+  registerSpendTracking(context, auth);
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
   registerModelComparison(context, auth);

@@ -208,8 +208,8 @@ export function describeUsageError(error: unknown, stage: 'api-key' | 'summary',
     if (status === 401) return { code: 'api-key-rejected', status, message: 'NEAR rejected this project\'s API key (HTTP 401) when asked which organization it belongs to. Check the key with NEAR AI: Setup.' };
     if (status === 402) return { code: 'out-of-credits', status, message: 'NEAR says this organization is out of credits or this API key\'s spend limit is reached (HTTP 402). Top up credits in the NEAR AI Cloud console.' };
   } else {
-    if (status === 401) return { code: 'token-rejected', status, message: 'NEAR rejected the usage reporting token (HTTP 401): it is invalid, expired, or revoked. Set a new one.' };
-    if (status === 403) return { code: 'wrong-org', status, message: `The usage reporting token is for a different organization than this API key (HTTP 403)${context.organizationId ? `; the key belongs to organization ${context.organizationId}` : ''}. Create a token for that organization.` };
+    if (status === 401) return { code: 'token-rejected', status, message: 'NEAR rejected the usage reporting token (HTTP 401): it is invalid, expired, or revoked. Fix token signs in again and makes a new one.' };
+    if (status === 403) return { code: 'wrong-org', status, message: `The usage reporting token is for a different organization than this API key (HTTP 403)${context.organizationId ? `; the key belongs to organization ${context.organizationId}` : ''}. Fix token signs in and makes one for that organization.` };
     if (status === 400) return { code: 'bad-request', status, message: `NEAR refused the usage summary request (HTTP 400).${near}` };
   }
   if (status === 0 && /request failed/i.test(raw)) return { code: 'network', status, message: `NEAR AI Cloud could not be reached: ${raw.replace(/^NEAR AI request failed:\s*/i, '').replace(/\.$/, '')}.` };

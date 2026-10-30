@@ -279,18 +279,36 @@ Usage Reporting Token**:
   links. The setting itself is only an on/off switch (on by default) for using
   NEAR's total once a token is set; a token pasted into any NEAR AI setting is
   moved to secret storage and removed from settings.
-- **The chat**: below the status line, "Match the NEAR console exactly: set a
-  usage reporting token" (or "Using NEAR's total" once one is set).
+- **The chat**: below the status line, "Match the NEAR console exactly: sign
+  in to set up usage reporting" (or "Using NEAR's total" once one is set).
 - **Spending Limits**: **Set usage reporting token…** and **Clear usage
   reporting token**.
 - **Agent Activity**, above the overview's cost, and **Elsewhere** in the Tools tab.
 - The Command Palette: **NEAR AI: Set Usage Reporting Token**.
 
-**How to get one.** The token is not in the NEAR AI Cloud console's UI: an
-organization owner or admin creates it with
-`POST /v1/organizations/{org_id}/reporting-tokens`, authenticated with a
-console session token (see NEAR's [Usage Reporting API](https://docs.near.ai/)).
-It is read-only and starts with `rpt-`.
+**How to get one: sign in once.** The token is not in the NEAR AI Cloud
+console's UI, so the extension makes it for you. **Set Usage Reporting Token**
+offers **Sign in with GitHub** or **Sign in with Google**:
+
+1. NEAR AI Cloud's sign-in opens in your browser. Sign in as an owner or admin
+   of the organization this project's API key belongs to.
+2. NEAR sends the sign-in back to a one-time listener on `127.0.0.1` that
+   only this sign-in can use. The page takes the sign-in out of the address
+   bar and browser history.
+3. The extension creates a read-only (`usage:read`) token named "NEAR AI for
+   VS Code (date)" with no expiry, so it keeps working until it is revoked.
+   It revokes the token the extension's previous sign-in made, then signs the
+   session out, which revokes the sign-in itself. Only the read-only token is
+   kept, in secret storage.
+4. It tests the token right away and says what NEAR answered.
+
+If NEAR ever rejects the token (revoked, or the API key moved to another
+organization), the Spend section says so and **Fix token** signs in again. In
+a browser-based VS Code, where the browser can't reach the listener, the
+sign-in ends on a page that won't load: paste that page's address into the box
+VS Code shows. **Paste a token** takes one you already have (an owner or admin
+can create one with `POST /v1/organizations/{org_id}/reporting-tokens`; see
+NEAR's [Usage Reporting API](https://docs.near.ai/)). It starts with `rpt-`.
 
 Without a token the status line reads like "$0.40 confirmed + ~$0.02 pending
 today" for this computer; hover it for details. "Today" is the local calendar

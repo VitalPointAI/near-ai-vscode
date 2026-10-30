@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.8
+
+- **Set up usage reporting by signing in.** **Set Usage Reporting Token** (and
+  every "set up usage reporting" link) now offers **Sign in with GitHub** or
+  **Sign in with Google**. You sign in to NEAR AI Cloud in your browser once, and
+  the extension creates a read-only usage token with no expiry. It tests the
+  token and starts showing NEAR's own spend figures, with no console session
+  token to find and no API call to make by hand. The sign-in is used once and
+  then signed out; only the read-only token is kept, in VS Code's encrypted
+  secret storage. Signing in again replaces the token and revokes the old one.
+  Needs an owner or admin of the API key's organization. Pasting a token still
+  works.
+- **Fix token signs in again.** When NEAR rejects the token, **Fix token** in
+  Agent Activity and in the test result goes straight to the sign-in instead
+  of to Settings.
+
 ## 0.4.7
 
 - **The guide covers 0.4.6's features.** The README, which is also the Marketplace page, now explains

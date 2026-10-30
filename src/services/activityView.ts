@@ -10,8 +10,8 @@ import { readActivityLimits } from './settings';
 import { SpendAccount, shownSpendAccount } from './spendAccount';
 import type { SpendInsight } from './spendInsight';
 import { DayBoundary, nanoToUsd, totalNanoUsd } from './spendLedger';
-import { currentReportingTokenHint, onReportingTokenChange, openConsoleBilling, openReportingTokenSetting, readDayBoundary, reportingTokenState, runReportingTokenHint, testReportingToken } from './spendTracking';
-import { hintForView, ReportingTokenHint } from './reportingToken';
+import { currentReportingTokenHint, onReportingTokenChange, openConsoleBilling, readDayBoundary, reportingTokenState, runReportingTokenHint, testReportingToken } from './spendTracking';
+import { hintForView, ReportingTokenHint, SET_REPORTING_TOKEN_COMMAND } from './reportingToken';
 
 // The Agent Activity page: an overview of agent activity, not a log (the chat shows the work
 // itself). Now: the agents running, what each is doing, and controls. A window (this
@@ -217,7 +217,7 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
     else if (message.type === 'export') await exportActivity(activity, message.format);
     else if (message.type === 'export-usage') await vscode.commands.executeCommand('nearAi.exportAnalytics');
     else if (message.type === 'reporting-token') await runReportingTokenHint();
-    else if (message.type === 'fix-token') await openReportingTokenSetting();
+    else if (message.type === 'fix-token') await vscode.commands.executeCommand(SET_REPORTING_TOKEN_COMMAND);
     else if (message.type === 'open-console') await openConsoleBilling();
     else if (message.type === 'test-token') {
       post({ type: 'token-test', running: true, text: 'Asking NEAR\'s usage summary…' });
@@ -325,7 +325,7 @@ export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
   </div>
   <p class="source-line"><span class="source-key">Cost source:</span> <strong id="source-label" class="source-badge"></strong> <span id="source-detail" class="hint-inline"></span></p>
   <p id="token-status" class="hint"></p>
-  <div id="token-problem" class="problem" role="alert" hidden><span id="token-problem-text"></span> <button id="fix-token" type="button" class="link" title="Open the setting that links to Set usage reporting token and Clear">Fix token</button></div>
+  <div id="token-problem" class="problem" role="alert" hidden><span id="token-problem-text"></span> <button id="fix-token" type="button" class="link" title="Sign in to NEAR AI Cloud to make a new usage reporting token, or paste one">Fix token</button></div>
   <p id="token-test" class="hint" role="status" aria-live="polite" hidden></p>
   <h3 id="periods-heading">Spent</h3>
   <dl id="periods" class="totals periods" aria-labelledby="periods-heading"></dl>

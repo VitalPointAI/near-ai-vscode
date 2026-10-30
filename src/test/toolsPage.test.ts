@@ -263,7 +263,7 @@ test('the Elsewhere row links to the usage reporting token and asks the host to 
   const page = await runPageScript();
   page.dispatch({ type: 'directory', directory: buildToolsDirectory(input({ reportingToken: reportingTokenHint('missing') })) });
   const elsewhere = page.doc.getElementById('elsewhere')!;
-  assert.match(elsewhere.textContent, /Spending limits.*Match the NEAR console exactly: set a usage reporting token/);
+  assert.match(elsewhere.textContent, /Spending limits.*Match the NEAR console exactly: sign in to set up usage reporting/);
   const link = elsewhere.all().find((node) => node.tagName === 'button' && node.textContent === TOKEN_MISSING_TEXT)!;
   assert.match(link.title, /reporting-tokens/);
   link.click();

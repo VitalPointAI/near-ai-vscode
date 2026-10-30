@@ -9,7 +9,7 @@ export const CLEAR_REPORTING_TOKEN_COMMAND = 'nearAi.clearUsageReportingToken';
 export const USE_NEAR_TOTAL_SETTING = 'nearAi.spend.useNearUsageTotal';
 
 /** How a token is made: it is not in the NEAR AI Cloud console's UI. */
-export const REPORTING_TOKEN_HOW_TO = 'An organization owner or admin creates one with POST /v1/organizations/{org_id}/reporting-tokens, authenticated with a NEAR AI Cloud console session token (it is not in the console UI). It starts with rpt-.';
+export const REPORTING_TOKEN_HOW_TO = 'Sign in to NEAR AI Cloud from VS Code as an organization owner or admin and one is created for you. Or paste one: an organization owner or admin creates one with POST /v1/organizations/{org_id}/reporting-tokens, authenticated with a NEAR AI Cloud console session token (it is not in the console UI). It starts with rpt-.';
 
 /** `missing`: no token stored. `set`: stored and used. `off`: stored, but nearAi.spend.useNearUsageTotal is off. */
 export type ReportingTokenState = 'missing' | 'set' | 'off';
@@ -25,7 +25,7 @@ export interface ReportingTokenHint {
   args: string[];
 }
 
-export const TOKEN_MISSING_TEXT = 'Match the NEAR console exactly: set a usage reporting token';
+export const TOKEN_MISSING_TEXT = 'Match the NEAR console exactly: sign in to set up usage reporting';
 export const TOKEN_SET_TEXT = 'Using NEAR\'s total';
 export const TOKEN_OFF_TEXT = 'Match the NEAR console exactly: turn on NEAR\'s total';
 
