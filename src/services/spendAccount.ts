@@ -1,6 +1,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { DayBoundary, dayStart, emptyTotals, nanoToUsd, SpendEntry, SpendFilter, SpendFinish, SpendLedger, SpendStart, SpendTotals, spendIdentity, totalNanoUsd } from './spendLedger';
+import type { ReportingTokenState } from './reportingToken';
+import { buildSpendInsight, BURN_WINDOW_DAYS, costSource, periodStarts, PERIODS, RequestCounts, SpendInsight, SpendPeriod, TokenTestResult } from './spendInsight';
 import { BillingApi, NearUsageFigure, NearUsageSummary, ReportingApi, SpendReconciler } from './spendReconciler';
 
 // One API key's spend on this computer: its ledger, the reconciliation with NEAR's billing API,
@@ -108,9 +110,60 @@ export class SpendAccount implements SpendSink {
 
   /** Today's spend for this key: NEAR's figure when a reporting token is set, else this computer's ledger. */
   public today(): SpendView {
-    const totals = this.ledger.totals({ since: this.dayStart() });
-    return spendView(totals, 'today', this.usage.today(), this.usage.problem);
+    const since = this.dayStart();
+    const totals = this.ledger.totals({ since });
+    const near = this.usage.today();
+    const view = spendView(totals, 'today', near, this.usage.problem);
+    // Where the figure comes from, first: NEAR's billing, per-request actuals, or list-price estimates.
+    const source = costSource({ tokenState: near || this.usage.problem ? 'set' : 'missing', near, counts: this.ledger.requestCounts({ since }) });
+    return { ...view, tooltip: `Cost source: ${source.label}. ${source.detail} ${view.tooltip}` };
   }
+
+  /** Unique requests by how their cost is known. */
+  public requestCounts(filter: SpendFilter = {}): RequestCounts { return this.ledger.requestCounts(filter); }
+
+  private yearReader: { since: number; ledger: SpendLedger } | undefined;
+
+  /**
+   * Everything Agent Activity shows about spend: the cost source and the token's state, totals for
+   * today, this week, this month, and this year (NEAR's when the token works, else this
+   * computer's ledger, labelled per figure), the 7-day burn rate, and the credits.
+   */
+  public async insight(tokenState: ReportingTokenState, options: { refreshNear?: boolean } = {}): Promise<SpendInsight> {
+    const now = this.now();
+    const boundary = this.config.dayBoundary?.() ?? 'local';
+    const starts = periodStarts(now, boundary);
+    const lastWeek = now - BURN_WINDOW_DAYS * 86_400_000;
+    // NEAR's period figures arrive later (at most every 10 minutes); the page updates when they do.
+    if (tokenState === 'set' && options.refreshNear !== false) void this.usage.refreshPeriods({ week: starts.week, month: starts.month, year: starts.year, lastWeek }).catch(() => undefined);
+    // The main ledger reads this and last month's files; the year's total reads every month's.
+    if (this.yearReader?.since !== starts.year) this.yearReader = { since: starts.year, ledger: new SpendLedger(path.join(this.config.dir, 'spend', this.identity), { now: this.now, writer: `reader-${this.ledger.writer}`, from: starts.year }) };
+    const year = this.yearReader.ledger;
+    await year.refresh();
+    const ledgerFor = (period: SpendPeriod) => {
+      const source = period === 'year' ? year : this.ledger;
+      return { totals: source.totals({ since: starts[period] }), counts: source.requestCounts({ since: starts[period] }) };
+    };
+    const ledger = Object.fromEntries(PERIODS.map((period) => [period, ledgerFor(period)])) as Record<SpendPeriod, ReturnType<typeof ledgerFor>>;
+    const today = this.usage.today();
+    const near: Partial<Record<SpendPeriod, NearUsageFigure>> = {
+      ...(today ? { today } : {}),
+      ...Object.fromEntries((['week', 'month', 'year'] as const).map((period) => [period, this.usage.period(period, starts[period])]).filter(([, figure]) => figure))
+    };
+    const nearLastWeek = this.usage.period('lastWeek');
+    return buildSpendInsight({
+      tokenState, now, boundary, near,
+      // A 7-day figure older than the refresh interval and a bit is not used for the burn rate.
+      ...(nearLastWeek && now - nearLastWeek.at < 900_000 ? { nearLastWeek } : {}),
+      okAt: this.usage.okAt,
+      problem: this.usage.problem,
+      ledger,
+      ledgerLastWeekUsd: nanoToUsd(totalNanoUsd(this.ledger.totals({ since: lastWeek })))
+    });
+  }
+
+  /** Checks the usage reporting token against NEAR now. */
+  public testReportingToken(): Promise<TokenTestResult> { return this.usage.testToken(); }
 
   public window(window: Exclude<SpendWindow, 'today'>, filter: SpendFilter): SpendView {
     return spendView(this.ledger.totals(filter), window);

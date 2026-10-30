@@ -1,3 +1,4 @@
+import { describeUsageError, TokenTestResult } from './spendInsight';
 import { SpendEntry, SpendLedger } from './spendLedger';
 
 // Settles ledger entries with NEAR's actual cost. The queue is the ledger itself (entries with an
@@ -150,6 +151,8 @@ export interface ReportingApi {
 
 export const USAGE_POLL_ACTIVE_MS = 60_000;
 export const USAGE_POLL_IDLE_MS = 300_000;
+/** NEAR's figures for the week, month, year, and last 7 days are asked for at most this often. */
+export const PERIOD_REFRESH_MS = 600_000;
 
 export interface NearUsageFigure {
   nanoUsd: number;
@@ -182,13 +185,23 @@ export class NearUsageSummary {
   private readonly listeners = new Set<() => void>();
   /** Why the last poll failed (no secrets), for the tooltip. */
   public problem: string | undefined;
+  /** When NEAR's usage summary last answered. */
+  public okAt: number | undefined;
   public polls = 0;
+  /** NEAR's totals since other period starts (this week, month, year; the last 7 days), by name. */
+  private readonly periods = new Map<string, NearUsageFigure>();
+  private periodsAt = 0;
+  private periodsKey = '';
+  private periodsInFlight: Promise<void> | undefined;
 
   public constructor(private readonly options: UsageSummaryOptions) {
     this.now = options.now ?? Date.now;
   }
 
   public attach(api: ReportingApi): void { this.api = api; }
+
+  /** Whether a client is attached to ask NEAR through (none until this key's client is made). */
+  public get attached(): boolean { return Boolean(this.api); }
 
   /** NEAR's total for today, while it is still today's. */
   public today(): NearUsageFigure | undefined {
@@ -209,7 +222,88 @@ export class NearUsageSummary {
   public soon(): void { this.nextAt = Math.min(this.nextAt, (this.figure?.at ?? 0) + USAGE_POLL_ACTIVE_MS); }
 
   /** Forgets NEAR's figure (the token was cleared). */
-  public reset(): void { this.figure = undefined; this.nextAt = 0; this.problem = undefined; this.notify(); }
+  public reset(): void { this.figure = undefined; this.nextAt = 0; this.problem = undefined; this.okAt = undefined; this.periods.clear(); this.periodsAt = 0; this.periodsKey = ''; this.notify(); }
+
+  /** NEAR's total since `since` under `name`, when the last answer covered exactly that start. */
+  public period(name: string, since?: number): NearUsageFigure | undefined {
+    const figure = this.periods.get(name);
+    return figure && (since === undefined || figure.since === since) ? { ...figure } : undefined;
+  }
+
+  /**
+   * Asks NEAR for its totals since each start (e.g. this week, month, year, and 7 days ago), one
+   * call each, at most every PERIOD_REFRESH_MS unless the starts changed or `force`. Only while a
+   * token is set; a failure is kept as the problem, like a poll's.
+   */
+  public async refreshPeriods(starts: Record<string, number>, force = false): Promise<void> {
+    if (this.periodsInFlight) return this.periodsInFlight;
+    const key = Object.entries(starts).filter(([name]) => name !== 'lastWeek').map(([name, at]) => `${name}=${at}`).join(',');
+    if (!this.api || (!force && key === this.periodsKey && this.now() - this.periodsAt < PERIOD_REFRESH_MS)) return;
+    this.periodsInFlight = this.askPeriods(starts, key).finally(() => { this.periodsInFlight = undefined; });
+    return this.periodsInFlight;
+  }
+
+  private async askPeriods(starts: Record<string, number>, key: string): Promise<void> {
+    const token = await this.options.token().catch(() => undefined);
+    if (!token) return;
+    this.periodsAt = this.now();
+    this.periodsKey = key;
+    let stage: 'api-key' | 'summary' = 'api-key';
+    try {
+      const ids = await this.identity();
+      stage = 'summary';
+      for (const [name, since] of Object.entries(starts)) {
+        const nanoUsd = await this.api!.usageSummary(token, ids.organizationId, { apiKeyId: ids.apiKeyId, startTime: new Date(since).toISOString(), endTime: new Date(this.now()).toISOString() });
+        this.periods.set(name, { nanoUsd, at: this.now(), since });
+      }
+      this.okAt = this.now();
+      this.problem = undefined;
+    } catch (error) {
+      this.problem = describeUsageError(error, stage, { organizationId: this.ids?.organizationId }).message;
+    }
+    this.notify();
+  }
+
+  /**
+   * Checks the stored token now: asks NEAR which organization the API key is in (fresh, not the
+   * remembered answer), then for today's usage summary with the token. Reports success or the
+   * exact problem, and updates today's figure and problem as a poll would.
+   */
+  public async testToken(): Promise<TokenTestResult> {
+    if (!this.api) return { ok: false, code: 'no-client', message: 'No NEAR AI Cloud API key is set up for this project, so there is nothing to check the token against.' };
+    const token = await this.options.token().catch(() => undefined);
+    if (!token) return { ok: false, code: 'no-token', message: 'No usage reporting token is set (or nearAi.spend.useNearUsageTotal is off).' };
+    let stage: 'api-key' | 'summary' = 'api-key';
+    try {
+      this.ids = await this.api.checkApiKey();
+      await this.options.identity?.save(this.ids).catch(() => undefined);
+      stage = 'summary';
+      const since = this.options.dayStart();
+      this.polls += 1;
+      const nanoUsd = await this.api.usageSummary(token, this.ids.organizationId, { apiKeyId: this.ids.apiKeyId, startTime: new Date(since).toISOString(), endTime: new Date(this.now()).toISOString() });
+      const at = this.now();
+      this.figure = { nanoUsd, at, since };
+      this.okAt = at;
+      this.failures = 0;
+      this.problem = undefined;
+      this.notify();
+      return { ok: true, at, nanoUsd, organizationId: this.ids.organizationId };
+    } catch (error) {
+      const problem = describeUsageError(error, stage, { organizationId: this.ids?.organizationId });
+      this.problem = problem.message;
+      this.notify();
+      return { ok: false, ...problem };
+    }
+  }
+
+  private async identity(): Promise<{ organizationId: string; apiKeyId: string }> {
+    this.ids ??= await this.options.identity?.load().catch(() => undefined);
+    if (!this.ids) {
+      this.ids = await this.api!.checkApiKey();
+      await this.options.identity?.save(this.ids).catch(() => undefined);
+    }
+    return this.ids;
+  }
 
   public async tick(): Promise<void> {
     if (this.inFlight || !this.api || this.now() < this.nextAt) return this.inFlight;
@@ -221,23 +315,21 @@ export class NearUsageSummary {
     const token = await this.options.token().catch(() => undefined);
     if (!token) { if (this.figure) this.reset(); this.nextAt = this.now() + USAGE_POLL_ACTIVE_MS; return; }
     const since = this.options.dayStart();
+    let stage: 'api-key' | 'summary' = 'api-key';
     try {
-      this.ids ??= await this.options.identity?.load().catch(() => undefined);
-      if (!this.ids) {
-        this.ids = await this.api!.checkApiKey();
-        await this.options.identity?.save(this.ids).catch(() => undefined);
-      }
+      await this.identity();
+      stage = 'summary';
       this.polls += 1;
-      const nanoUsd = await this.api!.usageSummary(token, this.ids.organizationId, { apiKeyId: this.ids.apiKeyId, startTime: new Date(since).toISOString(), endTime: new Date(this.now()).toISOString() });
+      const nanoUsd = await this.api!.usageSummary(token, this.ids!.organizationId, { apiKeyId: this.ids!.apiKeyId, startTime: new Date(since).toISOString(), endTime: new Date(this.now()).toISOString() });
       this.figure = { nanoUsd, at: this.now(), since };
+      this.okAt = this.now();
       this.failures = 0;
       this.problem = undefined;
       this.nextAt = this.now() + (this.options.active() ? USAGE_POLL_ACTIVE_MS : USAGE_POLL_IDLE_MS);
       this.notify();
     } catch (error) {
       this.failures += 1;
-      const status = (error as { status?: unknown }).status;
-      this.problem = status === 401 ? 'NEAR rejected the usage reporting token (invalid, expired, or revoked).' : status === 403 ? 'The usage reporting token belongs to another organization than this API key.' : status === 429 ? 'NEAR is rate limiting usage reports.' : 'NEAR\'s usage summary could not be read.';
+      this.problem = describeUsageError(error, stage, { organizationId: this.ids?.organizationId }).message;
       const retryAfter = (error as { retryAfterMs?: unknown }).retryAfterMs;
       this.nextAt = this.now() + Math.max(typeof retryAfter === 'number' ? retryAfter : 0, Math.min(USAGE_POLL_IDLE_MS * 2, USAGE_POLL_ACTIVE_MS * (2 ** Math.min(4, this.failures - 1))));
       this.notify();
