@@ -1,5 +1,0 @@
-{
-  "prompt": "Fix the problems reported in ISSUE.md, add regression tests for them under test/, and keep the existing tests passing. Do not modify test/report.test.js. Finish with a summary of the cause and the fix.",
-  "visibleTests": ["test/report.test.js"],
-  "hiddenEnv": { "TZ": "America/Toronto" }
-}

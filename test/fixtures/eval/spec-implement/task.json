@@ -1,4 +1,0 @@
-{
-  "prompt": "Implement parse in csv.js exactly as SPEC.md describes, with no dependencies. Do not modify csv.test.js; add more tests of your own if you like. Finish with a summary.",
-  "visibleTests": ["csv.test.js"]
-}
