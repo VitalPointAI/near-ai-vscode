@@ -52,6 +52,10 @@ sent only to the model you pick.
   into requirements, phases, plans, and verified results. Agents do the legwork
   and you make the calls. The agents strip and Agent Activity show what every
   agent is doing as it works.
+- **Pick models on evidence.** **Compare Models** runs the same coding,
+  research, planning, and execution tasks on the models you choose, grades
+  them with hidden tests, and ranks every model you have tested. One click
+  puts the winner to work in any agent role.
 - **You stay in control of what's sent.** Each message is checked before it
   leaves: likely secrets are held back, personal data asks first, TEE-only mode
   blocks forwarded models, and an emergency stop halts everything.
@@ -67,6 +71,21 @@ as a row in the chat.
 - **You approve what matters.** File edits show a diff and shell commands show
   the exact command before they run, with **Allow**, **Allow for this run**, or
   **Deny** (with a note on what to do instead). Reads and searches run freely.
+  A command card also offers **Always allow "git push" in this workspace**,
+  which adds a narrow rule to `nearAi.agent.allowCommands` and applies at once.
+  Rules never cover `--force`, a typed URL, `rm`, `curl`, or an interpreter
+  such as `node` or `bash`, and `npm run build` allows only that script.
+- **Auto approve that stays out of your way.** In Auto mode, fixed rules clear
+  everyday work on their own: reading and searching, builds and tests, git
+  status, diff, commit, pull, fetch, switch, stash, merge, revert and
+  cherry-pick, deleting single files or build output (`dist`, `node_modules`,
+  `coverage`, …), installs from the lockfile, `sed` and `awk` that only print
+  or substitute, and the project's own `node_modules/.bin` tools. Each part of
+  a chained command such as `cd app && npm test` is checked on its own.
+  Commands the rules can't decide go to a private safety model (with a second
+  private model as fallback); risky or uncertain ones ask, and the card says
+  why. After the run reads web pages or MCP results, the safety model is
+  stricter and commands that can reach the network always ask.
 - **Undo a whole run.** Every file the agent changes is snapshotted first, so
   one **Revert** puts them all back.
 - **A visible plan.** Multi-step work keeps a task list above the input box.
@@ -157,6 +176,33 @@ approval rules; tools that can change data ask first in every mode unless you
 mark the server Trusted, and the approval card shows exactly what is sent.
 URLs (which may carry the access token), header values, and environment values
 are stored in VS Code's encrypted secret storage.
+
+### Compare Models
+
+**NEAR AI: Compare Models** (also on the Tools page) shows which models do your
+kind of work best, measured on real tasks rather than published benchmarks.
+
+- **Leaderboard first.** The top of the page ranks every model you have
+  tested, using the latest result for each task: an overall score out of 10,
+  scores for coding, research, planning, and execution, pass rate, speed, cost,
+  stalls, privacy (TEE, Local, or Forwarded), and the roles it holds now.
+  Results older than 30 days, from a task that has since changed, or for a
+  model NEAR no longer lists are marked, so the ranking reflects what is known
+  today.
+- **Choose what to run.** Pick 2 to 6 models, the full or short task set,
+  and how many times to run each task (up to 3). The tasks run in a temporary folder outside your
+  workspace, and answers are graded by tests the models never see.
+- **See the cost first.** The page estimates the cost from NEAR's prices
+  before anything runs, and asks you to confirm. Each task run stops at
+  `nearAi.agent.maxRunCostUsd`, and the comparison stops at your daily limit.
+- **Quick or full.** **Reuse saved results** runs only what is missing, so
+  testing a new model against ones you tested before costs only the new
+  model's runs. **Run everything again** repeats every task.
+- **Every run is saved** on this computer (in the extension's storage, not
+  the project) and listed under History, so you can reopen its report.
+- **Use as…** puts a model into the chat's main model, the deep, standard, or
+  fast tier, or an agent role in one click, with **Undo**. Models that aren't
+  private can't be chosen in TEE-only mode.
 
 ### Agent Activity
 
@@ -260,7 +306,15 @@ If NEAR itself refuses a request with HTTP 402 (credits or the key's spend
 limit used up), the chat says "NEAR spend limit reached".
 
 **Agent Activity** shows each run's agents, models, tokens, and cost, and
-**Export details** saves them as Markdown or JSON.
+**Export details** saves them as Markdown or JSON. Its **Spend** section
+answers "is my usage reporting token working?": it says whether figures are
+NEAR's actual billing (the token works), settled per request, or estimated
+from list prices, with **Test token now** and **Fix token**. It also shows
+spend today, this week, this month, and this year, the 7-day burn rate, and
+**Top up credits**, which opens the NEAR AI Cloud console. NEAR has no
+top-up link that works without signing in, and its API doesn't give the
+remaining balance to an API key or reporting token, so the balance and time
+until it runs out aren't shown.
 
 ### Teams, attachments, images, and memory
 
@@ -358,7 +412,7 @@ Read the full [security and trust report](SECURITY.md).
 | --- | --- | --- |
 | `nearAi.defaultModel` | `z-ai/glm-5.3` | Model used for new chats. |
 | `nearAi.actionPolicy` | `approve-risky` | `approve-risky`: edits and commands ask first. `mostly-autonomous`: edits run, commands ask. `auto`: edits run, and commands run when they pass the safety check (fixed rules for clear cases, a private TEE model for the rest; risky or uncertain commands ask, with the reason). `fully-autonomous`: everything runs except deny-listed commands (only for throwaway workspaces). You can also switch it from the picker next to the model in the chat's bottom bar (Ask before edits / Edits auto / Auto / Full auto); it writes user settings, or the workspace or folder settings when the value is set there, asks before Full auto, and shows "Stopped" while the emergency stop is on. |
-| `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking (simple commands only; anything with `;`, `|`, `>`, or `$( )` asks). |
+| `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking, matched by their leading words (`git push` covers `git push origin main`, but never `--force` or a URL). The approval card's **Always allow** adds entries. In `auto`, each part of a chained command is matched on its own; in other modes, anything with `;`, `\|`, `>`, or `$( )` asks. |
 | `nearAi.agent.denyCommands` | `rm -rf /`, `git push --force`, … | Commands the agent may never run. |
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / Qwen3.6-35B-A3B | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). By default only research, synthesis, and mapping roles use the fast tier; GSD's `budget` and `adaptive` model profiles also send checkers and the test-writing auditor there. |
 | `nearAi.agent.safetyModel` | the fast tier | With `auto`, the model that checks commands the rules cannot decide. Used only when it runs privately (TEE or local); otherwise those commands ask. |

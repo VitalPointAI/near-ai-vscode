@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.7
+
+- **The guide covers 0.4.6's features.** The README, which is also the Marketplace page, now explains
+  Compare Models, the approval card's "Always allow" button and what Auto
+  approve clears on its own, and the Spend section in Agent Activity. The
+  `nearAi.agent.allowCommands` row in the settings table describes how
+  entries are matched. No change to how the extension works.
+
 ## 0.4.6
 
 - **Auto approve asks far less.** The safety check's model often used up its
