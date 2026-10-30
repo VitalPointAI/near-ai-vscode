@@ -1,6 +1,7 @@
 .vscode/**
 .planning/**
 .codex/**
+.claude/**
 .agents/**
 src/**
 test/**
