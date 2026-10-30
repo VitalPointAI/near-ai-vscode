@@ -94,6 +94,7 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       const summary = first.summary as { runs: number; tokens: { output: number } };
       assert.ok(summary.runs >= 1 && summary.tokens.output > 0, JSON.stringify(summary));
       assert.ok(!('entries' in first), 'no raw event log');
+      assert.ok(!('insight' in first), 'a local runtime has no NEAR bill, so no spend section');
       const before = page.toView.length;
       await api.sidebar.request({ type: 'send', text: 'Say hi again', model: 'fake-coder' });
       await observer.next('toView', (message) => message.type === 'assistant-done', observer.toView.length - 1);

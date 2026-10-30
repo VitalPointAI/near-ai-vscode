@@ -64,6 +64,20 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 button.link { background: none; color: var(--vscode-textLink-foreground); padding: 2px 0; }
 button.link:hover { text-decoration: underline; background: none; }
 button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.source-line { margin: 10px 0 4px; }
+.source-key { color: var(--muted); }
+.source-badge { padding: 1px 8px; border-radius: 8px; border: 1px solid currentColor; font-weight: 600; }
+.source-badge[data-kind="near"], .source-badge[data-kind="per-request"] { color: var(--vscode-testing-iconPassed, #3fb950); }
+.source-badge[data-kind="estimated"] { color: var(--warn); }
+.source-badge[data-kind="none"] { color: var(--muted); }
+.hint-inline { color: var(--muted); }
+#token-status[data-state="failing"] { color: var(--bad); }
+.problem { margin: 6px 0; padding: 6px 10px; border-left: 3px solid var(--bad); background: var(--vscode-inputValidation-errorBackground, transparent); }
+#token-test[data-ok="false"] { color: var(--bad); }
+.periods .pair { display: flex; flex-direction: column; min-width: 7em; }
+.figure-source { font-size: 0.8em; color: var(--muted); }
+.figure-source[data-source="partial"], .figure-source[data-source="estimated"] { color: var(--warn); }
+.credits { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 @media (max-width: 520px) {
   body { padding: 0 12px 32px; }
   th, td { padding: 4px 6px; }

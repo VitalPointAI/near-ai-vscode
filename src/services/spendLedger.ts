@@ -112,6 +112,11 @@ export interface SpendLedgerOptions {
   now?: () => number;
   /** Identifies this window's writes (default: random per instance). */
   writer?: string;
+  /**
+   * Also read the monthly files back to this time (ms), e.g. the start of the year for a yearly
+   * total. By default only this and last month's files are read.
+   */
+  from?: number;
 }
 
 /** The fields a caller gives when a billable response starts. */
@@ -136,6 +141,7 @@ export type SpendFinish = Partial<Pick<SpendEntry, 'requestId' | 'inputTokens' |
 export class SpendLedger {
   public readonly writer: string;
   private readonly now: () => number;
+  private readonly from: number | undefined;
   private readonly entries = new Map<string, SpendEntry & { v: number }>();
   private readonly actuals = new Map<string, { nano: number; how: 'billing' | 'zero' }>();
   private readonly offsets = new Map<string, number>();
@@ -147,6 +153,7 @@ export class SpendLedger {
   public constructor(public readonly dir: string, options: SpendLedgerOptions = {}) {
     this.now = options.now ?? Date.now;
     this.writer = options.writer ?? `${process.pid}-${randomBytes(4).toString('hex')}`;
+    this.from = options.from;
   }
 
   /** Records a billable response; returns its entry id for `finish`. */
@@ -208,6 +215,22 @@ export class SpendLedger {
       else totals.estimatedNanoUsd += entry.estimateNanoUsd;
     }
     return totals;
+  }
+
+  /** Unique requests (a request ID counts once) by how their cost is known: reconciled, pending, or estimate only. */
+  public requestCounts(filter: SpendFilter = {}): { reconciled: number; pending: number; estimated: number } {
+    const counts = { reconciled: 0, pending: 0, estimated: 0 };
+    const counted = new Set<string>();
+    for (const entry of this.entries.values()) {
+      if (!matches(entry, filter)) continue;
+      const rid = entry.requestId;
+      if (rid && counted.has(rid)) continue;
+      if (rid) counted.add(rid);
+      if (rid && this.actuals.has(rid)) counts.reconciled += 1;
+      else if (rid) counts.pending += 1;
+      else counts.estimated += 1;
+    }
+    return counts;
   }
 
   /** Called after anything changes (own writes and what `refresh` reads). */
@@ -316,8 +339,20 @@ export class SpendLedger {
 
   private segments(): string[] {
     const now = new Date(this.now());
+    const files = new Set<string>();
+    if (this.from !== undefined && this.from < now.getTime()) {
+      const start = new Date(this.from);
+      // Month by month from `from` (at most two years of files).
+      for (let month = 0; month < 24; month += 1) {
+        const at = Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + month, 15);
+        if (at > now.getTime() + 31 * 86_400_000) break;
+        files.add(this.segment(at));
+      }
+    }
     const previous = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15);
-    return [this.segment(previous), this.segment(now.getTime())];
+    files.add(this.segment(previous));
+    files.add(this.segment(now.getTime()));
+    return [...files];
   }
 }
 

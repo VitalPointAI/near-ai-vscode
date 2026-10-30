@@ -105,6 +105,42 @@
     link.dataset.state = token.state;
   }
 
+  // Spend: where the figures come from, the token's state, totals by period, burn rate, credits.
+  function renderInsight(insight) {
+    const section = $('spend-section');
+    section.hidden = !insight;
+    if (!insight) return;
+    const source = $('source-label');
+    setText(source, insight.source.label);
+    source.dataset.kind = insight.source.kind;
+    setText($('source-detail'), insight.source.detail);
+    const token = insight.token;
+    setText($('token-status'), token.text);
+    $('token-status').dataset.state = token.state;
+    $('token-problem').hidden = !token.problem;
+    setText($('token-problem-text'), token.problem || '');
+    $('fix-token').hidden = !token.canFix;
+    $('test-token').hidden = !token.canTest;
+    const top = $('top-up');
+    setText(top, insight.topUp.text);
+    top.title = insight.topUp.tooltip;
+    syncRows($('periods'), insight.periods, (figure) => figure.period, (wrap) => { wrap.className = 'pair'; wrap.append(el('dt'), el('dd'), el('span', 'figure-source')); }, (wrap, figure) => {
+      setText(wrap.children[0], figure.label);
+      setText(wrap.children[1], figure.text);
+      setText(wrap.children[2], figure.sourceText);
+      wrap.children[2].dataset.source = figure.source;
+      wrap.title = figure.tooltip;
+    }, 'div');
+    const credits = insight.credits;
+    const rows = [
+      ['Burn rate (7-day average)', insight.burn.text, insight.burn.tooltip],
+      ['Remaining credits', credits.text, credits.tooltip]
+    ];
+    if (credits.available) rows.push(['Time to depletion', credits.depletionText || '–', credits.tooltip]);
+    renderPairs($('credits'), rows);
+    $('credits-note').hidden = credits.available;
+  }
+
   function renderSummary(summary, hasProject, token) {
     const empty = summary.empty;
     $('summary').hidden = empty;
@@ -192,7 +228,15 @@
       renderNow(message.running || []);
       renderSummary(message.summary, message.hasProject, message.token);
       renderToken(message.token);
+      renderInsight(message.insight);
       renderHistory(message.history);
+    }
+    if (message.type === 'token-test') {
+      const line = $('token-test');
+      line.hidden = false;
+      line.dataset.ok = message.running ? '' : String(Boolean(message.ok));
+      setText(line, String(message.text || ''));
+      $('test-token').disabled = Boolean(message.running);
     }
     if (message.type === 'focus-agent' && typeof message.agentId === 'string') {
       state.focus = message.agentId;
@@ -225,5 +269,9 @@
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !menu.hidden) { closeMenu(); details.focus(); } });
   $('export-usage').addEventListener('click', () => vscode.postMessage({ type: 'export-usage' }));
   if ($('reporting-token')) $('reporting-token').addEventListener('click', () => vscode.postMessage({ type: 'reporting-token' }));
+  $('test-token').addEventListener('click', () => vscode.postMessage({ type: 'test-token' }));
+  $('fix-token').addEventListener('click', () => vscode.postMessage({ type: 'fix-token' }));
+  $('top-up').addEventListener('click', () => vscode.postMessage({ type: 'open-console' }));
+  $('open-console').addEventListener('click', () => vscode.postMessage({ type: 'open-console' }));
   vscode.postMessage({ type: 'ready' });
 })();
