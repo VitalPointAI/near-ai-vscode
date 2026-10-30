@@ -1,19 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: 0.4.x
-milestone_name: 0.4.x line
+milestone_name: line
 current_phase: null
 status: idle
-stopped_at: v0.5.0 paused; 0.4.5 published
-last_updated: "2026-10-29T00:00:00.000Z"
-last_activity: 2026-10-29
-last_activity_desc: Paused v0.5.0 (moved to a new project) and archived its planning; continuing the 0.4.x line
+last_updated: "2026-10-30T22:30:53.435Z"
+state_head: dd2f3d22656fc4b86cb53e1920ec0b4abad693f2
 progress:
-  total_phases: 0
+  total_phases: 1
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
   percent: 0
+last_activity: 2026-10-30
+stopped_at: v0.5.0 paused; 0.4.5 published
+last_activity_desc: Added Phase 25 (cybersecurity harness) to the 0.4.x line with 12 requirements
 ---
 
 # Project State
@@ -21,8 +22,14 @@ progress:
 ## Current position
 
 Line: 0.4.x (latest release 0.4.5, 2026-10-29)
-Phase: none active
-Next: plan the next 0.4.x work (add a phase with `/gsd-phase`, or use `/gsd-quick` for small changes)
+Phase: 25 added, not planned
+Next: `/gsd-plan-phase 25` (cybersecurity harness), or `/gsd-quick` for small changes
+
+## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 25 added: Cybersecurity harness with a target picker, offensive and defensive scans (CYBER-01…12; not planned yet)
 
 ## Notes
 
