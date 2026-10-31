@@ -2,9 +2,14 @@
 gsd_state_version: "1.0"
 milestone: v0.6.0
 milestone_name: Team Mode
+current_phase: 60
+current_phase_name: "Team core: identity, signed event log, git transport, roster"
 status: planning
-last_updated: "2026-10-31T11:04:17.000Z"
+stopped_at: Phase 60 context gathered
+last_updated: "2026-10-31T11:08:30.342Z"
 last_activity: 2026-10-31
+last_activity_desc: Roadmap created for milestone v0.6.0 (Phases 60-67, 31/31 requirements mapped)
+state_head: ec53121cf82d686b792a504568ad474acf7341ad
 progress:
   total_phases: 8
   completed_phases: 0
@@ -76,9 +81,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-31
-Stopped at: Roadmap for v0.6.0 Team Mode written (Phases 60-67); next is `/gsd-plan-phase 60` (optionally `/gsd-discuss-phase 60` first)
-Resume file: None
+Last session: 2026-10-31T11:08:30.291Z
+Stopped at: Phase 60 context gathered
+Resume file: .planning/phases/60-team-core-identity-signed-event-log-git-transport-roster/60-CONTEXT.md
 
 ## Notes
 
