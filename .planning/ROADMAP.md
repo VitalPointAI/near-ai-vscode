@@ -63,13 +63,13 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Concurrent appends from both clients never lose an event: a test with several child-process clients appending to a local bare repository ends with every event present and no force-push.
   5. Solo projects (no `.planning/.near-ai/team.json`) behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 1/11 plans executed in 6 waves
+**Plans**: 2/11 plans executed in 6 waves
 
 **Wave 1**
 - [x] 60-01-PLAN.md — Tracer: signed genesis round trip between two clones over a real bare remote; type contracts, canonical JSON, identity (TEAM-04)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 60-02-PLAN.md — `decideTeamAction` full spec 6.3 matrix and `assertNoSecrets` (SEC-04, SEC-01)
+- [x] 60-02-PLAN.md — `decideTeamAction` full spec 6.3 matrix and `assertNoSecrets` (SEC-04, SEC-01)
 - [ ] 60-03-PLAN.md — Transport hardening: CAS retry with rebuild, push classification, mirror lock, rewritten-branch quarantine, paused status (TEAM-04)
 - [ ] 60-04-PLAN.md — Event validation: envelope, exact-key bodies with email hashes, policy validators (TEAM-04)
 
@@ -207,7 +207,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 60. Team core | v0.6.0 | 1/11 | In Progress | - |
+| 60. Team core | v0.6.0 | 2/11 | In Progress | - |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 0/TBD | Not started | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 0/TBD | Not started | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |

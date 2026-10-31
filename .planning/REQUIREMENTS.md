@@ -59,10 +59,10 @@
 
 ### Security
 
-- [ ] **SEC-01**: No secret is written to the log, team.json, settings or audit.
+- [x] **SEC-01**: No secret is written to the log, team.json, settings or audit.
 - [ ] **SEC-02**: A team-wide stop halts every member's agents; only a lead resumes.
 - [ ] **SEC-03**: Teammate-authored text reaches agents only as untrusted data.
-- [ ] **SEC-04**: Role permissions in section 6.3 are enforced on write and on read.
+- [x] **SEC-04**: Role permissions in section 6.3 are enforced on write and on read.
 
 ## Future Requirements
 
@@ -86,8 +86,8 @@ Phases are numbered 60 to 67; spec phase 25 is Phase 60, and so on in order.
 |-------------|-------|--------|
 | TEAM-01 | Phase 60 | Pending |
 | TEAM-04 | Phase 60 | Pending |
-| SEC-01 | Phase 60 | Pending |
-| SEC-04 | Phase 60 | Pending |
+| SEC-01 | Phase 60 | Complete |
+| SEC-04 | Phase 60 | Complete |
 | TEAM-02 | Phase 61 | Pending |
 | TEAM-03 | Phase 61 | Pending |
 | BOARD-01 | Phase 62 | Pending |
