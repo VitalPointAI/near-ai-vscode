@@ -189,7 +189,7 @@ test('generic denials use the role and the action label without dashes', () => {
   assert.equal(decision.reason, `the developer role does not allow ${ACTION_LABELS['item.assign']}`);
   const reasons = [...Object.values(PERMISSION_REASONS), ...Object.values(ACTION_LABELS)];
   for (const text of reasons) {
-    assert.ok(!text.includes('—') && !text.includes('–'), `no dash in: ${text}`);
+    assert.ok(!/[\u2013\u2014]/.test(text), `no dash in: ${text}`);
   }
 });
 
