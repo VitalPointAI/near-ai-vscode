@@ -3,11 +3,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MAX_EVENT_BYTES, canonicalize, eventPath } from '../domain/team/canonical';
-import { parseEventFile, validateEnvelope } from '../domain/team/validate';
-import { TEAM_REJECTION_REASONS } from '../domain/team/types';
+import { applyPolicyChanges, defaultTeamPolicy, validatePolicy, validatePolicyChanges } from '../domain/team/policy';
+import { parseEventFile, validateBody, validateDeviceRef, validateEnvelope, validateName } from '../domain/team/validate';
+import { IMPLEMENTED_EVENT_TYPES, TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { CommittedEvent, TeamEvent } from '../domain/team/types';
 import { newMemberId, newTeamId } from '../team/identity';
-import { createOwner, testEvent } from './helpers/teamHarness';
+import { createOwner, testEvent, testGenesis } from './helpers/teamHarness';
 import type { TestOwner } from './helpers/teamHarness';
 
 const INVALID = TEAM_REJECTION_REASONS.invalidBody;
@@ -173,4 +174,279 @@ test('rejection ids use the event id when it matches the pattern and the path ot
   assert.equal(badId.eventId, eventPath(event));
   assert.equal(badId.reason, `${INVALID}: id`);
   assert.notEqual(newMemberId(), '');
+});
+
+// ---- Bodies and policy ----
+
+const OWNER_ID = 'mbr-0123456789abcdef';
+const OTHER_ID = 'mbr-fedcba9876543210';
+const HASH_A = 'a'.repeat(64);
+const HASH_B = 'b'.repeat(64);
+const EVENT_A = 'evt-01ARZ3NDEKTSV4RRFFQ69G5FAV';
+const LINE_SEPARATOR = String.fromCharCode(0x2028);
+const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029);
+
+function bodiesFor(device: { fingerprint: string; publicKey: string }): Record<string, Record<string, unknown>> {
+  return {
+    'team.created': { name: 'Core team', ownerId: OWNER_ID, ownerName: 'Ada', ownerEmailHashes: [HASH_A], ownerDevice: device, policy: defaultTeamPolicy(), near: { organizationId: 'org_1', workspaceId: 'ws:2' } },
+    'member.joined': { memberId: OTHER_ID, name: 'Grace', emailHashes: [HASH_A, HASH_B], role: 'developer', device },
+    'member.role-changed': { memberId: OTHER_ID, role: 'lead' },
+    'member.removed': { memberId: OTHER_ID },
+    'device.added': { memberId: OTHER_ID, device },
+    'device.revoked': { memberId: OTHER_ID, fingerprint: device.fingerprint },
+    'member.availability': { availability: 'focus', workingHours: { tz: 'Europe/London', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:30' } },
+    'member.skills': { memberId: OTHER_ID, skills: ['typescript', 'c++', 'node.js'] },
+    'policy.changed': { changes: { peerMetricsVisible: true, safetyFactorBp: 13000 } },
+    'snapshot.written': { coversThrough: EVENT_A, lamport: 500, stateHash: HASH_A, path: 'snapshots/000000000500.json' }
+  };
+}
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+test('valid bodies for all ten Phase 60 types pass, with and without optional fields', async () => {
+  const { owner } = await context();
+  const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
+  const bodies = bodiesFor(device);
+  assert.equal(Object.keys(bodies).length, IMPLEMENTED_EVENT_TYPES.length);
+  for (const type of IMPLEMENTED_EVENT_TYPES) {
+    assert.equal(validateBody(type, bodies[type]), undefined, type);
+  }
+  const created = clone(bodies['team.created'] as Record<string, unknown>);
+  delete created.near;
+  assert.equal(validateBody('team.created', created), undefined, 'near is optional');
+  assert.equal(validateBody('member.availability', { availability: 'away' }), undefined, 'workingHours is optional');
+  assert.equal(validateBody('member.skills', { memberId: OTHER_ID, skills: [] }), undefined);
+  assert.equal(validateBody('member.joined', { ...bodies['member.joined'], emailHashes: [] }), undefined);
+  assert.equal(validateBody('item.created', {}), 'unsupported event type for this version');
+  assert.equal(validateBody('member.removed', []), `${INVALID}: body`);
+  assert.equal(validateBody('member.removed', null), `${INVALID}: body`);
+});
+
+test('every body rejects extra keys, missing keys and wrong types by field name', async () => {
+  const { owner } = await context();
+  const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
+  const bodies = bodiesFor(device);
+  for (const type of IMPLEMENTED_EVENT_TYPES) {
+    const valid = bodies[type] as Record<string, unknown>;
+    const extra = { ...valid, surprise: 1 };
+    assert.equal(validateBody(type, extra), `${INVALID}: body.surprise`, `${type} extra key`);
+    for (const key of Object.keys(valid)) {
+      const missing = clone(valid);
+      delete missing[key];
+      const optional = (type === 'team.created' && key === 'near') || (type === 'member.availability' && key === 'workingHours');
+      if (!optional) assert.equal(validateBody(type, missing), `${INVALID}: body.${key}`, `${type} missing ${key}`);
+      const wrong = { ...clone(valid), [key]: key === 'lamport' ? 'x' : 12345 };
+      assert.equal(validateBody(type, wrong), `${INVALID}: body.${key}`, `${type} wrong type ${key}`);
+      const nulled = { ...clone(valid), [key]: null };
+      assert.equal(validateBody(type, nulled), `${INVALID}: body.${key}`, `${type} null ${key}`);
+    }
+  }
+});
+
+test('members carry email hashes only, and device fingerprints must match their key', async () => {
+  const { owner } = await context();
+  const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
+  const joined = bodiesFor(device)['member.joined'] as Record<string, unknown>;
+  assert.equal(validateBody('member.joined', { ...joined, emails: ['a@b.test'] }), `${INVALID}: body.emails`);
+  const plainOwner = bodiesFor(device)['team.created'] as Record<string, unknown>;
+  assert.equal(validateBody('team.created', { ...plainOwner, ownerEmails: ['a@b.test'] }), `${INVALID}: body.ownerEmails`);
+  assert.equal(validateBody('member.joined', { ...joined, emailHashes: ['ada@example.test'] }), `${INVALID}: body.emailHashes`);
+  assert.equal(validateBody('member.joined', { ...joined, emailHashes: [HASH_A.toUpperCase()] }), `${INVALID}: body.emailHashes`);
+  assert.equal(validateBody('member.joined', { ...joined, emailHashes: [HASH_A, HASH_A] }), `${INVALID}: body.emailHashes`);
+  const nine = Array.from({ length: 9 }, (_unused, index) => String(index).repeat(64));
+  assert.equal(validateBody('member.joined', { ...joined, emailHashes: nine }), `${INVALID}: body.emailHashes`);
+  assert.equal(validateBody('member.joined', { ...joined, emailHashes: nine.slice(0, 8) }), undefined);
+  assert.equal(validateBody('member.joined', { ...joined, emailHashes: HASH_A }), `${INVALID}: body.emailHashes`);
+
+  const stranger = await createOwner(newTeamId());
+  const mismatched = { fingerprint: stranger.identity.fingerprint, publicKey: device.publicKey };
+  assert.equal(validateBody('member.joined', { ...joined, device: mismatched }), `${INVALID}: body.device.fingerprint`);
+  assert.equal(validateBody('device.added', { memberId: OTHER_ID, device: mismatched }), `${INVALID}: body.device.fingerprint`);
+  assert.equal(validateBody('team.created', { ...plainOwner, ownerDevice: mismatched }), `${INVALID}: body.ownerDevice.fingerprint`);
+  assert.equal(validateBody('member.joined', { ...joined, device: { ...device, publicKey: `${device.publicKey.slice(0, 42)}=` } }), `${INVALID}: body.device.publicKey`);
+  assert.equal(validateBody('member.joined', { ...joined, device: { ...device, extra: 1 } }), `${INVALID}: body.device.extra`);
+  assert.equal(validateBody('member.joined', { ...joined, device: { fingerprint: device.fingerprint } }), `${INVALID}: body.device.publicKey`);
+  assert.equal(validateDeviceRef(device, 'x'), undefined);
+  assert.equal(validateDeviceRef('device', 'x'), `${INVALID}: x`);
+  assert.equal(validateBody('device.revoked', { memberId: OTHER_ID, fingerprint: 'dev-1' }), `${INVALID}: body.fingerprint`);
+});
+
+test('names are 1 to 80 characters after trimming with no control characters or line separators', () => {
+  assert.equal(validateName('Ada', 'n'), undefined);
+  assert.equal(validateName('  Ada  ', 'n'), undefined);
+  assert.equal(validateName('a'.repeat(80), 'n'), undefined);
+  assert.equal(validateName('日本語 😀', 'n'), undefined);
+  for (const bad of ['', '   ', 'a'.repeat(81), 'two\nlines', 'tab\there', 'bell\u0007', 'nul\u0000', 'del\u007F', `sep${LINE_SEPARATOR}`, `para${PARAGRAPH_SEPARATOR}`, 5, null, undefined, ['Ada']]) {
+    assert.equal(validateName(bad, 'body.name'), `${INVALID}: body.name`, String(bad));
+  }
+});
+
+test('working hours: weekday list, clock times and time zone are strict', () => {
+  const valid = { tz: 'America/Argentina/Buenos_Aires', days: [0, 6], start: '00:00', end: '23:59' };
+  assert.equal(validateBody('member.availability', { availability: 'available', workingHours: valid }), undefined);
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ['days', { ...valid, days: [] }],
+    ['days', { ...valid, days: [7] }],
+    ['days', { ...valid, days: [-1] }],
+    ['days', { ...valid, days: [1, 1] }],
+    ['days', { ...valid, days: [3, 2] }],
+    ['days', { ...valid, days: [0, 1, 2, 3, 4, 5, 6, 6] }],
+    ['days', { ...valid, days: [1.5] }],
+    ['days', { ...valid, days: '12345' }],
+    ['start', { ...valid, start: '24:00' }],
+    ['start', { ...valid, start: '9:00' }],
+    ['end', { ...valid, end: '12:60' }],
+    ['end', { ...valid, end: 1700 }],
+    ['tz', { ...valid, tz: 'Europe London' }],
+    ['tz', { ...valid, tz: '' }],
+    ['tz', { ...valid, tz: 'a'.repeat(65) }]
+  ];
+  for (const [field, hours] of cases) {
+    assert.equal(validateBody('member.availability', { availability: 'available', workingHours: hours }), `${INVALID}: body.workingHours.${field}`, JSON.stringify(hours));
+  }
+  assert.equal(validateBody('member.availability', { availability: 'available', workingHours: { ...valid, extra: 1 } }), `${INVALID}: body.workingHours.extra`);
+  assert.equal(validateBody('member.availability', { availability: 'available', workingHours: { tz: 'UTC' } }), `${INVALID}: body.workingHours.days`);
+  assert.equal(validateBody('member.availability', { availability: 'busy' }), `${INVALID}: body.availability`);
+});
+
+test('skills: at most 32 unique lowercase tags of at most 40 characters', () => {
+  const skills = (list: unknown): string | undefined => validateBody('member.skills', { memberId: OTHER_ID, skills: list });
+  assert.equal(skills(['a']), undefined);
+  assert.equal(skills(Array.from({ length: 32 }, (_unused, index) => `skill${index}`)), undefined);
+  assert.equal(skills(['a'.repeat(40)]), undefined);
+  for (const bad of [Array.from({ length: 33 }, (_unused, index) => `skill${index}`), ['dup', 'dup'], ['Upper'], ['a'.repeat(41)], [''], ['-lead'], ['has space'], [1], 'typescript']) {
+    assert.equal(skills(bad), `${INVALID}: body.skills`, JSON.stringify(bad));
+  }
+});
+
+test('team.created near link and ids are validated', async () => {
+  const { owner } = await context();
+  const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
+  const created = bodiesFor(device)['team.created'] as Record<string, unknown>;
+  assert.equal(validateBody('team.created', { ...created, near: { organizationId: 'org', workspaceId: 'bad space' } }), `${INVALID}: body.near.workspaceId`);
+  assert.equal(validateBody('team.created', { ...created, near: { organizationId: 'org' } }), `${INVALID}: body.near.workspaceId`);
+  assert.equal(validateBody('team.created', { ...created, near: { organizationId: 'org', workspaceId: 'w', extra: 1 } }), `${INVALID}: body.near.extra`);
+  assert.equal(validateBody('team.created', { ...created, ownerId: 'owner' }), `${INVALID}: body.ownerId`);
+  assert.equal(validateBody('team.created', { ...created, name: '' }), `${INVALID}: body.name`);
+  assert.equal(validateBody('team.created', { ...created, policy: { ...defaultTeamPolicy(), safetyFactorBp: 1.25 } }), `${INVALID}: body.policy.safetyFactorBp`);
+  assert.equal(validateBody('member.role-changed', { memberId: OTHER_ID, role: 'admin' }), `${INVALID}: body.role`);
+  assert.equal(validateBody('member.joined', { memberId: OTHER_ID, name: 'x', emailHashes: [], role: 'root', device }), `${INVALID}: body.role`);
+});
+
+test('snapshot.written pins the path to the lamport and the hash to 64 lowercase hex', () => {
+  const valid = { coversThrough: EVENT_A, lamport: 500, stateHash: HASH_A, path: 'snapshots/000000000500.json' };
+  assert.equal(validateBody('snapshot.written', valid), undefined);
+  assert.equal(validateBody('snapshot.written', { ...valid, path: 'snapshots/000000000501.json' }), `${INVALID}: body.path`);
+  assert.equal(validateBody('snapshot.written', { ...valid, path: 'snapshots/500.json' }), `${INVALID}: body.path`);
+  assert.equal(validateBody('snapshot.written', { ...valid, stateHash: 'A'.repeat(64) }), `${INVALID}: body.stateHash`);
+  assert.equal(validateBody('snapshot.written', { ...valid, stateHash: 'a'.repeat(63) }), `${INVALID}: body.stateHash`);
+  assert.equal(validateBody('snapshot.written', { ...valid, lamport: 0 }), `${INVALID}: body.lamport`);
+  assert.equal(validateBody('snapshot.written', { ...valid, lamport: 1_000_000_000_000 }), `${INVALID}: body.lamport`);
+  assert.equal(validateBody('snapshot.written', { ...valid, lamport: 1.5 }), `${INVALID}: body.lamport`);
+  assert.equal(validateBody('snapshot.written', { ...valid, coversThrough: 'evt-1' }), `${INVALID}: body.coversThrough`);
+  assert.equal(validateBody('snapshot.written', { ...valid, lamport: 1, path: 'snapshots/000000000001.json' }), undefined);
+});
+
+test('real genesis events from the harness parse through parseEventFile', async () => {
+  const teamId = newTeamId();
+  const owner = await createOwner(teamId);
+  const genesis = testGenesis({ teamId, owner, name: 'Genesis team' });
+  for (const event of genesis.events) {
+    const result = parseEventFile(entryFor(event));
+    assert.equal(result.ok, true, event.type);
+  }
+  const tampered = clone(genesis.events[1]) as unknown as { body: Record<string, unknown> };
+  tampered.body.emails = ['owner@example.invalid'];
+  assert.equal(rejection(entryFor(tampered)).reason, `${INVALID}: body.emails`);
+});
+
+test('validatePolicy accepts the default policy and rejects each kind of bad field', () => {
+  assert.equal(validatePolicy(defaultTeamPolicy()), undefined);
+  assert.equal(validatePolicy(defaultTeamPolicy({ integrationBranch: 'release/0.6' })), undefined);
+  const policy = (patch: Record<string, unknown>): Record<string, unknown> => ({ ...defaultTeamPolicy(), ...patch });
+  const roles = { owner: [], lead: [], developer: [], reviewer: [], observer: [] };
+  const weights = { roleFit: 3000, fileAffinity: 2500, continuity: 1500, capacity: 1500, budgetHeadroom: 1000, criticalPath: 500 };
+  const bad: Array<[string, Record<string, unknown>]> = [
+    ['safetyFactorBp', policy({ safetyFactorBp: 1.25 })],
+    ['safetyFactorBp', policy({ safetyFactorBp: -1 })],
+    ['overrunFactorBp', policy({ overrunFactorBp: 100_001 })],
+    ['reconcileToleranceBp', policy({ reconcileToleranceBp: '500' })],
+    ['dispatchMode', policy({ dispatchMode: 'manual' })],
+    ['reviewPolicy', policy({ reviewPolicy: 'none' })],
+    ['integrationMode', policy({ integrationMode: 'rebase' })],
+    ['budgetPeriod', policy({ budgetPeriod: 'weekly' })],
+    ['unspentPolicy', policy({ unspentPolicy: 'keep' })],
+    ['offerTimeoutMinutes', policy({ offerTimeoutMinutes: 0 })],
+    ['leaseTtlMinutes', policy({ leaseTtlMinutes: 10_081 })],
+    ['heartbeatMinutes', policy({ heartbeatMinutes: 1.5 })],
+    ['enforceWip', policy({ enforceWip: 'yes' })],
+    ['teeOnly', policy({ teeOnly: 0 })],
+    ['integrationBranch', policy({ integrationBranch: 'feature/../main' })],
+    ['integrationBranch', policy({ integrationBranch: '-bad' })],
+    ['integrationBranch', policy({ integrationBranch: 'has space' })],
+    ['sharedPaths', policy({ sharedPaths: ['../outside'] })],
+    ['sharedPaths', policy({ sharedPaths: ['a/../b'] })],
+    ['sharedPaths', policy({ sharedPaths: ['/etc/passwd'] })],
+    ['sharedPaths', policy({ sharedPaths: [''] })],
+    ['sharedPaths', policy({ sharedPaths: ['a'.repeat(201)] })],
+    ['sharedPaths', policy({ sharedPaths: Array.from({ length: 65 }, (_unused, index) => `f${index}`) })],
+    ['resources', policy({ resources: [5] })],
+    ['verifyCommands', policy({ verifyCommands: ['x'.repeat(201)] })],
+    ['verifyCommands', policy({ verifyCommands: ['npm test\nrm -rf /'] })],
+    ['verifyCommands', policy({ verifyCommands: Array.from({ length: 17 }, () => 'npm test') })],
+    ['allowedModels', policy({ allowedModels: { owner: [], lead: [], developer: [], reviewer: [] } })],
+    ['allowedModels', policy({ allowedModels: { ...roles, admin: [] } })],
+    ['allowedModels', policy({ allowedModels: { ...roles, owner: ['m'.repeat(161)] } })],
+    ['allowedModels', policy({ allowedModels: { ...roles, owner: Array.from({ length: 33 }, (_unused, index) => `m${index}`) } })],
+    ['dispatchWeightsBp', policy({ dispatchWeightsBp: { ...weights, roleFit: 5000 } })],
+    ['dispatchWeightsBp', policy({ dispatchWeightsBp: { roleFit: 10_000, fileAffinity: 0, continuity: 0, capacity: 0, budgetHeadroom: 0 } })],
+    ['dispatchWeightsBp', policy({ dispatchWeightsBp: { roleFit: 10_001, fileAffinity: -1, continuity: 0, capacity: 0, budgetHeadroom: 0, criticalPath: 0 } })]
+  ];
+  for (const [field, value] of bad) {
+    assert.equal(validatePolicy(value), `${INVALID}: policy.${field}`, `${field} ${JSON.stringify(value[field]).slice(0, 60)}`);
+  }
+  const valid = defaultTeamPolicy() as unknown as Record<string, unknown>;
+  const missing = { ...valid };
+  delete missing.teeOnly;
+  assert.equal(validatePolicy(missing), `${INVALID}: policy.teeOnly`);
+  assert.equal(validatePolicy({ ...valid, notAKey: 1 }), `${INVALID}: policy.notAKey`);
+  assert.equal(validatePolicy({ ...valid, ['sp ace']: 1 }), `${INVALID}: policy.sp?ace`);
+  assert.equal(validatePolicy([]), `${INVALID}: policy`);
+  assert.equal(validatePolicy(null, 'body.policy'), `${INVALID}: body.policy`);
+  assert.equal(validatePolicy(policy({ dispatchWeightsBp: { roleFit: 10_000, fileAffinity: 0, continuity: 0, capacity: 0, budgetHeadroom: 0, criticalPath: 0 } })), undefined, 'all weight on one factor still sums to 10000');
+  assert.equal(validatePolicy(policy({ sharedPaths: ['src/**/*.ts', 'docs/a.md'], verifyCommands: [] })), undefined);
+});
+
+test('validatePolicyChanges needs at least one valid known key; applyPolicyChanges returns a new object', () => {
+  assert.equal(validatePolicyChanges({}), `${INVALID}: changes`);
+  assert.equal(validatePolicyChanges([]), `${INVALID}: changes`);
+  assert.equal(validatePolicyChanges(null), `${INVALID}: changes`);
+  assert.equal(validatePolicyChanges({ peerMetricsVisible: true }), undefined);
+  assert.equal(validatePolicyChanges({ notAKey: 1 }), `${INVALID}: changes.notAKey`);
+  assert.equal(validatePolicyChanges(JSON.parse('{"__proto__":{"x":1}}')), `${INVALID}: changes.__proto__`);
+  assert.equal(validatePolicyChanges({ constructor: 1 }), `${INVALID}: changes.constructor`);
+  assert.equal(validatePolicyChanges({ safetyFactorBp: 1.25 }), `${INVALID}: changes.safetyFactorBp`);
+  assert.equal(validatePolicyChanges({ peerMetricsVisible: true, dispatchMode: 'nope' }), `${INVALID}: changes.dispatchMode`);
+  assert.equal(validatePolicyChanges({ sharedPaths: ['a'] }, 'body.changes'), undefined);
+  assert.equal(validatePolicyChanges({}, 'body.changes'), `${INVALID}: body.changes`);
+
+  const before = defaultTeamPolicy();
+  const snapshot = JSON.stringify(before);
+  const changes = { peerMetricsVisible: true, sharedPaths: ['only.txt'], dispatchWeightsBp: { roleFit: 10_000, fileAffinity: 0, continuity: 0, capacity: 0, budgetHeadroom: 0, criticalPath: 0 } };
+  const after = applyPolicyChanges(before, changes);
+  assert.equal(JSON.stringify(before), snapshot, 'the input policy is unchanged');
+  assert.notEqual(after, before);
+  assert.equal(after.peerMetricsVisible, true);
+  assert.deepEqual(after.sharedPaths, ['only.txt']);
+  assert.notEqual(after.sharedPaths, changes.sharedPaths, 'arrays are copied');
+  assert.notEqual(after.dispatchWeightsBp, changes.dispatchWeightsBp);
+  assert.notEqual(after.allowedModels, before.allowedModels);
+  assert.notEqual(after.verifyCommands, before.verifyCommands);
+  assert.equal(after.leaseTtlMinutes, before.leaseTtlMinutes);
+  assert.equal(validatePolicy(after), undefined);
+  after.verifyCommands.push('extra');
+  assert.equal(before.verifyCommands.includes('extra'), false);
+  assert.deepEqual(applyPolicyChanges(before, {}), before);
 });

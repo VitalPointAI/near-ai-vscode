@@ -1,9 +1,10 @@
 // Schema layer of the validation pipeline (D-09 step 1): turns one committed file into an event or a fixed rejection reason.
 // Pure: no I/O, no clock, no vscode. Parsed input is validated in place with Object.keys and own-property checks and is never
 // copied with spread syntax, so a hostile prototype key cannot survive into a trusted object (T-60-19).
-import { MAX_EVENT_BYTES, canonicalize, eventPath, isStrictBase64url } from './canonical';
-import { IMPLEMENTED_EVENT_TYPES, TEAM_REJECTION_REASONS } from './types';
-import type { CommittedEvent, ImplementedTeamEvent, Rejection } from './types';
+import { MAX_EVENT_BYTES, canonicalize, eventPath, fingerprintOf, isStrictBase64url, snapshotPath } from './canonical';
+import { validatePolicy, validatePolicyChanges } from './policy';
+import { AVAILABILITIES, IMPLEMENTED_EVENT_TYPES, ROLES, TEAM_REJECTION_REASONS } from './types';
+import type { CommittedEvent, ImplementedEventType, ImplementedTeamEvent, Rejection } from './types';
 
 export const EVENT_ID_PATTERN = /^evt-[0-9A-HJKMNP-TV-Z]{26}$/;
 export const MEMBER_ID_PATTERN = /^mbr-[0-9a-f]{16}$/;
@@ -79,16 +80,146 @@ export function validateEnvelope(value: unknown): string | undefined {
   return undefined;
 }
 
-// Interim table: Task 2 of plan 60-04 replaces this with the exact-key body validators for all ten types.
-export function validateBody(type: string, body: unknown): string | undefined {
-  if (!(IMPLEMENTED_EVENT_TYPES as readonly string[]).includes(type)) return TEAM_REJECTION_REASONS.unsupported;
-  if (!isRecord(body)) return invalid('body');
-  if (type === 'member.availability') {
-    const keyError = checkKeys(body, 'body', ['availability']);
-    if (keyError !== undefined) return keyError;
-    return body.availability === 'available' ? undefined : invalid('body.availability');
+// Shared field validators. Every one returns a full reason string or undefined, and none of them copies its input.
+const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F\u2028\u2029]/;
+const NAME_MAX = 80;
+const MAX_EMAIL_HASHES = 8;
+const MAX_SKILLS = 32;
+const SKILL_PATTERN = /^[a-z0-9][a-z0-9._+-]{0,39}$/;
+const TIME_ZONE_PATTERN = /^[A-Za-z0-9_+/-]{1,64}$/;
+const CLOCK_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const NEAR_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+const STATE_HASH_PATTERN = /^[0-9a-f]{64}$/;
+const PUBLIC_KEY_BYTES = 32;
+const LAST_WEEKDAY = 6;
+
+// Display names: 1..80 characters after trimming, no control characters or line separators.
+export function validateName(value: unknown, path: string): string | undefined {
+  if (typeof value !== 'string' || CONTROL_CHARACTERS.test(value)) return invalid(path);
+  const length = value.trim().length;
+  return length >= 1 && length <= NAME_MAX ? undefined : invalid(path);
+}
+
+// A device reference is bound to its key: the fingerprint must be the hash of the decoded public key (D-31).
+export function validateDeviceRef(value: unknown, path: string): string | undefined {
+  if (!isRecord(value)) return invalid(path);
+  const keyError = checkKeys(value, path, ['fingerprint', 'publicKey']);
+  if (keyError !== undefined) return keyError;
+  const publicKey = value.publicKey;
+  if (!matches(publicKey, PUBLIC_KEY_PATTERN) || !isStrictBase64url(publicKey, PUBLIC_KEY_BYTES)) return invalid(child(path, 'publicKey'));
+  const fingerprint = value.fingerprint;
+  if (!matches(fingerprint, FINGERPRINT_PATTERN) || fingerprint !== fingerprintOf(Buffer.from(publicKey, 'base64url'))) return invalid(child(path, 'fingerprint'));
+  return undefined;
+}
+
+function validateId(value: unknown, pattern: RegExp, path: string): string | undefined {
+  return matches(value, pattern) ? undefined : invalid(path);
+}
+
+function validateChoice(value: unknown, allowed: readonly string[], path: string): string | undefined {
+  return typeof value === 'string' && allowed.includes(value) ? undefined : invalid(path);
+}
+
+function validateUniqueList(value: unknown, path: string, max: number, pattern: RegExp): string | undefined {
+  if (!Array.isArray(value) || value.length > max) return invalid(path);
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!matches(item, pattern) || seen.has(item)) return invalid(path);
+    seen.add(item);
   }
   return undefined;
+}
+
+// Members carry salted hashes only; a plain address can never match the 64 hex shape.
+function validateEmailHashes(value: unknown, path: string): string | undefined {
+  return validateUniqueList(value, path, MAX_EMAIL_HASHES, EMAIL_HASH_PATTERN);
+}
+
+function validateSkills(value: unknown, path: string): string | undefined {
+  return validateUniqueList(value, path, MAX_SKILLS, SKILL_PATTERN);
+}
+
+function validateWorkingHours(value: unknown, path: string): string | undefined {
+  if (!isRecord(value)) return invalid(path);
+  const keyError = checkKeys(value, path, ['tz', 'days', 'start', 'end']);
+  if (keyError !== undefined) return keyError;
+  if (!matches(value.tz, TIME_ZONE_PATTERN)) return invalid(child(path, 'tz'));
+  const days = value.days;
+  if (!Array.isArray(days) || days.length < 1 || days.length > LAST_WEEKDAY + 1) return invalid(child(path, 'days'));
+  let previous = -1;
+  for (const day of days) {
+    if (!isSafeIntegerInRange(day, 0, LAST_WEEKDAY) || day <= previous) return invalid(child(path, 'days'));
+    previous = day;
+  }
+  if (!matches(value.start, CLOCK_PATTERN)) return invalid(child(path, 'start'));
+  if (!matches(value.end, CLOCK_PATTERN)) return invalid(child(path, 'end'));
+  return undefined;
+}
+
+function validateNear(value: unknown, path: string): string | undefined {
+  if (!isRecord(value)) return invalid(path);
+  const keyError = checkKeys(value, path, ['organizationId', 'workspaceId']);
+  if (keyError !== undefined) return keyError;
+  return validateId(value.organizationId, NEAR_ID_PATTERN, child(path, 'organizationId'))
+    ?? validateId(value.workspaceId, NEAR_ID_PATTERN, child(path, 'workspaceId'));
+}
+
+function validateLamportField(value: unknown, path: string): string | undefined {
+  return isSafeIntegerInRange(value, 1, MAX_LAMPORT) ? undefined : invalid(path);
+}
+
+// Exact-key bodies for the ten Phase 60 types (D-31). The signed shapes are permanent, so a test pins each one.
+type BodyValidator = (body: Fields) => string | undefined;
+
+const BODY_VALIDATORS: Record<ImplementedEventType, BodyValidator> = {
+  'team.created': (body) => checkKeys(body, 'body', ['name', 'ownerId', 'ownerName', 'ownerEmailHashes', 'ownerDevice', 'policy'], ['near'])
+    ?? validateName(body.name, 'body.name')
+    ?? validateId(body.ownerId, MEMBER_ID_PATTERN, 'body.ownerId')
+    ?? validateName(body.ownerName, 'body.ownerName')
+    ?? validateEmailHashes(body.ownerEmailHashes, 'body.ownerEmailHashes')
+    ?? validateDeviceRef(body.ownerDevice, 'body.ownerDevice')
+    ?? validatePolicy(body.policy, 'body.policy')
+    ?? (Object.prototype.hasOwnProperty.call(body, 'near') ? validateNear(body.near, 'body.near') : undefined),
+  'member.joined': (body) => checkKeys(body, 'body', ['memberId', 'name', 'emailHashes', 'role', 'device'])
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
+    ?? validateName(body.name, 'body.name')
+    ?? validateEmailHashes(body.emailHashes, 'body.emailHashes')
+    ?? validateChoice(body.role, ROLES, 'body.role')
+    ?? validateDeviceRef(body.device, 'body.device'),
+  'member.role-changed': (body) => checkKeys(body, 'body', ['memberId', 'role'])
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
+    ?? validateChoice(body.role, ROLES, 'body.role'),
+  'member.removed': (body) => checkKeys(body, 'body', ['memberId'])
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId'),
+  'device.added': (body) => checkKeys(body, 'body', ['memberId', 'device'])
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
+    ?? validateDeviceRef(body.device, 'body.device'),
+  'device.revoked': (body) => checkKeys(body, 'body', ['memberId', 'fingerprint'])
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
+    ?? validateId(body.fingerprint, FINGERPRINT_PATTERN, 'body.fingerprint'),
+  'member.availability': (body) => checkKeys(body, 'body', ['availability'], ['workingHours'])
+    ?? validateChoice(body.availability, AVAILABILITIES, 'body.availability')
+    ?? (Object.prototype.hasOwnProperty.call(body, 'workingHours') ? validateWorkingHours(body.workingHours, 'body.workingHours') : undefined),
+  'member.skills': (body) => checkKeys(body, 'body', ['memberId', 'skills'])
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
+    ?? validateSkills(body.skills, 'body.skills'),
+  'policy.changed': (body) => checkKeys(body, 'body', ['changes'])
+    ?? validatePolicyChanges(body.changes, 'body.changes'),
+  'snapshot.written': (body) => checkKeys(body, 'body', ['coversThrough', 'lamport', 'stateHash', 'path'])
+    ?? validateId(body.coversThrough, EVENT_ID_PATTERN, 'body.coversThrough')
+    ?? validateLamportField(body.lamport, 'body.lamport')
+    ?? validateId(body.stateHash, STATE_HASH_PATTERN, 'body.stateHash')
+    ?? (body.path === snapshotPath(body.lamport as number) ? undefined : invalid('body.path'))
+};
+
+function isImplementedType(type: string): type is ImplementedEventType {
+  return (IMPLEMENTED_EVENT_TYPES as readonly string[]).includes(type);
+}
+
+export function validateBody(type: string, body: unknown): string | undefined {
+  if (!isImplementedType(type)) return TEAM_REJECTION_REASONS.unsupported;
+  if (!isRecord(body)) return invalid('body');
+  return BODY_VALIDATORS[type](body);
 }
 
 function rejectionFor(entry: CommittedEvent, reason: string, parsed?: unknown): ParsedEntry {
