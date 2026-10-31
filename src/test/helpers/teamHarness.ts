@@ -8,10 +8,11 @@ import * as path from 'node:path';
 import type { SecretStorageLike } from '../../services/auth';
 import { canonicalize } from '../../domain/team/canonical';
 import { defaultTeamPolicy } from '../../domain/team/policy';
-import type { GenesisAnchor, TeamEvent, TeamFile } from '../../domain/team/types';
+import type { CommittedEvent, GenesisAnchor, LogHead, Materializer, TeamEvent, TeamFile } from '../../domain/team/types';
 import { createDeviceIdentity, emailHash, newEventId, newMemberId, signEvent } from '../../team/identity';
 import type { DeviceIdentity } from '../../team/identity';
 import { DEFAULT_COORDINATION_REF } from '../../team/gitTransport';
+import type { GitResult, GitRunner } from '../../team/runGit';
 
 // The developer's own git configuration must never change a test result.
 const isolatedConfig = path.join(mkdtempSync(path.join(tmpdir(), 'near-ai-team-gitconfig-')), 'gitconfig');
@@ -100,4 +101,65 @@ export function testGenesis(options: { teamId: string; owner: TestOwner; name: s
     genesis: { eventId: created.id, ownerDevice: device }, createdAt: '2026-01-01T00:00:00.000Z'
   };
   return { events: [created, joined], anchor: { teamId, eventId: created.id, ownerDevice: device }, teamFileText: canonicalize(teamFile) };
+}
+
+export function fakeGitResult(code: number, stdout = '', stderr = ''): GitResult {
+  return { code, stdout: Buffer.from(stdout, 'utf8'), stderr };
+}
+
+export interface FaultRule {
+  when: (args: string[]) => boolean;
+  // How many matching calls are replaced. Unlimited when omitted.
+  times?: number;
+  replace: (realResult?: GitResult) => GitResult;
+  // Run the real git first (so its effect happens) and hand the real result to replace. Used to lose a response that did land.
+  runReal?: boolean;
+}
+
+// Wraps a runner and replaces the result of matching calls. The first rule with calls left wins.
+export function faultRunner(real: GitRunner, rules: FaultRule[]): GitRunner {
+  const remaining = rules.map((rule) => rule.times ?? Number.POSITIVE_INFINITY);
+  return async (args, options) => {
+    const index = rules.findIndex((rule, position) => (remaining[position] ?? 0) > 0 && rule.when(args));
+    const rule = rules[index];
+    if (index < 0 || rule === undefined) return real(args, options);
+    remaining[index] = (remaining[index] ?? 0) - 1;
+    const actual = rule.runReal === true ? await real(args, options) : undefined;
+    return rule.replace(actual);
+  };
+}
+
+export type RecordedState = { entries: CommittedEvent[]; head: LogHead };
+
+const EVENT_FILE = /^events\/(\d{12})-(evt-[0-9A-HJKMNP-TV-Z]{26})\.json$/;
+
+// Accepts every entry. The head follows the lamport and id in the event file name. Lets transport tests run without the team rules.
+export function recordingMaterializer(): Materializer<RecordedState> {
+  return {
+    initial: () => ({ entries: [], head: { eventId: '', lamport: 0 } }),
+    apply: (state, entry) => {
+      state.entries.push(entry);
+      const match = entry.kind === 'event' ? EVENT_FILE.exec(entry.path) : null;
+      if (match !== null) state.head = { lamport: Number(match[1]), eventId: match[2] as string };
+      return { accepted: true };
+    },
+    head: (state) => ({ ...state.head }),
+    check: () => undefined
+  };
+}
+
+// Writes a throw-away global git config and returns the environment that points git at it. Pass the env to a wrapped runner.
+export function withGlobalGitConfig(lines: string[]): { env: Record<string, string>; cleanup(): Promise<void> } {
+  const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-team-globalconfig-'));
+  const file = path.join(dir, 'gitconfig');
+  writeFileSync(file, `${lines.join('\n')}\n`, 'utf8');
+  return { env: { GIT_CONFIG_GLOBAL: file }, cleanup: () => rm(dir, { recursive: true, force: true }) };
+}
+
+// A signed member.availability event with an explicit position, for appends that do not need the full team rules.
+export function testEvent(identity: DeviceIdentity, fields: { lamport: number; prev: string; author: string; teamId: string }): TeamEvent<'member.availability'> {
+  return signEvent(identity, {
+    v: 1, id: newEventId(), teamId: fields.teamId, type: 'member.availability', lamport: fields.lamport, at: '2026-01-01T00:01:00.000Z',
+    author: fields.author, device: identity.fingerprint, prev: fields.prev, body: { availability: 'available' }
+  });
 }

@@ -1,8 +1,9 @@
-// Git transport for the coordination log (D-01, D-02, D-03, D-04, D-16, D-17, D-34).
+// Git transport for the coordination log (D-01, D-02, D-03, D-04, D-16, D-17, D-25, D-29, D-33, D-34).
 // The log lives on an orphan branch of the project's own remote. All work happens in a dedicated bare mirror, so the user's
 // working tree, index and branches are never touched. Every git call goes through the injected GitRunner.
-// Tracer scope: fetch and incremental read, plus the genesis append. The retry loop for an existing branch belongs to plan 60-03.
-import { mkdir, rm, stat } from 'node:fs/promises';
+// Appends are compare-and-swap: a lost push race fetches again and calls the builder again, so Lamport, prev and the signature
+// are always derived from the fresh state (D-29). A rewritten remote branch pauses the transport and is never followed (D-33).
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import { canonicalize, eventPath } from '../domain/team/canonical';
@@ -13,14 +14,32 @@ import type { GitResult, GitRunner } from './runGit';
 import type { AppendBuild, AppendBuilder, AppendOptions, AppendResult, CoordinationTransport, TransportStatus, TransportSubscription } from './transport';
 
 export const DEFAULT_COORDINATION_REF = 'refs/heads/near-ai/coordination';
+// The last trusted head. Only advanced after the ancestry check passes, so readAll never reads past it (D-33).
 export const LOCAL_REF = 'refs/team/coordination';
+// Where a fetch lands before it is trusted. A rewritten branch stays here and never reaches LOCAL_REF.
+export const INCOMING_REF = 'refs/team/incoming';
+export const QUARANTINE_REF_PREFIX = 'refs/team/quarantine/';
+
+// Hosted remotes may word a lost race differently (RESEARCH A1). These two lists are the only place to extend; an unknown
+// rejection is permanent and is shown with its redacted text instead of being retried.
+export const CAS_LOST_MARKERS = ['non-fast-forward', 'fetch first', 'incorrect old value provided'] as const;
+export const RETRYABLE_FETCH_MARKERS = ['incorrect old value provided', 'cannot lock ref'] as const;
 
 const REMOTE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/;
 const REF_PATTERN = /^refs\/(?:heads|near-ai)\/[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
-const EXTRA_FILE_PATTERN = /^(?:events|snapshots)\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.json$/;
+const SNAPSHOT_FILE_PATTERN = /^snapshots\/\d{12}\.json$/;
 const TEAM_FILE = 'team.json';
 const LOG_FORMAT = '--format=%x01%H%x00%ct%x00%P';
 const MAX_LISTENER_ERRORS = 20;
+const DEFAULT_MAX_RETRIES = 5;
+const DEFAULT_BASE_DELAY_MS = 200;
+const DEFAULT_GC_EVERY = 100;
+const FETCH_RACE_RETRIES = 3;
+const LOCAL_TIMEOUT_MS = 15_000;
+const BULK_TIMEOUT_MS = 60_000;
+const NETWORK_TIMEOUT_MS = 60_000;
+const DEFAULT_SSH_COMMAND = 'ssh -o BatchMode=yes -o ConnectTimeout=10';
+const AUTH_HINT = 'Run git fetch once in a terminal so your credential helper can store the credentials.';
 
 export interface GitTransportOptions<S> {
   mirrorDir: string;
@@ -33,7 +52,10 @@ export interface GitTransportOptions<S> {
   baseDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  // Where the last trusted position is kept so a deleted mirror cannot hide a rewrite. Defaults to pin.json beside the mirror.
   pinFile?: string;
+  // Run `git gc --auto` inside the mirror lock after this many successful operations (RESEARCH Pitfall 8).
+  gcEveryOperations?: number;
 }
 
 class RemoteUnavailableError extends Error {
@@ -45,11 +67,27 @@ class RemoteUnavailableError extends Error {
 
 interface RawChange { status: string; path: string; blob: string }
 interface RawCommit { commit: string; commitTime: number; parents: string[]; changes: RawChange[] }
+interface Pin { head: string; lamport: number; entries: number }
+interface PushedAttempt { commit: string; events: TeamEvent[] }
+
+export type PushOutcome =
+  | { kind: 'ok' }
+  | { kind: 'up-to-date' }
+  | { kind: 'cas-lost'; detail: string }
+  | { kind: 'permanent'; detail: string }
+  | { kind: 'offline'; detail: string };
+
+export type GitFailure =
+  | { kind: 'absent' }
+  | { kind: 'race' }
+  | { kind: 'auth'; detail: string }
+  | { kind: 'unreachable'; detail: string };
 
 // Fetches and commits on one mirror are serialised in this process (D-34). Callers on the same mirror share one chain.
 const mirrorLocks = new Map<string, Promise<void>>();
 
-async function withMirrorLock<T>(key: string, task: () => Promise<T>): Promise<T> {
+export async function withMirrorLock<T>(mirrorDir: string, work: () => Promise<T>): Promise<T> {
+  const key = path.resolve(mirrorDir);
   const previous = mirrorLocks.get(key) ?? Promise.resolve();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -57,11 +95,43 @@ async function withMirrorLock<T>(key: string, task: () => Promise<T>): Promise<T
   mirrorLocks.set(key, tail);
   await previous;
   try {
-    return await task();
+    return await work();
   } finally {
     release();
     if (mirrorLocks.get(key) === tail) mirrorLocks.delete(key);
   }
+}
+
+// Reads a `git push --porcelain` result. Only the flagged ref lines are used: the "To <url>" line is never read, so a URL with
+// credentials cannot reach a reason. An exit without any ref line (timeout, auth, network) is offline and may still have landed.
+export function classifyPush(result: GitResult): PushOutcome {
+  const lines = result.stdout.toString('utf8').split('\n').filter((line) => /^[ +\-*=!]\t/.test(line));
+  const rejected = lines.filter((line) => line.startsWith('!'));
+  const first = rejected[0];
+  if (first !== undefined) {
+    const columns = first.split('\t');
+    const summary = redactGitMessage((columns[columns.length - 1] ?? '').trim());
+    if (CAS_LOST_MARKERS.some((marker) => summary.includes(marker))) return { kind: 'cas-lost', detail: summary };
+    const remoteLines = result.stderr.split('\n').filter((line) => line.startsWith('remote:')).slice(0, 3).map((line) => line.slice('remote:'.length).trim()).filter((line) => line !== '');
+    const extra = remoteLines.length > 0 ? ` ${redactGitMessage(remoteLines.join(' '))}` : '';
+    return { kind: 'permanent', detail: `${summary}${extra}` };
+  }
+  if (result.code === 0) return lines.some((line) => line.startsWith('=')) ? { kind: 'up-to-date' } : { kind: 'ok' };
+  return { kind: 'offline', detail: redactGitMessage(result.stderr.trim() || `git push exited with ${result.code}`) };
+}
+
+// Classifies a failed fetch or ls-remote by its English stderr (LC_ALL=C is set by runGit).
+export function classifyGitFailure(result: GitResult): GitFailure {
+  const stderr = result.stderr;
+  if (/couldn't find remote ref/.test(stderr)) return { kind: 'absent' };
+  if (RETRYABLE_FETCH_MARKERS.some((marker) => stderr.includes(marker))) return { kind: 'race' };
+  const detail = redactGitMessage(stderr.trim() || `git exited with ${result.code}`);
+  if (/terminal prompts disabled|could not read (?:Username|Password)|Authentication failed|Permission denied|returned error: 40[13]/i.test(stderr)) return { kind: 'auth', detail };
+  return { kind: 'unreachable', detail };
+}
+
+function failureReason(failure: GitFailure & { detail: string }): string {
+  return failure.kind === 'auth' ? `${failure.detail} ${AUTH_HINT}` : failure.detail;
 }
 
 // `git log -z` output: \x01<sha>\0<commit time>\0<parents>\0 then, per changed file, \n:<modes> <old> <new> <status>\0<path>\0.
@@ -98,13 +168,14 @@ function classify(rawPath: string, isRoot: boolean): { kind: EntryKind; anomaly?
   return { kind: 'anomaly', anomaly: TEAM_REJECTION_REASONS.unexpectedPath };
 }
 
-function pushDetail(result: GitResult): { kind: 'rejected' | 'remote-rejected' | 'other'; reason: string } {
-  const lines = result.stdout.toString('utf8').split('\n').filter((line) => line.startsWith('!'));
-  const line = lines[0];
-  if (line === undefined) return { kind: 'other', reason: redactGitMessage(result.stderr.trim() || `git push exited with ${result.code}`) };
-  const columns = line.split('\t');
-  const summary = redactGitMessage((columns[columns.length - 1] ?? '').trim());
-  return { kind: summary.startsWith('[remote rejected]') ? 'remote-rejected' : 'rejected', reason: summary };
+const defaultSleep = (ms: number): Promise<void> => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+
+function isPin(value: unknown): value is Pin {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.head === 'string' && /^[0-9a-f]{40,64}$/.test(record.head)
+    && typeof record.lamport === 'number' && Number.isSafeInteger(record.lamport) && record.lamport >= 0
+    && typeof record.entries === 'number' && Number.isSafeInteger(record.entries) && record.entries >= 0;
 }
 
 export class GitTransport<S> implements CoordinationTransport<S> {
@@ -114,22 +185,45 @@ export class GitTransport<S> implements CoordinationTransport<S> {
   private readonly projectRoot: string;
   private readonly remote: string;
   private readonly ref: string;
+  private readonly maxRetries: number;
+  private readonly baseDelayMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly random: () => number;
+  private readonly pinFile: string;
+  private readonly gcEvery: number;
   private readonly listeners = new Set<(entries: CommittedEvent[]) => void>();
+  private readonly diagnosticListeners = new Set<(message: string) => void>();
   private readonly listenerErrors: string[] = [];
   private current: S;
   private lastProcessed: string | undefined;
+  private appliedEntries = 0;
+  private pin: Pin | undefined;
+  private pinLoaded = false;
+  private successes = 0;
   private mirrorReady = false;
   private statusValue: TransportStatus = { state: 'ok' };
 
   public constructor(options: GitTransportOptions<S>) {
     if (!REMOTE_PATTERN.test(options.remote)) throw new Error('The remote name in the team file is not valid.');
     if (!REF_PATTERN.test(options.ref) || options.ref.includes('..')) throw new Error('The coordination branch name in the team file is not valid.');
+    const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+    const baseDelayMs = options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
+    const gcEvery = options.gcEveryOperations ?? DEFAULT_GC_EVERY;
+    if (!Number.isSafeInteger(maxRetries) || maxRetries < 0) throw new Error('maxRetries must be a whole number of zero or more.');
+    if (!Number.isFinite(baseDelayMs) || baseDelayMs < 0) throw new Error('baseDelayMs must be zero or more.');
+    if (!Number.isSafeInteger(gcEvery) || gcEvery < 1) throw new Error('gcEveryOperations must be a whole number of one or more.');
     this.git = options.git ?? runGit;
     this.materializer = options.materializer;
     this.mirrorDir = options.mirrorDir;
     this.projectRoot = options.projectRoot;
     this.remote = options.remote;
     this.ref = options.ref;
+    this.maxRetries = maxRetries;
+    this.baseDelayMs = baseDelayMs;
+    this.sleep = options.sleep ?? defaultSleep;
+    this.random = options.random ?? Math.random;
+    this.pinFile = options.pinFile ?? path.join(path.dirname(options.mirrorDir), 'pin.json');
+    this.gcEvery = gcEvery;
     this.current = options.materializer.initial();
   }
 
@@ -139,6 +233,12 @@ export class GitTransport<S> implements CoordinationTransport<S> {
 
   public status(): TransportStatus {
     return { ...this.statusValue };
+  }
+
+  // The commit last applied to the state plus the Lamport position and id of the last accepted event.
+  public head(): { commit?: string; lamport: number; eventId: string } {
+    const head = this.materializer.head(this.current);
+    return this.lastProcessed === undefined ? { lamport: head.lamport, eventId: head.eventId } : { commit: this.lastProcessed, lamport: head.lamport, eventId: head.eventId };
   }
 
   // Errors thrown by update listeners are kept here (bounded) so one bad listener cannot break syncing for the others.
@@ -151,8 +251,18 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     return { dispose: () => { this.listeners.delete(listener); } };
   }
 
+  // Maintenance messages (a failed gc, an unreadable position file). Always redacted before delivery.
+  public onDiagnostic(listener: (message: string) => void): TransportSubscription {
+    this.diagnosticListeners.add(listener);
+    return { dispose: () => { this.diagnosticListeners.delete(listener); } };
+  }
+
   public fetch(): Promise<CommittedEvent[]> {
-    return withMirrorLock(this.mirrorDir, () => this.fetchLocked());
+    return withMirrorLock(this.mirrorDir, async () => {
+      const entries = await this.fetchLocked();
+      await this.afterOperation(this.statusValue.state === 'ok');
+      return entries;
+    });
   }
 
   public readAll(): Promise<CommittedEvent[]> {
@@ -164,11 +274,15 @@ export class GitTransport<S> implements CoordinationTransport<S> {
   }
 
   public append(build: AppendBuilder<S>, options?: AppendOptions): Promise<AppendResult> {
-    return withMirrorLock(this.mirrorDir, () => (options?.genesis ? this.appendGenesis(build, options.genesis.teamFileText) : this.appendExisting()));
+    return withMirrorLock(this.mirrorDir, async () => {
+      const result = options?.genesis ? await this.appendGenesis(build, options.genesis.teamFileText) : await this.appendExisting(build);
+      await this.afterOperation(result.ok);
+      return result;
+    });
   }
 
   private mirrorGit(args: string[], extra: { env?: Record<string, string>; input?: string | Buffer; timeoutMs?: number } = {}): Promise<GitResult> {
-    return this.git(['--git-dir', this.mirrorDir, ...args], extra);
+    return this.git(['--git-dir', this.mirrorDir, ...args], { timeoutMs: LOCAL_TIMEOUT_MS, ...extra });
   }
 
   private async ensureMirror(): Promise<void> {
@@ -187,15 +301,27 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     await mkdir(hooksDir, { recursive: true });
     mustSucceed(await this.mirrorGit(['config', 'core.hooksPath', hooksDir]), 'Configuring the coordination mirror');
     mustSucceed(await this.mirrorGit(['config', 'gc.autoDetach', 'false']), 'Configuring the coordination mirror');
+    // Objects from the remote are checked as they arrive. The remote URL is never written into this config (D-34).
+    mustSucceed(await this.mirrorGit(['config', 'transfer.fsckObjects', 'true']), 'Configuring the coordination mirror');
     this.mirrorReady = true;
   }
 
   // Read on every call and never stored or returned: the URL can embed credentials (D-34).
   private async remoteUrl(): Promise<string> {
-    const result = await this.git(['-C', this.projectRoot, 'remote', 'get-url', '--push', this.remote]);
+    const result = await this.git(['-C', this.projectRoot, 'remote', 'get-url', '--push', this.remote], { timeoutMs: LOCAL_TIMEOUT_MS });
     const url = gitText(result);
     if (result.code !== 0 || url === '') throw new RemoteUnavailableError(`This project has no git remote named "${this.remote}".`);
     return url;
+  }
+
+  // The mirror does not see the project's own git config, so a project-level core.sshCommand is passed through. An ssh command
+  // from the environment wins (it also wins inside git), and without any a non-interactive one keeps a passphrase prompt from hanging.
+  private async networkEnv(): Promise<Record<string, string>> {
+    const inherited = process.env.GIT_SSH_COMMAND;
+    if (inherited !== undefined && inherited !== '') return {};
+    const configured = await this.git(['-C', this.projectRoot, 'config', '--get', 'core.sshCommand'], { timeoutMs: LOCAL_TIMEOUT_MS });
+    const command = configured.code === 0 ? gitText(configured) : '';
+    return { GIT_SSH_COMMAND: command !== '' ? command : DEFAULT_SSH_COMMAND };
   }
 
   private async revParse(ref: string): Promise<string | undefined> {
@@ -209,42 +335,150 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     this.statusValue = next;
   }
 
+  private diagnostic(message: string): void {
+    const text = redactGitMessage(message);
+    for (const listener of this.diagnosticListeners) {
+      try {
+        listener(text);
+      } catch (error) {
+        this.recordListenerError(error);
+      }
+    }
+  }
+
+  private recordListenerError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.listenerErrors.push(redactGitMessage(message));
+    if (this.listenerErrors.length > MAX_LISTENER_ERRORS) this.listenerErrors.shift();
+  }
+
+  private backoff(attempt: number): number {
+    return this.baseDelayMs * 2 ** (attempt - 1) * (0.5 + this.random());
+  }
+
+  // Counted inside the mirror lock. A failed gc is a diagnostic and never changes the status (RESEARCH Pitfall 8).
+  private async afterOperation(success: boolean): Promise<void> {
+    if (!success) return;
+    this.successes += 1;
+    if (this.successes % this.gcEvery !== 0) return;
+    const result = await this.mirrorGit(['gc', '--auto', '--quiet'], { timeoutMs: BULK_TIMEOUT_MS });
+    if (result.code !== 0) this.diagnostic(`Maintenance of the coordination mirror failed: ${result.stderr.trim() || `git gc exited with ${result.code}`}`);
+  }
+
+  private async loadPin(): Promise<void> {
+    if (this.pinLoaded) return;
+    this.pinLoaded = true;
+    let text: string;
+    try {
+      text = await readFile(this.pinFile, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      this.diagnostic('The saved coordination position could not be read, so it was ignored.');
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      this.diagnostic(`The saved coordination position is not valid JSON, so it was ignored: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (isPin(parsed)) this.pin = { head: parsed.head, lamport: parsed.lamport, entries: parsed.entries };
+    else this.diagnostic('The saved coordination position has an unexpected shape, so it was ignored.');
+  }
+
+  // Temp file then rename, so a crash never leaves half a pin. Failure is a diagnostic: syncing continues.
+  private async savePin(head: string): Promise<void> {
+    if (this.pin?.head === head && this.pin.entries === this.appliedEntries) return;
+    const next: Pin = { head, lamport: this.materializer.head(this.current).lamport, entries: this.appliedEntries };
+    const temp = `${this.pinFile}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`;
+    try {
+      await mkdir(path.dirname(this.pinFile), { recursive: true });
+      await writeFile(temp, `${JSON.stringify(next)}\n`, 'utf8');
+      await rename(temp, this.pinFile);
+      this.pin = next;
+    } catch (error) {
+      this.diagnostic(`The coordination position could not be saved: ${error instanceof Error ? error.message : String(error)}`);
+      try {
+        await rm(temp, { force: true });
+      } catch (cleanupError) {
+        this.diagnostic(`A temporary coordination position file could not be removed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+      }
+    }
+  }
+
+  // Fetches into the staging ref. The lock-race wording is retried a few times with a short jittered pause (D-34).
+  private async fetchRemote(url: string): Promise<GitResult> {
+    const env = await this.networkEnv();
+    let retries = 0;
+    for (;;) {
+      const result = await this.mirrorGit(['fetch', '--no-tags', '--quiet', url, `+${this.ref}:${INCOMING_REF}`], { env, timeoutMs: NETWORK_TIMEOUT_MS });
+      if (result.code === 0 || classifyGitFailure(result).kind !== 'race' || retries >= FETCH_RACE_RETRIES) return result;
+      retries += 1;
+      await this.sleep(Math.max(1, this.baseDelayMs / 8) * (0.5 + this.random()));
+    }
+  }
+
+  // Every previously trusted commit must still be an ancestor of (or equal to) the fetched head.
+  private async checkAncestry(trusted: string[], head: string): Promise<{ kind: 'ok' } | { kind: 'rewritten'; old: string; present: boolean } | { kind: 'unknown'; detail: string }> {
+    for (const old of trusted) {
+      if (old === head) continue;
+      const present = await this.mirrorGit(['cat-file', '-e', `${old}^{commit}`]);
+      if (present.code !== 0) return { kind: 'rewritten', old, present: false };
+      const ancestor = await this.mirrorGit(['merge-base', '--is-ancestor', old, head]);
+      if (ancestor.code === 1) return { kind: 'rewritten', old, present: true };
+      if (ancestor.code !== 0) return { kind: 'unknown', detail: redactGitMessage(ancestor.stderr.trim() || `git merge-base exited with ${ancestor.code}`) };
+    }
+    return { kind: 'ok' };
+  }
+
   private async fetchLocked(): Promise<CommittedEvent[]> {
     if (this.statusValue.state === 'paused') return [];
     try {
       await this.ensureMirror();
+      await this.loadPin();
       const url = await this.remoteUrl();
-      const previousHead = await this.revParse(LOCAL_REF);
-      const fetched = await this.mirrorGit(['fetch', '--no-tags', '--quiet', url, `+${this.ref}:${LOCAL_REF}`]);
+      const fetched = await this.fetchRemote(url);
       if (fetched.code !== 0) {
+        const failure = classifyGitFailure(fetched);
         // A remote without the coordination branch yet is a normal state, not a failure.
-        if (/couldn't find remote ref/.test(fetched.stderr)) {
+        if (failure.kind === 'absent') {
           this.setStatus({ state: 'ok' });
           return [];
         }
-        this.setStatus({ state: 'offline', reason: redactGitMessage(fetched.stderr.trim() || `git fetch exited with ${fetched.code}`) });
+        const reason = failure.kind === 'race' ? 'The remote was busy and could not be read. Team sync will try again.' : failureReason(failure);
+        this.setStatus({ state: 'offline', reason });
         return [];
       }
-      const head = await this.revParse(LOCAL_REF);
+      const head = await this.revParse(INCOMING_REF);
       if (head === undefined) {
         this.setStatus({ state: 'ok' });
         return [];
       }
-      if (previousHead !== undefined && head !== previousHead) {
-        const ancestor = await this.mirrorGit(['merge-base', '--is-ancestor', previousHead, head]);
-        if (ancestor.code === 1) {
-          // The remote branch was rewritten (D-33): keep the last good state, keep the old objects reachable, and stop syncing.
-          mustSucceed(await this.mirrorGit(['update-ref', `refs/team/quarantine/${previousHead.slice(0, 12)}`, previousHead]), 'Keeping the previous coordination history');
-          this.setStatus({ state: 'paused', reason: TEAM_REJECTION_REASONS.logRewritten });
-          return [];
-        }
-        if (ancestor.code !== 0) throw new Error(`Comparing coordination history failed: ${redactGitMessage(ancestor.stderr.trim())}`);
+      const trusted: string[] = [];
+      const local = await this.revParse(LOCAL_REF);
+      if (local !== undefined) trusted.push(local);
+      if (this.pin !== undefined && !trusted.includes(this.pin.head)) trusted.push(this.pin.head);
+      const ancestry = await this.checkAncestry(trusted, head);
+      if (ancestry.kind === 'unknown') {
+        this.setStatus({ state: 'offline', reason: `Team sync could not compare coordination heads: ${ancestry.detail}` });
+        return [];
+      }
+      if (ancestry.kind === 'rewritten') {
+        // The remote branch was rewritten (D-33): keep the last good state, keep the old objects reachable, and stop syncing.
+        if (ancestry.present) mustSucceed(await this.mirrorGit(['update-ref', `${QUARANTINE_REF_PREFIX}${ancestry.old.slice(0, 12)}`, ancestry.old]), 'Keeping the previous coordination history');
+        else this.diagnostic('The previous coordination history is no longer in the mirror, so only the saved position marks the rewrite.');
+        this.setStatus({ state: 'paused', reason: TEAM_REJECTION_REASONS.logRewritten });
+        return [];
       }
       this.setStatus({ state: 'ok' });
+      if (local !== head) mustSucceed(await this.mirrorGit(['update-ref', LOCAL_REF, head]), 'Recording the coordination head');
       if (head === this.lastProcessed) return [];
       const entries = await this.readRange(this.lastProcessed === undefined ? LOCAL_REF : `${this.lastProcessed}..${LOCAL_REF}`);
       for (const entry of entries) entry.verdict = this.materializer.apply(this.current, entry);
       this.lastProcessed = head;
+      this.appliedEntries += entries.length;
+      await this.savePin(head);
       if (entries.length > 0) this.notify(entries);
       return entries;
     } catch (error) {
@@ -261,16 +495,16 @@ export class GitTransport<S> implements CoordinationTransport<S> {
       try {
         listener(entries);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.listenerErrors.push(redactGitMessage(message));
-        if (this.listenerErrors.length > MAX_LISTENER_ERRORS) this.listenerErrors.shift();
+        this.recordListenerError(error);
       }
     }
   }
 
   // Reads commits first-parent and oldest first. Event files inside one commit come out in file-name order (D-03).
+  // Only added files can become entries, and their text comes from the blob the adding commit named (D-03). A merge commit,
+  // a modified or deleted file and a file in an unexpected place each become an anomaly row, never state.
   private async readRange(range: string): Promise<CommittedEvent[]> {
-    const logged = mustSucceed(await this.mirrorGit(['log', '--first-parent', '--reverse', '--no-renames', '--raw', '-z', '--no-abbrev', LOG_FORMAT, range]), 'Reading the coordination log');
+    const logged = mustSucceed(await this.mirrorGit(['log', '--first-parent', '--reverse', '--no-renames', '--raw', '-z', '--no-abbrev', LOG_FORMAT, range], { timeoutMs: BULK_TIMEOUT_MS }), 'Reading the coordination log');
     const commits = parseLog(logged.stdout.toString('utf8'));
     const wanted = new Set<string>();
     for (const commit of commits) for (const change of commit.changes) if (change.status === 'A') wanted.add(change.blob);
@@ -297,7 +531,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
   private async blobSizes(blobs: string[]): Promise<Map<string, number>> {
     const sizes = new Map<string, number>();
     if (blobs.length === 0) return sizes;
-    const result = mustSucceed(await this.mirrorGit(['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], { input: `${blobs.join('\n')}\n` }), 'Reading coordination file sizes');
+    const result = mustSucceed(await this.mirrorGit(['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], { input: `${blobs.join('\n')}\n`, timeoutMs: BULK_TIMEOUT_MS }), 'Reading coordination file sizes');
     for (const line of result.stdout.toString('utf8').split('\n')) {
       const fields = line.split(' ');
       if (fields.length === 3 && fields[1] === 'blob') sizes.set(fields[0] ?? '', Number(fields[2]));
@@ -308,7 +542,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
   private async blobTexts(blobs: string[]): Promise<Map<string, string>> {
     const texts = new Map<string, string>();
     if (blobs.length === 0) return texts;
-    const output = mustSucceed(await this.mirrorGit(['cat-file', '--batch'], { input: `${blobs.join('\n')}\n` }), 'Reading coordination files').stdout;
+    const output = mustSucceed(await this.mirrorGit(['cat-file', '--batch'], { input: `${blobs.join('\n')}\n`, timeoutMs: BULK_TIMEOUT_MS }), 'Reading coordination files').stdout;
     let offset = 0;
     while (offset < output.length) {
       const lineEnd = output.indexOf(0x0a, offset);
@@ -323,19 +557,83 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     return texts;
   }
 
-  private async appendExisting(): Promise<AppendResult> {
-    await this.fetchLocked();
-    const status = this.statusValue;
-    if (status.state === 'paused') return { ok: false, kind: 'paused', reason: status.reason ?? TEAM_REJECTION_REASONS.logRewritten, attempts: 0 };
-    if (status.state === 'offline') return { ok: false, kind: 'offline', reason: status.reason ?? 'The remote is not reachable.', attempts: 0 };
-    if (await this.revParse(LOCAL_REF) === undefined) return { ok: false, kind: 'refused', reason: 'The coordination log does not exist yet. Enable Team Mode first.', attempts: 0 };
-    return { ok: false, kind: 'refused', reason: 'Adding to an existing coordination log is not available in this build yet.', attempts: 0 };
-  }
-
   private normalise(build: AppendBuild): { events: TeamEvent[]; files: Array<{ path: string; text: string }> } | { conflict: string } {
     if (Array.isArray(build)) return { events: build, files: [] };
     if ('conflict' in build) return { conflict: build.conflict };
     return { events: build.events, files: build.files ?? [] };
+  }
+
+  // Is a commit pushed by an earlier attempt of this operation now part of the fetched history? Then it landed even though
+  // the response was lost, and appending again would write a duplicate (RESEARCH Pitfall 6).
+  private async findLanded(pushed: PushedAttempt[], head: string): Promise<PushedAttempt | undefined> {
+    for (const attempt of pushed) {
+      const result = await this.mirrorGit(['merge-base', '--is-ancestor', attempt.commit, head]);
+      if (result.code === 0) return attempt;
+      if (result.code !== 1) throw new Error(`Comparing coordination history failed: ${redactGitMessage(result.stderr.trim() || `exit code ${result.code}`)}`);
+    }
+    return undefined;
+  }
+
+  private async appendExisting(build: AppendBuilder<S>): Promise<AppendResult> {
+    const maxAttempts = this.maxRetries + 1;
+    const pushed: PushedAttempt[] = [];
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      await this.fetchLocked();
+      const status = this.statusValue;
+      if (status.state === 'paused') return { ok: false, kind: 'paused', reason: status.reason ?? TEAM_REJECTION_REASONS.logRewritten, attempts: attempt - 1 };
+      if (status.state === 'offline') return { ok: false, kind: 'offline', reason: status.reason ?? 'The remote is not reachable.', attempts: attempt - 1 };
+      const head = await this.revParse(LOCAL_REF);
+      if (head === undefined) return { ok: false, kind: 'refused', reason: 'The coordination log does not exist yet. Enable Team Mode first.', attempts: attempt - 1 };
+
+      const landed = await this.findLanded(pushed, head);
+      if (landed !== undefined) return { ok: true, events: landed.events, commit: landed.commit, attempts: attempt };
+
+      const built = this.normalise(await build(this.current, this.materializer.head(this.current)));
+      const failKind = attempt === 1 ? 'refused' : 'conflict';
+      if ('conflict' in built) return { ok: false, kind: failKind, reason: built.conflict, attempts: attempt };
+      if (built.events.length === 0) return { ok: false, kind: 'refused', reason: 'There were no events to write.', attempts: attempt };
+      const rejection = this.materializer.check(this.current, built.events);
+      if (rejection !== undefined) return { ok: false, kind: failKind, reason: rejection.reason, attempts: attempt };
+      const files = built.events.map((event) => ({ path: eventPath(event), text: canonicalize(event) }));
+      for (const extra of built.files) {
+        if (!SNAPSHOT_FILE_PATTERN.test(extra.path)) return { ok: false, kind: 'refused', reason: 'The coordination commit named a file that is not allowed.', attempts: attempt };
+        const existing = await this.mirrorGit(['cat-file', '-e', `${head}:${extra.path}`]);
+        if (existing.code === 0) return { ok: false, kind: failKind, reason: 'A snapshot for this point already exists.', attempts: attempt };
+        files.push(extra);
+      }
+      const first = built.events[0] as TeamEvent;
+      const commit = await this.commitFiles(files, head, `team: ${first.type} ${first.id}`);
+
+      let url: string;
+      try {
+        url = await this.remoteUrl();
+      } catch (error) {
+        if (error instanceof RemoteUnavailableError) {
+          this.setStatus({ state: 'offline', reason: error.message });
+          return { ok: false, kind: 'offline', reason: error.message, attempts: attempt };
+        }
+        throw error;
+      }
+      const env = await this.networkEnv();
+      const outcome = classifyPush(await this.mirrorGit(['push', '--porcelain', url, `${commit}:${this.ref}`], { env, timeoutMs: NETWORK_TIMEOUT_MS }));
+      if (outcome.kind === 'ok' || outcome.kind === 'up-to-date') {
+        // D-19: fetch straight after a local append so the state and listeners include the new events.
+        await this.fetchLocked();
+        return { ok: true, events: built.events, commit, attempts: attempt };
+      }
+      if (outcome.kind === 'permanent') return { ok: false, kind: 'remote-rejected', reason: outcome.detail, attempts: attempt };
+      // A lost race, or a push whose answer never arrived (it may still have landed): remember the commit, then fetch again.
+      pushed.push({ commit, events: built.events });
+      if (attempt === maxAttempts) {
+        if (outcome.kind === 'offline') {
+          this.setStatus({ state: 'offline', reason: outcome.detail });
+          return { ok: false, kind: 'offline', reason: outcome.detail, attempts: attempt };
+        }
+        return { ok: false, kind: 'busy', reason: 'The team log changed too often while saving. Try again in a moment.', attempts: attempt };
+      }
+      await this.sleep(this.backoff(attempt));
+    }
+    return { ok: false, kind: 'busy', reason: 'The team log changed too often while saving. Try again in a moment.', attempts: maxAttempts };
   }
 
   private async appendGenesis(build: AppendBuilder<S>, teamFileText: string): Promise<AppendResult> {
@@ -347,10 +645,12 @@ export class GitTransport<S> implements CoordinationTransport<S> {
       if (error instanceof RemoteUnavailableError) return { ok: false, kind: 'refused', reason: error.message, attempts: 0 };
       throw error;
     }
-    const probe = await this.mirrorGit(['ls-remote', '--exit-code', url, this.ref]);
+    const env = await this.networkEnv();
+    const probe = await this.mirrorGit(['ls-remote', '--exit-code', url, this.ref], { env, timeoutMs: NETWORK_TIMEOUT_MS });
     if (probe.code === 0) return { ok: false, kind: 'exists', reason: 'This remote already has a coordination log', attempts: 0 };
     if (probe.code !== 2) {
-      const reason = redactGitMessage(probe.stderr.trim() || `git ls-remote exited with ${probe.code}`);
+      const failure = classifyGitFailure(probe);
+      const reason = failure.kind === 'auth' || failure.kind === 'unreachable' ? failureReason(failure) : redactGitMessage(probe.stderr.trim() || `git ls-remote exited with ${probe.code}`);
       this.setStatus({ state: 'offline', reason });
       return { ok: false, kind: 'offline', reason, attempts: 1 };
     }
@@ -363,19 +663,18 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     if (rejection !== undefined) return { ok: false, kind: 'refused', reason: rejection.reason, attempts: 1 };
     const files = built.events.map((event) => ({ path: eventPath(event), text: canonicalize(event) }));
     for (const extra of built.files) {
-      if (!EXTRA_FILE_PATTERN.test(extra.path)) return { ok: false, kind: 'refused', reason: 'The coordination commit named a file that is not allowed.', attempts: 1 };
+      if (!SNAPSHOT_FILE_PATTERN.test(extra.path)) return { ok: false, kind: 'refused', reason: 'The coordination commit named a file that is not allowed.', attempts: 1 };
       files.push(extra);
     }
     files.push({ path: TEAM_FILE, text: teamFileText });
     const first = built.events[0] as TeamEvent;
     const commit = await this.commitFiles(files, undefined, `team: ${first.type} ${first.id}`);
-    const pushed = await this.mirrorGit(['push', '--porcelain', url, `${commit}:${this.ref}`]);
-    if (pushed.code !== 0) {
-      const detail = pushDetail(pushed);
-      if (detail.kind === 'rejected') return { ok: false, kind: 'exists', reason: 'This remote already has a coordination log', attempts: 1 };
-      if (detail.kind === 'remote-rejected') return { ok: false, kind: 'remote-rejected', reason: detail.reason, attempts: 1 };
-      this.setStatus({ state: 'offline', reason: detail.reason });
-      return { ok: false, kind: 'offline', reason: detail.reason, attempts: 1 };
+    const outcome = classifyPush(await this.mirrorGit(['push', '--porcelain', url, `${commit}:${this.ref}`], { env, timeoutMs: NETWORK_TIMEOUT_MS }));
+    if (outcome.kind === 'cas-lost') return { ok: false, kind: 'exists', reason: 'This remote already has a coordination log', attempts: 1 };
+    if (outcome.kind === 'permanent') return { ok: false, kind: 'remote-rejected', reason: outcome.detail, attempts: 1 };
+    if (outcome.kind === 'offline') {
+      this.setStatus({ state: 'offline', reason: outcome.detail });
+      return { ok: false, kind: 'offline', reason: outcome.detail, attempts: 1 };
     }
     await this.fetchLocked();
     return { ok: true, events: built.events, commit, attempts: 1 };
