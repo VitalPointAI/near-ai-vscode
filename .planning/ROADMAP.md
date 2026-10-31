@@ -61,7 +61,30 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   3. A forged event (bad signature, unbound key, or insufficient role under the spec's role matrix) is rejected by both clients, never changes state, and is listed with its reason in the Rejected events diagnostics; role permissions are enforced both when writing and when reading the log. (TEAM-04, SEC-04)
   4. Concurrent appends from both clients never lose an event: a test with several child-process clients appending to a local bare repository ends with every event present and no force-push.
   5. Solo projects (no `.planning/.near-ai/team.json`) behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
-**Plans**: TBD
+**Plans**: 11 plans in 6 waves
+
+**Wave 1**
+- [ ] 60-01-PLAN.md — Tracer: signed genesis round trip between two clones over a real bare remote; type contracts, canonical JSON, identity (TEAM-04)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 60-02-PLAN.md — `decideTeamAction` full spec 6.3 matrix and `assertNoSecrets` (SEC-04, SEC-01)
+- [ ] 60-03-PLAN.md — Transport hardening: CAS retry with rebuild, push classification, mirror lock, rewritten-branch quarantine, paused status (TEAM-04)
+- [ ] 60-04-PLAN.md — Event validation: envelope, exact-key bodies with email hashes, policy validators (TEAM-04)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 60-05-PLAN.md — Full materializer, positional revocation, snapshots, seeded property test (TEAM-04, SEC-04)
+- [ ] 60-06-PLAN.md — `team.json` as untrusted input, atomic writes, trust pin, `team-roster` audit (SEC-01, TEAM-01)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 60-07-PLAN.md — `TeamLog`: write-side checks, two-clone convergence, forgery suite, snapshot writer (TEAM-04, SEC-04, SEC-01)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 60-08-PLAN.md — `enableTeamMode` core, team.json-only commit, rollback, canary (TEAM-01, SEC-01)
+- [ ] 60-09-PLAN.md — Sync scheduler, `TeamSession`, status bar, Verify Team Log, audit wiring (TEAM-04, SEC-01)
+- [ ] 60-10-PLAN.md — Concurrency test with forked child-process clients (TEAM-04)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 60-11-PLAN.md — `registerTeamMode` with solo parity, package.json contributions, command flows, phase gate (TEAM-01, SEC-01)
 
 ### Phase 61: Invitations, joining, removal, NEAR org and key integration
 **Goal**: A lead can bring people into the team and remove them cleanly: invite by email with a role and allocation, the invitee joins with a single-use code and gets their own NEAR access and API key, and removal releases everything the member held and makes their keys worthless.

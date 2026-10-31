@@ -570,7 +570,9 @@ await git(['commit', '--only', '-m', 'chore(team): enable NEAR AI Team Mode', '-
 | A9 | SecretStorage values are shared across windows of the same VS Code profile on one machine, so two windows share one device key | Pattern 1 | If not shared, two windows would need two device keys; low impact. |
 | A10 | Emails stored in `member.joined`/`team.created` are acceptable PII in an immutable git history | Open Questions | Privacy/GDPR concern; owner decision. |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All resolved by the orchestrator on 2026-10-31 under the owner's standing instruction: Q1 builder append = CONTEXT D-29; Q2 basis points = D-30; Q3 event bodies and email hashes = D-31; Q4 owner device protection = D-32; Q5 rewritten branch = D-33; Q6 owner key loss = a second owner device or a lead re-binding is out of scope (no ownership transfer in v0.6.0, deferred in CONTEXT); handled as an explained error in 60-01 and 60-06; Q7 snapshot races = D-33 plus the 60-07 snapshot skip; Q8 release packaging = 60-11 `npm run verify:release`. The original questions follow for the record.
 
 1. **`append(events, revalidate)` signature (D-18 vs D-03)**
    - What we know: a retried pre-signed event has stale Lamport/`prev` and will be rejected after rebase (Pitfall 1).

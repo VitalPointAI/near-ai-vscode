@@ -1,12 +1,53 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v0.6.0",
-  "phases": [],
+  "milestone": "v0.6.0 — Team Mode",
+  "phases": [
+    {
+      "number": "60",
+      "name": "Team core",
+      "status": "pending"
+    },
+    {
+      "number": "61",
+      "name": "Invitations, joining, removal, NEAR org and key integration",
+      "status": "pending"
+    },
+    {
+      "number": "62",
+      "name": "Work model, GSD import, Team Board",
+      "status": "pending"
+    },
+    {
+      "number": "63",
+      "name": "Claims, leases, claim workspaces, LeaseGuard, duplicate checks",
+      "status": "pending"
+    },
+    {
+      "number": "64",
+      "name": "Dispatcher, offers, Next Task",
+      "status": "pending"
+    },
+    {
+      "number": "65",
+      "name": "Integration merge train",
+      "status": "pending"
+    },
+    {
+      "number": "66",
+      "name": "Budgets, allocations, provider caps",
+      "status": "pending"
+    },
+    {
+      "number": "67",
+      "name": "Metrics, collaboration, team stop, relay, hardening",
+      "status": "pending"
+    }
+  ],
   "next": {
-    "command": "/gsd:discuss-phase",
-    "label": "Discuss the first phase",
-    "reason": "Project initialized — plan your first phase"
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 60 of 8 · 0% · executing"
   },
-  "updated_at": "2026-10-31T10:59:20.963Z"
+  "updated_at": "2026-10-31T12:20:17.876Z"
 }
