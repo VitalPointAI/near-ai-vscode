@@ -2,7 +2,10 @@
 // Covers the Ed25519 signing scheme (D-06), the genesis anchor (D-10), the git compare-and-swap ref (D-03) and neutral commits (D-04).
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { eventPath } from '../domain/team/canonical';
@@ -13,8 +16,9 @@ import { CAS_LOST_MARKERS, DEFAULT_COORDINATION_REF, GitTransport, LOCAL_REF, QU
 import type { GitTransportOptions } from '../team/gitTransport';
 import { newTeamId } from '../team/identity';
 import { redactGitMessage, runGit } from '../team/runGit';
+import type { GitRunner } from '../team/runGit';
 import type { AppendBuilder } from '../team/transport';
-import { createOwner, createTeamFixture, faultRunner, fakeGitResult, gitIn, recordingMaterializer, testEvent, testGenesis } from './helpers/teamHarness';
+import { createOwner, createTeamFixture, faultRunner, fakeGitResult, gitIn, recordingMaterializer, testEvent, testGenesis, withGlobalGitConfig } from './helpers/teamHarness';
 import type { RecordedState, TeamFixture, TestGenesis, TestOwner } from './helpers/teamHarness';
 
 function clientFor(fixture: TeamFixture, name: string, anchor: GenesisAnchor): GitTransport<TeamState> {
@@ -486,5 +490,299 @@ test('head() reports the applied commit and the last accepted position', async (
     assert.equal(head.commit, gitIn(fixture.remote, ['rev-parse', DEFAULT_COORDINATION_REF]));
     assert.equal(head.lamport, 3);
     assert.ok(head.eventId.startsWith('evt-'));
+  });
+});
+
+// ---- Offline and paused status, rewrite refusal, anomalies and isolation (plan 60-03 task 2, D-03, D-16, D-25, D-33, D-34).
+
+const REWRITTEN_TEXT = "The team's coordination log was rewritten on the remote; Team Mode is paused";
+
+function mirrorOf(fixture: TeamFixture, name: string): string {
+  return path.join(fixture.storageDir(name), 'coordination.git');
+}
+
+// Replaces the coordination branch on the remote with an unrelated history, as a hostile or careless force push would.
+function rewriteRemote(fixture: TeamFixture, via: string): void {
+  gitIn(fixture.remote, ['config', 'receive.denyNonFastForwards', 'false']);
+  const dir = fixture.clones[via] as string;
+  gitIn(dir, ['checkout', '-q', '--orphan', 'rewrite']);
+  gitIn(dir, ['commit', '-q', '--allow-empty', '-m', 'rewrite']);
+  gitIn(dir, ['push', '-q', '--force', 'origin', `rewrite:${DEFAULT_COORDINATION_REF}`]);
+  gitIn(fixture.remote, ['config', 'receive.denyNonFastForwards', 'true']);
+}
+
+// A fast-forward checkout of the coordination branch in a clone, for tests that need to commit unusual history.
+function checkoutCoordination(fixture: TeamFixture, name: string): string {
+  const dir = fixture.clones[name] as string;
+  gitIn(dir, ['fetch', '-q', 'origin', `+${DEFAULT_COORDINATION_REF}:refs/work/coordination`]);
+  gitIn(dir, ['checkout', '-q', '--detach', 'refs/work/coordination']);
+  return dir;
+}
+
+function pushCoordination(dir: string): void {
+  gitIn(dir, ['push', '-q', 'origin', `HEAD:${DEFAULT_COORDINATION_REF}`]);
+}
+
+test('an unreachable remote makes the transport offline with a redacted reason, then recovers when the remote is back', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const { teamId, owner } = await seedLog(fixture, 'a');
+    const b = recClient(fixture, 'b');
+    const clone = fixture.clones['b'] as string;
+    const user = `user${randomBytes(5).toString('hex')}`;
+    const password = `pw${randomBytes(8).toString('hex')}`;
+    gitIn(clone, ['remote', 'set-url', 'origin', `http://${user}:${password}@127.0.0.1:1/team.git`]);
+
+    assert.deepEqual(await b.fetch(), []);
+    assert.equal(b.status().state, 'offline');
+    const reason = b.status().reason ?? '';
+    assert.ok(reason.length > 0);
+    assert.equal(reason.includes(password), false);
+    assert.equal(reason.includes(user), false);
+    const append = await b.append(availability(owner, teamId));
+    assert.equal(append.ok, false);
+    if (!append.ok) {
+      assert.equal(append.kind, 'offline');
+      assert.equal(append.reason.includes(password), false);
+      assert.equal(append.reason.includes(user), false);
+    }
+    const config = gitIn(mirrorOf(fixture, 'b'), ['config', '--local', '--list']);
+    assert.equal(config.includes(password), false, 'the URL is never written into the mirror config');
+
+    gitIn(clone, ['remote', 'set-url', 'origin', fixture.remote]);
+    const entries = await b.fetch();
+    assert.ok(entries.length > 0);
+    assert.equal(b.status().state, 'ok');
+    assert.equal(b.status().reason, undefined);
+  });
+});
+
+test('a credential prompt failure is offline with the hint to run git fetch once in a terminal', async () => {
+  await withFixture(['a'], async (fixture) => {
+    await seedLog(fixture, 'a');
+    const denied = fakeGitResult(128, '', "fatal: could not read Username for 'https://example.invalid': terminal prompts disabled");
+    const client = recClient(fixture, 'a', { git: faultRunner(runGit, [{ when: (args) => args.includes('fetch'), replace: () => denied }]) });
+    await client.fetch();
+    assert.equal(client.status().state, 'offline');
+    assert.ok((client.status().reason ?? '').includes('Run git fetch once in a terminal so your credential helper can store the credentials.'));
+  });
+});
+
+test('a rewritten remote branch pauses the transport, quarantines the old head and keeps the last trusted history', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    const { teamId, owner, client: a } = await seedLog(fixture, 'a');
+    assert.equal((await a.append(availability(owner, teamId))).ok, true);
+    const b = recClient(fixture, 'b');
+    await b.fetch();
+    const oldHead = gitIn(fixture.remote, ['rev-parse', DEFAULT_COORDINATION_REF]);
+    const before = JSON.stringify(b.state());
+    const entriesBefore = b.state().entries.length;
+
+    rewriteRemote(fixture, 'c');
+    assert.deepEqual(await b.fetch(), []);
+    assert.equal(b.status().state, 'paused');
+    assert.equal(b.status().reason, REWRITTEN_TEXT);
+    assert.equal(gitIn(mirrorOf(fixture, 'b'), ['rev-parse', `${QUARANTINE_REF_PREFIX}${oldHead.slice(0, 12)}`]), oldHead);
+    assert.equal(JSON.stringify(b.state()), before, 'the serialised state does not change');
+    assert.equal(gitIn(mirrorOf(fixture, 'b'), ['rev-parse', LOCAL_REF]), oldHead, 'the trusted head is not moved');
+    const append = await b.append(availability(owner, teamId));
+    assert.equal(append.ok, false);
+    if (!append.ok) assert.equal(append.kind, 'paused');
+    const trusted = await b.readAll();
+    assert.equal(trusted.length, entriesBefore);
+    assert.ok(trusted.every((entry) => entry.commit !== gitIn(fixture.remote, ['rev-parse', DEFAULT_COORDINATION_REF])));
+  });
+});
+
+test('a saved position catches a rewrite even after the mirror directory was deleted', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    const { teamId, owner, client: a } = await seedLog(fixture, 'a');
+    assert.equal((await a.append(availability(owner, teamId))).ok, true);
+    const first = recClient(fixture, 'b');
+    await first.fetch();
+    const pin = JSON.parse(await readFile(path.join(fixture.storageDir('b'), 'pin.json'), 'utf8')) as { head: string; lamport: number; entries: number };
+    assert.equal(pin.head, gitIn(fixture.remote, ['rev-parse', DEFAULT_COORDINATION_REF]));
+    assert.equal(pin.lamport, 3);
+    assert.equal(pin.entries, 4);
+
+    rewriteRemote(fixture, 'c');
+    await rm(mirrorOf(fixture, 'b'), { recursive: true, force: true });
+    const second = recClient(fixture, 'b');
+    assert.deepEqual(await second.fetch(), []);
+    assert.equal(second.status().state, 'paused');
+    assert.equal(second.status().reason, REWRITTEN_TEXT);
+    const append = await second.append(availability(owner, teamId));
+    assert.equal(append.ok, false);
+    if (!append.ok) assert.equal(append.kind, 'paused');
+  });
+});
+
+test('a saved position does not block a fresh mirror when the remote was only extended', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const { teamId, owner, client: a } = await seedLog(fixture, 'a');
+    await recClient(fixture, 'b').fetch();
+    assert.equal((await a.append(availability(owner, teamId))).ok, true);
+    await rm(mirrorOf(fixture, 'b'), { recursive: true, force: true });
+    const again = recClient(fixture, 'b');
+    const entries = await again.fetch();
+    assert.equal(again.status().state, 'ok');
+    assert.equal(entries.length, 4);
+  });
+});
+
+test('failing to compare heads is offline with a redacted reason and not a rewrite', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const { teamId, owner, client } = await seedLog(fixture, 'a');
+    assert.equal((await client.append(availability(owner, teamId))).ok, true);
+    assert.equal((await recClient(fixture, 'b').append(availability(owner, teamId))).ok, true, 'the remote moves ahead of the first mirror');
+    const canary = `canary${randomBytes(6).toString('hex')}`;
+    const broken = fakeGitResult(128, '', `fatal: bad object from https://user:${canary}@example.invalid/x.git`);
+    const probing = recClient(fixture, 'a', { git: faultRunner(runGit, [{ when: (args) => args.includes('merge-base'), replace: () => broken }]) });
+    await probing.fetch();
+    assert.equal(probing.status().state, 'offline');
+    const reason = probing.status().reason ?? '';
+    assert.ok(reason.startsWith('Team sync could not compare coordination heads'), reason);
+    assert.equal(reason.includes(canary), false);
+  });
+});
+
+test('a commit that modifies an existing event file becomes an anomaly and the adding commit stays the source of truth', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    const { genesis } = await seedLog(fixture, 'a');
+    const b = recClient(fixture, 'b');
+    await b.fetch();
+    const file = eventPath(genesis.events[0]);
+    const original = gitIn(fixture.remote, ['show', `${DEFAULT_COORDINATION_REF}:${file}`]);
+    const dir = checkoutCoordination(fixture, 'c');
+    writeFileSync(path.join(dir, file), '{"tampered":true}', 'utf8');
+    gitIn(dir, ['commit', '-q', '-am', 'edit an event']);
+    pushCoordination(dir);
+
+    const entries = await b.fetch();
+    assert.deepEqual(entries.map((entry) => [entry.kind, entry.anomaly, entry.path]), [['anomaly', TEAM_REJECTION_REASONS.historyChanged, file]]);
+    const seen = b.state().entries.filter((entry) => entry.path === file && entry.kind === 'event');
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]?.kind, 'event');
+    assert.equal(seen[0]?.text, original);
+    const fresh = recClient(fixture, 'a');
+    await rm(mirrorOf(fixture, 'a'), { recursive: true, force: true });
+    await fresh.fetch();
+    assert.equal(fresh.state().entries.filter((entry) => entry.path === file && entry.kind === 'event')[0]?.text, original, 'a full read also uses the adding commit');
+  });
+});
+
+test('a commit that deletes a coordination file becomes an anomaly', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    const { genesis } = await seedLog(fixture, 'a');
+    const b = recClient(fixture, 'b');
+    await b.fetch();
+    const file = eventPath(genesis.events[1]);
+    const dir = checkoutCoordination(fixture, 'c');
+    gitIn(dir, ['rm', '-q', file]);
+    gitIn(dir, ['commit', '-q', '-m', 'remove an event']);
+    pushCoordination(dir);
+    const entries = await b.fetch();
+    assert.deepEqual(entries.map((entry) => [entry.kind, entry.anomaly, entry.path]), [['anomaly', TEAM_REJECTION_REASONS.historyChanged, file]]);
+  });
+});
+
+test('a merge commit becomes an anomaly and the merged-in history is ignored', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    await seedLog(fixture, 'a');
+    const b = recClient(fixture, 'b');
+    await b.fetch();
+    const dir = checkoutCoordination(fixture, 'c');
+    const tip = gitIn(dir, ['rev-parse', 'HEAD']);
+    gitIn(dir, ['checkout', '-q', '-b', 'side']);
+    writeFileSync(path.join(dir, 'side.txt'), 'merged in from the second parent', 'utf8');
+    gitIn(dir, ['add', 'side.txt']);
+    gitIn(dir, ['commit', '-q', '-m', 'side work']);
+    gitIn(dir, ['checkout', '-q', '--detach', tip]);
+    gitIn(dir, ['merge', '-q', '--no-ff', '-s', 'ours', 'side', '-m', 'merge side']);
+    pushCoordination(dir);
+    const entries = await b.fetch();
+    assert.deepEqual(entries.map((entry) => [entry.kind, entry.anomaly]), [['anomaly', TEAM_REJECTION_REASONS.mergeCommit]]);
+    assert.equal(b.state().entries.some((entry) => entry.path === 'side.txt'), false);
+  });
+});
+
+test('files outside events, snapshots and the root team file are anomalies', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    await seedLog(fixture, 'a');
+    const b = recClient(fixture, 'b');
+    await b.fetch();
+    const dir = checkoutCoordination(fixture, 'c');
+    mkdirSync(path.join(dir, 'events', 'nested'), { recursive: true });
+    writeFileSync(path.join(dir, 'events', 'nested', 'x.json'), '{}', 'utf8');
+    writeFileSync(path.join(dir, 'notes.txt'), 'hello', 'utf8');
+    gitIn(dir, ['add', 'events/nested/x.json', 'notes.txt']);
+    gitIn(dir, ['commit', '-q', '-m', 'extra files']);
+    pushCoordination(dir);
+    const entries = await b.fetch();
+    assert.deepEqual(entries.map((entry) => [entry.kind, entry.anomaly, entry.path]), [
+      ['anomaly', TEAM_REJECTION_REASONS.unexpectedPath, 'events/nested/x.json'],
+      ['anomaly', TEAM_REJECTION_REASONS.unexpectedPath, 'notes.txt']
+    ]);
+  });
+});
+
+test('a failing global pre-push hook does not stop a coordination push', { skip: process.platform === 'win32' }, async () => {
+  await withFixture(['a'], async (fixture) => {
+    const hooks = await mkdtemp(path.join(tmpdir(), 'near-ai-team-hooks-'));
+    writeFileSync(path.join(hooks, 'pre-push'), '#!/bin/sh\nexit 1\n', 'utf8');
+    chmodSync(path.join(hooks, 'pre-push'), 0o755);
+    const config = withGlobalGitConfig(['[core]', `\thooksPath = ${hooks}`]);
+    try {
+      const control = (): void => {
+        execFileSync('git', ['push', '-q', 'origin', 'HEAD:refs/heads/hook-control'], { cwd: fixture.clones['a'], env: { ...process.env, ...config.env }, stdio: 'ignore' });
+      };
+      assert.throws(control, 'the global hook really does block an ordinary push');
+      const withHooks: GitRunner = (args, options) => runGit(args, { ...options, env: { ...options?.env, ...config.env } });
+      const { teamId, owner, client } = await seedLog(fixture, 'a', { git: withHooks });
+      const result = await client.append(availability(owner, teamId));
+      assert.equal(result.ok, true);
+      assert.equal(remoteEventFiles(fixture).length, 3);
+    } finally {
+      await config.cleanup();
+      await rm(hooks, { recursive: true, force: true });
+    }
+  });
+});
+
+test('the mirror never stores the remote and checks incoming objects', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const { teamId, owner, client } = await seedLog(fixture, 'a');
+    assert.equal((await client.append(availability(owner, teamId))).ok, true);
+    const lines = gitIn(mirrorOf(fixture, 'a'), ['config', '--local', '--list']).split('\n');
+    assert.equal(lines.some((line) => line.toLowerCase().startsWith('remote.')), false);
+    assert.equal(lines.some((line) => line.includes(fixture.remote)), false);
+    assert.ok(lines.map((line) => line.toLowerCase()).includes('transfer.fsckobjects=true'));
+  });
+});
+
+test('update listeners receive new entries until disposed; diagnostics are redacted', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const { teamId, owner, client: a } = await seedLog(fixture, 'a');
+    const canary = `canary${randomBytes(6).toString('hex')}`;
+    const gcFailure = fakeGitResult(1, '', `fatal: gc failed near https://user:${canary}@example.invalid/x.git`);
+    const b = recClient(fixture, 'b', { gcEveryOperations: 1, git: faultRunner(runGit, [{ when: (args) => args.includes('gc'), replace: () => gcFailure }]) });
+    const batches: number[] = [];
+    const diagnostics: string[] = [];
+    const subscription = b.onUpdate((entries) => { batches.push(entries.length); });
+    const diagnosticSubscription = b.onDiagnostic((message) => { diagnostics.push(message); });
+
+    await b.fetch();
+    assert.deepEqual(batches, [3]);
+    assert.equal(diagnostics.length, 1);
+    assert.ok(diagnostics[0]?.includes('Maintenance'));
+    assert.equal(diagnostics[0]?.includes(canary), false);
+    assert.equal(b.status().state, 'ok', 'a failed gc does not change the status');
+
+    subscription.dispose();
+    diagnosticSubscription.dispose();
+    assert.equal((await a.append(availability(owner, teamId))).ok, true);
+    await b.fetch();
+    assert.deepEqual(batches, [3]);
+    assert.equal(diagnostics.length, 1);
+    assert.equal(b.head().lamport, 3);
   });
 });
