@@ -1,13 +1,10 @@
 ---
 gsd_state_version: "1.0"
-milestone: 0.4.x
-milestone_name: 0.4.x line
-current_phase: null
-status: idle
-stopped_at: v0.5.0 paused; 0.4.5 published
-last_updated: "2026-10-29T00:00:00.000Z"
-last_activity: 2026-10-29
-last_activity_desc: Paused v0.5.0 (moved to a new project) and archived its planning; continuing the 0.4.x line
+milestone: v0.6.0
+milestone_name: Team Mode
+status: planning
+last_updated: "2026-10-31T10:59:20.957Z"
+last_activity: 2026-10-31
 progress:
   total_phases: 0
   completed_phases: 0
@@ -20,9 +17,10 @@ progress:
 
 ## Current position
 
-Line: 0.4.x (latest release 0.4.5, 2026-10-29)
-Phase: none active
-Next: plan the next 0.4.x work (add a phase with `/gsd-phase`, or use `/gsd-quick` for small changes)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-10-31 — Milestone v0.6.0 started
 
 ## Notes
 

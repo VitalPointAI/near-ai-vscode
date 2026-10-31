@@ -39,6 +39,28 @@ The first milestone includes onboarding, both API-key and NEAR sign-in authentic
 
 v0.5.0 (trusted-source knowledge base) was paused on 2026-10-29 and is moving to a separate project; its brief, research, roadmap and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`. Evidence-based model defaults (`.planning/research/v0.6.0-evidence-based-model-defaults.md`) remain a candidate for later 0.4.x work.
 
+## Current Milestone: v0.6.0 Team Mode
+
+**Goal:** Turn the single-developer harness into a team harness where several people, each running their own NEAR AI agents, work one project toward Open-GSD milestones and releases without colliding.
+
+**Source of truth:** `.planning/research/v0.6.0-team-mode-addendum.md` (where this file and the spec differ, the spec wins).
+
+**Target features:**
+- Membership: invite people with roles, join with a single-use code, remove cleanly; signed device keys
+- A signed, append-only coordination log on the project's git remote, verified by every client
+- A live Team Board derived from the GSD roadmap, phases and plans
+- Automatic dispatch (suggest, offer, auto) and a one-action Next Task
+- Deconfliction: exclusive claims, path and resource leases, a lease guard in the agent runtime, duplicate checks
+- One verified, reviewed merge path (merge train or PR mode); STATE.md regenerated from the log
+- Per-member budgets and allocations, provider-side spend caps per NEAR API key, reconciliation and alerts
+- Metrics, comments and handoffs, team memory, team-wide stop, release readiness, optional relay transport
+
+**Phase numbering:** Team Mode uses phases 60 to 67 (spec phases 25 to 32, in order), because Phase 25 belongs to the parallel 0.4.x line.
+
+**Owner decisions taken (spec section 14):** coordination storage is the orphan branch `near-ai/coordination`; default dispatch mode is `offer`; peer metrics visibility is off by default; the integration default is the local merge train; the milestone is v0.6.0 Team Mode (evidence-based model defaults move to v0.7.0 or a 0.6.x release). Decision 1 (NEAR spend-limit semantics) is confirmed in Phase 61 research.
+
+**Constraints:** solo projects (no `.planning/.near-ai/team.json`) behave exactly as 0.4.8; `src/domain/team/*` and `src/team/*` never import `vscode`; no new runtime dependencies in the team core; no secret is ever written to the coordination log, `team.json`, settings, transcripts, audit or fixtures; money is integer nano-USD; event ordering never uses wall clock.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -57,4 +79,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-29 after pausing v0.5.0 and continuing the 0.4.x line*
+*Last updated: 2026-10-31 after starting milestone v0.6.0 Team Mode*
