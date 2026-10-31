@@ -50,6 +50,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [ ] **Phase 67: Metrics, collaboration, team memory, team stop, release readiness, relay transport, hardening** - Metrics, comments and handoffs, team memory, team-wide stop, a release readiness card, and an optional relay
 
 ### Phase 60: Team core: identity, signed event log, git transport, roster
+
 **Goal**: A lead can turn on Team Mode for a project, and two clones of it share one signed, append-only coordination log over the project's own git remote in which every client verifies every event, roles are enforced and no secret is ever written.
 **Depends on**: Nothing (first phase of this milestone; builds on the shipped 0.4.8 extension)
 **Requirements**: TEAM-01, TEAM-04, SEC-01, SEC-04
@@ -61,10 +62,11 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   3. A forged event (bad signature, unbound key, or insufficient role under the spec's role matrix) is rejected by both clients, never changes state, and is listed with its reason in the Rejected events diagnostics; role permissions are enforced both when writing and when reading the log. (TEAM-04, SEC-04)
   4. Concurrent appends from both clients never lose an event: a test with several child-process clients appending to a local bare repository ends with every event present and no force-push.
   5. Solo projects (no `.planning/.near-ai/team.json`) behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
-**Plans**: 11 plans in 6 waves
+
+**Plans**: 1/11 plans executed in 6 waves
 
 **Wave 1**
-- [ ] 60-01-PLAN.md — Tracer: signed genesis round trip between two clones over a real bare remote; type contracts, canonical JSON, identity (TEAM-04)
+- [x] 60-01-PLAN.md — Tracer: signed genesis round trip between two clones over a real bare remote; type contracts, canonical JSON, identity (TEAM-04)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 60-02-PLAN.md — `decideTeamAction` full spec 6.3 matrix and `assertNoSecrets` (SEC-04, SEC-01)
@@ -87,6 +89,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [ ] 60-11-PLAN.md — `registerTeamMode` with solo parity, package.json contributions, command flows, phase gate (TEAM-01, SEC-01)
 
 ### Phase 61: Invitations, joining, removal, NEAR org and key integration
+
 **Goal**: A lead can bring people into the team and remove them cleanly: invite by email with a role and allocation, the invitee joins with a single-use code and gets their own NEAR access and API key, and removal releases everything the member held and makes their keys worthless.
 **Depends on**: Phase 60
 **Requirements**: TEAM-02, TEAM-03
@@ -98,10 +101,12 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   3. Invite, join and remove complete end to end in tests against a fake NEAR API server (organization, invitation, workspace key, spend-limit and usage endpoints), with one opt-in live test behind an environment flag, and in a manual check against a real NEAR organization.
   4. After the full invite, join and remove flow, a privacy canary finds no secret (API key, session token, clear-text invite code) in the coordination branch, `team.json`, settings, audit or transcripts.
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 62: Work model, GSD import, Team Board (live, read and move)
+
 **Goal**: Every member sees one live Team Board built from the project's GSD roadmap, phases, plans and tasks, sees other members' changes within one poll, and can move cards only along permitted transitions.
 **Depends on**: Phase 60
 **Requirements**: BOARD-01, BOARD-02, BOARD-03
@@ -112,10 +117,12 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   3. A move made by member A appears on member B's board within one poll interval. (BOARD-02)
   4. Moves are permission-checked and follow only permitted transitions; an illegal drop snaps back and says why. (BOARD-03)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 63: Claims, leases, claim workspaces, LeaseGuard, duplicate checks
+
 **Goal**: No two members, and no two sub-agents, can work the same item or the same files at the same time, agents are stopped from writing outside what they hold, and abandoned work is never lost.
 **Depends on**: Phase 62
 **Requirements**: CLAIM-01, CLAIM-02, CLAIM-03, CLAIM-04, CLAIM-05, ASSIGN-03
@@ -126,9 +133,11 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   3. A claim with no heartbeat within the lease TTL expires and its item returns to ready with a "has prior work on branch X" note; the branch survives and is offered to the next claimant, who continues from it instead of restarting. Each claim runs in its own branch and worktree with attribution trailers on its commits. (CLAIM-04)
   4. Creating a card that overlaps an open item on title tokens, requirement IDs or scope requires the creator to link, merge or confirm "distinct" with a recorded reason, and a claim whose diff is already contained in the integration head is marked duplicate. (CLAIM-05)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
+
 **Plans**: TBD
 
 ### Phase 64: Dispatcher, offers, Next Task, agent execution under claims
+
 **Goal**: Ready work finds the right member without anyone hunting for it: the dispatcher offers or assigns per policy, and `Next Task` turns the best eligible item into a claimed, prepared workspace and chat session in one action, with agents always running under a member and a claim.
 **Depends on**: Phase 63
 **Requirements**: ASSIGN-01, ASSIGN-02
@@ -139,9 +148,11 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   3. `Next Task` (command, board button and `/next`) claims the best eligible item for the caller, prepares its claim workspace and opens a chat session pre-loaded with the plan, its must-haves and the GSD execute command, in one action. (ASSIGN-02)
   4. In Team Mode the GSD execute flow refuses to run a plan without an active claim for it, and every agent run is attributed to its member and claim.
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
+
 **Plans**: TBD
 
 ### Phase 65: Integration merge train, verification, review gate, STATE regeneration
+
 **Goal**: All code reaches the integration branch through one rebased, scope-checked, verified and independently reviewed path, and STATE.md progress comes from the log instead of hand edits.
 **Depends on**: Phase 63
 **Requirements**: INTEG-01, INTEG-02, INTEG-03
@@ -152,9 +163,11 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   3. A member's own agent cannot satisfy that member's review; the review comes from another member (or that member's reviewer agent) per policy, and findings appear on the card. (INTEG-02)
   4. After a merge, STATE.md progress is regenerated from the log with no hand edit, the estimation calibration is updated with actual versus estimated cost, leases are released and the item is marked done. (INTEG-03)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
+
 **Plans**: TBD
 
 ### Phase 66: Budgets, allocations, provider caps, reconciliation, alerts, model policy
+
 **Goal**: Money is controlled at three layers: leads set the team budget and member allocations, no member can spend beyond theirs, NEAR enforces a hard per-key cap, and spend is reconciled and alerted.
 **Depends on**: Phase 61, Phase 63
 **Requirements**: BUDGET-01, BUDGET-02, BUDGET-03, BUDGET-04, BUDGET-05
@@ -166,10 +179,12 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   3. The provider spend limit on a member's NEAR API key is set and raised on each grant through the API (a fake server in tests), and the board says so plainly when no NEAR organization is configured. (BUDGET-02)
   4. Reconciliation against NEAR per-key usage flags a seeded 10% discrepancy as unreconciled and shows both figures, and alerts at 50, 80 and 100% of member, ring-fence and team budgets reach the member and lead as a notification, a card badge and a `budget.alert` event. (BUDGET-04, BUDGET-05)
   5. A privacy canary run of the full flow so far (enable, invite, join, claim, run, integrate, budget), with canary strings in prompts, files and keys, finds none on the coordination branch, in `team.json`, audit or settings; solo projects behave exactly as 0.4.8; and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 67: Metrics, collaboration, team memory, team stop, release readiness, relay transport, hardening
+
 **Goal**: The team can see how it is doing and finish a release together: metrics from the log, comments and handoffs across members, shared memory through approved proposals, a team-wide stop, a release readiness card, an optional real-time relay, and the whole flow hardened end to end.
 **Depends on**: Phase 64, Phase 65, Phase 66
 **Requirements**: METRIC-01, COLLAB-01, COLLAB-02, SEC-02, SEC-03, BOARD-04
@@ -181,6 +196,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   3. A team stop issued by a developer halts every member's agents and refuses new runs until a lead resumes, and instructions injected into a comment do not change agent behaviour (the existing untrusted-content tests extended). (SEC-02, SEC-03)
   4. The optional relay transport passes the malicious-relay harness (a malicious relay can withhold but not forge) and delivers board changes to other members within 2 s, while git remains the default transport.
   5. The two-window `npm run test:e2e` scenario passes (enable, invite, join, claim, run a stub agent, integrate, and see done on both boards); solo projects behave exactly as 0.4.8 with the existing suite unchanged and green; and `npm run lint` and the full `npm test` pass.
+
 **Plans**: TBD
 **UI hint**: yes
 
@@ -191,7 +207,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 60. Team core | v0.6.0 | 0/TBD | Not started | - |
+| 60. Team core | v0.6.0 | 1/11 | In Progress | - |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 0/TBD | Not started | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 0/TBD | Not started | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
