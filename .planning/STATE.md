@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 60
 current_phase_name: "Team core: identity, signed event log, git transport, roster"
 status: executing
-stopped_at: Completed 60-02-PLAN.md
-last_updated: "2026-10-31T12:46:36.417Z"
+stopped_at: Completed 60-03-PLAN.md
+last_updated: "2026-10-31T13:03:27.012Z"
 last_activity: 2026-10-31
 last_activity_desc: Phase 60 execution started
-state_head: 95e4e2f121f8eb4ab23b1d1bcd406cb95da00f73
+state_head: 732b512f50be4f581cb669f1cc65bff5ac5214f0
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-31)
 ## Current Position
 
 Phase: 60 (Team core: identity, signed event log, git transport, roster) — EXECUTING
-Plan: 3 of 11
+Plan: 4 of 11
 Status: Ready to execute
 Last activity: 2026-10-31 — Phase 60 execution started
 
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 60 P01 | 13 min | 2 tasks | 12 files |
 | Phase 60 P02 | 14min | 2 tasks | 4 files |
+| Phase 60 P03 | 25min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,7 @@ Recent decisions affecting current work:
 - [Phase 60]: Canonical nesting depth counts containers: 16 accepted, 17 rejected; any failure of the first event refuses the whole log
 - [Phase 60]: Rewritten coordination branch pauses the client with a sticky pause and a quarantine ref (D-33 pulled into 60-01)
 - [Phase 60]: 60-02: permission cells are checked before owner overrides; secret detector exempts only strict publicKey and sig shapes
+- [Phase 60]: 60-03: fetches land in a staging ref and the trusted ref moves only after the ancestry check; unanswered pushes are resolved by the next fetch's ancestry check
 
 ### Pending Todos
 
@@ -90,8 +92,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-31T12:46:36.351Z
-Stopped at: Completed 60-02-PLAN.md
+Last session: 2026-10-31T13:03:26.938Z
+Stopped at: Completed 60-03-PLAN.md
 Resume file: None
 
 ## Notes
