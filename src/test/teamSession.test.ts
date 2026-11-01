@@ -565,6 +565,9 @@ test('a focus change while the first sync is blocked still sets the cadence of t
       const context = { globalStorageUri: { fsPath: rig.globalStorage }, secrets: rig.owner.secrets, subscriptions: [] as Array<{ dispose(): void }> };
       const channel = (stub.vscode as { window: { createOutputChannel(name: string): { appendLine(line: string): void; show(): void } } }).window.createOutputChannel(TEAM_OUTPUT_CHANNEL);
       const starting = createVscodeTeamSession(context as never, rig.projectRoot, rig.teamFile, channel, { timers: rig.timers, git });
+      // A handler attached at once, so a rejection while the test is still waiting is never unhandled. The finally awaits it on every
+      // path, so a failure never leaves the first sync running against fixtures withRig is about to delete (WR-02).
+      const settled = starting.then((session) => session, () => undefined);
       try {
         await until(() => held, 'the first fetch to be held');
         stub.fireWindowState(!startFocused, !startFocused);
@@ -579,7 +582,11 @@ test('a focus change while the first sync is blocked still sets the cadence of t
         }
       } finally {
         release();
+        const session = await settled;
         for (const disposable of context.subscriptions) disposable.dispose();
+        // The subscriptions hold the session only once start resolved inside the try. dispose() is idempotent, so this also covers a
+        // session that resolved after a failure above.
+        session?.dispose();
       }
     });
   }
