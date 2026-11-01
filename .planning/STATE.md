@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 60
 current_phase_name: "Team core: identity, signed event log, git transport, roster"
 status: executing
-stopped_at: Completed 60-07-PLAN.md
-last_updated: "2026-11-01T12:54:23.393Z"
+stopped_at: Completed 60-08-PLAN.md
+last_updated: "2026-11-01T13:06:48.485Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 60 execution started
-state_head: 283d0a5061c602006600238830f5e973166ef4f1
+state_head: e8bce2b9ac7004b5e2f6e01b48a44ef766562732
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 7
+  completed_plans: 8
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-31)
 ## Current Position
 
 Phase: 60 (Team core: identity, signed event log, git transport, roster) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 Status: Ready to execute
 Last activity: 2026-11-01 — Phase 60 execution started
 
@@ -61,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 60 P05 | 50 min | 2 tasks | 3 files |
 | Phase 60 P06 | 5 min | 2 tasks | 6 files |
 | Phase 60 P07 | 40 min | 3 tasks | 3 files |
+| Phase 60 P08 | 10 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,8 @@ Recent decisions affecting current work:
 - [Phase 60]: 60-06: team.json refuses any extra key including policy; the signed log stays the only source of policy
 - [Phase 60]: 60-06: roster audit mirror secret-checks all new entries before appending any; corrupt trust or mark files fail closed
 - [Phase 60]: 60-07: batch prev chains event to event (first uses the head id); a snapshot over a state holding a secret-like value is skipped as a reported conflict, not thrown; append returns the user's AppendResult and the snapshot outcome is read via lastSnapshot()
+- [Phase 60]: 60-08: failures after the genesis landed (team.json unsaved, trust pin refused, commit refused) keep the device key and return commit-failed; only a failed or non-landing genesis push rolls back key and mirror
+- [Phase 60]: 60-08: an unreadable team.json is reported as exists-locally and left untouched, never overwritten
 
 ### Pending Todos
 
@@ -102,8 +105,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-01T12:54:23.364Z
-Stopped at: Completed 60-07-PLAN.md
+Last session: 2026-11-01T13:06:48.455Z
+Stopped at: Completed 60-08-PLAN.md
 Resume file: None
 
 ## Notes
