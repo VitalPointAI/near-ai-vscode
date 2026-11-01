@@ -1,9 +1,9 @@
 ---
-status: testing
+status: diagnosed
 phase: 60-team-core-identity-signed-event-log-git-transport-roster
 source: [60-VERIFICATION.md]
 started: 2026-11-01T14:09:01Z
-updated: 2026-11-01T15:40:02Z
+updated: 2026-11-01T16:13:43Z
 ---
 
 ## Current Test
@@ -44,5 +44,19 @@ blocked: 0
   reason: "Automated real-window UAT: Automated real-window runs (two VS Code 1.144.0 instances, separate user-data dirs, scratch repos in ~/projects/near-ai-team-uat): Enable in A passed (team created, team.json committed and pushed, status Team: clone-a); B synced (Team: clone-a; Verify Team Log 2 events, 1 member, 0 rejected); a stalled remote paused after 65 s with the window responsive (2-5 ms command round trips). But status transitions are unreliable: in one run a refused remote paused in 5 s and recovered in 10 s, in the next it never paused within 90 s; after a stall the restored remote stayed paused for 180 s. No stale lock files in the mirror; a manual fetch into it succeeded."
   severity: major
   test: 1
-  artifacts: []
-  missing: []
+  root_cause: "Polling stops, the status text is correct. Poll cadence follows a cached focus flag (syncScheduler.ts:49) written only by onDidChangeWindowState events (teamSession.ts:413). focusChanged() has no change check, so every window-state event with unchanged focus (e.g. active=false) clears and re-arms the poll timer from now (syncScheduler.ts:81-92); a stream of events closer than the delay starves polling (fake clock: 1 run in 1 h). Repeated focusChanged(true) runs an unthrottled sync each time. The listener is registered after the awaited first sync (teamSession.ts:395-413), so a focus change during it is lost and focused() is never re-read. Unfocused 120 s base, doubled per failure up to 600 s, is by design (D-19/D-25). The UAT harness could not hold focus (UAT_FORCE_FOCUS only replaced window.state) and waited less than the unfocused cadence."
+  artifacts:
+    - path: "src/team/syncScheduler.ts"
+      issue: "focusedNow cached and event-written only; focusChanged re-arms the timer on unchanged focus and starts an extra run on repeated true"
+    - path: "src/services/team/teamSession.ts"
+      issue: "forwards activity-only window-state events as focus changes; registers the listener after the awaited first sync; never re-reads focused()"
+    - path: "src/test/helpers/vscodeStub.ts"
+      issue: "fireWindowState(focused) has no active flag, so tests cannot deliver an unchanged-focus event"
+    - path: "src/test/teamScheduler.test.ts"
+      issue: "no test for repeated focusChanged with unchanged focus or for starvation"
+  missing:
+    - "Scheduler: ignore focusChanged(x) when x equals the current focus; anchor the next poll to the last run so a transition cannot postpone a pending poll; let the cadence follow the live focused() value"
+    - "Session: forward only real focus transitions; register onDidChangeWindowState before the first sync (or re-read focused() after it)"
+    - "Regression tests: repeated unchanged focus events neither re-arm nor add runs (unit and fake-clock 1 h starvation case); session test with {focused:false,active:true} then {focused:false,active:false}; focus gain during a blocked first sync keeps the 5 s cadence; vscodeStub fireWindowState(focused, active)"
+    - "UAT harness: hold OS focus or nudge a sync after each remote change, log window.state and the scheduler delay; Test 1 wording states a focused window"
+  debug_session: ".planning/debug/team-status-paused-recovery.md"
