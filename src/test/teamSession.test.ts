@@ -54,8 +54,10 @@ async function until(check: () => boolean, what: string, timeoutMs = 20_000): Pr
 }
 
 interface Request { ms: number; callback: () => void; cleared: boolean; fired: boolean }
+// The clock never moves: these tests fire timers by hand, so a constant now() keeps the scheduler's anchor on the same clock as set() (IN-02).
 class FakeTimers {
   public readonly requests: Request[] = [];
+  public now(): number { return 0; }
   public set(callback: () => void, ms: number): unknown {
     const request: Request = { ms, callback, cleared: false, fired: false };
     this.requests.push(request);
@@ -530,7 +532,7 @@ test('window-state events that only change activity neither re-arm the poll nor 
       assert.equal(rig.timers.requests.length, requestCount + 1, 'losing focus re-arms exactly once');
       assert.equal(pending.cleared, true, 'the focused poll was replaced');
       const unfocused = rig.timers.requests[requestCount] as Request;
-      assert.ok(unfocused.ms <= UNFOCUSED_POLL_MS && unfocused.ms >= UNFOCUSED_POLL_MS - 10_000, `the unfocused delay counts from the last run, got ${unfocused.ms}`);
+      assert.equal(unfocused.ms, UNFOCUSED_POLL_MS, 'the unfocused delay counts from the last run, which ended at the same fake time');
 
       stub.fireWindowState(false, false);
       assert.equal(rig.timers.requests.length, requestCount + 1, 'an activity-only change after the loss requests no timer');

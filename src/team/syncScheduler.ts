@@ -17,9 +17,10 @@ export const DEFAULT_POLL_SECONDS = 15;
 export interface SchedulerTimers {
   set(callback: () => void, ms: number): unknown;
   clear(handle: unknown): void;
-  // Milliseconds on the same clock that set() counts against. When absent the scheduler uses the monotonic performance.now(),
-  // because a wall clock can step backward (NTP corrections, a VM resync after host sleep) and setTimeout itself is monotonic.
-  now?(): number;
+  // Milliseconds on the same clock that set() counts against. Required, so injected timers can never mix their own set() clock with
+  // a real clock (IN-02). The default timers use the monotonic performance.now(), because a wall clock can step backward
+  // (NTP corrections, a VM resync after host sleep) and setTimeout itself is monotonic.
+  now(): number;
 }
 
 export interface SyncSchedulerOptions {
@@ -124,7 +125,7 @@ export class SyncScheduler {
   }
 
   private clock(): number {
-    return this.timers.now === undefined ? performance.now() : this.timers.now();
+    return this.timers.now();
   }
 
   // Replaces the pending timer. Without an explicit delay the wait is the full nextDelay().
