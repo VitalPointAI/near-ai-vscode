@@ -2,6 +2,9 @@
 // Focused windows poll every pollSeconds, unfocused windows every 120 s, a focus event or a nudge runs at once, and two syncs never overlap.
 // A run that reports unhealthy (or throws) backs the delay off exponentially up to 10 minutes; a healthy run resets it.
 // An event that does not change focus is ignored: it neither clears nor re-arms the pending poll and never starts a run (G-60-1).
+// Losing focus moves the pending poll to the unfocused delay counted from the end of the last run, so it never postpones a poll
+// past that delay. Whenever a poll is armed after a run, focus is read again from focused(), so a focus change whose event was
+// missed (for example during the awaited first sync) only changes the next wait and never starts a run.
 // Timers only schedule polls and never order events. This module never imports vscode.
 
 export const UNFOCUSED_POLL_MS = 120_000;
@@ -13,6 +16,8 @@ export const DEFAULT_POLL_SECONDS = 15;
 export interface SchedulerTimers {
   set(callback: () => void, ms: number): unknown;
   clear(handle: unknown): void;
+  // Milliseconds on the same clock that set() counts against. When absent the scheduler uses Date.now().
+  now?(): number;
 }
 
 export interface SyncSchedulerOptions {
@@ -32,7 +37,8 @@ const defaultTimers: SchedulerTimers = {
     handle.unref();
     return handle;
   },
-  clear: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>); }
+  clear: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>); },
+  now: () => Date.now()
 };
 
 function baseSeconds(configured: number): number {
@@ -49,6 +55,7 @@ export class SyncScheduler {
   private stopped = true;
   private focusedNow: boolean;
   private failureCount = 0;
+  private lastRunEndedAt = 0;
 
   public constructor(private readonly options: SyncSchedulerOptions) {
     this.timers = options.timers ?? defaultTimers;
@@ -88,10 +95,10 @@ export class SyncScheduler {
       this.requestRun();
       return;
     }
-    // Losing focus only lengthens the wait. A run in flight reschedules with the new interval when it ends.
+    // Losing focus only lengthens the wait, and counts it from the end of the last run so repeated events can never push a poll later.
+    // A run in flight reschedules with the new interval when it ends.
     if (this.inFlight === undefined) {
-      this.clearTimer();
-      this.schedule();
+      this.schedule(Math.max(0, this.lastRunEndedAt + this.nextDelay() - this.clock()));
     }
   }
 
@@ -110,7 +117,12 @@ export class SyncScheduler {
     this.handle = undefined;
   }
 
-  private schedule(): void {
+  private clock(): number {
+    return this.timers.now === undefined ? Date.now() : this.timers.now();
+  }
+
+  // Replaces the pending timer. Without an explicit delay the wait is the full nextDelay().
+  private schedule(delayMs: number = this.nextDelay()): void {
     if (this.stopped) return;
     this.clearTimer();
     this.timerPending = true;
@@ -118,7 +130,7 @@ export class SyncScheduler {
       this.timerPending = false;
       this.handle = undefined;
       this.requestRun();
-    }, this.nextDelay());
+    }, delayMs);
   }
 
   private requestRun(): void {
@@ -141,6 +153,9 @@ export class SyncScheduler {
     } finally {
       this.inFlight = undefined;
     }
+    this.lastRunEndedAt = this.clock();
+    // The cadence follows the live window focus. This arms a wait only and never starts a run.
+    this.focusedNow = this.options.focused();
     this.schedule();
   }
 
