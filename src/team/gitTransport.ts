@@ -43,6 +43,8 @@ const LOCAL_TIMEOUT_MS = 15_000;
 const BULK_TIMEOUT_MS = 60_000;
 const NETWORK_TIMEOUT_MS = 60_000;
 const DEFAULT_SSH_COMMAND = 'ssh -o BatchMode=yes -o ConnectTimeout=10';
+// The name the mirror gives the remote for the length of one git call; it exists only in that process's environment, never in the mirror's config.
+const TEAM_REMOTE_NAME = 'near-ai-team';
 const AUTH_HINT = 'Run git fetch once in a terminal so your credential helper can store the credentials.';
 
 export interface GitTransportOptions<S> {
@@ -206,6 +208,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
   private successes = 0;
   private mirrorReady = false;
   private statusValue: TransportStatus = { state: 'ok' };
+  private envConfigSupport: Promise<boolean> | undefined;
 
   public constructor(options: GitTransportOptions<S>) {
     if (!REMOTE_PATTERN.test(options.remote)) throw new Error('The remote name in the team file is not valid.');
@@ -365,6 +368,33 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     return { GIT_SSH_COMMAND: command !== '' ? command : DEFAULT_SSH_COMMAND };
   }
 
+  // git 2.31 and later read config from the environment. The remote URL can carry a credential (https://user:token@host), and a process
+  // command line is readable by other local users, so the URL travels in the environment of the git process instead of its arguments (WR-12).
+  // An older git cannot do that, so it falls back to the argument form.
+  private async supportsEnvironmentConfig(): Promise<boolean> {
+    if (this.envConfigSupport === undefined) {
+      this.envConfigSupport = this.git(['--version'], { timeoutMs: LOCAL_TIMEOUT_MS }).then((result) => {
+        const match = /(\d+)\.(\d+)/.exec(gitText(result));
+        if (result.code !== 0 || match === null) return false;
+        const major = Number(match[1]);
+        return major > 2 || (major === 2 && Number(match[2]) >= 31);
+      }, () => false);
+    }
+    return this.envConfigSupport;
+  }
+
+  // The remote name (or URL, on an old git) to hand to fetch, push and ls-remote, with the environment that makes it resolve.
+  private async networkTarget(url: string): Promise<{ target: string; env: Record<string, string> }> {
+    const env = await this.networkEnv();
+    if (!(await this.supportsEnvironmentConfig())) return { target: url, env };
+    const inherited = Number(process.env.GIT_CONFIG_COUNT ?? '0');
+    const index = Number.isSafeInteger(inherited) && inherited > 0 ? inherited : 0;
+    return {
+      target: TEAM_REMOTE_NAME,
+      env: { ...env, GIT_CONFIG_COUNT: String(index + 1), [`GIT_CONFIG_KEY_${index}`]: `remote.${TEAM_REMOTE_NAME}.url`, [`GIT_CONFIG_VALUE_${index}`]: url }
+    };
+  }
+
   private async revParse(ref: string): Promise<string | undefined> {
     const result = await this.mirrorGit(['rev-parse', '-q', '--verify', `${ref}^{commit}`]);
     if (result.code === 0) return gitText(result);
@@ -450,10 +480,10 @@ export class GitTransport<S> implements CoordinationTransport<S> {
 
   // Fetches into the staging ref. The lock-race wording is retried a few times with a short jittered pause (D-34).
   private async fetchRemote(url: string): Promise<GitResult> {
-    const env = await this.networkEnv();
+    const { target, env } = await this.networkTarget(url);
     let retries = 0;
     for (;;) {
-      const result = await this.mirrorGit(['fetch', '--no-tags', '--quiet', url, `+${this.ref}:${INCOMING_REF}`], { env, timeoutMs: NETWORK_TIMEOUT_MS });
+      const result = await this.mirrorGit(['fetch', '--no-tags', '--quiet', target, `+${this.ref}:${INCOMING_REF}`], { env, timeoutMs: NETWORK_TIMEOUT_MS });
       if (result.code === 0 || classifyGitFailure(result).kind !== 'race' || retries >= FETCH_RACE_RETRIES) return result;
       retries += 1;
       await this.sleep(Math.max(1, this.baseDelayMs / 8) * (0.5 + this.random()));
@@ -658,8 +688,8 @@ export class GitTransport<S> implements CoordinationTransport<S> {
         }
         throw error;
       }
-      const env = await this.networkEnv();
-      const outcome = classifyPush(await this.mirrorGit(['push', '--porcelain', url, `${commit}:${this.ref}`], { env, timeoutMs: NETWORK_TIMEOUT_MS }));
+      const { target, env } = await this.networkTarget(url);
+      const outcome = classifyPush(await this.mirrorGit(['push', '--porcelain', target, `${commit}:${this.ref}`], { env, timeoutMs: NETWORK_TIMEOUT_MS }));
       if (outcome.kind === 'ok' || outcome.kind === 'up-to-date') {
         // D-19: fetch straight after a local append so the state and listeners include the new events.
         await this.fetchLocked();
@@ -689,8 +719,8 @@ export class GitTransport<S> implements CoordinationTransport<S> {
       if (error instanceof RemoteUnavailableError) return { ok: false, kind: 'refused', reason: error.message, attempts: 0 };
       throw error;
     }
-    const env = await this.networkEnv();
-    const probe = await this.mirrorGit(['ls-remote', '--exit-code', url, this.ref], { env, timeoutMs: NETWORK_TIMEOUT_MS });
+    const { target, env } = await this.networkTarget(url);
+    const probe = await this.mirrorGit(['ls-remote', '--exit-code', target, this.ref], { env, timeoutMs: NETWORK_TIMEOUT_MS });
     if (probe.code === 0) return { ok: false, kind: 'exists', reason: 'This remote already has a coordination log', attempts: 0 };
     if (probe.code !== 2) {
       const failure = classifyGitFailure(probe);
@@ -713,7 +743,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     files.push({ path: TEAM_FILE, text: teamFileText });
     const first = built.events[0] as TeamEvent;
     const commit = await this.commitFiles(files, undefined, `team: ${first.type} ${first.id}`);
-    const outcome = classifyPush(await this.mirrorGit(['push', '--porcelain', url, `${commit}:${this.ref}`], { env, timeoutMs: NETWORK_TIMEOUT_MS }));
+    const outcome = classifyPush(await this.mirrorGit(['push', '--porcelain', target, `${commit}:${this.ref}`], { env, timeoutMs: NETWORK_TIMEOUT_MS }));
     if (outcome.kind === 'cas-lost') return { ok: false, kind: 'exists', reason: 'This remote already has a coordination log', attempts: 1 };
     if (outcome.kind === 'permanent') return { ok: false, kind: 'remote-rejected', reason: outcome.detail, attempts: 1 };
     if (outcome.kind === 'offline') {

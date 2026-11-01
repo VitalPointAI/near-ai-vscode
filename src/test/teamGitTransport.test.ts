@@ -851,3 +851,54 @@ test('a coordination branch deleted on the remote after it was read shows a visi
     assert.deepEqual(b.status(), { state: 'ok' }, 'sync resumes when the branch is back');
   });
 });
+
+interface RecordedCall { args: string[]; env: Record<string, string> | undefined }
+
+function recordingRunner(calls: RecordedCall[], reportedVersion?: string): GitRunner {
+  return async (args, options) => {
+    calls.push({ args: [...args], env: options?.env === undefined ? undefined : { ...options.env } });
+    if (reportedVersion !== undefined && args.length === 1 && args[0] === '--version') return fakeGitResult(0, `git version ${reportedVersion}\n`);
+    return runGit(args, options);
+  };
+}
+
+test('the remote URL travels in the git process environment, never in its arguments (WR-12)', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const teamId = newTeamId();
+    const owner = await createOwner(teamId);
+    const genesis = testGenesis({ teamId, owner, name: 'Environment URL team' });
+    const calls: RecordedCall[] = [];
+    const transport = new GitTransport<TeamState>({
+      mirrorDir: path.join(fixture.storageDir('a'), 'coordination.git'), projectRoot: fixture.clones['a'] as string, remote: 'origin',
+      ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(genesis.anchor), git: recordingRunner(calls), baseDelayMs: 1
+    });
+    assert.equal((await transport.append(async () => genesis.events, { genesis: { teamFileText: genesis.teamFileText } })).ok, true);
+    await transport.fetch();
+    const url = fixture.remote;
+    const network = calls.filter((call) => ['fetch', 'push', 'ls-remote'].some((verb) => call.args.includes(verb)) && call.args.includes('--git-dir'));
+    assert.ok(network.length >= 3, 'ls-remote, push and fetch all ran');
+    for (const call of network) {
+      assert.equal(call.args.some((arg) => arg.includes(url)), false, `no argument carries the URL: ${call.args.join(' ')}`);
+      assert.equal(call.env?.['GIT_CONFIG_COUNT'], '1');
+      assert.equal(call.env?.['GIT_CONFIG_KEY_0'], 'remote.near-ai-team.url');
+      assert.equal(call.env?.['GIT_CONFIG_VALUE_0'], url);
+    }
+    assert.equal(gitIn(path.join(fixture.storageDir('a'), 'coordination.git'), ['config', '--local', '--list']).includes(url), false, 'the mirror config does not keep it');
+  });
+});
+
+test('a git older than 2.31 falls back to passing the URL as an argument and still works (WR-12)', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const teamId = newTeamId();
+    const owner = await createOwner(teamId);
+    const genesis = testGenesis({ teamId, owner, name: 'Old git team' });
+    const calls: RecordedCall[] = [];
+    const transport = new GitTransport<TeamState>({
+      mirrorDir: path.join(fixture.storageDir('a'), 'coordination.git'), projectRoot: fixture.clones['a'] as string, remote: 'origin',
+      ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(genesis.anchor), git: recordingRunner(calls, '2.30.2'), baseDelayMs: 1
+    });
+    assert.equal((await transport.append(async () => genesis.events, { genesis: { teamFileText: genesis.teamFileText } })).ok, true);
+    assert.ok(calls.some((call) => call.args.includes('push') && call.args.includes(fixture.remote)), 'the push used the URL argument');
+    assert.equal(calls.some((call) => call.env?.['GIT_CONFIG_COUNT'] !== undefined), false);
+  });
+});
