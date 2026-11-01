@@ -1,52 +1,17 @@
-// Materialiser for the team event log. This is the tracer-depth version: it proves the genesis anchor (D-10), the signature
-// scheme (D-06) and deterministic serialisation. Plan 60-05 replaces the validation body with the full D-09 pipeline behind
-// these same exports. Pure: no I/O, no clock, ordering comes only from the order entries are applied in (D-03).
-import { MAX_EVENT_BYTES, canonicalize, eventPath, fingerprintOf, isStrictBase64url, verifyEventSignature } from './canonical';
-import { DEFAULT_WIP_LIMIT, defaultTeamPolicy } from './policy';
-import { TEAM_EVENT_TYPES, TEAM_REJECTION_REASONS } from './types';
-import type { CommittedEvent, DeviceRef, EntryVerdict, GenesisAnchor, Materializer, Member, Rejection, TeamEvent, TeamState } from './types';
+// Materialiser for the team event log: the full D-09 validation pipeline and the state transitions for the ten Phase 60 event types.
+// Every client runs exactly this code on every committed entry, so it is pure and deterministic: no I/O, no clock, no secret scanning
+// (acceptance must not depend on detector versions), and ordering comes only from the order entries are applied in (D-03).
+import { canonicalize, eventPath, verifyEventSignature } from './canonical';
+import { actionForEvent, decideTeamAction } from './permissions';
+import { DEFAULT_WIP_LIMIT, applyPolicyChanges, defaultTeamPolicy } from './policy';
+import { TEAM_REJECTION_REASONS } from './types';
+import type { CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, Materializer, Member, Rejection, TeamEvent, TeamState } from './types';
+import { isRecord, parseEventFile } from './validate';
 
-const MAX_LAMPORT_JUMP = 1000;
-const EVENT_ID_PATTERN = /^evt-[0-9A-HJKMNP-TV-Z]{26}$/;
-const ENVELOPE_KEYS = ['at', 'author', 'body', 'device', 'id', 'lamport', 'prev', 'sig', 'teamId', 'type', 'v'];
+export const MAX_LAMPORT_JUMP = 1000;
+const R = TEAM_REJECTION_REASONS;
 
 type Fields = Record<string, unknown>;
-
-function isRecord(value: unknown): value is Fields {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function hasExactKeys(value: Fields, required: string[], optional: string[] = []): boolean {
-  const keys = Object.keys(value);
-  return required.every((key) => keys.includes(key)) && keys.every((key) => required.includes(key) || optional.includes(key));
-}
-
-function isString(value: unknown, maxLength = 200): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= maxLength;
-}
-
-function isDeviceRef(value: unknown): value is DeviceRef {
-  return isRecord(value) && hasExactKeys(value, ['fingerprint', 'publicKey'])
-    && typeof value.publicKey === 'string' && isStrictBase64url(value.publicKey, 32)
-    && typeof value.fingerprint === 'string' && value.fingerprint === fingerprintOf(Buffer.from(value.publicKey, 'base64url'));
-}
-
-function sameDevice(left: DeviceRef, right: DeviceRef): boolean {
-  return left.fingerprint === right.fingerprint && left.publicKey === right.publicKey;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.length <= 200);
-}
-
-function isEnvelope(value: unknown): value is TeamEvent {
-  if (!isRecord(value) || !hasExactKeys(value, ENVELOPE_KEYS)) return false;
-  return value.v === 1 && typeof value.id === 'string' && EVENT_ID_PATTERN.test(value.id) && isString(value.teamId)
-    && typeof value.type === 'string' && (TEAM_EVENT_TYPES as readonly string[]).includes(value.type)
-    && typeof value.lamport === 'number' && Number.isSafeInteger(value.lamport) && value.lamport >= 1
-    && isString(value.at) && isString(value.author) && typeof value.device === 'string' && typeof value.prev === 'string'
-    && isRecord(value.body) && typeof value.sig === 'string';
-}
 
 export function createState(anchor: GenesisAnchor): TeamState {
   return {
@@ -59,6 +24,11 @@ export function createState(anchor: GenesisAnchor): TeamState {
   };
 }
 
+// A candidate check must never alias the live state, so the copy is deep. TeamState holds only plain data, Maps and Sets.
+export function cloneState(state: TeamState): TeamState {
+  return structuredClone(state);
+}
+
 function reject(state: TeamState, eventId: string, reason: string): EntryVerdict {
   const rejection: Rejection = { eventId, reason };
   state.rejected.push(rejection);
@@ -66,11 +36,11 @@ function reject(state: TeamState, eventId: string, reason: string): EntryVerdict
 }
 
 function refuse(state: TeamState, eventId: string): EntryVerdict {
-  state.refused = TEAM_REJECTION_REASONS.logRefused;
-  return reject(state, eventId, TEAM_REJECTION_REASONS.logRefused);
+  state.refused = R.logRefused;
+  return reject(state, eventId, R.logRefused);
 }
 
-function accept(state: TeamState, event: TeamEvent): EntryVerdict {
+function accept(state: TeamState, event: ImplementedTeamEvent): EntryVerdict {
   state.head = { eventId: event.id, lamport: event.lamport };
   state.highLamport = event.lamport;
   state.accepted += 1;
@@ -78,25 +48,13 @@ function accept(state: TeamState, event: TeamEvent): EntryVerdict {
   return { accepted: true, event };
 }
 
-function parseEvent(entry: CommittedEvent): TeamEvent | string {
-  if (entry.size > MAX_EVENT_BYTES) return TEAM_REJECTION_REASONS.tooLarge;
-  let parsed: unknown;
-  let canonical: string;
-  try {
-    parsed = JSON.parse(entry.text);
-    canonical = canonicalize(parsed);
-  } catch {
-    // Unparseable text and values the canonical form refuses are the same fault for a reader: a malformed event.
-    return TEAM_REJECTION_REASONS.malformed;
-  }
-  if (canonical !== entry.text) return TEAM_REJECTION_REASONS.notCanonical;
-  if (!isEnvelope(parsed)) return TEAM_REJECTION_REASONS.malformed;
-  return parsed;
+function sameDevice(left: DeviceRef, right: DeviceRef): boolean {
+  return left.fingerprint === right.fingerprint && left.publicKey === right.publicKey;
 }
 
 function bindOwner(state: TeamState, event: TeamEvent<'team.created'>): void {
   const body = event.body;
-  state.team = { id: state.team.id, name: body.name, ownerId: body.ownerId, policy: body.policy };
+  state.team = { id: state.team.id, name: body.name, ownerId: body.ownerId, policy: structuredClone(body.policy) };
   if (body.near) state.team.near = { organizationId: body.near.organizationId, workspaceId: body.near.workspaceId };
   const owner: Member = {
     id: body.ownerId, name: body.ownerName, emailHashes: [...body.ownerEmailHashes], role: 'owner',
@@ -110,58 +68,172 @@ function bindOwner(state: TeamState, event: TeamEvent<'team.created'>): void {
 // The first event must be the team.created named by the anchor and signed by the anchored owner key (D-10).
 function applyGenesis(state: TeamState, entry: CommittedEvent): EntryVerdict {
   const anchor = state.genesis;
-  const parsed = parseEvent(entry);
-  if (typeof parsed === 'string') return refuse(state, entry.path);
-  const event = parsed;
-  if (event.type !== 'team.created' || event.id !== anchor.eventId || entry.path !== eventPath(event)) return refuse(state, event.id);
-  const body: unknown = event.body;
-  if (!isRecord(body) || !hasExactKeys(body, ['name', 'ownerId', 'ownerName', 'ownerEmailHashes', 'ownerDevice', 'policy'], ['near'])) return refuse(state, event.id);
-  if (!isString(body.name) || !isString(body.ownerId) || !isString(body.ownerName) || !isStringArray(body.ownerEmailHashes) || !isRecord(body.policy)) return refuse(state, event.id);
-  if (!isDeviceRef(body.ownerDevice) || !sameDevice(body.ownerDevice, anchor.ownerDevice)) return refuse(state, event.id);
+  const parsed = parseEventFile(entry);
+  if (!parsed.ok) return refuse(state, parsed.rejection.eventId);
+  const event = parsed.event;
+  if (event.type !== 'team.created' || event.id !== anchor.eventId) return refuse(state, event.id);
+  const body = event.body;
   if (event.teamId !== anchor.teamId || event.author !== body.ownerId || event.device !== anchor.ownerDevice.fingerprint) return refuse(state, event.id);
+  if (!sameDevice(body.ownerDevice, anchor.ownerDevice)) return refuse(state, event.id);
   if (!verifyEventSignature(event, anchor.ownerDevice.publicKey)) return refuse(state, event.id);
-  bindOwner(state, event as TeamEvent<'team.created'>);
+  bindOwner(state, event);
   return accept(state, event);
 }
 
-function publicKeyFor(state: TeamState, event: TeamEvent): string | undefined {
+// D-09 step 3 (positional, D-11): the device must be bound to the author by an earlier accepted roster event and neither revoked nor removed yet.
+function boundKey(state: TeamState, event: ImplementedTeamEvent): DeviceKey | string {
   const memberId = state.deviceIndex.get(event.device);
-  if (memberId === undefined || memberId !== event.author) return undefined;
-  return state.members.get(memberId)?.devices.find((device) => device.fingerprint === event.device && device.revokedEvent === undefined)?.publicKey;
+  if (memberId === undefined || memberId !== event.author) return R.unboundDevice;
+  const member = state.members.get(memberId);
+  const key = member?.devices.find((device) => device.fingerprint === event.device);
+  if (member === undefined || key === undefined) return R.unboundDevice;
+  if (key.revokedEvent !== undefined) return R.revokedDevice;
+  if (member.removedEvent !== undefined) return R.removedAuthor;
+  return key;
 }
 
-function applyJoined(state: TeamState, event: TeamEvent): EntryVerdict {
-  const body: unknown = event.body;
+function isOwnerJoin(state: TeamState, event: TeamEvent<'member.joined'>): boolean {
   const owner = state.members.get(state.team.ownerId);
-  if (state.accepted !== 1 || owner === undefined || !isRecord(body) || !hasExactKeys(body, ['memberId', 'name', 'emailHashes', 'role', 'device'])) return reject(state, event.id, TEAM_REJECTION_REASONS.ownerJoinOnly);
-  if (body.memberId !== owner.id || body.role !== 'owner' || !isDeviceRef(body.device) || !sameDevice(body.device, state.genesis.ownerDevice)) return reject(state, event.id, TEAM_REJECTION_REASONS.ownerJoinOnly);
-  if (!isString(body.name) || !isStringArray(body.emailHashes)) return reject(state, event.id, TEAM_REJECTION_REASONS.invalidBody);
-  owner.name = body.name;
-  owner.emailHashes = [...body.emailHashes];
-  owner.joinedEvent = event.id;
-  owner.joinedAt = event.at;
-  return accept(state, event);
+  if (state.accepted !== 1 || owner === undefined || event.author !== owner.id) return false;
+  const body = event.body;
+  return body.memberId === owner.id && body.role === 'owner' && sameDevice(body.device, state.genesis.ownerDevice);
+}
+
+// D-09 step 6: the same decideTeamAction the write side calls, evaluated against the state at this log position.
+function authorisationProblem(state: TeamState, event: ImplementedTeamEvent): string | undefined {
+  if (event.type === 'team.created') return R.genesisOnly;
+  if (event.type === 'member.joined') return isOwnerJoin(state, event) ? undefined : `${R.notPermitted}: ${R.ownerJoinOnly}`;
+  const action = actionForEvent(event);
+  if (action === undefined) return R.notPermitted;
+  const decision = decideTeamAction(state, event.author, action);
+  return decision.allowed ? undefined : `${R.notPermitted}: ${decision.reason ?? ''}`;
+}
+
+function lookupMember(state: TeamState, memberId: string): Member | string {
+  const member = state.members.get(memberId);
+  if (member === undefined) return R.memberMissing;
+  return member.removedEvent === undefined ? member : R.memberRemoved;
+}
+
+// D-09 step 7: every entity the event names must exist at this position.
+function referenceProblem(state: TeamState, event: ImplementedTeamEvent): string | undefined {
+  switch (event.type) {
+    case 'member.role-changed':
+    case 'member.removed':
+    case 'member.skills': {
+      const member = lookupMember(state, event.body.memberId);
+      return typeof member === 'string' ? member : undefined;
+    }
+    case 'device.added': {
+      const member = lookupMember(state, event.body.memberId);
+      if (typeof member === 'string') return member;
+      return state.deviceIndex.has(event.body.device.fingerprint) ? R.deviceTaken : undefined;
+    }
+    case 'device.revoked': {
+      const member = lookupMember(state, event.body.memberId);
+      if (typeof member === 'string') return member;
+      const key = state.deviceIndex.get(event.body.fingerprint) === member.id
+        ? member.devices.find((device) => device.fingerprint === event.body.fingerprint) : undefined;
+      if (key === undefined) return R.deviceNotBound;
+      if (key.revokedEvent !== undefined) return R.deviceRevoked;
+      return member.devices.filter((device) => device.revokedEvent === undefined).length === 1 ? R.lastDevice : undefined;
+    }
+    case 'snapshot.written':
+      // Task 2 proves a snapshot against the replayed state; until a state hash exists nothing can match.
+      return R.snapshotMismatch;
+    default:
+      return undefined;
+  }
+}
+
+function memberOf(state: TeamState, memberId: string): Member {
+  const member = state.members.get(memberId);
+  if (member === undefined) throw new Error(`Member ${memberId} vanished between the reference check and the transition.`);
+  return member;
+}
+
+function applyTransition(state: TeamState, event: ImplementedTeamEvent): void {
+  switch (event.type) {
+    case 'team.created':
+      return;
+    case 'member.joined': {
+      const owner = memberOf(state, event.body.memberId);
+      owner.name = event.body.name;
+      owner.emailHashes = [...event.body.emailHashes];
+      owner.joinedEvent = event.id;
+      owner.joinedAt = event.at;
+      return;
+    }
+    case 'member.role-changed':
+      memberOf(state, event.body.memberId).role = event.body.role;
+      return;
+    case 'member.removed': {
+      const member = memberOf(state, event.body.memberId);
+      member.removedEvent = event.id;
+      member.removedAt = event.at;
+      return;
+    }
+    case 'device.added':
+      memberOf(state, event.body.memberId).devices.push({
+        fingerprint: event.body.device.fingerprint, publicKey: event.body.device.publicKey, addedBy: event.author, addedEvent: event.id
+      });
+      state.deviceIndex.set(event.body.device.fingerprint, event.body.memberId);
+      return;
+    case 'device.revoked': {
+      const key = memberOf(state, event.body.memberId).devices.find((device) => device.fingerprint === event.body.fingerprint);
+      if (key === undefined) throw new Error(`Device ${event.body.fingerprint} vanished between the reference check and the transition.`);
+      key.revokedEvent = event.id;
+      key.revokedBy = event.author;
+      return;
+    }
+    case 'member.availability': {
+      const member = memberOf(state, event.author);
+      member.availability = event.body.availability;
+      // An update without hours keeps the hours already on record.
+      if (event.body.workingHours !== undefined) member.workingHours = structuredClone(event.body.workingHours);
+      return;
+    }
+    case 'member.skills':
+      memberOf(state, event.body.memberId).skills = [...event.body.skills];
+      return;
+    case 'policy.changed':
+      state.team.policy = applyPolicyChanges(state.team.policy, event.body.changes);
+      return;
+    case 'snapshot.written':
+      return;
+  }
 }
 
 export function applyEntry(state: TeamState, entry: CommittedEvent): EntryVerdict {
   if (state.refused !== undefined) return { accepted: false, rejection: { eventId: entry.path, reason: state.refused } };
   if (entry.kind === 'genesis-copy') return { accepted: true };
-  if (entry.kind === 'anomaly') return reject(state, entry.path, entry.anomaly ?? TEAM_REJECTION_REASONS.unexpectedPath);
-  if (entry.kind === 'snapshot') return reject(state, entry.path, TEAM_REJECTION_REASONS.snapshotOrphan);
+  if (entry.kind === 'anomaly') return reject(state, entry.path, entry.anomaly ?? R.unexpectedPath);
+  if (entry.kind === 'snapshot') return reject(state, entry.path, R.snapshotOrphan);
+  // Step 1 (schema). The very first event decides whether this log is ours at all (D-10).
   if (state.accepted === 0) return applyGenesis(state, entry);
-  const parsed = parseEvent(entry);
-  if (typeof parsed === 'string') return reject(state, entry.path, parsed);
-  const event = parsed;
-  if (entry.path !== eventPath(event)) return reject(state, event.id, TEAM_REJECTION_REASONS.fileName);
-  if (event.type !== 'member.joined') return reject(state, event.id, TEAM_REJECTION_REASONS.unsupported);
-  if (event.teamId !== state.team.id) return reject(state, event.id, TEAM_REJECTION_REASONS.wrongTeam);
-  if (state.seenEventIds.has(event.id)) return reject(state, event.id, TEAM_REJECTION_REASONS.duplicate);
-  const publicKey = publicKeyFor(state, event);
-  if (publicKey === undefined) return reject(state, event.id, TEAM_REJECTION_REASONS.unboundDevice);
-  if (!verifyEventSignature(event, publicKey)) return reject(state, event.id, TEAM_REJECTION_REASONS.badSignature);
-  if (event.lamport <= state.highLamport) return reject(state, event.id, TEAM_REJECTION_REASONS.lamportNotGreater);
-  if (event.lamport > state.highLamport + MAX_LAMPORT_JUMP) return reject(state, event.id, TEAM_REJECTION_REASONS.lamportJump);
-  return applyJoined(state, event);
+  const parsed = parseEventFile(entry);
+  if (!parsed.ok) {
+    state.rejected.push(parsed.rejection);
+    return { accepted: false, rejection: parsed.rejection };
+  }
+  const event = parsed.event;
+  // Step 2: team and replay.
+  if (event.teamId !== state.team.id) return reject(state, event.id, R.wrongTeam);
+  if (state.seenEventIds.has(event.id)) return reject(state, event.id, R.duplicate);
+  // Steps 3 and 4: the bound device, then its signature.
+  const key = boundKey(state, event);
+  if (typeof key === 'string') return reject(state, event.id, key);
+  if (!verifyEventSignature(event, key.publicKey)) return reject(state, event.id, R.badSignature);
+  // Step 5: Lamport counts accepted events only, so a rejected event can never poison the high-water mark.
+  if (event.lamport <= state.highLamport) return reject(state, event.id, R.lamportNotGreater);
+  if (event.lamport > state.highLamport + MAX_LAMPORT_JUMP) return reject(state, event.id, R.lamportJump);
+  // Steps 6 and 7: permission at this position, then the entities the event names. Nothing is mutated before all checks pass.
+  const denied = authorisationProblem(state, event);
+  if (denied !== undefined) return reject(state, event.id, denied);
+  const missing = referenceProblem(state, event);
+  if (missing !== undefined) return reject(state, event.id, missing);
+  applyTransition(state, event);
+  return accept(state, event);
 }
 
 export function reduce(entries: CommittedEvent[], anchor: GenesisAnchor): TeamState {
@@ -199,18 +271,28 @@ function asEntry(event: TeamEvent): CommittedEvent {
   return { commit: '', commitTime: 0, path: eventPath(event), blob: '', size: Buffer.byteLength(text, 'utf8'), text, kind: 'event' };
 }
 
+// The rejection a read of these events would produce, found on a copy so the live state is never touched.
+export function checkCandidate(state: TeamState, events: TeamEvent[]): Rejection | undefined {
+  const copy = cloneState(state);
+  for (const event of events) {
+    let entry: CommittedEvent;
+    try {
+      entry = asEntry(event);
+    } catch {
+      // A candidate that cannot be written as a canonical file could never be committed, which a reader reports as malformed.
+      return { eventId: event.id, reason: R.malformed };
+    }
+    const verdict = applyEntry(copy, entry);
+    if (!verdict.accepted) return verdict.rejection;
+  }
+  return undefined;
+}
+
 export function teamMaterializer(anchor: GenesisAnchor): Materializer<TeamState> {
   return {
     initial: () => createState(anchor),
     apply: (state, entry) => applyEntry(state, entry),
     head: (state) => ({ ...state.head }),
-    check: (state, events: TeamEvent[]) => {
-      const copy = structuredClone(state);
-      for (const event of events) {
-        const verdict = applyEntry(copy, asEntry(event));
-        if (!verdict.accepted) return verdict.rejection;
-      }
-      return undefined;
-    }
+    check: (state, events: TeamEvent[]) => checkCandidate(state, events)
   };
 }
