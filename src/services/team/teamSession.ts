@@ -387,8 +387,23 @@ export class TeamSession {
   }
 }
 
+// Turns window-state events into focus transitions (G-60-1). VS Code also fires onDidChangeWindowState when only the window's
+// activity changes, so the returned listener remembers the last focus value and forwards a value only when it differs from it.
+export function focusTransitions(initialFocused: boolean, forward: (focused: boolean) => void): (state: { focused: boolean }) => void {
+  let last = initialFocused;
+  return (state) => {
+    if (state.focused === last) return;
+    last = state.focused;
+    forward(state.focused);
+  };
+}
+
 // The real editor services (D-16, D-19, D-25). Every disposable lands on context.subscriptions.
-export async function createVscodeTeamSession(context: vscode.ExtensionContext, projectRoot: string, teamFile: TeamFile, output: TeamOutput): Promise<TeamSession> {
+// Tests pass their own timers and git runner through overrides. The extension passes nothing.
+export async function createVscodeTeamSession(
+  context: vscode.ExtensionContext, projectRoot: string, teamFile: TeamFile, output: TeamOutput,
+  overrides: Pick<TeamSessionDeps, 'timers' | 'git'> = {}
+): Promise<TeamSession> {
   const statusBar = createTeamStatusBar();
   let session: TeamSession;
   try {
@@ -402,7 +417,8 @@ export async function createVscodeTeamSession(context: vscode.ExtensionContext, 
       pollSeconds: () => vscode.workspace.getConfiguration('nearAi.team').get<number>('pollSeconds', DEFAULT_POLL_SECONDS),
       focused: () => vscode.window.state.focused,
       withProgress: <T>(title: string, task: () => Promise<T>): Promise<T> =>
-        Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, () => task()))
+        Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, () => task())),
+      ...overrides
     });
   } catch (error) {
     statusBar.dispose();
