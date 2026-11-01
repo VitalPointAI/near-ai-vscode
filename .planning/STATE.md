@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 60
 current_phase_name: "Team core: identity, signed event log, git transport, roster"
 status: executing
-stopped_at: Completed 60-05-PLAN.md
-last_updated: "2026-11-01T12:36:35.693Z"
+stopped_at: Completed 60-06-PLAN.md
+last_updated: "2026-11-01T12:42:42.233Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 60 execution started
-state_head: ee1d08f93d055b4d3da9646b0f15fee98c6c693d
+state_head: 8384e235959e172c5d239c58f955e07064940ea1
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-31)
 ## Current Position
 
 Phase: 60 (Team core: identity, signed event log, git transport, roster) — EXECUTING
-Plan: 6 of 11
+Plan: 7 of 11
 Status: Ready to execute
 Last activity: 2026-11-01 — Phase 60 execution started
 
@@ -59,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 60 P03 | 25min | 2 tasks | 3 files |
 | Phase 60 P04 | 20min | 2 tasks | 3 files |
 | Phase 60 P05 | 50 min | 2 tasks | 3 files |
+| Phase 60 P06 | 5 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,8 @@ Recent decisions affecting current work:
 - [Phase 60]: 60-04: validators return full 'invalid event body: <path>' reasons; rejection id is the parsed event id when it matches the pattern, else the file path
 - [Phase 60]: 60-05: stateHash covers state.rejected, so snapshot.written bodies are computed after any preceding rejections; replay keeps every client in agreement
 - [Phase 60]: 60-05: member.availability without workingHours keeps the hours on record; member.joined outside genesis rejects as not permitted: only the owner joins at genesis in this version
+- [Phase 60]: 60-06: team.json refuses any extra key including policy; the signed log stays the only source of policy
+- [Phase 60]: 60-06: roster audit mirror secret-checks all new entries before appending any; corrupt trust or mark files fail closed
 
 ### Pending Todos
 
@@ -97,8 +100,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-01T12:36:35.662Z
-Stopped at: Completed 60-05-PLAN.md
+Last session: 2026-11-01T12:42:42.205Z
+Stopped at: Completed 60-06-PLAN.md
 Resume file: None
 
 ## Notes
