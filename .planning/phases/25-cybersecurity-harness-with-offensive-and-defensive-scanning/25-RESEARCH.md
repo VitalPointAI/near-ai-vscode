@@ -1102,32 +1102,37 @@ gitleaks version 2>/dev/null || echo "gitleaks: not found"
 | A11 | Docker Desktop is accessible from WSL distros via socket mount | Sandbox Architecture | If not, container sandbox is unavailable on WSL |
 | A12 | `cvss` npm package correctly implements CVSS 3.1 formula | Code Examples | If wrong, scores will be incorrect; must verify version |
 
-## Open Questions
+## Open Questions (all RESOLVED)
 
-1. **CVSS score computation library**
+1. **CVSS score computation library** — **RESOLVED (25-01).**
    - What we know: The formula is specified by FIRST; manual implementation is error-prone
    - What's unclear: Whether `npm view cvss` returns a well-maintained package; no web search available to verify
    - Recommendation: Check `npm view cvss version` and `npm audit cvss` before implementing; if unavailable, inline the formula from specification
+   - Resolution: no new dependency. 25-01 reuses the `cvss3Score` implementation already vendored in `src/security/osv.ts` via `cvss31Vector(metrics)`, and its tracer asserts every finding score is computed from the vector rather than hard-coded — preserving the zero-new-dependency constraint (T-25-SC).
 
-2. **Devcontainer detection approach**
+2. **Devcontainer detection approach** — **RESOLVED (25-01).**
    - What we know: CONTEXT.md mentions `devcontainers` npm package as a candidate
    - What's unclear: Whether `@devcontainers/cli` exists or if detection should parse JSON manually
    - Recommendation: Try `npx @devcontainers/cli inspect` first; fall back to manual `.devcontainer/devcontainer.json` parsing
+   - Resolution: manual JSON parsing only. 25-01's `resolveTarget` treats a `container` target as a name or ID resolved at run time through the sandbox service (25-04), and no devcontainer-specific path ships this phase; no CLI is invoked and no package is added.
 
-3. **Container image for test-vulnerable**
+3. **Container image for test-vulnerable** — **RESOLVED (25-03).**
    - What we know: Needs to be packaged, no network needed for basic tests
    - What's unclear: Whether to build a custom image or use an existing vulnerable image (e.g., `owasp/zap2docker-stable`)
    - Recommendation: Build a minimal custom image with Express + deliberately vulnerable routes; publish to Docker Hub as `near-ai/test-vulnerable`
+   - Resolution: no image, no registry. 25-03 ships two plain-Node fixture servers under `test/fixtures/cyber/{vulnerable,patched}` started on an OS-chosen ephemeral port by `startTarget`, so the seeded-issue tests run on any CI host with no docker/podman and no network pull.
 
-4. **Sandbox network isolation on WSL**
+4. **Sandbox network isolation on WSL** — **RESOLVED (25-04).**
    - What we know: WSL can access Docker Desktop; containers may have host network access
    - What's unclear: Whether container networking on WSL can be restricted to host-only
    - Recommendation: Use `docker network create` with `--internal` flag; test on WSL explicitly
+   - Resolution: `docker run --rm -d --network none` for the container tier, asserted argv-exactly in 25-04's tests; the temp tier applies a per-run binary allowlist. WSL-specific verification stays in 25-08's hands-on acceptance rather than a separate CI matrix.
 
-5. **How many retries for JSON parse-repair?**
+5. **How many retries for JSON parse-repair?** — **RESOLVED (25-02).**
    - What we know: D-19 says "bounded retries"; CYBER-04 says "bounded retries"
    - What's unclear: The exact number (2? 3? 5?)
    - Recommendation: Start with 3; make configurable via settings
+   - Resolution: `MAX_STEP_REPAIRS = 3`, a module constant in `cyberProtocolDriver.ts`; after three consecutive repair failures for one role the driver returns a typed `incompatible` result that the run records visibly. Not settings-configurable this phase.
 
 ## Metadata
 
