@@ -6,6 +6,7 @@
 // past that delay. Whenever a poll is armed after a run, focus is read again from focused(), so a focus change whose event was
 // missed (for example during the awaited first sync) only changes the next wait and never starts a run.
 // Timers only schedule polls and never order events. This module never imports vscode.
+import { performance } from 'node:perf_hooks';
 
 export const UNFOCUSED_POLL_MS = 120_000;
 export const MAX_BACKOFF_MS = 600_000;
@@ -16,7 +17,8 @@ export const DEFAULT_POLL_SECONDS = 15;
 export interface SchedulerTimers {
   set(callback: () => void, ms: number): unknown;
   clear(handle: unknown): void;
-  // Milliseconds on the same clock that set() counts against. When absent the scheduler uses Date.now().
+  // Milliseconds on the same clock that set() counts against. When absent the scheduler uses the monotonic performance.now(),
+  // because a wall clock can step backward (NTP corrections, a VM resync after host sleep) and setTimeout itself is monotonic.
   now?(): number;
 }
 
@@ -38,7 +40,7 @@ const defaultTimers: SchedulerTimers = {
     return handle;
   },
   clear: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>); },
-  now: () => Date.now()
+  now: () => performance.now()
 };
 
 function baseSeconds(configured: number): number {
@@ -97,8 +99,11 @@ export class SyncScheduler {
     }
     // Losing focus only lengthens the wait, and counts it from the end of the last run so repeated events can never push a poll later.
     // A run in flight reschedules with the new interval when it ends.
+    // The wait is clamped to the full delay, so no clock behaviour (a backward step, a clock that is not finite) can make it longer (CR-01).
     if (this.inFlight === undefined) {
-      this.schedule(Math.max(0, this.lastRunEndedAt + this.nextDelay() - this.clock()));
+      const full = this.nextDelay();
+      const remaining = this.lastRunEndedAt + full - this.clock();
+      this.schedule(Number.isFinite(remaining) ? Math.min(full, Math.max(0, remaining)) : full);
     }
   }
 
@@ -118,7 +123,7 @@ export class SyncScheduler {
   }
 
   private clock(): number {
-    return this.timers.now === undefined ? Date.now() : this.timers.now();
+    return this.timers.now === undefined ? performance.now() : this.timers.now();
   }
 
   // Replaces the pending timer. Without an explicit delay the wait is the full nextDelay().

@@ -384,6 +384,23 @@ test('losing focus after more than 120 s since the last run polls at once', asyn
   h.scheduler.stop();
 });
 
+test('a clock that steps backward before a focus loss never pushes the next poll past the unfocused delay (CR-01)', async () => {
+  const h = harness({ pollSeconds: 15, always: true });
+  h.scheduler.start();
+  await settle();
+  assert.deepEqual(h.timers.delays(), [15_000]);
+  await h.timers.advanceTo(10_000);
+  // A one-hour backward step, as an NTP correction or a VM resync after host sleep can make on a wall clock.
+  h.timers.clock -= ONE_HOUR_MS;
+  h.focus.value = false;
+  h.scheduler.focusChanged(false);
+  assert.equal(h.timers.requests[0]?.cleared, true, 'the focused poll was replaced');
+  const armed = h.timers.delays().at(-1);
+  assert.ok(armed !== undefined && armed <= UNFOCUSED_POLL_MS, `the wait is at most the unfocused delay, got ${armed}`);
+  assert.equal(armed, UNFOCUSED_POLL_MS, 'the wait is clamped to the full unfocused delay');
+  h.scheduler.stop();
+});
+
 test('the cadence follows focused() after each run even when no focus event arrived', async () => {
   const gain = harness({ focused: false, pollSeconds: 5 });
   gain.scheduler.start();
