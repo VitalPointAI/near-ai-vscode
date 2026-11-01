@@ -186,7 +186,7 @@ export class TeamLog {
       if (!verdict.accepted) rejected.push(verdict.rejection);
       else if (verdict.event !== undefined) accepted.push(verdict.event);
     }
-    const snapshot = await this.maybeWriteSnapshot();
+    const snapshot = await this.trySnapshot();
     const result: SyncResult = { entries, accepted, rejected, status: this.transport.status() };
     if (snapshot !== undefined) result.snapshot = snapshot;
     return result;
@@ -206,8 +206,20 @@ export class TeamLog {
       const wanted = intents(state);
       return Array.isArray(wanted) ? prepareEvents(state, head, signer, wanted, this.now) : wanted;
     });
-    if (result.ok) await this.maybeWriteSnapshot();
+    if (result.ok) await this.trySnapshot();
     return result;
+  }
+
+  // The fetch and the append have already happened when a snapshot is attempted, so a throw here (a git error, a full disk) must not
+  // discard what they returned: the transport does not hand the same entries out again. The failure is reported as a refused snapshot.
+  private async trySnapshot(): Promise<AppendResult | undefined> {
+    try {
+      return await this.maybeWriteSnapshot();
+    } catch (error) {
+      const failed: AppendResult = { ok: false, kind: 'refused', reason: error instanceof Error ? error.message : String(error), attempts: 0 };
+      this.lastSnapshotResult = failed;
+      return failed;
+    }
   }
 
   private snapshotDue(state: TeamState): boolean {

@@ -436,6 +436,26 @@ test('a snapshot is written again only after another snapshotEvery events and ve
   });
 });
 
+test('a snapshot write that throws does not discard the entries the same sync fetched (WR-04)', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture, { snapshotEvery: 1000 });
+    await appendAvailability(seed.a, 3);
+    const failing: GitRunner = async (args, options) => {
+      if (args.includes('commit-tree')) throw new Error('disk full while writing the snapshot');
+      return runGit(args, options);
+    };
+    const b = clientFor(fixture, 'b', seed.anchor, seed.signer, { git: failing, snapshotEvery: 5 });
+    const synced = await b.log.sync();
+    assert.equal(synced.accepted.length, 5, 'the genesis pair and the three new events are all returned');
+    assert.equal(synced.snapshot?.ok, false);
+    assert.match(synced.snapshot?.ok === false ? synced.snapshot.reason : '', /disk full while writing the snapshot/);
+    assert.equal(b.log.lastSnapshot()?.ok, false);
+    assert.deepEqual(remoteSnapshotFiles(fixture), []);
+    const again = await b.transport.fetch();
+    assert.equal(again.length, 0, 'the transport does not hand the same entries out twice, so losing them would be permanent');
+  });
+});
+
 test('two clients crossing the threshold together write one snapshot and the loser skips without an error', async () => {
   await withFixture(['a', 'b'], async (fixture) => {
     const seed = await seedTeam(fixture, { snapshotEvery: 1000 });
