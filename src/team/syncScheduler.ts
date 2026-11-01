@@ -1,6 +1,7 @@
 // Polling scheduler for a running team (D-19, D-25). It decides only WHEN a sync runs; what a sync does is the caller's run function.
 // Focused windows poll every pollSeconds, unfocused windows every 120 s, a focus event or a nudge runs at once, and two syncs never overlap.
 // A run that reports unhealthy (or throws) backs the delay off exponentially up to 10 minutes; a healthy run resets it.
+// An event that does not change focus is ignored: it neither clears nor re-arms the pending poll and never starts a run (G-60-1).
 // Timers only schedule polls and never order events. This module never imports vscode.
 
 export const UNFOCUSED_POLL_MS = 120_000;
@@ -79,6 +80,8 @@ export class SyncScheduler {
   }
 
   public focusChanged(focused: boolean): void {
+    // Window-state events can repeat the focus value they already reported. Acting on them would restart the wait every time and starve polling (G-60-1).
+    if (focused === this.focusedNow) return;
     this.focusedNow = focused;
     if (this.stopped) return;
     if (focused) {

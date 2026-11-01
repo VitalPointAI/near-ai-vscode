@@ -217,6 +217,7 @@ export class TeamSession {
     this.scheduler.nudge();
   }
 
+  // Only a real focus change does anything: a gain syncs at once, a loss moves the next poll to the unfocused delay. Repeating the current focus is ignored.
   public focusChanged(focused: boolean): void {
     this.scheduler.focusChanged(focused);
   }
@@ -426,7 +427,7 @@ export async function createVscodeTeamSession(
   }
   context.subscriptions.push(
     session,
-    vscode.window.onDidChangeWindowState((state) => { session.focusChanged(state.focused); }),
+    vscode.window.onDidChangeWindowState(focusTransitions(vscode.window.state.focused, (focused) => { session.focusChanged(focused); })),
     vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi.team.pollSeconds')) session.nudge(); })
   );
   return session;
