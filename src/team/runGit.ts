@@ -35,14 +35,24 @@ export class GitCommandError extends Error {
   }
 }
 
+function killTree(pid: number | undefined, ownGroup: boolean, fallback: () => void): void {
+  try {
+    if (ownGroup && pid !== undefined) process.kill(-pid, 'SIGKILL');
+    else fallback();
+  } catch {
+    try { fallback(); } catch { /* the process is already gone */ }
+  }
+}
+
 export const runGit: GitRunner = (args, options = {}) => new Promise<GitResult>((resolve, reject) => {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', GCM_INTERACTIVE: 'never', ...options.env };
   const hasInput = options.input !== undefined;
-  const child = spawn('git', args, { cwd: options.cwd, env, windowsHide: true, stdio: [hasInput ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+  // On POSIX git runs in its own process group so a timeout can stop its helpers (git-remote-https, ssh) as well as git itself.
+  const ownGroup = process.platform !== 'win32';
+  const child = spawn('git', args, { cwd: options.cwd, env, windowsHide: true, detached: ownGroup, stdio: [hasInput ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
   const out: Buffer[] = [];
   const err: Buffer[] = [];
-  let timedOut = false;
   let settled = false;
   const finish = (action: () => void): void => {
     if (settled) return;
@@ -51,8 +61,13 @@ export const runGit: GitRunner = (args, options = {}) => new Promise<GitResult>(
     action();
   };
   const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill('SIGKILL');
+    killTree(child.pid, ownGroup, () => child.kill('SIGKILL'));
+    // Do not wait for 'close': a helper that survived the kill can hold the pipes open and 'close' would never fire.
+    finish(() => {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      resolve({ code: TIMED_OUT_CODE, stdout: Buffer.concat(out), stderr: `git timed out after ${timeoutMs} ms` });
+    });
   }, timeoutMs);
   child.stdout?.on('data', (chunk: Buffer) => out.push(chunk));
   child.stderr?.on('data', (chunk: Buffer) => err.push(chunk));
@@ -60,10 +75,7 @@ export const runGit: GitRunner = (args, options = {}) => new Promise<GitResult>(
     finish(() => reject(error.code === 'ENOENT' ? new GitNotFoundError() : error));
   });
   child.on('close', (code) => {
-    finish(() => {
-      if (timedOut) resolve({ code: TIMED_OUT_CODE, stdout: Buffer.concat(out), stderr: `git timed out after ${timeoutMs} ms` });
-      else resolve({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString('utf8') });
-    });
+    finish(() => resolve({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString('utf8') }));
   });
   if (hasInput && child.stdin) {
     // A child that exits before reading its input reports EPIPE on stdin; keep the text with stderr, the exit code carries the outcome.
