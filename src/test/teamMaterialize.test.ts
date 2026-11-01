@@ -235,6 +235,39 @@ test('an accepted verdict carries the author role at that position, read before 
   assert.deepEqual(verdicts.map((verdict) => (verdict.accepted ? verdict.authorRole : undefined)), ['owner', 'owner']);
 });
 
+test('prev must name the accepted log head: a signed event pointing anywhere else is rejected with a fixed reason (WR-08)', async () => {
+  const w = await world();
+  const first = signed(w.owner, { teamId: w.teamId, type: 'member.availability', body: { availability: 'away' }, lamport: 3, prev: w.state.head.eventId });
+  accept(w, first);
+  const elsewhere = [
+    '', // a genesis-style empty link
+    w.genesis.length > 0 ? (JSON.parse(w.genesis[0].text) as { id: string }).id : '', // an older event, not the head
+    newEventId() // an event that is not in the log at all
+  ];
+  for (const [index, prev] of elsewhere.entries()) {
+    const event = signed(w.owner, { teamId: w.teamId, type: 'member.availability', body: { availability: 'focus' }, lamport: 4 + index, prev });
+    reject(w, event, R.prevMismatch);
+  }
+  // The head did not move, so an event that names it is still accepted afterwards.
+  accept(w, signed(w.owner, { teamId: w.teamId, type: 'member.availability', body: { availability: 'focus' }, lamport: 4, prev: first.id }));
+});
+
+test('a genesis team.created whose prev is not empty refuses the whole log (WR-08)', async () => {
+  const teamId = newTeamId();
+  const owner = await makeActor(teamId);
+  const { entries, anchor } = genesisEntries(owner, teamId);
+  const original = JSON.parse(entries[0].text) as TeamEvent<'team.created'>;
+  const { sig: _sig, ...unsigned } = original;
+  void _sig;
+  const linked = signEvent(owner.identity, { ...unsigned, prev: newEventId() });
+  // The id, author and device are the anchored ones and the signature is valid: only the link differs.
+  assert.equal(linked.id, original.id);
+  const state = reduce([], anchor);
+  const verdict = applyEntry(state, entryOf(linked));
+  assert.equal(verdict.accepted, false);
+  assert.equal(state.refused, R.logRefused);
+});
+
 test('references: unknown members, taken fingerprints, foreign or revoked devices and the last device are rejected with fixed reasons', async () => {
   const w = await world();
   const developer = await withMember(w, 'developer');

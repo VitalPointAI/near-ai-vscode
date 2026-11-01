@@ -31,6 +31,7 @@ export interface ImplementedEventBodies { 'team.created': TeamCreatedBody; 'memb
 export type ImplementedEventType = keyof ImplementedEventBodies;
 export const IMPLEMENTED_EVENT_TYPES: readonly ImplementedEventType[] = ['team.created', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'policy.changed', 'snapshot.written'];
 export type TeamEventBodyMap = ImplementedEventBodies & { [K in Exclude<TeamEventType, ImplementedEventType>]: JsonObject };
+// prev is the id of the accepted log head the author built on ('' for team.created). A reader requires it to equal the head at this position.
 export interface TeamEvent<T extends TeamEventType = TeamEventType> { v: 1; id: string; teamId: string; type: T; lamport: number; at: string; author: string; device: string; prev: string; body: TeamEventBodyMap[T]; sig: string }
 export type UnsignedTeamEvent<T extends TeamEventType = TeamEventType> = Omit<TeamEvent<T>, 'sig'>;
 export type ImplementedTeamEvent = { [T in ImplementedEventType]: TeamEvent<T> }[ImplementedEventType];
@@ -77,6 +78,7 @@ export const TEAM_REJECTION_REASONS = {
   wrongTeam: 'event belongs to another team', duplicate: 'duplicate event id', unboundDevice: 'device is not bound to the author',
   revokedDevice: 'device was revoked before this event', removedAuthor: 'author was removed before this event', badSignature: 'signature is not valid',
   lamportNotGreater: 'lamport is not greater than the highest seen', lamportJump: 'lamport jump too large',
+  prevMismatch: 'prev does not name the log head',
   genesisOnly: 'team.created is only valid as the first event', ownerJoinOnly: 'only the owner joins at genesis in this version',
   notPermitted: 'not permitted', memberMissing: 'referenced member does not exist', memberRemoved: 'referenced member was removed',
   deviceTaken: 'device is already registered', deviceNotBound: 'referenced device is not bound to that member', deviceRevoked: 'device is already revoked',

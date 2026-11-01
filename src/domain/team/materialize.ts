@@ -77,6 +77,7 @@ function applyGenesis(state: TeamState, entry: CommittedEvent): EntryVerdict {
   if (event.teamId !== anchor.teamId || event.author !== body.ownerId || event.device !== anchor.ownerDevice.fingerprint) return refuse(state, event.id);
   if (!sameDevice(body.ownerDevice, anchor.ownerDevice)) return refuse(state, event.id);
   if (!verifyEventSignature(event, anchor.ownerDevice.publicKey)) return refuse(state, event.id);
+  if (event.prev !== '') return refuse(state, event.id);
   bindOwner(state, event);
   return accept(state, event, state.members.get(body.ownerId)?.role);
 }
@@ -231,6 +232,8 @@ export function applyEntry(state: TeamState, entry: CommittedEvent): EntryVerdic
   const key = boundKey(state, event);
   if (typeof key === 'string') return reject(state, event.id, key);
   if (!verifyEventSignature(event, key.publicKey)) return reject(state, event.id, R.badSignature);
+  // The signed prev must name the accepted head this event follows, so the field is a real link and not decoration (WR-08).
+  if (event.prev !== state.head.eventId) return reject(state, event.id, R.prevMismatch);
   // Step 5: Lamport counts accepted events only, so a rejected event can never poison the high-water mark.
   if (event.lamport <= state.highLamport) return reject(state, event.id, R.lamportNotGreater);
   if (event.lamport > state.highLamport + MAX_LAMPORT_JUMP) return reject(state, event.id, R.lamportJump);
