@@ -401,6 +401,73 @@ test('a clock that steps backward before a focus loss never pushes the next poll
   h.scheduler.stop();
 });
 
+// The bookkeeping after a run calls injected callbacks. A throw from any of them must reach onError and still arm a poll (WR-01).
+async function afterRunFailure(failing: 'focused' | 'now' | 'pollSeconds'): Promise<{ errors: unknown[]; timers: FakeTimers; runs: { value: number }; unhandled: unknown[]; failure: Error }> {
+  const failure = new Error(`${failing} failed`);
+  const timers = new FakeTimers();
+  const runs = { value: 0 };
+  const errors: unknown[] = [];
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => { unhandled.push(reason); };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    // Each callback works during start() and throws once the first run has begun, so only the post-run bookkeeping meets the throw.
+    const breaks = (name: typeof failing): boolean => failing === name && runs.value > 0;
+    const now = timers.now.bind(timers);
+    timers.now = (): number => {
+      if (breaks('now')) throw failure;
+      return now();
+    };
+    const scheduler = new SyncScheduler({
+      run: async () => { runs.value += 1; return true; },
+      pollSeconds: () => {
+        if (breaks('pollSeconds')) throw failure;
+        return 15;
+      },
+      focused: () => {
+        if (breaks('focused')) throw failure;
+        return true;
+      },
+      timers,
+      onError: (error) => { errors.push(error); }
+    });
+    scheduler.start();
+    await settle();
+    if (timers.live.length > 0) {
+      timers.fire();
+      await settle();
+    }
+    scheduler.stop();
+    return { errors, timers, runs, unhandled, failure };
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+}
+
+test('a focused() that throws after a run is reported to onError and polling is still re-armed (WR-01)', async () => {
+  const result = await afterRunFailure('focused');
+  assert.deepEqual(result.unhandled, [], 'the scheduler promise never rejected');
+  assert.ok(result.errors.length >= 1 && result.errors.every((error) => error === result.failure), 'every throw reached onError');
+  assert.equal(result.timers.delays()[0], 15_000, 'the poll was armed with the last known focus');
+  assert.equal(result.runs.value, 2, 'and the armed poll ran');
+});
+
+test('a clock that throws after a run is reported to onError and polling is still re-armed (WR-01)', async () => {
+  const result = await afterRunFailure('now');
+  assert.deepEqual(result.unhandled, [], 'the scheduler promise never rejected');
+  assert.ok(result.errors.length >= 1 && result.errors.every((error) => error === result.failure), 'every throw reached onError');
+  assert.equal(result.timers.delays()[0], 15_000, 'the poll was armed at the full delay');
+  assert.equal(result.runs.value, 2, 'and the armed poll ran');
+});
+
+test('a pollSeconds that throws after a run is reported to onError and a poll is still armed at the backoff cap (WR-01)', async () => {
+  const result = await afterRunFailure('pollSeconds');
+  assert.deepEqual(result.unhandled, [], 'the scheduler promise never rejected');
+  assert.ok(result.errors.length >= 1 && result.errors.every((error) => error === result.failure), 'every throw reached onError');
+  assert.equal(result.timers.delays()[0], MAX_BACKOFF_MS, 'without a delay the poll falls back to the backoff cap');
+  assert.equal(result.runs.value, 2, 'and the armed poll ran');
+});
+
 test('the cadence follows focused() after each run even when no focus event arrived', async () => {
   const gain = harness({ focused: false, pollSeconds: 5 });
   gain.scheduler.start();

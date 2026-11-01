@@ -158,10 +158,39 @@ export class SyncScheduler {
     } finally {
       this.inFlight = undefined;
     }
-    this.lastRunEndedAt = this.clock();
-    // The cadence follows the live window focus. This arms a wait only and never starts a run.
-    this.focusedNow = this.options.focused();
-    this.schedule();
+    this.armAfterRun();
+  }
+
+  // Every step here calls an injected callback (the clock, focused(), pollSeconds(), timers.set()). A throw is reported to onError
+  // and the poll is still armed, so a failing callback can never reject cycle() or stop polling without a report (WR-01).
+  private armAfterRun(): void {
+    try {
+      this.lastRunEndedAt = this.clock();
+    } catch (error) {
+      // The previous anchor stays. It is earlier, so a later focus loss can only poll sooner, never later.
+      this.report(error);
+    }
+    try {
+      // The cadence follows the live window focus. This arms a wait only and never starts a run.
+      this.focusedNow = this.options.focused();
+    } catch (error) {
+      // The last known focus stays and sets the cadence.
+      this.report(error);
+    }
+    let delayMs: number;
+    try {
+      delayMs = this.nextDelay();
+    } catch (error) {
+      // Without a delay the poll waits the backoff cap, the same wait a failing remote settles at.
+      this.report(error);
+      delayMs = MAX_BACKOFF_MS;
+    }
+    try {
+      this.schedule(delayMs);
+    } catch (error) {
+      // timers.set() itself failed, so no poll can be armed. A nudge, a focus gain or start() still runs a sync.
+      this.report(error);
+    }
   }
 
   private async runOnce(): Promise<void> {
