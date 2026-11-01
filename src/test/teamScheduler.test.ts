@@ -1,15 +1,22 @@
 // SyncScheduler under fake timers: focus-aware intervals, clamping, exponential backoff to 10 minutes, single flight, nudge and stop (D-19, D-25).
+// A fake clock also covers G-60-1: focus events that change nothing never starve polling, a focus loss is counted from the last run,
+// and the cadence follows the live focused() value after every run.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MAX_BACKOFF_MS, SyncScheduler, UNFOCUSED_POLL_MS } from '../team/syncScheduler';
 import type { SchedulerTimers } from '../team/syncScheduler';
 
-interface Request { id: number; ms: number; callback: () => void; cleared: boolean; fired: boolean }
+interface Request { id: number; ms: number; due: number; callback: () => void; cleared: boolean; fired: boolean }
 
 class FakeTimers implements SchedulerTimers {
   public readonly requests: Request[] = [];
+  // Milliseconds on the fake clock. It only moves when a test fires a timer or calls advanceTo.
+  public clock = 0;
+  public now(): number {
+    return this.clock;
+  }
   public set(callback: () => void, ms: number): unknown {
-    const request: Request = { id: this.requests.length, ms, callback, cleared: false, fired: false };
+    const request: Request = { id: this.requests.length, ms, due: this.clock + ms, callback, cleared: false, fired: false };
     this.requests.push(request);
     return request;
   }
@@ -26,7 +33,20 @@ class FakeTimers implements SchedulerTimers {
     const request = this.live[this.live.length - 1];
     assert.ok(request !== undefined, 'a timer is waiting');
     request.fired = true;
+    this.clock = Math.max(this.clock, request.due);
     request.callback();
+  }
+  // Fires every live timer that is due at or before the target, earliest first, letting each run settle, then moves the clock to the target.
+  public async advanceTo(target: number): Promise<void> {
+    for (;;) {
+      const due = this.live.filter((request) => request.due <= target).sort((a, b) => a.due - b.due || a.id - b.id)[0];
+      if (due === undefined) break;
+      due.fired = true;
+      this.clock = Math.max(this.clock, due.due);
+      due.callback();
+      await settle();
+    }
+    this.clock = target;
   }
 }
 
@@ -46,7 +66,7 @@ function deferred(): Deferred {
 interface Harness { scheduler: SyncScheduler; timers: FakeTimers; runs: Deferred[]; errors: unknown[]; focus: { value: boolean }; poll: { value: number }; runCount: { value: number } }
 
 // Each run waits on a deferred the test settles, so the test controls when a run ends and what it reports.
-function harness(options: { focused?: boolean; pollSeconds?: number; instant?: Array<boolean | Error> } = {}): Harness {
+function harness(options: { focused?: boolean; pollSeconds?: number; instant?: Array<boolean | Error>; always?: boolean } = {}): Harness {
   const timers = new FakeTimers();
   const runs: Deferred[] = [];
   const errors: unknown[] = [];
@@ -57,6 +77,7 @@ function harness(options: { focused?: boolean; pollSeconds?: number; instant?: A
   const scheduler = new SyncScheduler({
     run: () => {
       runCount.value += 1;
+      if (options.always !== undefined) return Promise.resolve(options.always);
       const next = instant.shift();
       if (next instanceof Error) return Promise.reject(next);
       if (next !== undefined) return Promise.resolve(next);
@@ -295,4 +316,91 @@ test('start after stop begins again and an error handler that throws does not br
   } finally {
     console.error = original;
   }
+});
+
+// An hour of fake time. Every run here resolves at once, so the run count only depends on when polls are armed.
+const ONE_HOUR_MS = 3_600_000;
+
+async function runsInAnHour(options: { always: boolean; focused: boolean; eventEveryMs?: number }): Promise<number> {
+  const h = harness({ focused: options.focused, always: options.always });
+  h.scheduler.start();
+  await settle();
+  if (options.eventEveryMs === undefined) {
+    await h.timers.advanceTo(ONE_HOUR_MS);
+  } else {
+    for (let at = options.eventEveryMs; at <= ONE_HOUR_MS; at += options.eventEveryMs) {
+      await h.timers.advanceTo(at);
+      h.scheduler.focusChanged(options.focused);
+    }
+    await h.timers.advanceTo(ONE_HOUR_MS);
+  }
+  h.scheduler.stop();
+  return h.runCount.value;
+}
+
+test('unchanged focus events every 100 s for an hour still give every 120 s poll (G-60-1)', async () => {
+  const baseline = await runsInAnHour({ always: true, focused: false });
+  assert.ok(baseline >= 30, `the baseline is the start run plus one every 120 s, got ${baseline}`);
+  const withEvents = await runsInAnHour({ always: true, focused: false, eventEveryMs: 100_000 });
+  assert.equal(withEvents, baseline);
+});
+
+test('unchanged focus events every 200 s with a failing remote still give every backed-off poll (G-60-1)', async () => {
+  const baseline = await runsInAnHour({ always: false, focused: false });
+  assert.ok(baseline >= 6, `the backed-off baseline polls at 240 s, 480 s, then every 600 s, got ${baseline}`);
+  const withEvents = await runsInAnHour({ always: false, focused: false, eventEveryMs: 200_000 });
+  assert.equal(withEvents, baseline);
+});
+
+test('losing focus moves the next poll to 120 s after the last run, not after the event', async () => {
+  const h = harness({ pollSeconds: 15, always: true });
+  h.scheduler.start();
+  await settle();
+  assert.deepEqual(h.timers.delays(), [15_000]);
+  await h.timers.advanceTo(10_000);
+  h.focus.value = false;
+  h.scheduler.focusChanged(false);
+  assert.equal(h.timers.requests[0]?.cleared, true);
+  assert.deepEqual(h.timers.delays(), [15_000, 110_000]);
+  await h.timers.advanceTo(119_999);
+  assert.equal(h.runCount.value, 1, 'no run before 120 s after the last run');
+  await h.timers.advanceTo(120_000);
+  assert.equal(h.runCount.value, 2, 'one run at 120 s after the last run');
+  assert.equal(h.timers.delays().at(-1), UNFOCUSED_POLL_MS, 'and the next poll is 120 s after that run');
+  h.scheduler.stop();
+});
+
+test('losing focus after more than 120 s since the last run polls at once', async () => {
+  const h = harness({ pollSeconds: 3600, always: true });
+  h.scheduler.start();
+  await settle();
+  assert.deepEqual(h.timers.delays(), [3_600_000]);
+  await h.timers.advanceTo(200_000);
+  h.focus.value = false;
+  h.scheduler.focusChanged(false);
+  assert.deepEqual(h.timers.delays(), [3_600_000, 0]);
+  await h.timers.advanceTo(200_000);
+  assert.equal(h.runCount.value, 2);
+  h.scheduler.stop();
+});
+
+test('the cadence follows focused() after each run even when no focus event arrived', async () => {
+  const gain = harness({ focused: false, pollSeconds: 5 });
+  gain.scheduler.start();
+  await settle();
+  gain.focus.value = true;
+  gain.runs[0]?.resolve(true);
+  await settle();
+  assert.deepEqual(gain.timers.delays(), [5_000]);
+  assert.equal(gain.runCount.value, 1, 'a refreshed gain only shortens the wait and starts no run');
+  gain.scheduler.stop();
+
+  const loss = harness({ focused: true, pollSeconds: 5 });
+  loss.scheduler.start();
+  await settle();
+  loss.focus.value = false;
+  loss.runs[0]?.resolve(true);
+  await settle();
+  assert.deepEqual(loss.timers.delays(), [UNFOCUSED_POLL_MS]);
+  loss.scheduler.stop();
 });

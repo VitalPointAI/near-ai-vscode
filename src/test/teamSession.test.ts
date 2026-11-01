@@ -1,6 +1,7 @@
 // TeamSession on real git with the vscode stub installed for the whole file: first sync, status bar states, audit mirroring across restarts,
 // Verify Team Log, rejected events printed once, an unreachable remote with a credential canary, a rewritten log, the trust pin and the
-// real-editor wiring (focus, setting changes, disposables). Lazy requires keep every vscode import behind the installed stub.
+// real-editor wiring (focus, setting changes, disposables), and the G-60-1 focus rules: events that change nothing neither re-arm the poll
+// nor sync, and a focus change during the first sync still sets the cadence. Lazy requires keep every vscode import behind the installed stub.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -544,6 +545,44 @@ test('window-state events that only change activity neither re-arm the poll nor 
       for (const disposable of context.subscriptions) disposable.dispose();
     }
   });
+});
+
+test('a focus change while the first sync is blocked still sets the cadence of the first poll (G-60-1)', async () => {
+  for (const startFocused of [false, true]) {
+    await withRig(async (rig) => {
+      stub.setConfig('nearAi.team.pollSeconds', 5);
+      stub.fireWindowState(startFocused, startFocused);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let held = false;
+      const git: GitRunner = async (args, options) => {
+        if (!held && args.includes('fetch')) {
+          held = true;
+          await gate;
+        }
+        return rig.git(args, options);
+      };
+      const context = { globalStorageUri: { fsPath: rig.globalStorage }, secrets: rig.owner.secrets, subscriptions: [] as Array<{ dispose(): void }> };
+      const channel = (stub.vscode as { window: { createOutputChannel(name: string): { appendLine(line: string): void; show(): void } } }).window.createOutputChannel(TEAM_OUTPUT_CHANNEL);
+      const starting = createVscodeTeamSession(context as never, rig.projectRoot, rig.teamFile, channel, { timers: rig.timers, git });
+      try {
+        await until(() => held, 'the first fetch to be held');
+        stub.fireWindowState(!startFocused, !startFocused);
+        release();
+        await starting;
+        await until(() => rig.timers.requests.length >= 1, 'the first poll to be armed');
+        if (startFocused) {
+          assert.equal(rig.timers.delays()[0], UNFOCUSED_POLL_MS, 'a window that lost focus during the first sync polls at the unfocused delay');
+        } else {
+          assert.equal(rig.timers.delays()[0], 5_000, 'a window that gained focus during the first sync polls at pollSeconds');
+          assert.equal(rig.timers.delays().includes(UNFOCUSED_POLL_MS), false, 'no unfocused delay was ever requested');
+        }
+      } finally {
+        release();
+        for (const disposable of context.subscriptions) disposable.dispose();
+      }
+    });
+  }
 });
 
 // ---- redaction when git itself echoes the credentials ----
