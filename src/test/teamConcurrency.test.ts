@@ -210,3 +210,7 @@ async function runScenario(scenario: Scenario): Promise<void> {
 test('4 forked clients with separate mirrors append 5 events each: every event once, linear history, no forced update, clean fresh replay', { timeout: 60_000 }, async () => {
   await runScenario({ clients: 4, each: 5, shared: false });
 });
+
+test('3 forked clients sharing one mirror directory append 3 events each and converge the same way', { timeout: 90_000 }, async () => {
+  await runScenario({ clients: 3, each: 3, shared: true });
+});
