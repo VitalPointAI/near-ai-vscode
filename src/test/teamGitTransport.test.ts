@@ -385,6 +385,42 @@ test('a fetch that loses a ref lock race is retried and the append succeeds', as
   });
 });
 
+test('opening a mirror that another process is configuring retries the config lock, and an already configured mirror is not written again', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const { teamId, owner } = await seedLog(fixture, 'a');
+    // A second process (a new transport on the same mirror) meets git's config.lock twice before it gets through.
+    const locked = fakeGitResult(255, '', 'error: could not lock config file /somewhere/coordination.git/config: File exists');
+    const delays: number[] = [];
+    const contended = recClient(fixture, 'a', {
+      git: faultRunner(runGit, [{ when: (args) => args.includes('config') && !args.includes('--get'), times: 2, replace: () => locked }]),
+      sleep: async (ms) => { delays.push(ms); }
+    });
+    const result = await contended.append(availability(owner, teamId));
+    assert.equal(result.ok, true);
+    assert.equal(delays.length, 0, 'an already configured mirror needs no config write, so there is no lock to lose');
+    assert.equal(gitIn(mirrorOf(fixture, 'a'), ['config', '--get', 'gc.autoDetach']), 'false');
+
+    // A mirror whose settings are missing is written, and a lock race on that write is retried.
+    const fresh = recClient(fixture, 'a', {
+      mirrorDir: path.join(fixture.storageDir('fresh'), 'coordination.git'),
+      git: faultRunner(runGit, [{ when: (args) => args.includes('config') && !args.includes('--get'), times: 2, replace: () => locked }]),
+      sleep: async (ms) => { delays.push(ms); }
+    });
+    await fresh.fetch();
+    assert.equal(fresh.status().state, 'ok');
+    assert.equal(delays.length, 2);
+    assert.equal(gitIn(path.join(fixture.storageDir('fresh'), 'coordination.git'), ['config', '--get', 'transfer.fsckObjects']), 'true');
+
+    const writes: string[][] = [];
+    const counting: GitRunner = async (args, options) => {
+      if (args.includes('config') && !args.includes('--get')) writes.push(args);
+      return runGit(args, options);
+    };
+    await recClient(fixture, 'a', { git: counting }).fetch();
+    assert.deepEqual(writes, [], 'reopening a configured mirror writes no config');
+  });
+});
+
 test('push outcomes are classified from the porcelain lines and the stderr', () => {
   const ref = 'abc:refs/heads/near-ai/coordination';
   assert.deepEqual(classifyPush(fakeGitResult(0, `To x\n*\t${ref}\t[new branch]\nDone\n`)), { kind: 'ok' });

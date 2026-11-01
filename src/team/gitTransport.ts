@@ -24,6 +24,8 @@ export const QUARANTINE_REF_PREFIX = 'refs/team/quarantine/';
 // rejection is permanent and is shown with its redacted text instead of being retried.
 export const CAS_LOST_MARKERS = ['non-fast-forward', 'fetch first', 'incorrect old value provided'] as const;
 export const RETRYABLE_FETCH_MARKERS = ['incorrect old value provided', 'cannot lock ref'] as const;
+// Another process on the same mirror holds git's config.lock (two windows, or an agent and a window, opening one mirror together).
+export const CONFIG_LOCK_MARKERS = ['could not lock config file'] as const;
 
 const REMOTE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/;
 const REF_PATTERN = /^refs\/(?:heads|near-ai)\/[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
@@ -35,6 +37,7 @@ const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_BASE_DELAY_MS = 200;
 const DEFAULT_GC_EVERY = 100;
 const FETCH_RACE_RETRIES = 3;
+const CONFIG_LOCK_RETRIES = 20;
 const LOCAL_TIMEOUT_MS = 15_000;
 const BULK_TIMEOUT_MS = 60_000;
 const NETWORK_TIMEOUT_MS = 60_000;
@@ -295,15 +298,52 @@ export class GitTransport<S> implements CoordinationTransport<S> {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       initialised = false;
     }
-    if (!initialised) mustSucceed(await this.git(['init', '--bare', '-q', this.mirrorDir]), 'Creating the coordination mirror');
+    if (!initialised) await this.initMirror();
     // The user's global hooks must never run on coordination commits (D-34): point the mirror at an empty hooks directory.
     const hooksDir = path.join(this.mirrorDir, 'coordination-hooks');
     await mkdir(hooksDir, { recursive: true });
-    mustSucceed(await this.mirrorGit(['config', 'core.hooksPath', hooksDir]), 'Configuring the coordination mirror');
-    mustSucceed(await this.mirrorGit(['config', 'gc.autoDetach', 'false']), 'Configuring the coordination mirror');
+    await this.setMirrorConfig('core.hooksPath', hooksDir);
+    await this.setMirrorConfig('gc.autoDetach', 'false');
     // Objects from the remote are checked as they arrive. The remote URL is never written into this config (D-34).
-    mustSucceed(await this.mirrorGit(['config', 'transfer.fsckObjects', 'true']), 'Configuring the coordination mirror');
+    await this.setMirrorConfig('transfer.fsckObjects', 'true');
     this.mirrorReady = true;
+  }
+
+  // Two processes can create the same mirror together. The loser of the race to write git's config sees the winner's mirror, which is fine.
+  private async initMirror(): Promise<void> {
+    for (let retries = 0; ; retries += 1) {
+      const result = await this.git(['init', '--bare', '-q', this.mirrorDir]);
+      if (result.code === 0) return;
+      try {
+        await stat(path.join(this.mirrorDir, 'HEAD'));
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      if (!this.configLockRace(result) || retries >= CONFIG_LOCK_RETRIES) mustSucceed(result, 'Creating the coordination mirror');
+      await this.sleep(this.configLockPause());
+    }
+  }
+
+  // Writes a mirror setting only when it differs, so opening an existing mirror normally takes no lock. A write that still meets another
+  // process's config.lock is retried with a short jittered pause (D-34: lock races are retryable).
+  private async setMirrorConfig(key: string, value: string): Promise<void> {
+    for (let retries = 0; ; retries += 1) {
+      const current = await this.mirrorGit(['config', '--get', key]);
+      if (current.code === 0 && gitText(current) === value) return;
+      const result = await this.mirrorGit(['config', key, value]);
+      if (result.code === 0) return;
+      if (!this.configLockRace(result) || retries >= CONFIG_LOCK_RETRIES) mustSucceed(result, 'Configuring the coordination mirror');
+      await this.sleep(this.configLockPause());
+    }
+  }
+
+  private configLockRace(result: GitResult): boolean {
+    return CONFIG_LOCK_MARKERS.some((marker) => result.stderr.includes(marker));
+  }
+
+  private configLockPause(): number {
+    return Math.max(1, this.baseDelayMs / 8) * (0.5 + this.random());
   }
 
   // Read on every call and never stored or returned: the URL can embed credentials (D-34).
