@@ -63,7 +63,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Concurrent appends from both clients never lose an event: a test with several child-process clients appending to a local bare repository ends with every event present and no force-push.
   5. Solo projects (no `.planning/.near-ai/team.json`) behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 12 plans (11/12 executed) in 7 waves
+**Plans**: 12 plans (12/12 executed) in 7 waves
 
 **Wave 1**
 - [x] 60-01-PLAN.md — Tracer: signed genesis round trip between two clones over a real bare remote; type contracts, canonical JSON, identity (TEAM-04)
@@ -89,7 +89,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [x] 60-11-PLAN.md — `registerTeamMode` with solo parity, package.json contributions, command flows, phase gate (TEAM-01, SEC-01)
 
 **Wave 7** *(gap closure for UAT G-60-1)*
-- [ ] 60-12-PLAN.md — Poll cadence cannot be starved by window-state events: ignore unchanged focus, anchor focus-loss re-arm to the last run, refresh focus after each run, fake-clock and session regression tests (TEAM-04)
+- [x] 60-12-PLAN.md — Poll cadence cannot be starved by window-state events: ignore unchanged focus, anchor focus-loss re-arm to the last run, refresh focus after each run, fake-clock and session regression tests (TEAM-04)
 
 ### Phase 61: Invitations, joining, removal, NEAR org and key integration
 
@@ -210,7 +210,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 60. Team core | v0.6.0 | 11/11 | In Progress | - |
+| 60. Team core | v0.6.0 | 12/12 | In Progress | - |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 0/TBD | Not started | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 0/TBD | Not started | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |

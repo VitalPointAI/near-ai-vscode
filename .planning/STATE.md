@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 60
 current_phase_name: "Team core: identity, signed event log, git transport, roster"
 status: verifying
-stopped_at: Completed 60-11-PLAN.md
-last_updated: "2026-11-01T13:47:49.462Z"
+stopped_at: Completed 60-12-PLAN.md
+last_updated: "2026-11-01T16:37:06.728Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 60 execution started
-state_head: "0b0168eca0a00727e9b72527b14d97b44a06408a"
+state_head: 553e0d714ea86dd35c2de1f9452c82f1308189a9
 progress:
   total_phases: 8
   completed_phases: 0
-  total_plans: 11
-  completed_plans: 11
+  total_plans: 12
+  completed_plans: 12
   percent: 0
 ---
 
@@ -65,6 +65,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 60 P09 | 35 min | 2 tasks | 6 files |
 | Phase 60 P10 | 38 min | 2 tasks | 4 files |
 | Phase 60 P11 | 10 min | 3 tasks | 8 files |
+| Phase 60 P12 | 25min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,7 @@ Recent decisions affecting current work:
 - [Phase 60]: 60-09: TeamSession adopts its signer after the first sync by matching the device fingerprint to a roster member; backoff never shortens a poll interval longer than 10 minutes
 - [Phase 60]: 60-10: shared-mirror config.lock race fixed in gitTransport.ts (conditional config writes plus lock retry) rather than in the test
 - [Phase 60]: 60-11: ENOENT and ENOTDIR both mean solo; Enable checks for an existing team before asking questions; Push offered only on a branch; commit-failed still starts the session
+- [Phase 60]: G-60-1: unchanged-focus window-state events are ignored; focus loss re-arms anchored to the last run; cadence re-reads focused() after each run (60-12)
 
 ### Pending Todos
 
@@ -112,8 +114,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-01T13:47:49.430Z
-Stopped at: Completed 60-11-PLAN.md
+Last session: 2026-11-01T16:37:06.618Z
+Stopped at: Completed 60-12-PLAN.md
 Resume file: None
 
 ## Notes

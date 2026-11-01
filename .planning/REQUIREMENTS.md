@@ -11,7 +11,7 @@
 - [ ] **TEAM-01**: A lead can enable Team Mode on an initialised project; solo projects behave exactly as before.
 - [ ] **TEAM-02**: A lead can invite a person by email with role and allocation; the invitee joins with a single-use code and gets their own NEAR access and key.
 - [ ] **TEAM-03**: A lead can remove a member; their claims, leases and allocations are released and later events from their keys are rejected.
-- [ ] **TEAM-04**: Every client verifies every coordination event's signature and the author's permission at that point in the log.
+- [x] **TEAM-04**: Every client verifies every coordination event's signature and the author's permission at that point in the log.
 
 ### Team Board
 
@@ -85,7 +85,7 @@ Phases are numbered 60 to 67; spec phase 25 is Phase 60, and so on in order.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TEAM-01 | Phase 60 | Pending |
-| TEAM-04 | Phase 60 | Pending |
+| TEAM-04 | Phase 60 | Complete |
 | SEC-01 | Phase 60 | In Progress |
 | SEC-04 | Phase 60 | In Progress |
 | TEAM-02 | Phase 61 | Pending |
