@@ -82,7 +82,7 @@ export function toRosterAuditEvent(event: TeamEvent, authorRole: Role | undefine
 // Every new entry is checked for secrets before any is appended, so a refusal leaves the audit log untouched.
 // Returns how many entries were appended.
 export async function mirrorRosterEvents(
-  sink: AuditSink, mark: MirrorMark, events: TeamEvent[], roleOf: (memberId: string) => Role | undefined
+  sink: AuditSink, mark: MirrorMark, events: TeamEvent[], roleOf: (memberId: string, event: TeamEvent) => Role | undefined
 ): Promise<number> {
   const floor = await mark.read();
   const candidates = events
@@ -92,7 +92,7 @@ export async function mirrorRosterEvents(
   const known = new Set((await sink.list({ type: 'team-roster' })).map((entry) => entry.id));
   const fresh: AuditEvent[] = [];
   for (const event of candidates) {
-    const entry = toRosterAuditEvent(event, roleOf(event.author));
+    const entry = toRosterAuditEvent(event, roleOf(event.author, event));
     assertNoSecrets(entry, 'team audit entry');
     if (!known.has(entry.id)) {
       known.add(entry.id);

@@ -66,7 +66,8 @@ export interface TeamState {
 export interface TeamFile { version: 1; teamId: string; name: string; coordination: { transport: 'git'; ref: string; remote: string }; genesis: { eventId: string; ownerDevice: DeviceRef }; near?: NearLink; createdAt: string }
 
 export type EntryKind = 'event' | 'snapshot' | 'genesis-copy' | 'anomaly';
-export type EntryVerdict = { accepted: true; event?: TeamEvent } | { accepted: false; rejection: Rejection };
+// authorRole is the author's role at this log position, read before the event's own transition runs.
+export type EntryVerdict = { accepted: true; event?: TeamEvent; authorRole?: Role } | { accepted: false; rejection: Rejection };
 export interface CommittedEvent { commit: string; commitTime: number; path: string; blob: string; size: number; text: string; kind: EntryKind; anomaly?: string; verdict?: EntryVerdict }
 export interface Materializer<S> { initial(): S; apply(state: S, entry: CommittedEvent): EntryVerdict; head(state: S): LogHead; check(state: S, events: TeamEvent[]): Rejection | undefined }
 

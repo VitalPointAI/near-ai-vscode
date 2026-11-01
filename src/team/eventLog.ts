@@ -123,6 +123,8 @@ export interface TeamLogOptions {
 export interface SyncResult {
   entries: CommittedEvent[];
   accepted: TeamEvent[];
+  // The author's role at each accepted event's position, keyed by event id.
+  authorRoles: Map<string, Role>;
   rejected: Rejection[];
   status: TransportStatus;
   snapshot?: AppendResult;
@@ -179,15 +181,20 @@ export class TeamLog {
   public async sync(): Promise<SyncResult> {
     const entries = await this.transport.fetch();
     const accepted: TeamEvent[] = [];
+    const authorRoles = new Map<string, Role>();
     const rejected: Rejection[] = [];
     for (const entry of entries) {
       const verdict = entry.verdict;
       if (verdict === undefined) continue;
-      if (!verdict.accepted) rejected.push(verdict.rejection);
-      else if (verdict.event !== undefined) accepted.push(verdict.event);
+      if (!verdict.accepted) {
+        rejected.push(verdict.rejection);
+      } else if (verdict.event !== undefined) {
+        accepted.push(verdict.event);
+        if (verdict.authorRole !== undefined) authorRoles.set(verdict.event.id, verdict.authorRole);
+      }
     }
     const snapshot = await this.trySnapshot();
-    const result: SyncResult = { entries, accepted, rejected, status: this.transport.status() };
+    const result: SyncResult = { entries, accepted, authorRoles, rejected, status: this.transport.status() };
     if (snapshot !== undefined) result.snapshot = snapshot;
     return result;
   }

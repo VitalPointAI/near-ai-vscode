@@ -215,6 +215,26 @@ test('read side: the same decideTeamAction as the write side rejects each forbid
   accept(w, make(w, developer, 'member.skills', { memberId: developer.memberId, skills: ['typescript'] }));
 });
 
+test('an accepted verdict carries the author role at that position, read before the event changes anything (WR-05)', async () => {
+  const w = await world();
+  const lead = await withMember(w, 'lead');
+  const developer = await withMember(w, 'developer');
+  const roleAt = (event: TeamEvent): Role | undefined => {
+    const verdict = applyEntry(w.state, entryOf(event));
+    assert.equal(verdict.accepted, true);
+    return verdict.accepted ? verdict.authorRole : undefined;
+  };
+  assert.equal(roleAt(make(w, lead, 'member.skills', { memberId: lead.memberId, skills: ['rust'] })), 'lead');
+  assert.equal(roleAt(make(w, w.owner, 'member.role-changed', { memberId: lead.memberId, role: 'developer' })), 'owner');
+  assert.equal(roleAt(make(w, lead, 'member.skills', { memberId: lead.memberId, skills: ['sql'] })), 'developer', 'after the demotion the same author is a developer');
+  assert.equal(roleAt(make(w, developer, 'member.availability', { availability: 'away' })), 'developer');
+  // The genesis events were read at the owner role as well.
+  const fresh = await world();
+  const replay = reduce([], fresh.anchor);
+  const verdicts = fresh.genesis.map((entry) => applyEntry(replay, entry));
+  assert.deepEqual(verdicts.map((verdict) => (verdict.accepted ? verdict.authorRole : undefined)), ['owner', 'owner']);
+});
+
 test('references: unknown members, taken fingerprints, foreign or revoked devices and the last device are rejected with fixed reasons', async () => {
   const w = await world();
   const developer = await withMember(w, 'developer');

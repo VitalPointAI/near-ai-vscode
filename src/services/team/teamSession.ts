@@ -151,6 +151,8 @@ export class TeamSession {
   private readonly reportedRejections = new Set<string>();
   private readonly reportedIssues = new Map<string, string>();
   private pendingRoster: TeamEvent[] = [];
+  // The author's role at each queued event's log position (WR-05), so a later promotion or demotion does not rewrite history.
+  private readonly rosterRoles = new Map<string, Role>();
 
   private constructor(deps: TeamSessionDeps, storage: string, identity: DeviceIdentity | undefined) {
     this.deps = deps;
@@ -288,7 +290,7 @@ export class TeamSession {
       const result = await this.log.sync();
       status = result.status;
       this.noteRejections(result.rejected);
-      this.queueRoster(result.accepted);
+      this.queueRoster(result.accepted, result.authorRoles);
       this.noteSnapshot(result.snapshot);
       this.adoptSigner();
       this.clearIssue('sync');
@@ -337,9 +339,12 @@ export class TeamSession {
   }
 
   // Accepted roster events wait here until the audit mirror has really stored them, so a failed write is retried and never lost.
-  private queueRoster(accepted: TeamEvent[]): void {
+  private queueRoster(accepted: TeamEvent[], authorRoles: Map<string, Role>): void {
     for (const event of accepted) {
-      if ((ROSTER_AUDIT_TYPES as readonly string[]).includes(event.type)) this.pendingRoster.push(event);
+      if (!(ROSTER_AUDIT_TYPES as readonly string[]).includes(event.type)) continue;
+      this.pendingRoster.push(event);
+      const role = authorRoles.get(event.id);
+      if (role !== undefined) this.rosterRoles.set(event.id, role);
     }
   }
 
@@ -347,9 +352,9 @@ export class TeamSession {
     if (this.pendingRoster.length === 0) return;
     const batch = [...this.pendingRoster];
     try {
-      const members = this.log.state().members;
-      const roleOf = (memberId: string): Role | undefined => members.get(memberId)?.role;
+      const roleOf = (_memberId: string, event: TeamEvent): Role | undefined => this.rosterRoles.get(event.id);
       await mirrorRosterEvents(this.deps.audit, fileMirrorMark(this.storage), batch, roleOf);
+      for (const event of batch) this.rosterRoles.delete(event.id);
       this.pendingRoster = this.pendingRoster.filter((event) => !batch.includes(event));
       this.clearIssue('audit');
     } catch (error) {

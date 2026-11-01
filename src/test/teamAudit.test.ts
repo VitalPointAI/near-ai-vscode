@@ -113,6 +113,20 @@ test('mirroring again, after a simulated restart, and with a lost mark appends n
   }
 });
 
+test('the role passed for each event is the one recorded, so a history replayed in one batch is not stamped with final roles (WR-05)', async () => {
+  const r = await rig();
+  try {
+    const store = new AuditStore(r.workspace);
+    const skills = skillsEvent(r, 3, r.genesis.events[1].id);
+    const atTheTime = new Map<string, Role>([[r.genesis.events[0].id, 'owner'], [r.genesis.events[1].id, 'owner'], [skills.id, 'lead']]);
+    await mirrorRosterEvents(store, fileMirrorMark(r.storage), [...r.genesis.events, skills], (_memberId, event) => atTheTime.get(event.id));
+    const entries = await store.list({ type: 'team-roster' });
+    assert.deepEqual(entries.map((entry) => entry.metadata?.role), ['owner', 'owner', 'lead']);
+  } finally {
+    await dispose(r);
+  }
+});
+
 test('only events above the stored mark are mirrored, and the mark follows the highest lamport', async () => {
   const r = await rig();
   try {

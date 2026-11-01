@@ -41,12 +41,12 @@ function refuse(state: TeamState, eventId: string): EntryVerdict {
   return reject(state, eventId, R.logRefused);
 }
 
-function accept(state: TeamState, event: ImplementedTeamEvent): EntryVerdict {
+function accept(state: TeamState, event: ImplementedTeamEvent, authorRole?: Role): EntryVerdict {
   state.head = { eventId: event.id, lamport: event.lamport };
   state.highLamport = event.lamport;
   state.accepted += 1;
   state.seenEventIds.add(event.id);
-  return { accepted: true, event };
+  return authorRole === undefined ? { accepted: true, event } : { accepted: true, event, authorRole };
 }
 
 function sameDevice(left: DeviceRef, right: DeviceRef): boolean {
@@ -78,7 +78,7 @@ function applyGenesis(state: TeamState, entry: CommittedEvent): EntryVerdict {
   if (!sameDevice(body.ownerDevice, anchor.ownerDevice)) return refuse(state, event.id);
   if (!verifyEventSignature(event, anchor.ownerDevice.publicKey)) return refuse(state, event.id);
   bindOwner(state, event);
-  return accept(state, event);
+  return accept(state, event, state.members.get(body.ownerId)?.role);
 }
 
 // D-09 step 3 (positional, D-11): the device must be bound to the author by an earlier accepted roster event and neither revoked nor removed yet.
@@ -239,8 +239,10 @@ export function applyEntry(state: TeamState, entry: CommittedEvent): EntryVerdic
   if (denied !== undefined) return reject(state, event.id, denied);
   const missing = referenceProblem(state, event);
   if (missing !== undefined) return reject(state, event.id, missing);
+  // The role is read before the transition, so an event that changes its own author's role is still recorded under the role it was written with.
+  const authorRole = state.members.get(event.author)?.role;
   applyTransition(state, event);
-  return accept(state, event);
+  return accept(state, event, authorRole);
 }
 
 export function reduce(entries: CommittedEvent[], anchor: GenesisAnchor): TeamState {
