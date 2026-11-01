@@ -5,11 +5,11 @@ milestone_name: Team Mode
 current_phase: 61
 current_phase_name: Invitations, joining, removal, NEAR org and key integration
 status: planning
-stopped_at: Phase 60 complete, ready to plan Phase 61
-last_updated: "2026-11-01T18:57:41.213Z"
+stopped_at: Phase 61 context gathered
+last_updated: "2026-11-01T22:48:47.296Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 60 complete, transitioned to Phase 61
-state_head: ab35bcd2448e093e6041da58c6fb958ed8105946
+state_head: f19704b230b434a18aa7e3e0b7c08f1a81bab3d3
 progress:
   total_phases: 8
   completed_phases: 1
@@ -116,9 +116,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-01T18:58:03Z
-Stopped at: Phase 60 complete, ready to plan Phase 61
-Resume file: None
+Last session: 2026-11-01T22:48:47.235Z
+Stopped at: Phase 61 context gathered
+Resume file: .planning/phases/61-invitations-joining-removal-near-org-and-key-integration/61-CONTEXT.md
 
 ## Notes
 
