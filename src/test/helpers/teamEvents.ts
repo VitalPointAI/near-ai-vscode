@@ -110,7 +110,7 @@ const POLICY_CHANGES: Array<Partial<TeamPolicy>> = [
 ];
 
 // A seeded log of about `length` entries: valid events from two owner devices mixed with forged ones. The first valid snapshot.written is
-// placed before any forgery because a snapshot hash covers state.rejected, so it only matches while the valid-only replay agrees on it.
+// placed before any forgery. The snapshot hash no longer covers state.rejected (WR-07), so the placement is kept only to leave the seeded scenarios as they were.
 // Every entry is also run through a live state, which both chooses the next valid Lamport and asserts each entry gets the planned verdict.
 export async function buildScenario(seed: number, length: number): Promise<Scenario> {
   const random = mulberry32(seed);

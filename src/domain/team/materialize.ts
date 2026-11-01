@@ -295,8 +295,23 @@ export function serialiseState(state: TeamState): string {
   return canonicalize(plainState(state));
 }
 
+// The version of the hashed shape below. A later phase that adds hashed fields bumps this deliberately; a reader that hashes with another
+// version simply does not match, which is the same safe outcome as any other snapshot mismatch.
+export const STATE_HASH_VERSION = 1;
+
+// What a snapshot hash covers (WR-07): only state every client that understands the same event types derives identically. The counters
+// and logs that depend on how a particular client version treated entries it did not recognise (accepted, seenEventIds, rejected) and the
+// list of earlier snapshots are left out, so a newer client's snapshot is not refused by an older one because of bookkeeping alone, and a
+// junk file in the log cannot invalidate a snapshot that was computed just before it. Where the log stands is bound by head and
+// highLamport. The snapshot file still carries the full serialiseState text, signed by the author.
+function hashedState(state: TeamState): Fields {
+  const plain = plainState(state);
+  for (const key of ['accepted', 'seenEventIds', 'rejected', 'snapshots']) delete plain[key];
+  return { hashVersion: STATE_HASH_VERSION, ...plain };
+}
+
 export function stateHash(state: TeamState): string {
-  return createHash('sha256').update(serialiseState(state)).digest('hex');
+  return createHash('sha256').update(canonicalize(hashedState(state))).digest('hex');
 }
 
 // ---- Snapshots (D-27) -------------------------------------------------------------------------------------------------------------

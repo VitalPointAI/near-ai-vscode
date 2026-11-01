@@ -1,9 +1,10 @@
 // Materialiser tests: the D-09 validation pipeline in order, positional revocation and removal (D-11), the read-side permission matrix (D-12, D-32),
 // reference checks, the ten state transitions, and that a rejected event changes nothing but state.rejected.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { canonicalize, snapshotPath } from '../domain/team/canonical';
-import { MAX_LAMPORT_JUMP, SNAPSHOT_REASONS, applyEntry, checkCandidate, cloneState, deserialiseState, parseSnapshotFile, reduce, serialiseState, snapshotBody, stateHash } from '../domain/team/materialize';
+import { MAX_LAMPORT_JUMP, SNAPSHOT_REASONS, STATE_HASH_VERSION, applyEntry, checkCandidate, cloneState, deserialiseState, parseSnapshotFile, reduce, serialiseState, snapshotBody, stateHash } from '../domain/team/materialize';
 import { PERMISSION_REASONS } from '../domain/team/permissions';
 import { applyPolicyChanges, defaultTeamPolicy } from '../domain/team/policy';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
@@ -431,12 +432,57 @@ test('snapshot.written matching the replayed state is accepted and recorded; any
   reject(w, make(w, w.owner, 'snapshot.written', { ...good, lamport: good.lamport - 1, path: snapshotPath(good.lamport - 1) }), R.snapshotMismatch);
   const developer = await withMember(w, 'developer');
   reject(w, make(w, developer, 'snapshot.written', snapshotWrittenBody(w.state)), notPermitted('the developer role does not allow writing snapshots'));
-  // The hash covers state.rejected, so the body is taken after the rejections above.
+  // The hash no longer covers state.rejected (WR-07), so the rejections above do not matter; the body is taken at the current head.
   const afterFixture = snapshotWrittenBody(w.state);
   const event = make(w, w.owner, 'snapshot.written', afterFixture);
   accept(w, event);
   assert.deepEqual(w.state.snapshots, [{ path: afterFixture.path, coversThrough: afterFixture.coversThrough, lamport: afterFixture.lamport, stateHash: afterFixture.stateHash, eventId: event.id }]);
   reject(w, make(w, w.owner, 'snapshot.written', afterFixture), R.snapshotMismatch);
+});
+
+test('the snapshot hash ignores version-dependent bookkeeping, so rejected junk and unknown event types do not break it (WR-07)', async () => {
+  const w = await world();
+  const quiet = reduce(w.genesis, w.anchor);
+  // A reader that did not understand a newer event type records a rejection; another reader that saw a forged file records one too.
+  const future = { ...signed(w.owner, { teamId: w.teamId, type: 'member.availability', body: { availability: 'away' }, lamport: 3, prev: w.state.head.eventId }), type: 'item.created' };
+  expectRejected(w, entryOf(future as unknown as TeamEvent), R.unsupported);
+  const forged = signed(w.owner, { teamId: w.teamId, type: 'member.availability', body: { availability: 'away' }, lamport: 3, prev: w.state.head.eventId });
+  reject(w, { ...forged, body: { availability: 'focus' } }, R.badSignature);
+  assert.equal(w.state.rejected.length, 2);
+  assert.notEqual(serialiseState(w.state), serialiseState(quiet), 'the full state text still records the rejections');
+  assert.equal(stateHash(w.state), stateHash(quiet), 'the hash does not');
+  // Bookkeeping that depends on how a client counted entries is outside the hash as well.
+  const counted = cloneState(quiet);
+  counted.accepted += 1;
+  counted.seenEventIds.add(newEventId());
+  counted.snapshots.push({ path: snapshotPath(9), coversThrough: quiet.head.eventId, lamport: 9, stateHash: 'a'.repeat(64), eventId: newEventId() });
+  assert.equal(stateHash(counted), stateHash(quiet));
+  // A snapshot computed by the quiet reader is accepted by the reader that carries the junk.
+  accept(w, make(w, w.owner, 'snapshot.written', snapshotWrittenBody(quiet)));
+  assert.equal(w.state.snapshots.length, 1);
+});
+
+test('the snapshot hash still covers what matters: members, devices, policy, head and the hash version (WR-07)', async () => {
+  const w = await world();
+  const base = stateHash(w.state);
+  const role = cloneState(w.state);
+  addFixtureMember(role, await makeActor(w.teamId), 'developer');
+  assert.notEqual(stateHash(role), base, 'a member');
+  const policy = cloneState(w.state);
+  policy.team.policy.teeOnly = !policy.team.policy.teeOnly;
+  assert.notEqual(stateHash(policy), base, 'the policy');
+  const moved = cloneState(w.state);
+  moved.head = { eventId: newEventId(), lamport: moved.head.lamport + 1 };
+  assert.notEqual(stateHash(moved), base, 'the head');
+  const lamport = cloneState(w.state);
+  lamport.highLamport += 1;
+  assert.notEqual(stateHash(lamport), base, 'the highest lamport');
+  const stopped = cloneState(w.state);
+  stopped.stopped = true;
+  assert.notEqual(stateHash(stopped), base, 'a later-phase field');
+  assert.equal(STATE_HASH_VERSION, 1);
+  const unversioned = createHash('sha256').update(serialiseState(w.state)).digest('hex');
+  assert.notEqual(base, unversioned, 'the hash is of the versioned stable shape, not of the raw state text');
 });
 
 test('a snapshot file is accepted only when an accepted snapshot.written names its path', async () => {
