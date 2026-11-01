@@ -20,7 +20,9 @@ export interface VscodeStub {
   setConfig(key: string, value: unknown): void;
   // The folders the window reports; an empty list means no folder is open.
   setWorkspaceFolders(paths: string[]): void;
-  // Active defaults to focused. A different active value delivers an activity-only change, which VS Code also reports through onDidChangeWindowState.
+  // Sets the window state the way VS Code's ExtHostWindow reports it: one onDidChangeWindowState event per property that actually
+  // changed (focused first, then active), each carrying the whole state after that change, and no event when nothing changed (IN-03).
+  // Active defaults to focused. Changing only active delivers an activity-only event, which VS Code also sends.
   fireWindowState(focused: boolean, active?: boolean): void;
 }
 
@@ -135,9 +137,18 @@ export function createVscodeStub(): VscodeStub {
       }
     },
     fireWindowState(focused: boolean, active: boolean = focused): void {
-      windowState.focused = focused;
-      windowState.active = active;
-      for (const listener of [...windowListeners]) listener({ focused, active });
+      const fire = (): void => {
+        const state = { focused: windowState.focused, active: windowState.active };
+        for (const listener of [...windowListeners]) listener({ ...state });
+      };
+      if (windowState.focused !== focused) {
+        windowState.focused = focused;
+        fire();
+      }
+      if (windowState.active !== active) {
+        windowState.active = active;
+        fire();
+      }
     }
   };
 }

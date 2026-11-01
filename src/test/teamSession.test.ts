@@ -509,6 +509,26 @@ test('focusTransitions forwards only real focus changes', () => {
   assert.deepEqual(forwarded, [false, true]);
 });
 
+test('the vscode stub fires one window-state event per changed property and none when nothing changes, as VS Code does (IN-03)', () => {
+  resetStub();
+  const window = (stub.vscode as { window: { onDidChangeWindowState(listener: (state: { focused: boolean; active: boolean }) => void): { dispose(): void } } }).window;
+  const events: Array<{ focused: boolean; active: boolean }> = [];
+  const subscription = window.onDidChangeWindowState((state) => { events.push(state); });
+  try {
+    stub.fireWindowState(true, true);
+    assert.deepEqual(events, [], 'an unchanged state fires nothing');
+    stub.fireWindowState(false, false);
+    assert.deepEqual(events, [{ focused: false, active: true }, { focused: false, active: false }], 'a change to both properties fires one event each');
+    stub.fireWindowState(false, true);
+    assert.deepEqual(events.slice(2), [{ focused: false, active: true }], 'an activity-only change fires one event');
+    stub.fireWindowState(true, true);
+    assert.deepEqual(events.slice(3), [{ focused: true, active: true }], 'a focus-only change fires one event');
+  } finally {
+    subscription.dispose();
+    resetStub();
+  }
+});
+
 test('window-state events that only change activity neither re-arm the poll nor sync, and real focus changes still do (G-60-1)', async () => {
   await withRig(async (rig) => {
     stub.setConfig('nearAi.team.pollSeconds', 20);
