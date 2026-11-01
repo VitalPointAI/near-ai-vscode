@@ -2,14 +2,14 @@
 // reference checks, the ten state transitions, and that a rejected event changes nothing but state.rejected.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalize } from '../domain/team/canonical';
-import { MAX_LAMPORT_JUMP, applyEntry, checkCandidate, cloneState, reduce, serialiseState } from '../domain/team/materialize';
+import { canonicalize, snapshotPath } from '../domain/team/canonical';
+import { MAX_LAMPORT_JUMP, SNAPSHOT_REASONS, applyEntry, checkCandidate, cloneState, deserialiseState, parseSnapshotFile, reduce, serialiseState, snapshotBody, stateHash } from '../domain/team/materialize';
 import { PERMISSION_REASONS } from '../domain/team/permissions';
 import { applyPolicyChanges, defaultTeamPolicy } from '../domain/team/policy';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
-import type { CommittedEvent, GenesisAnchor, ImplementedEventBodies, ImplementedEventType, Role, TeamEvent, TeamState } from '../domain/team/types';
+import type { CommittedEvent, GenesisAnchor, ImplementedEventBodies, ImplementedEventType, JsonObject, Role, TeamEvent, TeamState } from '../domain/team/types';
 import { newEventId, newMemberId, newTeamId, signEvent } from '../team/identity';
-import { addFixtureMember, entryOf, genesisEntries, makeActor, makeDevice, signed } from './helpers/teamEvents';
+import { addFixtureMember, buildScenario, entryOf, genesisEntries, makeActor, makeDevice, mulberry32, signed, signedSnapshot, snapshotWrittenBody } from './helpers/teamEvents';
 import type { TestActor } from './helpers/teamEvents';
 
 const R = TEAM_REJECTION_REASONS;
@@ -333,4 +333,172 @@ test('cloneState copies maps, sets, arrays, members and policy so a candidate ne
   assert.equal(w.state.seenEventIds.has('evt-x'), false);
   assert.equal(w.state.team.policy.teeOnly, false);
   assert.equal(w.state.rejected.length, 0);
+});
+
+// ---- Task 2: stable serialisation, state hash, snapshots and the determinism property ----
+
+function snapshotEntry(path: string): CommittedEvent {
+  return { commit: 'c'.repeat(40), commitTime: 1, path, blob: 'b'.repeat(40), size: 2, text: '{}', kind: 'snapshot' };
+}
+
+test('serialiseState is byte-stable: the same entries and any member insertion order give identical text', async () => {
+  const w = await world();
+  const again = reduce(w.genesis, w.anchor);
+  assert.equal(serialiseState(w.state), serialiseState(again));
+  const left = reduce(w.genesis, w.anchor);
+  const right = reduce(w.genesis, w.anchor);
+  const first = await makeActor(w.teamId);
+  const second = await makeActor(w.teamId);
+  addFixtureMember(left, first, 'developer');
+  addFixtureMember(left, second, 'reviewer');
+  addFixtureMember(right, second, 'reviewer');
+  addFixtureMember(right, first, 'developer');
+  assert.equal(serialiseState(left), serialiseState(right));
+  assert.equal(stateHash(left), stateHash(right));
+  assert.match(stateHash(left), /^[0-9a-f]{64}$/);
+  assert.notEqual(stateHash(left), stateHash(w.state));
+  assert.equal(serialiseState(cloneState(left)), serialiseState(left));
+});
+
+test('serialiseState carries refused and omits undefined fields', async () => {
+  const w = await world();
+  const plain = JSON.parse(serialiseState(w.state)) as Record<string, unknown>;
+  assert.equal('refused' in plain, false);
+  const refusedState = reduce([entryOf(signed(w.owner, { teamId: w.teamId, type: 'member.availability', body: { availability: 'away' }, lamport: 1, prev: '' }))], w.anchor);
+  const refused = JSON.parse(serialiseState(refusedState)) as Record<string, unknown>;
+  assert.equal(refused.refused, R.logRefused);
+  assert.equal(serialiseState(w.state).includes('undefined'), false);
+});
+
+test('snapshot.written matching the replayed state is accepted and recorded; any mismatch is rejected', async () => {
+  const w = await world();
+  const good = snapshotWrittenBody(w.state);
+  reject(w, make(w, w.owner, 'snapshot.written', { ...good, stateHash: 'f'.repeat(64) }), R.snapshotMismatch);
+  reject(w, make(w, w.owner, 'snapshot.written', { ...good, coversThrough: newEventId() }), R.snapshotMismatch);
+  reject(w, make(w, w.owner, 'snapshot.written', { ...good, lamport: good.lamport - 1, path: snapshotPath(good.lamport - 1) }), R.snapshotMismatch);
+  const developer = await withMember(w, 'developer');
+  reject(w, make(w, developer, 'snapshot.written', snapshotWrittenBody(w.state)), notPermitted('the developer role does not allow writing snapshots'));
+  // The hash covers state.rejected, so the body is taken after the rejections above.
+  const afterFixture = snapshotWrittenBody(w.state);
+  const event = make(w, w.owner, 'snapshot.written', afterFixture);
+  accept(w, event);
+  assert.deepEqual(w.state.snapshots, [{ path: afterFixture.path, coversThrough: afterFixture.coversThrough, lamport: afterFixture.lamport, stateHash: afterFixture.stateHash, eventId: event.id }]);
+  reject(w, make(w, w.owner, 'snapshot.written', afterFixture), R.snapshotMismatch);
+});
+
+test('a snapshot file is accepted only when an accepted snapshot.written names its path', async () => {
+  const w = await world();
+  const orphanPath = snapshotPath(w.state.head.lamport);
+  expectRejected(w, snapshotEntry(orphanPath), R.snapshotOrphan, orphanPath);
+  const body = snapshotWrittenBody(w.state);
+  assert.equal(body.path, orphanPath);
+  accept(w, make(w, w.owner, 'snapshot.written', body));
+  const before = serialiseState(w.state);
+  assert.equal(applyEntry(w.state, snapshotEntry(body.path)).accepted, true);
+  assert.equal(serialiseState(w.state), before);
+  expectRejected(w, snapshotEntry(snapshotPath(body.lamport + 1)), R.snapshotOrphan, snapshotPath(body.lamport + 1));
+});
+
+test('parseSnapshotFile accepts an owner or lead signed snapshot as provisional and round-trips the state', async () => {
+  const w = await world();
+  const lead = await withMember(w, 'lead');
+  accept(w, make(w, w.owner, 'member.skills', { memberId: lead.memberId, skills: ['sql'] }));
+  const ownerSigned = signedSnapshot(w.owner, w.state);
+  const parsed = parseSnapshotFile(canonicalize(ownerSigned), w.anchor);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.provisional, true);
+  assert.equal(serialiseState(parsed.state), serialiseState(w.state));
+  assert.equal(stateHash(parsed.state), ownerSigned.stateHash);
+  assert.equal(parsed.file.coversThrough, w.state.head.eventId);
+  const leadSigned = parseSnapshotFile(canonicalize(signedSnapshot(lead, w.state)), w.anchor);
+  assert.equal(leadSigned.ok, true);
+  assert.equal(deserialiseState(snapshotBody(w.state).state, w.anchor).accepted, w.state.accepted);
+});
+
+test('parseSnapshotFile rejects bad signatures, non-managers, hash mismatches, another team and extra keys', async () => {
+  const w = await world();
+  const developer = await withMember(w, 'developer');
+  const stranger = await makeActor(w.teamId);
+  const good = signedSnapshot(w.owner, w.state);
+  const reason = (text: string, anchor: GenesisAnchor = w.anchor): string => {
+    const parsed = parseSnapshotFile(text, anchor);
+    assert.equal(parsed.ok, false, 'expected a rejection');
+    return parsed.ok ? '' : parsed.reason;
+  };
+  const flipped = `${good.sig.startsWith('A') ? 'B' : 'A'}${good.sig.slice(1)}`;
+  assert.equal(reason(canonicalize({ ...good, sig: flipped })), R.badSignature);
+  assert.equal(reason(canonicalize(signedSnapshot(developer, w.state))), SNAPSHOT_REASONS.notManager);
+  assert.equal(reason(canonicalize(signedSnapshot(stranger, w.state))), R.unboundDevice);
+  assert.equal(reason(canonicalize(signedSnapshot(w.owner, w.state, { stateHash: 'e'.repeat(64) }))), R.snapshotMismatch);
+  assert.equal(reason(canonicalize(signedSnapshot(w.owner, w.state, { coversThrough: newEventId() }))), R.snapshotMismatch);
+  assert.equal(reason(canonicalize({ ...good, extra: 1 })), `${SNAPSHOT_REASONS.invalid}: file`);
+  assert.equal(reason(canonicalize({ ...good, state: { ...good.state, extra: 1 } })).startsWith(SNAPSHOT_REASONS.invalid), true);
+  assert.equal(reason(JSON.stringify(good, null, 2)), SNAPSHOT_REASONS.notCanonical);
+  assert.equal(reason('not json'), SNAPSHOT_REASONS.malformed);
+  const otherTeam = newTeamId();
+  const otherOwner = await makeActor(otherTeam);
+  const other = genesisEntries(otherOwner, otherTeam);
+  assert.equal(reason(canonicalize(good), other.anchor), SNAPSHOT_REASONS.wrongTeam);
+  assert.equal(reason(canonicalize(signedSnapshot(otherOwner, reduce(other.entries, other.anchor)))), SNAPSHOT_REASONS.wrongTeam);
+  const wrongAnchor: GenesisAnchor = { ...w.anchor, eventId: newEventId() };
+  assert.equal(reason(canonicalize(good), wrongAnchor).startsWith(SNAPSHOT_REASONS.invalid), true);
+});
+
+test('deserialiseState refuses a state that is not tied to the anchor or is internally inconsistent', async () => {
+  const w = await world();
+  const plain = (): JsonObject => JSON.parse(serialiseState(w.state)) as JsonObject;
+  assert.doesNotThrow(() => deserialiseState(plain(), w.anchor));
+  const withRefused = { ...plain(), refused: R.logRefused };
+  assert.throws(() => deserialiseState(withRefused, w.anchor));
+  const strangerDevice = await makeActor(w.teamId);
+  const swapped = plain();
+  const members = swapped.members as Array<{ devices: Array<{ publicKey: string; fingerprint: string }> }>;
+  const device = members[0]?.devices[0];
+  if (device === undefined) throw new Error('fixture has no device');
+  device.publicKey = strangerDevice.identity.publicKey;
+  device.fingerprint = strangerDevice.identity.fingerprint;
+  assert.throws(() => deserialiseState(swapped, w.anchor));
+  const inflated = { ...plain(), accepted: 99 };
+  assert.throws(() => deserialiseState(inflated, w.anchor));
+});
+
+test('deterministic property: replay, incremental application and snapshot plus tail agree over seeded random logs', async () => {
+  const seeds = Array.from({ length: 40 }, (_unused, index) => 1001 + index * 7919);
+  for (const seed of seeds) {
+    const scenario = await buildScenario(seed, 60);
+    const label = `seed ${seed}`;
+    const full = reduce(scenario.entries, scenario.anchor);
+    // (a) reduce is deterministic.
+    assert.equal(serialiseState(reduce(scenario.entries, scenario.anchor)), serialiseState(full), `${label}: replay`);
+    // (e) exactly the forged entries are rejected, each with its planned reason.
+    assert.deepEqual(full.rejected, scenario.forged, `${label}: rejected list`);
+    assert.equal(full.refused, undefined, label);
+    // (b) incremental application in random chunks, with the live state copied between chunks, equals a full replay.
+    const random = mulberry32(seed ^ 0x9e3779b9);
+    let live = reduce([], scenario.anchor);
+    for (let index = 0; index < scenario.entries.length;) {
+      const size = 1 + Math.floor(random() * 9);
+      for (const entry of scenario.entries.slice(index, index + size)) applyEntry(live, entry);
+      index += size;
+      live = cloneState(live);
+    }
+    assert.equal(serialiseState(live), serialiseState(full), `${label}: incremental`);
+    // (c) rejected events change nothing but state.rejected.
+    const validOnly = reduce(scenario.valid, scenario.anchor);
+    assert.equal(withoutRejected(full), withoutRejected(validOnly), `${label}: forged entries leave no trace`);
+    assert.deepEqual(validOnly.rejected, [], label);
+    // (d) a snapshot taken at a random cut plus the tail equals the full replay, also through the signed file.
+    const cut = 2 + Math.floor(random() * (scenario.entries.length - 2));
+    const head = reduce(scenario.entries.slice(0, cut), scenario.anchor);
+    const restored = deserialiseState(snapshotBody(head).state, scenario.anchor);
+    for (const entry of scenario.entries.slice(cut)) applyEntry(restored, entry);
+    assert.equal(serialiseState(restored), serialiseState(full), `${label}: snapshot at ${cut} plus tail`);
+    const signedFile = parseSnapshotFile(canonicalize(signedSnapshot(scenario.owner, head)), scenario.anchor);
+    assert.equal(signedFile.ok, true, `${label}: signed snapshot parses`);
+    if (signedFile.ok) {
+      for (const entry of scenario.entries.slice(cut)) applyEntry(signedFile.state, entry);
+      assert.equal(serialiseState(signedFile.state), serialiseState(full), `${label}: provisional snapshot plus tail`);
+    }
+  }
 });

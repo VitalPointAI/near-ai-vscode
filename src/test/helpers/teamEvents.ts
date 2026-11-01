@@ -1,10 +1,13 @@
 // Signed-event factory for the team materialiser tests: actors with real Ed25519 keys generated at runtime, a signed event builder,
 // committed-entry wrappers, genesis batches and a seeded PRNG. No key material is ever written to disk.
 // The file has no .test suffix on purpose so the test glob does not run it as a suite.
-import { canonicalize, eventPath } from '../../domain/team/canonical';
+import { canonicalBytes, canonicalize, eventPath, snapshotPath } from '../../domain/team/canonical';
+import { applyEntry, createState, reduce, snapshotBody, stateHash } from '../../domain/team/materialize';
+import type { SnapshotBody, SnapshotFile } from '../../domain/team/materialize';
 import { DEFAULT_WIP_LIMIT } from '../../domain/team/policy';
-import type { CommittedEvent, GenesisAnchor, ImplementedEventBodies, ImplementedEventType, Role, TeamEvent, TeamEventBodyMap, TeamState } from '../../domain/team/types';
-import { createDeviceIdentity, newEventId, signEvent } from '../../team/identity';
+import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
+import type { CommittedEvent, GenesisAnchor, ImplementedEventBodies, ImplementedEventType, Role, TeamEvent, TeamEventBodyMap, TeamPolicy, TeamState } from '../../domain/team/types';
+import { createDeviceIdentity, newEventId, newTeamId, signEvent } from '../../team/identity';
 import type { DeviceIdentity } from '../../team/identity';
 import { MemorySecrets, createOwner, testGenesis } from './teamHarness';
 
@@ -77,4 +80,144 @@ export function mulberry32(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+// A snapshot file signed by the actor. Overrides are applied before signing, so a test can build a validly signed snapshot that lies.
+export function signedSnapshot(actor: TestActor, state: TeamState, overrides: Partial<SnapshotBody> = {}): SnapshotFile {
+  const unsigned = { ...snapshotBody(state), ...overrides, author: actor.memberId, device: actor.identity.fingerprint };
+  return { ...unsigned, sig: actor.identity.sign(canonicalBytes(unsigned)) };
+}
+
+export function snapshotWrittenBody(state: TeamState): ImplementedEventBodies['snapshot.written'] {
+  return { coversThrough: state.head.eventId, lamport: state.head.lamport, stateHash: stateHash(state), path: snapshotPath(state.head.lamport) };
+}
+
+export interface Scenario {
+  teamId: string;
+  anchor: GenesisAnchor;
+  owner: TestActor;
+  // Every entry in log order, valid and forged.
+  entries: CommittedEvent[];
+  // The same log without the forged entries.
+  valid: CommittedEvent[];
+  // Each forged entry with the reason a reader must give for it, in log order.
+  forged: Array<{ eventId: string; reason: string }>;
+}
+
+const SKILLS = ['rust', 'typescript', 'sql', 'docs', 'review', 'devops'];
+const POLICY_CHANGES: Array<Partial<TeamPolicy>> = [
+  { dispatchMode: 'auto' }, { dispatchMode: 'suggest' }, { teeOnly: true }, { teeOnly: false }, { offerTimeoutMinutes: 45 }, { peerMetricsVisible: true }, { sharedPaths: ['package.json', 'CHANGELOG.md'] }
+];
+
+// A seeded log of about `length` entries: valid events from two owner devices mixed with forged ones. The first valid snapshot.written is
+// placed before any forgery because a snapshot hash covers state.rejected, so it only matches while the valid-only replay agrees on it.
+// Every entry is also run through a live state, which both chooses the next valid Lamport and asserts each entry gets the planned verdict.
+export async function buildScenario(seed: number, length: number): Promise<Scenario> {
+  const random = mulberry32(seed);
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+  const teamId = newTeamId();
+  const owner = await makeActor(teamId);
+  const second = await makeDevice(owner);
+  const stranger = await makeActor(teamId);
+  const otherTeam = newTeamId();
+  const { entries: genesis, anchor } = genesisEntries(owner, teamId);
+  const live = reduce(genesis, anchor);
+  const entries: CommittedEvent[] = [...genesis];
+  const valid: CommittedEvent[] = [...genesis];
+  const forged: Array<{ eventId: string; reason: string }> = [];
+  let secondAdded = false;
+  let secondRevoked = false;
+  let snapshotted = false;
+  const at = (offset = 1): { teamId: string; lamport: number; prev: string } => ({ teamId, lamport: live.highLamport + offset, prev: live.head.eventId });
+  const accepted = (event: TeamEvent): void => {
+    const entry = entryOf(event);
+    const verdict = applyEntry(live, entry);
+    if (!verdict.accepted) throw new Error(`seed ${seed}: planned valid ${event.type} was rejected: ${verdict.rejection.reason}`);
+    entries.push(entry);
+    valid.push(entry);
+  };
+  const rejected = (entry: CommittedEvent, eventId: string, reason: string): void => {
+    const verdict = applyEntry(live, entry);
+    if (verdict.accepted || verdict.rejection.reason !== reason) throw new Error(`seed ${seed}: planned forgery ${eventId} expected "${reason}"`);
+    entries.push(entry);
+    forged.push({ eventId, reason });
+  };
+  const signer = (): TestActor => (secondAdded && !secondRevoked && random() < 0.5 ? { ...second } : owner);
+  const addValid = (): void => {
+    const roll = random();
+    if (!secondAdded) {
+      secondAdded = true;
+      accepted(signed(owner, { ...at(), type: 'device.added', body: { memberId: owner.memberId, device: { fingerprint: second.identity.fingerprint, publicKey: second.identity.publicKey } } }));
+    } else if (roll < 0.1 && !secondRevoked) {
+      secondRevoked = true;
+      accepted(signed(owner, { ...at(), type: 'device.revoked', body: { memberId: owner.memberId, fingerprint: second.identity.fingerprint } }));
+    } else if (roll < 0.45) {
+      accepted(signed(signer(), { ...at(1 + Math.floor(random() * 5)), type: 'member.availability', body: { availability: pick(['available', 'focus', 'away', 'offline'] as const) } }));
+    } else if (roll < 0.7) {
+      const skills = SKILLS.filter(() => random() < 0.4);
+      accepted(signed(signer(), { ...at(), type: 'member.skills', body: { memberId: owner.memberId, skills } }));
+    } else {
+      accepted(signed(owner, { ...at(), type: 'policy.changed', body: { changes: pick(POLICY_CHANGES) } }));
+    }
+  };
+  const addForgery = (): void => {
+    const kind = Math.floor(random() * 10);
+    const reasons = TEAM_REJECTION_REASONS;
+    if (kind === 0) {
+      const event = signed(owner, { ...at(), type: 'member.availability', body: { availability: 'away' } });
+      const tampered = { ...event, body: { availability: 'focus' as const } };
+      rejected(entryOf(tampered), event.id, reasons.badSignature);
+    } else if (kind === 1) {
+      const event = signEvent(stranger.identity, {
+        v: 1, id: newEventId(), teamId, type: 'member.availability', lamport: live.highLamport + 1, at: '2026-01-01T00:00:00.000Z', author: owner.memberId,
+        device: stranger.identity.fingerprint, prev: live.head.eventId, body: { availability: 'away' }
+      });
+      rejected(entryOf(event), event.id, reasons.unboundDevice);
+    } else if (kind === 2) {
+      const event = signed(owner, { ...at(0), type: 'member.availability', body: { availability: 'away' } });
+      rejected(entryOf(event), event.id, reasons.lamportNotGreater);
+    } else if (kind === 3) {
+      const event = signed(owner, { ...at(1001 + Math.floor(random() * 500)), type: 'member.availability', body: { availability: 'away' } });
+      rejected(entryOf(event), event.id, reasons.lamportJump);
+    } else if (kind === 4) {
+      const events = valid.filter((entry) => entry.kind === 'event');
+      const replay = pick(events);
+      rejected(replay, (JSON.parse(replay.text) as { id: string }).id, reasons.duplicate);
+    } else if (kind === 5) {
+      const event = signed(owner, { ...at(), teamId: otherTeam, type: 'member.availability', body: { availability: 'away' } });
+      rejected(entryOf(event), event.id, reasons.wrongTeam);
+    } else if (kind === 6) {
+      const event = signed(owner, { ...at(), type: 'member.role-changed', body: { memberId: owner.memberId, role: 'lead' } });
+      rejected(entryOf(event), event.id, `${reasons.notPermitted}: nobody can change their own role`);
+    } else if (kind === 7) {
+      const body = snapshotWrittenBody(live);
+      const event = signed(owner, { ...at(), type: 'snapshot.written', body: { ...body, stateHash: stateHash(createState(anchor)) } });
+      rejected(entryOf(event), event.id, reasons.snapshotMismatch);
+    } else if (kind === 8) {
+      const orphan: CommittedEvent = { commit: 'c'.repeat(40), commitTime: 1, path: snapshotPath(live.highLamport + 7), blob: 'b'.repeat(40), size: 2, text: '{}', kind: 'snapshot' };
+      rejected(orphan, orphan.path, reasons.snapshotOrphan);
+    } else {
+      const event = signed(owner, { ...at(), type: 'member.removed', body: { memberId: owner.memberId } });
+      rejected(entryOf(event), event.id, `${reasons.notPermitted}: the owner cannot be removed`);
+    }
+  };
+  const forgeryStart = 8 + Math.floor(random() * 4);
+  const snapshotAt = 3 + Math.floor(random() * (forgeryStart - 3));
+  while (entries.length < length) {
+    if (!snapshotted && entries.length >= snapshotAt && entries.length < forgeryStart && secondAdded) {
+      snapshotted = true;
+      const body = snapshotWrittenBody(live);
+      accepted(signed(owner, { ...at(), type: 'snapshot.written', body }));
+      const file: CommittedEvent = { commit: 'c'.repeat(40), commitTime: 1, path: body.path, blob: 'b'.repeat(40), size: 2, text: '{}', kind: 'snapshot' };
+      const verdict = applyEntry(live, file);
+      if (!verdict.accepted) throw new Error(`seed ${seed}: the snapshot file was not accepted`);
+      entries.push(file);
+      valid.push(file);
+    } else if (entries.length >= forgeryStart && random() < 0.3) {
+      addForgery();
+    } else {
+      addValid();
+    }
+  }
+  return { teamId, anchor, owner, entries, valid, forged };
 }
