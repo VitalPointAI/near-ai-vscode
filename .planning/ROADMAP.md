@@ -63,7 +63,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Concurrent appends from both clients never lose an event: a test with several child-process clients appending to a local bare repository ends with every event present and no force-push.
   5. Solo projects (no `.planning/.near-ai/team.json`) behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 11/11 plans executed in 6 waves
+**Plans**: 12 plans (11/12 executed) in 7 waves
 
 **Wave 1**
 - [x] 60-01-PLAN.md — Tracer: signed genesis round trip between two clones over a real bare remote; type contracts, canonical JSON, identity (TEAM-04)
@@ -87,6 +87,9 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 
 **Wave 6** *(blocked on Wave 5 completion)*
 - [x] 60-11-PLAN.md — `registerTeamMode` with solo parity, package.json contributions, command flows, phase gate (TEAM-01, SEC-01)
+
+**Wave 7** *(gap closure for UAT G-60-1)*
+- [ ] 60-12-PLAN.md — Poll cadence cannot be starved by window-state events: ignore unchanged focus, anchor focus-loss re-arm to the last run, refresh focus after each run, fake-clock and session regression tests (TEAM-04)
 
 ### Phase 61: Invitations, joining, removal, NEAR org and key integration
 
