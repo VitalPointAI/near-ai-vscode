@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 60
 current_phase_name: "Team core: identity, signed event log, git transport, roster"
 status: executing
-stopped_at: Completed 60-04-PLAN.md
-last_updated: "2026-10-31T13:16:03.674Z"
-last_activity: 2026-10-31
+stopped_at: Completed 60-05-PLAN.md
+last_updated: "2026-11-01T12:36:35.693Z"
+last_activity: 2026-11-01
 last_activity_desc: Phase 60 execution started
-state_head: c3c7493411ce6bdf6ce43e9316e112186dc11346
+state_head: ee1d08f93d055b4d3da9646b0f15fee98c6c693d
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -30,9 +30,9 @@ See: .planning/PROJECT.md (updated 2026-10-31)
 ## Current Position
 
 Phase: 60 (Team core: identity, signed event log, git transport, roster) — EXECUTING
-Plan: 5 of 11
+Plan: 6 of 11
 Status: Ready to execute
-Last activity: 2026-10-31 — Phase 60 execution started
+Last activity: 2026-11-01 — Phase 60 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -58,6 +58,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 60 P02 | 14min | 2 tasks | 4 files |
 | Phase 60 P03 | 25min | 2 tasks | 3 files |
 | Phase 60 P04 | 20min | 2 tasks | 3 files |
+| Phase 60 P05 | 50 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Recent decisions affecting current work:
 - [Phase 60]: 60-02: permission cells are checked before owner overrides; secret detector exempts only strict publicKey and sig shapes
 - [Phase 60]: 60-03: fetches land in a staging ref and the trusted ref moves only after the ancestry check; unanswered pushes are resolved by the next fetch's ancestry check
 - [Phase 60]: 60-04: validators return full 'invalid event body: <path>' reasons; rejection id is the parsed event id when it matches the pattern, else the file path
+- [Phase 60]: 60-05: stateHash covers state.rejected, so snapshot.written bodies are computed after any preceding rejections; replay keeps every client in agreement
+- [Phase 60]: 60-05: member.availability without workingHours keeps the hours on record; member.joined outside genesis rejects as not permitted: only the owner joins at genesis in this version
 
 ### Pending Todos
 
@@ -94,8 +97,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-31T13:15:54.895Z
-Stopped at: Completed 60-04-PLAN.md
+Last session: 2026-11-01T12:36:35.662Z
+Stopped at: Completed 60-05-PLAN.md
 Resume file: None
 
 ## Notes
