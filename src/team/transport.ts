@@ -5,6 +5,10 @@ import type { CommittedEvent, LogHead, TeamEvent } from '../domain/team/types';
 export type TransportState = 'ok' | 'paused' | 'offline';
 export interface TransportStatus { state: TransportState; reason?: string }
 
+// The remote no longer has a coordination branch this client has already read. It is not a rewrite (that pauses for good) and not a network
+// problem, so it gets its own visible, self-healing state: sync resumes when the branch comes back.
+export const BRANCH_MISSING_REASON = 'The coordination branch is missing on the remote. NEAR AI keeps the last good copy and checks again.';
+
 // A builder may return events, events plus extra files for the same commit, or a conflict that stops the append.
 export type AppendBuild = TeamEvent[] | { events: TeamEvent[]; files?: Array<{ path: string; text: string }> } | { conflict: string };
 // The builder is called again after every lost race so lamport, prev and the signature are re-derived from the fresh state (D-29).

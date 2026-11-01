@@ -564,3 +564,18 @@ test('a coordination log that does not match the genesis anchor shows a paused n
     assertPlainCopy(started.lines);
   });
 });
+
+test('a coordination branch deleted on the remote shows a log-missing status that recovers (WR-10)', async () => {
+  await withRig(async (rig) => {
+    const started = await startSession(rig);
+    const head = gitIn(rig.fixture.remote, ['rev-parse', DEFAULT_COORDINATION_REF]);
+    gitIn(rig.fixture.remote, ['update-ref', '-d', DEFAULT_COORDINATION_REF]);
+    assert.equal(await started.session.sync(), false);
+    assert.equal(lastItem().text, barModule.PAUSED_MISSING_TEXT);
+    assert.equal(lastItem().tooltip.includes('Team sync is working'), false);
+    gitIn(rig.fixture.remote, ['update-ref', DEFAULT_COORDINATION_REF, head]);
+    assert.equal(await started.session.sync(), true);
+    assert.equal(lastItem().text, `Team: ${TEAM_NAME}`);
+    assertPlainCopy(started.lines);
+  });
+});

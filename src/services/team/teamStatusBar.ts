@@ -3,10 +3,12 @@
 import * as vscode from 'vscode';
 import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
 import { redactGitMessage } from '../../team/runGit';
+import { BRANCH_MISSING_REASON } from '../../team/transport';
 import type { TransportStatus } from '../../team/transport';
 
 export const PAUSED_UNREACHABLE_TEXT = 'Team sync paused: remote unreachable';
 export const PAUSED_REWRITTEN_TEXT = 'Team sync paused: log rewritten';
+export const PAUSED_MISSING_TEXT = 'Team sync paused: log missing on remote';
 export const PAUSED_REFUSED_TEXT = 'Team log not trusted';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 
@@ -30,6 +32,9 @@ export function statusText(status: TransportStatus, teamName: string): { text: s
   }
   if (status.reason === TEAM_REJECTION_REASONS.logRewritten) {
     return { text: PAUSED_REWRITTEN_TEXT, tooltip: TEAM_REJECTION_REASONS.logRewritten };
+  }
+  if (status.reason === BRANCH_MISSING_REASON) {
+    return { text: PAUSED_MISSING_TEXT, tooltip: `${BRANCH_MISSING_REASON} Click to run Verify Team Log.` };
   }
   if (status.reason === TEAM_REJECTION_REASONS.logRefused) {
     return { text: PAUSED_REFUSED_TEXT, tooltip: `${TEAM_REJECTION_REASONS.logRefused}. Team events are being ignored. Click to run Verify Team Log.` };

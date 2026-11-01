@@ -11,6 +11,7 @@ import { TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { CommittedEvent, EntryKind, LogHead, Materializer, TeamEvent } from '../domain/team/types';
 import { NEUTRAL_IDENTITY_ENV, gitText, mustSucceed, redactGitMessage, runGit } from './runGit';
 import type { GitResult, GitRunner } from './runGit';
+import { BRANCH_MISSING_REASON } from './transport';
 import type { AppendBuild, AppendBuilder, AppendOptions, AppendResult, CoordinationTransport, TransportStatus, TransportSubscription } from './transport';
 
 export const DEFAULT_COORDINATION_REF = 'refs/heads/near-ai/coordination';
@@ -483,7 +484,10 @@ export class GitTransport<S> implements CoordinationTransport<S> {
         const failure = classifyGitFailure(fetched);
         // A remote without the coordination branch yet is a normal state, not a failure.
         if (failure.kind === 'absent') {
-          this.setStatus({ state: 'ok' });
+          // Only a branch that was never read is normal. One this client has read (a local copy or a saved position) and that is now gone
+          // was deleted on the remote, which must stay visible instead of reading as a healthy, empty team (WR-10).
+          const seen = this.pin !== undefined || (await this.revParse(LOCAL_REF)) !== undefined;
+          this.setStatus(seen ? { state: 'offline', reason: BRANCH_MISSING_REASON } : { state: 'ok' });
           return [];
         }
         const reason = failure.kind === 'race' ? 'The remote was busy and could not be read. Team sync will try again.' : failureReason(failure);

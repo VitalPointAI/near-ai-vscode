@@ -17,6 +17,7 @@ import type { GitTransportOptions } from '../team/gitTransport';
 import { newTeamId } from '../team/identity';
 import { redactGitMessage, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
+import { BRANCH_MISSING_REASON } from '../team/transport';
 import type { AppendBuilder } from '../team/transport';
 import { createOwner, createTeamFixture, faultRunner, fakeGitResult, gitIn, recordingMaterializer, testEvent, testGenesis, withGlobalGitConfig } from './helpers/teamHarness';
 import type { RecordedState, TeamFixture, TestGenesis, TestOwner } from './helpers/teamHarness';
@@ -820,5 +821,33 @@ test('update listeners receive new entries until disposed; diagnostics are redac
     assert.deepEqual(batches, [3]);
     assert.equal(diagnostics.length, 1);
     assert.equal(b.head().lamport, 3);
+  });
+});
+
+test('a coordination branch deleted on the remote after it was read shows a visible state and recovers when it returns (WR-10)', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    const teamId = newTeamId();
+    const owner = await createOwner(teamId);
+    const genesis = testGenesis({ teamId, owner, name: 'Deleted branch team' });
+    const a = clientFor(fixture, 'a', genesis.anchor);
+    assert.equal((await a.append(async () => genesis.events, { genesis: { teamFileText: genesis.teamFileText } })).ok, true);
+    const b = clientFor(fixture, 'b', genesis.anchor);
+    await b.fetch();
+    assert.deepEqual(b.status(), { state: 'ok' });
+
+    const head = gitIn(fixture.remote, ['rev-parse', DEFAULT_COORDINATION_REF]);
+    gitIn(fixture.remote, ['update-ref', '-d', DEFAULT_COORDINATION_REF]);
+    assert.deepEqual(await b.fetch(), []);
+    assert.deepEqual(b.status(), { state: 'offline', reason: BRANCH_MISSING_REASON }, 'a branch this client has read is not reported as healthy when it is gone');
+    assert.equal(b.state().accepted, 2, 'the last good state is kept');
+
+    // A client that never read the branch still treats an absent branch as normal (a team being created).
+    const c = clientFor(fixture, 'c', genesis.anchor);
+    await c.fetch();
+    assert.deepEqual(c.status(), { state: 'ok' });
+
+    gitIn(fixture.remote, ['update-ref', DEFAULT_COORDINATION_REF, head]);
+    await b.fetch();
+    assert.deepEqual(b.status(), { state: 'ok' }, 'sync resumes when the branch is back');
   });
 });
