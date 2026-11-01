@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 60
 current_phase_name: "Team core: identity, signed event log, git transport, roster"
 status: executing
-stopped_at: Completed 60-08-PLAN.md
-last_updated: "2026-11-01T13:06:48.485Z"
+stopped_at: Completed 60-09-PLAN.md
+last_updated: "2026-11-01T13:23:47.399Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 60 execution started
-state_head: e8bce2b9ac7004b5e2f6e01b48a44ef766562732
+state_head: 3672b35cffec617adaa60168d7b6c29600722c25
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 8
+  completed_plans: 9
   percent: 0
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-31)
 ## Current Position
 
 Phase: 60 (Team core: identity, signed event log, git transport, roster) — EXECUTING
-Plan: 9 of 11
+Plan: 10 of 11
 Status: Ready to execute
 Last activity: 2026-11-01 — Phase 60 execution started
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 60 P06 | 5 min | 2 tasks | 6 files |
 | Phase 60 P07 | 40 min | 3 tasks | 3 files |
 | Phase 60 P08 | 10 min | 2 tasks | 3 files |
+| Phase 60 P09 | 35 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,8 @@ Recent decisions affecting current work:
 - [Phase 60]: 60-07: batch prev chains event to event (first uses the head id); a snapshot over a state holding a secret-like value is skipped as a reported conflict, not thrown; append returns the user's AppendResult and the snapshot outcome is read via lastSnapshot()
 - [Phase 60]: 60-08: failures after the genesis landed (team.json unsaved, trust pin refused, commit refused) keep the device key and return commit-failed; only a failed or non-landing genesis push rolls back key and mirror
 - [Phase 60]: 60-08: an unreadable team.json is reported as exists-locally and left untouched, never overwritten
+- [Phase 60]: 60-09: roster audit mirror uses a fresh AuditStore per attempt and confirms each entry by reading audit.json back, since AuditStore.persist swallows write failures
+- [Phase 60]: 60-09: TeamSession adopts its signer after the first sync by matching the device fingerprint to a roster member; backoff never shortens a poll interval longer than 10 minutes
 
 ### Pending Todos
 
@@ -105,8 +108,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-01T13:06:48.455Z
-Stopped at: Completed 60-08-PLAN.md
+Last session: 2026-11-01T13:23:47.369Z
+Stopped at: Completed 60-09-PLAN.md
 Resume file: None
 
 ## Notes
