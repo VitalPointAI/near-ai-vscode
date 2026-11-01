@@ -530,3 +530,22 @@ test('credentials in a git error never reach the tooltip, the channel or a notif
     assertPlainCopy(started.lines);
   });
 });
+
+// ---- review fixes ----
+
+test('a throw while showing the status does not stop later syncs (WR-03)', async () => {
+  await withRig(async (rig) => {
+    const bar = createTeamStatusBar();
+    let armed = false;
+    const started = await startSession(rig, {
+      statusBar: { update: (status, name) => { if (armed) throw new Error('status bar torn down'); bar.update(status, name); }, dispose: () => { bar.dispose(); } }
+    });
+    const before = rig.fetches.count;
+    armed = true;
+    assert.equal(await started.session.sync(), false, 'a sync that threw reports unhealthy and does not reject');
+    assert.ok(started.lines.some((line) => line.startsWith('Team sync failed unexpectedly: status bar torn down')));
+    armed = false;
+    assert.equal(await started.session.sync(), true, 'the next sync really runs');
+    assert.equal(rig.fetches.count, before + 2, 'both syncs reached the remote');
+  });
+});

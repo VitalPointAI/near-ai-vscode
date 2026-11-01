@@ -196,7 +196,15 @@ export class TeamSession {
 
   // Runs one sync now. It never rejects: a failure is written to the output channel and shown in the status bar.
   public sync(): Promise<boolean> {
-    const run = this.syncing.then(() => this.syncOnce());
+    // A throw anywhere in a sync must not poison the chain: later syncs would otherwise skip syncOnce and replay the old rejection.
+    const run = this.syncing.then(() => this.syncOnce()).catch((error: unknown) => {
+      try {
+        this.reportIssue('sync-internal', `Team sync failed unexpectedly: ${describeError(error)}`);
+      } catch {
+        // The output channel itself failed (for example during shutdown); the next sync reports again.
+      }
+      return false;
+    });
     this.syncing = run.then(() => undefined);
     return run;
   }
