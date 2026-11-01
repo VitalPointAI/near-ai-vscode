@@ -7,6 +7,7 @@ import type { TransportStatus } from '../../team/transport';
 
 export const PAUSED_UNREACHABLE_TEXT = 'Team sync paused: remote unreachable';
 export const PAUSED_REWRITTEN_TEXT = 'Team sync paused: log rewritten';
+export const PAUSED_REFUSED_TEXT = 'Team log not trusted';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 
 const MAX_REASON_LENGTH = 400;
@@ -29,6 +30,9 @@ export function statusText(status: TransportStatus, teamName: string): { text: s
   }
   if (status.reason === TEAM_REJECTION_REASONS.logRewritten) {
     return { text: PAUSED_REWRITTEN_TEXT, tooltip: TEAM_REJECTION_REASONS.logRewritten };
+  }
+  if (status.reason === TEAM_REJECTION_REASONS.logRefused) {
+    return { text: PAUSED_REFUSED_TEXT, tooltip: `${TEAM_REJECTION_REASONS.logRefused}. Team events are being ignored. Click to run Verify Team Log.` };
   }
   const reason = status.reason === undefined ? '' : safeReason(status.reason).replace(/\.+$/, '');
   const lead = reason === '' ? 'The team remote could not be reached.' : `The team remote could not be reached: ${reason}.`;

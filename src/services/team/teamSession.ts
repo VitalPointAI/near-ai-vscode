@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { AuditEvent, AuditFilter } from '../../domain/approval';
 import { teamMaterializer } from '../../domain/team/materialize';
+import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
 import type { GenesisAnchor, Role, TeamEvent, TeamFile, TeamState } from '../../domain/team/types';
 import { AuditStore } from '../auditStore';
 import type { SecretStorageLike } from '../auth';
@@ -23,7 +24,7 @@ import { DEFAULT_POLL_SECONDS, SyncScheduler } from '../../team/syncScheduler';
 import type { SchedulerTimers } from '../../team/syncScheduler';
 import { checkTrustPin, teamStorageDir } from '../../team/teamFile';
 import type { TransportStatus } from '../../team/transport';
-import { createTeamStatusBar, safeReason, statusText } from './teamStatusBar';
+import { PAUSED_REFUSED_TEXT, createTeamStatusBar, safeReason, statusText } from './teamStatusBar';
 import type { TeamStatusBar } from './teamStatusBar';
 
 export const TEAM_OUTPUT_CHANNEL = 'NEAR AI Team';
@@ -150,6 +151,7 @@ export class TeamSession {
   private lastStatusKey: string | undefined;
   private readonly reportedRejections = new Set<string>();
   private readonly reportedIssues = new Map<string, string>();
+  private refusalAnnounced = false;
   private pendingRoster: TeamEvent[] = [];
   // The author's role at each queued event's log position (WR-05), so a later promotion or demotion does not rewrite history.
   private readonly rosterRoles = new Map<string, Role>();
@@ -298,6 +300,16 @@ export class TeamSession {
       const reason = describeError(error);
       this.reportIssue('sync', `Team sync failed: ${reason}`);
       status = { state: 'offline', reason };
+    }
+    // A log that does not match the team's genesis anchor reads fine over the transport, so the transport status stays ok. It is still
+    // the central trust failure, so it gets its own paused state, one warning and a backoff instead of "sync working" (WR-06).
+    const refused = status.state === 'ok' ? this.log.state().refused : undefined;
+    if (refused !== undefined) {
+      status = { state: 'paused', reason: TEAM_REJECTION_REASONS.logRefused };
+      if (!this.refusalAnnounced) {
+        this.refusalAnnounced = true;
+        this.announce('warn', `${PAUSED_REFUSED_TEXT}: ${TEAM_REJECTION_REASONS.logRefused}. Team events from this remote are ignored.`);
+      }
     }
     this.showStatus(status);
     await this.mirror();

@@ -549,3 +549,18 @@ test('a throw while showing the status does not stop later syncs (WR-03)', async
     assert.equal(rig.fetches.count, before + 2, 'both syncs reached the remote');
   });
 });
+
+test('a coordination log that does not match the genesis anchor shows a paused not-trusted state, warns once and backs off (WR-06)', async () => {
+  await withRig(async (rig) => {
+    const wrongAnchor: TeamFile = { ...rig.teamFile, genesis: { ...rig.teamFile.genesis, eventId: newEventId() } };
+    const started = await startSession(rig, { teamFile: wrongAnchor, globalStorageDir: rig.fixture.storageDir('wrong-team') });
+    assert.equal(lastItem().text, barModule.PAUSED_REFUSED_TEXT);
+    assert.equal(lastItem().text, 'Team log not trusted');
+    assert.equal(lastItem().tooltip.includes('Team sync is working'), false);
+    assert.ok(lastItem().tooltip.includes(TEAM_REJECTION_REASONS.logRefused));
+    assert.equal(await started.session.sync(), false, 'a refused log is not a healthy sync, so the scheduler backs off');
+    assert.equal(stub.notifications.filter((entry) => entry.level === 'warn' && entry.message.includes('Team log not trusted')).length, 1, 'one warning, not one per poll');
+    assert.equal(started.lines.some((line) => line === `Team sync is running for ${TEAM_NAME}.`), false);
+    assertPlainCopy(started.lines);
+  });
+});
