@@ -12,6 +12,7 @@ import { registerSecurityScanning } from './services/securityScan';
 import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
+import { registerTeamMode } from './services/team/teamCommands';
 import { registerMcpConnections } from './services/mcpView';
 import { openTools } from './services/toolsPage';
 import { registerModelComparison } from './services/modelComparisonPanel';
@@ -54,6 +55,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
   registerSpendTracking(context, auth);
+  registerTeamMode(context);
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
   registerModelComparison(context, auth);
