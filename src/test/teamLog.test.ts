@@ -4,22 +4,23 @@ import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import test, { mock } from 'node:test';
 import { verifyEventSignature } from '../domain/team/canonical';
-import { reduce, serialiseState, teamMaterializer } from '../domain/team/materialize';
+import { parseSnapshotFile, reduce, serialiseState, stateHash, teamMaterializer } from '../domain/team/materialize';
 import { PERMISSION_REASONS } from '../domain/team/permissions';
 import { defaultTeamPolicy } from '../domain/team/policy';
 import { SecretLeakError } from '../domain/team/secrets';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { GenesisAnchor, LogHead, TeamEvent, TeamFile, TeamState } from '../domain/team/types';
-import { DEFAULT_SNAPSHOT_EVERY, NO_DEVICE_KEY_MESSAGE, TeamLog, buildGenesisEvents, prepareEvents } from '../team/eventLog';
+import { DEFAULT_SNAPSHOT_EVERY, NO_DEVICE_KEY_MESSAGE, SNAPSHOT_ALREADY_WRITTEN, TeamLog, buildGenesisEvents, prepareEvents } from '../team/eventLog';
 import type { EventIntent, TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
 import { emailHash, newTeamId } from '../team/identity';
 import { runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
+import type { CoordinationTransport } from '../team/transport';
 import { canonicalTeamFile } from '../team/teamFile';
 import { fakeGitResult, createOwner, createTeamFixture, faultRunner, gitIn } from './helpers/teamHarness';
 import type { TeamFixture, TestOwner } from './helpers/teamHarness';
-import { entryOf, makeDevice, signed } from './helpers/teamEvents';
+import { addFixtureMember, entryOf, makeActor, makeDevice, signed } from './helpers/teamEvents';
 import type { TestActor } from './helpers/teamEvents';
 
 const R = TEAM_REJECTION_REASONS;
@@ -83,6 +84,17 @@ function remoteHead(fixture: TeamFixture): string {
 function remoteEventLamports(fixture: TeamFixture): number[] {
   return gitIn(fixture.remote, ['ls-tree', '-r', '--name-only', DEFAULT_COORDINATION_REF]).split('\n')
     .filter((line) => line.startsWith('events/')).map((line) => Number(line.slice('events/'.length, 'events/'.length + 12)));
+}
+
+function remoteSnapshotFiles(fixture: TeamFixture): string[] {
+  return gitIn(fixture.remote, ['ls-tree', '-r', '--name-only', DEFAULT_COORDINATION_REF]).split('\n').filter((line) => line.startsWith('snapshots/'));
+}
+
+async function appendAvailability(client: Client, count: number): Promise<void> {
+  for (let index = 0; index < count; index += 1) {
+    const result = await client.log.append(() => [{ type: 'member.availability', body: { availability: index % 2 === 0 ? 'focus' : 'away' } }]);
+    assert.equal(result.ok, true);
+  }
 }
 
 function secondDeviceIntent(second: TestActor): EventIntent {
@@ -364,4 +376,136 @@ test('a log without a signer can sync and verify but its append rejects with the
 
 test('the default snapshot interval is 500 events', () => {
   assert.equal(DEFAULT_SNAPSHOT_EVERY, 500);
+});
+
+test('the owner client writes a signed snapshot with snapshot.written in one commit and another client accepts both entries', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture, { snapshotEvery: 5 });
+    await appendAvailability(seed.a, 2);
+    assert.deepEqual(remoteSnapshotFiles(fixture), [], 'lamport 4 is below the threshold');
+    await appendAvailability(seed.a, 1);
+    assert.deepEqual(remoteSnapshotFiles(fixture), ['snapshots/000000000005.json']);
+    const written = seed.a.log.lastSnapshot();
+    assert.equal(written?.ok, true);
+    assert.deepEqual(remoteEventLamports(fixture), [1, 2, 3, 4, 5, 6]);
+    const tip = gitIn(fixture.remote, ['show', '--name-only', '--format=', DEFAULT_COORDINATION_REF]).split('\n').sort();
+    assert.equal(tip.length, 2, 'the tip commit holds exactly the event and the snapshot file');
+    assert.ok(tip.some((name) => /^events\/000000000006-evt-/.test(name)));
+    assert.ok(tip.includes('snapshots/000000000005.json'));
+
+    const b = clientFor(fixture, 'b', seed.anchor, undefined, { snapshotEvery: 5 });
+    const synced = await b.log.sync();
+    assert.deepEqual(synced.rejected, []);
+    assert.equal(synced.snapshot, undefined, 'a client without a signer never writes snapshots');
+    const snapshotEvent = synced.accepted.find((event) => event.type === 'snapshot.written') as TeamEvent<'snapshot.written'>;
+    assert.ok(snapshotEvent !== undefined);
+    assert.equal(snapshotEvent.lamport, 6);
+    assert.equal(snapshotEvent.body.lamport, 5);
+    assert.equal(snapshotEvent.body.path, 'snapshots/000000000005.json');
+    const snapshotEntry = synced.entries.find((entry) => entry.kind === 'snapshot');
+    assert.equal(snapshotEntry?.verdict?.accepted, true);
+    assert.equal(b.log.state().snapshots.length, 1);
+    assert.equal(serialiseState(b.log.state()), serialiseState(seed.a.log.state()));
+
+    const parsed = parseSnapshotFile(gitIn(fixture.remote, ['show', `${DEFAULT_COORDINATION_REF}:snapshots/000000000005.json`]), seed.anchor);
+    assert.equal(parsed.ok, true);
+    if (parsed.ok) {
+      assert.equal(parsed.provisional, true);
+      assert.equal(stateHash(parsed.state), snapshotEvent.body.stateHash);
+      assert.equal(parsed.file.author, seed.owner.memberId);
+      assert.equal(parsed.state.head.lamport, 5);
+    }
+  });
+});
+
+test('a snapshot is written again only after another snapshotEvery events and verifyAll counts the snapshots written', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture, { snapshotEvery: 5 });
+    await appendAvailability(seed.a, 3);
+    assert.equal(seed.a.log.state().head.lamport, 6, 'events 3, 4, 5 and the snapshot event 6');
+    await appendAvailability(seed.a, 3);
+    assert.deepEqual(remoteSnapshotFiles(fixture), ['snapshots/000000000005.json'], 'lamport 9 is still below 5 + 5');
+    await appendAvailability(seed.a, 1);
+    assert.deepEqual(remoteSnapshotFiles(fixture), ['snapshots/000000000005.json', 'snapshots/000000000010.json']);
+
+    const report = await clientFor(fixture, 'b', seed.anchor).log.verifyAll();
+    assert.equal(report.snapshots, 2);
+    assert.deepEqual(report.rejected, []);
+    assert.equal(report.accepted, 11, 'ten events, then the second snapshot event at 11');
+    assert.equal(report.head.lamport, 11);
+  });
+});
+
+test('two clients crossing the threshold together write one snapshot and the loser skips without an error', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture, { snapshotEvery: 1000 });
+    assert.equal((await seed.a.log.append(() => [secondDeviceIntent(seed.second)])).ok, true);
+    await appendAvailability(seed.a, 2);
+    assert.equal(seed.a.log.state().head.lamport, 5);
+    assert.deepEqual(remoteSnapshotFiles(fixture), [], 'client A is configured never to snapshot here');
+
+    const winner = new TeamLog({ anchor: seed.anchor, transport: seed.a.transport, signer: seed.signer, now: fixedNow, snapshotEvery: 5 });
+    const mirror = clientFor(fixture, 'b', seed.anchor);
+    let winnerResult: Awaited<ReturnType<TeamLog['sync']>> | undefined;
+    // B decides a snapshot is due, then the other owner device gets its snapshot in before B's append starts.
+    const racing: CoordinationTransport<TeamState> = {
+      fetch: () => mirror.transport.fetch(),
+      readAll: () => mirror.transport.readAll(),
+      onUpdate: (listener) => mirror.transport.onUpdate(listener),
+      status: () => mirror.transport.status(),
+      state: () => mirror.transport.state(),
+      append: async (build, options) => {
+        winnerResult = await winner.sync();
+        return mirror.transport.append(build, options);
+      }
+    };
+    const loser = new TeamLog({
+      anchor: seed.anchor, transport: racing, signer: { identity: seed.second.identity, memberId: seed.second.memberId }, now: fixedNow, snapshotEvery: 5
+    });
+    const synced = await loser.sync();
+    assert.equal(winnerResult?.snapshot?.ok, true, 'the winner wrote the snapshot');
+    assert.ok(synced.snapshot !== undefined);
+    assert.equal(synced.snapshot?.ok, false);
+    if (synced.snapshot !== undefined && !synced.snapshot.ok) {
+      assert.equal(synced.snapshot.kind, 'refused');
+      assert.equal(synced.snapshot.reason, SNAPSHOT_ALREADY_WRITTEN);
+    }
+    assert.equal(SNAPSHOT_ALREADY_WRITTEN, 'snapshot already written');
+    assert.deepEqual(remoteSnapshotFiles(fixture), ['snapshots/000000000005.json'], 'exactly one snapshot landed');
+    assert.deepEqual(remoteEventLamports(fixture), [1, 2, 3, 4, 5, 6]);
+    assert.equal(loser.state().snapshots.length, 1);
+    assert.equal(serialiseState(loser.state()), serialiseState(seed.a.log.state()));
+  });
+});
+
+test('a signer whose role is not owner or lead never writes snapshots', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture, { snapshotEvery: 1000 });
+    await appendAvailability(seed.a, 3);
+    const developer = await makeActor(seed.teamId);
+    const b = clientFor(fixture, 'b', seed.anchor, { identity: developer.identity, memberId: developer.memberId }, { snapshotEvery: 5 });
+    await b.transport.fetch();
+    addFixtureMember(b.transport.state(), developer, 'developer');
+    const synced = await b.log.sync();
+    assert.equal(b.log.state().head.lamport, 5);
+    assert.equal(synced.snapshot, undefined);
+    assert.equal(b.log.lastSnapshot(), undefined);
+    assert.deepEqual(remoteSnapshotFiles(fixture), []);
+  });
+});
+
+test('a snapshot is skipped, not thrown, when the state holds a secret-like value an older client let through', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const seed = await seedTeam(fixture, { snapshotEvery: 3 });
+    const canary = `sk-${randomBytes(12).toString('hex')}`;
+    const raw = await seed.a.transport.append((state, head) => [signed(seed.owner, {
+      teamId: seed.teamId, type: 'member.skills', body: { memberId: seed.owner.memberId, skills: [canary] }, lamport: head.lamport + 1, prev: state.head.eventId
+    })]);
+    assert.equal(raw.ok, true);
+    const synced = await seed.a.log.sync();
+    assert.equal(synced.snapshot?.ok, false);
+    if (synced.snapshot !== undefined && !synced.snapshot.ok) assert.ok(synced.snapshot.reason.startsWith('snapshot skipped'));
+    assert.deepEqual(remoteSnapshotFiles(fixture), []);
+    assert.ok(!gitIn(fixture.remote, ['log', '-p', '--format=', DEFAULT_COORDINATION_REF]).includes('snapshots/'));
+  });
 });
