@@ -20,7 +20,8 @@ export interface VscodeStub {
   setConfig(key: string, value: unknown): void;
   // The folders the window reports; an empty list means no folder is open.
   setWorkspaceFolders(paths: string[]): void;
-  fireWindowState(focused: boolean): void;
+  // Active defaults to focused. A different active value delivers an activity-only change, which VS Code also reports through onDidChangeWindowState.
+  fireWindowState(focused: boolean, active?: boolean): void;
 }
 
 type ConfigListener = (event: { affectsConfiguration(section: string): boolean }) => void;
@@ -37,9 +38,9 @@ export function createVscodeStub(): VscodeStub {
   let workspaceFolders: Array<{ uri: { fsPath: string }; name: string; index: number }> | undefined;
   const messageAnswers: VscodeStub['messageAnswers'] = [];
   const config = new Map<string, unknown>();
-  const windowListeners = new Set<(state: { focused: boolean }) => void>();
+  const windowListeners = new Set<(state: { focused: boolean; active: boolean }) => void>();
   const configListeners = new Set<ConfigListener>();
-  const windowState = { focused: true };
+  const windowState = { focused: true, active: true };
 
   const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...actions: string[]): Promise<string | undefined> => {
     notifications.push({ level, message: text });
@@ -53,8 +54,8 @@ export function createVscodeStub(): VscodeStub {
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     ThemeColor: class ThemeColor { public constructor(public readonly id: string) {} },
     window: {
-      get state(): { focused: boolean } { return { focused: windowState.focused }; },
-      onDidChangeWindowState: (listener: (state: { focused: boolean }) => void) => {
+      get state(): { focused: boolean; active: boolean } { return { focused: windowState.focused, active: windowState.active }; },
+      onDidChangeWindowState: (listener: (state: { focused: boolean; active: boolean }) => void) => {
         windowListeners.add(listener);
         return { dispose: (): void => { windowListeners.delete(listener); } };
       },
@@ -133,9 +134,10 @@ export function createVscodeStub(): VscodeStub {
         listener({ affectsConfiguration: (section: string) => key === section || key.startsWith(`${section}.`) });
       }
     },
-    fireWindowState(focused: boolean): void {
+    fireWindowState(focused: boolean, active: boolean = focused): void {
       windowState.focused = focused;
-      for (const listener of [...windowListeners]) listener({ focused });
+      windowState.active = active;
+      for (const listener of [...windowListeners]) listener({ focused, active });
     }
   };
 }

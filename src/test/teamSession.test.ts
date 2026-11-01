@@ -17,6 +17,7 @@ import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
 import { newEventId, newTeamId } from '../team/identity';
 import { NEUTRAL_IDENTITY_ENV, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
+import { UNFOCUSED_POLL_MS } from '../team/syncScheduler';
 import type { TransportStatus } from '../team/transport';
 import { TrustPinError, parseTeamFile } from '../team/teamFile';
 import { teamMaterializer } from '../domain/team/materialize';
@@ -33,7 +34,7 @@ const sessionModule = require('../services/team/teamSession') as typeof import('
 const barModule = require('../services/team/teamStatusBar') as typeof import('../services/team/teamStatusBar');
 test.after(() => { uninstall(); });
 
-const { TeamSession, UPDATE_EXTENSION_TEXT, READ_ONLY_TEXT, createVscodeTeamSession, formatVerifyReport, projectAuditSink, TEAM_OUTPUT_CHANNEL } = sessionModule;
+const { TeamSession, UPDATE_EXTENSION_TEXT, READ_ONLY_TEXT, createVscodeTeamSession, focusTransitions, formatVerifyReport, projectAuditSink, TEAM_OUTPUT_CHANNEL } = sessionModule;
 const { PAUSED_REWRITTEN_TEXT, PAUSED_UNREACHABLE_TEXT, createTeamStatusBar } = barModule;
 const statusTextFor = (status: TransportStatus): { text: string; tooltip: string } => barModule.statusText(status, TEAM_NAME);
 type Session = Awaited<ReturnType<typeof TeamSession.start>>;
@@ -90,6 +91,8 @@ function resetStub(): void {
   stub.configUpdates.length = 0;
   stub.inputAnswers.length = 0;
   stub.messageAnswers.length = 0;
+  // One test's window focus must never leak into the next.
+  stub.fireWindowState(true, true);
 }
 
 // A fixture with a bare remote, the clone the session runs in ("a"), a clone for raw pushes, and the genesis already on the remote.
@@ -389,11 +392,13 @@ test('an unreachable remote pauses with a redacted reason, backs off to 10 minut
     assert.equal(started.lines.filter((line) => line.startsWith(PAUSED_UNREACHABLE_TEXT)).length, 1, 'the paused state is written once while it lasts');
 
     const before = rig.fetches.count;
+    started.session.focusChanged(false);
     started.session.focusChanged(true);
     await until(() => rig.fetches.count > before, 'focus to retry at once');
 
     gitIn(rig.projectRoot, ['remote', 'set-url', 'origin', rig.fixture.remote]);
     await until(() => rig.timers.live.length === 1, 'the retry to settle');
+    started.session.focusChanged(false);
     started.session.focusChanged(true);
     await until(() => lastItem().text === `Team: ${TEAM_NAME}`, 'the status bar to recover');
     assert.ok(started.lines.includes('Team sync is working again.'));
@@ -475,6 +480,7 @@ test('createVscodeTeamSession wires focus, the pollSeconds setting and its dispo
 
       const firstForgery = tamperedEvent(rig, 3);
       rawPush(rig.fixture.clones['raw'] as string, [firstForgery], 'raw: forgery one');
+      stub.fireWindowState(false);
       stub.fireWindowState(true);
       await until(() => lines.some((line) => line.startsWith(`Rejected event ${firstForgery.id}`)), 'a focus event to fetch at once');
 
@@ -487,6 +493,56 @@ test('createVscodeTeamSession wires focus, the pollSeconds setting and its dispo
       for (const disposable of context.subscriptions) disposable.dispose();
     }
     assert.equal(lastItem().disposed, true);
+  });
+});
+
+test('focusTransitions forwards only real focus changes', () => {
+  const forwarded: boolean[] = [];
+  const listener = focusTransitions(true, (focused) => { forwarded.push(focused); });
+  for (const state of [
+    { focused: true, active: false }, { focused: false, active: true }, { focused: false, active: false },
+    { focused: true, active: true }, { focused: true, active: true }
+  ]) listener(state);
+  assert.deepEqual(forwarded, [false, true]);
+});
+
+test('window-state events that only change activity neither re-arm the poll nor sync, and real focus changes still do (G-60-1)', async () => {
+  await withRig(async (rig) => {
+    stub.setConfig('nearAi.team.pollSeconds', 20);
+    const context = { globalStorageUri: { fsPath: rig.globalStorage }, secrets: rig.owner.secrets, subscriptions: [] as Array<{ dispose(): void }> };
+    const channel = (stub.vscode as { window: { createOutputChannel(name: string): { appendLine(line: string): void; show(): void } } }).window.createOutputChannel(TEAM_OUTPUT_CHANNEL);
+    const session = await createVscodeTeamSession(context as never, rig.projectRoot, rig.teamFile, channel, { timers: rig.timers, git: rig.git });
+    try {
+      await until(() => rig.timers.live.length === 1, 'exactly one pending poll');
+      assert.deepEqual(rig.timers.delays(), [20_000]);
+      const pending = rig.timers.live[0] as Request;
+      const requestCount = rig.timers.requests.length;
+      const fetchCount = rig.fetches.count;
+
+      for (let index = 0; index < 36; index += 1) {
+        stub.fireWindowState(true, index % 2 === 1);
+        assert.equal(rig.timers.requests.length, requestCount, `activity-only event ${index} requested no timer`);
+        assert.equal(pending.cleared, false, `activity-only event ${index} left the pending poll alone`);
+      }
+
+      stub.fireWindowState(false, true);
+      assert.equal(rig.timers.requests.length, requestCount + 1, 'losing focus re-arms exactly once');
+      assert.equal(pending.cleared, true, 'the focused poll was replaced');
+      const unfocused = rig.timers.requests[requestCount] as Request;
+      assert.ok(unfocused.ms <= UNFOCUSED_POLL_MS && unfocused.ms >= UNFOCUSED_POLL_MS - 10_000, `the unfocused delay counts from the last run, got ${unfocused.ms}`);
+
+      stub.fireWindowState(false, false);
+      assert.equal(rig.timers.requests.length, requestCount + 1, 'an activity-only change after the loss requests no timer');
+      assert.equal(unfocused.cleared, false, 'and leaves the unfocused poll alone');
+      for (let index = 0; index < 5; index += 1) await turn();
+      assert.equal(rig.fetches.count, fetchCount, 'no event so far started a sync');
+
+      stub.fireWindowState(true, true);
+      await until(() => rig.fetches.count > fetchCount, 'a real focus gain to sync at once');
+      await until(() => rig.timers.live.length === 1, 'the gain run to settle');
+    } finally {
+      for (const disposable of context.subscriptions) disposable.dispose();
+    }
   });
 });
 

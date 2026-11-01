@@ -43,7 +43,7 @@ function deferred(): Deferred {
   return { promise, resolve, reject };
 }
 
-interface Harness { scheduler: SyncScheduler; timers: FakeTimers; runs: Deferred[]; errors: unknown[]; focus: { value: boolean }; poll: { value: number } }
+interface Harness { scheduler: SyncScheduler; timers: FakeTimers; runs: Deferred[]; errors: unknown[]; focus: { value: boolean }; poll: { value: number }; runCount: { value: number } }
 
 // Each run waits on a deferred the test settles, so the test controls when a run ends and what it reports.
 function harness(options: { focused?: boolean; pollSeconds?: number; instant?: Array<boolean | Error> } = {}): Harness {
@@ -53,8 +53,10 @@ function harness(options: { focused?: boolean; pollSeconds?: number; instant?: A
   const focus = { value: options.focused ?? true };
   const poll = { value: options.pollSeconds ?? 15 };
   const instant = [...(options.instant ?? [])];
+  const runCount = { value: 0 };
   const scheduler = new SyncScheduler({
     run: () => {
+      runCount.value += 1;
       const next = instant.shift();
       if (next instanceof Error) return Promise.reject(next);
       if (next !== undefined) return Promise.resolve(next);
@@ -67,7 +69,7 @@ function harness(options: { focused?: boolean; pollSeconds?: number; instant?: A
     timers,
     onError: (error) => { errors.push(error); }
   });
-  return { scheduler, timers, runs, errors, focus, poll };
+  return { scheduler, timers, runs, errors, focus, poll, runCount };
 }
 
 test('start runs once at once, then waits pollSeconds when focused', async () => {
@@ -174,6 +176,30 @@ test('focusChanged(false) reschedules with the unfocused interval', async () => 
   assert.equal(h.timers.requests[0]?.cleared, true);
   assert.deepEqual(h.timers.delays(), [15_000, UNFOCUSED_POLL_MS]);
   h.scheduler.stop();
+});
+
+test('a focus event that does not change focus neither re-arms the wait nor starts a run', async () => {
+  const focusedHarness = harness({ instant: [true] });
+  focusedHarness.scheduler.start();
+  await settle();
+  assert.deepEqual(focusedHarness.timers.delays(), [15_000]);
+  for (let index = 0; index < 10; index += 1) focusedHarness.scheduler.focusChanged(true);
+  await settle();
+  assert.equal(focusedHarness.timers.requests.length, 1, 'no new timer was requested');
+  assert.equal(focusedHarness.timers.requests[0]?.cleared, false, 'the pending timer was not cleared');
+  assert.equal(focusedHarness.runCount.value, 1, 'no run was started');
+  focusedHarness.scheduler.stop();
+
+  const unfocusedHarness = harness({ focused: false, instant: [true] });
+  unfocusedHarness.scheduler.start();
+  await settle();
+  assert.deepEqual(unfocusedHarness.timers.delays(), [UNFOCUSED_POLL_MS]);
+  for (let index = 0; index < 10; index += 1) unfocusedHarness.scheduler.focusChanged(false);
+  await settle();
+  assert.equal(unfocusedHarness.timers.requests.length, 1, 'no new timer was requested');
+  assert.equal(unfocusedHarness.timers.requests[0]?.cleared, false, 'the pending timer was not cleared');
+  assert.equal(unfocusedHarness.runCount.value, 1, 'no run was started');
+  unfocusedHarness.scheduler.stop();
 });
 
 test('losing focus during a run applies the unfocused interval when the run ends', async () => {
