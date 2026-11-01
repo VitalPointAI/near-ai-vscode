@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { canonicalize } from '../domain/team/canonical';
+import { isGitRefName } from '../domain/team/policy';
 import { assertNoSecrets } from '../domain/team/secrets';
 import type { DeviceRef, NearLink, TeamFile } from '../domain/team/types';
 import { AT_PATTERN, EVENT_ID_PATTERN, TEAM_ID_PATTERN, isRecord, validateDeviceRef, validateName } from '../domain/team/validate';
@@ -61,10 +62,8 @@ function checked(reason: string | undefined, field: string): void {
 }
 
 function validRef(ref: unknown): ref is string {
-  if (typeof ref !== 'string' || !COORDINATION_REF_PATTERN.test(ref)) return false;
-  if (ref.includes('..') || ref.includes('//') || ref.endsWith('/') || ref.endsWith('.lock')) return false;
-  // Git refuses a path component that starts with a dot or ends in .lock, so a ref like that could never be a real branch.
-  return ref.split('/').every((part) => !part.startsWith('.') && !part.endsWith('.lock'));
+  // The pattern keeps the coordination ref to a plain alphabet; the shared validator applies git's own rules (WR-09).
+  return typeof ref === 'string' && COORDINATION_REF_PATTERN.test(ref) && isGitRefName(ref);
 }
 
 function parseNear(value: unknown): NearLink {

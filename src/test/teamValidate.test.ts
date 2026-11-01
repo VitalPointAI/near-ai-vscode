@@ -1,9 +1,10 @@
 // Schema tests for the team event envelope, the ten Phase 60 bodies and the policy (D-07, D-08, D-09 step 1, D-30, D-31).
 // Reasons are asserted verbatim: they are the fixed strings the materialiser and the UI show.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { MAX_EVENT_BYTES, canonicalize, eventPath } from '../domain/team/canonical';
-import { applyPolicyChanges, defaultTeamPolicy, validatePolicy, validatePolicyChanges } from '../domain/team/policy';
+import { applyPolicyChanges, defaultTeamPolicy, isGitRefName, validatePolicy, validatePolicyChanges } from '../domain/team/policy';
 import { parseEventFile, validateBody, validateDeviceRef, validateEnvelope, validateName } from '../domain/team/validate';
 import { IMPLEMENTED_EVENT_TYPES, TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { CommittedEvent, TeamEvent } from '../domain/team/types';
@@ -449,4 +450,35 @@ test('validatePolicyChanges needs at least one valid known key; applyPolicyChang
   after.verifyCommands.push('extra');
   assert.equal(before.verifyCommands.includes('extra'), false);
   assert.deepEqual(applyPolicyChanges(before, {}), before);
+});
+
+// WR-09: one branch-name validator that follows git. Names git accepts and the old ASCII-only pattern refused, and names the old pattern
+// accepted that git refuses, are both checked against `git check-ref-format --branch` itself.
+test('isGitRefName agrees with git check-ref-format --branch (WR-09)', () => {
+  const gitAccepts = (name: string): boolean => {
+    try {
+      execFileSync('git', ['check-ref-format', '--branch', name], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const names = [
+    'main', 'release/0.6', 'feature/c++', 'user@work/fix', 'topic#12', 'a,b', 'caf\u00E9/menu', '\u65E5\u672C\u8A9E', `long/${'x'.repeat(200)}`,
+    'a//b', 'release.lock', 'dir.lock/x', '.hidden', 'a/.hidden', 'trailing/', '/leading', 'ends.', 'a..b', 'a@{b', '-dash', 'has space',
+    'tilde~1', 'caret^', 'colon:x', 'question?', 'star*', 'bracket[0]', 'back\\slash', 'tab\tname', 'ctrl\u0001name', '', 'del\u007Fname'
+  ];
+  for (const name of names) assert.equal(isGitRefName(name), gitAccepts(name), `isGitRefName(${JSON.stringify(name)})`);
+  // `check-ref-format --branch @` expands to the current branch, so it is checked on its own: git branch refuses the name '@'.
+  assert.equal(isGitRefName('@'), false);
+  // Beyond git: invisible format characters could make a name read as something else, and a name past 255 characters is not a branch to sign.
+  assert.equal(isGitRefName('main\u202Egnp'), false);
+  assert.equal(isGitRefName('zero\u200Bwidth'), false);
+  assert.equal(isGitRefName('x'.repeat(256)), false);
+  for (const name of ['feature/c++', 'user@work/fix', 'caf\u00E9/menu']) {
+    assert.equal(validatePolicy(defaultTeamPolicy({ integrationBranch: name })), undefined, name);
+  }
+  for (const name of ['a//b', 'release.lock', 'trailing/']) {
+    assert.equal(validatePolicy(defaultTeamPolicy({ integrationBranch: name })), `${INVALID}: policy.integrationBranch`, name);
+  }
 });

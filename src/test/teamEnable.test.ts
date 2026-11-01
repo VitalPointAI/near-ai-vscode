@@ -155,6 +155,28 @@ test('enableDefaults reads the folder name, git identity, remote and branches', 
   });
 });
 
+test('Enable accepts valid git branch names that the old ASCII pattern refused and falls back to main for a name no rule allows (WR-09)', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const root = fixture.clones.a as string;
+    gitIn(root, ['branch', '-q', '-m', 'main', 'trunk']);
+    gitIn(root, ['checkout', '-q', '-b', 'feature/c++#1@caf\u00E9']);
+    const defaults = await enableDefaults(root);
+    assert.equal(defaults.integrationBranch, 'feature/c++#1@caf\u00E9');
+    const result = await enableTeamMode(inputFor(fixture, 'a', new MemorySecrets()));
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), true);
+  });
+  await withFixture(['a'], async (fixture) => {
+    const root = fixture.clones.a as string;
+    gitIn(root, ['branch', '-q', '-m', 'main', 'trunk']);
+    // Git allows a zero-width character in a branch name; the shared rules do not, so the default must not fail Enable.
+    gitIn(root, ['checkout', '-q', '-b', 'zero\u200Bwidth']);
+    assert.equal((await enableDefaults(root)).integrationBranch, 'main');
+    const result = await enableTeamMode(inputFor(fixture, 'a', new MemorySecrets()));
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+  });
+});
+
 test('Enable creates the team, the device key, the orphan coordination branch and a team.json-only commit, and never pushes the code branch', async () => {
   await withFixture(['a', 'b'], async (fixture) => {
     const root = fixture.clones.a as string;

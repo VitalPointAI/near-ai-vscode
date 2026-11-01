@@ -4,7 +4,7 @@
 // This module never imports vscode.
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { defaultTeamPolicy, validatePolicy } from '../domain/team/policy';
+import { defaultTeamPolicy, isGitRefName, validatePolicy } from '../domain/team/policy';
 import { SecretLeakError, assertNoSecrets } from '../domain/team/secrets';
 import type { TeamEvent, TeamFile, TeamState } from '../domain/team/types';
 import { validateName } from '../domain/team/validate';
@@ -125,7 +125,8 @@ export async function enableDefaults(projectRoot: string, git: GitRunner = runGi
   const main = await git(['show-ref', '--verify', '-q', 'refs/heads/main'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
   const defaults: EnableDefaults = {
     teamName: path.basename(path.resolve(projectRoot)), ownerName, ownerEmail, remote: DEFAULT_REMOTE,
-    integrationBranch: main.code === 0 ? 'main' : (branch === '' ? 'main' : branch)
+    // A current branch the shared name rules would refuse falls back to main, so Enable does not fail on a name the user never chose (WR-09).
+    integrationBranch: main.code === 0 || !isGitRefName(branch) ? 'main' : branch
   };
   if (branch !== '') defaults.branch = branch;
   return defaults;

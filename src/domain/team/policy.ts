@@ -21,7 +21,9 @@ export function defaultTeamPolicy(options: { integrationBranch?: string } = {}):
 // Policy validation (D-13, D-30). Every TeamPolicy key has one validator; the Record type makes a missing key a compile error.
 // Reasons are `invalid event body: <path>` where the path starts at the caller-supplied prefix.
 const DISPATCH_WEIGHT_KEYS: readonly DispatchWeight[] = ['roleFit', 'fileAffinity', 'continuity', 'capacity', 'budgetHeadroom', 'criticalPath'];
-const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+const MAX_REF_NAME = 255;
+// Characters git refuses in a ref name (check-ref-format) plus controls and invisible format characters, which could spoof what a person reads.
+const FORBIDDEN_REF_CHARACTERS = /[\u0000-\u0020\u007F-\u009F\s~^:?*[\\\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/;
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F\u2028\u2029]/;
 const MAX_BASIS_POINTS = 100_000;
 const WEIGHT_TOTAL_BP = 10000; // dispatch weights must sum to 10000 basis points
@@ -93,8 +95,18 @@ function isDispatchWeights(value: unknown): boolean {
   return total === WEIGHT_TOTAL_BP;
 }
 
+// One validator for every branch or ref name Team Mode signs or reads. It follows `git check-ref-format --branch`: any letters, digits and
+// punctuation git allows, but not the sequences it refuses (.., @{, //, a leading or trailing slash, a trailing dot, a component that
+// starts with a dot or ends in .lock) and not a leading dash, which a command line would read as an option.
+export function isGitRefName(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_REF_NAME) return false;
+  if (value === '@' || value.startsWith('-') || value.startsWith('/') || value.endsWith('/') || value.endsWith('.')) return false;
+  if (value.includes('..') || value.includes('//') || value.includes('@{') || FORBIDDEN_REF_CHARACTERS.test(value)) return false;
+  return value.split('/').every((part) => !part.startsWith('.') && !part.endsWith('.lock'));
+}
+
 function isIntegrationBranch(value: unknown): boolean {
-  return typeof value === 'string' && BRANCH_PATTERN.test(value) && !value.includes('..');
+  return isGitRefName(value);
 }
 
 const POLICY_CHECKS: Record<keyof TeamPolicy, PolicyCheck> = {
