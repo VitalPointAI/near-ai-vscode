@@ -11,6 +11,7 @@ import test from 'node:test';
 import { canonicalize, eventPath } from '../domain/team/canonical';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { TeamEvent, TeamFile } from '../domain/team/types';
+import { auditMarkFile, projectMarkScope } from '../team/auditMirror';
 import type { VerifyReport } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
 import { newEventId, newTeamId } from '../team/identity';
@@ -230,7 +231,7 @@ test('start creates the mirror, syncs once, shows Team: <name> and writes two te
     assert.deepEqual(rows.map((row) => row.metadata?.eventType), ['team.created', 'member.joined']);
     assert.equal(rows[0]?.metadata?.role, 'owner');
     assert.equal(rows[0]?.projectId, rig.teamFile.teamId);
-    const mark = JSON.parse(await fs.readFile(path.join(rig.globalStorage, 'team', rig.teamFile.teamId, 'audit-mark.json'), 'utf8')) as { lamport: number };
+    const mark = JSON.parse(await fs.readFile(auditMarkFile(path.join(rig.globalStorage, 'team', rig.teamFile.teamId), projectMarkScope(rig.projectRoot)), 'utf8')) as { lamport: number };
     assert.equal(mark.lamport, 2);
 
     first.session.dispose();
@@ -445,7 +446,7 @@ test('an audit write that does not reach disk is reported once, keeps the mark b
     const failures = started.lines.filter((line) => line.startsWith('Team audit mirror failed'));
     assert.equal(failures.length, 1, 'the same failure is written once, not at every poll');
     assert.ok(failures[0]?.includes('could not be saved'));
-    const markFile = path.join(rig.globalStorage, 'team', rig.teamFile.teamId, 'audit-mark.json');
+    const markFile = auditMarkFile(path.join(rig.globalStorage, 'team', rig.teamFile.teamId), projectMarkScope(rig.projectRoot));
     assert.equal(existsSync(markFile), false, 'the mark did not move past unwritten entries');
 
     rmSync(path.join(rig.projectRoot, '.planning'), { force: true });
@@ -577,5 +578,19 @@ test('a coordination branch deleted on the remote shows a log-missing status tha
     assert.equal(await started.session.sync(), true);
     assert.equal(lastItem().text, `Team: ${TEAM_NAME}`);
     assertPlainCopy(started.lines);
+  });
+});
+
+test('a second checkout of the same team on this computer still receives the roster entries in its own audit log (WR-11)', async () => {
+  await withRig(async (rig) => {
+    const first = await startSession(rig);
+    assert.equal((await auditRows(rig.projectRoot)).length, 2);
+    first.session.dispose();
+    // Same team, same global storage, another clone: it has its own audit file, so the first checkout's progress must not apply to it.
+    const otherRoot = rig.fixture.clones['raw'] as string;
+    const second = await startSession({ ...rig, projectRoot: otherRoot }, { timers: new FakeTimers() });
+    assert.deepEqual((await auditRows(otherRoot)).map((row) => row.metadata?.eventType), ['team.created', 'member.joined']);
+    assert.equal((await auditRows(rig.projectRoot)).length, 2, 'the first checkout is not written twice');
+    second.session.dispose();
   });
 });

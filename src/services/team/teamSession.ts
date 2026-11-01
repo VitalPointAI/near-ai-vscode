@@ -12,7 +12,7 @@ import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
 import type { GenesisAnchor, Role, TeamEvent, TeamFile, TeamState } from '../../domain/team/types';
 import { AuditStore } from '../auditStore';
 import type { SecretStorageLike } from '../auth';
-import { ROSTER_AUDIT_TYPES, fileMirrorMark, mirrorRosterEvents } from '../../team/auditMirror';
+import { ROSTER_AUDIT_TYPES, fileMirrorMark, mirrorRosterEvents, projectMarkScope } from '../../team/auditMirror';
 import type { AuditSink } from '../../team/auditMirror';
 import { SNAPSHOT_ALREADY_WRITTEN, TeamLog } from '../../team/eventLog';
 import type { TeamSigner, VerifyReport } from '../../team/eventLog';
@@ -365,7 +365,7 @@ export class TeamSession {
     const batch = [...this.pendingRoster];
     try {
       const roleOf = (_memberId: string, event: TeamEvent): Role | undefined => this.rosterRoles.get(event.id);
-      await mirrorRosterEvents(this.deps.audit, fileMirrorMark(this.storage), batch, roleOf);
+      await mirrorRosterEvents(this.deps.audit, fileMirrorMark(this.storage, projectMarkScope(this.deps.projectRoot)), batch, roleOf);
       for (const event of batch) this.rosterRoles.delete(event.id);
       this.pendingRoster = this.pendingRoster.filter((event) => !batch.includes(event));
       this.clearIssue('audit');

@@ -28,8 +28,18 @@ export interface MirrorMark {
   write(lamport: number): Promise<void>;
 }
 
-export function fileMirrorMark(storageDir: string): MirrorMark {
-  const file = path.resolve(storageDir, MARK_FILE);
+// The mark lives in per-team storage that every checkout of the team on this machine shares, but each project has its own audit file. Keying
+// the mark by project keeps a second clone or worktree from skipping entries its own audit log never received (WR-11).
+export function projectMarkScope(projectRoot: string): string {
+  return createHash('sha256').update(path.resolve(projectRoot)).digest('hex').slice(0, 16);
+}
+
+export function auditMarkFile(storageDir: string, scope?: string): string {
+  return path.resolve(storageDir, scope === undefined ? MARK_FILE : `audit-mark.${scope}.json`);
+}
+
+export function fileMirrorMark(storageDir: string, scope?: string): MirrorMark {
+  const file = auditMarkFile(storageDir, scope);
   return {
     async read(): Promise<number> {
       let text: string;
