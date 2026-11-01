@@ -7,7 +7,9 @@ export interface VscodeStub {
   vscode: unknown;
   outputChannels: Array<{ name: string; lines: string[] }>;
   statusBarItems: RecordedStatusBarItem[];
-  notifications: Array<{ level: 'info' | 'warn' | 'error'; message: string; actions: string[] }>;
+  notifications: Array<{ level: 'info' | 'warn' | 'error'; message: string }>;
+  // The action buttons of notifications[i], at the same index.
+  notificationActions: string[][];
   configUpdates: unknown[];
   commands: Map<string, (...args: unknown[]) => unknown>;
   // Answers handed to showInputBox and to the show*Message calls, in order. An empty queue answers undefined (dismissed).
@@ -27,6 +29,7 @@ export function createVscodeStub(): VscodeStub {
   const outputChannels: VscodeStub['outputChannels'] = [];
   const statusBarItems: VscodeStub['statusBarItems'] = [];
   const notifications: VscodeStub['notifications'] = [];
+  const notificationActions: string[][] = [];
   const configUpdates: unknown[] = [];
   const commands = new Map<string, (...args: unknown[]) => unknown>();
   const inputAnswers: VscodeStub['inputAnswers'] = [];
@@ -39,7 +42,8 @@ export function createVscodeStub(): VscodeStub {
   const windowState = { focused: true };
 
   const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...actions: string[]): Promise<string | undefined> => {
-    notifications.push({ level, message: text, actions });
+    notifications.push({ level, message: text });
+    notificationActions.push(actions);
     return messageAnswers.shift();
   };
 
@@ -119,7 +123,7 @@ export function createVscodeStub(): VscodeStub {
   };
 
   return {
-    vscode, outputChannels, statusBarItems, notifications, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
+    vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
     setWorkspaceFolders(paths: string[]): void {
       workspaceFolders = paths.length === 0 ? undefined : paths.map((fsPath, index) => ({ uri: { fsPath }, name: fsPath.split('/').pop() ?? '', index }));
     },

@@ -61,6 +61,7 @@ function resetStub(): void {
   stub.outputChannels.length = 0;
   stub.statusBarItems.length = 0;
   stub.notifications.length = 0;
+  stub.notificationActions.length = 0;
   stub.configUpdates.length = 0;
   stub.inputAnswers.length = 0;
   stub.messageAnswers.length = 0;
@@ -141,7 +142,8 @@ test('Verify Team Log in a solo project only explains how to turn Team Mode on',
     await handle.ready;
     await stub.commands.get(VERIFY_LOG_COMMAND)?.();
     timers.restore();
-    assert.deepEqual(stub.notifications, [{ level: 'info', message: SOLO_TEXT, actions: [] }]);
+    assert.deepEqual(stub.notifications, [{ level: 'info', message: SOLO_TEXT }]);
+    assert.deepEqual(stub.notificationActions, [[]], 'the explanation has no buttons');
     assert.equal(SOLO_TEXT, 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.');
     assert.deepEqual(timers.setTimeoutCalls, []);
     assert.equal(timers.setIntervalCalls, 0);
