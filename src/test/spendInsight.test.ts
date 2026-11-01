@@ -12,7 +12,9 @@ import { NearAiError } from '../services/nearAiClient';
 import { SpendAccount } from '../services/spendAccount';
 import { BALANCE_UNAVAILABLE_TEXT, buildSpendInsight, burnRate, burnView, CONSOLE_URL, costSource, creditsView, depletion, describeUsageError, durationText, emptyCounts, periodFigure, periodStarts, SpendPeriod, tokenStatus, tokenTestMessage, TOP_UP_TOOLTIP } from '../services/spendInsight';
 import { emptyTotals, SpendLedger } from '../services/spendLedger';
-import { NearUsageSummary, ReportingApi } from '../services/spendReconciler';
+import { NOT_OFFERED_RETRY_MS, NearUsageSummary, ReportingApi } from '../services/spendReconciler';
+import { reportingTokenHint, TOKEN_FAILING_TEXT, TOKEN_SET_TEXT, TOKEN_UNAVAILABLE_TEXT, TOKEN_WAITING_TEXT } from '../services/reportingToken';
+import { spendView } from '../services/spendAccount';
 
 const at = (text: string) => new Date(text).getTime();
 const hhmm = (time: number) => new Date(time).toISOString().slice(11, 16);
@@ -303,4 +305,69 @@ test('the page builder keeps the cost source honest when the token is off', () =
   assert.ok(insight.periods.every((figure) => figure.source === 'estimated'));
   assert.equal(insight.token.state, 'off');
   assert.equal(insight.topUp.text, 'Top up credits');
+});
+
+test('NEAR answering 404 to the usage summary is "not offered yet": the token is kept, nothing reads as failing, and NEAR is asked hourly', async () => {
+  // As of November 2026 cloud-api.near.ai answers 404 to the documented /usage/summary before checking any token.
+  const notFound = new NearAiError(404, 'Not found', false);
+  const mapped = describeUsageError(notFound, 'summary');
+  assert.equal(mapped.code, 'not-offered');
+  assert.match(mapped.message, /does not offer the usage summary yet/);
+  assert.match(mapped.message, /token is kept/);
+  assert.equal(describeUsageError(notFound, 'api-key').code, 'unexpected', 'a 404 from check_api_key is still unexpected');
+  assert.match(tokenTestMessage({ ok: false, ...mapped }), /^The usage reporting token is saved\. NEAR AI Cloud does not offer/);
+  assert.doesNotMatch(tokenTestMessage({ ok: false, ...mapped }), /test failed/);
+
+  let clock = at('2026-11-01T16:00:00Z');
+  const reporting = new FakeReporting(() => 2_000_000_000);
+  const usage = new NearUsageSummary({ now: () => clock, dayStart: () => at('2026-11-01T04:00:00Z'), token: async () => TOKEN, active: () => true });
+  usage.attach(reporting);
+  assert.equal(usage.nearStatus(), 'waiting', 'nothing asked yet');
+  reporting.fail = { stage: 'summary', error: notFound };
+  await usage.tick();
+  assert.equal(usage.nearStatus(), 'unavailable');
+  assert.equal(usage.problem, undefined, 'not a failing token');
+  assert.match(usage.unavailable ?? '', /does not offer/);
+  assert.equal(usage.tokenSeen, true);
+  const asked = usage.polls;
+  clock += NOT_OFFERED_RETRY_MS - 1_000;
+  await usage.tick();
+  assert.equal(usage.polls, asked, 'not asked again within the hour');
+  clock += 2_000;
+  reporting.fail = undefined;
+  await usage.tick();
+  assert.equal(usage.polls, asked + 1, 'asked again after an hour');
+  assert.equal(usage.nearStatus(), 'working', 'once NEAR offers it, its total is used with no action');
+  assert.equal(usage.unavailable, undefined);
+  reporting.fail = { stage: 'summary', error: new NearAiError(401, 'revoked', false) };
+  await usage.testToken();
+  assert.equal(usage.nearStatus(), 'failing', 'a rejected token is still a failure');
+
+  const status = tokenStatus({ tokenState: 'set', unavailable: mapped.message });
+  assert.equal(status.state, 'unavailable');
+  assert.equal(status.problem, undefined, 'no problem box for something nobody can fix');
+  assert.match(status.text, /token is set, but NEAR AI Cloud does not offer/);
+});
+
+test('every token line agrees with whether a token is stored and how NEAR is answering', () => {
+  assert.equal(reportingTokenHint('set').text, TOKEN_SET_TEXT, 'working is unchanged');
+  assert.equal(reportingTokenHint('set', 'working').text, TOKEN_SET_TEXT);
+  assert.equal(reportingTokenHint('set', 'waiting').text, TOKEN_WAITING_TEXT);
+  assert.equal(reportingTokenHint('set', 'unavailable').text, TOKEN_UNAVAILABLE_TEXT);
+  assert.equal(reportingTokenHint('set', 'failing').text, TOKEN_FAILING_TEXT);
+  for (const near of ['waiting', 'unavailable', 'failing'] as const) {
+    const hint = reportingTokenHint('set', near);
+    assert.doesNotMatch(hint.text, /Using NEAR/, `${near} never claims NEAR's total is in use`);
+    assert.match(hint.title, /this computer's ledger/);
+  }
+  assert.doesNotMatch(reportingTokenHint('missing', 'waiting').text, /token set/i);
+
+  const totals = emptyTotals();
+  const setTip = (token: { unavailable?: string; tokenSet?: boolean }) => spendView(totals, 'today', undefined, undefined, token).tooltip;
+  assert.match(setTip({}), /Set a usage reporting token/, 'without a token it says how to set one');
+  for (const token of [{ tokenSet: true }, { unavailable: 'x', tokenSet: true }]) {
+    assert.doesNotMatch(setTip(token), /Set a usage reporting token/, 'with a token stored it never says to set one');
+    assert.match(setTip(token), /A usage reporting token is set/);
+  }
+  assert.match(setTip({ unavailable: 'x', tokenSet: true }), /does not offer its usage summary yet/);
 });

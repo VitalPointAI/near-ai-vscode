@@ -148,6 +148,25 @@ export async function startLoopbackSignIn(options: { external?: (local: string) 
   return { callback, local, tokens, close: () => finish(new SignInError('cancelled', 'Sign-in was cancelled.')) };
 }
 
+/**
+ * The session from the listener or from an address the user pastes, whichever comes first. A
+ * browser-based VS Code (code-server) can be open on another machine, where the forwarded callback
+ * (http://localhost:8080/proxy/<port>/…) is that machine's localhost: the page doesn't load there,
+ * so its address, whose fragment holds the session, is pasted instead. The loser is closed. A paste
+ * box dismissed without an address cancels the sign-in.
+ */
+export async function firstSession(loopback: Pick<LoopbackSignIn, 'tokens' | 'close'>, paste: { value: Promise<string | undefined>; dismiss(): void }): Promise<SessionTokens | undefined> {
+  const pasted = paste.value.then((value) => ({ value }));
+  try {
+    const first = await Promise.race([loopback.tokens.then((tokens) => ({ tokens })), pasted]);
+    if ('tokens' in first) return first.tokens;
+    loopback.close();
+    return first.value === undefined ? undefined : parseCallback(first.value);
+  } finally {
+    paste.dismiss();
+  }
+}
+
 /** The page NEAR redirects to: hands the fragment to the listener and takes it off the address bar. */
 function callbackPage(nonce: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>NEAR AI for VS Code</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>

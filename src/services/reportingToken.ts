@@ -28,8 +28,18 @@ export interface ReportingTokenHint {
 export const TOKEN_MISSING_TEXT = 'Match the NEAR console exactly: sign in to set up usage reporting';
 export const TOKEN_SET_TEXT = 'Using NEAR\'s total';
 export const TOKEN_OFF_TEXT = 'Match the NEAR console exactly: turn on NEAR\'s total';
+export const TOKEN_WAITING_TEXT = 'Usage token set: waiting for NEAR\'s total';
+export const TOKEN_UNAVAILABLE_TEXT = 'Usage token set: NEAR does not offer its total yet';
+export const TOKEN_FAILING_TEXT = 'Usage token set: NEAR\'s total failed (fix token)';
 
-export function reportingTokenHint(state: ReportingTokenState): ReportingTokenHint {
+/**
+ * The link for a token's state. With a token stored, `near` says how NEAR's total is doing, so the
+ * link never claims NEAR's total is in use while the figures are this computer's.
+ */
+export function reportingTokenHint(state: ReportingTokenState, near: 'working' | 'waiting' | 'unavailable' | 'failing' = 'working'): ReportingTokenHint {
+  if (state === 'set' && near === 'waiting') return { state, text: TOKEN_WAITING_TEXT, title: 'A usage reporting token is set. NEAR AI Cloud has not been asked for its total yet, so spend figures are this computer\'s ledger for now. Click to replace the token.', command: SET_REPORTING_TOKEN_COMMAND, args: [] };
+  if (state === 'set' && near === 'unavailable') return { state, text: TOKEN_UNAVAILABLE_TEXT, title: 'A usage reporting token is set, but NEAR AI Cloud does not offer its usage summary yet (it answers HTTP 404), so spend figures are this computer\'s ledger. The token is kept and NEAR is asked again every hour; nothing needs doing. Click to replace the token.', command: SET_REPORTING_TOKEN_COMMAND, args: [] };
+  if (state === 'set' && near === 'failing') return { state, text: TOKEN_FAILING_TEXT, title: 'A usage reporting token is set, but NEAR\'s usage summary failed, so spend figures are this computer\'s ledger. Agent Activity shows NEAR\'s answer. Click to sign in again and make a new token.', command: SET_REPORTING_TOKEN_COMMAND, args: [] };
   if (state === 'set') return { state, text: TOKEN_SET_TEXT, title: 'Spend figures show NEAR AI Cloud\'s own total for this API key, the figure the console shows (a usage reporting token is set). Click to replace the token; NEAR AI: Clear Usage Reporting Token removes it.', command: SET_REPORTING_TOKEN_COMMAND, args: [] };
   if (state === 'off') return { state, text: TOKEN_OFF_TEXT, title: `A usage reporting token is set, but ${USE_NEAR_TOTAL_SETTING} is off, so spend figures are this computer's ledger. Click to open the setting.`, command: 'workbench.action.openSettings', args: [USE_NEAR_TOTAL_SETTING] };
   return { state, text: TOKEN_MISSING_TEXT, title: `Spend figures are this computer's ledger, which can differ from the NEAR AI console. With a usage reporting token they show NEAR's own total for this API key. ${REPORTING_TOKEN_HOW_TO}`, command: SET_REPORTING_TOKEN_COMMAND, args: [] };

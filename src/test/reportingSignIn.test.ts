@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  FetchLike, isLoopbackUrl, loginUrl, parseCallback, PASTE_CALLBACK, reportingTokenName, setUpReportingToken, SignInError, startLoopbackSignIn
+  FetchLike, firstSession, isLoopbackUrl, loginUrl, parseCallback, PASTE_CALLBACK, reportingTokenName, setUpReportingToken, SignInError, startLoopbackSignIn
 } from '../services/reportingSignIn';
 
 const BASE = 'https://cloud-api.near.ai/v1';
@@ -91,6 +91,51 @@ test('the listener accepts the forwarded origin of a remote window, refuses a no
   const cancelled = await startLoopbackSignIn({ signal: abort.signal });
   abort.abort();
   assert.equal(await code(cancelled.tokens), 'cancelled');
+});
+
+test('a browser-based window takes the session from the listener or a pasted address, whichever comes first', async () => {
+  const fragment = `token=${encodeURIComponent(SESSION.accessToken)}&refresh_token=${encodeURIComponent(SESSION.refreshToken)}`;
+  const box = () => {
+    let enter: (value: string | undefined) => void = () => undefined;
+    const paste = { value: new Promise<string | undefined>((resolve) => { enter = resolve; }), dismissed: false, dismiss() { paste.dismissed = true; } };
+    return { paste, enter: (value: string | undefined) => enter(value) };
+  };
+
+  // code-server opened on this machine: the page loads, the listener gets the session, the box goes.
+  const local = await startLoopbackSignIn();
+  const reached = box();
+  const fromListener = firstSession(local, reached.paste);
+  assert.equal((await fetch(local.local, { method: 'POST', body: fragment, headers: { origin: new URL(local.local).origin } })).status, 200);
+  assert.deepEqual(await fromListener, SESSION);
+  assert.equal(reached.paste.dismissed, true);
+
+  // Opened from another machine (over Tailscale): the forwarded localhost doesn't load there, so the
+  // address is pasted, and the listener is closed.
+  const remote = await startLoopbackSignIn({ external: async (url) => url.replace(/127\.0\.0\.1:\d+/, 'localhost:8080/proxy/4321') });
+  const pasted = box();
+  const fromPaste = firstSession(remote, pasted.paste);
+  pasted.enter(`${remote.callback}#${fragment}`);
+  assert.deepEqual(await fromPaste, SESSION);
+  assert.equal(await code(remote.tokens), 'cancelled');
+
+  // Dismissing the box cancels; an error from NEAR in the pasted address is that error.
+  const dismissed = await startLoopbackSignIn();
+  const escaped = box();
+  const none = firstSession(dismissed, escaped.paste);
+  escaped.enter(undefined);
+  assert.equal(await none, undefined);
+  assert.equal(await code(dismissed.tokens), 'cancelled');
+  const denied = await startLoopbackSignIn();
+  const refused = box();
+  const failing = firstSession(denied, refused.paste);
+  refused.enter(`${denied.callback}#error=access_denied`);
+  assert.equal(await code(failing), 'denied');
+
+  // The listener timing out ends it too, and the box goes.
+  const slow = await startLoopbackSignIn({ timeoutMs: 20 });
+  const waiting = box();
+  assert.equal(await code(firstSession(slow, waiting.paste)), 'timeout');
+  assert.equal(waiting.paste.dismissed, true);
 });
 
 interface Call { url: string; method: string; headers: Record<string, string>; body?: string }

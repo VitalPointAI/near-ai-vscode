@@ -271,6 +271,12 @@ response, in batches, even after a reload. Figures say how sure they are:
   and reads the key's usage summary every minute while runs are going and
   every 5 minutes otherwise.
 
+  As of November 2026, NEAR AI Cloud documents this usage summary but does not
+  serve it yet: it answers HTTP 404. While that lasts, the token is kept, the
+  figures are this computer's own, nothing is marked as failing, and NEAR is
+  asked again every hour. NEAR's total appears without any action once NEAR
+  turns the summary on.
+
 **Where to set the usage reporting token.** Any of these runs **NEAR AI: Set
 Usage Reporting Token**:
 
@@ -280,7 +286,11 @@ Usage Reporting Token**:
   NEAR's total once a token is set; a token pasted into any NEAR AI setting is
   moved to secret storage and removed from settings.
 - **The chat**: below the status line, "Match the NEAR console exactly: sign
-  in to set up usage reporting" (or "Using NEAR's total" once one is set).
+  in to set up usage reporting" when no token is set. With a token set, the
+  same link says how NEAR's total is doing: "Using NEAR's total" while NEAR
+  answers, "Usage token set: waiting for NEAR's total" before the first
+  answer, "Usage token set: NEAR does not offer its total yet" while NEAR
+  answers 404, or "Usage token set: NEAR's total failed (fix token)".
 - **Spending Limits**: **Set usage reporting token…** and **Clear usage
   reporting token**.
 - **Agent Activity**, above the overview's cost, and **Elsewhere** in the Tools tab.
@@ -304,9 +314,12 @@ offers **Sign in with GitHub** or **Sign in with Google**:
 
 If NEAR ever rejects the token (revoked, or the API key moved to another
 organization), the Spend section says so and **Fix token** signs in again. In
-a browser-based VS Code, where the browser can't reach the listener, the
-sign-in ends on a page that won't load: paste that page's address into the box
-VS Code shows. **Paste a token** takes one you already have (an owner or admin
+a browser-based VS Code such as code-server, VS Code also shows a box for the
+sign-in address while it waits. If the browser is on the same computer, the
+sign-in finishes on its own and the box closes. If it is on another computer
+(for example code-server over Tailscale), the sign-in ends on a page that
+won't load, because its `localhost` address is that computer's: copy that
+page's whole address into the box. **Paste a token** takes one you already have (an owner or admin
 can create one with `POST /v1/organizations/{org_id}/reporting-tokens`; see
 NEAR's [Usage Reporting API](https://docs.near.ai/)). It starts with `rpt-`.
 

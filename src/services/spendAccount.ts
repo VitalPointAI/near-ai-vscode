@@ -113,9 +113,9 @@ export class SpendAccount implements SpendSink {
     const since = this.dayStart();
     const totals = this.ledger.totals({ since });
     const near = this.usage.today();
-    const view = spendView(totals, 'today', near, this.usage.problem);
+    const view = spendView(totals, 'today', near, this.usage.problem, { unavailable: this.usage.unavailable, tokenSet: this.usage.tokenSeen });
     // Where the figure comes from, first: NEAR's billing, per-request actuals, or list-price estimates.
-    const source = costSource({ tokenState: near || this.usage.problem ? 'set' : 'missing', near, counts: this.ledger.requestCounts({ since }) });
+    const source = costSource({ tokenState: near || this.usage.problem || this.usage.unavailable || this.usage.tokenSeen ? 'set' : 'missing', near, unavailable: this.usage.unavailable, counts: this.ledger.requestCounts({ since }) });
     return { ...view, tooltip: `Cost source: ${source.label}. ${source.detail} ${view.tooltip}` };
   }
 
@@ -157,6 +157,7 @@ export class SpendAccount implements SpendSink {
       ...(nearLastWeek && now - nearLastWeek.at < 900_000 ? { nearLastWeek } : {}),
       okAt: this.usage.okAt,
       problem: this.usage.problem,
+      unavailable: this.usage.unavailable,
       ledger,
       ledgerLastWeekUsd: nanoToUsd(totalNanoUsd(this.ledger.totals({ since: lastWeek })))
     });
@@ -202,7 +203,7 @@ const money = (usd: number) => `$${usd.toFixed(2)}`;
 const fine = (usd: number) => `$${usd.toFixed(usd > 0 && usd < 0.01 ? 4 : 2)}`;
 
 /** Formats a window's totals with where the figure comes from. */
-export function spendView(totals: SpendTotals, window: SpendWindow, near?: NearUsageFigure, nearProblem?: string): SpendView {
+export function spendView(totals: SpendTotals, window: SpendWindow, near?: NearUsageFigure, nearProblem?: string, token: { unavailable?: string; tokenSet?: boolean } = {}): SpendView {
   const confirmed = nanoToUsd(totals.confirmedNanoUsd);
   const pending = nanoToUsd(totals.pendingNanoUsd);
   const estimated = nanoToUsd(totals.estimatedNanoUsd);
@@ -222,7 +223,11 @@ export function spendView(totals: SpendTotals, window: SpendWindow, near?: NearU
     return { totals, near, usd: Math.max(usd, local), source: 'near', text: `${money(usd)}${suffix} (NEAR)`, tooltip: `NEAR AI Cloud's usage summary for this API key today, from every computer using it (updated ${at}). ${thisComputer} ${explain}` };
   }
   const source: SpendView['source'] = totals.requests === 0 ? 'none' : pending > 0 || estimated > 0 ? 'pending' : 'confirmed';
-  const tokenNote = window === 'today' ? (nearProblem ? ` NEAR's own total is unavailable: ${nearProblem}` : ' Set a usage reporting token (NEAR AI: Set Usage Reporting Token) to show NEAR\'s own total for this key, including other computers.') : '';
+  const tokenNote = window !== 'today' ? ''
+    : nearProblem ? ` NEAR's own total is unavailable: ${nearProblem}`
+    : token.unavailable ? ' A usage reporting token is set, but NEAR AI Cloud does not offer its usage summary yet, so this is this computer\'s figure. NEAR is asked again every hour.'
+    : token.tokenSet ? ' A usage reporting token is set; NEAR\'s own total for this key shows here once NEAR answers.'
+    : ' Set a usage reporting token (NEAR AI: Set Usage Reporting Token) to show NEAR\'s own total for this key, including other computers.';
   return { totals, usd: local, source, text: localText, tooltip: `${thisComputer} ${explain}${tokenNote}` };
 }
 
