@@ -373,6 +373,60 @@ test('a genesis push whose reply was lost but that landed is detected and Enable
   });
 });
 
+test('a genesis push that may have landed, with the remote unreachable afterwards, keeps the device key and the mirror (WR-01)', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const git = faultRunner(runGit, [
+      { when: (args) => args.includes('push') && args.includes('--porcelain'), runReal: true, times: 1, replace: () => fakeGitResult(1, '', 'fatal: the remote end hung up unexpectedly') },
+      { when: (args) => args.includes('fetch'), replace: () => fakeGitResult(128, '', 'fatal: unable to access the remote: Could not resolve host') }
+    ]);
+    const secrets = new MemorySecrets();
+    const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git }));
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, 'push-unconfirmed');
+    assert.match(result.message, /may have been created/);
+    assert.match(result.message, /git ls-remote origin refs\/heads\/near-ai\/coordination/);
+    assert.equal(secrets.values.size, 1, 'the only owner key is kept');
+    assert.equal((await teamFolders(fixture.storageDir('a'))).length, 1, 'the mirror folder is kept');
+    assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH), 'the push did land');
+    assert.equal(existsSync(path.join(fixture.clones.a as string, TEAM_FILE_REL)), false);
+  });
+});
+
+test('a genesis push that throws before reaching the remote removes the device key and the mirror (WR-02)', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const git: GitRunner = async (args, options) => {
+      if (args.includes('push') && args.includes('--porcelain')) throw new Error('disk full while pushing');
+      if (args.includes('fetch')) throw new Error('mirror unusable');
+      return runGit(args, options);
+    };
+    const secrets = new MemorySecrets();
+    const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git }));
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, 'push-failed');
+    assert.match(result.message, /disk full while pushing/);
+    assert.equal(secrets.values.size, 0, 'the device key is gone');
+    assert.deepEqual(await teamFolders(fixture.storageDir('a')), [], 'the mirror is gone');
+    assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
+  });
+});
+
+test('a genesis push that landed and then threw is recognised and Enable finishes (WR-02)', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const git: GitRunner = async (args, options) => {
+      const real = await runGit(args, options);
+      if (args.includes('push') && args.includes('--porcelain')) throw new Error('connection reset after the push');
+      return real;
+    };
+    const secrets = new MemorySecrets();
+    const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { git }));
+    assert.equal(result.ok, true);
+    assert.equal(secrets.values.size, 1);
+    assert.ok(remoteHasRef(fixture, COORDINATION_BRANCH));
+  });
+});
+
 test('pushCodeBranch pushes the current branch only when it is called', async () => {
   await withFixture(['a'], async (fixture) => {
     const root = fixture.clones.a as string;

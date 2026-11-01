@@ -6,7 +6,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { defaultTeamPolicy, validatePolicy } from '../domain/team/policy';
 import { SecretLeakError, assertNoSecrets } from '../domain/team/secrets';
-import type { TeamFile } from '../domain/team/types';
+import type { TeamEvent, TeamFile, TeamState } from '../domain/team/types';
 import { validateName } from '../domain/team/validate';
 import type { SecretStorageLike } from '../services/auth';
 import { teamMaterializer } from '../domain/team/materialize';
@@ -21,7 +21,7 @@ export const ENABLE_COMMIT_MESSAGE = 'chore(team): enable NEAR AI Team Mode';
 
 export type EnableFailureCode =
   | 'git-missing' | 'not-initialised' | 'not-a-repo' | 'no-commit' | 'no-remote' | 'remote-unreachable' | 'exists-locally' | 'exists-remotely'
-  | 'invalid-input' | 'secret' | 'push-failed' | 'commit-failed';
+  | 'invalid-input' | 'secret' | 'push-failed' | 'push-unconfirmed' | 'commit-failed';
 
 export interface EnableInput {
   projectRoot: string;
@@ -158,6 +158,52 @@ async function rollback(secrets: SecretStorageLike, globalStorageDir: string, te
   return problems;
 }
 
+type GenesisOutcome =
+  | { kind: 'pushed' }
+  | { kind: 'exists' }
+  | { kind: 'failed'; reason: string; detail: string }
+  | { kind: 'unconfirmed'; reason: string; detail: string };
+
+// Writes the genesis batch. A definite failure is 'failed' or 'exists'. A push without a ref line (timeout, dropped connection) and a throw
+// part-way through may both have landed, so those are checked against the remote; only an answer from the remote settles them. When the
+// remote cannot be asked the result is 'unconfirmed', and the caller must keep the device key.
+async function pushGenesis(args: { transport: GitTransport<TeamState>; events: TeamEvent[]; teamFileText: string; git: GitRunner; projectRoot: string; remote: string }): Promise<GenesisOutcome> {
+  const { transport, events, teamFileText, git, projectRoot, remote } = args;
+  let reason: string;
+  try {
+    const pushed = await transport.append(async () => events, { genesis: { teamFileText } });
+    if (pushed.ok) return { kind: 'pushed' };
+    if (pushed.kind === 'exists') return { kind: 'exists' };
+    if (pushed.kind !== 'offline') return { kind: 'failed', reason: redactGitMessage(pushed.reason), detail: '' };
+    reason = redactGitMessage(pushed.reason);
+  } catch (error) {
+    reason = describeError(error);
+  }
+  let detail: string;
+  let fetchThrew = false;
+  try {
+    await transport.fetch();
+    const status = transport.status();
+    if (status.state === 'ok') {
+      return transport.head().eventId === events[1]?.id ? { kind: 'pushed' } : { kind: 'failed', reason, detail: '' };
+    }
+    detail = `Checking the remote afterwards also failed: ${redactGitMessage(status.reason ?? 'the remote could not be reached')}`;
+  } catch (error) {
+    fetchThrew = true;
+    detail = `Checking the remote afterwards also failed: ${describeError(error)}`;
+  }
+  if (fetchThrew) {
+    // The mirror could not be used for the check (for example a folder that cannot be created); ask the remote directly.
+    try {
+      const probe = await git(['ls-remote', '--exit-code', remote, DEFAULT_COORDINATION_REF], { cwd: projectRoot, env: await networkEnv(projectRoot, git), timeoutMs: NETWORK_TIMEOUT_MS });
+      if (probe.code === 2) return { kind: 'failed', reason, detail: '' };
+    } catch (error) {
+      detail = `${detail} ${describeError(error)}`;
+    }
+  }
+  return { kind: 'unconfirmed', reason, detail };
+}
+
 export async function enableTeamMode(input: EnableInput): Promise<EnableResult> {
   const git = input.git ?? runGit;
   const now = input.now ?? ((): Date => new Date());
@@ -227,28 +273,22 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
     mirrorDir: path.join(storageDir, 'coordination.git'), projectRoot, remote, ref: DEFAULT_COORDINATION_REF,
     materializer: teamMaterializer(genesis.anchor), git
   });
-  const events = genesis.events;
-  let pushed = await transport.append(async () => events, { genesis: { teamFileText: canonicalTeamFile(teamFile) } });
-  if (!pushed.ok && pushed.kind === 'exists') {
+  const outcome = await pushGenesis({ transport, events: genesis.events, teamFileText: canonicalTeamFile(teamFile), git, projectRoot, remote });
+  if (outcome.kind === 'exists') {
     const problems = await rollback(input.secrets, input.globalStorageDir, teamId);
     return fail('exists-remotely', ['This remote already has a coordination log.', ...problems].join(' '));
   }
-  if (!pushed.ok) {
-    // A push whose reply was lost may still have landed. Fetch once; only the head naming our member.joined event proves it did.
-    let landed = false;
-    let fetchProblem = '';
-    try {
-      await transport.fetch();
-      landed = transport.head().eventId === events[1].id;
-    } catch (error) {
-      fetchProblem = `Checking the remote afterwards also failed: ${describeError(error)}`;
-    }
-    if (!landed) {
-      const problems = await rollback(input.secrets, input.globalStorageDir, teamId);
-      const reason = redactGitMessage(pushed.reason);
-      return fail('push-failed', [`The team could not be created on the remote: ${reason}`, fetchProblem, ...problems, 'Nothing was kept on this computer.'].filter((part) => part !== '').join(' '));
-    }
-    pushed = { ok: true, events, commit: transport.head().commit ?? '', attempts: pushed.attempts };
+  if (outcome.kind === 'failed') {
+    const problems = await rollback(input.secrets, input.globalStorageDir, teamId);
+    return fail('push-failed', [`The team could not be created on the remote: ${outcome.reason}`, outcome.detail, ...problems, 'Nothing was kept on this computer.'].filter((part) => part !== '').join(' '));
+  }
+  if (outcome.kind === 'unconfirmed') {
+    // The push may have landed and nothing could confirm it either way. If it did, this device key is the only owner key, so it stays.
+    return fail('push-unconfirmed', [
+      `The team may have been created on the remote "${remote}", but this computer could not confirm it: ${outcome.reason}`,
+      outcome.detail,
+      `Your device key and the local copy of the coordination log were kept. Check whether ${DEFAULT_COORDINATION_REF} exists on the remote (git ls-remote ${remote} ${DEFAULT_COORDINATION_REF}) once you are online. If it does, keep this computer's NEAR AI data, because it holds the only owner key. If it does not, you can run Enable Team Mode again.`
+    ].filter((part) => part !== '').join(' '));
   }
 
   // The coordination branch now exists, so from here the key stays; a failure only affects the file in the user's project.
