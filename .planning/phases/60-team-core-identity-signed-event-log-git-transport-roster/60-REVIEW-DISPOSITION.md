@@ -5,55 +5,55 @@ titles: json
 findings:
   - id: CR-01
     severity: critical
-    disposition: open
+    disposition: fixed
     title: "`runGit` does not settle on timeout when git leaves a child process holding its pipes, which wedges all Team sync"
   - id: WR-01
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "Enable deletes the device key when an ambiguous push could not be confirmed either way"
   - id: WR-02
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "A throw from `transport.append` during Enable leaves the device key and mirror behind"
   - id: WR-03
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "One unexpected throw permanently poisons the `TeamSession.sync` chain"
   - id: WR-04
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "A failed snapshot write loses the entries the same sync already applied"
   - id: WR-05
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "Roster audit entries record the author's final role, not the role at that log position"
   - id: WR-06
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "A refused coordination log still shows a healthy \"Team: name\" status"
   - id: WR-07
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "The snapshot state hash covers version-dependent fields, so mixed-version teams will reject each other's snapshots"
   - id: WR-08
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "The signed `prev` field is never checked, so it adds no integrity"
   - id: WR-09
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "Enable fails with a misleading error for valid git branch names, and the two branch validators disagree"
   - id: WR-10
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "A missing coordination branch on the remote is reported as healthy even after a trusted log existed"
   - id: WR-11
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "The audit mirror progress mark lives in per-team global storage, so a second clone of the same team never receives roster entries"
   - id: WR-12
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "The remote URL, which may embed credentials, is passed on git's command line"
   - id: IN-01
     severity: info
@@ -79,28 +79,28 @@ findings:
     severity: info
     disposition: open
     title: "`commitFiles` drops the original failure when cleanup also fails"
-open: 19
+open: 6
 total: 19
-recorded: 2026-11-01T14:05:26.178Z
+recorded: 2026-11-01T15:01:43.496Z
 ---
 
 # Phase 60: Code Review Disposition
 
 | Finding | Severity | Disposition | Source |
 |---------|----------|-------------|--------|
-| CR-01 | critical | open | - |
-| WR-01 | warning | open | - |
-| WR-02 | warning | open | - |
-| WR-03 | warning | open | - |
-| WR-04 | warning | open | - |
-| WR-05 | warning | open | - |
-| WR-06 | warning | open | - |
-| WR-07 | warning | open | - |
-| WR-08 | warning | open | - |
-| WR-09 | warning | open | - |
-| WR-10 | warning | open | - |
-| WR-11 | warning | open | - |
-| WR-12 | warning | open | - |
+| CR-01 | critical | fixed | 60-REVIEW-FIX.md |
+| WR-01 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-02 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-03 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-04 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-05 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-06 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-07 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-08 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-09 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-10 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-11 | warning | fixed | 60-REVIEW-FIX.md |
+| WR-12 | warning | fixed | 60-REVIEW-FIX.md |
 | IN-01 | info | open | - |
 | IN-02 | info | open | - |
 | IN-03 | info | open | - |
