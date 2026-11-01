@@ -8,20 +8,28 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { teamMaterializer } from '../domain/team/materialize';
-import type { GenesisAnchor, TeamFile, TeamState } from '../domain/team/types';
+import { AuditStore } from '../services/auditStore';
+import { API_KEY_SECRET, REFRESH_TOKEN_SECRET } from '../services/auth';
+import type { GenesisAnchor, TeamEvent, TeamFile, TeamState } from '../domain/team/types';
+import { fileMirrorMark, mirrorRosterEvents } from '../team/auditMirror';
 import { ENABLE_COMMIT_MESSAGE, checkEnablePreconditions, enableDefaults, enableTeamMode, pushCodeBranch } from '../team/enable';
 import type { EnableInput } from '../team/enable';
 import { TeamLog } from '../team/eventLog';
+import type { TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
-import { deviceKeySecretName, emailHash } from '../team/identity';
+import { DEVICE_KEY_SECRET_PREFIX, createDeviceIdentity, deviceKeySecretName, emailHash, loadDeviceIdentity } from '../team/identity';
 import { GitNotFoundError, runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { TEAM_FILE_REL, parseTeamFile, readTeamFile, teamStorageDir } from '../team/teamFile';
+import { deviceKeyForms, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
+import type { Needle } from './helpers/teamCanary';
 import { MemorySecrets, createTeamFixture, fakeGitResult, faultRunner, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
 
 const OWNER_EMAIL = 'Lead.Owner@Example.invalid';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
+// src/services/spendTracking.ts holds this constant but imports vscode, which a node test cannot load, so the key is repeated here.
+const REPORTING_TOKEN_KEY = 'nearAi.usageReportingToken';
 
 async function withFixture(clones: string[], run: (fixture: TeamFixture) => Promise<void>, options: { initialised?: boolean } = {}): Promise<void> {
   const fixture = await createTeamFixture({ clones, initialised: options.initialised ?? true });
@@ -391,5 +399,153 @@ test('pushCodeBranch refuses option-like names and strips credentials from a fai
     assert.match(message, /Pushing main to origin failed/);
     assert.equal(message.includes(password), false);
     assert.equal(message.includes('someone'), false);
+  });
+});
+
+function seedCredentials(secrets: MemorySecrets, canaries: ReturnType<typeof makeCanaries>): void {
+  secrets.values.set(API_KEY_SECRET, canaries.apiKey);
+  secrets.values.set(REFRESH_TOKEN_SECRET, canaries.refreshToken);
+  secrets.values.set(REPORTING_TOKEN_KEY, canaries.reportingToken);
+}
+
+test('the canary scanners find a planted value in a git object, a file and every device key rendering', async () => {
+  const canaries = makeCanaries();
+  assert.equal(new Set(canaries.labelled().map((needle) => needle.value)).size, 5, 'every canary is different');
+  const secrets = new MemorySecrets();
+  await createDeviceIdentity(secrets, 'team-0123456789abcdef0123456789abcdef');
+  const stored = secrets.values.get(deviceKeySecretName('team-0123456789abcdef0123456789abcdef')) as string;
+  const forms = deviceKeyForms(stored);
+  assert.equal(forms.length, 4);
+  assert.equal(new Set(forms).size, 4);
+  const needles: Needle[] = [...canaries.labelled(), ...forms.map((value, index) => ({ label: `device key form ${index}`, value }))];
+
+  const dir = await fs.mkdtemp(path.join(tmpdir(), 'near-ai-canary-scan-'));
+  try {
+    const repo = path.join(dir, 'repo.git');
+    gitIn(dir, ['init', '--bare', '-q', repo]);
+    assert.deepEqual(await scanGitObjects(repo, needles), [], 'an empty repository has nothing to find');
+    execFileSync('git', ['--git-dir', repo, 'hash-object', '-w', '--stdin'], { input: `before ${canaries.prompt} after`, stdio: ['pipe', 'pipe', 'pipe'] });
+    assert.deepEqual(await scanGitObjects(repo, needles), ['prompt']);
+    mkdirSync(path.join(dir, 'files', 'nested'), { recursive: true });
+    for (const [index, form] of forms.entries()) writeFileSync(path.join(dir, 'files', 'nested', `form-${index}.txt`), `x${form}x`, 'utf8');
+    const hits = await scanFiles([path.join(dir, 'files')], needles);
+    assert.deepEqual(hits.map((hit) => hit.split(': ')[1]).sort(), ['device key form 0', 'device key form 1', 'device key form 2', 'device key form 3']);
+    assert.ok(hits.every((hit) => hit.startsWith('files/nested/form-')));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('SEC-01 canary: no secret reaches any git object, team.json, extension storage or the audit store after Enable and roster events', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const root = fixture.clones.a as string;
+    const canaries = makeCanaries();
+    const secrets = new MemorySecrets();
+    seedCredentials(secrets, canaries);
+
+    // The remote URL carries a user name and password; an insteadOf rule maps it back to the real bare remote so git still works.
+    const url = `https://canaryuser:${canaries.urlPassword}@example.invalid/team.git`;
+    gitIn(root, ['remote', 'set-url', 'origin', url]);
+    gitIn(root, ['config', `url.${fixture.remote}.insteadOf`, url]);
+    mkdirSync(path.join(root, '.planning', '.near-ai', 'transcripts'), { recursive: true });
+    writeFileSync(path.join(root, '.planning', '.near-ai', 'transcripts', 'canary.json'), JSON.stringify({ prompt: canaries.prompt }), 'utf8');
+
+    const enabled = await enableTeamMode(inputFor(fixture, 'a', secrets));
+    assert.equal(enabled.ok, true);
+    if (!enabled.ok) return;
+    const teamId = enabled.teamFile.teamId;
+    const storageDir = teamStorageDir(fixture.storageDir('a'), teamId);
+    const mirrorDir = path.join(storageDir, 'coordination.git');
+
+    // Roster events written the way the session will write them: availability, skills and a second owner device.
+    const anchor = anchorOf(enabled.teamFile);
+    const transport = new GitTransport<TeamState>({
+      mirrorDir, projectRoot: root, remote: 'origin', ref: DEFAULT_COORDINATION_REF, materializer: teamMaterializer(anchor), baseDelayMs: 1
+    });
+    const identity = await loadDeviceIdentity(secrets, teamId);
+    assert.ok(identity !== undefined);
+    if (identity === undefined) return;
+    const probe = new TeamLog({ anchor, transport });
+    const genesis = await probe.sync();
+    assert.equal(genesis.accepted.length, 2);
+    const owner = [...probe.state().members.values()][0];
+    assert.ok(owner !== undefined);
+    if (owner === undefined) return;
+    const signer: TeamSigner = { identity, memberId: owner.id };
+    const log = new TeamLog({ anchor, transport, signer });
+    const secondSecrets = new MemorySecrets();
+    const second = await createDeviceIdentity(secondSecrets, teamId);
+    const accepted: TeamEvent[] = [...genesis.accepted];
+    for (const intent of [
+      { type: 'member.availability' as const, body: { availability: 'available' as const } },
+      { type: 'member.skills' as const, body: { memberId: owner.id, skills: ['typescript', 'testing'] } },
+      { type: 'device.added' as const, body: { memberId: owner.id, device: { fingerprint: second.fingerprint, publicKey: second.publicKey } } }
+    ]) {
+      const written = await log.append(() => [intent]);
+      assert.equal(written.ok, true);
+      if (written.ok) accepted.push(...written.events);
+    }
+    assert.equal(accepted.length, 5);
+
+    const store = new AuditStore(root);
+    assert.equal(await mirrorRosterEvents(store, fileMirrorMark(storageDir), accepted, (id) => log.state().members.get(id)?.role), 5);
+    const auditFile = path.join(root, '.planning', '.near-ai', 'audit.json');
+    assert.ok(existsSync(auditFile));
+
+    const needles: Needle[] = [
+      ...canaries.labelled(),
+      { label: 'remote user', value: 'canaryuser' },
+      ...deviceKeyForms(secrets.values.get(deviceKeySecretName(teamId)) as string).map((value, index) => ({ label: `device key form ${index}`, value })),
+      ...deviceKeyForms(secondSecrets.values.get(deviceKeySecretName(teamId)) as string).map((value, index) => ({ label: `second device key form ${index}`, value }))
+    ];
+
+    // Controls: the same scanners do see the canaries where they are meant to be, so an empty result below means something.
+    assert.deepEqual((await scanFiles([path.join(root, '.planning', '.near-ai', 'transcripts')], needles)).map((hit) => hit.split(': ')[1]), ['prompt']);
+    const cloneControl = await scanGitObjects(path.join(root, '.git'), needles);
+    assert.ok(cloneControl.includes('remote password') && cloneControl.includes('remote user'), 'the clone config holds the canary URL by construction');
+
+    assert.deepEqual(await scanGitObjects(mirrorDir, needles), [], 'coordination mirror objects and config');
+    assert.deepEqual(await scanGitObjects(fixture.remote, needles), [], 'bare remote objects and config');
+    assert.deepEqual(await scanGitObjects(path.join(root, '.git'), needles, { includeConfig: false }), [], 'project repository objects');
+    assert.deepEqual(await scanFiles([path.join(root, '.planning', '.near-ai', 'team.json'), storageDir, auditFile], needles), [], 'team.json, team storage and audit');
+    assert.deepEqual(await scanFiles([fixture.storageDir('a')], needles), [], 'all extension storage');
+
+    assert.equal(gitIn(root, ['ls-tree', '-r', '--name-only', 'HEAD']).includes('transcripts'), false, 'the transcripts file is not in the project commit');
+    assert.equal((await store.list({ type: 'team-roster' })).length, 5);
+    assert.deepEqual([...secrets.values.keys()].filter((key) => key.startsWith(DEVICE_KEY_SECRET_PREFIX)), [deviceKeySecretName(teamId)], 'the device key lives only in secret storage');
+  });
+});
+
+test('a secret typed into the team name is refused and nothing is written anywhere', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const root = fixture.clones.a as string;
+    const canaries = makeCanaries();
+    const secrets = new MemorySecrets();
+    seedCredentials(secrets, canaries);
+    const before = [...secrets.values.keys()].sort();
+    const result = await enableTeamMode(inputFor(fixture, 'a', secrets, { teamName: canaries.apiKey }));
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, 'secret');
+    assert.equal(result.message.includes(canaries.apiKey), false, 'the refusal does not repeat the value');
+    assert.equal(existsSync(path.join(root, TEAM_FILE_REL)), false);
+    assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
+    assert.deepEqual([...secrets.values.keys()].sort(), before, 'no device key was created');
+    assert.equal([...secrets.values.keys()].some((key) => key.startsWith(DEVICE_KEY_SECRET_PREFIX)), false);
+    assert.deepEqual(await teamFolders(fixture.storageDir('a')), []);
+    assert.equal(gitIn(root, ['log', '-1', '--format=%s']), 'seed');
+  });
+});
+
+test('a secret typed into the owner name or email is refused as well', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const canaries = makeCanaries();
+    for (const extra of [{ ownerName: canaries.refreshToken }, { ownerEmail: `${canaries.reportingToken}@example.invalid` }] as Array<Partial<EnableInput>>) {
+      const secrets = new MemorySecrets();
+      const result = await enableTeamMode(inputFor(fixture, 'a', secrets, extra));
+      assert.equal(result.ok ? undefined : result.code, 'secret');
+      assert.equal(secrets.values.size, 0);
+    }
+    assert.equal(remoteHasRef(fixture, COORDINATION_BRANCH), false);
   });
 });
