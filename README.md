@@ -304,9 +304,12 @@ offers **Sign in with GitHub** or **Sign in with Google**:
 
 If NEAR ever rejects the token (revoked, or the API key moved to another
 organization), the Spend section says so and **Fix token** signs in again. In
-a browser-based VS Code, where the browser can't reach the listener, the
-sign-in ends on a page that won't load: paste that page's address into the box
-VS Code shows. **Paste a token** takes one you already have (an owner or admin
+a browser-based VS Code such as code-server, VS Code also shows a box for the
+sign-in address while it waits. If the browser is on the same computer, the
+sign-in finishes on its own and the box closes. If it is on another computer
+(for example code-server over Tailscale), the sign-in ends on a page that
+won't load, because its `localhost` address is that computer's: copy that
+page's whole address into the box. **Paste a token** takes one you already have (an owner or admin
 can create one with `POST /v1/organizations/{org_id}/reporting-tokens`; see
 NEAR's [Usage Reporting API](https://docs.near.ai/)). It starts with `rpt-`.
 

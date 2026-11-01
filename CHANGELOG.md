@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.9
+
+- **Signing in works from code-server on another computer.** When VS Code runs
+  in the browser (code-server) and that browser is on a different computer, for
+  example over Tailscale, NEAR AI Cloud sent the sign-in to a `localhost`
+  address on the browser's computer, which doesn't load, and the setup waited
+  until it timed out. VS Code now shows a box for the sign-in address as soon as
+  the browser opens: copy the address of the page that won't load into it and
+  the token is made. If the browser is on the same computer, the sign-in still
+  finishes on its own and the box closes.
+
 ## 0.4.8
 
 - **Set up usage reporting by signing in.** **Set Usage Reporting Token** (and

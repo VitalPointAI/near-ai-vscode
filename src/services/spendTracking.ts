@@ -5,7 +5,7 @@ import { ProfileStore } from './profileStore';
 import { CLEAR_REPORTING_TOKEN_COMMAND, movePastedReportingTokens, REPORTING_TOKEN_HOW_TO, ReportingTokenHint, reportingTokenHint, ReportingTokenState, SET_REPORTING_TOKEN_COMMAND, USE_NEAR_TOTAL_SETTING } from './reportingToken';
 import { configureSpend, resetNearUsage, SpendAccount, spendAccountFor } from './spendAccount';
 import { CONSOLE_URL, tokenTestMessage } from './spendInsight';
-import { loginUrl, parseCallback, PASTE_CALLBACK, reportingTokenName, SessionTokens, setUpReportingToken, SignInError, SignInProvider, startLoopbackSignIn } from './reportingSignIn';
+import { firstSession, loginUrl, parseCallback, PASTE_CALLBACK, reportingTokenName, SessionTokens, setUpReportingToken, SignInError, SignInProvider, startLoopbackSignIn } from './reportingSignIn';
 import type { DayBoundary } from './spendLedger';
 import { readSettings } from './settings';
 
@@ -116,22 +116,44 @@ async function browserSignIn(baseUrl: string, provider: SignInProvider, signal: 
   try {
     const loopback = await startLoopbackSignIn({ signal, external: async (local) => (await vscode.env.asExternalUri(vscode.Uri.parse(local))).toString(true) });
     if (!await vscode.env.openExternal(vscode.Uri.parse(loginUrl(baseUrl, provider, loopback.callback)))) { loopback.close(); return undefined; }
-    return await loopback.tokens;
+    // A browser-based VS Code (code-server) may be open on another machine, where the forwarded
+    // localhost callback isn't this one, so the address can be pasted while the listener waits.
+    if (vscode.env.uiKind !== vscode.UIKind.Web) return await loopback.tokens;
+    return await firstSession(loopback, pasteSignInAddress(loopback.callback, 'If the browser then shows a page that can\'t be reached, copy that page\'s whole address and paste it here.'));
   } catch (error) {
     if (!(error instanceof SignInError) || error.code !== 'remote') throw error;
   }
-  // A browser-based VS Code can't be reached from the browser on 127.0.0.1: NEAR sends the session
-  // to a page that won't load, and its address (whose fragment holds the session) is pasted here.
+  // The forwarded callback isn't on loopback, which NEAR refuses: NEAR sends the session to a page
+  // that won't load, and its address (whose fragment holds the session) is pasted here.
   if (!await vscode.env.openExternal(vscode.Uri.parse(loginUrl(baseUrl, provider, PASTE_CALLBACK)))) return undefined;
-  const pasted = await vscode.window.showInputBox({
-    title: 'Finish signing in to NEAR AI Cloud',
-    prompt: 'After signing in, the browser shows a page that can\'t be reached. Copy that page\'s whole address and paste it here. It holds a one-time sign-in that is signed out as soon as the token is made.',
-    password: true,
-    ignoreFocusOut: true,
-    placeHolder: 'http://127.0.0.1:9/near-ai/signed-in#token=…',
-    validateInput: (value) => { try { parseCallback(value); return undefined; } catch (error) { return (error as Error).message; } }
+  const paste = pasteSignInAddress(PASTE_CALLBACK, 'After signing in, the browser shows a page that can\'t be reached. Copy that page\'s whole address and paste it here.');
+  try {
+    const pasted = await paste.value;
+    return pasted ? parseCallback(pasted) : undefined;
+  } finally {
+    paste.dismiss();
+  }
+}
+
+/** A box for the address the browser ends on after signing in; `value` is undefined if it is dismissed. */
+function pasteSignInAddress(callback: string, prompt: string): { value: Promise<string | undefined>; dismiss(): void } {
+  const box = vscode.window.createInputBox();
+  box.title = 'Finish signing in to NEAR AI Cloud';
+  box.prompt = `${prompt} It holds a one-time sign-in that is signed out as soon as the token is made.`;
+  box.password = true;
+  box.ignoreFocusOut = true;
+  box.placeholder = `${callback}#token=…`;
+  const value = new Promise<string | undefined>((resolve) => {
+    box.onDidChangeValue((text) => { box.validationMessage = text.trim() ? checkPasted(text) : undefined; });
+    box.onDidAccept(() => { if (!checkPasted(box.value)) resolve(box.value); else box.validationMessage = checkPasted(box.value); });
+    box.onDidHide(() => resolve(undefined));
   });
-  return pasted ? parseCallback(pasted) : undefined;
+  box.show();
+  return { value, dismiss: () => box.dispose() };
+}
+
+function checkPasted(value: string): string | undefined {
+  try { parseCallback(value); return undefined; } catch (error) { return (error as Error).message; }
 }
 
 /**
