@@ -415,8 +415,9 @@ test('the canary scanners find a planted value in a git object, a file and every
   await createDeviceIdentity(secrets, 'team-0123456789abcdef0123456789abcdef');
   const stored = secrets.values.get(deviceKeySecretName('team-0123456789abcdef0123456789abcdef')) as string;
   const forms = deviceKeyForms(stored);
-  assert.equal(forms.length, 4);
-  assert.equal(new Set(forms).size, 4);
+  assert.ok(forms.length === 3 || forms.length === 4, 'stored form, seed hex and seed base64url, plus base64url when it differs');
+  assert.equal(new Set(forms).size, forms.length);
+  assert.equal(forms[0], stored);
   const needles: Needle[] = [...canaries.labelled(), ...forms.map((value, index) => ({ label: `device key form ${index}`, value }))];
 
   const dir = await fs.mkdtemp(path.join(tmpdir(), 'near-ai-canary-scan-'));
@@ -429,7 +430,7 @@ test('the canary scanners find a planted value in a git object, a file and every
     mkdirSync(path.join(dir, 'files', 'nested'), { recursive: true });
     for (const [index, form] of forms.entries()) writeFileSync(path.join(dir, 'files', 'nested', `form-${index}.txt`), `x${form}x`, 'utf8');
     const hits = await scanFiles([path.join(dir, 'files')], needles);
-    assert.deepEqual(hits.map((hit) => hit.split(': ')[1]).sort(), ['device key form 0', 'device key form 1', 'device key form 2', 'device key form 3']);
+    assert.deepEqual(hits.map((hit) => hit.split(': ')[1]).sort(), forms.map((_, index) => `device key form ${index}`).sort());
     assert.ok(hits.every((hit) => hit.startsWith('files/nested/form-')));
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

@@ -42,11 +42,12 @@ export function makeCanaries(): Canaries {
 }
 
 // The stored device key is base64 PKCS#8 for Ed25519: a fixed 16 byte header and the 32 byte seed. Each rendering a leak could take is
-// returned, so a scan catches the key whether it was copied as stored, re-encoded, or reduced to its seed.
+// returned (three or four distinct texts), so a scan catches the key whether it was copied as stored, re-encoded, or reduced to its seed.
 export function deviceKeyForms(storedSecret: string): string[] {
   const der = Buffer.from(storedSecret, 'base64');
   const seed = der.subarray(der.length - 32);
-  return [storedSecret, der.toString('base64url'), seed.toString('hex'), seed.toString('base64url')];
+  // base64 and base64url are the same text when the key happens to have no + or / in it, so repeats are dropped.
+  return [...new Set([storedSecret, der.toString('base64url'), seed.toString('hex'), seed.toString('base64url')])];
 }
 
 function foundIn(haystack: Buffer, needles: Needle[]): string[] {
