@@ -1,152 +1,118 @@
 ---
 phase: 60-team-core-identity-signed-event-log-git-transport-roster
-fixed_at: 2026-11-01T00:00:00Z
+fixed_at: 2026-11-01T16:57:53Z
 review_path: .planning/phases/60-team-core-identity-signed-event-log-git-transport-roster/60-REVIEW.md
 iteration: 1
-findings_in_scope: 13
-fixed: 13
+findings_in_scope: 6
+fixed: 6
 skipped: 0
 status: all_fixed
 ---
 
-# Phase 60: Code Review Fix Report
+# Phase 60: Code Review Fix Report (incremental review of plan 60-12)
 
-**Fixed at:** 2026-11-01
-**Source review:** .planning/phases/60-team-core-identity-signed-event-log-git-transport-roster/60-REVIEW.md
+**Fixed at:** 2026-11-01T16:57:53Z
+**Source review:** .planning/phases/60-team-core-identity-signed-event-log-git-transport-roster/60-REVIEW.md (incremental review of gap plan 60-12, G-60-1)
 **Iteration:** 1
 
+> This report replaces the earlier fix report for the full-phase review (CR-01, WR-01 to WR-12 under the same IDs). That report is in git history at commit `69f2e0e` (`git show 69f2e0e:.planning/phases/60-team-core-identity-signed-event-log-git-transport-roster/60-REVIEW-FIX.md`).
+
 **Summary:**
-- Findings in scope: 13 (CR-01, WR-01 to WR-12; Info findings IN-01 to IN-06 are out of scope for `critical_warning`)
-- Fixed: 13 (WR-01 and WR-02 share one commit because they are one function)
+- Findings in scope: 6 (scope `all`: CR-01, WR-01, WR-02, IN-01, IN-02, IN-03)
+- Fixed: 6, one commit each
 - Skipped: 0
 
-**Verification (ran in the linked worktree `.claude/worktrees/team-mode`, not a nested review-fix worktree, as instructed):**
-- `npm run lint` (tsc --noEmit): clean.
-- `npm test`: 939 tests, 931 pass, 0 fail, 8 skipped (the same 8 environment skips as before: ripgrep, LibreOffice, Open-GSD runtime, live NEAR AI tests). Baseline was 918 tests, 0 failing; 21 regression tests were added.
-- Focused suites were run after every fix. Regression tests for CR-01 and WR-08 were also confirmed to fail with the fix removed.
+**Verification (ran in the linked worktree `.claude/worktrees/team-mode`, on branch `gsd/phase-60-team-core-identity-signed-event-log-git-transport-roster`, not in a nested review-fix worktree, as the orchestrator instructed):**
+- `./node_modules/.bin/tsc -p tsconfig.json` (the project's own tsc): exit 0.
+- `node --test dist/test/teamScheduler.test.js dist/test/teamSession.test.js`: 44 tests, 44 pass, 0 fail (39 before this pass, plus 5 new: 1 for CR-01, 3 for WR-01, 1 for IN-03).
+- `npm run lint` (`tsc -p tsconfig.json --noEmit`): exit 0, no output.
+- `npm test`: exit 0. 953 tests, 945 pass, 0 fail, 0 cancelled, 8 skipped (the same environment skips as before).
+- The CR-01 and WR-01 regression tests were run against the unfixed code first and failed (CR-01: `got 3710000`; WR-01: each test failed with the injected `focused failed`, `now failed` or `pollSeconds failed` escaping as a rejection).
+- WR-02 was probed by injecting `assert.fail` right after the first fetch was held: only that test failed, with no unhandled rejection or failure in any other test. The probe was reverted with `git checkout --` and never committed.
+- Every stub consumer (`teamSession`, `teamCommands`, `teamSoloParity`, `teamManifest`, plus `teamScheduler`) was run after IN-03: 69 tests, 69 pass.
 
-Fixes that change logic are marked "requires human verification" below, because syntax and test checks cannot prove a condition is semantically right.
+Unchanged: the D-19/D-25 constants (`UNFOCUSED_POLL_MS`, `MAX_BACKOFF_MS`, `MIN_POLL_SECONDS`, `MAX_POLL_SECONDS`, `DEFAULT_POLL_SECONDS`) and the doubling rule in `nextDelay()`. `src/team/syncScheduler.ts` still imports nothing from vscode (its only import is `node:perf_hooks`). No catch block added in this pass is empty. No package.json or package-lock.json change.
 
 ## Fixed Issues
 
-### CR-01: `runGit` does not settle on timeout when git leaves a child process holding its pipes, which wedges all Team sync
+### CR-01: The anchored focus-loss re-arm has no upper bound and uses a clock that can go backward, so a focus loss can postpone a poll by any amount
 
-**Files modified:** `src/team/runGit.ts`, `src/test/teamRunGit.test.ts` (new)
-**Commit:** 53b3fc6
-**Status:** fixed: requires human verification (process-group handling is platform specific; Windows keeps the old single-process kill)
-**Applied fix:** On POSIX git is spawned `detached` (its own process group). On timeout the whole group gets `SIGKILL` (fallback to `child.kill`), and the promise is settled from the timer with exit code 124 and the usual message, then `stdout`/`stderr` are destroyed. `close` no longer matters after a timeout, and the now-unused `timedOut` flag was removed.
-**Regression test:** a fake `git` shell script (first on `PATH` through `options.env`) starts `sleep 30` as a background helper that inherits the pipes, records its pid and waits. With `timeoutMs: 400` the test asserts code 124, settlement well under 5 s (without the fix it takes the full 30 s), and that the helper pid is dead within 3 s. Deterministic and about 0.4 s. A second test checks a normal `git --version` still returns its output. The first test is skipped on Windows.
+**Files modified:** `src/team/syncScheduler.ts`, `src/test/teamScheduler.test.ts`
+**Commit:** 03a4ded
+**Status:** fixed: requires human verification (logic change to the focus-loss wait)
+**Applied fix:** The default timers' `now()` and the `clock()` fallback use the monotonic `performance.now()` (from `node:perf_hooks`) instead of `Date.now()`. The focus-loss branch computes `full = nextDelay()` and `remaining = lastRunEndedAt + full - clock()`, and arms `Math.min(full, Math.max(0, remaining))`. A non-finite remainder falls back to `full`, which goes slightly beyond the review's suggestion so that a broken clock also cannot produce a wait that is not the bounded one.
+**Regression test:** 'a clock that steps backward before a focus loss never pushes the next poll past the unfocused delay (CR-01)'. After a focused run, the fake clock advances to 10 s and then steps back one hour before `focusChanged(false)`. The test asserts the armed delay is at most, and exactly, `UNFOCUSED_POLL_MS`. Before the fix it armed 3,710,000 ms.
 
-### WR-01: Enable deletes the device key when an ambiguous push could not be confirmed either way
+### WR-01: The new `focused()` and `now()` calls in `cycle()` are outside the error handling, so a throw rejects the scheduler promise unhandled and stops polling for good
 
-(Fixed together with WR-02 in the same commit; see below.)
+**Files modified:** `src/team/syncScheduler.ts`, `src/test/teamScheduler.test.ts`
+**Commit:** 74d7121
+**Status:** fixed: requires human verification (new error path in the scheduler loop)
+**Applied fix:** The bookkeeping after a run moved out of `cycle()` into `armAfterRun()`. Each step that calls an injected callback has its own guard that reports through `report()` (and so `onError`):
+- `clock()`: on a throw the previous anchor stays. It is earlier, so a later focus loss can only poll sooner.
+- `focused()`: on a throw the last known focus stays and sets the cadence.
+- `nextDelay()` (which calls `pollSeconds()`): on a throw the poll is armed at `MAX_BACKOFF_MS`, the wait a failing remote settles at.
+- `schedule()` (which calls `timers.set()`): on a throw the error is reported. No poll can be armed then, but a nudge, a focus gain or `start()` still runs a sync.
 
-### WR-02: A throw from `transport.append` during Enable leaves the device key and mirror behind
+The guards are separate, rather than the single combined try the review suggested, so a failing clock does not also skip the focus refresh. They also cover `schedule()`, as the review recommended. `cycle()` can no longer reject, so its "Never rejects" comment holds.
+**Regression tests:** three tests share an `afterRunFailure` helper that makes one callback throw once the first run has begun, fires the armed poll, and records `unhandledRejection` during the test:
+- 'a focused() that throws after a run is reported to onError and polling is still re-armed (WR-01)': no unhandled rejection, every error reached `onError`, the poll was armed at 15 000 ms and the second run ran.
+- 'a clock that throws after a run is reported to onError and polling is still re-armed (WR-01)': the same, armed at 15 000 ms.
+- 'a pollSeconds that throws after a run is reported to onError and a poll is still armed at the backoff cap (WR-01)': the same, armed at `MAX_BACKOFF_MS`.
 
-**Files modified:** `src/team/enable.ts`, `src/test/teamEnable.test.ts`
-**Commit:** 6c5a470
-**Status:** fixed: requires human verification (rollback decision logic)
-**Applied fix:** The genesis write moved into `pushGenesis`, which wraps the append in `try/catch`. Outcomes:
-- `exists`, or any definite non-offline failure (`refused`, `remote-rejected`, ...): roll back as before.
-- An `offline` result (push produced no ref line) or a throw: ask the remote. `transport.fetch()` followed by a check that `transport.status().state === 'ok'`; then "head is our member.joined event" means landed, otherwise a definite failure (roll back). If the status is not `ok`, the outcome is unknown.
-- If the confirming fetch itself throws (for example an unusable mirror folder), `git ls-remote --exit-code` is asked directly: exit 2 means definitely absent (roll back); anything else is unknown.
-- Unknown now returns a new failure code `push-unconfirmed`: the device key and the mirror are kept, and the message names the manual check (`git ls-remote <remote> refs/heads/near-ai/coordination`) and says to keep this computer's NEAR AI data if the branch exists, because the key is the only owner key.
-`teamCommands.ts` needed no change: it reports every code other than `commit-failed` as an error with the message text.
-**Behaviour note:** a network-down failure (push offline and fetch offline) used to roll back and now keeps an unused key and mirror, as the review asked. Re-running Enable creates a fresh team id; the abandoned key is the cost of never destroying the only owner key.
-**Regression tests:** push may have landed with fetch failing keeps the key and the mirror (`push-unconfirmed`); a throw on push and fetch with the remote answering "absent" rolls everything back; a push that lands and then throws is detected and Enable finishes. The existing "failed genesis push" and "lost reply but landed" tests pass unchanged.
+### WR-02: The blocked-first-sync session test leaks the starting session and its promise when it fails
 
-### WR-03: One unexpected throw permanently poisons the `TeamSession.sync` chain
+**Files modified:** `src/test/teamSession.test.ts`
+**Commit:** 1cf88f3
+**Applied fix:** A rejection handler (`settled = starting.then((session) => session, () => undefined)`) is attached as soon as `starting` is created, so a rejection while the test is still in `until()` is never unhandled. The `finally` releases the gate, awaits `settled`, disposes `context.subscriptions`, and then disposes the session itself. This covers a session that resolved after a failure, before it was pushed to the subscriptions. `TeamSession.dispose()` is idempotent, so the double dispose on the success path is harmless. `withRig` therefore never deletes the fixtures while the first sync is still running. Test-only change, so no separate regression test. The failure-path probe described under Verification confirms the behaviour.
 
-**Files modified:** `src/services/team/teamSession.ts`, `src/test/teamSession.test.ts`
-**Commit:** 7cdb3f7
-**Applied fix:** `sync()` now catches any rejection from `syncOnce`, reports it once as "Team sync failed unexpectedly: ..." (guarded in case the output channel itself throws), and returns `false` (so the scheduler backs off). The chain tail was already non-rejecting in effect; the result promise never rejects, as the doc comment says. This is slightly stronger than the review's snippet, which still rejected to the caller.
-**Regression test:** a status bar whose `update` throws once; the sync resolves `false`, the next sync resolves `true` and both reached the remote.
+### IN-01: Comments now misstate focus behaviour
 
-### WR-04: A failed snapshot write loses the entries the same sync already applied
+**Files modified:** `src/team/syncScheduler.ts`
+**Commit:** 4743a0c
+**Applied fix:**
+- Header line 2 now says "a real focus gain or a nudge runs at once".
+- The focus-loss comment now says the loss switches the wait to the unfocused delay counted from the end of the last run (shorter when pollSeconds exceeds 120 s, and at once when that delay has already passed).
 
-**Files modified:** `src/team/eventLog.ts`, `src/test/teamLog.test.ts`
-**Commit:** 63d16d6
-**Applied fix:** New private `trySnapshot()` turns a throw from `maybeWriteSnapshot` into a `{ ok: false, kind: 'refused', reason, attempts: 0 }` result and records it in `lastSnapshot()`. It is used in `sync()` and, for the same reason, in `append()` (a snapshot throw after a successful append used to make a landed append look failed).
-**Regression test:** an owner client whose `commit-tree` throws, syncing five pending entries with a snapshot due: `sync()` returns all five accepted events plus a failed snapshot result carrying the message, and a second `fetch()` returns nothing (proving the entries would have been lost).
+### IN-02: `SchedulerTimers.now` is optional, so injected timers without it silently mix a fake `set` clock with the real `Date.now()`
 
-### WR-05: Roster audit entries record the author's final role, not the role at that log position
+**Files modified:** `src/team/syncScheduler.ts`, `src/test/teamSession.test.ts`
+**Commit:** a554f6f
+**Applied fix:** Both of the review's options:
+- `SchedulerTimers.now()` is now required, so the compiler rejects injected timers without a clock. `clock()` has no fallback, and the default timers still supply `performance.now()`.
+- The session-test `FakeTimers` gets a constant `now()` (0). The G-60-1 activity-only test now asserts `unfocused.ms === UNFOCUSED_POLL_MS` exactly instead of `UNFOCUSED_POLL_MS - 10_000 <= ms <= UNFOCUSED_POLL_MS`.
 
-**Files modified:** `src/domain/team/types.ts`, `src/domain/team/materialize.ts`, `src/team/eventLog.ts`, `src/team/auditMirror.ts`, `src/services/team/teamSession.ts`, `src/test/teamMaterialize.test.ts`, `src/test/teamAudit.test.ts`
-**Commit:** c8f48fc
-**Status:** fixed: requires human verification
-**Applied fix:** The accepted `EntryVerdict` gained an optional `authorRole`, read in `applyEntry` before `applyTransition` (genesis uses the owner's role). `SyncResult` gained `authorRoles` (event id to role). `TeamSession` stores the role per queued roster event and passes it to `mirrorRosterEvents`, whose `roleOf` callback is now `(memberId, event) => Role | undefined` (existing one-argument callers still type-check and the tests using them are unchanged). Roles are dropped from the session map once mirrored.
-**Regression tests:** a lead who is later demoted yields `lead` then `developer` verdicts; `mirrorRosterEvents` records the role given per event instead of a single final lookup. The existing session audit test still sees `owner` through the new wiring. Note: Phase 60 logs cannot yet contain a non-owner author, so this is latent until later phases add joins; it is covered at the materialiser and mirror level.
+The only `SchedulerTimers` implementations are the two test `FakeTimers` classes and the default timers. `teamSession.ts` only passes the type through.
 
-### WR-06: A refused coordination log still shows a healthy "Team: name" status
+### IN-03: The stub delivers combined and no-change window-state events that VS Code never sends
 
-**Files modified:** `src/services/team/teamSession.ts`, `src/services/team/teamStatusBar.ts`, `src/test/teamSession.test.ts`
-**Commit:** 3e902df
-**Applied fix:** After each sync, `syncOnce` reads `this.log.state().refused`. If set while the transport says `ok`, the status becomes `{ state: 'paused', reason: logRefused }`, the status bar shows "Team log not trusted" with a tooltip that carries the refusal reason, one warning notification is raised per session, and `syncOnce` returns `false` so the scheduler backs off.
-**Regression test:** a session started with a team file whose genesis event id does not match the remote (fresh storage so the trust pin does not intervene): status text, tooltip (no "Team sync is working"), one warning only across two syncs, `false` return, no "sync is running" line.
+**Files modified:** `src/test/helpers/vscodeStub.ts`, `src/test/teamSession.test.ts`
+**Commit:** 299de97
+**Applied fix:** `fireWindowState(focused, active = focused)` now behaves like VS Code's `ExtHostWindow`. It fires one `onDidChangeWindowState` event per property that actually changed (focused first, then active). Each event carries the whole state after that change. Nothing fires when the state is unchanged. The interface comment says so. A new test, 'the vscode stub fires one window-state event per changed property and none when nothing changes, as VS Code does (IN-03)', pins this:
+- no event for an unchanged state
+- two events, `{false,true}` then `{false,false}`, for a change to both properties
+- one event each for an activity-only change and a focus-only change
 
-### WR-07: The snapshot state hash covers version-dependent fields, so mixed-version teams will reject each other's snapshots
+The review's optional alternative, a separate `fireWindowProperty` helper, was not needed: the orchestrator asked for `fireWindowState` itself to match VS Code.
 
-**Files modified:** `src/domain/team/materialize.ts`, `src/test/teamMaterialize.test.ts`, `src/test/helpers/teamEvents.ts` (comment only)
-**Commit:** f1a4ddf
-**Status:** fixed: requires human verification (signed/hashed format change)
-**FORMAT CHANGE:** `stateHash(state)` is now `sha256(canonicalize({ hashVersion: 1, ...plainState }))` where `plainState` has `accepted`, `seenEventIds`, `rejected` and `snapshots` removed. Still hashed: `team`, `members`, `deviceIndex`, the later-phase maps, `stopped`, `head`, `highLamport`, `genesis` (and `refused` when set). `STATE_HASH_VERSION = 1` is exported so a later phase extends the hashed shape deliberately. `serialiseState`, the snapshot file shape and `deserialiseState` (which still requires and cross-checks the unhashed fields) are unchanged. No snapshot has shipped, so there are no old hashes to migrate.
-**Why not more:** `head` and `highLamport` stay in the hash as the review asked, and `snapshot.written` is still checked against `coversThrough`/`lamport`. An older client that skipped a newer event type still has a different head and will still not match; this fix removes the bookkeeping divergence (rejected junk, counters, earlier snapshots), not the head divergence.
-**Caution for the future snapshot fast path (A2):** the four excluded fields are no longer authenticated by the hash; they are covered only by the manager's snapshot-file signature plus the consistency checks in `deserialiseState`. A consumer that trusts a snapshot should recompute them by replay or treat them as advisory.
-**Tests:** every existing determinism, forgery, snapshot and scenario test passed unchanged. The only edits to existing tests are two comments that said the hash covers `state.rejected`. New tests: rejected entries (unsupported type and forged signature), bumped counters and extra snapshot refs leave the hash unchanged, and a snapshot computed by a reader without the junk is accepted by one with it; members, policy, head, highLamport, later-phase fields and the hash version still change the hash.
+**Call sites (all in `src/test/teamSession.test.ts`; line numbers at 299de97).** No call site needed a code change. Each assertion keeps its intent:
+- **L98 `resetStub`, `fireWindowState(true, true)`:** now fires nothing when the state is already `{true,true}`, and only the changed properties otherwise. Intent ("one test's window focus must never leak into the next") is kept, because the state is still reset.
+- **L486-487 wiring test, `fireWindowState(false)` then `fireWindowState(true)`:** from `{true,true}` these now deliver four events: focus loss, activity loss, focus gain, activity gain. The real focus gain still syncs at once, so the assertion (the first forgery is rejected after a focus event) keeps its intent.
+- **L546 G-60-1 loop, `fireWindowState(true, index % 2 === 1)`:** active alternates from `{true,true}`, so each of the 36 iterations is exactly one activity-only event, as before. The per-iteration assertions (no timer requested, pending poll not cleared) are unchanged and now test the exact shape VS Code sends.
+- **L551 `fireWindowState(false, true)`:** the loop ends at `{true,true}`, so this is one focus-only event, as before. "losing focus re-arms exactly once" is unchanged.
+- **L557 `fireWindowState(false, false)`:** before, this was one combined event with focus repeated as false. Now it is one activity-only event. That is closer to the assertion's intent ("an activity-only change after the loss requests no timer").
+- **L563 `fireWindowState(true, true)`:** from `{false,false}`, this was one combined event and is now two: a focus gain, then an activity-only event. The gain still syncs at once and the activity event is ignored, so "a real focus gain to sync at once" and "the gain run to settle" (exactly one live timer) keep their intent.
+- **L576 blocked-first-sync setup, `fireWindowState(startFocused, startFocused)`:** for `false` this is two events and for `true` no event. No listener is subscribed yet, so only the resulting state matters, and it is the same.
+- **L595 `fireWindowState(!startFocused, !startFocused)` during the blocked first sync:** now two events instead of one. The session's listener is not subscribed yet, so the events are still missed, and the test still checks that the cadence comes from `focused()` after the run.
+- **L518-524:** these are the new IN-03 stub test itself.
 
-### WR-08: The signed `prev` field is never checked, so it adds no integrity
+## Deviations
 
-**Files modified:** `src/domain/team/types.ts`, `src/domain/team/materialize.ts`, `src/test/teamMaterialize.test.ts`
-**Commit:** 4f1752e
-**Status:** fixed: requires human verification (signed data rule change)
-**FORMAT CHANGE:** after the signature step, `applyEntry` rejects any event whose `prev` is not the head event id at that position, with the new fixed reason `TEAM_REJECTION_REASONS.prevMismatch` ("prev does not name the log head"). A genesis `team.created` whose `prev` is not `''` now refuses the log. Honest writers already satisfy this: `buildGenesisEvents` and `prepareEvents` derive `prev` from the accepted head and chain within a batch, and the CAS append re-derives it after every lost race. The `TeamEvent` type carries a comment saying `prev` is enforced.
-**Tests:** no existing test needed changing (all helpers already used the head id). New tests cover an empty link, an older event id and an unknown id (all rejected, head unmoved, a correct link still accepted afterwards) and a validly signed genesis with a non-empty `prev`. Both fail with the check removed.
-**Known limit:** an older client that rejects an unknown event type writes `prev` from its own (older) head, which a newer reader will reject. That client already fails the Lamport check against the same log, so D-07 behaviour for older writers is unchanged.
-
-### WR-09: Enable fails with a misleading error for valid git branch names, and the two branch validators disagree
-
-**Files modified:** `src/domain/team/policy.ts`, `src/team/teamFile.ts`, `src/team/enable.ts`, `src/test/teamValidate.test.ts`, `src/test/teamEnable.test.ts`
-**Commit:** f167d6a
-**Status:** fixed: requires human verification (signed policy field rule)
-**FORMAT CHANGE (read side):** the `integrationBranch` check in signed policy is now `isGitRefName`, exported from `policy.ts`. It follows `git check-ref-format --branch`: any characters git allows (letters from any script, `+`, `@`, `#`, `,`, and so on) up to 255 characters, but not `..`, `@{`, `//`, a leading or trailing `/`, a trailing `.`, a leading `-`, a lone `@`, a component starting with `.` or ending in `.lock`. It also rejects control characters, spaces and invisible/bidi format characters (`U+200B..200F`, `U+2028..202E`, `U+2060..2064`, `U+2066..206F`, `U+FEFF`) so a signed name cannot spoof what a person reads. The old pattern capped names at 128 ASCII characters. `teamFile.ts` `validRef` now applies the same shared rules on top of its ASCII coordination-ref pattern, replacing its own copy of the component checks. `enableDefaults` falls back to `main` when the current branch would be refused (for example a branch with a zero-width character), so Enable does not fail on a name the user never chose.
-**Tests:** `isGitRefName` is compared with the real `git check-ref-format --branch` over a corpus of 35 names (valid and invalid, ASCII and not); the beyond-git rules and the policy validator are asserted; Enable succeeds with a branch `feature/c++#1@café` and falls back to `main` for a zero-width branch. Existing branch tests (`feature/../main`, `-bad`, `has space`) are unchanged and pass.
-
-### WR-10: A missing coordination branch on the remote is reported as healthy even after a trusted log existed
-
-**Files modified:** `src/team/transport.ts`, `src/team/gitTransport.ts`, `src/services/team/teamStatusBar.ts`, `src/test/teamGitTransport.test.ts`, `src/test/teamSession.test.ts`
-**Commit:** faabc43
-**Status:** fixed: requires human verification
-**Applied fix:** In `fetchLocked`, an `absent` failure is normal only when this client has never read the branch (no saved position and no `LOCAL_REF`). Otherwise the status is `offline` with the new exported `BRANCH_MISSING_REASON`. I chose `offline` rather than `paused` on purpose: `paused` is sticky (a rewrite must never be followed), whereas a deleted-then-restored branch should resume by itself, and the ancestry check still runs when it returns. The status bar shows "Team sync paused: log missing on remote".
-**Tests:** transport level (read, delete on remote, offline with the reason and last good state kept, a never-read client still `ok`, restore and recover) and session level (status text, no "working" tooltip, recovery).
-
-### WR-11: The audit mirror progress mark lives in per-team global storage, so a second clone of the same team never receives roster entries
-
-**Files modified:** `src/team/auditMirror.ts`, `src/services/team/teamSession.ts`, `src/test/teamSession.test.ts`
-**Commit:** 335b844
-**Applied fix:** `fileMirrorMark(storageDir, scope?)` writes `audit-mark.<scope>.json`; the session passes `projectMarkScope(projectRoot)` (first 16 hex characters of the sha256 of the resolved project path). Without a scope the file name is unchanged, so `teamAudit` tests and the mark unit tests are untouched. The `sink.list` id check remains the second guard, so an old shared `audit-mark.json` is simply ignored and a first pass is deduplicated.
-**Existing tests edited (and why):** the two session tests that read or checked `audit-mark.json` now compute the per-project file with the exported helpers. The second of them asserted the mark file does not exist after a failed audit write; with the old name that would have become trivially true, so it had to follow the fix.
-**New regression test:** a second clone with the same global storage and team id gets its own two audit rows; the first checkout is not written twice.
-
-### WR-12: The remote URL, which may embed credentials, is passed on git's command line
-
-**Files modified:** `src/team/gitTransport.ts`, `src/test/teamGitTransport.test.ts`
-**Commit:** 74ef837
-**Status:** fixed: requires human verification (cannot be exercised against a real credentialed remote here)
-**Applied fix:** `networkTarget(url)` returns a process-local remote name (`near-ai-team`) and an environment with `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` set to `remote.near-ai-team.url=<url>` (the index starts after any `GIT_CONFIG_COUNT` the user's environment already has). `fetch`, both `push` calls and the genesis `ls-remote` use the name; nothing is written to the mirror's config. Support is detected once with `git --version` (2.31 or later); an older git, or an unparsable version, falls back to the previous argument form.
-**Tests:** a recording runner shows ls-remote, push and fetch carry no argument containing the remote URL and carry the three config variables in the environment, and the mirror's local config does not contain the URL; a runner that reports `git version 2.30.2` shows the argument fallback is used and the flow still works. All earlier transport, concurrency and session tests pass unchanged. Redaction of error text is unchanged.
-
-## Skipped Issues
-
-None.
-
-## Notes for the reader
-
-- IN-01 to IN-06 were out of scope (`fix_scope: critical_warning`) and were not changed. IN-03 (read versus push URL) is now easier to address because every network call goes through `networkTarget`.
-- No existing assertion encoding buggy behaviour had to be changed other than the two session-test mark-file paths (WR-11) and two explanatory comments (WR-07).
-- Files outside the phase's team code that were touched: none. `package.json` and dependencies are unchanged. `.planning/config.json` and `.planning/state.json` carry the orchestrator's uncommitted changes and were not modified or committed by this run.
+- **No nested worktree.** The orchestrator said to run every command in the linked worktree `.claude/worktrees/team-mode` and not switch branches. So no `gsd-reviewfix/*` worktree, temp branch or recovery sentinel was created, and the cleanup tail did not apply. The fixes are committed directly on `gsd/phase-60-team-core-identity-signed-event-log-git-transport-roster`.
+- **Plain `git commit`.** Commits were made with `git commit -- <paths>` and a Co-Authored-By trailer, matching the phase's earlier fix commits, instead of `gsd-tools query commit`. Only the listed files went into each commit. `.planning/config.json` and `.planning/state.json` were left uncommitted and untouched.
 
 ---
 
-_Fixed: 2026-11-01_
+_Fixed: 2026-11-01T16:57:53Z_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 1_

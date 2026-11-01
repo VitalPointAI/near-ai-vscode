@@ -6,108 +6,45 @@ findings:
   - id: CR-01
     severity: critical
     disposition: fixed
-    title: "`runGit` does not settle on timeout when git leaves a child process holding its pipes, which wedges all Team sync"
+    title: "The anchored focus-loss re-arm has no upper bound and uses a clock that can go backward, so a focus loss can postpone a poll by any amount"
   - id: WR-01
     severity: warning
     disposition: fixed
-    title: "Enable deletes the device key when an ambiguous push could not be confirmed either way"
+    title: "The new `focused()` and `now()` calls in `cycle()` are outside the error handling, so a throw rejects the scheduler promise unhandled and stops polling for good"
   - id: WR-02
     severity: warning
     disposition: fixed
-    title: "A throw from `transport.append` during Enable leaves the device key and mirror behind"
-  - id: WR-03
-    severity: warning
-    disposition: fixed
-    title: "One unexpected throw permanently poisons the `TeamSession.sync` chain"
-  - id: WR-04
-    severity: warning
-    disposition: fixed
-    title: "A failed snapshot write loses the entries the same sync already applied"
-  - id: WR-05
-    severity: warning
-    disposition: fixed
-    title: "Roster audit entries record the author's final role, not the role at that log position"
-  - id: WR-06
-    severity: warning
-    disposition: fixed
-    title: "A refused coordination log still shows a healthy \"Team: name\" status"
-  - id: WR-07
-    severity: warning
-    disposition: fixed
-    title: "The snapshot state hash covers version-dependent fields, so mixed-version teams will reject each other's snapshots"
-  - id: WR-08
-    severity: warning
-    disposition: fixed
-    title: "The signed `prev` field is never checked, so it adds no integrity"
-  - id: WR-09
-    severity: warning
-    disposition: fixed
-    title: "Enable fails with a misleading error for valid git branch names, and the two branch validators disagree"
-  - id: WR-10
-    severity: warning
-    disposition: fixed
-    title: "A missing coordination branch on the remote is reported as healthy even after a trusted log existed"
-  - id: WR-11
-    severity: warning
-    disposition: fixed
-    title: "The audit mirror progress mark lives in per-team global storage, so a second clone of the same team never receives roster entries"
-  - id: WR-12
-    severity: warning
-    disposition: fixed
-    title: "The remote URL, which may embed credentials, is passed on git's command line"
+    title: "The blocked-first-sync session test leaks the starting session and its promise when it fails"
   - id: IN-01
     severity: info
-    disposition: open
-    title: "Event timestamps are format-checked only, and the audit mirror records the author's claimed time"
+    disposition: fixed
+    title: "Comments now misstate focus behaviour"
   - id: IN-02
     severity: info
-    disposition: open
-    title: "Email hashes are salted with a public value, so they can be confirmed by dictionary"
+    disposition: fixed
+    title: "`SchedulerTimers.now` is optional, so injected timers without it silently mix a fake `set` clock with the real `Date.now()`"
   - id: IN-03
     severity: info
-    disposition: open
-    title: "Reads use the push URL"
-  - id: IN-04
-    severity: info
-    disposition: open
-    title: "`update-ref LOCAL_REF` has no old-value guard across windows"
-  - id: IN-05
-    severity: info
-    disposition: open
-    title: "The status tooltip blames the remote for any sync failure"
-  - id: IN-06
-    severity: info
-    disposition: open
-    title: "`commitFiles` drops the original failure when cleanup also fails"
-open: 6
-total: 19
-recorded: 2026-11-01T15:01:43.496Z
+    disposition: fixed
+    title: "The stub delivers combined and no-change window-state events that VS Code never sends"
+open: 0
+total: 6
+recorded: 2026-11-01T16:57:53Z
 ---
 
 # Phase 60: Code Review Disposition
 
+This records the **incremental review of gap plan 60-12** (G-60-1) in `60-REVIEW.md`. That review reuses the IDs CR-01, WR-01, WR-02 and IN-01 to IN-03 for different findings. The earlier disposition of the full-phase review (CR-01, WR-01 to WR-12 fixed; IN-01 to IN-06 open) is in git history at commit `e2b04fa` (`git show e2b04fa:.planning/phases/60-team-core-identity-signed-event-log-git-transport-roster/60-REVIEW-DISPOSITION.md`).
+
 | Finding | Severity | Disposition | Source |
 |---------|----------|-------------|--------|
-| CR-01 | critical | fixed | 60-REVIEW-FIX.md |
-| WR-01 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-02 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-03 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-04 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-05 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-06 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-07 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-08 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-09 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-10 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-11 | warning | fixed | 60-REVIEW-FIX.md |
-| WR-12 | warning | fixed | 60-REVIEW-FIX.md |
-| IN-01 | info | open | - |
-| IN-02 | info | open | - |
-| IN-03 | info | open | - |
-| IN-04 | info | open | - |
-| IN-05 | info | open | - |
-| IN-06 | info | open | - |
+| CR-01 | critical | fixed | 60-REVIEW-FIX.md (commit 03a4ded; monotonic default clock, focus-loss wait clamped to 0..nextDelay(); backward-clock regression test) |
+| WR-01 | warning | fixed | 60-REVIEW-FIX.md (commit 74d7121; post-run callbacks guarded and reported, poll still armed; throwing focused/clock/pollSeconds regression tests) |
+| WR-02 | warning | fixed | 60-REVIEW-FIX.md (commit 1cf88f3; starting session settled and disposed on every test path) |
+| IN-01 | info | fixed | 60-REVIEW-FIX.md (commit 4743a0c; scheduler comments corrected) |
+| IN-02 | info | fixed | 60-REVIEW-FIX.md (commit a554f6f; SchedulerTimers.now required, session-test clock pinned, exact UNFOCUSED_POLL_MS assertion) |
+| IN-03 | info | fixed | 60-REVIEW-FIX.md (commit 299de97; fireWindowState fires per changed property and not on no change; call sites recorded) |
 
 Dispositions: `open` (recorded, not yet triaged), `fixed`, `skipped`, `deferred`.
 Set `deferred` by hand and put the reason in the Source cell; both are preserved. A `|` in the reason is kept as prose and escaped on the next run.
-Re-running the gate keeps every row it can. A row the current review no longer reports is kept and its Source cell flagged, so a finding does not leave this record silently. ONE exception: when a finding id is REUSED by a different finding, the earlier decision cannot keep a row — the id is taken — and it is dropped. A RECORDED decision (anything but `open`) is named on the console when that happens; a row still at `open` is replaced silently, because `open` records no decision to lose.
+Re-running the gate keeps every row it can. A row the current review no longer reports is kept and its Source cell flagged, so a finding does not leave this record silently. ONE exception: when a finding id is REUSED by a different finding, the earlier decision cannot keep a row (the id is taken) and it is dropped. A RECORDED decision (anything but `open`) is named on the console when that happens; a row still at `open` is replaced silently, because `open` records no decision to lose.
