@@ -1,5 +1,5 @@
 // Polling scheduler for a running team (D-19, D-25). It decides only WHEN a sync runs; what a sync does is the caller's run function.
-// Focused windows poll every pollSeconds, unfocused windows every 120 s, a focus event or a nudge runs at once, and two syncs never overlap.
+// Focused windows poll every pollSeconds, unfocused windows every 120 s, a real focus gain or a nudge runs at once, and two syncs never overlap.
 // A run that reports unhealthy (or throws) backs the delay off exponentially up to 10 minutes; a healthy run resets it.
 // An event that does not change focus is ignored: it neither clears nor re-arms the pending poll and never starts a run (G-60-1).
 // Losing focus moves the pending poll to the unfocused delay counted from the end of the last run, so it never postpones a poll
@@ -97,7 +97,8 @@ export class SyncScheduler {
       this.requestRun();
       return;
     }
-    // Losing focus only lengthens the wait, and counts it from the end of the last run so repeated events can never push a poll later.
+    // Losing focus switches the wait to the unfocused delay counted from the end of the last run (shorter when pollSeconds exceeds 120 s,
+    // and at once when that delay has already passed), so repeated events can never push a poll later.
     // A run in flight reschedules with the new interval when it ends.
     // The wait is clamped to the full delay, so no clock behaviour (a backward step, a clock that is not finite) can make it longer (CR-01).
     if (this.inFlight === undefined) {
