@@ -2,8 +2,9 @@
 // Writing turns intents into stamped, secret-checked, permission-checked and signed events inside the transport builder, so a lost
 // push race rebuilds lamport, prev, id and signature instead of re-sending a stale event (D-05, D-29). Reading syncs the transport and
 // reports a verdict per entry; verifyAll replays the whole log from genesis (D-25). This module never imports vscode.
-import { CanonicalJsonError, MAX_EVENT_BYTES, canonicalBytes } from '../domain/team/canonical';
-import { applyEntry, createState } from '../domain/team/materialize';
+import { CanonicalJsonError, MAX_EVENT_BYTES, canonicalBytes, canonicalize, snapshotPath } from '../domain/team/canonical';
+import { applyEntry, createState, snapshotBody } from '../domain/team/materialize';
+import type { SnapshotFile } from '../domain/team/materialize';
 import { actionForEvent, decideTeamAction } from '../domain/team/permissions';
 import { assertNoSecrets, findSecrets } from '../domain/team/secrets';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
@@ -13,7 +14,7 @@ import type {
 } from '../domain/team/types';
 import { newEventId, signEvent } from './identity';
 import type { DeviceIdentity } from './identity';
-import type { AppendResult, CoordinationTransport, TransportStatus } from './transport';
+import type { AppendBuild, AppendResult, CoordinationTransport, TransportStatus } from './transport';
 
 const R = TEAM_REJECTION_REASONS;
 
@@ -22,6 +23,8 @@ const DEFAULT_YIELD_EVERY = 200;
 // An Ed25519 signature is 86 base64url characters; the placeholder gives the exact size the signed file will have.
 const SIGNATURE_PLACEHOLDER = 'A'.repeat(86);
 export const NO_DEVICE_KEY_MESSAGE = 'This computer has no device key for this team.';
+// What a client that lost the snapshot race is told when its builder runs again against a log that already has the snapshot (D-33).
+export const SNAPSHOT_ALREADY_WRITTEN = 'snapshot already written';
 
 export class NoDeviceKeyError extends Error {
   public constructor() {
@@ -152,13 +155,16 @@ export class TeamLog {
   private readonly transport: CoordinationTransport<TeamState>;
   private readonly signer: TeamSigner | undefined;
   private readonly now: () => Date;
+  private readonly snapshotEvery: number;
   private readonly yieldEvery: number;
+  private lastSnapshotResult: AppendResult | undefined;
 
   public constructor(options: TeamLogOptions) {
     this.anchor = options.anchor;
     this.transport = options.transport;
     this.signer = options.signer;
     this.now = options.now ?? ((): Date => new Date());
+    this.snapshotEvery = positiveInteger(options.snapshotEvery ?? DEFAULT_SNAPSHOT_EVERY, 'snapshotEvery');
     this.yieldEvery = positiveInteger(options.yieldEvery ?? DEFAULT_YIELD_EVERY, 'yieldEvery');
   }
 
@@ -180,7 +186,15 @@ export class TeamLog {
       if (!verdict.accepted) rejected.push(verdict.rejection);
       else if (verdict.event !== undefined) accepted.push(verdict.event);
     }
-    return { entries, accepted, rejected, status: this.transport.status() };
+    const snapshot = await this.maybeWriteSnapshot();
+    const result: SyncResult = { entries, accepted, rejected, status: this.transport.status() };
+    if (snapshot !== undefined) result.snapshot = snapshot;
+    return result;
+  }
+
+  // The outcome of the most recent snapshot attempt after a sync or an append, so a caller that only appended can still see it.
+  public lastSnapshot(): AppendResult | undefined {
+    return this.lastSnapshotResult;
   }
 
   // The intents function is called with the freshest state on every attempt, so a caller that derives its intents from state (a conflict
@@ -188,10 +202,46 @@ export class TeamLog {
   public async append(intents: (state: TeamState) => EventIntent[] | { conflict: string }): Promise<AppendResult> {
     const signer = this.signer;
     if (signer === undefined) throw new NoDeviceKeyError();
-    return this.transport.append((state, head) => {
+    const result = await this.transport.append((state, head) => {
       const wanted = intents(state);
       return Array.isArray(wanted) ? prepareEvents(state, head, signer, wanted, this.now) : wanted;
     });
+    if (result.ok) await this.maybeWriteSnapshot();
+    return result;
+  }
+
+  private snapshotDue(state: TeamState): boolean {
+    const last = state.snapshots.reduce((highest, ref) => Math.max(highest, ref.lamport), 0);
+    return state.head.lamport >= last + this.snapshotEvery;
+  }
+
+  // D-27: only an owner or lead client writes snapshots, one per snapshotEvery accepted events. A client that loses the race is not
+  // in error: the result is reported (refused or conflict) and the next sync sees the winner's snapshot.
+  private async maybeWriteSnapshot(): Promise<AppendResult | undefined> {
+    const signer = this.signer;
+    if (signer === undefined || this.transport.status().state !== 'ok') return undefined;
+    const state = this.transport.state();
+    if (!this.snapshotDue(state) || !decideTeamAction(state, signer.memberId, { kind: 'snapshot.write' }).allowed) return undefined;
+    const result = await this.transport.append((fresh, head) => this.buildSnapshot(fresh, head, signer));
+    this.lastSnapshotResult = result;
+    return result;
+  }
+
+  // Runs again after every lost race, so the threshold, the state hash, the file and the event are all derived from the fresh state (D-29).
+  private buildSnapshot(state: TeamState, head: LogHead, signer: TeamSigner): AppendBuild {
+    const decision = decideTeamAction(state, signer.memberId, { kind: 'snapshot.write' });
+    if (!decision.allowed) return { conflict: `${R.notPermitted}: ${decision.reason ?? ''}` };
+    if (!this.snapshotDue(state)) return { conflict: SNAPSHOT_ALREADY_WRITTEN };
+    const body = snapshotBody(state);
+    // The state is copied into the file, so a secret-like value an older client let through must not be copied into a second place.
+    if (findSecrets(body.state).length > 0) return { conflict: 'snapshot skipped because the state holds a secret-like value' };
+    const unsigned = { ...body, author: signer.memberId, device: signer.identity.fingerprint };
+    const file: SnapshotFile = { ...unsigned, sig: signer.identity.sign(canonicalBytes(unsigned)) };
+    const prepared = prepareEvents(state, head, signer, [{
+      type: 'snapshot.written', body: { coversThrough: body.coversThrough, lamport: body.lamport, stateHash: body.stateHash, path: snapshotPath(body.lamport) }
+    }], this.now);
+    if (!Array.isArray(prepared)) return prepared;
+    return { events: prepared, files: [{ path: snapshotPath(body.lamport), text: canonicalize(file) }] };
   }
 
   // D-25: re-fetch, then replay the whole log from genesis with a fresh state, so nothing a previous sync decided is trusted.
