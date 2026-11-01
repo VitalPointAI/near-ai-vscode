@@ -7,13 +7,17 @@ export interface VscodeStub {
   vscode: unknown;
   outputChannels: Array<{ name: string; lines: string[] }>;
   statusBarItems: RecordedStatusBarItem[];
-  notifications: Array<{ level: 'info' | 'warn' | 'error'; message: string }>;
+  notifications: Array<{ level: 'info' | 'warn' | 'error'; message: string; actions: string[] }>;
   configUpdates: unknown[];
   commands: Map<string, (...args: unknown[]) => unknown>;
   // Answers handed to showInputBox and to the show*Message calls, in order. An empty queue answers undefined (dismissed).
   inputAnswers: Array<string | undefined>;
+  // The options each showInputBox call received, in order.
+  inputRequests: Array<{ prompt?: string; title?: string; value?: string; placeHolder?: string }>;
   messageAnswers: Array<string | undefined>;
   setConfig(key: string, value: unknown): void;
+  // The folders the window reports; an empty list means no folder is open.
+  setWorkspaceFolders(paths: string[]): void;
   fireWindowState(focused: boolean): void;
 }
 
@@ -26,14 +30,16 @@ export function createVscodeStub(): VscodeStub {
   const configUpdates: unknown[] = [];
   const commands = new Map<string, (...args: unknown[]) => unknown>();
   const inputAnswers: VscodeStub['inputAnswers'] = [];
+  const inputRequests: VscodeStub['inputRequests'] = [];
+  let workspaceFolders: Array<{ uri: { fsPath: string }; name: string; index: number }> | undefined;
   const messageAnswers: VscodeStub['messageAnswers'] = [];
   const config = new Map<string, unknown>();
   const windowListeners = new Set<(state: { focused: boolean }) => void>();
   const configListeners = new Set<ConfigListener>();
   const windowState = { focused: true };
 
-  const message = (level: 'info' | 'warn' | 'error') => async (text: string): Promise<string | undefined> => {
-    notifications.push({ level, message: text });
+  const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...actions: string[]): Promise<string | undefined> => {
+    notifications.push({ level, message: text, actions });
     return messageAnswers.shift();
   };
 
@@ -79,10 +85,14 @@ export function createVscodeStub(): VscodeStub {
       showInformationMessage: message('info'),
       showWarningMessage: message('warn'),
       showErrorMessage: message('error'),
-      showInputBox: async (): Promise<string | undefined> => inputAnswers.shift(),
+      showInputBox: async (options?: { prompt?: string; title?: string; value?: string; placeHolder?: string }): Promise<string | undefined> => {
+        inputRequests.push({ ...options });
+        return inputAnswers.shift();
+      },
       withProgress: async <T>(_options: unknown, task: (progress: { report(value: unknown): void }) => PromiseLike<T>): Promise<T> => task({ report: (): void => undefined })
     },
     workspace: {
+      get workspaceFolders(): typeof workspaceFolders { return workspaceFolders; },
       getConfiguration: (section?: string) => ({
         get: <T>(key: string, fallback?: T): T => {
           const full = section === undefined || section === '' ? key : `${section}.${key}`;
@@ -109,7 +119,10 @@ export function createVscodeStub(): VscodeStub {
   };
 
   return {
-    vscode, outputChannels, statusBarItems, notifications, configUpdates, commands, inputAnswers, messageAnswers,
+    vscode, outputChannels, statusBarItems, notifications, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
+    setWorkspaceFolders(paths: string[]): void {
+      workspaceFolders = paths.length === 0 ? undefined : paths.map((fsPath, index) => ({ uri: { fsPath }, name: fsPath.split('/').pop() ?? '', index }));
+    },
     setConfig(key: string, value: unknown): void {
       config.set(key, value);
       for (const listener of [...configListeners]) {
@@ -132,4 +145,15 @@ export function installVscodeStub(stub: VscodeStub): () => void {
   const original = hook._load;
   hook._load = (request, parent, isMain): unknown => (request === 'vscode' ? stub.vscode : original(request, parent, isMain));
   return (): void => { hook._load = original; };
+}
+
+export interface FakeContext {
+  subscriptions: Array<{ dispose(): void }>;
+  globalStorageUri: { fsPath: string };
+  secrets: unknown;
+}
+
+// The few ExtensionContext members Team Mode uses. Cast it with `as never` where an ExtensionContext is expected.
+export function createFakeContext(globalStoragePath: string, secrets: unknown): FakeContext {
+  return { subscriptions: [], globalStorageUri: { fsPath: globalStoragePath }, secrets };
 }
