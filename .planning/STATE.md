@@ -2,44 +2,44 @@
 gsd_state_version: "1.0"
 milestone: v0.6.0
 milestone_name: Team Mode
-current_phase: 60
-current_phase_name: "Team core: identity, signed event log, git transport, roster"
-status: verifying
-stopped_at: Completed 60-12-PLAN.md
-last_updated: "2026-11-01T16:37:06.728Z"
+current_phase: 61
+current_phase_name: Invitations, joining, removal, NEAR org and key integration
+status: planning
+stopped_at: Phase 60 complete, ready to plan Phase 61
+last_updated: "2026-11-01T18:57:41.213Z"
 last_activity: 2026-11-01
-last_activity_desc: Phase 60 execution started
-state_head: 553e0d714ea86dd35c2de1f9452c82f1308189a9
+last_activity_desc: Phase 60 complete, transitioned to Phase 61
+state_head: ab35bcd2448e093e6041da58c6fb958ed8105946
 progress:
   total_phases: 8
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 12
   completed_plans: 12
-  percent: 0
+  percent: 13
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-31)
+See: .planning/PROJECT.md (updated 2026-11-01)
 
 **Core value:** Several people, each running their own private NEAR AI agents, work one project toward Open-GSD milestones and releases without colliding, overspending or leaking secrets.
-**Current focus:** Phase 60 — Team core: identity, signed event log, git transport, roster
+**Current focus:** Phase 61 — Invitations, joining, removal, NEAR org and key integration
 
 ## Current Position
 
-Phase: 60 (Team core: identity, signed event log, git transport, roster) — EXECUTING
-Plan: 11 of 11
-Status: Phase complete — ready for verification
-Last activity: 2026-11-01 — Phase 60 execution started
+Phase: 61 — Invitations, joining, removal, NEAR org and key integration
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-11-01 — Phase 60 complete, transitioned to Phase 61
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 13%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
+- Total plans completed: 12
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -47,7 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 60 | 12 | - | - |
 
 *Updated after each plan completion*
 **Per-Plan Metrics:**
@@ -94,6 +94,7 @@ Recent decisions affecting current work:
 - [Phase 60]: 60-10: shared-mirror config.lock race fixed in gitTransport.ts (conditional config writes plus lock retry) rather than in the test
 - [Phase 60]: 60-11: ENOENT and ENOTDIR both mean solo; Enable checks for an existing team before asking questions; Push offered only on a branch; commit-failed still starts the session
 - [Phase 60]: G-60-1: unchanged-focus window-state events are ignored; focus loss re-arms anchored to the last run; cadence re-reads focused() after each run (60-12)
+- [Phase 60]: 60-12 review: the scheduler uses a monotonic clock (performance.now) and caps a focus-loss re-arm at one full delay; post-run callback failures are reported and the next poll is still armed
 
 ### Pending Todos
 
@@ -102,6 +103,7 @@ None yet.
 ### Blockers/Concerns
 
 - [Phase 61]: Owner decision 1 (NEAR spend-limit semantics: lifetime or per period, and which org role may set it) is confirmed in Phase 61 research; Phase 66 depends on the answer.
+- [Phase 60]: The real-window re-test of G-60-1 (60-UAT test 3) ran mostly unfocused because the desktop window lost OS focus; the unfocused cadence and focus-gain syncs were observed, the focused 5 s cadence was covered by unit tests only.
 - [Phase 67]: The planner may split this phase; the relay transport is separable and can ship last.
 
 ## Deferred Items
@@ -114,8 +116,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-01T16:37:06.618Z
-Stopped at: Completed 60-12-PLAN.md
+Last session: 2026-11-01T18:58:03Z
+Stopped at: Phase 60 complete, ready to plan Phase 61
 Resume file: None
 
 ## Notes

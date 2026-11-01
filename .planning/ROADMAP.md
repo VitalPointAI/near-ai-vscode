@@ -40,7 +40,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 
 **Phase summary:**
 
-- [ ] **Phase 60: Team core: identity, signed event log, git transport, roster** - Enable Team Mode and share one signed, verified coordination log over the project's git remote
+- [x] **Phase 60: Team core: identity, signed event log, git transport, roster** - Enable Team Mode and share one signed, verified coordination log over the project's git remote (completed 2026-11-01)
 - [ ] **Phase 61: Invitations, joining, removal, NEAR org and key integration** - Invite by email, join with a single-use code, remove cleanly, with NEAR access and keys following
 - [ ] **Phase 62: Work model, GSD import, Team Board (live, read and move)** - A live board of milestones, phases, plans and tasks, with permission-checked moves
 - [ ] **Phase 63: Claims, leases, claim workspaces, LeaseGuard, duplicate checks** - Exclusive claims and path leases enforced in the agent runtime, per-claim branches, duplicates refused
@@ -63,7 +63,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Concurrent appends from both clients never lose an event: a test with several child-process clients appending to a local bare repository ends with every event present and no force-push.
   5. Solo projects (no `.planning/.near-ai/team.json`) behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 12 plans (12/12 executed) in 7 waves
+**Plans**: 12/12 plans complete (12/12 executed) in 7 waves
 
 **Wave 1**
 - [x] 60-01-PLAN.md — Tracer: signed genesis round trip between two clones over a real bare remote; type contracts, canonical JSON, identity (TEAM-04)
@@ -210,7 +210,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 60. Team core | v0.6.0 | 12/12 | In Progress | - |
+| 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 0/TBD | Not started | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 0/TBD | Not started | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |

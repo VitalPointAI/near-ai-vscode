@@ -6,7 +6,7 @@
     {
       "number": "60",
       "name": "Team core",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "61",
@@ -45,9 +45,9 @@
     }
   ],
   "next": {
-    "command": "/gsd:progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 60 of 8 · 0% · executing"
+    "command": "/gsd-progress --next",
+    "label": "Advance to the next step (plan phase 61)",
+    "reason": "Phase 2 of 8 — needs a plan"
   },
-  "updated_at": "2026-10-31T13:15:43.837Z"
+  "updated_at": "2026-11-01T18:57:41.224Z"
 }

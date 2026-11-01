@@ -59,6 +59,8 @@ v0.5.0 (trusted-source knowledge base) was paused on 2026-10-29 and is moving to
 
 **Owner decisions taken (spec section 14):** coordination storage is the orphan branch `near-ai/coordination`; default dispatch mode is `offer`; peer metrics visibility is off by default; the integration default is the local merge train; the milestone is v0.6.0 Team Mode (evidence-based model defaults move to v0.7.0 or a 0.6.x release). Decision 1 (NEAR spend-limit semantics) is confirmed in Phase 61 research.
 
+**Progress:** Phase 60 (team core: identity, signed event log, git transport, roster) completed 2026-11-01, delivering TEAM-01, TEAM-04, SEC-01 and SEC-04; verified 11/11 must-haves and a real two-window UAT. Next: Phase 61 (invitations, joining, removal, NEAR org and key integration).
+
 **Constraints:** solo projects (no `.planning/.near-ai/team.json`) behave exactly as 0.4.8; `src/domain/team/*` and `src/team/*` never import `vscode`; no new runtime dependencies in the team core; no secret is ever written to the coordination log, `team.json`, settings, transcripts, audit or fixtures; money is integer nano-USD; event ordering never uses wall clock.
 
 ## Evolution
@@ -79,4 +81,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-31 after starting milestone v0.6.0 Team Mode*
+*Last updated: 2026-11-01 after Phase 60*
