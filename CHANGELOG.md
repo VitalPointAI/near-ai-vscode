@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.10
+
+- **Usage reporting no longer looks broken while NEAR AI Cloud is missing its
+  usage summary.** NEAR AI Cloud documents the usage summary that a reporting
+  token reads, but it currently answers HTTP 404 to it. The token test used to
+  report that as a failure and offer **Fix token**, which could not help.
+  Now the token is kept and its test says it is saved. The figures are this
+  computer's own, and NEAR is asked again every hour, so NEAR's total appears
+  on its own once NEAR turns the summary on.
+- **The token's messages agree with each other.** The token link said "Using
+  NEAR's total" whenever a token was stored, while the spend tooltip still
+  said to set one. Both now follow the same state: using NEAR's total, waiting
+  for NEAR's first answer, NEAR not offering its total yet, or NEAR's total
+  failing. Without a token they say how to set one.
+
 ## 0.4.9
 
 - **Signing in works from code-server on another computer.** When VS Code runs

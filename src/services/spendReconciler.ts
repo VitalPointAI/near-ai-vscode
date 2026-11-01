@@ -1,4 +1,4 @@
-import { describeUsageError, TokenTestResult } from './spendInsight';
+import { describeUsageError, TokenTestResult, UsageProblem } from './spendInsight';
 import { SpendEntry, SpendLedger } from './spendLedger';
 
 // Settles ledger entries with NEAR's actual cost. The queue is the ledger itself (entries with an
@@ -153,6 +153,11 @@ export const USAGE_POLL_ACTIVE_MS = 60_000;
 export const USAGE_POLL_IDLE_MS = 300_000;
 /** NEAR's figures for the week, month, year, and last 7 days are asked for at most this often. */
 export const PERIOD_REFRESH_MS = 600_000;
+/** How often NEAR is asked again while it does not offer the usage summary (HTTP 404). */
+export const NOT_OFFERED_RETRY_MS = 3_600_000;
+
+/** NEAR's total with a stored token: answering, not asked yet, not offered by NEAR (HTTP 404), or failing. */
+export type NearTotalStatus = 'working' | 'waiting' | 'unavailable' | 'failing';
 
 export interface NearUsageFigure {
   nanoUsd: number;
@@ -185,6 +190,10 @@ export class NearUsageSummary {
   private readonly listeners = new Set<() => void>();
   /** Why the last poll failed (no secrets), for the tooltip. */
   public problem: string | undefined;
+  /** Set instead of `problem` while NEAR AI Cloud does not offer the usage summary (HTTP 404). */
+  public unavailable: string | undefined;
+  /** Whether a token was stored when NEAR was last asked (undefined until the first ask). */
+  public tokenSeen: boolean | undefined;
   /** When NEAR's usage summary last answered. */
   public okAt: number | undefined;
   public polls = 0;
@@ -222,7 +231,14 @@ export class NearUsageSummary {
   public soon(): void { this.nextAt = Math.min(this.nextAt, (this.figure?.at ?? 0) + USAGE_POLL_ACTIVE_MS); }
 
   /** Forgets NEAR's figure (the token was cleared). */
-  public reset(): void { this.figure = undefined; this.nextAt = 0; this.problem = undefined; this.okAt = undefined; this.periods.clear(); this.periodsAt = 0; this.periodsKey = ''; this.notify(); }
+  public reset(): void { this.figure = undefined; this.nextAt = 0; this.problem = undefined; this.unavailable = undefined; this.tokenSeen = undefined; this.okAt = undefined; this.periods.clear(); this.periodsAt = 0; this.periodsKey = ''; this.notify(); }
+
+  /** How NEAR's total is doing with the stored token, for every display that names the token. */
+  public nearStatus(): NearTotalStatus {
+    if (this.unavailable) return 'unavailable';
+    if (this.problem) return 'failing';
+    return this.okAt === undefined ? 'waiting' : 'working';
+  }
 
   /** NEAR's total since `since` under `name`, when the last answer covered exactly that start. */
   public period(name: string, since?: number): NearUsageFigure | undefined {
@@ -238,7 +254,7 @@ export class NearUsageSummary {
   public async refreshPeriods(starts: Record<string, number>, force = false): Promise<void> {
     if (this.periodsInFlight) return this.periodsInFlight;
     const key = Object.entries(starts).filter(([name]) => name !== 'lastWeek').map(([name, at]) => `${name}=${at}`).join(',');
-    if (!this.api || (!force && key === this.periodsKey && this.now() - this.periodsAt < PERIOD_REFRESH_MS)) return;
+    if (!this.api || (!force && key === this.periodsKey && this.now() - this.periodsAt < (this.unavailable ? NOT_OFFERED_RETRY_MS : PERIOD_REFRESH_MS))) return;
     this.periodsInFlight = this.askPeriods(starts, key).finally(() => { this.periodsInFlight = undefined; });
     return this.periodsInFlight;
   }
@@ -258,8 +274,9 @@ export class NearUsageSummary {
       }
       this.okAt = this.now();
       this.problem = undefined;
+      this.unavailable = undefined;
     } catch (error) {
-      this.problem = describeUsageError(error, stage, { organizationId: this.ids?.organizationId }).message;
+      this.failed(error, stage);
     }
     this.notify();
   }
@@ -272,6 +289,7 @@ export class NearUsageSummary {
   public async testToken(): Promise<TokenTestResult> {
     if (!this.api) return { ok: false, code: 'no-client', message: 'No NEAR AI Cloud API key is set up for this project, so there is nothing to check the token against.' };
     const token = await this.options.token().catch(() => undefined);
+    this.tokenSeen = Boolean(token);
     if (!token) return { ok: false, code: 'no-token', message: 'No usage reporting token is set (or nearAi.spend.useNearUsageTotal is off).' };
     let stage: 'api-key' | 'summary' = 'api-key';
     try {
@@ -286,11 +304,12 @@ export class NearUsageSummary {
       this.okAt = at;
       this.failures = 0;
       this.problem = undefined;
+      this.unavailable = undefined;
       this.notify();
       return { ok: true, at, nanoUsd, organizationId: this.ids.organizationId };
     } catch (error) {
-      const problem = describeUsageError(error, stage, { organizationId: this.ids?.organizationId });
-      this.problem = problem.message;
+      const problem = this.failed(error, stage);
+      if (problem.code === 'not-offered') this.nextAt = this.now() + NOT_OFFERED_RETRY_MS;
       this.notify();
       return { ok: false, ...problem };
     }
@@ -313,6 +332,7 @@ export class NearUsageSummary {
 
   private async poll(): Promise<void> {
     const token = await this.options.token().catch(() => undefined);
+    this.tokenSeen = Boolean(token);
     if (!token) { if (this.figure) this.reset(); this.nextAt = this.now() + USAGE_POLL_ACTIVE_MS; return; }
     const since = this.options.dayStart();
     let stage: 'api-key' | 'summary' = 'api-key';
@@ -325,15 +345,34 @@ export class NearUsageSummary {
       this.okAt = this.now();
       this.failures = 0;
       this.problem = undefined;
+      this.unavailable = undefined;
       this.nextAt = this.now() + (this.options.active() ? USAGE_POLL_ACTIVE_MS : USAGE_POLL_IDLE_MS);
       this.notify();
     } catch (error) {
+      if (this.failed(error, stage).code === 'not-offered') {
+        this.failures = 0;
+        this.nextAt = this.now() + NOT_OFFERED_RETRY_MS;
+        this.notify();
+        return;
+      }
       this.failures += 1;
-      this.problem = describeUsageError(error, stage, { organizationId: this.ids?.organizationId }).message;
       const retryAfter = (error as { retryAfterMs?: unknown }).retryAfterMs;
       this.nextAt = this.now() + Math.max(typeof retryAfter === 'number' ? retryAfter : 0, Math.min(USAGE_POLL_IDLE_MS * 2, USAGE_POLL_ACTIVE_MS * (2 ** Math.min(4, this.failures - 1))));
       this.notify();
     }
+  }
+
+  /** Records why NEAR's summary could not be read: a missing route is kept apart from a failing token. */
+  private failed(error: unknown, stage: 'api-key' | 'summary'): UsageProblem {
+    const problem = describeUsageError(error, stage, { organizationId: this.ids?.organizationId });
+    if (problem.code === 'not-offered') {
+      this.unavailable = problem.message;
+      this.problem = undefined;
+    } else {
+      this.problem = problem.message;
+      this.unavailable = undefined;
+    }
+    return problem;
   }
 
   private notify(): void { for (const listener of [...this.listeners]) { try { listener(); } catch { /* ignore */ } } }

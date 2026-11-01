@@ -3,7 +3,7 @@ import { AuthService } from './auth';
 import { NearAiClient } from './nearAiClient';
 import { ProfileStore } from './profileStore';
 import { CLEAR_REPORTING_TOKEN_COMMAND, movePastedReportingTokens, REPORTING_TOKEN_HOW_TO, ReportingTokenHint, reportingTokenHint, ReportingTokenState, SET_REPORTING_TOKEN_COMMAND, USE_NEAR_TOTAL_SETTING } from './reportingToken';
-import { configureSpend, resetNearUsage, SpendAccount, spendAccountFor } from './spendAccount';
+import { configureSpend, resetNearUsage, shownSpendAccount, SpendAccount, spendAccountFor } from './spendAccount';
 import { CONSOLE_URL, tokenTestMessage } from './spendInsight';
 import { firstSession, loginUrl, parseCallback, PASTE_CALLBACK, reportingTokenName, SessionTokens, setUpReportingToken, SignInError, SignInProvider, startLoopbackSignIn } from './reportingSignIn';
 import type { DayBoundary } from './spendLedger';
@@ -52,7 +52,7 @@ export async function reportingTokenState(): Promise<ReportingTokenState | undef
 /** The link every spend display shows: set a token, NEAR's total in use, or turn it back on. */
 export async function currentReportingTokenHint(): Promise<ReportingTokenHint | undefined> {
   const state = await reportingTokenState();
-  return state ? reportingTokenHint(state) : undefined;
+  return state ? reportingTokenHint(state, shownSpendAccount()?.usage.nearStatus() ?? 'waiting') : undefined;
 }
 
 /** What a page's token link does, decided here from the current state (a page only asks). */
@@ -291,7 +291,7 @@ export async function testReportingToken(account: SpendAccount | undefined): Pro
   }
   const result = await account.testReportingToken();
   const text = tokenTestMessage(result);
-  if (result.ok) void vscode.window.showInformationMessage(text);
+  if (result.ok || result.code === 'not-offered') void vscode.window.showInformationMessage(text);
   else void vscode.window.showErrorMessage(text, 'Fix token').then((choice) => { if (choice) void vscode.commands.executeCommand(SET_REPORTING_TOKEN_COMMAND); });
   return { ok: result.ok, text };
 }

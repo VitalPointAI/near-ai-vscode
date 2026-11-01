@@ -31,7 +31,7 @@ export const emptyCounts = (): RequestCounts => ({ reconciled: 0, pending: 0, es
 export interface NearFigure { nanoUsd: number; at: number; since: number }
 
 export type CostSourceKind = 'near' | 'per-request' | 'estimated' | 'none';
-export type TokenStatusState = 'missing' | 'off' | 'unchecked' | 'working' | 'failing';
+export type TokenStatusState = 'missing' | 'off' | 'unchecked' | 'working' | 'failing' | 'unavailable';
 
 export interface TokenStatus {
   state: TokenStatusState;
@@ -53,12 +53,13 @@ export interface CostSource {
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
-/** How the usage reporting token is doing: missing, switched off, not yet asked, answering, or failing. */
-export function tokenStatus(input: { tokenState: ReportingTokenState; okAt?: number; problem?: string; formatTime?: (at: number) => string }): TokenStatus {
+/** How the usage reporting token is doing: missing, switched off, not yet asked, answering, failing, or waiting for NEAR to offer the summary. */
+export function tokenStatus(input: { tokenState: ReportingTokenState; okAt?: number; problem?: string; unavailable?: string; formatTime?: (at: number) => string }): TokenStatus {
   const time = input.formatTime ?? clock;
   if (input.tokenState === 'missing') return { state: 'missing', text: 'No usage reporting token is set.' };
   if (input.tokenState === 'off') return { state: 'off', text: 'A usage reporting token is set but not used (nearAi.spend.useNearUsageTotal is off).' };
   if (input.problem) return { state: 'failing', text: `The usage reporting token is set, but NEAR's usage summary failed${input.okAt ? ` (last worked at ${time(input.okAt)})` : ''}.`, problem: input.problem };
+  if (input.unavailable) return { state: 'unavailable', text: 'A usage reporting token is set, but NEAR AI Cloud does not offer its usage summary yet (it answers HTTP 404), so spend shows this computer\'s own figures. The token is kept and NEAR is asked again every hour; nothing needs doing.' };
   if (input.okAt) return { state: 'working', text: `The usage reporting token works: NEAR's usage summary answered at ${time(input.okAt)}.` };
   return { state: 'unchecked', text: 'The usage reporting token is set; NEAR has not been asked yet.' };
 }
@@ -68,9 +69,9 @@ export function tokenStatus(input: { tokenState: ReportingTokenState; okAt?: num
  * for today; "Actual per request" only when at least one request was reconciled with
  * /v1/billing/costs (with how many are still estimates); otherwise the list-price estimate.
  */
-export function costSource(input: { tokenState: ReportingTokenState; near?: NearFigure; okAt?: number; problem?: string; counts: RequestCounts; formatTime?: (at: number) => string }): CostSource {
+export function costSource(input: { tokenState: ReportingTokenState; near?: NearFigure; okAt?: number; problem?: string; unavailable?: string; counts: RequestCounts; formatTime?: (at: number) => string }): CostSource {
   const time = input.formatTime ?? clock;
-  const token = tokenStatus({ tokenState: input.tokenState, okAt: input.okAt ?? input.near?.at, problem: input.problem, formatTime: time });
+  const token = tokenStatus({ tokenState: input.tokenState, okAt: input.okAt ?? input.near?.at, problem: input.problem, unavailable: input.unavailable, formatTime: time });
   if (input.tokenState === 'set' && input.near) {
     const stale = input.problem ? '; the latest check failed, so it may be out of date' : '';
     return { kind: 'near', label: 'Actual (NEAR billing)', detail: `NEAR AI Cloud's usage summary for this API key, from every computer using it, as of ${time(input.near.at)}${stale}.`, token };
@@ -187,9 +188,16 @@ export function creditsView(input: { remainingUsd?: number; burn: BurnView; now:
 
 // ---- what a failed usage summary or token test means ----
 
-export type UsageErrorCode = 'no-token' | 'no-client' | 'api-key-rejected' | 'out-of-credits' | 'token-rejected' | 'wrong-org' | 'bad-request' | 'rate-limited' | 'timeout' | 'network' | 'server' | 'bad-response' | 'unexpected';
+export type UsageErrorCode = 'no-token' | 'no-client' | 'api-key-rejected' | 'out-of-credits' | 'token-rejected' | 'wrong-org' | 'not-offered' | 'bad-request' | 'rate-limited' | 'timeout' | 'network' | 'server' | 'bad-response' | 'unexpected';
 
 export interface UsageProblem { code: UsageErrorCode; message: string; status?: number }
+
+/**
+ * NEAR AI Cloud documents GET /v1/organizations/{org_id}/usage/summary, but as of November 2026 it
+ * answers 404 before checking any token, like a route that does not exist. That is not the token's
+ * fault, so it is kept and asked about again hourly instead of being reported as failing.
+ */
+export const USAGE_SUMMARY_NOT_OFFERED = 'NEAR AI Cloud does not offer the usage summary yet (it answered HTTP 404), so spend shows this computer\'s own figures. The token is kept, and NEAR is asked again every hour.';
 
 /**
  * Turns an error from POST /v1/check_api_key (`stage: 'api-key'`) or GET .../usage/summary
@@ -211,6 +219,7 @@ export function describeUsageError(error: unknown, stage: 'api-key' | 'summary',
     if (status === 401) return { code: 'token-rejected', status, message: 'NEAR rejected the usage reporting token (HTTP 401): it is invalid, expired, or revoked. Fix token signs in again and makes a new one.' };
     if (status === 403) return { code: 'wrong-org', status, message: `The usage reporting token is for a different organization than this API key (HTTP 403)${context.organizationId ? `; the key belongs to organization ${context.organizationId}` : ''}. Fix token signs in and makes one for that organization.` };
     if (status === 400) return { code: 'bad-request', status, message: `NEAR refused the usage summary request (HTTP 400).${near}` };
+    if (status === 404) return { code: 'not-offered', status, message: USAGE_SUMMARY_NOT_OFFERED };
   }
   if (status === 0 && /request failed/i.test(raw)) return { code: 'network', status, message: `NEAR AI Cloud could not be reached: ${raw.replace(/^NEAR AI request failed:\s*/i, '').replace(/\.$/, '')}.` };
   if (status === 0) return { code: 'bad-response', status, message: `NEAR AI Cloud answered, but not as expected: ${raw}` };
@@ -223,6 +232,7 @@ export type TokenTestResult = { ok: true; at: number; nanoUsd: number; organizat
 /** What the token test reports, in one sentence. */
 export function tokenTestMessage(result: TokenTestResult, formatTime: (at: number) => string = clock): string {
   if (result.ok) return `The usage reporting token works: NEAR's usage summary answered at ${formatTime(result.at)} with ${money(nanoToUsd(result.nanoUsd))} today for this API key.`;
+  if (result.code === 'not-offered') return `The usage reporting token is saved. ${result.message}`;
   return `The usage reporting token test failed: ${result.message}`;
 }
 
@@ -248,6 +258,8 @@ export interface SpendInsightInput {
   /** When NEAR's usage summary last answered, and its last problem. */
   okAt?: number;
   problem?: string;
+  /** Set while NEAR AI Cloud does not offer the usage summary (HTTP 404), instead of `problem`. */
+  unavailable?: string;
   /** This computer's ledger per period, and over the last 7 days. */
   ledger: Record<SpendPeriod, { totals: SpendTotals; counts: RequestCounts }>;
   ledgerLastWeekUsd: number;
@@ -262,7 +274,7 @@ export function buildSpendInsight(input: SpendInsightInput): SpendInsight {
   const using = input.tokenState === 'set';
   const near = (period: SpendPeriod) => (using ? input.near[period] : undefined);
   const todayNear = near('today');
-  const source = costSource({ tokenState: input.tokenState, near: todayNear && todayNear.since === starts.today ? todayNear : undefined, okAt: input.okAt, problem: input.problem, counts: input.ledger.today.counts, formatTime: time });
+  const source = costSource({ tokenState: input.tokenState, near: todayNear && todayNear.since === starts.today ? todayNear : undefined, okAt: input.okAt, problem: input.problem, unavailable: input.unavailable, counts: input.ledger.today.counts, formatTime: time });
   const periods = PERIODS.map((period) => periodFigure(period, starts[period], input.ledger[period], near(period), time));
   const burn = using && input.nearLastWeek ? burnView(nanoToUsd(input.nearLastWeek.nanoUsd), 'near') : burnView(input.ledgerLastWeekUsd, 'ledger');
   return {

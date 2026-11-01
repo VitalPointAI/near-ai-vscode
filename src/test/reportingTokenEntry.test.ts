@@ -14,7 +14,7 @@ import { ProfileStore } from '../services/profileStore';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import {
   CLEAR_REPORTING_TOKEN_COMMAND, findPastedReportingTokens, movePastedReportingTokens, REPORTING_TOKEN_HOW_TO, reportingTokenHint, SET_REPORTING_TOKEN_COMMAND,
-  TOKEN_MISSING_TEXT, TOKEN_SET_TEXT, USE_NEAR_TOTAL_SETTING, withoutTokenAt
+  TOKEN_MISSING_TEXT, TOKEN_SET_TEXT, TOKEN_WAITING_TEXT, USE_NEAR_TOTAL_SETTING, withoutTokenAt
 } from '../services/reportingToken';
 import { buildToolsDirectory, parseToolsPageMessage } from '../services/toolsDirectory';
 import { DEFAULT_RULES } from '../agent/permissions';
@@ -282,12 +282,14 @@ test('the chat: the spend line links to the token, and the link runs the command
     assert.match(String(status()?.token?.title), /reporting-tokens/);
     await receive!({ type: 'reporting-token' });
     assert.deepEqual(executed.at(-1), [SET_REPORTING_TOKEN_COMMAND]);
-    // Once a token is set (from anywhere), the line says NEAR's total is in use.
+    // Once a token is set (from anywhere), the line says so. NEAR has not answered for it yet, so it
+    // does not claim NEAR's total is in use (0.4.10: it used to, while the tooltip said to set one).
     inputBox = async () => TOKEN;
     await commands.get(SET_REPORTING_TOKEN_COMMAND)!();
     inputBox = undefined;
-    for (let wait = 0; wait < 50 && status()?.token?.text !== TOKEN_SET_TEXT; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(status()?.token?.text, TOKEN_SET_TEXT);
+    for (let wait = 0; wait < 50 && status()?.token?.text !== TOKEN_WAITING_TEXT; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(status()?.token?.text, TOKEN_WAITING_TEXT);
+    assert.notEqual(status()?.token?.text, TOKEN_SET_TEXT);
   } finally {
     globalThis.fetch = originalFetch;
     secrets.values.clear();
@@ -320,6 +322,11 @@ test('Agent Activity: the cost header links to the token, and the link runs the 
   assert.deepEqual(executed.at(-1), [SET_REPORTING_TOKEN_COMMAND]);
   secrets.values.set(KEY, TOKEN);
   await activityHandlers.message?.({ type: 'set-window', window: 'today' });
+  // Stored, but NEAR has not answered yet: the link says so instead of claiming NEAR's total is in use.
+  assert.equal(overview()?.token?.text, TOKEN_WAITING_TEXT);
+  // Once NEAR's usage summary answers, the figures are NEAR's and the link says that.
+  account.usage.okAt = Date.now();
+  await activityHandlers.message?.({ type: 'set-window', window: 'week' });
   assert.equal(overview()?.token?.text, TOKEN_SET_TEXT);
   account.dispose();
   secrets.values.clear();
