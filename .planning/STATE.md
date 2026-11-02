@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: executing
-stopped_at: Completed 62-06-PLAN.md
-last_updated: "2026-11-02T19:20:47.649Z"
+stopped_at: Completed 62-07-PLAN.md
+last_updated: "2026-11-02T19:44:59.292Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 475204697e7560c0b2766d955362b1266e9608d9
+state_head: 537d0b31be768626374727e0999ca80712f6cb52
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 40
-  completed_plans: 32
+  completed_plans: 33
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 62 (Work model, GSD import, Team Board (live, read and move)) — EXECUTING
-Plan: 7 of 14
+Plan: 8 of 14
 Status: Ready to execute
 Last activity: 2026-11-02 — Phase 62 execution started
 
@@ -86,6 +86,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P04 | 35 min | 3 tasks | 8 files |
 | Phase 62 P05 | 40 min | 3 tasks | 4 files |
 | Phase 62 P06 | 70min | 3 tasks | 5 files |
+| Phase 62 P07 | 22 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -151,6 +152,9 @@ Recent decisions affecting current work:
 - [Phase 62]: Import permission is checked before any fetch; a developer gets 'not permitted' and nothing is touched
 - [Phase 62]: 62-06: hold is offered only from Ready; model counts describe the default milestone selection while cards of every milestone are in the model — UI-SPEC offered-moves table; the client filters locally with no host round trip
 - [Phase 62]: 62-06: lane keys are unassigned, item ids, board and all; refusals map omits the card's own column and any column it may enter — Stable ids let the client update in place; a missing entry means the drop is offered
+- [Phase 62]: 62-07: a visible board only changes what the scheduler reads (one timer); opening it syncs at once, closing it returns to the unfocused delay
+- [Phase 62]: 62-07: the automatic import is role-gated (owner, lead) before any git call, once a minute on a monotonic clock, one notice per window, failures one redacted line
+- [Phase 62]: 62-07: canWrite means a device key for a non-removed member; reachability and trust are the board's job through boardStatus
 
 ### Pending Todos
 
@@ -172,8 +176,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T19:20:47.364Z
-Stopped at: Completed 62-06-PLAN.md
+Last session: 2026-11-02T19:44:59.008Z
+Stopped at: Completed 62-07-PLAN.md
 Resume file: None
 
 ## Notes
