@@ -77,3 +77,14 @@ test('publish checks the VSIX checksum from the build job before it does anythin
   assert.match(publish, /environment:\s*\n\s*name: marketplace/);
   assert.equal((publish.match(/secrets\.VSCE_PAT/g) ?? []).length, 1);
 });
+
+test('a release tag never replaces an existing GitHub release or its files', () => {
+  const text = read('release.yml');
+  assert.doesNotMatch(text, /--clobber/);
+  assert.doesNotMatch(text, /gh release (upload|edit|delete)/);
+  const all = jobs(text);
+  for (const id of ['build', 'release']) {
+    assert.match(all.get(id), /if gh release view "\$TAG"[^\n]*; then\s*\n\s*echo "::error::[^"]*already exists[^"]*"; exit 1/, `${id} refuses an existing release`);
+  }
+  assert.match(all.get('release'), /gh release create "\$TAG"[^\n]*--verify-tag/);
+});

@@ -258,8 +258,11 @@ There is no "unpublish one version" that users reliably follow. Options, best fi
 ### The Release workflow failed
 
 - **build failed:** fix the cause in a PR. If the tag points at a commit that should not be
-  released, do not move the tag; release the fix as the next patch. If only an outside service
-  failed, re-run the job.
+  released, do not move the tag (the tag ruleset refuses that anyway); release the fix as the
+  next patch. If only an outside service failed, re-run the job.
+- **release failed:** the workflow never changes an existing GitHub release (no `--clobber`), so
+  a re-run refuses if the failed run already created one. The owner checks the partial release
+  in the web UI, deletes it if it is incomplete, then re-runs the failed jobs.
 - **publish failed** (expired `VSCE_PAT`, Marketplace outage): fix the cause (for a token, the
   owner updates the secret, see below), then re-run the failed job:
   `gh run rerun <run-id> --failed`. It publishes the same verified VSIX and needs the owner's
@@ -282,7 +285,44 @@ These are applied once by the owner; agents never change them.
   no force pushes or deletion; conversations must be resolved.
 - Merging: squash only, the PR title as the commit message, branches deleted after merge.
 - Environment `marketplace`: the owner as the required reviewer, deployments only from `v*.*.*`
-  tags, and the `VSCE_PAT` secret stored in this environment only.
+  tags, admins cannot bypass it (`can_admins_bypass: false`), and the `VSCE_PAT` secret stored
+  in this environment only.
+- Release tags: nobody can move or delete a `v*` tag, admins included, and only organization
+  owners can create one. A tag push runs the `release.yml` of the tagged commit, so this is what
+  keeps an unreviewed commit from carrying its own release workflow.
+
+Release tags (two rulesets: one without any bypass for moving and deleting, one for creating).
+Rulesets accept roles, teams and apps as bypass actors, not single accounts, so creating is
+limited to the organization owner role; every organization owner can create a tag.
+
+```bash
+repo=VitalPointAI/near-ai-vscode
+gh api -X POST "repos/$repo/rulesets" --input - <<'JSON'
+{"name": "release tags are permanent", "target": "tag", "enforcement": "active",
+ "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+ "rules": [{"type": "update"}, {"type": "deletion"}],
+ "bypass_actors": []}
+JSON
+gh api -X POST "repos/$repo/rulesets" --input - <<'JSON'
+{"name": "only owners create release tags", "target": "tag", "enforcement": "active",
+ "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+ "rules": [{"type": "creation"}],
+ "bypass_actors": [{"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]}
+JSON
+```
+
+The `marketplace` environment:
+
+```bash
+owner_id="$(gh api users/ALuhning --jq .id)"
+gh api -X PUT "repos/$repo/environments/marketplace" --input - <<JSON
+{"reviewers": [{"type": "User", "id": $owner_id}], "prevent_self_review": false,
+ "can_admins_bypass": false,
+ "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+JSON
+gh api -X POST "repos/$repo/environments/marketplace/deployment-branch-policies" \
+  -f name='v*.*.*' -f type=tag
+```
 
 The `VSCE_PAT` is an Azure DevOps personal access token with the **Marketplace (Manage)** scope
 for the `VitalPoint` publisher. The owner adds or rotates it with:

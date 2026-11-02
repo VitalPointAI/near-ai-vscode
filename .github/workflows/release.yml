@@ -1,14 +1,18 @@
 # Builds and publishes a release when a v<x.y.z> tag is pushed (scripts/merge-pr.mjs tags the
 # squash commit of a release/x.y.z PR; scripts/tag-release.mjs can retry it or tag a hotfix).
 #
-#   build    read-only token. Checks the tag, runs the tests, builds and verifies the VSIX, and
-#            records its SHA-256 as a job output.
+#   build    read-only token. Checks the tag (and that no release exists for it yet), runs the
+#            tests, builds and verifies the VSIX, and records its SHA-256 as a job output.
 #   release  holds contents: write to create the GitHub release, so it installs and runs nothing:
 #            it downloads the build's artifact, checks the checksum, and runs `gh release`.
 #   publish  runs in the protected "marketplace" environment, so it waits until the owner
 #            approves it in GitHub. It checks the VSIX checksum before anything else, installs
 #            the vsce pinned in package-lock.json without install scripts, and publishes that
 #            exact VSIX with the VSCE_PAT secret, which exists only in that environment.
+#
+# Only the owner can create v* tags, and nobody can move or delete them (a tag ruleset), and
+# the "marketplace" environment cannot be bypassed by admins; see docs/development-workflow.md,
+# "Repository settings".
 name: Release
 
 on:
@@ -42,11 +46,16 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Check the tag matches package.json, CHANGELOG and main
+      - name: Check the tag matches package.json, CHANGELOG and main, and is not released yet
         id: meta
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          # A tag is released once. A moved or re-pushed tag must not replace a release's files.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::A GitHub release for $TAG already exists. Release tags are never reused; release the fix as the next patch version."; exit 1
+          fi
           version="${TAG#v}"
           pkg_version="$(node -p "require('./package.json').version")"
           name="$(node -p "require('./package.json').name")"
@@ -110,7 +119,7 @@ jobs:
           SHA256: ${{ needs.build.outputs.sha256 }}
           VSIX: ${{ needs.build.outputs.vsix }}
         run: echo "$SHA256  $VSIX" | sha256sum --check --strict
-      - name: Create or update the GitHub release
+      - name: Create the GitHub release
         working-directory: release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,11 +128,9 @@ jobs:
           VSIX: ${{ needs.build.outputs.vsix }}
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$VSIX" "$VSIX.sha256" --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$TAG" --notes-file release-notes.md --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" "$VSIX" "$VSIX.sha256" --title "$VERSION" --notes-file release-notes.md --verify-tag --repo "$GITHUB_REPOSITORY"
+            echo "::error::A GitHub release for $TAG already exists; refusing to change it."; exit 1
           fi
+          gh release create "$TAG" "$VSIX" "$VSIX.sha256" --title "$VERSION" --notes-file release-notes.md --verify-tag --repo "$GITHUB_REPOSITORY"
 
   publish:
     name: publish
