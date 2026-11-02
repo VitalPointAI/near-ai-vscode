@@ -231,12 +231,11 @@ test('a drop in another row is refused with the row sentence; a drop on the card
   assert.equal(h.announcements[h.announcements.length - 1], `Can't move plan 90-01 to Backlog. ${REFUSALS.differentRow}`);
   assert.equal(h.$$('.drop-caption').length, 0);
   assert.deepEqual(marked(h, 'drop-ok'), []);
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt });
 
   card(h, 'plan:90-01').querySelector('.dismiss')!.click();
   assert.equal(h.$$('.refusal-line').length, 0, 'the person dismissed the message');
   const before = h.announcements.length;
-  const dt2 = lift(h, 'plan:90-01');
-  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: Object.assign(dt2, { dropEffect: 'move' }) });
   const own = cell(h, 'ready', lane);
   const dt3 = lift(h, 'plan:90-01');
   over(h, own, dt3);
@@ -254,7 +253,7 @@ test('Escape during a drag, or a drag that ends with no drop, clears the highlig
   let dt = lift(h, 'plan:90-01');
   assert.deepEqual(marked(h, 'drop-ok'), ['backlog', 'done', 'cancelled']);
   over(h, cell(h, 'claimed'), dt);
-  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt });
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: Object.assign(dt, { dropEffect: 'none' }) });
   assert.deepEqual(marked(h, 'drop-ok'), []);
   assert.equal(h.$$('.drop-caption').length, 0);
   assert.equal(classes(card(h, 'plan:90-01')).includes('dragging'), false);
@@ -290,6 +289,7 @@ test('drops that do not carry the board type are ignored', async () => {
   const { h } = await ownerBoard();
   const foreign = h.dataTransfer();
   foreign.setData('text/plain', 'plan:90-01');
+  h.advance(150); // the first load announcement lands
   const before = h.announcements.length;
   assert.equal(over(h, cell(h, 'backlog'), foreign).defaultPrevented, false, 'a foreign drag is not accepted');
   drop(h, cell(h, 'backlog'), foreign);

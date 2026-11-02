@@ -30,7 +30,7 @@
   function verdict(cell, s) {
     const c = board.cardData(s.id);
     const column = cell.getAttribute('data-column');
-    if (!c) return { kind: 'no', column, text: 'That card is no longer on the board. Nothing was moved.' };
+    if (!c) return { kind: 'no', column, text: 'This card is no longer on the board. Nothing was moved.' };
     if (cell.getAttribute('data-lane') !== s.lane) return { kind: 'no', column, text: 'This card stays in its own row. Drop it in another column of the same row.' };
     if (column === c.column) return { kind: 'own', column };
     const move = c.moves.find((m) => m.column === column);
@@ -56,7 +56,29 @@
   // ---- highlights ------------------------------------------------------------------------------------------------------------------------------
   const add = (node, cls) => node.classList.add(cls);
   const remove = (node, cls) => node.classList.remove(cls);
+  // The transient "Can't drop here" caption inside the cell the pointer is over (a refused cell). It never takes a pointer event, so it cannot cause a dragleave.
+  let hover;
+  function hideHover() {
+    if (!hover) return;
+    hover.caption.remove();
+    remove(hover.cell, 'drop-no');
+    hover = undefined;
+  }
+  function showHover(cell, reason) {
+    if (hover && hover.cell === cell && hover.caption.isConnected) return;
+    hideHover();
+    const caption = document.createElement(cell.localName === 'ul' ? 'li' : 'div');
+    caption.className = 'drop-caption';
+    caption.setAttribute('role', 'presentation');
+    caption.setAttribute('aria-hidden', 'true');
+    caption.style.setProperty('pointer-events', 'none');
+    caption.textContent = "Can't drop here: " + reason;
+    cell.appendChild(caption);
+    add(cell, 'drop-no');
+    hover = { cell, caption };
+  }
   function clearMarks() {
+    hideHover();
     for (const c of area.querySelectorAll('.cell')) { remove(c, 'drop-ok'); remove(c, 'drop-no'); }
     for (const n of area.querySelectorAll('.lane')) remove(n, 'drag-active');
     for (const n of area.querySelectorAll('.column')) remove(n, 'drag-active');
@@ -85,13 +107,29 @@
     session = { id, lane: source.getAttribute('data-lane'), state: 'active' };
     add(li, 'dragging');
     mark(session);
+    if (!reduced()) lastRects = snapshot(model);
   });
 
-  area.addEventListener('dragenter', (e) => { if (session && session.state === 'active' && hasType(e) && cellOf(e.target)) e.preventDefault(); });
+  // Every cell accepts the drop, so a refused drop can say why instead of the browser flying the card back with no word.
+  function accepts(e) { return !!session && session.state === 'active' && hasType(e) && !!cellOf(e.target); }
+  function hint(e) {
+    const target = cellOf(e.target);
+    const v = verdict(target, session);
+    if (v.kind === 'no') showHover(target, v.text); else hideHover();
+  }
+  area.addEventListener('dragenter', (e) => { if (!accepts(e)) return; e.preventDefault(); hint(e); });
   area.addEventListener('dragover', (e) => {
-    if (!session || session.state !== 'active' || !hasType(e) || !cellOf(e.target)) return;
+    if (!accepts(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    hint(e);
+  });
+  area.addEventListener('dragleave', (e) => {
+    const target = cellOf(e.target);
+    if (!hover || hover.cell !== target) return;
+    const into = asElement(e.relatedTarget);
+    if (into && target.contains(into)) return;
+    hideHover();
   });
 
   area.addEventListener('drop', (e) => {
@@ -105,19 +143,79 @@
     const li = board.cardElement(s.id);
     if (li) remove(li, 'dragging');
     const v = verdict(target, s);
-    if (v.kind !== 'ok') return;
+    if (v.kind === 'own') return;
+    // A refused drop never posts and never moves anything: the card keeps its place and shows and announces the reason.
+    if (v.kind === 'no') { board.showRefusal(s.id, columnLabel(v.column), v.text); return; }
     const c = board.cardData(s.id);
     awaiting[s.id] = { column: columnLabel(v.column), key: stateKey(c) };
     board.setPending(s.id, 'Moving to ' + columnLabel(v.column) + '...');
     board.post({ type: 'move', itemId: s.id, target: v.move.key });
   });
 
-  area.addEventListener('dragend', () => {
-    const li = session ? board.cardElement(session.id) : null;
+  /** A drag that ended without a drop (Escape, or dropped somewhere the board does not take): nothing changed, and the person is told so. */
+  function cancel(s) {
+    s.state = 'cancelled';
+    const li = board.cardElement(s.id);
     if (li) remove(li, 'dragging');
     clearMarks();
+    const c = board.cardData(s.id);
+    board.announce(c ? 'Move cancelled. The card is still in ' + c.stateLabel + '.' : 'Move cancelled.');
+  }
+  area.addEventListener('dragend', () => {
+    const s = session;
     session = undefined;
+    if (!s) return;
+    if (s.state === 'active') { cancel(s); return; }
+    const li = board.cardElement(s.id);
+    if (li) remove(li, 'dragging');
+    clearMarks();
   });
+  // Browsers cancel a native drag on Escape themselves and then send dragend; this covers a host that reports the key instead.
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && session && session.state === 'active') cancel(session); });
+
+  // ---- motion ----------------------------------------------------------------------------------------------------------------------------------
+  // A card that changes column glides from where it was to where it is (FLIP) over 150 ms. Under prefers-reduced-motion nothing is animated at all; the
+  // card simply appears at its destination. The 3 second changed outline belongs to board.js and is not motion.
+  let lastRects = new Map();
+  let lastColumns = new Map();
+  const slides = new Map();
+  function reduced() {
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (err) { return false; }
+  }
+  function snapshot(model) {
+    const out = new Map();
+    for (const c of model.cards) {
+      const li = board.cardElement(c.id);
+      if (!li || !li.isConnected) continue;
+      const r = li.getBoundingClientRect();
+      if (r.width > 0 || r.height > 0) out.set(c.id, { left: r.left, top: r.top });
+    }
+    return out;
+  }
+  function slide(id, dx, dy) {
+    const li = board.cardElement(id);
+    if (!li || (dx === 0 && dy === 0)) return;
+    clearTimeout(slides.get(id));
+    li.style.setProperty('transition', 'none');
+    li.style.setProperty('transform', 'translate(' + dx + 'px, ' + dy + 'px)');
+    li.getBoundingClientRect(); // makes the browser take the starting position before the transition is switched on
+    li.style.setProperty('transition', 'transform 150ms ease-out');
+    li.style.setProperty('transform', 'translate(0px, 0px)');
+    slides.set(id, setTimeout(() => { li.style.removeProperty('transform'); li.style.removeProperty('transition'); slides.delete(id); }, 150));
+  }
+  function glide() {
+    const model = board.model();
+    if (!model || board.layout() !== 'kanban' || reduced()) { lastRects = new Map(); lastColumns = new Map(); return; }
+    const now = snapshot(model);
+    for (const c of model.cards) {
+      const was = lastRects.get(c.id);
+      const at = now.get(c.id);
+      const before = lastColumns.get(c.id);
+      if (was && at && before !== undefined && before !== c.column) slide(c.id, was.left - at.left, was.top - at.top);
+    }
+    lastRects = now;
+    lastColumns = new Map(model.cards.map((c) => [c.id, c.column]));
+  }
 
   board.onRender(() => {
     syncDraggable();
@@ -126,6 +224,7 @@
       if (li) add(li, 'dragging');
       mark(session);
     }
+    glide();
   });
 
   // The host answered a request from a drop. A reason is shown on the card and announced once; an empty reason is a dismissed prompt, which board.js
