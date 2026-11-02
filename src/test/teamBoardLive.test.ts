@@ -101,7 +101,8 @@ test('tracer: member A blocks a card and member B sees it after exactly one poll
       assert.equal(received[0]?.verdict?.accepted, true);
       // Blocked is a flag and never a column: a stored card keeps its stored state, and the board shows it in the Backlog while it is blocked (D-10, D-11).
       assert.equal(after?.state, before.state);
-      assert.equal(effectiveColumn(b.session.state().items, after as NonNullable<typeof after>), columnBefore === 'ready' ? 'backlog' : columnBefore);
+      assert.equal(columnBefore, 'ready', 'the fixture plan is ready before it is blocked');
+      assert.equal(effectiveColumn(b.session.state().items, after as NonNullable<typeof after>), 'backlog');
       const history = b.session.itemHistory(BLOCKED_PLAN);
       assert.equal(history[0]?.type, 'item.blocked');
       assert.equal(history[0]?.reason, REASON);
@@ -166,8 +167,8 @@ test('a visible board keeps the focused poll interval in an unfocused window, cr
       const remoteBefore = (await fs.readdir(path.join(rig.fixture.remote, 'refs', 'heads'))).sort();
 
       b.session.setBoardVisible(true);
-      await until(() => b.timers.delays().length === 3, 'the sync that opening the board runs');
-      assert.equal(b.timers.delays()[2], POLL_MS, 'the next wait is the focused interval');
+      await until(() => b.timers.delays().length === 2, 'the sync that opening the board runs');
+      assert.equal(b.timers.delays()[1], POLL_MS, 'the next wait is the focused interval');
       assert.equal(b.timers.live.length, 1, 'still one pending timer');
 
       b.session.setBoardVisible(false);

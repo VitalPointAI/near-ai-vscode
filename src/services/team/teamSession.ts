@@ -8,11 +8,13 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { AuditEvent, AuditFilter } from '../../domain/approval';
 import { DEFAULT_BASE_URL } from '../../domain/config';
+import { ItemHistory } from '../../domain/team/itemHistory';
+import type { HistoryEntry } from '../../domain/team/itemHistory';
 import { memberAttention } from '../../domain/team/invite';
 import type { MemberAttention } from '../../domain/team/invite';
 import { teamMaterializer } from '../../domain/team/materialize';
 import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
-import type { GenesisAnchor, Role, TeamEvent, TeamFile, TeamState } from '../../domain/team/types';
+import type { CommittedEvent, GenesisAnchor, Role, TeamEvent, TeamFile, TeamState } from '../../domain/team/types';
 import { AuditStore } from '../auditStore';
 import { AuthService } from '../auth';
 import type { SecretStorageLike } from '../auth';
@@ -76,6 +78,10 @@ export interface TeamSessionDeps {
   nearBaseUrl?: string;
   fetch?: FetchLike;
   runCommand?: (id: string, args?: unknown) => PromiseLike<unknown>;
+  /** False turns the automatic re-import of the integration branch off. The default is on, for owners and leads only. */
+  autoImport?: boolean;
+  /** Monotonic milliseconds for the automatic import throttle. The default is the scheduler's clock, performance.now(). */
+  monotonicNow?: () => number;
 }
 
 function describeError(error: unknown): string {
@@ -165,6 +171,11 @@ export class TeamSession {
   private readonly identity: DeviceIdentity | undefined;
   private readonly scheduler: SyncScheduler;
   private readonly diagnosticSubscription: { dispose(): void };
+  private readonly updateSubscription: { dispose(): void };
+  private readonly history = new ItemHistory();
+  private readonly changeListeners = new Set<(entries: readonly CommittedEvent[]) => void>();
+  // Whether a Team Board is open. It only changes how often this window polls; it is never written anywhere (Phase 60 D-19, T-62-26).
+  private boardVisible = false;
   private log: TeamLog;
   private signing = false;
   private disposed = false;
@@ -196,10 +207,12 @@ export class TeamSession {
     });
     this.log = new TeamLog({ anchor: this.anchor, transport: this.transport });
     this.diagnosticSubscription = this.transport.onDiagnostic((message) => { this.line(`Team sync note: ${message}`); });
+    // Subscribed before the first sync, so card history covers the whole window and own appends are heard like remote events (D-18).
+    this.updateSubscription = this.transport.onUpdate((entries) => { this.entriesApplied(entries); });
     this.scheduler = new SyncScheduler({
       run: () => this.scheduledRun(),
       pollSeconds: deps.pollSeconds,
-      focused: deps.focused,
+      focused: () => this.boardVisible || deps.focused(),
       onError: (error) => { this.reportIssue('scheduler', `Team sync stopped unexpectedly: ${describeError(error)}`); },
       ...(deps.timers === undefined ? {} : { timers: deps.timers })
     });
@@ -285,7 +298,25 @@ export class TeamSession {
 
   // Only a real focus change does anything: a gain syncs at once, a loss moves the next poll to the unfocused delay. Repeating the current focus is ignored.
   public focusChanged(focused: boolean): void {
-    this.scheduler.focusChanged(focused);
+    this.scheduler.focusChanged(focused || this.boardVisible);
+  }
+
+  // A visible board polls at the focused interval even when the window is not focused (Phase 60 D-19). The scheduler already owns the timer, so this
+  // only changes what it reads next; nothing about who looked is recorded anywhere.
+  public setBoardVisible(visible: boolean): void {
+    if (this.boardVisible === visible) return;
+    this.boardVisible = visible;
+    this.scheduler.focusChanged(this.deps.focused() || visible);
+  }
+
+  // Told once per transport update (a poll that brought events, or this session's own append) with the entries it carried.
+  public onStateChange(listener: (entries: readonly CommittedEvent[]) => void): { dispose(): void } {
+    this.changeListeners.add(listener);
+    return { dispose: () => { this.changeListeners.delete(listener); } };
+  }
+
+  public itemHistory(itemId: string): HistoryEntry[] {
+    return this.history.forItem(itemId);
   }
 
   public dispose(): void {
@@ -293,6 +324,8 @@ export class TeamSession {
     this.disposed = true;
     this.scheduler.stop();
     this.diagnosticSubscription.dispose();
+    this.updateSubscription.dispose();
+    this.changeListeners.clear();
     this.deps.statusBar.dispose();
   }
 
@@ -322,6 +355,19 @@ export class TeamSession {
       this.announce('warn', `Team log checked, with problems: ${counts}.${extras}`);
     }
     return report;
+  }
+
+  private entriesApplied(entries: readonly CommittedEvent[]): void {
+    if (entries.length === 0) return;
+    this.history.record(entries);
+    for (const listener of [...this.changeListeners]) {
+      try {
+        listener(entries);
+      } catch (error) {
+        // A failing listener must not break the sync or the other listeners; it is reported once per message.
+        this.reportIssue('state-listener', `A Team Board update could not be shown: ${describeError(error)}`);
+      }
+    }
   }
 
   private scheduledRun(): Promise<boolean> {
