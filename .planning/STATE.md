@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 61
 current_phase_name: Invitations, joining, removal, NEAR org and key integration
 status: executing
-stopped_at: Completed 61-04-PLAN.md
-last_updated: "2026-11-02T01:19:19.443Z"
+stopped_at: Completed 61-05-PLAN.md
+last_updated: "2026-11-02T01:28:58.031Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 61 execution started
-state_head: baebbeb6a26b087a90cc4cefdd1b3c61a89aeefa
+state_head: 346362ac00f261873863188dcb5382e7aaff53c5
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 26
-  completed_plans: 16
+  completed_plans: 17
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 61 (Invitations, joining, removal, NEAR org and key integration) — EXECUTING
-Plan: 5 of 14
+Plan: 6 of 14
 Status: Ready to execute
 Last activity: 2026-11-01 — Phase 61 execution started
 
@@ -70,6 +70,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P02 | 35min | 2 tasks | 3 files |
 | Phase 61 P03 | 15min | 2 tasks | 5 files |
 | Phase 61 P04 | 15 min | 3 tasks | 8 files |
+| Phase 61 P05 | 8 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -104,6 +105,8 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-03: sealTo accepts 16 to 512 byte plaintext and re-rolls any draw the write-side detector would flag (cap 8); randomness source is an optional 4th parameter
 - [Phase 61]: A refused refresh that finds the stored refresh token unchanged waits 300 ms and re-reads once before reporting the NEAR sign-in expired, because the winning window stores its rotated token only after NEAR answers it
 - [Phase 61]: installTeamKey verifies the key with check_api_key (retrying invalid and unavailable) before touching any profile or stored key, so a bad re-delivery never replaces the working key; removeTeamKey restores the remembered profile only if the team profile is still active
+- [Phase 61]: 61-05: member.key-sealed confirmed as recorded (Task 1 auto-selected confirm-recorded); every delivery is a new key, so device add and revoke both rotate and an existing key is never re-sealed
+- [Phase 61]: 61-05: memberAttention lists one item per member (confirm, then deliver-key, then rotate-key); leads are included, only the owner is excluded
 
 ### Pending Todos
 
@@ -125,8 +128,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T01:19:19.316Z
-Stopped at: Completed 61-04-PLAN.md
+Last session: 2026-11-02T01:28:57.902Z
+Stopped at: Completed 61-05-PLAN.md
 Resume file: None
 
 ## Notes
