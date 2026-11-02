@@ -300,8 +300,10 @@ const REAL_TIMERS: BoardTimers = {
   clear: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>); }
 };
 
+// Every error text the board writes goes through the same redaction as the rest of Team Mode: no remote address with credentials, no control
+// characters, bounded length (WR-03, T-62-48).
 function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return safeReason(error instanceof Error ? error.message : String(error));
 }
 
 export class BoardController {
@@ -512,7 +514,7 @@ export class BoardController {
   private refuse(state: SurfaceState, itemId: string, reason: string, target?: MoveKey): void {
     this.post(state, { type: 'refused', itemId, reason });
     // A dismissed prompt is not a failure. The channel gets the move and the sentence, never the card's text.
-    if (reason !== '') this.deps.output.appendLine(`Team Board: ${target === undefined ? 'the request' : `the ${target} move`} was not done. ${reason}`);
+    if (reason !== '') this.deps.output.appendLine(`Team Board: ${target === undefined ? 'the request' : `the ${target} move`} was not done. ${safeReason(reason)}`);
   }
 
   private async askReason(target: 'block' | 'cancel', label: string): Promise<string | undefined> {
@@ -553,7 +555,7 @@ export class BoardController {
       case 'paused':
         return REFUSALS.offline;
       case 'busy':
-        return `${result.reason} ${words.nothing}`;
+        return `${safeReason(result.reason)} ${words.nothing}`;
       case 'refused':
       case 'conflict':
         return words.declined;

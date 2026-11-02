@@ -146,8 +146,8 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     const shown = level === 'info' ? vscode.window.showInformationMessage(message)
       : level === 'warn' ? vscode.window.showWarningMessage(message)
         : vscode.window.showErrorMessage(message);
-    Promise.resolve(shown).catch((error: unknown) => {
-      output.appendLine(`A Team Mode message could not be shown: ${error instanceof Error ? error.message : String(error)}`);
+    Promise.resolve(shown).catch(async (error: unknown) => {
+      output.appendLine(`A Team Mode message could not be shown: ${await describe(error)}`);
     });
   }
 
@@ -179,8 +179,8 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
 
   // Runs a context command without leaving a rejection behind: a failure goes to the channel.
   function setContextKey(value: boolean): void {
-    Promise.resolve(vscode.commands.executeCommand('setContext', TEAM_MODE_CONTEXT_KEY, value)).catch((error: unknown) => {
-      output.appendLine(`The Team Board view could not be ${value ? 'shown' : 'hidden'}: ${error instanceof Error ? error.message : String(error)}`);
+    Promise.resolve(vscode.commands.executeCommand('setContext', TEAM_MODE_CONTEXT_KEY, value)).catch(async (error: unknown) => {
+      output.appendLine(`The Team Board view could not be ${value ? 'shown' : 'hidden'}: ${await describe(error)}`);
     });
   }
 
@@ -275,7 +275,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       }
     } catch (error) {
       if (!(error instanceof TeamFileError)) throw error;
-      report('error', `${error.message} Nothing was changed.`);
+      report('error', `${await describe(error)} Nothing was changed.`);
       return;
     }
 

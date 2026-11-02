@@ -513,6 +513,38 @@ test('a secret caught on write maps to the secret sentence and a lost device key
   });
 });
 
+test('WR-03: an unexpected error from a move, a new item or a model update reaches the output channel redacted, flat and without the credential', async () => {
+  await withBoard('owner', async ({ started, ui }) => {
+    const secretUrl = 'https://builder:canary-secret-62@git.example.invalid/team.git';
+    const thrown = new Error(`push to ${secretUrl} failed\nsecond line\u0007`);
+    let failModel = false;
+    const session = new Proxy(started.session, {
+      get(target, property) {
+        if (property === 'currentLog') return () => ({ append: async (): Promise<never> => { throw thrown; } });
+        if (property === 'boardStatus' && failModel) return () => { throw thrown; };
+        const value = Reflect.get(target, property) as unknown;
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      }
+    });
+    const lines: string[] = [];
+    const { panel, board } = openBoard(session, ui, lines);
+    try {
+      await panel.receive({ type: 'ready' });
+      await panel.receive({ type: 'move', itemId: READY_PLAN, target: 'hold' });
+      await panel.receive({ type: 'new-item', draft: { kind: 'chore', title: 'Tidy up', scope: [] } });
+      failModel = true;
+      board.controller.sessionChanged();
+      const failures = lines.filter((line) => / failed: | could not be updated: /.test(line));
+      assert.equal(failures.length >= 3, true, `three failures were written (${failures.length})`);
+      assert.equal(lines.some((line) => line.includes('canary-secret-62')), false, 'no credential in the channel');
+      assert.equal(lines.some((line) => /[\u0000-\u001F]/.test(line)), false, 'every line is one flat line');
+      assert.equal(failures.every((line) => line.includes('https://git.example.invalid/team.git')), true, 'the address is kept without its credentials');
+    } finally {
+      board.controller.dispose();
+    }
+  });
+});
+
 test('a developer cannot move a card and is told so before any prompt; a window with no device key is told that instead', async () => {
   await withBoard('dev', async ({ rig, panel }) => {
     const before = remoteEventCount(rig);
