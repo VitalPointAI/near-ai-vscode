@@ -133,3 +133,28 @@ export function transitionProblem(state: Pick<TeamState, 'items'>, event: Implem
     default: return undefined;
   }
 }
+
+// ---- Board model (D-08, D-10, D-11, D-17) ------------------------------------------------------------------------------------------------
+export const BOARD_COLUMNS = ['backlog', 'ready', 'claimed', 'in-progress', 'in-review', 'integrating', 'done', 'cancelled'] as const;
+export type BoardColumn = typeof BOARD_COLUMNS[number];
+export type NotReadyReason = 'not-unclaimed' | 'held' | 'blocked' | 'no-estimate' | 'no-scope' | 'dependency-open' | 'dependency-missing' | 'phase-held' | 'phase-dependency-open';
+
+export function isCard(_item: WorkItem): boolean {
+  return false;
+}
+
+export function readiness(_items: ReadonlyMap<string, WorkItem>, _id: string): { ready: boolean; reasons: NotReadyReason[] } {
+  return { ready: false, reasons: [] };
+}
+
+export function effectiveColumn(_items: ReadonlyMap<string, WorkItem>, _item: WorkItem): BoardColumn {
+  return 'backlog';
+}
+
+export function progressOf(_items: ReadonlyMap<string, WorkItem>, _groupId: string): { percent: number; done: number; total: number } {
+  return { percent: 0, done: 0, total: 0 };
+}
+
+export function countReady(_items: ReadonlyMap<string, WorkItem>): number {
+  return 0;
+}
