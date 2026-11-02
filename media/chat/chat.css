@@ -68,6 +68,24 @@ button { font: inherit; color: inherit; }
 .turn li { margin: 2px 0; }
 .turn strong { font-weight: 600; }
 .turn blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 2px solid var(--vscode-textBlockQuote-border, var(--vscode-panel-border)); color: var(--vscode-descriptionForeground); }
+/* Blockquotes merge consecutive `>` lines into paragraphs; the last one sits flush. */
+.turn blockquote > :last-child { margin-bottom: 0; }
+.turn del { color: var(--vscode-descriptionForeground); }
+/* Tables scroll sideways inside their own box, so a wide table never widens the chat. */
+.turn .table-wrap { max-width: 100%; margin: 0 0 10px; overflow-x: auto; border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
+.turn .table-wrap:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.turn table { border-collapse: collapse; font-size: 0.95em; line-height: 1.4; word-break: normal; overflow-wrap: normal; }
+.turn th, .turn td { padding: 3px 8px; text-align: left; vertical-align: top; border: 1px solid var(--vscode-panel-border); min-width: 4em; max-width: 28em; overflow-wrap: break-word; }
+.turn tr > :first-child { border-left: 0; }
+.turn tr > :last-child { border-right: 0; }
+.turn thead tr:first-child > * { border-top: 0; }
+.turn tbody tr:last-child > * { border-bottom: 0; }
+.turn thead th { font-weight: 600; background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBarSectionHeader-background)); }
+.turn tbody th { font-weight: 600; }
+.turn tbody tr:nth-child(even) { background: var(--vscode-list-hoverBackground, transparent); }
+.turn th.align-left, .turn td.align-left { text-align: left; }
+.turn th.align-center, .turn td.align-center { text-align: center; }
+.turn th.align-right, .turn td.align-right { text-align: right; font-variant-numeric: tabular-nums; }
 .turn hr { border: 0; border-top: 1px solid var(--vscode-panel-border); margin: 10px 0; }
 .turn a { color: var(--vscode-textLink-foreground); text-decoration: none; }
 .turn a:hover { text-decoration: underline; color: var(--vscode-textLink-activeForeground); }
