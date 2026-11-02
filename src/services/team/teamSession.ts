@@ -7,6 +7,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { AuditEvent, AuditFilter } from '../../domain/approval';
+import { DEFAULT_BASE_URL } from '../../domain/config';
+import { memberAttention } from '../../domain/team/invite';
+import type { MemberAttention } from '../../domain/team/invite';
 import { teamMaterializer } from '../../domain/team/materialize';
 import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
 import type { GenesisAnchor, Role, TeamEvent, TeamFile, TeamState } from '../../domain/team/types';
@@ -23,10 +26,11 @@ import type { DeviceIdentity } from '../../team/identity';
 import type { GitRunner } from '../../team/runGit';
 import { DEFAULT_POLL_SECONDS, SyncScheduler } from '../../team/syncScheduler';
 import type { SchedulerTimers } from '../../team/syncScheduler';
-import { checkTrustPin, teamStorageDir } from '../../team/teamFile';
+import { NearSession } from '../../team/nearSession';
+import { checkTrustPin, runSerialised, teamStorageDir, writeFileAtomic } from '../../team/teamFile';
 import type { TransportStatus } from '../../team/transport';
-import { PAUSED_REFUSED_TEXT, createTeamStatusBar, safeReason, statusText } from './teamStatusBar';
-import type { TeamStatusBar } from './teamStatusBar';
+import { PAUSED_REFUSED_TEXT, createTeamStatusBar, displayText, safeReason, statusText } from './teamStatusBar';
+import type { TeamStatusBar, TeamStatusExtras } from './teamStatusBar';
 
 export const TEAM_OUTPUT_CHANNEL = 'NEAR AI Team';
 export const SHOW_DETAILS_ACTION = 'Show details';
@@ -163,6 +167,8 @@ export class TeamSession {
   private pendingRoster: TeamEvent[] = [];
   // The author's role at each queued event's log position (WR-05), so a later promotion or demotion does not rewrite history.
   private readonly rosterRoles = new Map<string, Role>();
+  // What this storage folder has already told the user (ids only), loaded on first use and written back after each addition.
+  private notified: Set<string> | undefined;
 
   private constructor(deps: TeamSessionDeps, storage: string, identity: DeviceIdentity | undefined) {
     this.deps = deps;
@@ -317,6 +323,7 @@ export class TeamSession {
   private async syncOnce(): Promise<boolean> {
     if (this.disposed) return false;
     let status: TransportStatus;
+    let synced = false;
     try {
       const result = await this.log.sync();
       status = result.status;
@@ -325,6 +332,7 @@ export class TeamSession {
       this.noteSnapshot(result.snapshot);
       this.adoptSigner();
       this.clearIssue('sync');
+      synced = status.state === 'ok';
     } catch (error) {
       const reason = describeError(error);
       this.reportIssue('sync', `Team sync failed: ${reason}`);
@@ -340,14 +348,16 @@ export class TeamSession {
         this.announce('warn', `${PAUSED_REFUSED_TEXT}: ${TEAM_REJECTION_REASONS.logRefused}. Team events from this remote are ignored.`);
       }
     }
-    this.showStatus(status);
+    // The reactions run after the sync steps above and only on a log that was read and is trusted; they never throw out of here.
+    const extras = await this.reactToMembers(synced && refused === undefined);
+    this.showStatus(status, extras);
     await this.mirror();
     return status.state === 'ok';
   }
 
-  private showStatus(status: TransportStatus): void {
+  private showStatus(status: TransportStatus, extras: TeamStatusExtras = {}): void {
     if (this.disposed) return;
-    this.deps.statusBar.update(status, this.teamFile.name);
+    this.deps.statusBar.update(status, this.teamFile.name, extras);
     const key = `${status.state}:${status.reason ?? ''}`;
     if (key === this.lastStatusKey) return;
     const recovered = this.lastStatusKey !== undefined && status.state === 'ok';
@@ -403,6 +413,126 @@ export class TeamSession {
     }
   }
 
+  // ---- member lifecycle reactions (D-16, D-24, D-25) ---------------------------------------------------------------------------------
+
+  private notifiedFile(): string {
+    return path.join(this.storage, NOTIFIED_FILE);
+  }
+
+  private async loadNotified(): Promise<Set<string>> {
+    if (this.notified !== undefined) return this.notified;
+    const keys = new Set<string>();
+    let text: string | undefined;
+    try {
+      text = await fs.readFile(this.notifiedFile(), 'utf8');
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+    }
+    if (text !== undefined) {
+      try {
+        const parsed = JSON.parse(text) as { keys?: unknown };
+        if (Array.isArray(parsed.keys)) for (const key of parsed.keys) if (typeof key === 'string') keys.add(key);
+      } catch {
+        // A damaged file reads as nothing told yet; the next addition writes it again.
+        keys.clear();
+      }
+    }
+    this.notified = keys;
+    return keys;
+  }
+
+  // True the first time a key is seen in this storage folder. The key is remembered on disk (ids only) so a reload does not repeat the message.
+  private async firstTime(key: string): Promise<boolean> {
+    const keys = await this.loadNotified();
+    if (keys.has(key)) return false;
+    keys.add(key);
+    const file = this.notifiedFile();
+    try {
+      await runSerialised(file, () => writeFileAtomic(file, `${JSON.stringify({ v: 1, keys: [...keys].sort() }, null, 2)}\n`));
+      this.clearIssue('notified');
+    } catch (error) {
+      this.reportIssue('notified', `Team Mode could not remember which messages it showed: ${describeError(error)}`);
+    }
+    return true;
+  }
+
+  // Shows a message with buttons without waiting for the user, and runs the command a button maps to.
+  private offer(level: 'info' | 'warn', message: string, choices: Array<{ label: string; run: () => PromiseLike<unknown> | void }>): void {
+    const labels = choices.map((choice) => choice.label);
+    const shown = level === 'info' ? this.deps.notify.info(message, ...labels) : this.deps.notify.warn(message, ...labels);
+    Promise.resolve(shown)
+      .then((picked) => {
+        const choice = choices.find((candidate) => candidate.label === picked);
+        return choice === undefined ? undefined : choice.run();
+      })
+      .catch((error: unknown) => { this.line(`A Team Mode action could not run: ${describeError(error)}`); });
+  }
+
+  private runManage(memberId: string, action: MemberAttention['kind'] | 'remove'): PromiseLike<unknown> | void {
+    if (this.deps.runCommand === undefined) {
+      this.line('This action needs the editor, so it was not run.');
+      return undefined;
+    }
+    return this.deps.runCommand(MANAGE_MEMBERS_COMMAND, { memberId, action });
+  }
+
+  // The NEAR account this team's session is signed in as on this computer, if any. Reading it touches SecretStorage only, never the network.
+  private async nearLabel(): Promise<string | undefined> {
+    try {
+      const session = new NearSession({ teamId: this.teamFile.teamId, secrets: this.deps.secrets, baseUrl: this.deps.nearBaseUrl ?? DEFAULT_BASE_URL });
+      return (await session.signedIn())?.label;
+    } catch (error) {
+      this.reportIssue('near-label', `The NEAR sign-in for this team could not be read: ${describeError(error)}`);
+      return undefined;
+    }
+  }
+
+  private async reactToMembers(trusted: boolean): Promise<TeamStatusExtras> {
+    const extras: TeamStatusExtras = { nearLinked: this.teamFile.near !== undefined };
+    const label = await this.nearLabel();
+    if (label !== undefined) extras.nearLabel = label;
+    if (!trusted) return extras;
+    try {
+      const state = this.transport.state();
+      const id = this.memberId();
+      const me = id === undefined ? undefined : state.members.get(id);
+      if (me !== undefined && me.removedEvent === undefined && this.signing && (me.role === 'owner' || me.role === 'lead')) {
+        const items = memberAttention(state, this.teamFile.near !== undefined);
+        extras.pending = items.filter((item) => item.kind === 'confirm').length;
+        await this.announceAttention(state, items);
+      }
+      this.clearIssue('members');
+    } catch (error) {
+      this.reportIssue('members', `Team Mode could not check the members after the sync: ${describeError(error)}`);
+    }
+    return extras;
+  }
+
+  // One message per item, remembered by the event that created the need so it is shown once even across reloads.
+  private async announceAttention(state: TeamState, items: MemberAttention[]): Promise<void> {
+    const team = displayText(this.teamFile.name);
+    for (const item of items) {
+      const member = state.members.get(item.memberId);
+      if (member === undefined) continue;
+      const name = displayText(member.name);
+      const keyEvent = member.nearKeyEvent ?? member.joinedEvent;
+      if (item.kind === 'confirm') {
+        if (!(await this.firstTime(`confirm:${member.joinedEvent}`))) continue;
+        this.offer('info', `${name} joined ${team} and is waiting for confirmation`, [
+          { label: 'Confirm', run: () => this.runManage(member.id, 'confirm') },
+          { label: 'Remove', run: () => this.runManage(member.id, 'remove') }
+        ]);
+      } else if (item.kind === 'deliver-key') {
+        if (!(await this.firstTime(`deliver-key:${member.id}:${keyEvent}`))) continue;
+        this.offer('info', `${name} is confirmed and still needs a NEAR key`, [{ label: 'Send key', run: () => this.runManage(member.id, 'deliver-key') }]);
+      } else {
+        if (!(await this.firstTime(`rotate-key:${member.id}:${keyEvent}`))) continue;
+        this.offer('info', `${name}'s NEAR key has to be replaced because their devices changed`, [{ label: 'Rotate key', run: () => this.runManage(member.id, 'rotate-key') }]);
+      }
+    }
+  }
+
   // The signer needs the member id this computer's key belongs to, which is only known once the roster has been read.
   private adoptSigner(): void {
     if (this.signing || this.identity === undefined) return;
@@ -445,6 +575,7 @@ export async function createVscodeTeamSession(
       },
       pollSeconds: () => vscode.workspace.getConfiguration('nearAi.team').get<number>('pollSeconds', DEFAULT_POLL_SECONDS),
       focused: () => vscode.window.state.focused,
+      runCommand: (id, args) => vscode.commands.executeCommand(id, args),
       withProgress: <T>(title: string, task: () => Promise<T>): Promise<T> =>
         Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, () => task())),
       ...overrides

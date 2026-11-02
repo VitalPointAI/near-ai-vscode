@@ -275,7 +275,8 @@ test('status text: the pending count, the removed state, the NEAR tooltip lines,
   assert.match(removed.tooltip, /You were removed from Alpha/);
   const hostile = statusText(ok, 'Alpha', { nearLabel: `line one\nline $(two) ${'x'.repeat(500)}` }).tooltip;
   assert.equal(/[\r\n]/.test(hostile.replace(/\.\s/g, ' ')), false, 'no line break from a label');
-  assert.equal(hostile.includes('$(two)'), false, 'the icon syntax is escaped');
+  assert.equal(/(^|[^\\])\$\(/.test(hostile), false, 'every icon opener is escaped');
+  assert.ok(hostile.includes('\\$(two)'), 'the escaped text still reads as typed');
   assert.ok(hostile.length < 400, 'a long label is bounded');
 });
 

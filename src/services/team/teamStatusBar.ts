@@ -3,6 +3,8 @@
 import * as vscode from 'vscode';
 import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
 import { redactGitMessage } from '../../team/runGit';
+import { NO_ORG_NOTICE } from '../../team/join';
+import { removedText } from '../../team/removedClient';
 import { BRANCH_MISSING_REASON } from '../../team/transport';
 import type { TransportStatus } from '../../team/transport';
 
@@ -13,6 +15,7 @@ export const PAUSED_REFUSED_TEXT = 'Team log not trusted';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 
 const MAX_REASON_LENGTH = 400;
+const MAX_DISPLAY_LENGTH = 60;
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F\u2028\u2029]+/g;
 
 // One line, no control characters, no credentials, bounded length.
@@ -26,13 +29,29 @@ function displayName(teamName: string): string {
   return teamName.replace(CONTROL_CHARACTERS, ' ').trim().replaceAll('$(', '\\$(');
 }
 
+// A member name or a NEAR label from the log or from NEAR is untrusted display text: one flat line, bounded, with the icon syntax escaped (Pitfall 13).
+export function displayText(text: string, maxLength: number = MAX_DISPLAY_LENGTH): string {
+  const flat = safeReason(text).replace(/\s+/g, ' ');
+  const bounded = flat.length > maxLength ? `${flat.slice(0, maxLength)}...` : flat;
+  return bounded.replaceAll('$(', '\\$(');
+}
+
 export const REMOVED_TEXT = 'Team: removed';
 
 export interface TeamStatusExtras { pending?: number; removed?: boolean; nearLabel?: string; nearLinked?: boolean }
 
-export function statusText(status: TransportStatus, teamName: string, _extras: TeamStatusExtras = {}): { text: string; tooltip: string } {
+function nearLine(extras: TeamStatusExtras): string {
+  if (extras.nearLabel !== undefined) return ` NEAR: signed in as ${displayText(extras.nearLabel)}.`;
+  if (extras.nearLinked === false) return ` ${NO_ORG_NOTICE}`;
+  return '';
+}
+
+export function statusText(status: TransportStatus, teamName: string, extras: TeamStatusExtras = {}): { text: string; tooltip: string } {
+  if (extras.removed === true) return { text: REMOVED_TEXT, tooltip: removedText(teamName) };
   if (status.state === 'ok') {
-    return { text: `Team: ${displayName(teamName)}`, tooltip: 'Team sync is working. Click to run Verify Team Log.' };
+    const pending = extras.pending ?? 0;
+    const suffix = pending > 0 ? ` (${pending} pending)` : '';
+    return { text: `Team: ${displayName(teamName)}${suffix}`, tooltip: `Team sync is working. Click to run Verify Team Log.${nearLine(extras)}` };
   }
   if (status.reason === TEAM_REJECTION_REASONS.logRewritten) {
     return { text: PAUSED_REWRITTEN_TEXT, tooltip: TEAM_REJECTION_REASONS.logRewritten };
@@ -66,7 +85,7 @@ export function createTeamStatusBar(): TeamStatusBar {
       const shown = statusText(status, teamName, extras);
       item.text = shown.text;
       item.tooltip = shown.tooltip;
-      item.backgroundColor = status.state === 'ok' ? undefined : new vscode.ThemeColor('statusBarItem.warningBackground');
+      item.backgroundColor = status.state === 'ok' && extras?.removed !== true ? undefined : new vscode.ThemeColor('statusBarItem.warningBackground');
     },
     dispose(): void {
       item.dispose();
