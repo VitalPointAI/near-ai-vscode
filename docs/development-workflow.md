@@ -150,8 +150,11 @@ The command (`.claude/commands/review-pr.md`) does the following:
 3. **Aggregate.** It merges the findings into one review file. Each finding starts with a
    severity: `[BLOCKER]` (must not merge), `[MAJOR]`, `[MINOR]` or `[NIT]`. The file must contain
    `Verdict: PASS` or `Verdict: FAIL` and `Head-SHA: <the reviewed commit>`.
-4. **Submit.** `node scripts/agent-review.mjs submit <number> --review <file>` posts the file as
-   a PR comment (with a snapshot of CI) and sets `agent-review` on the head commit.
+4. **Submit.** `node scripts/agent-review.mjs submit <number> --review <file>` sets
+   `agent-review` on the head commit to pending, posts the file as a PR comment (with a snapshot
+   of CI), and only then sets the result. If the comment cannot be posted, the status stays
+   pending and the merge gate refuses, so an earlier success on the same commit never survives a
+   failed re-review.
 
 `agent-review` is **success** only when the file has exactly one verdict line and it reads
 `Verdict: PASS`, its one `Head-SHA` line names the PR's current head, and it has no open

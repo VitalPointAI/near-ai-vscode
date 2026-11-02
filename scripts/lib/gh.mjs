@@ -120,6 +120,11 @@ function ghLines(endpoint, jq) {
   return gh(['api', '--paginate', endpoint, '--jq', jq]).split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line));
 }
 
+/** Every file path a PR changes, through the paginated API (gh pr view stops at 100). */
+export function prFiles(repo, number) {
+  return ghLines(`repos/${repo}/pulls/${number}/files?per_page=100`, '.[] | .filename | tojson');
+}
+
 /**
  * Everything the merge and release gates need about one commit (see evaluateCommit in
  * workflow.mjs): every check run attempt with the app and check suite it came from, the workflow
