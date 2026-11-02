@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 61
 current_phase_name: Invitations, joining, removal, NEAR org and key integration
 status: executing
-stopped_at: Completed 61-02-PLAN.md
-last_updated: "2026-11-02T01:04:38.788Z"
+stopped_at: Completed 61-03-PLAN.md
+last_updated: "2026-11-02T01:09:41.197Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 61 execution started
-state_head: c210aa6d47151a726116d4b082996d08e1e22b83
+state_head: 739197008d7ef3b4fdfd0e8b32f8b474ef81a9ee
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 26
-  completed_plans: 14
+  completed_plans: 15
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 61 (Invitations, joining, removal, NEAR org and key integration) — EXECUTING
-Plan: 3 of 14
+Plan: 4 of 14
 Status: Ready to execute
 Last activity: 2026-11-01 — Phase 61 execution started
 
@@ -68,6 +68,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 60 P12 | 25min | 2 tasks | 5 files |
 | Phase 61 P01 | 50 min | 3 tasks | 10 files |
 | Phase 61 P02 | 35min | 2 tasks | 3 files |
+| Phase 61 P03 | 15min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -99,6 +100,7 @@ Recent decisions affecting current work:
 - [Phase 60]: 60-12 review: the scheduler uses a monotonic clock (performance.now) and caps a focus-loss re-arm at one full delay; post-run callback failures are reported and the next poll is still armed
 - [Phase 61]: 61-01: invite/join shapes confirmed as recorded (HKDF/PKCS#8 derived key, 300 s commit-time skew, D-15 confirmation); invitedEvent kept after join so used invitations stay distinguishable
 - [Phase 61]: 61-02: createKey also reconciles (list by name, revoke) after a 5xx; listMembers has no email on the real route; checkApiKey 402 may carry empty ids
+- [Phase 61]: 61-03: sealTo accepts 16 to 512 byte plaintext and re-rolls any draw the write-side detector would flag (cap 8); randomness source is an optional 4th parameter
 
 ### Pending Todos
 
@@ -120,8 +122,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T01:04:38.666Z
-Stopped at: Completed 61-02-PLAN.md
+Last session: 2026-11-02T01:09:41.070Z
+Stopped at: Completed 61-03-PLAN.md
 Resume file: None
 
 ## Notes
