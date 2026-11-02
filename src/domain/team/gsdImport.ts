@@ -258,6 +258,21 @@ function frontmatterBlock(text: string): Block {
   return { kind: 'bad', problem: truncated ? `the frontmatter is longer than ${MAX_FRONTMATTER_LINES} lines` : 'the frontmatter block is not closed' };
 }
 
+// The offset just after the line that closes the frontmatter, found with the same rule as frontmatterBlock (a line that is exactly ---), or undefined
+// when there is no closed block. The heading search starts there, so a comment or a ---- line inside the frontmatter is never the title (IN-06).
+function frontmatterEnd(text: string): number | undefined {
+  let start = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  for (let index = 0; index < MAX_FRONTMATTER_LINES + 2; index += 1) {
+    const newline = text.indexOf('\n', start);
+    const end = newline === -1 ? text.length : newline;
+    const line = text.slice(start, Math.min(end, start + MAX_LINE_CHARS + 1)).trimEnd();
+    if (index === 0 ? line !== '---' : line === '---') return index === 0 ? undefined : end + (newline === -1 ? 0 : 1);
+    if (newline === -1) return undefined;
+    start = newline + 1;
+  }
+  return undefined;
+}
+
 interface Entry { key: string; rest: string; children: Line[] }
 
 function topLevelEntries(lines: readonly string[], problems: string[]): Entry[] {
@@ -738,7 +753,7 @@ export function buildGsdGraph(source: GsdSource, options: { milestone?: string }
       phase: located.phase,
       plan: located.plan,
       path: located.path,
-      title: entry?.title ?? (text === undefined ? undefined : headingTitle(text.slice(fields === undefined ? 0 : text.indexOf('\n---', 3) + 4))) ?? `Plan ${key}`,
+      title: entry?.title ?? (text === undefined ? undefined : headingTitle(text.slice(fields === undefined ? 0 : frontmatterEnd(text) ?? 0))) ?? `Plan ${key}`,
       dependsOn,
       filesModified: fields?.filesModified ?? [],
       requirements,

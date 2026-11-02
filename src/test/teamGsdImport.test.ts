@@ -113,6 +113,18 @@ test('the frontmatter reader takes inline, quoted inline and block lists and ski
   });
 });
 
+test('IN-06: the plan title comes from the first heading after the closing --- line, never from a comment or a ---- line inside the frontmatter', () => {
+  const third = '.planning/phases/90-alpha/90-03-PLAN.md';
+  const text = '---\nphase: 90\nplan: 03\n----\n# Injected from the frontmatter\n---x\n---\n\n# Plan 90-03: Third slice\n';
+  for (const eol of ['\n', '\r\n']) {
+    const source = fixtureSource();
+    const files = new Map(source.files);
+    files.set(third, text.replace(/\n/g, eol));
+    const graph = graphOf({ paths: [...source.paths, third], files });
+    assert.equal(graph.plans.find((plan) => plan.plan === '03')?.title, 'Third slice', JSON.stringify(eol));
+  }
+});
+
 test('the same files with CRLF line endings give the same graph', () => {
   const lf = graphOf(fixtureSource());
   const crlf = graphOf(fixtureSource((text) => text.replace(/\n/g, '\r\n')));
