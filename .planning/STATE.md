@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: executing
-stopped_at: Phase 62 context gathered
-last_updated: "2026-11-02T17:50:20.925Z"
-last_activity: 2026-11-01
-last_activity_desc: Phase 61 execution started
-state_head: 9f01abc73e99c649b0c2ac8c8af569c39d7ed2fa
+stopped_at: Completed 62-01-PLAN.md
+last_updated: "2026-11-02T18:05:59.955Z"
+last_activity: 2026-11-02
+last_activity_desc: Phase 62 execution started
+state_head: f534996be5e3ffd286dae6a9317b97bc89a18521
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 40
-  completed_plans: 26
+  completed_plans: 27
   percent: 13
 ---
 
@@ -25,14 +25,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-11-01)
 
 **Core value:** Several people, each running their own private NEAR AI agents, work one project toward Open-GSD milestones and releases without colliding, overspending or leaking secrets.
-**Current focus:** Phase 61 — Invitations, joining, removal, NEAR org and key integration
+**Current focus:** Phase 62 — Work model, GSD import, Team Board (live, read and move)
 
 ## Current Position
 
-Phase: 62 (Work model, GSD import, Team Board (live, read and move)) — READY TO EXECUTE
-Plan: 14 of 14
+Phase: 62 (Work model, GSD import, Team Board (live, read and move)) — EXECUTING
+Plan: 2 of 14
 Status: Ready to execute
-Last activity: 2026-11-01 — Phase 61 execution started
+Last activity: 2026-11-02 — Phase 62 execution started
 
 Progress: [█░░░░░░░░░] 13%
 
@@ -80,6 +80,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P12 | 40min | 3 tasks | 8 files |
 | Phase 61 P13 | 55 min | 3 tasks | 8 files |
 | Phase 61 P14 | 15 min | 3 tasks | 8 files |
+| Phase 62 P01 | 13 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -133,6 +134,7 @@ Recent decisions affecting current work:
 - [Phase 61]: The unfinished-join reset is offered only after a fresh sync shows this computer is not on the team list
 - [Phase 61]: 61-14: the lifecycle, privacy canary and full gate passed with no production change; the coordination push between cap and revoke is proven by counting remote event files at each NEAR call
 - [Phase 61]: 61-14: TEAM-02 and TEAM-03 ticked; only the manual real-NEAR organization check and the live test run remain for the owner
+- [Phase 62]: Plan 62-01: item event bodies, stored WorkItem shape, item.move row and transition rules confirmed as recorded (confirm-recorded); parent kind is checked at the reference step (itemParent), mark done ends a hold
 
 ### Pending Todos
 
@@ -154,9 +156,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T16:04:46.673Z
-Stopped at: Phase 62 context gathered
-Resume file: .planning/phases/62-work-model-gsd-import-team-board-live-read-and-move/62-CONTEXT.md
+Last session: 2026-11-02T18:05:59.678Z
+Stopped at: Completed 62-01-PLAN.md
+Resume file: None
 
 ## Notes
 
