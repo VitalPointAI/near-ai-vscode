@@ -116,12 +116,22 @@ as a row in the chat.
   approvals, queued messages, task list, model, spend, and draft. The tabs
   above the chat show which are running, which are waiting for you (the view's
   badge counts every waiting prompt, and a notice takes you there in one
-  click), which stopped, and which have new output. Ctrl+Shift+[ and ]
-  (Cmd on macOS) switch between them; Stop stops the one on screen, the
-  emergency stop stops them all. Up to eight are open; closing a running one
-  asks first, and its transcript stays in **History**. The open conversations
-  come back after a reload (a run cannot continue across one, so it shows as
-  stopped).
+  click), which stopped, and which have new output. A waiting approval or
+  question also shows a notice when the chat is hidden or VS Code (or its
+  browser tab) is in the background, and again when you come back to the
+  window if it was not announced yet; never twice for the same prompt.
+  Ctrl+Shift+[ and ] (Cmd on macOS) switch between them; Stop stops the one
+  on screen, the emergency stop stops them all. Up to eight are open; closing
+  a running one asks first, and its transcript stays in **History**. The open
+  conversations come back after a reload.
+- **Runs cut off by a reload or by code-server are not lost.** A run cannot
+  continue once its window reloads, crashes, or code-server closes it, but it
+  saves its state after every step. The next time the chat opens, the
+  conversation says "This run was cut off (the window or code-server closed
+  it) at" the time, with **Resume** and **Dismiss**. Resume continues from the
+  last saved step and tells the agent which steps had started but were never
+  recorded, so it checks them instead of doing them twice. Nothing resumes
+  until you click.
 - **New Chat**, **History**, **Tools**, and **Set Up** live in the view's title
   bar, just like other VS Code views.
 - **Tools** opens a directory of what the agents can use: every installed
@@ -485,6 +495,16 @@ Read the full [security and trust report](SECURITY.md).
   shows the run failed, and the work so far is kept: send a message to continue
   or switch models. The cut-off requests are recorded with NEAR's request ID and
   settled with what NEAR bills.
+- **Runs pause or stop in code-server (VS Code in a browser):** two things
+  in code-server affect long runs. First, VS Code's proxy support asks the
+  browser tab which proxy to use for every new connection; when the browser
+  pauses a background tab, nothing answers and runs wait until you come back.
+  If you don't use a proxy, set `"http.proxySupport": "off"` in your user
+  settings and reload (the extension offers to do this for you, once).
+  Second, when a tab stays disconnected while another code-server tab
+  connects, code-server closes the window's extension host after about 5
+  minutes, which stops every run in it. Keep the tab open and in front during
+  long runs; if a run is cut off, **Resume** it from the chat.
 - **The agent changed something you didn't want:** click **Revert** under the
   run. Changes made by shell commands it ran are not included; use git for
   those.
