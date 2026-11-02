@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: executing
-stopped_at: Completed 62-10-PLAN.md
-last_updated: "2026-11-02T20:36:33.106Z"
+stopped_at: Completed 62-11-PLAN.md
+last_updated: "2026-11-02T20:47:06.581Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 4be1998c372e50f7fd9fd0eee6f203e5fc6ebdf4
+state_head: dc892c063ed609d9631fafbd1b2126925231cc2a
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 40
-  completed_plans: 36
+  completed_plans: 37
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 62 (Work model, GSD import, Team Board (live, read and move)) — EXECUTING
-Plan: 11 of 14
+Plan: 12 of 14
 Status: Ready to execute
 Last activity: 2026-11-02 — Phase 62 execution started
 
@@ -90,6 +90,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P08 | 45 min | 3 tasks | 7 files |
 | Phase 62 P09 | 62 min | 3 tasks | 4 files |
 | Phase 62 P10 | 18 min | 2 tasks | 2 files |
+| Phase 62 P11 | 6 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -164,6 +165,7 @@ Recent decisions affecting current work:
 - [Phase 62]: Board client icons are inline SVG instead of vendored codicons; kanban columns are a fixed 256 px so only --vscode-* variables appear in board.css
 - [Phase 62]: Board client: Move to... shows only for owner and lead and is aria-disabled when offline, paused or removed; feature scripts own #menu and #item-form, board.js owns an empty aside#detail
 - [Phase 62]: 62-10: menu.js shows only refusals to requests it sent; menu closes when the card's moves change; Tab refocuses the opener and keeps its default
+- [Phase 62]: 62-11: every kanban cell accepts a board drag so a refused drop can give its reason; a drag still active at dragend counts as cancelled
 
 ### Pending Todos
 
@@ -185,8 +187,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T20:36:32.762Z
-Stopped at: Completed 62-10-PLAN.md
+Last session: 2026-11-02T20:47:06.191Z
+Stopped at: Completed 62-11-PLAN.md
 Resume file: None
 
 ## Notes
