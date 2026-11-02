@@ -62,6 +62,8 @@ export function localKeyScope(scope: ProjectCredentialScope): ProjectCredentialS
 }
 
 export const PROFILE_ID_PATTERN = /^profile-[a-z0-9][a-z0-9-]{1,63}$/;
+/** Team Mode installs a member's team key as the project profile `profile-team-<10 hex of sha256(teamId)>`. */
+export const TEAM_PROFILE_PREFIX = 'profile-team-';
 export const PROJECT_ID_PATTERN = /^project-[a-f0-9]{32}$/;
 
 export function isProfileId(value: unknown): value is string {

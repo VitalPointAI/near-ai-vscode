@@ -115,6 +115,7 @@ test('the first remembered personal profile is not overwritten by a later instal
   await withFixture(async (f) => {
     await personalProfile(f.store);
     await personalProfile(f.store, 'profile-other');
+    await f.store.select('profile-personal');
     const first = await f.makeKey('team-key-1');
     const common = { projectRoot: f.projectRoot, globalStorageDir: f.storage, teamId: TEAM_ID, teamName: 'Acme', secrets: f.secrets, baseUrl: f.fake.baseUrl, sleep: never };
     assert.equal((await installTeamKey({ ...common, apiKey: first.secret, keyId: first.id })).ok, true);
