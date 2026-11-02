@@ -5,6 +5,13 @@
 export const CI_CHECKS = Object.freeze(['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan']);
 /** Commit status set by scripts/agent-review.mjs after the agent review team has run. */
 export const AGENT_REVIEW_CONTEXT = 'agent-review';
+/**
+ * The only GitHub account whose `agent-review` status the merge and release gates trust: the
+ * repository owner, whose account the review agents run as. Fixed here rather than taken from
+ * whoever runs a script, so another admin running merge-pr cannot have their own status
+ * accepted. Changing it is a change to the gates and goes through review like one.
+ */
+export const AGENT_REVIEW_ACCOUNT = 'ALuhning';
 export const REQUIRED_CHECKS = Object.freeze([...CI_CHECKS, AGENT_REVIEW_CONTEXT]);
 /** Where the CI_CHECKS must come from: jobs of this workflow file, run by GitHub Actions. */
 export const CI_WORKFLOW = Object.freeze({ name: 'CI', path: '.github/workflows/ci.yml', app: 'github-actions' });
@@ -309,8 +316,8 @@ function newest(entries, startOf, { unfinishedFirst = false } = {}) {
  *   counts. A report with
  *   the same name from anywhere else refuses, so a duplicate-named job cannot stand in for or
  *   mask the real one.
- * - `agent-review` counts only as a commit status set by `reviewer` (the account the scripts run
- *   as). A check run of that name, or the status set by any other account, refuses.
+ * - `agent-review` counts only as a commit status set by `reviewer` (AGENT_REVIEW_ACCOUNT in the
+ *   scripts). A check run of that name, or the status set by any other account, refuses.
  * - Any other required name must be green wherever it reports; any other failed check refuses.
  * - With exactCommitCi (tagging a release), the CI_CHECKS are judged only on the newest CI run
  *   that tested the commit itself (a push or a run started by hand), not a pull request's merge

@@ -136,7 +136,7 @@ export function commitChecks(repo, sha) {
   };
 }
 
-/** The GitHub account the scripts run as: the only account whose `agent-review` status counts. */
+/** The GitHub account gh runs as (agent-review.mjs checks it is AGENT_REVIEW_ACCOUNT before it posts). */
 export function currentLogin() {
   const login = gh(['api', 'user', '--jq', '.login']).trim();
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(login)) throw new Error(`could not read the GitHub account gh runs as (got "${login}")`);

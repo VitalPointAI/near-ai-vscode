@@ -14,8 +14,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fail, gh, parseArgs, resolveRepo, viewPr } from './lib/gh.mjs';
-import { AGENT_REVIEW_CONTEXT, CI_CHECKS, evaluateChecks, fitComment, normalizeChecks, parseReview, reviewDecision } from './lib/workflow.mjs';
+import { currentLogin, fail, gh, parseArgs, resolveRepo, viewPr } from './lib/gh.mjs';
+import { AGENT_REVIEW_ACCOUNT, AGENT_REVIEW_CONTEXT, CI_CHECKS, evaluateChecks, fitComment, normalizeChecks, parseReview, reviewDecision } from './lib/workflow.mjs';
 
 const usage = 'usage: agent-review.mjs gather <pr> [--out dir] | submit <pr> --review <file.md> [--dry-run]  (both accept --repo owner/name)';
 
@@ -76,11 +76,17 @@ function submit(repo, number, reviewPath, dryRun) {
     ? `PASS: ${counts.major} major, ${counts.minor} minor, ${counts.nit} nit, ${counts.resolved} resolved`
     : `FAIL: ${decision.reasons[0]}`).slice(0, 140);
 
+  // Only the owner's status counts at merge and release (AGENT_REVIEW_ACCOUNT), so a status from
+  // any other account would only confuse; refuse before posting anything.
+  const login = currentLogin();
+  const trusted = login.toLowerCase() === AGENT_REVIEW_ACCOUNT.toLowerCase();
   if (dryRun) {
+    if (!trusted) console.log(`[dry run] note: gh runs as ${login}, but only ${AGENT_REVIEW_ACCOUNT}'s ${AGENT_REVIEW_CONTEXT} counts; a real submit would refuse.`);
     console.log(body);
     console.log(`\n[dry run] would set ${AGENT_REVIEW_CONTEXT}=${decision.state} on ${pr.headRefOid}: ${description}`);
     return;
   }
+  if (!trusted) fail(`gh runs as ${login}, but the merge and release gates trust ${AGENT_REVIEW_CONTEXT} only from ${AGENT_REVIEW_ACCOUNT}; nothing was posted`);
   const commentDir = mkdtempSync(path.join(tmpdir(), 'agent-review-comment-'));
   let commentUrl;
   try {

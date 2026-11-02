@@ -4,7 +4,8 @@
 //   - the PR is open, not a draft, targets main, and comes from a branch named by the convention;
 //   - every required check is green on the current head commit, and no other check failed. The
 //     CI jobs count only from the CI workflow (a job of the same name from anywhere else refuses)
-//     and `agent-review` only as a commit status set by the account this script runs as;
+//     and `agent-review` only as a commit status set by the owner's account (AGENT_REVIEW_ACCOUNT
+//     in scripts/lib/workflow.mjs), whoever runs this script;
 //   - the branch is up to date with main and GitHub reports it mergeable;
 //   - no review conversation is unresolved.
 // For a release/x.y.z or hotfix/x.y.z PR it first checks the head's package.json version, its

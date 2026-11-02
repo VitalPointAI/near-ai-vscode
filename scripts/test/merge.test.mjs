@@ -152,3 +152,17 @@ test('merge-pr refuses a release PR whose version tag already exists, unless --n
   assert.deepEqual(await mergePr(REPO, '9', { ...quiet, noTag: true }), { merged: true, mergeSha: SQUASH, tag: undefined });
   assert.equal(fake.called(/git\/(tags|refs)/).length, 0);
 });
+
+test('only the configured owner\'s agent-review counts, whoever runs merge-pr or tag-release', async () => {
+  // Another admin runs the merge with their own agent-review status: refused.
+  let fake = install(readyToMerge({ login: 'Em-kale', commits: { [HEAD]: greenCommit({ reviewer: 'Em-kale' }) } }));
+  await assert.rejects(mergePr(REPO, '7', quiet), /"agent-review" has not been set on this commit by ALuhning/);
+  assert.equal(fake.called(/^gh pr merge/).length, 0);
+  // The same admin can merge a PR the owner's review passed.
+  fake = install(readyToMerge({ login: 'Em-kale' }));
+  assert.equal((await mergePr(REPO, '7', quiet)).merged, true);
+  // A hotfix head tagged by another admin still needs the owner's review on it.
+  const hotfix = greenCommit({ reviewer: 'Em-kale', event: 'workflow_dispatch' });
+  install({ login: 'Em-kale', commits: { [HEAD]: hotfix }, branches: { 'hotfix/1.2.3': HEAD }, files: releaseFiles(HEAD) });
+  await assert.rejects(tagRelease(REPO, '1.2.3', HEAD, { log: () => {}, wait: false }), /has not been set on this commit by ALuhning/);
+});

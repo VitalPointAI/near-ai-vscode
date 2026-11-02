@@ -1,7 +1,7 @@
 // Tagging a release commit. Shared by merge-pr.mjs (after a release/x.y.z PR merges) and
 // tag-release.mjs (manual or hotfix use). The tag starts .github/workflows/release.yml.
-import { behindBy, branchHead, commitChecks, createAnnotatedTag, currentLogin, fileAt, sleep, tagCommit } from './gh.mjs';
-import { CI_CHECKS, changelogSection, evaluateCommit, releaseGate } from './workflow.mjs';
+import { behindBy, branchHead, commitChecks, createAnnotatedTag, fileAt, sleep, tagCommit } from './gh.mjs';
+import { AGENT_REVIEW_ACCOUNT, CI_CHECKS, changelogSection, evaluateCommit, releaseGate } from './workflow.mjs';
 
 /**
  * Waits (up to timeoutMs) for the CI jobs on sha to finish, then requires them all green, from
@@ -39,7 +39,7 @@ export async function tagRelease(repo, version, sha, { wait = true, log = consol
   const pkg = JSON.parse(fileAt(repo, 'package.json', sha));
   if (pkg.version !== version) throw new Error(`package.json at ${sha.slice(0, 7)} is ${pkg.version}, not ${version}`);
   if (!changelogSection(fileAt(repo, 'CHANGELOG.md', sha), version)) throw new Error(`CHANGELOG.md at ${sha.slice(0, 7)} has no "## ${version}" section`);
-  const gate = { required: plan.required, reviewer: plan.hotfix ? currentLogin() : undefined, exactCommitCi: true };
+  const gate = { required: plan.required, reviewer: plan.hotfix ? AGENT_REVIEW_ACCOUNT : undefined, exactCommitCi: true };
   if (wait) await waitForCi(repo, sha, { log, ...ci, ...gate });
   else {
     const result = evaluateCommit(commitChecks(repo, sha), gate);

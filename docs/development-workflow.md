@@ -116,10 +116,15 @@ with only that identity's `agent-review` trusted.
 
 A commit status is not a strong signature: GitHub accepts an `agent-review` status from any
 account or workflow with write access, and branch protection cannot require a particular
-account. `merge-pr.mjs` therefore counts only the status set by the account it runs as (the
-owner), and refuses when another account set one or when a check run uses that name. Merges
-outside `merge-pr.mjs` rely on trust in everyone with write access, until the review result comes
-from a GitHub App or check run that only the review process can write.
+account. `merge-pr.mjs` and `tag-release.mjs` therefore count only the status set by the
+owner's account, which is fixed in the scripts (`AGENT_REVIEW_ACCOUNT` in
+`scripts/lib/workflow.mjs`), not taken from whoever runs them: another admin running
+`merge-pr.mjs` still needs the owner's `agent-review`, and their own does not count. They refuse
+when another account set one or when a check run uses that name. `agent-review.mjs submit`
+refuses to post unless `gh` runs as that account. Changing `AGENT_REVIEW_ACCOUNT` changes the
+gate, so it goes through review like any gate change. Merges outside `merge-pr.mjs` rely on trust
+in everyone with write access, until the review result comes from a GitHub App or check run that
+only the review process can write.
 
 ### Running the review team from Claude Code
 
@@ -179,7 +184,8 @@ The merge agent runs `node scripts/merge-pr.mjs <number>` (first with `--dry-run
 - refuses unless every required check (the six CI jobs, `agent-review`, and anything else branch
   protection requires) is green on the current head, and no other check failed. The CI jobs
   count only from the `CI` workflow, so a job of the same name elsewhere cannot stand in for
-  one, and `agent-review` counts only as a commit status set by the account the script runs as;
+  one, and `agent-review` counts only as a commit status set by the owner's account
+  (`AGENT_REVIEW_ACCOUNT`), whoever runs the script;
 - refuses if the branch is behind `main`, has conflicts, or has unresolved conversations;
 - for a `release/x.y.z` or `hotfix/x.y.z` PR, refuses unless the head's package.json is
   `x.y.z`, CHANGELOG.md has its section, and `vx.y.z` does not exist yet (pass `--no-tag` for a
