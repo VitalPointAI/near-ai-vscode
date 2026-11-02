@@ -5,6 +5,7 @@ status: verified
 # threats_open = count of OPEN threats at or above workflow.security_block_on severity (the blocking gate)
 threats_open: 0
 asvs_level: 1
+updated: "2026-11-02"
 created: "2026-11-02"
 ---
 
@@ -84,13 +85,13 @@ Extracted from the `<threat_model>` tables of 62-01 to 62-14 (T-62-SC appears in
 | T-62-41 | Elevation of privilege | editing another member's item through a crafted edit-item | high | mitigate | `editProblem` inside `append` on fresh state refuses imported items and feeds `isOwnDraft` to `decideTeamAction` for item.edit and item.estimate; `prepareEvents` and reader re-check. Tests: teamBoardItems developer cannot edit another's chore; imported plan never editable | closed |
 | T-62-42 | Information disclosure | secret-like text typed into a form | high | mitigate | `cleanFields` runs `findSecrets` over title, description and scope before and after normalising; `assertNoSecrets` on write. Test: key-like text refused in title, description and file line with remote scan. Page-side persistence of the draft: T-62-46 | closed |
 | T-62-43 | Tampering | oversize or malformed fields | medium | mitigate | Parser caps (title 200, description 2000, 64 scope lines of 200, estimate range), `cleanFields` re-validation, exact-key validators on read. Test: malformed files and sizes refused, nothing written | closed |
-| T-62-44 | Information disclosure / Elevation of privilege | test seam returning SecretStorage | high | mitigate | `extension.ts` returns the team handle and secrets only when `process.env.NEAR_AI_E2E === '1'`, else `undefined`; e2e runner sets it. No negative unit test for the production return (advisory A1) | closed |
+| T-62-44 | Information disclosure / Elevation of privilege | test seam returning SecretStorage | high | mitigate | `extension.ts` returns the team handle and secrets only when `process.env.NEAR_AI_E2E === '1'`, else `undefined`; e2e runner sets it. Advisory A1 resolved in e9fbda9: extensionActivate test checks `activate()` returns undefined for NEAR_AI_E2E unset, empty, "0", "true" and " 1"; `boardTap.request`, the page probe and the page's `host-request` re-post are also gated on NEAR_AI_E2E=1 (IN-05) | closed |
 | T-62-45 | Tampering | release missing or changed board assets | medium | mitigate | `scripts/verify-release-content.mjs` lists all six board files; teamBoardAssets test checks the list equals the files the host loads, plus sink, network and colour-literal tests; `.vscodeignore` keeps `media/` | closed |
 | T-62-SC | Tampering | npm/pip/cargo installs | high | mitigate | `git diff` against the merge base with main: `package-lock.json` unchanged; `package.json` gains only `contributes.commands`, `contributes.views` and `nearAi.team.pollSeconds`, no dependency change | closed |
-| T-62-46 | Information disclosure | unsent form draft persisted in webview state (found in audit; widens T-62-33) | low | mitigate | No mitigation yet. `media/board/board.js` `persist` stores `draft` and `media/board/form.js` `draftNow` saves type, title, description, files and estimate on every input. In edit mode the draft starts from teammate-authored card text, and secret-like text is stored by VS Code before the host's `findSecrets` refusal (the page has no detector). Fix options: drop the draft when the view hides or on submit/refusal, or accept with the wider scope | open — below high threshold (non-blocking) |
-| T-62-47 | Denial of service | `.planning` tree listing buffered before the 2000-path cap (found in audit; residual of T-62-07) | medium | mitigate | No mitigation yet. `integrationSource.ts` runs `parseTree(listed.stdout)` on the full `ls-tree` output before `slice(0, MAX_PLANNING_PATHS)`; `runGit.ts` has a timeout but no output byte cap, so a branch pusher with a huge `.planning` tree can force a large in-memory buffer. Fix: byte-capped or streaming listing | open — below high threshold (non-blocking) |
-| T-62-48 | Information disclosure | unredacted error text in the Team Board output channel (found in audit) | low | mitigate | No mitigation at this layer. `boardView.ts` lines 420, 427, 448, 611 and 655 write `describe(error)` directly, unlike `safeReason` elsewhere. Today's error sources are already redacted (`mustSucceed`), so this is defence in depth | open — below high threshold (non-blocking) |
-| T-62-49 | Denial of service | page-to-host messages not rate-limited (found in audit) | low | mitigate | No mitigation yet. T-62-30 controls are host-to-page only; `import-plans`, `new-item` and `retry` from the page are bounded only by role checks, the serialised import chain and the CSP | open — below high threshold (non-blocking) |
+| T-62-46 | Information disclosure | unsent form draft persisted in webview state (found in audit; widens T-62-33) | low | mitigate | Fixed in b15806a. `form.js` `storable()` keeps a draft only for the person's own unsent new item, never for an edit form (which starts from a teammate's card); an edit draft stored by an older version is dropped on load. A title, description or files field matching the host's secret patterns (copied from `secrets.ts` and `redaction.ts`, plus a long random token) is stored as empty. Tests: boardForm "T-62-46: a field that looks like a key or password is never stored in the draft", "IN-08: an edit form is never stored"; teamBoardAssets "T-62-46: form.js keeps every host secret pattern" (drift guard). The host's submit-time refusal (T-62-42) is unchanged | closed |
+| T-62-47 | Denial of service | `.planning` tree listing buffered before the 2000-path cap (found in audit; residual of T-62-07) | medium | mitigate | Fixed in 0b9cda9 (with CR-02). `runGit` takes `maxStdoutBytes` and kills git as soon as it writes more, keeping at most that many bytes. The listing reads only `ROADMAP.md`, `STATE.md`, `phases` and `milestones` (pathspec) with a 4 MB cap; a bigger listing throws `PlanningTooLargeError` and the import fails with "The planning folder is too large to read" before anything is read or written. Only source files count against the 2000-path cap, and a cut listing is additive only. The auto-import probe reads only the tree hash. Tests: teamImportSource "T-62-47: runGit stops git once it writes more than maxStdoutBytes", "CR-02: only the roadmap, the state file and plan and summary files count against the path cap"; teamImport "CR-02 / T-62-47: a .planning listing over the byte cap is refused" | closed |
+| T-62-48 | Information disclosure | unredacted error text in the Team Board output channel (found in audit) | low | mitigate | Fixed in cf72101 (WR-03). `boardView.ts` `describe()` returns `safeReason(message)`; the busy reason posted to the page and the refusal line in the channel go through `safeReason` too; `teamCommands.ts` routes its last three raw error texts through its redacting `describe()`. Test: teamBoardView "WR-03: an unexpected error from a move, a new item or a model update reaches the output channel redacted, flat and without the credential" (canary `canary-secret-62` in a remote URL, control characters) | closed |
+| T-62-49 | Denial of service | page-to-host messages not rate-limited (found in audit) | low | mitigate | Fixed in 170cf7c. `BoardController` runs one item write, one import and one retry at a time; an import or retry is not started again within a 2 s cool-down; item writes that reach the log draw on a bucket of 10 refilled one per 500 ms. Extras are refused with plain words (the form's refused answer for writes, a notice for import and retry). Test: teamBoardView "T-62-49: the page gets one item write, one import and one retry at a time, a cool-down between imports and retries, and a small write bucket" | closed |
 
 *Status: open · closed · open — below high threshold (non-blocking)*
 *Severity: critical > high > medium > low — only open threats at or above workflow.security_block_on count toward threats_open*
@@ -102,14 +103,14 @@ Extracted from the `<threat_model>` tables of 62-01 to 62-14 (T-62-SC appears in
 
 | Risk ID | Threat Ref | Rationale | Accepted By | Date |
 |---------|------------|-----------|-------------|------|
-| AR-62-01 | T-62-33 | VS Code persists the board page's `setState` in its local webview storage. Accepted for filters, group by, collapsed sets, selection and milestone ids only, which hold no card text. This acceptance does not cover the unsent form draft added in 62-13; that is open as T-62-46 | Plan 62-09 threat model | 2026-11-02 |
+| AR-62-01 | T-62-33 | VS Code persists the board page's `setState` in its local webview storage. Accepted for filters, group by, collapsed sets, selection and milestone ids only, which hold no card text. This acceptance does not cover the unsent form draft added in 62-13; that is T-62-46, mitigated and closed in b15806a | Plan 62-09 threat model | 2026-11-02 |
 
 **Transferred:**
 - TR-62-01 (T-62-34), TR-62-02 (T-62-35), TR-62-03 (T-62-38): the page only shows and requests what the model offers; the extension host re-plans every move and re-checks every edit on fresh log state inside `log.append` (62-08, `boardView.ts`). Host control verified present and tested.
 
 **Advisories (non-blocking at ASVS L1):**
-- A1 (T-62-44): there is no negative unit test that production `activate()` returns `undefined` without `NEAR_AI_E2E`.
-- A2 (T-62-46..49): open below the high block threshold. They are recorded for a later fix or an explicit owner acceptance. No code was changed in this audit.
+- A1 (T-62-44): resolved in e9fbda9 (extensionActivate test).
+- A2 (T-62-46..49): resolved by the 62 review-fix pass (b15806a, 0b9cda9, cf72101, 170cf7c). All four are closed with evidence above.
 
 ---
 
@@ -118,6 +119,7 @@ Extracted from the `<threat_model>` tables of 62-01 to 62-14 (T-62-SC appears in
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-11-02 | 50 (T-62-01..T-62-45, T-62-SC counted once, plus T-62-46..T-62-49 found in audit) | 46 (42 mitigate, 1 accept, 3 transfer) | 4 (T-62-46 low, T-62-47 medium, T-62-48 low, T-62-49 low; all below the high threshold, 0 blocking) | gsd-security-auditor (ASVS L1, block on high); 320 focused tests pass |
+| 2026-11-02 | 50 | 50 (46 mitigate, 1 accept, 3 transfer) | 0 | gsd-code-fixer review-fix pass: T-62-46 (b15806a), T-62-47 (0b9cda9), T-62-48 (cf72101), T-62-49 (170cf7c) mitigated with regression tests; A1 resolved (e9fbda9) |
 
 ---
 
@@ -125,7 +127,7 @@ Extracted from the `<threat_model>` tables of 62-01 to 62-14 (T-62-SC appears in
 
 - [x] All threats have a disposition (mitigate / accept / transfer)
 - [x] Accepted risks documented in Accepted Risks Log
-- [x] `threats_open: 0` confirmed (4 open threats below the high threshold, non-blocking)
+- [x] `threats_open: 0` confirmed (no open threats at any severity after the review-fix pass)
 - [x] `status: verified` set in frontmatter
 
 **Approval:** verified 2026-11-02
