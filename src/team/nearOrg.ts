@@ -35,7 +35,8 @@ export class NearOrgError extends Error {
 export type NearRole = 'owner' | 'admin' | 'member';
 export interface NearOrganization { id: string; name: string; role: NearRole }
 export interface NearWorkspace { id: string; name: string; organizationId: string }
-export interface NearOrgMember { userId: string; role: NearRole; email?: string }
+/** 'unknown' is a role this version does not know; such a member is never removed automatically. */
+export interface NearOrgMember { userId: string; role: NearRole | 'unknown'; email?: string }
 export interface NearInvitation { id: string; organizationId: string; email: string; role: string; status: string; expiresAt?: string; organizationName?: string }
 export type InviteOutcome = { ok: true; alreadyMember: boolean } | { ok: false; reason: string };
 export interface NearKey {
@@ -132,10 +133,14 @@ function optionalString(source: Record<string, unknown>, key: string): string | 
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-function requireRole(source: Record<string, unknown>, what: string): NearRole {
+function knownRole(source: Record<string, unknown>): NearRole | undefined {
   const role = source['role'];
-  if (role !== 'owner' && role !== 'admin' && role !== 'member') throw badResponse(0, `${what}.role`);
-  return role;
+  return role === 'owner' || role === 'admin' || role === 'member' ? role : undefined;
+}
+
+// The id of a list row as NEAR sent it, before the rest of the row is read, so one row this version cannot read never hides another (WR-02).
+function rawId(row: unknown): string | undefined {
+  return isObject(row) ? optionalString(row, 'id') : undefined;
 }
 
 /**
@@ -298,15 +303,18 @@ export class NearOrgClient {
     return { key, secret: Buffer.from(secretText as string, 'utf8') };
   }
 
-  /** Every key in the workspace that is not revoked, with its limit and lifetime usage. */
+  /** Every key in the workspace that is not revoked, with its limit and lifetime usage. Strict: one row that cannot be read fails the list. */
   public async listKeys(workspaceId: string): Promise<NearKey[]> {
-    const rows = await this.pageAll(`/workspaces/${enc(workspaceId)}/api-keys`, 'api_keys');
-    return rows.map(parseKey);
+    return (await this.keyRows(workspaceId)).map(parseKey);
   }
 
-  /** NEAR has no single-key read, so the list is paged and matched by id. */
+  /**
+   * NEAR has no single-key read, so the list is paged and matched by the raw id; only the matching row is read, and strictly. The workspace is
+   * shared with keys made in the NEAR console, so a row this version cannot read never stops the lookup of another key (WR-02).
+   */
   public async findKey(workspaceId: string, keyId: string): Promise<NearKey | undefined> {
-    return (await this.listKeys(workspaceId)).find((key) => key.id === keyId);
+    const row = (await this.keyRows(workspaceId)).find((candidate) => rawId(candidate) === keyId);
+    return row === undefined ? undefined : parseKey(row);
   }
 
   /** Sets the limit. Setting the same limit twice is harmless, so this retries like a GET. */
@@ -326,11 +334,14 @@ export class NearOrgClient {
 
   // ---- organizations, workspaces and members ----
 
+  /** The caller's organizations. One with a role this version does not know is left out (WR-02): only owner and admin can be linked anyway. */
   public async listOrganizations(): Promise<NearOrganization[]> {
     const rows = await this.pageAll('/organizations', 'organizations');
-    return rows.map((row) => {
+    return rows.flatMap((row) => {
       const source = requireObject(row, 'organization');
-      return { id: requireString(source, 'id', 'organization'), name: requireString(source, 'name', 'organization'), role: requireRole(source, 'organization') };
+      const role = knownRole(source);
+      if (role === undefined) return [];
+      return [{ id: requireString(source, 'id', 'organization'), name: requireString(source, 'name', 'organization'), role }];
     });
   }
 
@@ -351,7 +362,8 @@ export class NearOrgClient {
       const userId = optionalString(user, 'id') ?? optionalString(source, 'user_id');
       if (userId === undefined) throw badResponse(0, 'member.user.id');
       const email = optionalString(user, 'email') ?? optionalString(source, 'email');
-      return { userId, role: requireRole(source, 'member'), ...(email === undefined ? {} : { email }) };
+      // A role this version does not know is kept as 'unknown', not dropped, so a match by email stays ambiguous rather than guessed (WR-02).
+      return { userId, role: knownRole(source) ?? 'unknown', ...(email === undefined ? {} : { email }) };
     });
   }
 
@@ -458,11 +470,18 @@ export class NearOrgClient {
     }
   }
 
-  /** Lists and revokes keys with this exact name; says what happened, never throws. */
+  private async keyRows(workspaceId: string): Promise<unknown[]> {
+    return this.pageAll(`/workspaces/${enc(workspaceId)}/api-keys`, 'api_keys');
+  }
+
+  /** Lists and revokes keys with this exact name, matched on the raw rows (WR-02); says what happened, never throws. */
   private async removeKeysNamed(workspaceId: string, name: string): Promise<string> {
     try {
-      const matches = (await this.listKeys(workspaceId)).filter((key) => key.name === name);
-      for (const key of matches) await this.revokeKey(workspaceId, key.id);
+      const matches = (await this.keyRows(workspaceId)).flatMap((row) => {
+        const id = rawId(row);
+        return id !== undefined && isObject(row) && row['name'] === name ? [id] : [];
+      });
+      for (const id of matches) await this.revokeKey(workspaceId, id);
       return matches.length === 0 ? 'No key with that name was found.' : `Revoked ${matches.length} key${matches.length === 1 ? '' : 's'} with that name that may have been made.`;
     } catch (error) {
       return `Could not check for a key that may have been made (${error instanceof NearOrgError ? error.code : 'unknown'}); look for one in the NEAR console.`;

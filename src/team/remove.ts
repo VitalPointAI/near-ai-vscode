@@ -115,7 +115,8 @@ async function leaveOrganization(org: NearOrgClient, near: NearLink, teamId: str
     if (matches.length === 0) return { status: 'manual', text: manualOrganizationText(member.name) };
     if (matches.length > 1) return { status: 'manual', text: ambiguousMatchText(member.name) };
     const target = matches[0];
-    if (target === undefined || target.role === 'owner') return { status: 'manual', text: protectedMatchText(member.name) };
+    // An owner, or a role this version does not know, is never removed automatically.
+    if (target === undefined || target.role === 'owner' || target.role === 'unknown') return { status: 'manual', text: protectedMatchText(member.name) };
     const remover = await org.currentUser();
     if (target.userId === remover.id) return { status: 'manual', text: protectedMatchText(member.name) };
     await org.removeMember(near.organizationId, target.userId);

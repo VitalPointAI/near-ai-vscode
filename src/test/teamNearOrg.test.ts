@@ -454,6 +454,49 @@ test('a create-key whose answer is lost lists keys by its name and revokes the m
   });
 });
 
+// WR-02: the team workspace is shared with keys made in the NEAR console, and NEAR may add roles. One row this client cannot read must not stop
+// the cap step of a removal or a rotation, or the lookup of a key by name after a lost create answer.
+function withOddRows(): FetchLike {
+  return async (url, init) => {
+    const response = await (fetch as unknown as FetchLike)(url, init);
+    const route = new URL(url).pathname;
+    const odd: Record<string, unknown[]> = {
+      '/v1/workspaces/ws-1/api-keys': [
+        { id: 'console-eur', name: 'made in the console', workspace_id: 'ws-1', is_active: true, spend_limit: { amount: 5, scale: 0, currency: 'EUR' }, usage: null },
+        { id: 'console-odd', name: 'odd row', workspace_id: 'ws-1', is_active: 'yes' }
+      ],
+      '/v1/organizations': [{ id: 'org-new-role', name: 'New role org', role: 'billing-manager' }],
+      '/v1/organizations/org-1/members': [{ user: { id: 'user-new-role', email: 'odd@example.invalid' }, role: 'billing-manager' }]
+    };
+    const extra = init.method === 'GET' ? odd[route] : undefined;
+    if (extra === undefined || !response.ok) return response;
+    const body = await response.json() as Record<string, unknown>;
+    const field = Object.keys(body).find((key) => Array.isArray(body[key])) as string;
+    const rows = [...(body[field] as unknown[]), ...extra];
+    return new Response(JSON.stringify({ ...body, [field]: rows, total: rows.length }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+}
+
+test('WR-02: one unreadable row in a NEAR list never hides the key, organization or member that is wanted', async () => {
+  await withFake(async ({ fake, lead }) => {
+    const client = new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(lead.accessToken), sleep: async () => undefined, fetch: withOddRows() });
+    const created = await client.createKey('ws-1', 'team-member-key', 3 * GIGA);
+    assert.equal((await client.findKey('ws-1', created.key.id))?.spendLimitNanoUsd, 3 * GIGA, 'the wanted key is found next to rows that do not parse');
+    assert.equal(await client.findKey('ws-1', 'no-such-key'), undefined);
+    await assert.rejects(() => client.findKey('ws-1', 'console-odd'), NearOrgError, 'the wanted row itself is still read strictly');
+    await assert.rejects(() => client.listKeys('ws-1'), NearOrgError, 'listKeys, which needs every row, stays strict');
+
+    // A create whose answer is lost still finds and revokes its own key by name.
+    fake.fail({ method: 'POST', pathPrefix: '/v1/workspaces/ws-1/api-keys', status: 'drop', times: 1, afterEffect: true });
+    const error = await rejectsWith(client.createKey('ws-1', 'lost-answer', GIGA), 'network');
+    assert.match(error.message, /Revoked 1 key/);
+
+    assert.deepEqual((await client.listOrganizations()).map((org) => org.id), ['org-1'], 'an organization with a role this version does not know is left out');
+    const members = await client.listMembers('org-1');
+    assert.deepEqual(members.map((member) => [member.userId, member.role]), [['user-lead', 'owner'], ['user-new-role', 'unknown']], 'a member with an unknown role is kept, marked unknown');
+  });
+});
+
 test('no error, message or request log ever holds a bearer token, a refresh token or a key secret', async () => {
   await withFake(async ({ fake, client, lead }) => {
     const created = await client.createKey('ws-1', 'redact-key', GIGA);
@@ -509,8 +552,10 @@ test('the fake rotates refresh tokens and logout ends only the current session',
 test('answers that miss a required field are bad-response, not guesses', async () => {
   const answering = (body: unknown, status = 200): FetchLike => async () => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
   const make = (body: unknown, status?: number) => new NearOrgClient({ baseUrl: 'https://cloud-api.near.ai/v1', auth: staticAuth('fa-token'), fetch: answering(body, status), sleep: async () => undefined });
-  await rejectsWith(make({ organizations: [{ id: 'o', name: 'n' }], total: 1 }).listOrganizations(), 'bad-response');
-  await rejectsWith(make({ organizations: [{ id: 'o', name: 'n', role: 'emperor' }], total: 1 }).listOrganizations(), 'bad-response');
+  // WR-02: an organization without a role this version knows is left out (it could not be linked anyway), never guessed into one.
+  assert.deepEqual(await make({ organizations: [{ id: 'o', name: 'n' }], total: 1 }).listOrganizations(), []);
+  assert.deepEqual(await make({ organizations: [{ id: 'o', name: 'n', role: 'emperor' }], total: 1 }).listOrganizations(), []);
+  await rejectsWith(make({ organizations: [{ name: 'n', role: 'owner' }], total: 1 }).listOrganizations(), 'bad-response');
   await rejectsWith(make({ workspaces: 'nope', total: 1 }).listWorkspaces('o'), 'bad-response');
   await rejectsWith(make({ members: [{ role: 'member', user: {} }], total: 1 }).listMembers('o'), 'bad-response');
   await rejectsWith(make({ results: [] }).inviteByEmail('o', 'a@example.invalid', 'member'), 'bad-response');
