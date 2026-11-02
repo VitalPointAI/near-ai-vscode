@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.12
+
+An agent doing useful work could be stopped as if it were stuck, and the chat
+then blamed the turn limit. This release fixes the stuck-agent check and makes
+every stop honest and easy to continue.
+
+- **Productive runs are no longer stopped as loops.** The check compared shell
+  commands by their first two words, so an agent that starts every command
+  with `cd <folder> &&` looked like it was repeating one action: a run doing
+  `cd <folder> && npm test`, `cd <folder> && git status`, and so on was
+  stopped after 14 different commands. The check now compares the whole
+  command (ignoring a leading `cd <folder> &&` and variable settings), and an
+  action counts as repeated only when it also gave the same result as before.
+  If the output changed, it is progress, not a loop.
+- **A stuck agent gets a chance to recover.** An agent that really does repeat
+  the same action with the same result is first nudged, then warned that its
+  result has not changed and told to change approach (try a different
+  command, read the error, or finish and report). It is stopped only if it
+  still repeats after that.
+- **An honest stop, with Continue.** A stopped run now says why: "Stopped: the
+  agent kept repeating <action> with the same result.", or, when the turn
+  limit was really reached, "Stopped after reaching the turn limit (<N>
+  turns)." Both come with a **Continue** button that sends "Continue." for
+  you, so you no longer have to type it. Nothing continues until you click.
+  Agent Activity history shows such runs as "Stuck", and a sub-agent that is
+  stopped tells the agent that started it that it did not finish.
+
 ## 0.4.11
 
 Agent runs in code-server (VS Code in a browser) could stop or stall without

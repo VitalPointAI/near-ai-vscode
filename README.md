@@ -132,6 +132,15 @@ as a row in the chat.
   last saved step and tells the agent which steps had started but were never
   recorded, so it checks them instead of doing them twice. Nothing resumes
   until you click.
+- **Stuck agents are caught, productive ones are not.** An agent counts as
+  repeating itself only when it runs the same action and gets the same result
+  each time; a command run again after a change, or one whose output changed,
+  never counts. A repeating agent is first nudged, then warned that its result
+  has not changed and told to change approach, and stopped only if it keeps
+  going. When a run stops short, the chat says why ("Stopped: the agent kept
+  repeating ... with the same result." or "Stopped after reaching the turn
+  limit (60 turns).") with a **Continue** button that sends "Continue." for
+  you. Nothing continues until you click.
 - **New Chat**, **History**, **Tools**, and **Set Up** live in the view's title
   bar, just like other VS Code views.
 - **Tools** opens a directory of what the agents can use: every installed
@@ -458,7 +467,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / Qwen3.6-35B-A3B | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). By default only research, synthesis, and mapping roles use the fast tier; GSD's `budget` and `adaptive` model profiles also send checkers and the test-writing auditor there. |
 | `nearAi.agent.safetyModel` | the fast tier | With `auto`, the model that checks commands the rules cannot decide. Used only when it runs privately (TEE or local); otherwise those commands ask. |
 | `nearAi.agent.maxParallelAgents` | `4` | Sub-agents that may run at once. |
-| `nearAi.agent.maxTurns` | `60` | Model turns per run before it pauses for you. |
+| `nearAi.agent.maxTurns` | `60` | Model turns per run before it pauses for you; **Continue** in the chat carries on. |
 | `nearAi.agent.saveTranscripts` | `true` | Keep conversations on this machine so History can resume them. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
 | `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |
