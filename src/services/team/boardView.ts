@@ -7,10 +7,14 @@ import * as vscode from 'vscode';
 import { MOVE_KEYS, availableMoves, buildBoardModel, buildCardDetail, planMove } from '../../domain/team/board';
 import type { BoardModel, MoveKey } from '../../domain/team/board';
 import { REFUSALS, SOMEONE, flattenName, staleRefusal } from '../../domain/team/boardText';
-import { SecretLeakError } from '../../domain/team/secrets';
+import { decideTeamAction } from '../../domain/team/permissions';
+import { SecretLeakError, findSecrets } from '../../domain/team/secrets';
+import type { ItemChanges, ItemCreatedBody, TeamState } from '../../domain/team/types';
 import { REASON_MAX } from '../../domain/team/validate';
-import { BOARD_ITEM_ID_PATTERN, GSD_ITEM_ID_PATTERN } from '../../domain/team/work';
+import { BOARD_ITEM_ID_PATTERN, GSD_ITEM_ID_PATTERN, isOwnDraft, isScopePattern } from '../../domain/team/work';
 import { NoDeviceKeyError } from '../../team/eventLog';
+import type { EventIntent } from '../../team/eventLog';
+import { ulid } from '../../team/identity';
 import type { AppendResult } from '../../team/transport';
 import { IMPORT_PLANS_COMMAND, OPEN_BOARD_COMMAND } from './teamCommands';
 import type { TeamOutput, TeamSession } from './teamSession';
@@ -33,6 +37,25 @@ const PAUSED_TEXT = 'The board shows the last update and cannot be changed until
 const NOT_READY_TEXT = 'The Team Board is not ready yet. Nothing was moved.';
 const NOT_SAVED_TEXT = 'The change could not be saved. Nothing was moved.';
 const LOG_DECLINED_TEXT = 'The team log did not accept this change. Nothing was moved.';
+// The board form (D-14). Every sentence says what happened to the item and ends "Nothing was saved." The page validates with the same words first.
+const NOTHING_SAVED = 'Nothing was saved.';
+const FORM_TEXT = Object.freeze({
+  notSaved: `The item could not be saved. ${NOTHING_SAVED}`,
+  declined: `The team log did not accept this item. ${NOTHING_SAVED}`,
+  titleRequired: `Enter a title. ${NOTHING_SAVED}`,
+  titleLong: `The title must be 200 characters or fewer. ${NOTHING_SAVED}`,
+  descriptionLong: `The description must be 2000 characters or fewer. ${NOTHING_SAVED}`,
+  scope: `Use one pattern per line, relative to the project folder, for example src/services/**. ${NOTHING_SAVED}`,
+  estimate: `Enter a whole number of tokens, 1 or more. ${NOTHING_SAVED}`,
+  addDenied: `Only the owner, leads and developers can add items. ${NOTHING_SAVED}`,
+  editDenied: `Only the owner, leads and developers can edit items. ${NOTHING_SAVED}`,
+  editOwn: `You can edit only the items you added. ${NOTHING_SAVED}`,
+  imported: `Items from the project plans change only when the plan files change. ${NOTHING_SAVED}`,
+  missing: `This item is no longer on the board. ${NOTHING_SAVED}`,
+  settled: `A finished or cancelled item cannot get a new estimate. ${NOTHING_SAVED}`
+});
+// The refused reply for a new item has no card to name, so it carries this empty id.
+const NO_ITEM_ID = '';
 // Stands in for a reason while a move is planned only to learn whether it is allowed and which prompt follows (the real reason is asked afterwards).
 const PROBE_REASON = 'placeholder';
 const DONE_DETAIL = 'Use this when the work is finished and merged. The whole team will see it as done, and plans that wait for it can become ready. You can reopen it later.';
@@ -117,6 +140,77 @@ function parseChanges(value: unknown): Extract<BoardMessage, { type: 'edit-item'
     ...(title === undefined ? {} : { title: title as string }), ...(description === undefined ? {} : { description: description as string }),
     ...(scope === undefined ? {} : { scope: [...(scope as string[])] }), ...(estimate === undefined ? {} : { estimate: estimate as number })
   };
+}
+
+
+// ---- what the host makes of a draft ----------------------------------------------------------------------------------------------------------
+
+interface CleanFields { title?: string; description?: string; scope?: string[]; estimate?: number }
+
+// The text of one field the way it is stored: line breaks of any kind become line feeds and other control characters become spaces.
+function descriptionOf(raw: string): string {
+  return raw.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000B-\u001F\u007F\u2028\u2029]/g, ' ').trim();
+}
+
+/**
+ * The host re-validates what the page already checked (Pitfall 9): trims, drops blank file lines, applies the length caps, the file pattern rule and the
+ * whole-number estimate, and refuses anything the secret detector flags before an intent exists. Fields the caller did not send stay out of the result.
+ */
+function cleanFields(input: CleanFields): { ok: true; fields: CleanFields } | { ok: false; reason: string } {
+  if (findSecrets([input.title ?? '', input.description ?? '', ...(input.scope ?? [])]).length > 0) return { ok: false, reason: REFUSALS.secret };
+  const fields: CleanFields = {};
+  if (input.title !== undefined) {
+    const title = flattenName(input.title, Number.MAX_SAFE_INTEGER);
+    if (title === '') return { ok: false, reason: FORM_TEXT.titleRequired };
+    if (title.length > TITLE_MAX) return { ok: false, reason: FORM_TEXT.titleLong };
+    fields.title = title;
+  }
+  if (input.description !== undefined) {
+    const description = descriptionOf(input.description);
+    if (description.length > DESCRIPTION_MAX) return { ok: false, reason: FORM_TEXT.descriptionLong };
+    fields.description = description;
+  }
+  if (input.scope !== undefined) {
+    const scope = input.scope.map((line) => line.trim()).filter((line) => line !== '');
+    if (scope.length > SCOPE_LINES_MAX || !scope.every(isScopePattern)) return { ok: false, reason: FORM_TEXT.scope };
+    fields.scope = scope;
+  }
+  if (input.estimate !== undefined) {
+    if (!isEstimate(input.estimate)) return { ok: false, reason: FORM_TEXT.estimate };
+    fields.estimate = input.estimate;
+  }
+  if (findSecrets([fields.title ?? '', fields.description ?? '', ...(fields.scope ?? [])]).length > 0) return { ok: false, reason: REFUSALS.secret };
+  return { ok: true, fields };
+}
+
+function isBadEstimate(value: unknown): boolean {
+  return typeof value === 'number' && !isEstimate(value);
+}
+
+function without(value: Plain, key: string): Plain {
+  const rest: Plain = {};
+  for (const own of Object.keys(value)) if (own !== key) rest[own] = value[own];
+  return rest;
+}
+
+/**
+ * A draft or an edit that the parser dropped only because its estimate is not a whole number of tokens from 1 up. The page validates this itself, so it
+ * is a form that was not filled in properly rather than a hostile message, and the person gets the form's own sentence. Everything else the parser
+ * drops stays unanswered. Returns the id the refusal is about ('' for a new item).
+ */
+function estimateRefusalTarget(raw: unknown): string | undefined {
+  if (!isPlain(raw)) return undefined;
+  if (raw.type === 'new-item') {
+    const draft = onlyKeys(raw, ['type', 'draft']) && isPlain(raw.draft) ? raw.draft : undefined;
+    return draft !== undefined && isBadEstimate(draft.estimate) && parseDraft(without(draft, 'estimate')) !== undefined ? NO_ITEM_ID : undefined;
+  }
+  if (raw.type === 'edit-item') {
+    const changes = onlyKeys(raw, ['type', 'itemId', 'changes']) && isItemId(raw.itemId) && isPlain(raw.changes) ? raw.changes : undefined;
+    if (changes === undefined || !isBadEstimate(changes.estimate)) return undefined;
+    const rest = without(changes, 'estimate');
+    return Object.keys(rest).length === 0 || parseChanges(rest) !== undefined ? raw.itemId as string : undefined;
+  }
+  return undefined;
 }
 
 const BARE_TYPES = ['ready', 'import-plans', 'open-board', 'retry', 'show-details'] as const;
@@ -343,7 +437,11 @@ export class BoardController {
   private async received(state: SurfaceState, raw: unknown): Promise<void> {
     boardTap.fromView?.(raw);
     const message = parseBoardMessage(raw);
-    if (message === undefined) return;
+    if (message === undefined) {
+      const target = estimateRefusalTarget(raw);
+      if (target !== undefined) this.refuse(state, target, FORM_TEXT.estimate);
+      return;
+    }
     try {
       await this.handle(state, message);
     } catch (error) {
@@ -383,8 +481,11 @@ export class BoardController {
       case 'show-details':
         this.deps.output.show(true);
         return;
-      default:
-        // new-item and edit-item are parsed here and handled by the form plan.
+      case 'new-item':
+        await this.newItem(state, message.draft);
+        return;
+      case 'edit-item':
+        await this.editItem(state, message.itemId, message.changes);
         return;
     }
   }
@@ -428,19 +529,19 @@ export class BoardController {
   }
 
   // The words for an append that did not land (the log refused it, the remote could not be reached, or the write threw).
-  private failureText(target: MoveKey, result: Extract<AppendResult, { ok: false }>): string {
-    this.deps.output.appendLine(`Team Board: the ${target} move was not saved (${result.kind}): ${safeReason(result.reason)}`);
+  private failureText(what: string, result: Extract<AppendResult, { ok: false }>, words: { nothing: string; declined: string; notSaved: string } = { nothing: 'Nothing was moved.', declined: LOG_DECLINED_TEXT, notSaved: NOT_SAVED_TEXT }): string {
+    this.deps.output.appendLine(`Team Board: ${what} was not saved (${result.kind}): ${safeReason(result.reason)}`);
     switch (result.kind) {
       case 'offline':
       case 'paused':
         return REFUSALS.offline;
       case 'busy':
-        return `${result.reason} Nothing was moved.`;
+        return `${result.reason} ${words.nothing}`;
       case 'refused':
       case 'conflict':
-        return LOG_DECLINED_TEXT;
+        return words.declined;
       default:
-        return NOT_SAVED_TEXT;
+        return words.notSaved;
     }
   }
 
@@ -502,7 +603,7 @@ export class BoardController {
         this.catchUp(state);
         return;
       }
-      this.refuse(state, itemId, this.failureText(target, result), target);
+      this.refuse(state, itemId, this.failureText(`the ${target} move`, result), target);
     } catch (error) {
       if (error instanceof SecretLeakError) this.refuse(state, itemId, REFUSALS.secret, target);
       else if (error instanceof NoDeviceKeyError) this.refuse(state, itemId, REFUSALS.noDeviceKey, target);
@@ -511,6 +612,132 @@ export class BoardController {
         this.refuse(state, itemId, NOT_SAVED_TEXT, target);
       }
     }
+  }
+
+  // ---- items made and edited on the board (D-14) --------------------------------------------------------------------------------------------
+
+  // Why this window cannot write at all, in the board's own words, or undefined when it can.
+  private writeBlock(session: TeamSession): string | undefined {
+    if (session.canWrite()) return undefined;
+    return this.model(session).viewer.readOnlyReason ?? FORM_TEXT.notSaved;
+  }
+
+  private static readonly FORM_WORDS = { nothing: NOTHING_SAVED, declined: FORM_TEXT.declined, notSaved: FORM_TEXT.notSaved };
+
+  // The write of an item event batch. `plan` runs on the freshest state inside the append: a string is a plain refusal, an array is the batch to write.
+  // The refusal is addressed to `askedAbout` (the item being edited, or '' for an item that does not exist yet) and success to `savedId`.
+  private async writeItem(
+    state: SurfaceState, session: TeamSession, ids: { savedId: string; askedAbout: string }, what: string, plan: (fresh: TeamState) => string | EventIntent[]
+  ): Promise<void> {
+    let builderRefusal: string | undefined;
+    try {
+      const result = await session.currentLog().append((fresh) => {
+        const planned = plan(fresh);
+        if (typeof planned !== 'string') return planned;
+        builderRefusal = planned;
+        return { conflict: planned };
+      });
+      if (result.ok) {
+        this.post(state, { type: 'saved', itemId: ids.savedId });
+        this.catchUp(state);
+        return;
+      }
+      if (builderRefusal !== undefined && result.reason === builderRefusal) {
+        this.refuse(state, ids.askedAbout, builderRefusal);
+        this.catchUp(state);
+        return;
+      }
+      this.refuse(state, ids.askedAbout, this.failureText(what, result, BoardController.FORM_WORDS));
+    } catch (error) {
+      if (error instanceof SecretLeakError) this.refuse(state, ids.askedAbout, REFUSALS.secret);
+      else if (error instanceof NoDeviceKeyError) this.refuse(state, ids.askedAbout, REFUSALS.noDeviceKey);
+      else {
+        this.deps.output.appendLine(`Team Board: ${what} failed: ${describe(error)}`);
+        this.refuse(state, ids.askedAbout, FORM_TEXT.notSaved);
+      }
+    }
+  }
+
+  private async newItem(state: SurfaceState, draft: Extract<BoardMessage, { type: 'new-item' }>['draft']): Promise<void> {
+    const session = this.deps.session();
+    if (session === undefined) {
+      this.refuse(state, NO_ITEM_ID, NOT_READY_TEXT);
+      return;
+    }
+    const blocked = this.writeBlock(session);
+    if (blocked !== undefined) {
+      this.refuse(state, NO_ITEM_ID, blocked);
+      return;
+    }
+    const cleaned = cleanFields({ title: draft.title, scope: draft.scope, ...(draft.description === undefined ? {} : { description: draft.description }), ...(draft.estimate === undefined ? {} : { estimate: draft.estimate }) });
+    if (!cleaned.ok) {
+      this.refuse(state, NO_ITEM_ID, cleaned.reason);
+      return;
+    }
+    const { fields } = cleaned;
+    const viewerId = session.memberId();
+    if (viewerId === undefined) {
+      this.refuse(state, NO_ITEM_ID, REFUSALS.noDeviceKey);
+      return;
+    }
+    // One item.created carries everything, the estimate included: a same-batch create then estimate by a developer would be judged on the state before the batch.
+    const id = `item:${ulid()}`;
+    const body: ItemCreatedBody = {
+      id, kind: draft.kind, title: fields.title as string, scope: fields.scope ?? [], requirements: [], mustHaves: [],
+      ...(fields.description === undefined || fields.description === '' ? {} : { description: fields.description }),
+      ...(fields.estimate === undefined ? {} : { estimate: { tokens: fields.estimate } })
+    };
+    await this.writeItem(state, session, { savedId: id, askedAbout: NO_ITEM_ID }, 'a new item', (fresh) => (
+      decideTeamAction(fresh, viewerId, { kind: 'item.create', ownDraft: true }).allowed ? [{ type: 'item.created', body }] : FORM_TEXT.addDenied
+    ));
+  }
+
+  // Why this person may not edit this item, or undefined when they may. Imported items change only with the plan files (D-06).
+  private editProblem(fresh: TeamState, viewerId: string, itemId: string, estimating: boolean): string | undefined {
+    const item = fresh.items.get(itemId);
+    if (item === undefined) return FORM_TEXT.missing;
+    if (item.origin !== 'board') return FORM_TEXT.imported;
+    const ownDraft = isOwnDraft(fresh, itemId, viewerId);
+    const allowed = decideTeamAction(fresh, viewerId, { kind: 'item.edit', ownDraft }).allowed
+      && (!estimating || decideTeamAction(fresh, viewerId, { kind: 'item.estimate', ownDraft }).allowed);
+    if (!allowed) return fresh.members.get(viewerId)?.role === 'developer' ? FORM_TEXT.editOwn : FORM_TEXT.editDenied;
+    return estimating && (item.state === 'done' || item.state === 'cancelled') ? FORM_TEXT.settled : undefined;
+  }
+
+  private async editItem(state: SurfaceState, itemId: string, changes: Extract<BoardMessage, { type: 'edit-item' }>['changes']): Promise<void> {
+    const session = this.deps.session();
+    if (session === undefined) {
+      this.refuse(state, itemId, NOT_READY_TEXT);
+      return;
+    }
+    const blocked = this.writeBlock(session);
+    if (blocked !== undefined) {
+      this.refuse(state, itemId, blocked);
+      return;
+    }
+    const cleaned = cleanFields(changes);
+    if (!cleaned.ok) {
+      this.refuse(state, itemId, cleaned.reason);
+      return;
+    }
+    const { fields } = cleaned;
+    const viewerId = session.memberId();
+    if (viewerId === undefined) {
+      this.refuse(state, itemId, REFUSALS.noDeviceKey);
+      return;
+    }
+    const content: ItemChanges = {
+      ...(fields.title === undefined ? {} : { title: fields.title }), ...(fields.description === undefined ? {} : { description: fields.description }),
+      ...(fields.scope === undefined ? {} : { scope: fields.scope })
+    };
+    await this.writeItem(state, session, { savedId: itemId, askedAbout: itemId }, 'an item change', (fresh) => {
+      const problem = this.editProblem(fresh, viewerId, itemId, fields.estimate !== undefined);
+      if (problem !== undefined) return problem;
+      const intents: EventIntent[] = [];
+      if (Object.keys(content).length > 0) intents.push({ type: 'item.updated', body: { id: itemId, changes: content } });
+      if (fields.estimate !== undefined) intents.push({ type: 'item.estimated', body: { id: itemId, estimate: { tokens: fields.estimate } } });
+      return intents;
+    });
   }
 
   // After a stale answer the page must show the latest, not wait for the throttle.
