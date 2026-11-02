@@ -295,5 +295,22 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 
-Report security issues through the repository's issue tracker with redacted
-logs. Never include API keys, raw prompts, or private file contents.
+## How changes reach a release
+
+Every change reaches `main` through a pull request. Before it can merge, CI type checks it,
+runs the unit tests and the end-to-end tests in a real VS Code, packages and inspects the VSIX,
+runs `npm audit` on runtime dependencies, and scans the files and every commit for secrets. A
+security and code review must also pass. Releases are built from a tagged commit on `main` by
+GitHub Actions, attached to a GitHub release with a SHA-256 checksum, and published to the
+Marketplace only after the owner approves that run. Every GitHub Action is pinned to a full
+commit hash. The process is described in
+[docs/development-workflow.md](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs/development-workflow.md).
+
+## Reporting a vulnerability
+
+Report vulnerabilities privately through GitHub: on the repository's **Security** tab, choose
+**Report a vulnerability**
+([direct link](https://github.com/VitalPointAI/near-ai-vscode/security/advisories/new)). Please
+do not open a public issue for a vulnerability. Other security issues can go to the
+[issue tracker](https://github.com/VitalPointAI/near-ai-vscode/issues) with redacted logs.
+Never include API keys, raw prompts, or private file contents.

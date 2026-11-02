@@ -16,3 +16,7 @@ sbom.cdx.json
 # Live model-eval results (NEAR_LIVE_EVAL_OUT)
 eval-*.json
 .planning/research/.cache/
+
+# Agent worktrees and local Claude Code settings
+.claude/worktrees/
+.claude/settings.local.json
