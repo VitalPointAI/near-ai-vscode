@@ -21,9 +21,10 @@ import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
 import { createDeviceIdentity, createSealIdentity, emailHash, newMemberId, newTeamId } from '../team/identity';
 import type { DeviceIdentity, SealIdentity } from '../team/identity';
 import { deriveInviteKey, generateInviteCode } from '../team/inviteCode';
-import { confirmMember, installDeliveredKey, teamKeyName } from '../team/keyDelivery';
+import { confirmMember, deliverMemberKey, installDeliveredKey, teamKeyName } from '../team/keyDelivery';
 import { NearOrgClient } from '../team/nearOrg';
-import type { NearAuth } from '../team/nearOrg';
+import type { CreatedNearKey, NearAuth, NearOrgClientOptions } from '../team/nearOrg';
+import { NearSessionError } from '../team/nearSession';
 import { canonicalTeamFile, teamStorageDir } from '../team/teamFile';
 import { readInstalledKey, teamProfileId } from '../team/teamKeyProfile';
 import { startFakeNear } from './helpers/fakeNear';
@@ -66,6 +67,7 @@ interface World {
   anchor: GenesisAnchor;
   a: Client;
   org: NearOrgClient;
+  auth: NearAuth;
   checklist: CleanupChecklist;
   memberId: string;
   first: Device;
@@ -133,7 +135,7 @@ async function startWorld(fixture: TeamFixture, options: WorldOptions = {}): Pro
   }
   return {
     fixture, fake, teamId, teamFile, anchor: genesis.anchor, a,
-    org: new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(lead.accessToken), sleep: noSleep }),
+    org: new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(lead.accessToken), sleep: noSleep }), auth: staticAuth(lead.accessToken),
     checklist: new CleanupChecklist(path.join(fixture.root, 'cleanup-a')), memberId, first, codeBytes: code.bytes, ownerMemberId: owner.memberId
   };
 }
@@ -298,5 +300,222 @@ test('an event the log does not have is not found', async () => {
     const first = (await world.a.transport.readAll()).map((entry) => parseEventFile(entry)).find((parsed) => parsed.ok);
     assert.ok(first !== undefined && first.ok);
     if (first !== undefined && first.ok) assert.equal((await world.a.log.findEvent(first.event.id))?.type, first.event.type);
+  });
+});
+
+// ---- failure paths (Task 2) -------------------------------------------------------------------------------------------------------------
+
+// A client that runs a step of the test right after a key was made, to stand in for another lead acting between two steps of one delivery.
+class InterruptedOrg extends NearOrgClient {
+  public lastKeyId: string | undefined;
+  private readonly afterCreate: () => Promise<void>;
+
+  public constructor(options: NearOrgClientOptions, afterCreate: () => Promise<void>) {
+    super(options);
+    this.afterCreate = afterCreate;
+  }
+
+  public override async createKey(workspaceId: string, name: string, spendLimitNanoUsd: number): Promise<CreatedNearKey> {
+    const created = await super.createKey(workspaceId, name, spendLimitNanoUsd);
+    this.lastKeyId = created.key.id;
+    await this.afterCreate();
+    return created;
+  }
+}
+
+function interruptedOrg(world: World, afterCreate: () => Promise<void>): InterruptedOrg {
+  return new InterruptedOrg({ baseUrl: world.fake.baseUrl, auth: world.auth, sleep: noSleep }, afterCreate);
+}
+
+const removeMember = (world: World) => async (): Promise<void> => {
+  const removed = await world.a.log.append(() => [{ type: 'member.removed', body: { memberId: world.memberId } }]);
+  assert.equal(removed.ok, true, removed.ok ? '' : removed.reason);
+};
+
+test('confirming without a NEAR sign-in changes the role, queues the key and leaves a pending item that says to sign in', async () => {
+  await inWorld(['a', 'b'], {}, async (world) => {
+    const result = await confirmMember({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, checklist: world.checklist });
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(result.roleChanged, true);
+    assert.equal(result.key, 'queued');
+    assert.deepEqual((await eventTypes(world.a)).slice(-1), ['member.role-changed']);
+    assert.equal(world.fake.requests.some((request) => request.path.includes('/api-keys')), false, 'NEAR was not asked for anything');
+    const items = await world.checklist.list();
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.step, 'deliver-key');
+    assert.equal(items[0]?.status, 'pending');
+    assert.equal(items[0]?.memberName, 'Dana Developer');
+    assert.equal(items[0]?.memberId, world.memberId);
+    assert.match(items[0]?.lastError ?? '', /Sign in to NEAR to send Dana Developer's key/);
+    assert.deepEqual(memberAttention(world.a.log.state(), true), [{ memberId: world.memberId, kind: 'deliver-key' }]);
+
+    // Signing in later and retrying sends the key and settles the same item.
+    const sent = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(sent.ok, true, sent.ok ? '' : sent.message);
+    const after = await world.checklist.list();
+    assert.equal(after.length, 1, 'the open item is reused, not duplicated');
+    assert.equal(after[0]?.id, items[0]?.id);
+    assert.equal(after[0]?.status, 'done');
+    assert.equal(after[0]?.lastError, undefined);
+  });
+});
+
+test('a lead whose NEAR sign-in is gone gets signed-out and a pending item, with nothing made at NEAR', async () => {
+  await inWorld(['a', 'b'], {}, async (world) => {
+    const signedOut = new NearOrgClient({
+      baseUrl: world.fake.baseUrl, sleep: noSleep,
+      auth: { accessToken: async () => { throw new NearSessionError('signed-out', 'You are not signed in to NEAR AI for this team. Sign in first.'); }, refreshAfterUnauthorized: async () => undefined }
+    });
+    const result = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: signedOut, checklist: world.checklist });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, 'signed-out');
+    const items = await world.checklist.list();
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.status, 'pending');
+    assert.match(items[0]?.lastError ?? '', /Sign in to NEAR to send Dana Developer's key/);
+    assert.equal(world.fake.requests.filter((request) => request.path.includes('/api-keys')).length, 0);
+  });
+});
+
+test('a NEAR error while making the key leaves the confirmation done, the key queued and a failed item with the error', async () => {
+  await inWorld(['a', 'b'], {}, async (world) => {
+    world.fake.fail({ method: 'POST', pathPrefix: '/v1/workspaces/ws-1/api-keys', status: 500, times: 1 });
+    const result = await confirmMember({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(result.roleChanged, true);
+    assert.equal(result.key, 'queued');
+    const types = await eventTypes(world.a);
+    assert.equal(types.includes('member.role-changed'), true);
+    assert.equal(types.includes('member.key-sealed'), false);
+    assert.equal(memberOf(world).role, 'developer');
+    const items = await world.checklist.list();
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.step, 'deliver-key');
+    assert.equal(items[0]?.status, 'failed');
+    assert.equal(items[0]?.attempts, 1);
+    assert.match(items[0]?.lastError ?? '', /500/);
+    assert.equal((await world.org.listKeys('ws-1')).length, 0, 'no key was left in the workspace');
+
+    // The retry works once the fault clears, settles the same item, and a second failure before that would have counted as another attempt.
+    const retried = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(retried.ok, true, retried.ok ? '' : retried.message);
+    const after = await world.checklist.list();
+    assert.equal(after.length, 1);
+    assert.equal(after[0]?.id, items[0]?.id);
+    assert.equal(after[0]?.status, 'done');
+    assert.equal(after[0]?.lastError, undefined);
+  });
+});
+
+test('a failed retry counts as another attempt on the same item', async () => {
+  await inWorld(['a', 'b'], {}, async (world) => {
+    world.fake.fail({ method: 'POST', pathPrefix: '/v1/workspaces/ws-1/api-keys', status: 500, times: 2 });
+    const input = { log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist };
+    assert.equal((await deliverMemberKey(input)).ok, false);
+    assert.equal((await deliverMemberKey(input)).ok, false);
+    const items = await world.checklist.list();
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.attempts, 2);
+    assert.equal(items[0]?.status, 'failed');
+  });
+});
+
+test('a key whose log write is refused because the member was removed meanwhile is zeroed then revoked, and a Retry item is left', async () => {
+  await inWorld(['a', 'b'], {}, async (world) => {
+    const org = interruptedOrg(world, removeMember(world));
+    const result = await confirmMember({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org, checklist: world.checklist });
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(result.roleChanged, true, 'the confirmation stands');
+    assert.equal(result.key, 'queued');
+    assert.match(result.message, /removed/);
+    const keyId = org.lastKeyId;
+    assert.ok(keyId !== undefined, 'a key was made');
+    const stored = world.fake.key(keyId);
+    assert.equal(stored?.revoked, true);
+    assert.equal(stored?.spendLimitNanoUsd, 0);
+    // The limit was set to 0 before the revoke, so a half-finished clean-up never leaves a spendable key.
+    const order = world.fake.requests.filter((request) => request.path.includes(`/api-keys/${keyId}`)).map((request) => request.method);
+    assert.deepEqual(order, ['PATCH', 'DELETE']);
+    assert.equal(memberOf(world).nearApiKeyId, undefined, 'the log holds no key for the member');
+    const items = await world.checklist.list();
+    assert.deepEqual(items.map((item) => [item.step, item.status]), [['deliver-key', 'failed']]);
+    assert.match(items[0]?.lastError ?? '', /removed/);
+  });
+});
+
+test('a key that cannot be zeroed or revoked after a refused write is put on the list for both steps', async () => {
+  await inWorld(['a', 'b'], {}, async (world) => {
+    world.fake.fail({ method: 'PATCH', pathPrefix: '/v1/workspaces/ws-1/api-keys', status: 500, times: 20 });
+    world.fake.fail({ method: 'DELETE', pathPrefix: '/v1/workspaces/ws-1/api-keys', status: 500, times: 20 });
+    const org = interruptedOrg(world, removeMember(world));
+    const result = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org, checklist: world.checklist });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, 'log');
+    const keyId = org.lastKeyId;
+    assert.ok(keyId !== undefined);
+    const items = await world.checklist.list();
+    const byStep = new Map(items.map((item) => [item.step, item]));
+    assert.equal(byStep.get('deliver-key')?.status, 'failed');
+    assert.equal(byStep.get('zero-limit')?.status, 'failed');
+    assert.equal(byStep.get('zero-limit')?.keyId, keyId);
+    assert.equal(byStep.get('revoke-key')?.status, 'failed');
+    assert.equal(byStep.get('revoke-key')?.keyId, keyId);
+    assert.equal(items.length, 3);
+    assert.equal(world.fake.key(keyId)?.revoked, false, 'the fake still has it, which is why the items exist');
+  });
+});
+
+test('a member who joined with their final role gets a key through deliverMemberKey at their allocation', async () => {
+  await inWorld(['a', 'b'], { role: 'observer', allocation: 2 * GIGA }, async (world) => {
+    assert.equal(memberOf(world).pendingRole, undefined);
+    assert.equal(memberOf(world).role, 'observer');
+    assert.deepEqual(memberAttention(world.a.log.state(), true), [{ memberId: world.memberId, kind: 'deliver-key' }]);
+    const result = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(world.fake.key(result.keyId)?.spendLimitNanoUsd, 2 * GIGA);
+    assert.equal(memberOf(world).nearApiKeyId, result.keyId);
+    assert.deepEqual((await eventTypes(world.a)).slice(-1), ['member.key-sealed']);
+
+    // A second delivery is refused: the key already sent is not replaced by a second one.
+    const again = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(again.ok, false);
+    assert.equal(world.fake.requests.filter((request) => request.method === 'POST' && request.path.endsWith('/api-keys')).length, 1);
+
+    await world.first.client.log.sync();
+    assert.deepEqual(await installDeliveredKey(installFor(world, world.first)), { status: 'installed', keyId: result.keyId });
+  });
+});
+
+test('confirmMember sends the key alone for a member who needs no role change', async () => {
+  await inWorld(['a', 'b'], { role: 'observer' }, async (world) => {
+    const result = await confirmMember({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(result.roleChanged, false);
+    assert.equal(result.key, 'delivered');
+    assert.equal(memberOf(world).nearApiKeyId !== undefined, true);
+    assert.equal((await eventTypes(world.a)).includes('member.role-changed'), false);
+  });
+});
+
+test('the owner never gets a key through the log and a member who has not joined has no device', async () => {
+  await inWorld(['a', 'b'], {}, async (world) => {
+    const owner = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.ownerMemberId, org: world.org, checklist: world.checklist });
+    assert.equal(owner.ok, false);
+    if (!owner.ok) {
+      assert.equal(owner.code, 'log');
+      assert.match(owner.message, /owner/i);
+    }
+    assert.equal(world.fake.requests.some((request) => request.path.includes('/api-keys')), false);
+  });
+  await inWorld(['a', 'b'], { join: false }, async (world) => {
+    const invited = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(invited.ok, false);
+    if (!invited.ok) assert.equal(invited.code, 'no-device');
+    assert.equal(world.fake.requests.some((request) => request.path.includes('/api-keys')), false);
   });
 });
