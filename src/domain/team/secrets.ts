@@ -6,6 +6,7 @@ import { redactSecrets } from '../redaction';
 
 // A token must not continue an identifier or a longer word, so it is preceded by anything except a letter or digit.
 const PKCS8_ED25519 = /MC4CAQAwBQYDK2VwBCIEI[A-Za-z0-9+/_-]*/;
+const PKCS8_X25519 = /MC4CAQAwBQYDK2VuBCIEI[A-Za-z0-9+/_-]*/;
 const PEM_PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 
 export const SECRET_PATTERNS: readonly RegExp[] = Object.freeze([
@@ -18,13 +19,20 @@ export const SECRET_PATTERNS: readonly RegExp[] = Object.freeze([
   /(?<![A-Za-z0-9])bearer\s+[^\s,;]+/i,
   /(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/,
   PEM_PRIVATE_KEY,
-  PKCS8_ED25519
+  PKCS8_ED25519,
+  PKCS8_X25519
 ]);
 
 // Generated key material is random base64url, so a token pattern can match it by chance. Values of exactly these
 // shapes under these keys skip the token patterns but are still checked for private key material.
 const PUBLIC_KEY_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 const SIGNATURE_SHAPE = /^[A-Za-z0-9_-]{86}$/;
+// Sealed key fields (D-23): a 12 byte nonce, a 16 byte tag and a ciphertext of 16 to 525 bytes, all base64url. A ciphertext that
+// starts like a token is never exempt, so a clear key written there is still caught.
+const NONCE_SHAPE = /^[A-Za-z0-9_-]{16}$/;
+const TAG_SHAPE = /^[A-Za-z0-9_-]{22}$/;
+const CIPHERTEXT_SHAPE = /^[A-Za-z0-9_-]{22,700}$/;
+const TOKEN_LIKE_START = /^(?:sk-|sk_|rpt-|rt_|adm_|oc_|eyJ)/;
 const MAX_DEPTH = 64;
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
@@ -46,11 +54,15 @@ function looksSecret(text: string): boolean {
 }
 
 function isPrivateKeyMaterial(text: string): boolean {
-  return PKCS8_ED25519.test(text) || PEM_PRIVATE_KEY.test(text);
+  return PKCS8_ED25519.test(text) || PKCS8_X25519.test(text) || PEM_PRIVATE_KEY.test(text);
 }
 
 function isExemptKeyMaterial(key: string | undefined, text: string): boolean {
-  return (key === 'publicKey' && PUBLIC_KEY_SHAPE.test(text)) || (key === 'sig' && SIGNATURE_SHAPE.test(text));
+  return (key === 'publicKey' && PUBLIC_KEY_SHAPE.test(text))
+    || (key === 'sig' && SIGNATURE_SHAPE.test(text))
+    || (key === 'nonce' && NONCE_SHAPE.test(text))
+    || (key === 'tag' && TAG_SHAPE.test(text))
+    || (key === 'ciphertext' && CIPHERTEXT_SHAPE.test(text) && !TOKEN_LIKE_START.test(text));
 }
 
 function stringIsFinding(key: string | undefined, text: string): boolean {

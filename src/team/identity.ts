@@ -3,6 +3,8 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign as edSign } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import type { SecretStorageLike } from '../services/auth';
+import { openSealed } from './keySeal';
+import type { SealContext, SealedEntry } from './keySeal';
 import { MAX_EVENT_BYTES, canonicalBytes, fingerprintOf, signingInput } from '../domain/team/canonical';
 import type { TeamEvent, TeamEventType, UnsignedTeamEvent } from '../domain/team/types';
 
@@ -59,8 +61,52 @@ export async function loadDeviceIdentity(secrets: SecretStorageLike, teamId: str
   return identityFrom(teamId, privateKey);
 }
 
+export const SEAL_KEY_SECRET_PREFIX = 'nearAi.team.sealKey.';
+
+export function sealKeySecretName(teamId: string): string {
+  return `${SEAL_KEY_SECRET_PREFIX}${teamId}`;
+}
+
+// The X25519 half of a device's identity (D-23). Its private key sits next to the device key in SecretStorage and is used only to open a delivery.
+export interface SealIdentity {
+  readonly teamId: string;
+  readonly publicKey: string;
+  open(entry: SealedEntry, context: SealContext): Buffer | undefined;
+}
+
+function sealIdentityFrom(teamId: string, privateKey: KeyObject): SealIdentity {
+  const publicKey = publicKeyRawOf(privateKey).toString('base64url');
+  return {
+    teamId,
+    publicKey,
+    open: (entry: SealedEntry, context: SealContext): Buffer | undefined => openSealed(entry, privateKey, publicKey, context)
+  };
+}
+
+export async function createSealIdentity(secrets: SecretStorageLike, teamId: string): Promise<SealIdentity> {
+  const name = sealKeySecretName(teamId);
+  if (await secrets.get(name)) throw new Error('This device already has a seal key for this team. Remove the old key before creating a new one.');
+  const { privateKey } = generateKeyPairSync('x25519');
+  await secrets.store(name, privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'));
+  return sealIdentityFrom(teamId, privateKey);
+}
+
+export async function loadSealIdentity(secrets: SecretStorageLike, teamId: string): Promise<SealIdentity | undefined> {
+  const stored = await secrets.get(sealKeySecretName(teamId));
+  if (!stored) return undefined;
+  let privateKey: KeyObject;
+  try {
+    privateKey = createPrivateKey({ key: Buffer.from(stored, 'base64'), format: 'der', type: 'pkcs8' });
+  } catch (error) {
+    throw new Error('The stored team seal key could not be read.', { cause: error });
+  }
+  if (privateKey.asymmetricKeyType !== 'x25519') throw new Error('The stored team seal key is not an X25519 key.');
+  return sealIdentityFrom(teamId, privateKey);
+}
+
 export async function forgetDeviceIdentity(secrets: SecretStorageLike, teamId: string): Promise<void> {
   await secrets.delete(deviceKeySecretName(teamId));
+  await secrets.delete(sealKeySecretName(teamId));
 }
 
 export function signEvent<T extends TeamEventType>(identity: DeviceIdentity, unsigned: UnsignedTeamEvent<T>): TeamEvent<T> {
