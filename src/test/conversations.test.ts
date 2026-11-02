@@ -174,10 +174,11 @@ class Memento {
 }
 
 const warnings: string[] = [];
+const windowListeners: Array<(state: { focused: boolean }) => void> = [];
 let confirmClose: string | undefined;
 const vscodeStub = {
   workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
-  window: { showInformationMessage: () => undefined, showWarningMessage: async (text: string) => { warnings.push(text); return /Stop it and close/.test(text) ? confirmClose : undefined; }, activeTextEditor: undefined },
+  window: { showInformationMessage: () => undefined, showWarningMessage: async (text: string) => { warnings.push(text); return /Stop it and close/.test(text) ? confirmClose : undefined; }, activeTextEditor: undefined, state: { focused: true }, onDidChangeWindowState: (listener: (state: { focused: boolean }) => void) => { windowListeners.push(listener); return { dispose() {} }; } },
   commands: { executeCommand: async () => undefined },
   Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }
 };
@@ -611,7 +612,7 @@ test('sidebar: a conversation stopped or closed while its turn is still being pr
   }
 });
 
-// --- 0.4.11: a run cut off by code-server or a reload is reported and can be resumed. ---
+// --- 0.4.11: a run cut off by code-server or a reload is reported and can be resumed; waiting prompts are noticed. ---
 
 /** The marker a run left in the extension's storage, rewritten as if its extension host had died. */
 function killHost(root: string, conversationId: string, steps?: string[]): Record<string, unknown> {
@@ -702,5 +703,44 @@ test('sidebar: Dismiss settles a cut-off run without running anything; a cut-off
     await sidebar.send({ type: 'switch-conversation', id: cut });
     assert.equal(since(sidebar.posted, again).some((message) => message.type === 'run-interrupted'), false);
     assert.deepEqual((await new RunMarkers(path.join(root, '.global'), root).interrupted()).map((marker) => marker.conversationId), [lost]);
+  });
+});
+
+test('sidebar: a waiting approval is announced when the window is not focused, and on focus for one that was not, once per prompt', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  const near = fakeNear((messages) => messages.some((message) => message.role === 'tool') ? { content: 'done' } : editCall);
+  await withNear(near, async () => {
+    const sidebar = await openSidebar(root, auth, shared);
+    const a = sidebar.summary()!.activeId;
+    const announced = () => warnings.filter((text) => /is waiting for your approval/.test(text)).length;
+    const start = announced();
+    // The browser tab is in the background: the chat counts as visible, but the window has no focus.
+    vscodeStub.window.state.focused = false;
+    const runA = sidebar.send({ type: 'send', text: 'edit while away', model: MODEL, conversationId: a });
+    await until(() => sidebar.item(a)?.status === 'waiting');
+    assert.equal(announced(), start + 1);
+    // Back in the window: that prompt was already announced.
+    vscodeStub.window.state.focused = true;
+    for (const listener of windowListeners) listener({ focused: true });
+    assert.equal(announced(), start + 1, 'never twice for the same prompt');
+
+    // A prompt that opens while the user is looking is not announced, until the window loses and regains focus.
+    await sidebar.send({ type: 'new-chat' });
+    const b = sidebar.summary()!.activeId;
+    const runB = sidebar.send({ type: 'send', text: 'edit while here', model: MODEL, conversationId: b });
+    await until(() => sidebar.item(b)?.status === 'waiting');
+    assert.equal(announced(), start + 1);
+    for (const listener of windowListeners) listener({ focused: false });
+    assert.equal(announced(), start + 1, 'losing focus announces nothing');
+    for (const listener of windowListeners) listener({ focused: true });
+    assert.equal(announced(), start + 2);
+    assert.match(warnings.at(-1)!, /"edit while here" is waiting for your approval/);
+    for (const listener of windowListeners) listener({ focused: true });
+    assert.equal(announced(), start + 2, 'once per prompt');
+    assert.deepEqual(sidebar.view.badge, { value: 2, tooltip: 'NEAR AI is waiting for you in 2 conversations' }, 'the badge stays');
+
+    await sidebar.send({ type: 'approval-reply', callId: 'call_edit', decision: 'deny', conversationId: a });
+    await sidebar.send({ type: 'approval-reply', callId: 'call_edit', decision: 'deny', conversationId: b });
+    await Promise.all([runA, runB]);
   });
 });

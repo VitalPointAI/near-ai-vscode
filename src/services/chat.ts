@@ -39,6 +39,7 @@ import { ReputationStore } from './reputation';
 import { hostAttribution } from '../domain/activity';
 import { ContextGraphMemory } from './contextGraphMemory';
 import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
+import { WaitingNotices } from './waitingNotices';
 
 /** Chat model and safety model pairs already told that auto approve has no private safety model. */
 const warnedSafetyModels = new Set<string>();
@@ -86,6 +87,8 @@ interface ChatTab {
   post: (message: Record<string, unknown>) => void;
   /** Its run the extension host never finished, until the user resumes or dismisses it. */
   interrupted?: RunMarker;
+  /** Announces its prompts still waiting that were not announced yet (the window got focus again). */
+  focusRegained?: () => void;
 }
 
 async function initializeChat(context: vscode.ExtensionContext, auth: AuthService, panel: ChatHost, html: string, initialPrompt?: string): Promise<void> {
@@ -150,7 +153,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   };
   const ensureAgent = (tab: ChatTab, root: string): AgentConversation => {
     if (!tab.agent) {
-      tab.agent = conversationFor(context, root, panel, tab.post, () => tab.title || 'a conversation');
+      const created = conversationFor(context, root, panel, tab.post, () => tab.title || 'a conversation');
+      tab.agent = created.agent;
+      tab.focusRegained = created.focusRegained;
       tab.agent.adopt(tab.id);
       tab.agent.onWaitingChange = () => sendSummary();
     }
@@ -607,7 +612,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const policyWatch = vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi.actionPolicy')) sendPolicyState(panel); });
   // Setting or clearing the usage reporting token (anywhere) updates the spend line's link.
   const tokenWatch = onReportingTokenChange(() => { void statusMessage({ agents: runningAgents(), account: state.spend }).then((status) => panel.webview.postMessage(status)); });
-  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  // Back in the window (or its browser tab): prompts that waited unannounced are announced now.
+  const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
+  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -675,22 +682,32 @@ function runMarkersFor(context: vscode.ExtensionContext, root: string): RunMarke
   return store;
 }
 
-function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string): AgentConversation {
+function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string): { agent: AgentConversation; focusRegained: () => void } {
   const storage = context.globalStorageUri.fsPath;
   const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root, sharedTranscriptKey(context.secrets)) : undefined;
+  // An agent held for approval or an answer waits; say so when nobody may be looking: the chat is
+  // hidden, or the window (in code-server, its browser tab) is in the background. Once per prompt.
+  const notices = new WaitingNotices();
+  const waitingIds = () => conversation.waitingPrompts().map((prompt) => promptIdOf(prompt)).filter((id): id is string => Boolean(id));
+  const announce = (prompt: Record<string, unknown>) => {
+    const text = prompt.type === 'approval-request' ? `An agent in "${title()}" is waiting for your approval: ${String(prompt.title ?? 'an action')}` : `NEAR AI has a question for you in "${title()}" and is waiting for the answer.`;
+    void Promise.resolve(vscode.window.showWarningMessage(text, 'Show chat')).then((choice) => { if (choice) void vscode.commands.executeCommand('nearAiChatView.focus'); });
+  };
   const forward = (outbound: Record<string, unknown>) => {
     post(outbound);
-    // An agent held for approval or an answer waits; say so when the chat isn't on screen.
-    if ((outbound.type === 'approval-request' || outbound.type === 'questions-request') && (panel as { visible?: boolean }).visible === false) {
-      const text = outbound.type === 'approval-request' ? `An agent in "${title()}" is waiting for your approval: ${String(outbound.title ?? 'an action')}` : `NEAR AI has a question for you in "${title()}" and is waiting for the answer.`;
-      void vscode.window.showWarningMessage(text, 'Show chat').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAiChatView.focus'); });
-    }
+    const id = promptIdOf(outbound);
+    if (id && notices.opened(id, { panelVisible: (panel as { visible?: boolean }).visible, windowFocused: vscode.window.state?.focused }, waitingIds())) announce(outbound);
   };
   const conversation = new AgentConversation(root, forward, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts, sharedActivityFeed());
   conversation.runMarkers = runMarkersFor(context, root);
   const minutes = vscode.workspace.getConfiguration('nearAi').get<number>('agent.approvalTimeoutMinutes', AGENT_DEFAULTS.approvalTimeoutMinutes);
   conversation.approvalTimeoutMs = Math.max(0, Math.min(1_440, typeof minutes === 'number' && Number.isFinite(minutes) ? minutes : AGENT_DEFAULTS.approvalTimeoutMinutes)) * 60_000;
-  return conversation;
+  const focusRegained = () => {
+    const prompts = conversation.waitingPrompts();
+    const fresh = new Set(notices.focusRegained(waitingIds()));
+    for (const prompt of prompts) if (fresh.has(promptIdOf(prompt) ?? '')) announce(prompt);
+  };
+  return { agent: conversation, focusRegained };
 }
 
 /** The view's badge while prompts wait for the user, in one conversation or several. */
