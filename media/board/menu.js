@@ -25,7 +25,7 @@
     const found = model && key ? model.columns.find((c) => c.key === key) : undefined;
     return found ? found.label : '';
   };
-  const itemNodes = () => menu.querySelectorAll('[role="menuitem"]');
+  const itemNodes = () => Array.from(menu.querySelectorAll('[role="menuitem"]'));
   const isOpen = () => !menu.hidden && !!current;
 
   function mark(opener, expanded) {

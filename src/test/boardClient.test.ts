@@ -78,6 +78,28 @@ test('tracer: a real model draws as the kanban at 800 px, the list at 400 px, an
   assert.deepEqual(h.posts.at(-1), { type: 'retry' });
 });
 
+test('the e2e probe answers only on a page the host marked for the extension-host tests, and reports the drawn cards and no page error', async () => {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const plain = start();
+  plain.deliver({ type: 'state', model });
+  plain.deliver({ type: 'e2e-probe', id: 1, action: 'facts' });
+  assert.equal(plain.posts.filter((p) => p.type === 'e2e-facts').length, 0, 'an unmarked page ignores the probe');
+
+  const h = createBoardHarness({ width: 800 });
+  h.document.body.setAttribute('data-e2e', '1');
+  h.load(['board.js', 'menu.js']);
+  h.deliver({ type: 'state', model });
+  h.deliver({ type: 'e2e-probe', id: 7, action: 'focus', itemId: 'plan:90-01' });
+  const facts = h.posts.filter((p) => p.type === 'e2e-facts');
+  assert.equal(facts.length, 1);
+  assert.equal(facts[0]!.id, 7);
+  assert.deepEqual([...facts[0]!.cardIds].sort(), model.cards.filter((c) => c.milestoneId === undefined || c.milestoneId === model.selectedMilestone).map((c) => c.id).sort());
+  assert.equal(facts[0]!.focusedCard, 'plan:90-01');
+  assert.equal(facts[0]!.menuOpen, false);
+  assert.deepEqual(facts[0]!.errors, []);
+});
+
 test('a title with markup and icon syntax is drawn as that exact text and creates no element', async () => {
   const world = await standard();
   const hostile = '<img src=x onerror=alert(1)> $(alert) <b>bold</b>';
@@ -218,8 +240,8 @@ test('the milestone picker lists the active milestone first, then the others, th
   const h = start();
   h.deliver({ type: 'state', model });
   const select = h.$('#ms-select')!;
-  assert.deepEqual(select.children.map((o) => o.getAttribute('value')), ['milestone:v0.9.0', 'milestone:v0.8.0', 'all']);
-  assert.deepEqual(select.children.map((o) => text(o)), ['Version 0.9.0', 'Version 0.8.0', 'All milestones']);
+  assert.deepEqual(Array.from(select.children).map((o) => o.getAttribute('value')), ['milestone:v0.9.0', 'milestone:v0.8.0', 'all']);
+  assert.deepEqual(Array.from(select.children).map((o) => text(o)), ['Version 0.9.0', 'Version 0.8.0', 'All milestones']);
   assert.equal(select.value, 'milestone:v0.9.0');
   assert.deepEqual(cardIds(h), [CHORE_ID, 'plan:90-01', 'plan:90-02'], 'the old milestone is hidden and the board item shows');
   h.setValue(select, 'milestone:v0.8.0', 'change');

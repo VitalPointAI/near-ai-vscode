@@ -88,6 +88,34 @@ test('tracer: in the kanban only a card with offered moves is draggable; the lis
   assert.equal(card(h, 'plan:90-01').draggable, true, 'and switching back gives it again');
 });
 
+test('CR-01: with browser-shaped NodeLists every render runs to its end: one roving stop per lane, draggable set, and a second model updates both', async () => {
+  const { h, model, world } = await ownerBoard({ menu: true });
+  // The fake DOM's lists have the browser's members only (WR-05), so code that calls map or indexOf on them throws here as it does in Chromium.
+  const list = h.document.querySelectorAll('.card') as unknown as Record<string, unknown>;
+  assert.equal(['map', 'filter', 'find', 'indexOf', 'some'].filter((name) => typeof list[name] === 'function').length, 0, 'no Array methods on a NodeList');
+  assert.equal(typeof list.forEach, 'function');
+  assert.equal(typeof (h.root.children as unknown as Record<string, unknown>).forEach, 'undefined', 'an HTMLCollection has no forEach');
+  const lanes = h.$$('.lane');
+  assert.ok(lanes.length > 0 && h.$$('.card').length > 0, 'cards are drawn');
+  const stopsPerLane = lanes.map((lane) => Array.from(lane.querySelectorAll('.card-main')).filter((b) => b.getAttribute('tabindex') === '0').length);
+  assert.deepEqual(stopsPerLane, lanes.map(() => 1), 'applyRoving ran: one tab stop per lane');
+  assert.equal(card(h, 'plan:90-01').getAttribute('draggable'), 'true', 'the render listeners ran: drag.js marked the card');
+
+  // A second model (a teammate change) renders again through the same path.
+  const blocked = JSON.parse(JSON.stringify(modelOf(world, world.owner.memberId))) as BoardModel;
+  blocked.cards = blocked.cards.filter((c) => c.id !== 'plan:90-02');
+  h.deliver({ type: 'state', model: blocked });
+  assert.equal(h.$('.card[data-id="plan:90-02"]'), null, 'the removed card is gone');
+  assert.equal(card(h, 'plan:90-01').getAttribute('draggable'), 'true');
+  const main = card(h, 'plan:90-01').querySelector('.card-main')!;
+  main.focus();
+  h.press(main, 'm');
+  assert.equal(h.$('#menu')!.hidden, false, 'the Move menu opens from the keyboard');
+  assert.ok(h.$$('#menu [role="menuitem"]').length >= cardOf(model, 'plan:90-01').moves.length, 'it lists the offered moves');
+  h.press(h.focused(), 'ArrowDown');
+  assert.equal(h.focused().getAttribute('role'), 'menuitem', 'stepping through the menu works');
+});
+
 test('tracer: dragstart carries the id under the board type, marks the offered cells of its own lane, and a drop on Backlog posts the hold with the pending line', async () => {
   const { h, model } = await ownerBoard();
   const ready = cardOf(model, 'plan:90-01');

@@ -77,7 +77,14 @@ const CARD_STATE_REFUSALS: ReadonlySet<string> = new Set([
  * Set by the extension-host tests to observe both directions of the page protocol. `request` is set by the controller: it posts
  * { type: 'host-request', payload } to every visible surface, which the real board.js re-posts to the host (the chat sidebar's precedent).
  */
-export const boardTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void; request?: (payload: unknown) => Promise<void> } = {};
+export const boardTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void; request?: (payload: unknown) => Promise<void>; probe?: (probe: BoardProbe) => Promise<void> } = {};
+
+/**
+ * Extension-host tests only (NEAR_AI_E2E=1): asks the real page to report what it drew. The page acts (focus a card, press a key on the focused element)
+ * and answers with an 'e2e-facts' message (card count and ids, focus, whether the Move menu is open, page errors caught). The host never reads that
+ * answer; the tests see it through `fromView`. The page honours this only when the host marked it with data-e2e, which happens only in the tests.
+ */
+export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key'; itemId?: string; key?: string }
 
 // ---- what the page may say -------------------------------------------------------------------------------------------------------------------
 
@@ -247,14 +254,14 @@ export function parseBoardMessage(value: unknown): BoardMessage | undefined {
  * The page: a nonce CSP with no inline script or style, no remote address and no font source (icons are inline SVG), one script tag per client
  * file in load order, and the root and live region the client draws into. `surface` tells the client whether it is the sidebar or the tab.
  */
-export function boardHtml(webview: { cspSource: string; asWebviewUri(uri: vscode.Uri): vscode.Uri }, media: vscode.Uri, nonce: string, surface: 'view' | 'panel'): string {
+export function boardHtml(webview: { cspSource: string; asWebviewUri(uri: vscode.Uri): vscode.Uri }, media: vscode.Uri, nonce: string, surface: 'view' | 'panel', testSeams = false): string {
   const asset = (file: string): string => webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
   const styles = BOARD_STYLES.map((file) => `<link rel="stylesheet" href="${asset(file)}">`).join('\n');
   const scripts = BOARD_SCRIPTS.map((file) => `<script nonce="${nonce}" src="${asset(file)}"></script>`).join('\n');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 ${styles}
-<title>${PANEL_TITLE}</title></head><body data-surface="${surface}">
+<title>${PANEL_TITLE}</title></head><body data-surface="${surface}"${testSeams ? ' data-e2e="1"' : ''}>
 <div id="root"></div>
 <div id="live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 ${scripts}
@@ -273,7 +280,11 @@ export interface BoardSurface {
 
 /** Test seam: the clock and timer of the post throttle. The extension passes nothing. */
 export interface BoardTimers { now(): number; set(callback: () => void, ms: number): unknown; clear(handle: unknown): void }
-export interface BoardDeps { session: () => TeamSession | undefined; output: TeamOutput; timers?: BoardTimers; throttleMs?: number; nowMs?: () => number }
+export interface BoardDeps {
+  session: () => TeamSession | undefined; output: TeamOutput; timers?: BoardTimers; throttleMs?: number; nowMs?: () => number;
+  /** True only under the extension-host tests (NEAR_AI_E2E=1): the page probe is offered. registerTeamBoard reads the variable. */
+  testSeams?: boolean;
+}
 
 interface SurfaceState {
   surface: BoardSurface;
@@ -310,6 +321,7 @@ export class BoardController {
     this.timers = deps.timers ?? REAL_TIMERS;
     this.throttleMs = deps.throttleMs ?? THROTTLE_MS;
     boardTap.request = (payload) => this.request(payload);
+    if (deps.testSeams === true) boardTap.probe = (probe) => this.probe(probe);
   }
 
   /** Starts serving a surface. It is sent nothing until its page says ready. */
@@ -344,6 +356,7 @@ export class BoardController {
     if (this.timer !== undefined) this.timers.clear(this.timer);
     this.timer = undefined;
     boardTap.request = undefined;
+    boardTap.probe = undefined;
   }
 
   // ---- visibility ---------------------------------------------------------------------------------------------------------------------------
@@ -430,6 +443,10 @@ export class BoardController {
 
   private async request(payload: unknown): Promise<void> {
     for (const state of this.surfaces) if (state.visible) this.post(state, { type: 'host-request', payload });
+  }
+
+  private async probe(probe: BoardProbe): Promise<void> {
+    for (const state of this.surfaces) if (state.visible) this.post(state, { type: 'e2e-probe', ...probe });
   }
 
   // ---- what the page says -------------------------------------------------------------------------------------------------------------------
@@ -784,7 +801,8 @@ const nonceOf = (): string => randomBytes(16).toString('base64');
  * and only in a project that has a team (a solo project never loads this module).
  */
 export function registerTeamBoard(context: vscode.ExtensionContext, deps: BoardDeps): { openPanel(): void; controller: BoardController } {
-  const controller = new BoardController(deps);
+  const testSeams = deps.testSeams ?? process.env.NEAR_AI_E2E === '1';
+  const controller = new BoardController({ ...deps, testSeams });
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'board');
   let panel: vscode.WebviewPanel | undefined;
 
@@ -792,7 +810,7 @@ export function registerTeamBoard(context: vscode.ExtensionContext, deps: BoardD
   const provider: vscode.WebviewViewProvider = {
     resolveWebviewView(view: vscode.WebviewView): void {
       view.webview.options = { enableScripts: true, localResourceRoots: [media] };
-      view.webview.html = boardHtml(view.webview, media, nonceOf(), 'view');
+      view.webview.html = boardHtml(view.webview, media, nonceOf(), 'view', testSeams);
       controller.attach(viewSurface(view));
     }
   };
@@ -805,7 +823,7 @@ export function registerTeamBoard(context: vscode.ExtensionContext, deps: BoardD
     const created = vscode.window.createWebviewPanel(BOARD_PANEL_TYPE, PANEL_TITLE, vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
     panel = created;
     created.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
-    created.webview.html = boardHtml(created.webview, media, nonceOf(), 'panel');
+    created.webview.html = boardHtml(created.webview, media, nonceOf(), 'panel', testSeams);
     controller.attach(panelSurface(created));
     created.onDidDispose(() => { if (panel === created) panel = undefined; });
   }

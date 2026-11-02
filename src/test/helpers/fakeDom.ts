@@ -134,13 +134,38 @@ const FOCUSABLE = new Set(['button', 'input', 'select', 'textarea', 'a']);
 // The links from a node to the rest of the page. They are kept out of what util.inspect prints: a failing strict assertion prints both sides at
 // depth 1000 and diffs the lines with a diff whose memory grows with the square of the line count, and while these links were enumerable one
 // node printed the whole page again from every node on the way, millions of lines, until the process ran out of memory (62-12 incident).
-const INSPECT_HIDDEN = ['doc', 'parentNode', 'childNodes', 'listeners', 'onText'];
+const INSPECT_HIDDEN = ['doc', 'parentNode', 'kids', 'listeners', 'onText'];
+
+// What a browser hands back from querySelectorAll, childNodes and children (WR-05). A real NodeList has length, index access, item, forEach,
+// entries, keys, values and iteration, and an HTMLCollection has no forEach either. Neither has map, filter, find, indexOf or some, so page
+// code that calls those on the raw result throws in Chromium (CR-01). These stand-ins have exactly the browser's members, so the same
+// mistake throws here too. Test code that wants Array methods converts with Array.from first, the way the page has to.
+export class FakeHTMLCollection {
+  readonly [index: number]: FakeNode;
+  readonly length: number;
+  constructor(nodes: readonly FakeNode[]) {
+    this.length = nodes.length;
+    nodes.forEach((node, index) => { Object.defineProperty(this, index, { value: node, enumerable: true }); });
+  }
+  item(index: number): FakeNode | null { return index >= 0 && index < this.length ? this[index] : null; }
+  *[Symbol.iterator](): IterableIterator<FakeNode> { for (let index = 0; index < this.length; index += 1) yield this[index]; }
+}
+
+export class FakeNodeList extends FakeHTMLCollection {
+  forEach(callback: (node: FakeNode, index: number, list: FakeNodeList) => void, thisArg?: unknown): void {
+    for (let index = 0; index < this.length; index += 1) callback.call(thisArg, this[index], index, this);
+  }
+  *entries(): IterableIterator<[number, FakeNode]> { for (let index = 0; index < this.length; index += 1) yield [index, this[index]]; }
+  *keys(): IterableIterator<number> { for (let index = 0; index < this.length; index += 1) yield index; }
+  *values(): IterableIterator<FakeNode> { yield* this; }
+}
 
 export class FakeNode {
   [key: string]: any;
   nodeType: number;
   parentNode: FakeNode | null = null;
-  childNodes: FakeNode[] = [];
+  /** The child nodes as an Array, for the fake's own bookkeeping. Page code sees them only through childNodes and children (browser shapes). */
+  kids: FakeNode[] = [];
   listeners = new Map<string, Listener[]>();
   attrs = new Map<string, string>();
   localName: string;
@@ -182,11 +207,11 @@ export class FakeNode {
   }
 
   // Text and markup. Assigning markup throws on purpose.
-  get textContent(): string { return this.nodeType === 3 ? this.text : this.childNodes.map((child) => child.textContent).join(''); }
+  get textContent(): string { return this.nodeType === 3 ? this.text : this.kids.map((child) => child.textContent).join(''); }
   set textContent(value: string) {
     const next = String(value);
     if (this.nodeType === 3) { this.text = next; return; }
-    for (const child of [...this.childNodes]) this.detach(child);
+    for (const child of [...this.kids]) this.detach(child);
     if (next !== '') this.appendChild(this.doc.createTextNode(next));
     if (this.onText !== undefined) this.onText(next);
   }
@@ -235,43 +260,46 @@ export class FakeNode {
   }
 
   // Tree.
-  get children(): FakeNode[] { return this.childNodes.filter((child) => child.nodeType === 1); }
-  get firstChild(): FakeNode | null { return this.childNodes[0] ?? null; }
-  get lastChild(): FakeNode | null { return this.childNodes[this.childNodes.length - 1] ?? null; }
-  get firstElementChild(): FakeNode | null { return this.children[0] ?? null; }
-  get nextSibling(): FakeNode | null { const siblings = this.parentNode?.childNodes ?? []; return siblings[siblings.indexOf(this) + 1] ?? null; }
-  get previousSibling(): FakeNode | null { const siblings = this.parentNode?.childNodes ?? []; return siblings[siblings.indexOf(this) - 1] ?? null; }
+  /** The element children as an Array, for the fake's own bookkeeping. */
+  elementKids(): FakeNode[] { return this.kids.filter((child) => child.nodeType === 1); }
+  get childNodes(): FakeNodeList { return new FakeNodeList(this.kids); }
+  get children(): FakeHTMLCollection { return new FakeHTMLCollection(this.elementKids()); }
+  get firstChild(): FakeNode | null { return this.kids[0] ?? null; }
+  get lastChild(): FakeNode | null { return this.kids[this.kids.length - 1] ?? null; }
+  get firstElementChild(): FakeNode | null { return this.elementKids()[0] ?? null; }
+  get nextSibling(): FakeNode | null { const siblings = this.parentNode?.kids ?? []; return siblings[siblings.indexOf(this) + 1] ?? null; }
+  get previousSibling(): FakeNode | null { const siblings = this.parentNode?.kids ?? []; return siblings[siblings.indexOf(this) - 1] ?? null; }
   get isConnected(): boolean { let node: FakeNode | null = this; while (node !== null && node.parentNode !== null) node = node.parentNode; return node === this.doc; }
   private detach(node: FakeNode): void {
     const parent = node.parentNode;
     if (parent === null) return;
     // A browser drops focus from an element that is removed or moved.
     if (this.doc.activeElement !== this.doc.body && node.contains(this.doc.activeElement)) this.doc.activeElement = this.doc.body;
-    parent.childNodes.splice(parent.childNodes.indexOf(node), 1);
+    parent.kids.splice(parent.kids.indexOf(node), 1);
     node.parentNode = null;
   }
-  appendChild(node: FakeNode): FakeNode { this.detach(node); node.parentNode = this; this.childNodes.push(node); return node; }
+  appendChild(node: FakeNode): FakeNode { this.detach(node); node.parentNode = this; this.kids.push(node); return node; }
   append(...nodes: Array<FakeNode | string>): void { for (const node of nodes) this.appendChild(typeof node === 'string' ? this.doc.createTextNode(node) : node); }
-  prepend(...nodes: FakeNode[]): void { for (const node of [...nodes].reverse()) this.insertBefore(node, this.childNodes[0] ?? null); }
+  prepend(...nodes: FakeNode[]): void { for (const node of [...nodes].reverse()) this.insertBefore(node, this.kids[0] ?? null); }
   insertBefore(node: FakeNode, ref: FakeNode | null): FakeNode {
     if (ref === null) return this.appendChild(node);
     if (node === ref) return node;
     this.detach(node);
     node.parentNode = this;
-    this.childNodes.splice(this.childNodes.indexOf(ref), 0, node);
+    this.kids.splice(this.kids.indexOf(ref), 0, node);
     return node;
   }
-  replaceChildren(...nodes: Array<FakeNode | string>): void { for (const child of [...this.childNodes]) this.detach(child); this.append(...nodes); }
+  replaceChildren(...nodes: Array<FakeNode | string>): void { for (const child of [...this.kids]) this.detach(child); this.append(...nodes); }
   removeChild(node: FakeNode): FakeNode { this.detach(node); return node; }
   remove(): void { if (this.parentNode !== null) this.parentNode.detach(this); }
   before(node: FakeNode): void { this.parentNode?.insertBefore(node, this); }
   after(node: FakeNode): void { this.parentNode?.insertBefore(node, this.nextSibling); }
   contains(other: FakeNode | null): boolean { for (let node = other; node !== null; node = node.parentNode) if (node === this) return true; return false; }
-  all(): FakeNode[] { return this.children.flatMap((child) => [child, ...child.all()]); }
+  all(): FakeNode[] { return this.elementKids().flatMap((child) => [child, ...child.all()]); }
   matches(selector: string): boolean { return parseSelector(selector).some((steps) => matchSteps(this, steps, steps.length - 1)); }
   closest(selector: string): FakeNode | null { for (let node: FakeNode | null = this; node !== null; node = node.parentNode) if (node.nodeType === 1 && node.matches(selector)) return node; return null; }
-  querySelectorAll(selector: string): FakeNode[] { return this.all().filter((node) => node.matches(selector)); }
-  querySelector(selector: string): FakeNode | null { return this.querySelectorAll(selector)[0] ?? null; }
+  querySelectorAll(selector: string): FakeNodeList { return new FakeNodeList(this.all().filter((node) => node.matches(selector))); }
+  querySelector(selector: string): FakeNode | null { return this.all().find((node) => node.matches(selector)) ?? null; }
   getBoundingClientRect(): Record<string, number> { return { x: 0, y: 0, left: 0, top: 0, right: this.clientWidth, bottom: 0, width: this.clientWidth, height: 0 }; }
   scrollIntoView(): void { /* nothing to scroll */ }
 
@@ -486,7 +514,7 @@ export function createBoardHarness(options: { width?: number; reducedMotion?: bo
     live(): string { return liveNode.textContent; },
     focused(): FakeNode { return document.activeElement; },
     $(selector: string): FakeNode | null { return document.querySelector(selector); },
-    $$(selector: string): FakeNode[] { return document.querySelectorAll(selector); },
+    $$(selector: string): FakeNode[] { return Array.from(document.querySelectorAll(selector)); },
     pendingTimers(): number { return timers.size; }
   };
   void width;

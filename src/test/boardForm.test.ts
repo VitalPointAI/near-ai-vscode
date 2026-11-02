@@ -87,20 +87,20 @@ test('New item opens form#item-form in the drawer with every field, the hints an
   assert.equal(f.parentNode, h.$('#detail'), 'the form lives in the shared drawer');
   assert.equal(h.$('#detail')!.hidden, false);
   assert.equal(text(f.querySelector('h2')), 'New item');
-  assert.deepEqual(f.querySelectorAll('label').map((l) => text(l)), ['Type', 'Title', 'Description (optional)', 'Files this touches (optional)', 'Estimate in tokens (optional)']);
-  assert.deepEqual(f.querySelectorAll('label').map((l) => l.getAttribute('for')), ['item-type', 'item-title', 'item-description', 'item-files', 'item-estimate']);
+  assert.deepEqual(Array.from(f.querySelectorAll('label')).map((l) => text(l)), ['Type', 'Title', 'Description (optional)', 'Files this touches (optional)', 'Estimate in tokens (optional)']);
+  assert.deepEqual(Array.from(f.querySelectorAll('label')).map((l) => l.getAttribute('for')), ['item-type', 'item-title', 'item-description', 'item-files', 'item-estimate']);
   const type = input(h, 'type');
   assert.equal(type.localName, 'select');
-  assert.deepEqual(type.querySelectorAll('option').map((o) => text(o)), ['Bug', 'Chore', 'Spike']);
+  assert.deepEqual(Array.from(type.querySelectorAll('option')).map((o) => text(o)), ['Bug', 'Chore', 'Spike']);
   assert.equal(type.value, 'chore', 'Chore is the default');
   assert.equal(h.focused(), type, 'focus starts on Type');
   const estimate = input(h, 'estimate');
   assert.equal(estimate.getAttribute('type'), 'number');
   assert.equal(estimate.getAttribute('min'), '1000');
   assert.equal(estimate.getAttribute('step'), '1000');
-  const hints = f.querySelectorAll('.hint').map((n) => text(n));
+  const hints = Array.from(f.querySelectorAll('.hint')).map((n) => text(n));
   assert.deepEqual(hints, ['One pattern per line, for example src/services/**', 'A rough size is fine. Typical plans are 50,000 to 100,000.', 'Without files and an estimate this item stays in Backlog.']);
-  assert.deepEqual(f.querySelectorAll('button').map((b) => text(b)), ['Add item', 'Close form']);
+  assert.deepEqual(Array.from(f.querySelectorAll('button')).map((b) => text(b)), ['Add item', 'Close form']);
   assert.equal(buttonNamed(h, 'Add item')!.getAttribute('type'), 'submit');
 });
 
@@ -297,7 +297,7 @@ test('Close form on a changed form asks Discard this item? with focus on Keep ed
   const f = form(h)!;
   assert.ok(f, 'the form is still open');
   assert.match(text(f), /Discard this item\?/);
-  assert.deepEqual(f.querySelectorAll('button').map((b) => text(b)).filter((t) => t === 'Discard changes' || t === 'Keep editing').sort(), ['Discard changes', 'Keep editing']);
+  assert.deepEqual(Array.from(f.querySelectorAll('button')).map((b) => text(b)).filter((t) => t === 'Discard changes' || t === 'Keep editing').sort(), ['Discard changes', 'Keep editing']);
   assert.equal(h.focused(), buttonNamed(h, 'Keep editing'));
   h.click(buttonNamed(h, 'Keep editing')!);
   assert.ok(form(h), 'still open');
@@ -376,7 +376,7 @@ test('Edit asks the host for the detail, pre-fills the form, shows the type as t
   assert.equal(text(h.$('#item-type')), 'Chore');
   assert.equal(input(h, 'title').value, 'Tidy settings page');
   assert.equal(h.focused(), input(h, 'title'));
-  assert.deepEqual(f.querySelectorAll('button').map((b) => text(b)), ['Save changes', 'Close form']);
+  assert.deepEqual(Array.from(f.querySelectorAll('button')).map((b) => text(b)), ['Save changes', 'Close form']);
 
   fill(h, { title: 'Tidy the settings page', estimate: '52000' });
   h.click(buttonNamed(h, 'Save changes')!);

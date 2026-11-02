@@ -217,7 +217,7 @@
     }
     body.replaceChildren(...out);
     if (focusKey) {
-      const again = body.querySelectorAll('[data-focus]').find((n) => n.getAttribute('data-focus') === focusKey);
+      const again = Array.from(body.querySelectorAll('[data-focus]')).find((n) => n.getAttribute('data-focus') === focusKey);
       if (again) again.focus(); else heading.focus();
     }
   }

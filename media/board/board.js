@@ -39,6 +39,11 @@
     };
   })();
 
+  // The extension-host tests (and only they: the host adds data-e2e under NEAR_AI_E2E=1) ask the page what it drew and which errors it caught.
+  const E2E = !!document.body && document.body.getAttribute('data-e2e') === '1';
+  const pageErrors = [];
+  if (E2E) window.addEventListener('error', (e) => { pageErrors.push(String((e && e.message) || e)); });
+
   // ---- state kept across reloads (D-15) -----------------------------------------------------------------------------------------------------
   const saved = vscode.getState() || {};
   const ui = {
@@ -79,6 +84,8 @@
 
   // ---- small helpers -------------------------------------------------------------------------------------------------------------------------
   const $ = (id) => document.getElementById(id);
+  // querySelectorAll gives a NodeList, which has no map, indexOf, find or filter in a browser (CR-01), so every list the code searches is an Array.
+  const nodesOf = (scope, selector) => Array.from(scope.querySelectorAll(selector));
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
   const setText = (n, t) => { if (n.textContent !== t) n.textContent = t; };
   const attr = (n, k, v) => { if (v === null || v === undefined || v === false) { if (n.getAttribute(k) !== null) n.removeAttribute(k); } else if (n.getAttribute(k) !== String(v)) n.setAttribute(k, String(v)); };
@@ -514,7 +521,7 @@
     h.box.children[1].hidden = !c.caption || collapsed;
     return h.box;
   }
-  const headNodes = () => heads.querySelectorAll('.col-btn');
+  const headNodes = () => nodesOf(heads, '.col-btn');
   heads.addEventListener('keydown', (e) => {
     const list = headNodes();
     const at = list.indexOf(document.activeElement);
@@ -615,9 +622,9 @@
 
   // ---- roving focus and the keyboard model -----------------------------------------------------------------------------------------------
   function applyRoving() {
-    const containers = layout === 'kanban' ? views.kanban.querySelectorAll('.lane') : views.list.querySelectorAll('.group');
+    const containers = layout === 'kanban' ? nodesOf(views.kanban, '.lane') : nodesOf(views.list, '.group');
     for (const group of containers) {
-      const cards = group.querySelectorAll('.card');
+      const cards = nodesOf(group, '.card');
       const gkey = group.getAttribute('data-gkey');
       const ids = cards.map((c) => c.getAttribute('data-id'));
       if (ids.indexOf(active[gkey]) < 0) active[gkey] = ids[0];
@@ -666,12 +673,12 @@
   function navTarget(li, key, ctrl) {
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return undefined;
     if (layout === 'list') {
-      const rows = li.closest('.group').querySelectorAll('.card');
+      const rows = nodesOf(li.closest('.group'), '.card');
       const at = rows.indexOf(li);
       return { ArrowDown: rows[at + 1], ArrowUp: rows[at - 1], Home: rows[0], End: rows[rows.length - 1] }[key] || null;
     }
     const lane = li.closest('.lane');
-    const grid = lane.querySelectorAll('ul.cell').map((cell) => cell.querySelectorAll('.card')).filter((cards) => cards.length > 0);
+    const grid = nodesOf(lane, 'ul.cell').map((cell) => nodesOf(cell, '.card')).filter((cards) => cards.length > 0);
     const col = grid.findIndex((cards) => cards.indexOf(li) >= 0);
     const row = grid[col].indexOf(li);
     if (ctrl && key === 'Home') return grid[0][0];
@@ -833,6 +840,23 @@
   };
   window.NearAiBoard = api;
 
+  // ---- the extension-host test probe (E2E only) ------------------------------------------------------------------------------------------------
+  function probe(m) {
+    if (m.action === 'focus' && typeof m.itemId === 'string') api.focusCard(m.itemId);
+    else if (m.action === 'key' && typeof m.key === 'string' && typeof KeyboardEvent === 'function') {
+      const target = document.activeElement || document.body;
+      try { target.dispatchEvent(new KeyboardEvent('keydown', { key: m.key, bubbles: true, cancelable: true })); } catch (error) { pageErrors.push(String((error && error.message) || error)); }
+    }
+    const a = document.activeElement;
+    const focused = a && a.closest ? a.closest('.card') : null;
+    const menu = document.getElementById('menu');
+    post({
+      type: 'e2e-facts', id: m.id, cardIds: nodesOf(document, '.card').map((n) => n.getAttribute('data-id')), draggable: nodesOf(document, '.card[draggable="true"]').length,
+      focusedCard: focused ? focused.getAttribute('data-id') : '', focusedRole: a && a.getAttribute ? a.getAttribute('role') || '' : '',
+      menuOpen: !!menu && !menu.hidden, menuItems: menu ? menu.querySelectorAll('[role="menuitem"]').length : 0, errors: pageErrors.slice()
+    });
+  }
+
   // ---- messages from the host ----------------------------------------------------------------------------------------------------------------
   window.addEventListener('message', (event) => {
     const m = event.data;
@@ -840,6 +864,7 @@
     switch (m.type) {
       case 'state': onState(m); break;
       case 'host-request': if (m.payload && typeof m.payload === 'object') post(m.payload); break;
+      case 'e2e-probe': if (E2E) { try { probe(m); } catch (error) { pageErrors.push(String((error && error.message) || error)); } } break;
       case 'notice': if (typeof m.text === 'string' && m.text) { notice = m.text; render(); announce(m.text); } break;
       case 'refused': if (m.reason === '' && typeof m.itemId === 'string') { delete pending[m.itemId]; refreshCard(m.itemId); } break;
       default: break;

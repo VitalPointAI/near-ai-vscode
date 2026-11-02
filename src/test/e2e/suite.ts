@@ -226,6 +226,42 @@ function teamTests(): Array<[string, () => Promise<void>]> {
       assert.equal(cardOf(state, 'plan:90-01')?.column, 'done');
       assert.equal(cardOf(state, 'plan:90-02')?.column, 'ready');
     }],
+    ['the real page draws the imported cards, a card takes focus and the Move menu opens and steps from the keyboard, with no page error (CR-01)', async () => {
+      // The page reports what it drew (test seam, NEAR_AI_E2E only). Before CR-01 the first render threw in Chromium on a NodeList, so no card was focusable.
+      let probes = 0;
+      const ask = async (probe: { action: 'facts' | 'focus' | 'key'; itemId?: string; key?: string }): Promise<Message> => {
+        probes += 1;
+        const id = probes;
+        const before = board.fromView.length;
+        await tap.probe!({ id, ...probe });
+        return board.next('fromView', (message) => message.type === 'e2e-facts' && message.id === id, before);
+      };
+      assert.ok(tap.probe, 'the page probe is offered under NEAR_AI_E2E=1');
+      let facts = await ask({ action: 'facts' });
+      for (let tries = 0; tries < 20 && !(facts.cardIds as string[]).includes('plan:90-02'); tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        facts = await ask({ action: 'facts' });
+      }
+      const ids = facts.cardIds as string[];
+      assert.ok(ids.includes('plan:90-01') && ids.includes('plan:90-02'), `the imported cards are drawn (${ids.length} cards: ${ids.join(', ')})`);
+      assert.ok((facts.draggable as number) > 0, 'the render listeners ran: at least one card is draggable');
+      assert.deepEqual(facts.errors, [], 'no page error after the render');
+      facts = await ask({ action: 'focus', itemId: 'plan:90-02' });
+      assert.equal(facts.focusedCard, 'plan:90-02', 'the card takes focus');
+      facts = await ask({ action: 'key', key: 'ArrowRight' });
+      assert.deepEqual(facts.errors, [], 'arrow keys move between cards without an error');
+      facts = await ask({ action: 'focus', itemId: 'plan:90-02' });
+      facts = await ask({ action: 'key', key: 'm' });
+      assert.equal(facts.menuOpen, true, 'M opens the Move menu');
+      assert.ok((facts.menuItems as number) > 0, 'the menu lists moves');
+      assert.equal(facts.focusedRole, 'menuitem', 'focus is in the menu');
+      facts = await ask({ action: 'key', key: 'ArrowDown' });
+      assert.equal(facts.focusedRole, 'menuitem', 'Down steps through the menu');
+      facts = await ask({ action: 'key', key: 'Escape' });
+      assert.equal(facts.menuOpen, false, 'Escape closes the menu');
+      assert.equal(facts.focusedCard, 'plan:90-02', 'focus returns to the card');
+      assert.deepEqual(facts.errors, [], 'no page error at any step');
+    }],
     ['a move sent through the real page reaches the host, and the next state shows the card on hold', async () => {
       const fromBefore = board.fromView.length;
       const toBefore = board.toView.length;

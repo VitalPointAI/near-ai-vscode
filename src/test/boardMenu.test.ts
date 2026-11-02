@@ -39,7 +39,7 @@ const card = (h: BoardHarness, id: string): FakeNode => {
 const main = (h: BoardHarness, id: string): FakeNode => card(h, id).querySelector('.card-main')!;
 const moveBtn = (h: BoardHarness, id: string): FakeNode => card(h, id).querySelector('.move-btn')!;
 const menu = (h: BoardHarness): FakeNode => h.$('#menu')!;
-const items = (h: BoardHarness): FakeNode[] => menu(h).querySelectorAll('[role="menuitem"]');
+const items = (h: BoardHarness): FakeNode[] => Array.from(menu(h).querySelectorAll('[role="menuitem"]'));
 const isOpen = (h: BoardHarness): boolean => h.$('#menu') !== null && !menu(h).hidden;
 const cardOf = (model: BoardModel, id: string): BoardCard => model.cards.find((c) => c.id === id)!;
 const moves = (h: BoardHarness): Array<Record<string, any>> => h.posts.filter((p) => p.type === 'move');
@@ -65,7 +65,7 @@ test('tracer: M opens the menu on a ready card, Down and Enter choose Backlog (p
   assert.equal(h.focused(), items(h)[0]);
   assert.equal(text(h.focused()), 'Done (mark as finished)');
   assert.deepEqual(menu(h).querySelectorAll('[role="separator"]').length, 1);
-  const kids = menu(h).children;
+  const kids = Array.from(menu(h).children);
   assert.equal(kids[kids.findIndex((k) => k.getAttribute('role') === 'separator') + 1]!.textContent, 'Block...');
 
   // Down moves along, and Down on the last wraps to the first.

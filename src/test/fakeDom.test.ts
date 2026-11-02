@@ -17,7 +17,7 @@ const ASSERT_INSPECT = { compact: false, customInspect: false, depth: 1000, maxA
 const lines = (value: unknown): number => inspect(value, ASSERT_INSPECT).split('\n').length;
 /** A node prints its own fields and attributes, about 20 to 40 lines. The incident printed 1,509 lines for a detached button and millions in a drawn board. */
 const NODE_LINES = 80;
-const LINKS = ['doc', 'parentNode', 'childNodes', 'listeners'];
+const LINKS = ['doc', 'parentNode', 'kids', 'childNodes', 'listeners'];
 
 /** The tripwire: a button under #root in a page with nothing loaded. Broken links cost about two thousand lines here, which is cheap to detect. */
 function assertBarePageNodesAreSmall(): void {
@@ -30,7 +30,7 @@ function assertBarePageNodesAreSmall(): void {
   for (const key of LINKS) assert.equal(Object.keys(button).includes(key), false, `${key} is kept out of what inspect prints`);
   const sizes = [button, button.firstChild!, h.root, h.document.body].map(lines);
   assert.ok(sizes.every((size) => size < NODE_LINES), `nodes print small, got ${sizes.join(', ')} lines`);
-  assert.equal(button.parentNode === h.root && h.root.childNodes.includes(button) && button.doc === h.document, true, 'the links still work');
+  assert.equal(button.parentNode === h.root && Array.from(h.root.childNodes).includes(button) && button.doc === h.document, true, 'the links still work');
 }
 
 function failureOf(run: () => void): Error {

@@ -68,7 +68,7 @@ const card = (h: BoardHarness, id: string): FakeNode => {
 const main = (h: BoardHarness, id: string): FakeNode => card(h, id).querySelector('.card-main')!;
 const drawer = (h: BoardHarness): FakeNode => h.$('#detail')!;
 const isOpen = (h: BoardHarness): boolean => !drawer(h).hidden;
-const headings = (h: BoardHarness): string[] => drawer(h).querySelectorAll('h3').map((n) => text(n));
+const headings = (h: BoardHarness): string[] => Array.from(drawer(h).querySelectorAll('h3')).map((n) => text(n));
 const detailPosts = (h: BoardHarness): Array<Record<string, any>> => h.posts.filter((p) => p.type === 'detail');
 
 /** Opens the detail of a card by keyboard, the way a person does, and delivers the host's answer. */
@@ -104,7 +104,7 @@ test('tracer: Enter on a plan asks the host once, shows the title while waiting,
   assert.equal(h.focused(), drawer(h).querySelector('h2'), 'the answer keeps focus on the heading');
   assert.deepEqual(headings(h), ['Facts', 'Must-haves', 'Requirements', 'Files', 'Tasks', 'History']);
 
-  const tasks = drawer(h).querySelectorAll('section').find((s) => text(s.querySelector('h3')) === 'Tasks')!;
+  const tasks = Array.from(drawer(h).querySelectorAll('section')).find((s) => text(s.querySelector('h3')) === 'Tasks')!;
   assert.match(text(tasks), /0 of 2 tasks done/);
   const rows = tasks.querySelectorAll('li');
   assert.equal(rows.length, 2);
@@ -112,8 +112,8 @@ test('tracer: Enter on a plan asks the host once, shows the title while waiting,
   assert.match(text(rows[0]), /Write the test/);
   assert.match(text(rows[1]), /Write the code/);
 
-  const history = drawer(h).querySelectorAll('section').find((s) => text(s.querySelector('h3')) === 'History')!;
-  const entries = history.querySelectorAll('li');
+  const history = Array.from(drawer(h).querySelectorAll('section')).find((s) => text(s.querySelector('h3')) === 'History')!;
+  const entries = Array.from(history.querySelectorAll('li'));
   assert.deepEqual(entries.map((li) => text(li).replace(/^.*?(Lee|Import)/, '$1')), ['Lee unblocked this.', 'Lee blocked this: waiting for the API key.', 'Import added this to the board.']);
   for (const li of entries) {
     const time = li.querySelector('time')!;
@@ -165,12 +165,12 @@ async function fullWorld(): Promise<BoardWorld> {
 }
 
 const sectionOf = (h: BoardHarness, title: string): FakeNode => {
-  const found = drawer(h).querySelectorAll('section').find((s) => text(s.querySelector('h3')) === title);
+  const found = Array.from(drawer(h).querySelectorAll('section')).find((s) => text(s.querySelector('h3')) === title);
   assert.ok(found, `a ${title} section`);
   return found;
 };
-const hasSection = (h: BoardHarness, title: string): boolean => drawer(h).querySelectorAll('section').some((s) => text(s.querySelector('h3')) === title);
-const buttonNamed = (root: FakeNode, name: string): FakeNode | undefined => root.querySelectorAll('button').find((b) => text(b) === name || b.getAttribute('aria-label') === name);
+const hasSection = (h: BoardHarness, title: string): boolean => Array.from(drawer(h).querySelectorAll('section')).some((s) => text(s.querySelector('h3')) === title);
+const buttonNamed = (root: FakeNode, name: string): FakeNode | undefined => Array.from(root.querySelectorAll('button')).find((b) => text(b) === name || b.getAttribute('aria-label') === name);
 
 test('a blocked card shows who blocked it and why, with the time, right under the title block', async () => {
   const world = await fullWorld();
@@ -183,7 +183,7 @@ test('a blocked card shows who blocked it and why, with the time, right under th
   assert.ok(first.querySelector('time'), 'with its time');
   assert.equal(first.querySelector('time')!.getAttribute('datetime'), detailOf(world, 'plan:90-01').blocked!.since);
   // Blocking puts the card in Backlog, so the host also lists "It is blocked." under Why this is not ready (UI-SPEC Card Detail 3), after the notice.
-  const reasons = sectionOf(h, 'Why this is not ready').querySelectorAll('li').map((li) => text(li));
+  const reasons = Array.from(sectionOf(h, 'Why this is not ready').querySelectorAll('li')).map((li) => text(li));
   assert.deepEqual(reasons, detailOf(world, 'plan:90-01').notReady);
   assert.ok(reasons.includes('It is blocked.'));
 });
@@ -194,7 +194,7 @@ test('a backlog card says in plain words why it is not ready', async () => {
   const expected = detailOf(world, 'plan:90-04').notReady;
   assert.ok(expected.length > 0, 'the host has reasons for this card');
   openBy(h, 'plan:90-04', messageOf(world, 'plan:90-04'));
-  assert.deepEqual(sectionOf(h, 'Why this is not ready').querySelectorAll('li').map((li) => text(li)), expected);
+  assert.deepEqual(Array.from(sectionOf(h, 'Why this is not ready').querySelectorAll('li')).map((li) => text(li)), expected);
   assert.ok(headings(h).indexOf('Why this is not ready') < headings(h).indexOf('Facts'), 'it comes before the facts');
 
   h.press(h.focused(), 'Escape');
@@ -211,7 +211,7 @@ test('facts are a definition list; a board item shows its description and Edit, 
   openBy(h, CHORE_WITH_TEXT, messageOf(world, CHORE_WITH_TEXT, 'dev'));
   const facts = sectionOf(h, 'Facts');
   assert.ok(facts.querySelector('dl'), 'facts are a dl');
-  const pairs = facts.querySelectorAll('dt').map((dt, index) => [text(dt), text(facts.querySelectorAll('dd')[index])]);
+  const pairs = Array.from(facts.querySelectorAll('dt')).map((dt, index) => [text(dt), text(facts.querySelectorAll('dd')[index])]);
   assert.deepEqual(pairs.find(([label]) => label === 'Created by'), ['Created by', 'Dana']);
   assert.deepEqual(pairs.find(([label]) => label === 'Source'), ['Source', 'Added on the board']);
   assert.match(text(sectionOf(h, 'Description')), /Clean up the sidebar spacing\./);
@@ -247,7 +247,7 @@ test('requirement buttons apply the requirement filter and leave the detail open
   api(h).setFilter('requirement', '');
 
   const deps = sectionOf(h, 'Dependencies');
-  const rows = deps.querySelectorAll('li');
+  const rows = Array.from(deps.querySelectorAll('li'));
   assert.equal(rows.length, 2);
   const onBoard = rows.find((li) => /90-01/.test(text(li)))!;
   assert.match(text(onBoard), /90-01 Alpha slice/);
@@ -309,7 +309,7 @@ test('Move to... in the detail opens the same menu as the card and is absent whe
   const menu = h.$('#menu')!;
   assert.equal(menu.hidden, false);
   // The model lives in the page's vm realm; copy its labels into a plain array here, since deepEqual compares the arrays' prototypes too.
-  assert.deepEqual(menu.querySelectorAll('[role="menuitem"]').map((i) => text(i)), [...api(h).cardData('plan:90-01').moves.map((m: any) => m.label)]);
+  assert.deepEqual(Array.from(menu.querySelectorAll('[role="menuitem"]')).map((i) => text(i)), [...api(h).cardData('plan:90-01').moves.map((m: any) => m.label)]);
   h.press(h.focused(), 'Escape');
   assert.equal(h.$('#menu')!.hidden, true, 'the first Escape closes only the menu');
   assert.equal(isOpen(h), true);
@@ -328,7 +328,7 @@ test('a refusal for the open card is shown in the detail as well', async () => {
   const { h } = await drawn(800, 'owner', world);
   openBy(h, 'plan:90-01', messageOf(world, 'plan:90-01'));
   buttonNamed(drawer(h).querySelector('.detail-head')!, 'Move to...')!.click();
-  const choice = h.$('#menu')!.querySelectorAll('[role="menuitem"]').find((i) => text(i).startsWith('Backlog'))!;
+  const choice = Array.from(h.$('#menu')!.querySelectorAll('[role="menuitem"]')).find((i) => text(i).startsWith('Backlog'))!;
   choice.click();
   assert.equal(h.posts.filter((p) => p.type === 'move').length, 1);
   h.deliver({ type: 'refused', itemId: 'plan:90-01', reason: 'Lee already changed this card. The board now shows the latest. Nothing moved.' });

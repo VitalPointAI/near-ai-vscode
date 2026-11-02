@@ -234,7 +234,7 @@
   }
 
   function newItemButton() {
-    return document.querySelectorAll('button').find((b) => b.textContent === T.newItem && !b.hidden);
+    return Array.from(document.querySelectorAll('button')).find((b) => b.textContent === T.newItem && !b.hidden);
   }
   function focusOpener(done) {
     const opener = done.opener;

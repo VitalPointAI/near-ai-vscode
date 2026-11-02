@@ -42,6 +42,13 @@ test('no board script builds markup from a string, evaluates code or reaches the
   }
 });
 
+test('CR-01: no board script calls an Array method straight on a querySelectorAll, children or childNodes result', () => {
+  // A NodeList has forEach and iteration but no map, filter, find, indexOf or some, and an HTMLCollection has no forEach either; such a call throws
+  // in the real webview. The fake DOM has the same shapes now (WR-05); this is the cheap static half of the same rule.
+  const misuse = /(?:querySelectorAll\([^()]*\)|\.children|\.childNodes)\s*\.\s*(?:map|filter|find|findIndex|indexOf|some|every|reduce|includes|slice|concat|flatMap)\s*\(/;
+  for (const file of BOARD_SCRIPTS) assert.equal(misuse.test(text(file)), false, `${file} calls an Array method on a NodeList or HTMLCollection`);
+});
+
 test('every board script is one strict-mode IIFE', () => {
   for (const file of BOARD_SCRIPTS) {
     const code = text(file).split('\n').filter((line) => !/^\s*(\/\/.*)?$/.test(line));
