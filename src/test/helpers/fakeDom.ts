@@ -131,6 +131,10 @@ function matchSteps(node: FakeNode, steps: Step[], index: number): boolean {
 
 const kebab = (name: string): string => name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 const FOCUSABLE = new Set(['button', 'input', 'select', 'textarea', 'a']);
+// The links from a node to the rest of the page. They are kept out of what util.inspect prints: a failing strict assertion prints both sides at
+// depth 1000 and diffs the lines with a diff whose memory grows with the square of the line count, and while these links were enumerable one
+// node printed the whole page again from every node on the way, millions of lines, until the process ran out of memory (62-12 incident).
+const INSPECT_HIDDEN = ['doc', 'parentNode', 'childNodes', 'listeners', 'onText'];
 
 export class FakeNode {
   [key: string]: any;
@@ -174,6 +178,7 @@ export class FakeNode {
       removeProperty: (name: string): string => { const old = styles.get(name) ?? ''; styles.delete(name); return old; },
       getPropertyValue: (name: string): string => styles.get(name) ?? ''
     };
+    for (const key of INSPECT_HIDDEN) Object.defineProperty(this, key, { value: this[key], writable: true, configurable: true, enumerable: false });
   }
 
   // Text and markup. Assigning markup throws on purpose.
