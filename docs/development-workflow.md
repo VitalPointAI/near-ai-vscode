@@ -104,6 +104,16 @@ its own PR. So the review team's result is recorded as a **commit status** named
 `agent-review` on the PR's head commit, and branch protection requires it. A push to the branch
 creates a new head commit without that status, so new commits always need a new review.
 
+**Agents act as the owner's admin account.** The agents run `gh` as the owner, who is an
+admin of the repository and the organization. GitHub therefore lets an agent session do
+everything the owner can: set the `agent-review` status, approve the `marketplace` deployment
+(the owner is its only reviewer) and change branch protection or rulesets. Today these are
+enforced by policy for agent sessions, not by GitHub: the agents are told never to set
+`agent-review` except through `/review-pr`, never to approve a deployment and never to change
+settings, and the scripts never do. The planned hardening is a separate, non-admin bot identity
+for the agents (a machine user or a fine-grained token) that is not an environment reviewer,
+with only that identity's `agent-review` trusted.
+
 A commit status is not a strong signature: GitHub accepts an `agent-review` status from any
 account or workflow with write access, and branch protection cannot require a particular
 account. `merge-pr.mjs` therefore counts only the status set by the account it runs as (the
