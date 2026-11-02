@@ -149,7 +149,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Moves are permission-checked and follow only permitted transitions; an illegal drop snaps back and says why. (BOARD-03)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
 
-**Plans**: 8/14 plans executed in 6 waves
+**Plans**: 9/14 plans executed in 6 waves
 **UI hint**: yes
 
 **Wave 1**
@@ -167,7 +167,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [x] 62-08-PLAN.md — Board host: view and panel, CSP, message parser, moves with native prompts, commands, solo parity (BOARD-01, BOARD-02, BOARD-03)
-- [ ] 62-09-PLAN.md — Board client core: both layouts, filters, lanes, states, live region, keyboard model, styles (BOARD-01, BOARD-03)
+- [x] 62-09-PLAN.md — Board client core: both layouts, filters, lanes, states, live region, keyboard model, styles (BOARD-01, BOARD-03)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 - [ ] 62-10-PLAN.md — Move to... menu (BOARD-03)
@@ -266,7 +266,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 14/14 | In Progress | - |
-| 62. Work model, GSD import, Team Board | v0.6.0 | 8/14 | In Progress | - |
+| 62. Work model, GSD import, Team Board | v0.6.0 | 9/14 | In Progress | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
 | 65. Integration merge train | v0.6.0 | 0/TBD | Not started | - |
