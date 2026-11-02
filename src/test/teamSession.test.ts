@@ -316,7 +316,7 @@ test('a raw-pushed event with a broken signature is printed once, listed by veri
 test('an event of an unsupported type makes verifyLog tell the user to update the extension', async () => {
   await withRig(async (rig) => {
     const started = await startSession(rig);
-    const future = { ...tamperedEvent(rig, 3), type: 'item.created' };
+    const future = { ...tamperedEvent(rig, 3), type: 'claim.taken' };
     rawPush(rig.fixture.clones['raw'] as string, [future], 'raw: future event type');
     const report = await started.session.verifyLog();
     assert.equal(report?.unsupported, 1);

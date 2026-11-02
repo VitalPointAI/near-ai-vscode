@@ -98,7 +98,7 @@ test('unknown versions and types always get the update-the-app reason, even with
   const { event } = await context();
   const unsupported = 'unsupported event type for this version';
   assert.equal(rejection(entryFor({ ...event, v: 2 })).reason, unsupported);
-  assert.equal(rejection(entryFor({ ...event, type: 'item.created' })).reason, unsupported, 'known to the union but not implemented yet');
+  assert.equal(rejection(entryFor({ ...event, type: 'claim.taken' })).reason, unsupported, 'known to the union but not implemented yet');
   assert.equal(rejection(entryFor({ ...event, type: 'made.up' })).reason, unsupported);
   assert.equal(rejection(entryFor({ ...event, type: 7 })).reason, unsupported);
   assert.equal(rejection(entryFor({ ...event, v: 2, id: 'nonsense', lamport: 0, extra: true })).reason, unsupported);
@@ -183,6 +183,7 @@ const OTHER_ID = 'mbr-fedcba9876543210';
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 const EVENT_A = 'evt-01ARZ3NDEKTSV4RRFFQ69G5FAV';
+const ITEM_ID = 'item:01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const LINE_SEPARATOR = String.fromCharCode(0x2028);
 const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029);
 
@@ -207,6 +208,14 @@ function bodiesFor(device: { fingerprint: string; publicKey: string }): Record<s
     'member.skills': { memberId: OTHER_ID, skills: ['typescript', 'c++', 'node.js'] },
     'policy.changed': { changes: { peerMetricsVisible: true, safetyFactorBp: 13000 } },
     'member.key-sealed': { memberId: OTHER_ID, keyId: 'key_0123456789abcdef', scheme: 'x25519-hkdf-sha256-aes-256-gcm-v1', sealed: [sealedEntry(device)] },
+    'item.imported': { id: 'plan:62-01', kind: 'plan', title: 'Work items in the signed log', state: 'backlog', dependsOn: ['plan:62-00'], scope: ['src/domain/team/**'], requirements: ['BOARD-01'], mustHaves: ['Items are validated'], tags: ['wave-1'], parentId: 'phase:62' },
+    'item.created': { id: ITEM_ID, kind: 'chore', title: 'Tidy the config', scope: ['src/**'], requirements: [], mustHaves: [] },
+    'item.updated': { id: 'plan:62-01', changes: { title: 'A clearer title' } },
+    'item.estimated': { id: ITEM_ID, estimate: { tokens: 48000, confidence: 'medium' } },
+    'item.blocked': { id: ITEM_ID, reason: 'waiting for the API key' },
+    'item.unblocked': { id: ITEM_ID },
+    'item.cancelled': { id: 'plan:62-01', reason: 'no longer in the roadmap' },
+    'item.reopened': { id: 'plan:62-01' },
     'snapshot.written': { coversThrough: EVENT_A, lamport: 500, stateHash: HASH_A, path: 'snapshots/000000000500.json' }
   };
 }
@@ -229,7 +238,7 @@ test('valid bodies for every implemented type pass, with and without optional fi
   assert.equal(validateBody('member.availability', { availability: 'away' }), undefined, 'workingHours is optional');
   assert.equal(validateBody('member.skills', { memberId: OTHER_ID, skills: [] }), undefined);
   assert.equal(validateBody('member.joined', { ...bodies['member.joined'], emailHashes: [] }), undefined);
-  assert.equal(validateBody('item.created', {}), 'unsupported event type for this version');
+  assert.equal(validateBody('claim.taken', {}), 'unsupported event type for this version');
   assert.equal(validateBody('member.removed', []), `${INVALID}: body`);
   assert.equal(validateBody('member.removed', null), `${INVALID}: body`);
 });

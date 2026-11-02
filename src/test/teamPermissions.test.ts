@@ -7,7 +7,7 @@ import {
 import type { PermissionView, TeamAction, TeamActionKind } from '../domain/team/permissions';
 import { defaultTeamPolicy } from '../domain/team/policy';
 import { ROLES } from '../domain/team/types';
-import type { ImplementedTeamEvent, Member, Role, TeamPolicy } from '../domain/team/types';
+import type { ImplementedTeamEvent, Member, Role, TeamPolicy, WorkItem } from '../domain/team/types';
 
 const IDS: Record<Role, string> = { owner: 'mbr-owner', lead: 'mbr-lead', developer: 'mbr-dev', reviewer: 'mbr-rev', observer: 'mbr-obs' };
 const EXTRA = 'mbr-extra';
@@ -53,6 +53,7 @@ const rows: Row[] = [
   { name: 'item.edit not own draft', kind: 'item.edit', build: () => ({ kind: 'item.edit', ownDraft: false }), expect: [T, T, F, F, F] },
   { name: 'item.estimate own draft', kind: 'item.estimate', build: () => ({ kind: 'item.estimate', ownDraft: true }), expect: [T, T, T, F, F] },
   { name: 'item.estimate not own draft', kind: 'item.estimate', build: () => ({ kind: 'item.estimate', ownDraft: false }), expect: [T, T, F, F, F] },
+  { name: 'item.move', kind: 'item.move', build: () => ({ kind: 'item.move' }), expect: [T, T, F, F, F] },
   { name: 'item.claim task', kind: 'item.claim', build: () => ({ kind: 'item.claim', itemKind: 'task' }), expect: [T, T, T, F, F] },
   { name: 'item.claim review item', kind: 'item.claim', build: () => ({ kind: 'item.claim', itemKind: 'review' }), expect: [T, T, T, T, F] },
   { name: 'item.assign', kind: 'item.assign', build: () => ({ kind: 'item.assign' }), expect: [T, T, F, F, F] },
@@ -100,7 +101,7 @@ for (const row of rows) {
 
 test('the table covers every kind in the matrix and the matrix has five roles per kind', () => {
   const kinds = Object.keys(PERMISSION_MATRIX);
-  assert.equal(kinds.length, 28);
+  assert.equal(kinds.length, 29);
   for (const kind of kinds) {
     assert.deepEqual(Object.keys(PERMISSION_MATRIX[kind as TeamActionKind]).sort(), [...ROLES].sort(), kind);
     assert.ok(rows.some((row) => row.kind === kind), `no table row for ${kind}`);
@@ -226,6 +227,42 @@ test('actionForEvent maps every non-genesis event type and skips the genesis pai
   ];
   for (const [event, expected] of cases) {
     assert.deepEqual(actionForEvent(event), expected, event.type);
+  }
+});
+
+function boardItem(id: string, createdBy: string, state: WorkItem['state'] = 'backlog'): WorkItem {
+  return {
+    id, kind: 'chore', title: 'Item', dependsOn: [], scope: [], requirements: [], mustHaves: [], state, tags: [],
+    origin: 'board', stateSince: '2026-01-01T00:00:00.000Z', createdBy
+  };
+}
+
+test('actionForEvent maps the item events, and decides own-draft from the stored item the same way for every caller', () => {
+  const ITEM = 'item:01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const mine = { items: new Map([[ITEM, boardItem(ITEM, IDS.developer)]]) };
+  const claimed = { items: new Map([[ITEM, boardItem(ITEM, IDS.developer, 'claimed')]]) };
+  const imported = { items: new Map([['plan:62-01', { ...boardItem('plan:62-01', IDS.developer), kind: 'plan' as const, origin: 'import' as const }]]) };
+  const at = (event: Record<string, unknown>, author: string = IDS.developer): ImplementedTeamEvent => ({ ...ENVELOPE, author, ...event } as ImplementedTeamEvent);
+  const imports = at({ type: 'item.imported', body: { id: 'plan:62-01', kind: 'plan', title: 'P', state: 'backlog', dependsOn: [], scope: [], requirements: [], mustHaves: [], tags: [], parentId: 'phase:62' } });
+  const creates = at({ type: 'item.created', body: { id: ITEM, kind: 'chore', title: 'C', scope: [], requirements: [], mustHaves: [] } });
+  const edits = at({ type: 'item.updated', body: { id: ITEM, changes: { title: 'T' } } });
+  const holds = at({ type: 'item.updated', body: { id: ITEM, changes: { hold: true } } });
+  const done = at({ type: 'item.updated', body: { id: ITEM, changes: { state: 'done' } } });
+  const estimates = at({ type: 'item.estimated', body: { id: ITEM, estimate: { tokens: 10 } } });
+  assert.deepEqual(actionForEvent(imports, mine), { kind: 'item.create', ownDraft: false });
+  assert.deepEqual(actionForEvent(creates, mine), { kind: 'item.create', ownDraft: true });
+  assert.deepEqual(actionForEvent(edits, mine), { kind: 'item.edit', ownDraft: true });
+  assert.deepEqual(actionForEvent(edits), { kind: 'item.edit', ownDraft: false }, 'without a state nothing is an own draft');
+  assert.deepEqual(actionForEvent(edits, claimed), { kind: 'item.edit', ownDraft: false }, 'a claimed item is no longer a draft');
+  assert.deepEqual(actionForEvent(edits, imported), { kind: 'item.edit', ownDraft: false }, 'an unknown item is not an own draft');
+  assert.deepEqual(actionForEvent(at({ type: 'item.updated', body: { id: ITEM, changes: { title: 'T' } } }, IDS.lead), mine), { kind: 'item.edit', ownDraft: false }, 'another author is not the draft owner');
+  assert.deepEqual(actionForEvent(holds, mine), { kind: 'item.move' });
+  assert.deepEqual(actionForEvent(done, mine), { kind: 'item.move' });
+  assert.deepEqual(actionForEvent(estimates, mine), { kind: 'item.estimate', ownDraft: true });
+  assert.deepEqual(actionForEvent(estimates, claimed), { kind: 'item.estimate', ownDraft: false });
+  for (const type of ['item.blocked', 'item.unblocked', 'item.cancelled', 'item.reopened']) {
+    const body = type === 'item.blocked' || type === 'item.cancelled' ? { id: ITEM, reason: 'r' } : { id: ITEM };
+    assert.deepEqual(actionForEvent(at({ type, body }), mine), { kind: 'item.move' }, type);
   }
 });
 

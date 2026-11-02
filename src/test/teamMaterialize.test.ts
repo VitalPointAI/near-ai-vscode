@@ -444,7 +444,7 @@ test('the snapshot hash ignores version-dependent bookkeeping, so rejected junk 
   const w = await world();
   const quiet = reduce(w.genesis, w.anchor);
   // A reader that did not understand a newer event type records a rejection; another reader that saw a forged file records one too.
-  const future = { ...signed(w.owner, { teamId: w.teamId, type: 'member.availability', body: { availability: 'away' }, lamport: 3, prev: w.state.head.eventId }), type: 'item.created' };
+  const future = { ...signed(w.owner, { teamId: w.teamId, type: 'member.availability', body: { availability: 'away' }, lamport: 3, prev: w.state.head.eventId }), type: 'claim.taken' };
   expectRejected(w, entryOf(future as unknown as TeamEvent), R.unsupported);
   const forged = signed(w.owner, { teamId: w.teamId, type: 'member.availability', body: { availability: 'away' }, lamport: 3, prev: w.state.head.eventId });
   reject(w, { ...forged, body: { availability: 'focus' } }, R.badSignature);
