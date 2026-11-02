@@ -14,6 +14,7 @@ import type { CleanupChecklist, CleanupItem, CleanupPatch, NewCleanupItem } from
 import { NO_DEVICE_KEY_MESSAGE } from './eventLog';
 import type { EventIntent, TeamLog } from './eventLog';
 import { emailHash } from './identity';
+import { REMOVED_INVITEE_TEXT, closeInvitationSends } from './invite';
 import { scrubNearText } from './nearOrg';
 import type { NearOrgClient } from './nearOrg';
 import { NearSessionError } from './nearSession';
@@ -242,6 +243,9 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
     return { ok: false, code: failure.code, message };
   }
 
+  // CR-02: a lead's NEAR invitation that never went out must not go out after the removal.
+  const invitationNote = await closeInvitationSends(input.checklist, member.id, REMOVED_INVITEE_TEXT);
+
   // Step 3: revoke each key whose cap is done.
   for (const step of steps) {
     if (step.cap.status !== 'done') continue;
@@ -278,7 +282,7 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
     ok: true, kind: 'removed', keyStillSpends, checklist: saved.items,
     message: sentence([
       `${member.name} was removed from ${input.teamFile.name}.`, keyNote, leftToDo(organization, `${member.name} is still in the NEAR organization.`),
-      'Remove their repository access last; it is on your cleanup list.', saved.notice
+      'Remove their repository access last; it is on your cleanup list.', saved.notice, invitationNote
     ])
   };
 }

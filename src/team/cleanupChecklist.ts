@@ -26,6 +26,8 @@ export interface CleanupItem {
   memberName: string;
   step: CleanupStep;
   keyId?: string;
+  /** For send-invitation: the NEAR organization the invitation was meant for when it was queued (CR-02). */
+  organizationId?: string;
   status: CleanupStatus;
   attempts: number;
   lastError?: string;
@@ -64,7 +66,7 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[]): value i
 function parseItem(value: unknown): CleanupItem {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(DAMAGED);
   const fields = value as Record<string, unknown>;
-  const { id, memberId, memberName, step, keyId, status, attempts, lastError, createdAt } = fields;
+  const { id, memberId, memberName, step, keyId, organizationId, status, attempts, lastError, createdAt } = fields;
   if (typeof id !== 'string' || !ITEM_ID.test(id)) throw new Error(DAMAGED);
   if (typeof memberId !== 'string' || !MEMBER_ID_PATTERN.test(memberId)) throw new Error(DAMAGED);
   if (typeof memberName !== 'string' || validateName(memberName, 'memberName') !== undefined) throw new Error(DAMAGED);
@@ -75,6 +77,10 @@ function parseItem(value: unknown): CleanupItem {
   if (keyId !== undefined) {
     if (typeof keyId !== 'string' || !KEY_ID.test(keyId)) throw new Error(DAMAGED);
     item.keyId = keyId;
+  }
+  if (organizationId !== undefined) {
+    if (typeof organizationId !== 'string' || !KEY_ID.test(organizationId)) throw new Error(DAMAGED);
+    item.organizationId = organizationId;
   }
   if (lastError !== undefined) {
     if (typeof lastError !== 'string' || lastError.length > MAX_ERROR_CHARACTERS) throw new Error(DAMAGED);
@@ -88,6 +94,7 @@ function checkNewItem(item: NewCleanupItem): void {
   if (validateName(item.memberName, 'memberName') !== undefined) throw new RangeError('The cleanup item needs a member name of 1 to 80 characters with no line breaks.');
   if (!oneOf(item.step, CLEANUP_STEPS) || !oneOf(item.status, CLEANUP_STATUSES)) throw new RangeError('The cleanup item has a step or status this version does not know.');
   if (item.keyId !== undefined && !KEY_ID.test(item.keyId)) throw new RangeError('The cleanup item names a key id that is not valid.');
+  if (item.organizationId !== undefined && !KEY_ID.test(item.organizationId)) throw new RangeError('The cleanup item names an organization id that is not valid.');
 }
 
 export class CleanupChecklist {
@@ -145,6 +152,7 @@ export class CleanupChecklist {
           attempts: 0, createdAt: this.now().toISOString()
         };
         if (item.keyId !== undefined) made.keyId = item.keyId;
+        if (item.organizationId !== undefined) made.organizationId = item.organizationId;
         const error = item.lastError === undefined ? '' : cleanError(item.lastError);
         if (error !== '') made.lastError = error;
         return made;

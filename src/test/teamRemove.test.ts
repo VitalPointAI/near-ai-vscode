@@ -28,6 +28,7 @@ import { SEAL_SCHEME, sealTo } from '../team/keySeal';
 import { NearOrgClient } from '../team/nearOrg';
 import type { NearAuth } from '../team/nearOrg';
 import { nearSessionSecretName, saveNearSession } from '../team/nearSession';
+import { recordInvite, retryNearInvitation } from '../team/invite';
 import { KEY_STILL_SPENDS_WARNING, removeMember, retryCleanupItem } from '../team/remove';
 import { REMOVED_FILE, handleOwnRemoval, readRemovedMarker, removedText } from '../team/removedClient';
 import { canonicalTeamFile, checkNearPin, teamStorageDir } from '../team/teamFile';
@@ -636,6 +637,63 @@ test('two leads removing the same member at once: one member.removed is accepted
     // The loser's list records what it did (it capped the key), and nothing it left undone.
     const loserList = first.ok ? await leadChecklist.forMember(dana.memberId) : await w.checklist.forMember(dana.memberId);
     assert.deepEqual(stepsOf(loserList), ['zero-limit:done']);
+  });
+});
+
+// CR-02: a "send the NEAR invitation" item left open must never invite a person the log no longer shows as an invited lead.
+test('CR-02: removing a lead closes their unsent NEAR invitation, and a stale one is closed on Retry with no sign-in and no NEAR call', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    const lee = await addMember(w, 'b', 'Lee Lead', 'lee@example.invalid', 'lead', false);
+    const invitedEvent = w.a.log.state().members.get(lee.memberId)?.invitedEvent as string;
+    await recordInvite(w.checklist.storageDir, { memberId: lee.memberId, name: 'Lee Lead', email: 'lee@example.invalid', role: 'lead', invitedEvent });
+    await w.checklist.add([{ memberId: lee.memberId, memberName: 'Lee Lead', step: 'send-invitation', status: 'pending', organizationId: 'org-1' }]);
+
+    const removed = await removeMember(removeArgs(w, lee.memberId));
+    assert.equal(removed.ok, true, removed.ok ? '' : removed.message);
+    const sends = (await w.checklist.forMember(lee.memberId)).filter((item) => item.step === 'send-invitation');
+    assert.deepEqual(sends.map((item) => item.status), ['done'], 'the removal closed the unsent invitation');
+
+    // An item that is still open (from another window, or saved before the removal) is closed by Retry before any sign-in.
+    const [stale] = await w.checklist.add([{ memberId: lee.memberId, memberName: 'Lee Lead', step: 'send-invitation', status: 'failed', organizationId: 'org-1' }]);
+    assert.ok(stale !== undefined);
+    let signIns = 0;
+    const before = w.fake.requests.length;
+    const outcome = await retryNearInvitation({ item: stale, teamFile: w.teamFile, log: w.a.log, checklist: w.checklist, org: async () => { signIns += 1; return w.org; } });
+    assert.equal(outcome.outcome, 'closed');
+    assert.equal(signIns, 0, 'no sign-in was asked for');
+    assert.equal(w.fake.requests.length, before, 'no NEAR request was sent');
+    assert.equal(w.fake.emailedToken('lee@example.invalid'), undefined, 'nobody was invited to the organization');
+    assert.equal((await w.checklist.list()).find((item) => item.id === stale.id)?.status, 'done');
+  });
+});
+
+test('CR-02: a NEAR invitation is sent on Retry only to a lead still waiting on the same invitation, and never to another organization', async () => {
+  await inWorld(['a'], {}, async (w) => {
+    const { memberId } = await invite(w, 'Kim Lead', 'kim@example.invalid', 'lead');
+    const invitedEvent = w.a.log.state().members.get(memberId)?.invitedEvent as string;
+    await recordInvite(w.checklist.storageDir, { memberId, name: 'Kim Lead', email: 'kim@example.invalid', role: 'lead', invitedEvent });
+
+    // Queued for an organization the team is no longer linked to: closed, nothing sent.
+    const [moved] = await w.checklist.add([{ memberId, memberName: 'Kim Lead', step: 'send-invitation', status: 'pending', organizationId: 'org-old' }]);
+    assert.ok(moved !== undefined);
+    const closed = await retryNearInvitation({ item: moved, teamFile: w.teamFile, log: w.a.log, checklist: w.checklist, org: async () => w.org });
+    assert.equal(closed.outcome, 'closed');
+    assert.equal(w.fake.emailedToken('kim@example.invalid'), undefined);
+
+    // Still an invited lead on this invitation: sent once.
+    const [due] = await w.checklist.add([{ memberId, memberName: 'Kim Lead', step: 'send-invitation', status: 'pending', organizationId: 'org-1' }]);
+    assert.ok(due !== undefined);
+    const sent = await retryNearInvitation({ item: due, teamFile: w.teamFile, log: w.a.log, checklist: w.checklist, org: async () => w.org });
+    assert.equal(sent.outcome, 'sent');
+    assert.notEqual(w.fake.emailedToken('kim@example.invalid'), undefined);
+    assert.equal((await w.checklist.list()).find((item) => item.id === due.id)?.status, 'done');
+
+    // An entry recorded for an earlier invitation of the same id does not match the log's invitation, so it is not sent.
+    await recordInvite(w.checklist.storageDir, { memberId, name: 'Kim Lead', email: 'kim@example.invalid', role: 'lead', invitedEvent: `evt-${'0'.repeat(26)}` });
+    const [superseded] = await w.checklist.add([{ memberId, memberName: 'Kim Lead', step: 'send-invitation', status: 'pending', organizationId: 'org-1' }]);
+    assert.ok(superseded !== undefined);
+    const old = await retryNearInvitation({ item: superseded, teamFile: w.teamFile, log: w.a.log, checklist: w.checklist, org: async () => w.org });
+    assert.equal(old.outcome, 'closed');
   });
 });
 

@@ -791,34 +791,38 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       await runMemberAction(ctx, item.memberId, item.step === 'deliver-key' ? 'deliver-key' : 'rotate-key');
       return;
     }
-    const chosen = await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false);
     if (item.step === 'send-invitation') {
-      const { readInviteDirectory } = await import('../../team/invite');
-      const entry = (await readInviteDirectory(ctx.session.storageDir())).find((candidate) => candidate.memberId === item.memberId);
-      if (entry === undefined) {
-        deps.report('info', `The email address for ${name} is only known on the computer that sent the invitation. Send the NEAR invitation from that computer, or from the NEAR console.`);
-        return;
-      }
-      if (chosen?.org === undefined || ctx.teamFile.near === undefined) {
-        deps.report('info', ctx.teamFile.near === undefined ? 'This team has no NEAR organization linked, so there is no NEAR invitation to send.' : `${what} needs your NEAR sign-in. Nothing was changed.`);
-        return;
-      }
-      try {
-        const outcome = await chosen.org.inviteByEmail(ctx.teamFile.near.organizationId, entry.email, 'admin');
-        if (outcome.ok) {
-          await ctx.checklist.update(item.id, { status: 'done', attempted: true });
+      // CR-02: the log is checked before any sign-in or NEAR call; an invitation for someone removed, joined or re-invited is closed instead.
+      const { retryNearInvitation } = await import('../../team/invite');
+      const outcome = await retryNearInvitation({
+        item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist,
+        org: async () => (await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false))?.org
+      });
+      switch (outcome.outcome) {
+        case 'sent':
           deps.report('info', `${name} was invited to your NEAR organization as an admin. They accept it when they join.`);
-        } else {
-          await ctx.checklist.update(item.id, { status: 'failed', lastError: outcome.reason, attempted: true });
+          return;
+        case 'already-member':
+          deps.report('info', `${name} is already in your NEAR organization.`);
+          return;
+        case 'closed':
+          deps.report('info', `No NEAR invitation was sent to ${name}, and the item was closed. ${await safe(outcome.reason)}`);
+          return;
+        case 'failed':
           deps.report('warn', `The NEAR invitation for ${name} was not sent: ${await safe(outcome.reason)}`);
-        }
-      } catch (error) {
-        const reason = await describeNear(error);
-        await ctx.checklist.update(item.id, { status: 'failed', lastError: reason, attempted: true });
-        deps.report('warn', `The NEAR invitation for ${name} was not sent: ${reason}`);
+          return;
+        case 'not-linked':
+          deps.report('info', await safe(outcome.reason));
+          return;
+        case 'unknown-email':
+          deps.report('info', `The email address for ${name} is only known on the computer that sent the invitation. Send the NEAR invitation from that computer, or from the NEAR console.`);
+          return;
+        case 'needs-sign-in':
+          deps.report('info', `${what} needs your NEAR sign-in. Nothing was changed.`);
+          return;
       }
-      return;
     }
+    const chosen = await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false);
     if (chosen === undefined) return;
     const { retryCleanupItem } = await import('../../team/remove');
     const updated = await retryCleanupItem({ item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist, ...(chosen.org === undefined ? {} : { org: chosen.org }) });

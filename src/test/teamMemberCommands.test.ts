@@ -4,6 +4,7 @@
 // time or read back from the code under test, never written as literals. Team modules load lazily, as in the product.
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import test from 'node:test';
 import { CleanupChecklist, repoAccessText } from '../team/cleanupChecklist';
@@ -855,15 +856,97 @@ test('Retry sends a NEAR invitation left on the cleanup list after asking the le
     assert.equal((await cleanup.list()).find((item) => item.memberName === 'Lee' && item.step === 'send-invitation')?.status, 'done');
     clearUi();
 
+    // CR-02: someone the team list does not have is never invited; the item is closed instead.
     stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Zed', 'Retry');
     await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.ok(shownMessages().some((message) => message.includes('item was closed')), shownMessages().join(' | '));
+    assert.equal((await cleanup.list()).find((item) => item.memberName === 'Zed')?.status, 'done');
+    clearUi();
+
+    // A lead invitation made on another computer has no email here, which is explained and changes nothing.
+    await t.run(SIGN_OUT_NEAR_COMMAND);
+    clearUi();
+    stub.inputAnswers.push('Uma', 'uma@example.invalid', '5');
+    stub.quickPickAnswers.push('Lead', '7 days');
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    await t.run(INVITE_COMMAND);
+    const umaId = parseInviteBundle(stub.clipboardWrites[0] as string).member;
+    const invitesFile = path.join(teamStorageDir(t.storage, teamId), INVITE_FILE);
+    const invites = JSON.parse(await fs.readFile(invitesFile, 'utf8')) as { version: number; invites: Array<{ memberId: string }> };
+    await fs.writeFile(invitesFile, JSON.stringify({ ...invites, invites: invites.invites.filter((entry) => entry.memberId !== umaId) }), 'utf8');
+    clearUi();
+    stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Uma', 'Retry');
+    await t.run(MANAGE_MEMBERS_COMMAND);
     assert.ok(shownMessages().some((message) => message.includes('only known on the computer that sent the invitation')), shownMessages().join(' | '));
+    assert.equal(t.fake?.emailedToken('uma@example.invalid'), undefined);
     clearUi();
 
     stub.quickPickAnswers.push('Repository access for Lee', 'Mark done');
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.deepEqual(manageActions(), ['Mark done']);
     assert.equal((await cleanup.list()).find((item) => item.step === 'repo-access')?.status, 'done');
+  }, { near: true });
+});
+
+// CR-02: a lead's NEAR invitation left on the cleanup list must not invite the person after they were removed or their invitation was replaced.
+test('CR-02: Retry of a NEAR invitation for a removed lead closes the item without signing in or inviting them, and Re-issue closes the old one', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await t.run(SIGN_OUT_NEAR_COMMAND);
+    clearUi();
+    // Lee is invited as a lead without a NEAR sign-in, so the NEAR invitation waits on the cleanup list, and joins.
+    stub.inputAnswers.push('Lee', 'lee@example.invalid', '5');
+    stub.quickPickAnswers.push('Lead', '7 days');
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    await t.run(INVITE_COMMAND);
+    stub.setMessageResponder(undefined);
+    const bundle = stub.clipboardWrites[0] as string;
+    const lee = { memberId: parseInviteBundle(bundle).member };
+    gitIn(t.root, ['push', '-q', 'origin', 'main']);
+    const j = await openJoiner(t);
+    stub.inputAnswers.push(bundle, 'Lee L');
+    await j.run(JOIN_COMMAND);
+    await closeWindow(j);
+    stub.setWorkspaceFolders([t.root]);
+    await t.handle.session()?.sync();
+    clearUi();
+    const teamId = (await readTeamFile(t.root))?.teamId as string;
+    const cleanup = new CleanupChecklist(teamStorageDir(t.storage, teamId));
+    assert.equal((await cleanup.forMember(lee.memberId)).some((item) => item.step === 'send-invitation' && item.status !== 'done'), true, 'the invitation was queued');
+
+    // Removed without a NEAR sign-in: the queued invitation is closed with the removal.
+    stub.quickPickAnswers.push('Lee L, lead, waiting for confirmation', 'Remove');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Remove') ? 'Remove' : actions.includes(WITHOUT_KEY_NOW) ? WITHOUT_KEY_NOW : undefined));
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.notEqual(t.handle.session()?.state().members.get(lee.memberId)?.removedEvent, undefined, shownMessages().join(' | '));
+    assert.equal((await cleanup.forMember(lee.memberId)).some((item) => item.step === 'send-invitation' && item.status !== 'done'), false, 'nothing left to send');
+    clearUi();
+
+    // A stale item still on the list (another window saved it) is closed by Retry: no sign-in, no NEAR invitation.
+    await cleanup.add([{ memberId: lee.memberId, memberName: 'Lee', step: 'send-invitation', status: 'failed' }]);
+    const signIns = t.signIns.count;
+    stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Lee', 'Retry');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Sign in') ? 'Sign in' : undefined));
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.equal(t.fake?.emailedToken('lee@example.invalid'), undefined, 'the removed person was not invited to the NEAR organization');
+    assert.equal(t.signIns.count, signIns, 'no sign-in was asked for');
+    assert.ok(shownMessages().some((message) => message.includes('item was closed')), shownMessages().join(' | '));
+    assert.equal((await cleanup.forMember(lee.memberId)).some((item) => item.step === 'send-invitation' && item.status !== 'done'), false);
+    clearUi();
+
+    // Re-issuing a lead invitation closes the unsent NEAR invitation of the invitation it replaces.
+    stub.inputAnswers.push('Kim', 'kim@example.invalid', '5');
+    stub.quickPickAnswers.push('Lead', '7 days');
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    await t.run(INVITE_COMMAND);
+    const kim = parseInviteBundle(stub.clipboardWrites[0] as string).member;
+    clearUi();
+    stub.quickPickAnswers.push('Invitation for Kim, lead, pending', 'Re-issue', '3 days');
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.equal(stub.clipboardWrites.length, 1, shownMessages().join(' | '));
+    assert.deepEqual((await cleanup.forMember(kim)).filter((item) => item.step === 'send-invitation').map((item) => item.status), ['done'], 'the replaced invitation will not be sent');
+    assert.equal(t.fake?.emailedToken('kim@example.invalid'), undefined);
   }, { near: true });
 });
 
