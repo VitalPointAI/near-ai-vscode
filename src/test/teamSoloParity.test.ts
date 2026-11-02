@@ -202,7 +202,7 @@ test('a team project loads the session lazily, shows Team: <name> and stops its 
     assert.ok(handle.session() !== undefined, 'the session is available');
     assert.ok(Object.keys(require.cache).includes(path.join(DIST_ROOT, 'services', 'team', 'teamSession.js')), 'the session module was loaded once the team was found');
     assert.equal(stub.statusBarItems.length, 1);
-    assert.equal(stub.statusBarItems[0]?.text, 'Team: Parity team');
+    assert.equal(stub.statusBarItems[0]?.text, '$(organization) Team: Parity team');
     assert.equal(stub.statusBarItems[0]?.visible, true);
     assert.ok(stub.outputChannels.some((channel) => channel.name === 'NEAR AI Team'), 'the team output channel exists once there is a team');
     const polls = timers.created.filter((entry) => entry.ms === 15_000);

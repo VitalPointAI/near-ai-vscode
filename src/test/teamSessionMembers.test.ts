@@ -233,7 +233,7 @@ test('tracer: a developer joins from another clone; the owner window says who is
     assert.deepEqual(stub.notificationActions[0], ['Confirm', 'Remove']);
     await until(() => owner.commands.length > 0, 'the Confirm action to run its command');
     assert.deepEqual(owner.commands, [{ id: MANAGE_MEMBERS_COMMAND, args: { memberId: dana.memberId, action: 'confirm' } }]);
-    assert.equal(lastBar().text, 'Team: Alpha (1 pending)');
+    assert.equal(lastBar().text, '$(organization) Team: Alpha (1 pending)');
   });
 });
 
@@ -250,7 +250,7 @@ test('the same join is announced once: not on the next sync and not after a relo
     const second = await startSession(w, 'owner');
     await second.session.sync();
     assert.equal(infoMessages().length, 1, 'a reload does not repeat it');
-    assert.equal(lastBar().text, 'Team: Alpha (1 pending)', 'the count is still shown after the reload');
+    assert.equal(lastBar().text, '$(organization) Team: Alpha (1 pending)', 'the count is still shown after the reload');
 
     const text = await fs.readFile(path.join(first.session.storageDir(), NOTIFIED_FILE), 'utf8');
     const joinedEvent = first.session.state().members.get(dana.memberId)?.joinedEvent;
@@ -270,7 +270,7 @@ test('a developer own window shows no pending count and no confirmation notifica
     const own = await startSession(w, dana);
     await own.session.sync();
     assert.deepEqual(infoMessages().filter((message) => message.includes('waiting for confirmation')), []);
-    assert.equal(lastBar().text, 'Team: Alpha');
+    assert.equal(lastBar().text, '$(organization) Team: Alpha');
   });
 });
 
@@ -279,20 +279,25 @@ test('a member name with $( in it is shown escaped in the notification and the s
     await joinPerson(w, 'b', 'Zed $(zap) Zero', 'zed@example.invalid');
     await startSession(w, 'owner');
     assert.deepEqual(infoMessages(), ['Zed \\$(zap) Zero joined Alpha and is waiting for confirmation']);
-    assert.equal(lastBar().text, 'Team: Alpha (1 pending)');
+    assert.equal(lastBar().text, '$(organization) Team: Alpha (1 pending)');
   });
 });
 
 test('status text: the pending count, the removed state, the NEAR tooltip lines, and one flat bounded line for any label', () => {
   const ok = { state: 'ok' as const };
-  assert.equal(statusText(ok, 'Alpha', { pending: 2 }).text, 'Team: Alpha (2 pending)');
-  assert.equal(statusText(ok, 'Alpha', { pending: 0 }).text, 'Team: Alpha');
-  assert.equal(statusText(ok, 'Alpha').text, 'Team: Alpha');
+  assert.equal(statusText(ok, 'Alpha', { pending: 2 }).text, '$(organization) Team: Alpha (2 pending)');
+  assert.equal(statusText(ok, 'Alpha', { pending: 0 }).text, '$(organization) Team: Alpha');
+  assert.equal(statusText(ok, 'Alpha').text, '$(organization) Team: Alpha');
+  assert.equal(statusText(ok, 'Alpha').tooltip.startsWith('Team sync is working. Click to open the Team Board.'), true);
+  assert.equal(statusText(ok, 'Alpha').command, 'nearAi.team.openBoard');
   assert.match(statusText(ok, 'Alpha', { nearLabel: 'lead@example.invalid' }).tooltip, /NEAR: signed in as lead@example\.invalid/);
   assert.match(statusText(ok, 'Alpha', { nearLinked: false }).tooltip, new RegExp(NO_ORG_NOTICE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.equal(statusText(ok, 'Alpha', { nearLinked: true }).tooltip.includes('NEAR'), false, 'a linked team with no sign-in on this computer says nothing about NEAR');
   const removed = statusText(ok, 'Alpha', { removed: true });
-  assert.equal(removed.text, REMOVED_TEXT);
+  assert.equal(removed.text, `$(error) ${REMOVED_TEXT}`);
+  assert.equal(removed.plain, REMOVED_TEXT);
+  assert.equal(removed.tier, 'error');
+  assert.equal(removed.command, undefined);
   assert.match(removed.tooltip, /You were removed from Alpha/);
   const hostile = statusText(ok, 'Alpha', { nearLabel: `line one\nline $(two) ${'x'.repeat(500)}` }).tooltip;
   assert.equal(/[\r\n]/.test(hostile.replace(/\.\s/g, ' ')), false, 'no line break from a label');
@@ -365,7 +370,7 @@ test('after the owner confirms and delivers, the member window installs the key 
     assert.equal((await readInstalledKey(dana.globalStorageDir, w.teamId))?.keyId, keyId);
     await own.session.sync();
     assert.deepEqual(infoMessages(), [KEY_READY], 'a later sync stays quiet');
-    assert.equal(lastBar().text, 'Team: Alpha', 'a developer window shows no pending count');
+    assert.equal(lastBar().text, '$(organization) Team: Alpha', 'a developer window shows no pending count');
   });
 });
 
@@ -406,7 +411,7 @@ test('the removed member window cleans up once, stops syncing, and shows a remov
 
     assert.equal(own.session.isRemoved(), true);
     assert.deepEqual(warnMessages(), [removedText(TEAM_NAME)]);
-    assert.equal(lastBar().text, REMOVED_TEXT);
+    assert.equal(lastBar().text, `$(error) ${REMOVED_TEXT}`);
     assert.equal(w.timers.live, 0, 'no poll is waiting');
     assert.equal(dana.secrets.values.has(deviceKeySecretName(w.teamId)), false, 'the device key is gone');
     assert.equal(dana.secrets.values.has(sealKeySecretName(w.teamId)), false, 'the seal key is gone');
@@ -438,7 +443,7 @@ test('after a reload the removed marker keeps the window in the removed state wi
 
     const again = await startSession(w, dana);
     assert.equal(again.session.isRemoved(), true);
-    assert.equal(lastBar().text, REMOVED_TEXT);
+    assert.equal(lastBar().text, `$(error) ${REMOVED_TEXT}`);
     assert.equal(w.gitCalls.count, calls, 'the reload made no git call');
     assert.equal(w.timers.requests.length, timersBefore, 'the reload armed no poll');
     assert.equal(await again.session.sync(), false);

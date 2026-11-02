@@ -1,7 +1,7 @@
 // A recording stand-in for the vscode module, installed through Module._load for a whole test file.
 // Modules that import 'vscode' must be required AFTER installVscodeStub, so a test file installs the stub first and loads them lazily.
 // The file has no .test suffix on purpose so the test glob does not run it as a suite.
-export interface RecordedStatusBarItem { text: string; tooltip: string; command?: string; visible: boolean; disposed: boolean; backgroundColor?: unknown }
+export interface RecordedStatusBarItem { text: string; tooltip: string; command?: string; visible: boolean; disposed: boolean; backgroundColor?: unknown; accessibilityInformation?: { label: string; role?: string } }
 
 export interface VscodeStub {
   vscode: unknown;
@@ -136,6 +136,8 @@ export function createVscodeStub(): VscodeStub {
           get tooltip(): string { return item.tooltip; },
           set command(value: string | undefined) { if (value === undefined) delete item.command; else item.command = value; },
           get command(): string | undefined { return item.command; },
+          set accessibilityInformation(value: { label: string; role?: string } | undefined) { if (value === undefined) delete item.accessibilityInformation; else item.accessibilityInformation = { ...value }; },
+          get accessibilityInformation(): { label: string; role?: string } | undefined { return item.accessibilityInformation; },
           set backgroundColor(value: unknown) { item.backgroundColor = value; },
           get backgroundColor(): unknown { return item.backgroundColor; },
           show: (): void => { item.visible = true; },

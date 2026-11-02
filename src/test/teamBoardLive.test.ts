@@ -6,10 +6,12 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import test from 'node:test';
-import { effectiveColumn } from '../domain/team/work';
+import { countReady, effectiveColumn } from '../domain/team/work';
+import { TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { CommittedEvent } from '../domain/team/types';
 import { importPlans } from '../team/importPlans';
 import { UNFOCUSED_POLL_MS } from '../team/syncScheduler';
+import { BRANCH_MISSING_REASON } from '../team/transport';
 import { openLog, rootOf, storageOf } from './helpers/teamFlowRig';
 import type { Participant, Rig } from './helpers/teamFlowRig';
 import { LiveTimers, turn, until, withLiveTeam } from './helpers/teamLiveRig';
@@ -206,4 +208,129 @@ test('window focus and board visibility combine: either one keeps the focused in
       b.session.dispose();
     }
   });
+});
+
+// ---- the status bar (D-17) -------------------------------------------------------------------------------------------------------------------
+
+const OK = { state: 'ok' as const };
+const OPEN_BOARD = 'nearAi.team.openBoard';
+const VERIFY_LOG = 'nearAi.team.verifyLog';
+
+test('status text with cards: ready and pending counts, singular and plural forms, the open-board target and an accessibility label', () => {
+  const { statusText } = barModule;
+  const three = statusText(OK, 'Alpha', { ready: 3, pending: 1 });
+  assert.equal(three.text, '$(organization) Team: 3 ready \u00b7 1 pending');
+  assert.equal(three.plain, 'Team: 3 ready \u00b7 1 pending');
+  assert.equal(three.tooltip, 'Alpha: 3 plans are ready to start. 1 member is waiting for confirmation. Click to open the Team Board.');
+  assert.equal(three.accessibilityLabel, 'Team Board. 3 plans ready. 1 member waiting for confirmation. Open the Team Board.');
+  assert.equal(three.command, OPEN_BOARD);
+  assert.equal(three.tier, 'none');
+
+  const none = statusText(OK, 'Alpha', { ready: 3, pending: 0 });
+  assert.equal(none.text, '$(organization) Team: 3 ready');
+  assert.equal(none.tooltip, 'Alpha: 3 plans are ready to start. Click to open the Team Board.');
+  assert.equal(none.accessibilityLabel, 'Team Board. 3 plans ready. Open the Team Board.');
+
+  assert.equal(statusText(OK, 'Alpha', { ready: 1, pending: 2 }).tooltip, 'Alpha: 1 plan is ready to start. 2 members are waiting for confirmation. Click to open the Team Board.');
+  assert.equal(statusText(OK, 'Alpha', { ready: 1 }).accessibilityLabel, 'Team Board. 1 plan ready. Open the Team Board.');
+  assert.equal(statusText(OK, 'Alpha', { ready: 0 }).text, '$(organization) Team: 0 ready');
+  assert.equal(statusText(OK, 'Alpha', { ready: 0 }).tooltip, 'Alpha: No plans are ready to start. Click to open the Team Board.');
+  assert.equal(statusText(OK, 'Alpha', { ready: 0 }).accessibilityLabel, 'Team Board. No plans ready. Open the Team Board.');
+  assert.equal(statusText(OK, 'Alpha', { ready: 3, nearLabel: 'lead@example.invalid' }).tooltip.endsWith(' NEAR: signed in as lead@example.invalid.'), true, 'the NEAR line follows');
+});
+
+test('status text without cards keeps only the team name and the pending suffix, and always has the icon, tooltip, label and open-board target', () => {
+  const { statusText } = barModule;
+  const quiet = statusText(OK, 'Alpha', { nearLinked: true });
+  assert.equal(quiet.text, '$(organization) Team: Alpha');
+  assert.equal(quiet.tooltip, 'Team sync is working. Click to open the Team Board.');
+  assert.equal(quiet.accessibilityLabel, 'Team Alpha. Sync is working. Open the Team Board.');
+  assert.equal(quiet.command, OPEN_BOARD);
+  const waiting = statusText(OK, 'Alpha', { pending: 2 });
+  assert.equal(waiting.text, '$(organization) Team: Alpha (2 pending)');
+  assert.equal(waiting.plain, 'Team: Alpha (2 pending)');
+});
+
+test('paused, not trusted and removed states: icon, plain form, tooltip ending, tier, click target and an accessibility label that carries the action', () => {
+  const { statusText, PAUSED_UNREACHABLE_TEXT, PAUSED_REWRITTEN_TEXT, PAUSED_MISSING_TEXT, PAUSED_REFUSED_TEXT, REMOVED_TEXT } = barModule;
+  const unreachable = statusText({ state: 'offline', reason: 'could not resolve host' }, 'Alpha');
+  assert.equal(unreachable.text, `$(warning) ${PAUSED_UNREACHABLE_TEXT}`);
+  assert.equal(unreachable.plain, PAUSED_UNREACHABLE_TEXT);
+  assert.ok(unreachable.tooltip.endsWith(' The board shows the last update and cannot be changed until the connection returns. Click to run Verify Team Log.'));
+  assert.equal(unreachable.accessibilityLabel, `${PAUSED_UNREACHABLE_TEXT}. Click to run Verify Team Log.`);
+  assert.equal(unreachable.tier, 'warning');
+  assert.equal(unreachable.command, VERIFY_LOG);
+
+  const rewritten = statusText({ state: 'paused', reason: TEAM_REJECTION_REASONS.logRewritten }, 'Alpha');
+  assert.equal(rewritten.text, `$(warning) ${PAUSED_REWRITTEN_TEXT}`);
+  assert.ok(rewritten.tooltip.endsWith('Click to run Verify Team Log.'));
+  assert.equal(rewritten.tier, 'warning');
+  assert.equal(rewritten.command, VERIFY_LOG);
+
+  const missing = statusText({ state: 'paused', reason: BRANCH_MISSING_REASON }, 'Alpha');
+  assert.equal(missing.text, `$(warning) ${PAUSED_MISSING_TEXT}`);
+  assert.ok(missing.tooltip.endsWith('Click to run Verify Team Log.'));
+  assert.equal(missing.tier, 'warning');
+
+  const refused = statusText({ state: 'paused', reason: TEAM_REJECTION_REASONS.logRefused }, 'Alpha');
+  assert.equal(refused.text, `$(error) ${PAUSED_REFUSED_TEXT}`);
+  assert.ok(refused.tooltip.startsWith('The team log did not pass its checks, so the board is paused.'));
+  assert.ok(refused.tooltip.endsWith('Click to run Verify Team Log.'));
+  assert.equal(refused.tier, 'error');
+  assert.equal(refused.command, VERIFY_LOG);
+
+  const removed = statusText(OK, 'Alpha', { removed: true });
+  assert.equal(removed.text, `$(error) ${REMOVED_TEXT}`);
+  assert.equal(removed.accessibilityLabel, REMOVED_TEXT);
+  assert.equal(removed.tier, 'error');
+  assert.equal(removed.command, undefined);
+
+  for (const shown of [unreachable, rewritten, missing, refused, removed, statusText(OK, 'Alpha', { ready: 2 })]) {
+    assert.equal(shown.plain.includes('$('), false, 'the plain form never carries icon syntax');
+    assert.equal(shown.accessibilityLabel.includes('$('), false, 'the label never carries icon syntax');
+  }
+});
+
+test('a team name that looks like an icon is shown as typed in the text, the tooltip and the label', () => {
+  const { statusText } = barModule;
+  const bare = statusText(OK, '$(alert) Evil');
+  const counted = statusText(OK, '$(alert) Evil', { ready: 2 });
+  for (const field of [bare.text, bare.tooltip, bare.accessibilityLabel, counted.text, counted.tooltip, counted.accessibilityLabel]) {
+    assert.equal(/(^|[^\\])\$\(alert\)/.test(field), false, `${field} has an unescaped icon opener`);
+  }
+  assert.ok(bare.text.includes('\\$(alert) Evil'), 'the text shows the name as typed');
+  assert.ok(bare.accessibilityLabel.includes('\\$(alert) Evil'));
+  assert.ok(counted.tooltip.includes('\\$(alert) Evil'));
+});
+
+test('a session with no items shows the team text with the icon and a label; once the log has cards it shows the ready count from the same poll', async () => {
+  await withLiveTeam(async (rig) => {
+    const b = await startSession(rig, rig.dev);
+    try {
+      const item = stub.statusBarItems[stub.statusBarItems.length - 1];
+      assert.ok(item !== undefined);
+      assert.equal(item.text, '$(organization) Team: Flow team');
+      assert.deepEqual(item.accessibilityInformation, { label: 'Team Flow team. Sync is working. Open the Team Board.', role: 'button' });
+      assert.equal(item.command, OPEN_BOARD);
+      assert.equal(item.backgroundColor, undefined);
+
+      await importFixture(rig);
+      b.timers.fire();
+      const ready = (): number => countReady(b.session.state().items);
+      await until(() => item.text !== '$(organization) Team: Flow team', 'the status bar to show the cards');
+      assert.ok(ready() > 0, 'the fixture has ready plans');
+      assert.equal(item.text, `$(organization) Team: ${ready()} ready`);
+      assert.equal(item.accessibilityInformation?.label, `Team Board. ${ready() === 1 ? '1 plan' : `${ready()} plans`} ready. Open the Team Board.`);
+
+      const before = ready();
+      const owner = await openLog(rig, 'owner');
+      await owner.log.append(() => [{ type: 'item.blocked', body: { id: BLOCKED_PLAN, reason: REASON } }]);
+      b.timers.fire();
+      await until(() => item.text !== `$(organization) Team: ${before} ready`, 'the count to follow the poll');
+      assert.equal(item.text, `$(organization) Team: ${before - 1} ready`);
+      assert.equal(item.command, OPEN_BOARD);
+    } finally {
+      b.session.dispose();
+    }
+  }, { planning: true });
 });

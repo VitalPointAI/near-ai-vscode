@@ -37,7 +37,7 @@ test.after(() => { uninstall(); });
 
 const { TeamSession, UPDATE_EXTENSION_TEXT, READ_ONLY_TEXT, createVscodeTeamSession, focusTransitions, formatVerifyReport, projectAuditSink, TEAM_OUTPUT_CHANNEL } = sessionModule;
 const { PAUSED_REWRITTEN_TEXT, PAUSED_UNREACHABLE_TEXT, createTeamStatusBar } = barModule;
-const statusTextFor = (status: TransportStatus): { text: string; tooltip: string } => barModule.statusText(status, TEAM_NAME);
+const statusTextFor = (status: TransportStatus): { text: string; plain: string; tooltip: string } => barModule.statusText(status, TEAM_NAME);
 type Session = Awaited<ReturnType<typeof TeamSession.start>>;
 type SessionDeps = Parameters<typeof TeamSession.start>[0];
 
@@ -221,9 +221,9 @@ test('start creates the mirror, syncs once, shows Team: <name> and writes two te
   await withRig(async (rig) => {
     const first = await startSession(rig);
     assert.ok(existsSync(path.join(rig.globalStorage, 'team', rig.teamFile.teamId, 'coordination.git', 'HEAD')), 'the mirror lives in global storage');
-    assert.equal(lastItem().text, `Team: ${TEAM_NAME}`);
-    assert.ok(lastItem().tooltip.includes('Verify Team Log'));
-    assert.equal(lastItem().command, 'nearAi.team.verifyLog');
+    assert.equal(lastItem().text, `$(organization) Team: ${TEAM_NAME}`);
+    assert.ok(lastItem().tooltip.startsWith('Team sync is working. Click to open the Team Board.'));
+    assert.equal(lastItem().command, 'nearAi.team.openBoard');
     assert.equal(lastItem().visible, true);
     assert.ok(first.lines.some((line) => line === `Team sync is running for ${TEAM_NAME}.`));
     assert.equal((first.session as unknown as { signing: boolean }).signing, true, 'the owner key was matched to its member after the first sync');
@@ -245,7 +245,7 @@ test('start creates the mirror, syncs once, shows Team: <name> and writes two te
     assert.equal(rig.timers.live.length, 0, 'dispose leaves no timer');
 
     const second = await startSession(rig, { timers: new FakeTimers() });
-    assert.equal(lastItem().text, `Team: ${TEAM_NAME}`);
+    assert.equal(lastItem().text, `$(organization) Team: ${TEAM_NAME}`);
     assert.equal((await auditRows(rig.projectRoot)).length, 2, 'a restart does not mirror the same events again');
     second.session.dispose();
     assertPlainCopy(first.lines);
@@ -258,7 +258,7 @@ test('a computer without a device key reads and mirrors but is told it is read-o
     const started = await startSession(rig, { secrets: new MemorySecrets() });
     assert.ok(started.lines.includes(READ_ONLY_TEXT));
     assert.equal((started.session as unknown as { signing: boolean }).signing, false);
-    assert.equal(lastItem().text, `Team: ${TEAM_NAME}`);
+    assert.equal(lastItem().text, `$(organization) Team: ${TEAM_NAME}`);
     assert.equal((await auditRows(rig.projectRoot)).length, 2);
   });
 });
@@ -384,10 +384,12 @@ test('an unreachable remote pauses with a redacted reason, backs off to 10 minut
       await until(() => rig.timers.requests.length === failure + 1, `failure ${failure} to be scheduled`);
     }
     assert.deepEqual(rig.timers.delays(), [15_000, 30_000, 60_000, 120_000, 240_000, 480_000, 600_000, 600_000]);
-    assert.equal(lastItem().text, PAUSED_UNREACHABLE_TEXT);
+    assert.equal(lastItem().text, `$(warning) ${PAUSED_UNREACHABLE_TEXT}`);
+    assert.equal(lastItem().command, 'nearAi.team.verifyLog');
     assert.equal(PAUSED_UNREACHABLE_TEXT, 'Team sync paused: remote unreachable');
     assert.ok(lastItem().tooltip.startsWith('The team remote could not be reached'));
     assert.ok(lastItem().tooltip.includes('right away when this window gets focus'));
+    assert.ok(lastItem().tooltip.endsWith('Click to run Verify Team Log.'));
     for (const text of everyShownText(started.lines)) {
       assert.equal(text.includes(canaries.urlPassword), false, `password not in: ${text}`);
       assert.equal(text.includes(userName), false, `user name not in: ${text}`);
@@ -403,7 +405,7 @@ test('an unreachable remote pauses with a redacted reason, backs off to 10 minut
     await until(() => rig.timers.live.length === 1, 'the retry to settle');
     started.session.focusChanged(false);
     started.session.focusChanged(true);
-    await until(() => lastItem().text === `Team: ${TEAM_NAME}`, 'the status bar to recover');
+    await until(() => lastItem().text === `$(organization) Team: ${TEAM_NAME}`, 'the status bar to recover');
     assert.ok(started.lines.includes('Team sync is working again.'));
     await until(() => rig.timers.delays().at(-1) === 15_000, 'the delay to reset');
     assertPlainCopy(started.lines);
@@ -415,9 +417,9 @@ test('a rewritten coordination branch shows the log rewritten state with the D-3
     const started = await startSession(rig);
     rewriteRemote(rig);
     assert.equal(await started.session.sync(), false);
-    assert.equal(lastItem().text, PAUSED_REWRITTEN_TEXT);
+    assert.equal(lastItem().text, `$(warning) ${PAUSED_REWRITTEN_TEXT}`);
     assert.equal(PAUSED_REWRITTEN_TEXT, 'Team sync paused: log rewritten');
-    assert.equal(lastItem().tooltip, TEAM_REJECTION_REASONS.logRewritten);
+    assert.equal(lastItem().tooltip, `${TEAM_REJECTION_REASONS.logRewritten}. Click to run Verify Team Log.`);
     assert.ok(started.lines.some((line) => line.startsWith(`${PAUSED_REWRITTEN_TEXT}.`) && line.includes(TEAM_REJECTION_REASONS.logRewritten)));
     assertPlainCopy(started.lines);
   });
@@ -477,7 +479,7 @@ test('createVscodeTeamSession wires focus, the pollSeconds setting and its dispo
     const session = await createVscodeTeamSession(context as never, rig.projectRoot, rig.teamFile, channel);
     try {
       assert.equal(session.teamFile.teamId, rig.teamFile.teamId);
-      assert.equal(lastItem().text, `Team: ${TEAM_NAME}`);
+      assert.equal(lastItem().text, `$(organization) Team: ${TEAM_NAME}`);
       assert.equal(context.subscriptions.length, 3, 'session, window state listener and configuration listener');
       assert.equal((await auditRows(rig.projectRoot)).length, 2);
 
@@ -628,7 +630,8 @@ test('credentials in a git error never reach the tooltip, the channel or a notif
     assert.equal(shown.tooltip.includes(canaries.urlPassword), false);
     assert.equal(shown.tooltip.includes(userName), false);
     assert.equal(shown.tooltip.includes('\n'), false);
-    assert.equal(shown.text, PAUSED_UNREACHABLE_TEXT);
+    assert.equal(shown.text, `$(warning) ${PAUSED_UNREACHABLE_TEXT}`);
+    assert.equal(shown.plain, PAUSED_UNREACHABLE_TEXT);
   }
 
   await withRig(async (rig) => {
@@ -642,10 +645,10 @@ test('credentials in a git error never reach the tooltip, the channel or a notif
     const started = await startSession(rig, { git: hostile });
     mode = 'report';
     assert.equal(await started.session.sync(), false);
-    assert.equal(lastItem().text, PAUSED_UNREACHABLE_TEXT);
+    assert.equal(lastItem().text, `$(warning) ${PAUSED_UNREACHABLE_TEXT}`);
     mode = 'throw';
     assert.equal(await started.session.sync(), false);
-    assert.equal(lastItem().text, PAUSED_UNREACHABLE_TEXT);
+    assert.equal(lastItem().text, `$(warning) ${PAUSED_UNREACHABLE_TEXT}`);
     assert.ok(started.lines.some((line) => line.startsWith('Team sync failed:')), 'a thrown error is written to the channel');
     await started.session.verifyLog();
     for (const text of everyShownText(started.lines)) {
@@ -679,8 +682,9 @@ test('a coordination log that does not match the genesis anchor shows a paused n
   await withRig(async (rig) => {
     const wrongAnchor: TeamFile = { ...rig.teamFile, genesis: { ...rig.teamFile.genesis, eventId: newEventId() } };
     const started = await startSession(rig, { teamFile: wrongAnchor, globalStorageDir: rig.fixture.storageDir('wrong-team') });
-    assert.equal(lastItem().text, barModule.PAUSED_REFUSED_TEXT);
-    assert.equal(lastItem().text, 'Team log not trusted');
+    assert.equal(lastItem().text, `$(error) ${barModule.PAUSED_REFUSED_TEXT}`);
+    assert.equal(lastItem().text, '$(error) Team log not trusted');
+    assert.equal(lastItem().command, 'nearAi.team.verifyLog');
     assert.equal(lastItem().tooltip.includes('Team sync is working'), false);
     assert.ok(lastItem().tooltip.includes(TEAM_REJECTION_REASONS.logRefused));
     assert.equal(await started.session.sync(), false, 'a refused log is not a healthy sync, so the scheduler backs off');
@@ -696,11 +700,11 @@ test('a coordination branch deleted on the remote shows a log-missing status tha
     const head = gitIn(rig.fixture.remote, ['rev-parse', DEFAULT_COORDINATION_REF]);
     gitIn(rig.fixture.remote, ['update-ref', '-d', DEFAULT_COORDINATION_REF]);
     assert.equal(await started.session.sync(), false);
-    assert.equal(lastItem().text, barModule.PAUSED_MISSING_TEXT);
+    assert.equal(lastItem().text, `$(warning) ${barModule.PAUSED_MISSING_TEXT}`);
     assert.equal(lastItem().tooltip.includes('Team sync is working'), false);
     gitIn(rig.fixture.remote, ['update-ref', DEFAULT_COORDINATION_REF, head]);
     assert.equal(await started.session.sync(), true);
-    assert.equal(lastItem().text, `Team: ${TEAM_NAME}`);
+    assert.equal(lastItem().text, `$(organization) Team: ${TEAM_NAME}`);
     assertPlainCopy(started.lines);
   });
 });
