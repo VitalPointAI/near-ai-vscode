@@ -27,6 +27,58 @@ export interface TeamModeOptions { nearBaseUrl?: string; fetch?: FetchLike; sign
 
 type Level = 'info' | 'warn' | 'error';
 
+/**
+ * The running team session of a window and the one start in flight (WR-06). start() joins a start in flight. restart() first waits for any
+ * start in flight (so it never ends on a session built from the old team.json or device key), disposes what is running, then starts fresh;
+ * restarts run one after another.
+ */
+export interface SessionSlot<T extends { dispose(): void }> {
+  current(): T | undefined;
+  start(): Promise<TeamModeState>;
+  restart(): Promise<TeamModeState>;
+  /** Forgets the session without disposing it (the window is closing and its subscriptions dispose it). */
+  clear(): void;
+}
+
+export function createSessionSlot<T extends { dispose(): void }>(make: () => Promise<{ session?: T; state: TeamModeState }>): SessionSlot<T> {
+  let session: T | undefined;
+  let starting: Promise<TeamModeState> | undefined;
+  let restarting: Promise<unknown> = Promise.resolve();
+
+  async function start(): Promise<TeamModeState> {
+    if (session !== undefined) return 'team';
+    if (starting !== undefined) return starting;
+    const run = (async (): Promise<TeamModeState> => {
+      const made = await make();
+      if (made.session !== undefined) session = made.session;
+      return made.state;
+    })();
+    starting = run;
+    try {
+      return await run;
+    } finally {
+      if (starting === run) starting = undefined;
+    }
+  }
+
+  async function restartNow(): Promise<TeamModeState> {
+    // A start that began before this restart read the old team.json and device key; it is let finish and then thrown away.
+    while (starting !== undefined) await starting.catch(() => undefined);
+    const old = session;
+    session = undefined;
+    old?.dispose();
+    return start();
+  }
+
+  function restart(): Promise<TeamModeState> {
+    const run = restarting.then(restartNow, restartNow);
+    restarting = run.catch(() => undefined);
+    return run;
+  }
+
+  return { current: () => session, start, restart, clear: (): void => { session = undefined; } };
+}
+
 function isMissing(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
   return code === 'ENOENT' || code === 'ENOTDIR';
@@ -49,9 +101,8 @@ async function teamFileExists(projectRoot: string): Promise<boolean> {
 
 export function registerTeamMode(context: vscode.ExtensionContext, options: TeamModeOptions = {}): TeamModeHandle {
   let channel: vscode.OutputChannel | undefined;
-  let session: TeamSession | undefined;
-  let starting: Promise<TeamModeState> | undefined;
   let disposed = false;
+  let projectRootForSlot: string | undefined;
 
   // Created on first use, so a solo project never gets one.
   const output = {
@@ -94,33 +145,29 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     announce(level, message);
   }
 
-  async function startSession(projectRoot: string): Promise<TeamModeState> {
-    if (session !== undefined) return 'team';
-    if (starting !== undefined) return starting;
-    const run = (async (): Promise<TeamModeState> => {
-      try {
-        const { readTeamFile } = await import('../../team/teamFile');
-        const teamFile = await readTeamFile(projectRoot);
-        if (teamFile === undefined) return 'solo';
-        const { createVscodeTeamSession } = await import('./teamSession');
-        const started = await createVscodeTeamSession(context, projectRoot, teamFile, output);
-        if (disposed) {
-          started.dispose();
-          return 'solo';
-        }
-        session = started;
-        return 'team';
-      } catch (error) {
-        report('warn', `Team Mode did not start: ${await describe(error)}`);
-        return 'error';
-      }
-    })();
-    starting = run;
+  const slot = createSessionSlot<TeamSession>(async () => {
+    const projectRoot = projectRootForSlot;
+    if (projectRoot === undefined) return { state: 'solo' };
     try {
-      return await run;
-    } finally {
-      starting = undefined;
+      const { readTeamFile } = await import('../../team/teamFile');
+      const teamFile = await readTeamFile(projectRoot);
+      if (teamFile === undefined) return { state: 'solo' };
+      const { createVscodeTeamSession } = await import('./teamSession');
+      const started = await createVscodeTeamSession(context, projectRoot, teamFile, output);
+      if (disposed) {
+        started.dispose();
+        return { state: 'solo' };
+      }
+      return { session: started, state: 'team' };
+    } catch (error) {
+      report('warn', `Team Mode did not start: ${await describe(error)}`);
+      return { state: 'error' };
     }
+  });
+
+  function startSession(projectRoot: string): Promise<TeamModeState> {
+    projectRootForSlot = projectRoot;
+    return slot.start();
   }
 
   async function detect(): Promise<TeamModeState> {
@@ -136,11 +183,10 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   }
 
   // After a join or a NEAR link the running session is out of date (a new device key, a changed team.json), so it is replaced by a fresh one.
+  // A start still in flight is waited for and thrown away first (WR-06), so the restart never ends on the old session.
   async function restartSession(projectRoot: string): Promise<void> {
-    const old = session;
-    session = undefined;
-    old?.dispose();
-    await startSession(projectRoot);
+    projectRootForSlot = projectRoot;
+    await slot.restart();
   }
 
   async function verifyLog(): Promise<void> {
@@ -149,12 +195,13 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       announce('info', SOLO_TEXT);
       return;
     }
-    if (session === undefined) {
+    if (slot.current() === undefined) {
       const state = await startSession(projectRoot);
       if (state === 'solo') announce('info', SOLO_TEXT);
-      if (session === undefined) return;
     }
-    await session.verifyLog();
+    const running = slot.current();
+    if (running === undefined) return;
+    await running.verifyLog();
   }
 
   async function ask(options: vscode.InputBoxOptions): Promise<string | undefined> {
@@ -248,17 +295,17 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     vscode.commands.registerCommand(ENABLE_COMMAND, guarded('Enable Team Mode', enable)),
     vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Verify Team Log', verifyLog)),
     ...registerMemberCommands({
-      context, output, report, announce, soloText: SOLO_TEXT, firstFolder, session: () => session, startSession, restartSession,
+      context, output, report, announce, soloText: SOLO_TEXT, firstFolder, session: () => slot.current(), startSession, restartSession,
       ...(options.nearBaseUrl === undefined ? {} : { nearBaseUrl: options.nearBaseUrl }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.signIn === undefined ? {} : { signIn: options.signIn })
     }),
-    { dispose: (): void => { disposed = true; session = undefined; } }
+    { dispose: (): void => { disposed = true; slot.clear(); } }
   );
 
   const ready = detect().catch(async (error: unknown): Promise<TeamModeState> => {
     output.appendLine(`Team Mode could not start: ${await describe(error)}`);
     return 'error';
   });
-  return { ready, session: () => session };
+  return { ready, session: () => slot.current() };
 }

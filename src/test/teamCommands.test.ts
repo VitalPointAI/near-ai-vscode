@@ -19,7 +19,7 @@ const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 test.after(() => { uninstall(); });
-const { ENABLE_COMMAND, PUSH_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, registerTeamMode } = commandsModule;
+const { ENABLE_COMMAND, PUSH_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, createSessionSlot, registerTeamMode } = commandsModule;
 
 const EM_DASH = '—';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
@@ -324,4 +324,42 @@ test('no message, channel line, status text or tooltip contains an em-dash', asy
     assert.equal(uiText().includes(EM_DASH), false);
     assert.ok(stub.notifications.length >= 3, 'the check covered several messages');
   });
+});
+
+// WR-06: a restart (after Join or a NEAR link) while the first session start is still syncing must end on a fresh session, not the old start.
+test('WR-06: restarting while the first start is still running waits for it, disposes it and ends on a fresh session', async () => {
+  interface Fake { id: number; disposed: boolean; dispose(): void }
+  const made: Fake[] = [];
+  const gates: Array<() => void> = [];
+  const slot = createSessionSlot<Fake>(async () => {
+    const fake: Fake = { id: made.length + 1, disposed: false, dispose(): void { this.disposed = true; } };
+    made.push(fake);
+    await new Promise<void>((release) => { gates.push(release); });
+    return { session: fake, state: 'team' as const };
+  });
+  const first = slot.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  const restarted = slot.restart();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(made.length, 1, 'the restart waits for the start in flight instead of joining it');
+  gates.shift()?.();
+  assert.equal(await first, 'team');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(made.length, 2, 'a fresh start began after the old one finished');
+  assert.equal(made[0]?.disposed, true, 'the session from before the restart was disposed');
+  gates.shift()?.();
+  await restarted;
+  assert.equal(slot.current()?.id, 2, 'the slot ends on the fresh session');
+  assert.equal(made[1]?.disposed, false);
+
+  // Two restarts at once run one after the other and end on the newest session.
+  let settled = false;
+  const both = Promise.all([slot.restart(), slot.restart()]).then(() => { settled = true; });
+  while (!settled) {
+    await new Promise((resolve) => setImmediate(resolve));
+    gates.shift()?.();
+  }
+  await both;
+  assert.equal(slot.current()?.id, made.length);
+  assert.ok(made.slice(0, -1).every((fake) => fake.disposed), 'every older session was disposed');
 });
