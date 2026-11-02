@@ -1,14 +1,24 @@
-// Team Board model (RED stub): types are final, behaviour arrives with the GREEN commit.
+// Team Board model (D-07, D-08, D-12, D-13, D-15, D-16, D-18): the whole board as a pure function of the log, and the one place that decides a move.
+// The menu, the drop targets and the write path all ask planMove, so the board offers only what the log would accept, and the host re-runs the same
+// function on fresh state inside the append. Pure: no vscode, no I/O, no clock reads (nowMs is a parameter used for display text only).
+import { COLUMN_CAPTIONS, COLUMN_LABELS, KIND_WORDS, MOVE_LABELS, REFUSALS, cardLabel, ageText, estimateText, flattenName, SOMEONE } from './boardText';
 import type { HistoryEntry } from './itemHistory';
-import type { ItemBlockedBody, ItemCancelledBody, ItemKind, ItemReopenedBody, ItemUnblockedBody, ItemUpdatedBody, Role, TeamState } from './types';
+import { decideTeamAction } from './permissions';
+import type {
+  ImplementedTeamEvent, ItemBlockedBody, ItemCancelledBody, ItemKind, ItemReopenedBody, ItemUnblockedBody, ItemUpdatedBody, Role, TeamState, WorkItem
+} from './types';
+import { TEAM_REJECTION_REASONS } from './types';
+import { BOARD_COLUMNS, effectiveColumn, isCard, transitionProblem } from './work';
 import type { BoardColumn } from './work';
 
 export const MOVE_KEYS = ['done', 'cancel', 'hold', 'release', 'reopen', 'block', 'unblock'] as const;
 export type MoveKey = typeof MOVE_KEYS[number];
 export interface CardMove { key: MoveKey; label: string; column?: BoardColumn; prompt: 'none' | 'reason' | 'confirm'; dependents?: number }
+// A structural subset of the EventIntent union in src/team/eventLog.ts, so the host can append it without a cast.
 export type MoveIntent =
   | { type: 'item.updated'; body: ItemUpdatedBody } | { type: 'item.blocked'; body: ItemBlockedBody } | { type: 'item.unblocked'; body: ItemUnblockedBody }
   | { type: 'item.cancelled'; body: ItemCancelledBody } | { type: 'item.reopened'; body: ItemReopenedBody };
+export type MoveResult = { ok: true; intent: MoveIntent } | { ok: false; reason: string };
 
 export type BoardStatus = { kind: 'live' | 'syncing' | 'offline' | 'paused' | 'removed'; text: string; lastUpdated?: string };
 export interface BoardModelOptions { nowMs: number; status: BoardStatus; viewerId?: string; canWrite: boolean; readOnlyReason?: string }
@@ -38,23 +48,188 @@ export interface CardDetail {
   notReady: string[]; editable: boolean; history: Array<{ at: string; text: string }>; historyNote?: string;
 }
 
-export function planMove(_state: TeamState, _viewerId: string | undefined, _itemId: string, _move: MoveKey, _input?: { reason?: string }): { ok: true; intent: MoveIntent } | { ok: false; reason: string } {
-  return { ok: false, reason: '' };
+const R = TEAM_REJECTION_REASONS;
+// A stand-in reason used only to ask "would this move be accepted": availableMoves never writes it.
+const PLACEHOLDER_REASON = 'placeholder';
+const MOVE_COLUMN: Readonly<Partial<Record<MoveKey, BoardColumn>>> = { done: 'done', cancel: 'cancelled', hold: 'backlog', release: 'ready', reopen: 'backlog' };
+const MOVE_PROMPT: Readonly<Record<MoveKey, CardMove['prompt']>> = { done: 'confirm', cancel: 'reason', hold: 'none', release: 'none', reopen: 'none', block: 'reason', unblock: 'none' };
+
+// ---- who may move ----------------------------------------------------------------------------------------------------------------------------
+
+// The reason this viewer may not move cards at all, or undefined when the role allows it. Decision first (D-12, A12): no viewer is a computer
+// without a device key, a removed member can look but not touch, and the matrix decides the rest.
+function moveDenial(state: TeamState, viewerId: string | undefined): string | undefined {
+  if (viewerId === undefined) return REFUSALS.noDeviceKey;
+  const member = state.members.get(viewerId);
+  if (member?.removedEvent !== undefined) return REFUSALS.removed;
+  return decideTeamAction(state, viewerId, { kind: 'item.move' }).allowed ? undefined : REFUSALS.notManager;
 }
 
-export function availableMoves(_state: TeamState, _viewerId: string | undefined, _itemId: string): CardMove[] {
-  return [];
+// ---- planMove --------------------------------------------------------------------------------------------------------------------------------
+
+function intentFor(itemId: string, move: MoveKey, reason: string): MoveIntent {
+  switch (move) {
+    case 'done': return { type: 'item.updated', body: { id: itemId, changes: { state: 'done' } } };
+    case 'hold': return { type: 'item.updated', body: { id: itemId, changes: { hold: true } } };
+    case 'release': return { type: 'item.updated', body: { id: itemId, changes: { hold: false } } };
+    case 'cancel': return { type: 'item.cancelled', body: { id: itemId, reason } };
+    case 'reopen': return { type: 'item.reopened', body: { id: itemId } };
+    case 'block': return { type: 'item.blocked', body: { id: itemId, reason } };
+    case 'unblock': return { type: 'item.unblocked', body: { id: itemId } };
+  }
 }
 
-export function columnMove(_state: TeamState, _viewerId: string | undefined, _itemId: string, _column: BoardColumn): { ok: true; move?: MoveKey } | { ok: false; reason: string } {
-  return { ok: false, reason: '' };
+// The state machine of 62-01 answers on a synthetic envelope: transitionProblem reads only the type and the body.
+function transitionFor(state: TeamState, viewerId: string, intent: MoveIntent): string | undefined {
+  const event = { v: 1, id: 'evt-probe', teamId: state.team.id, type: intent.type, lamport: 0, at: '', author: viewerId, device: '', prev: '', body: intent.body, sig: '' };
+  return transitionProblem(state, event as unknown as ImplementedTeamEvent);
 }
 
-export function buildBoardModel(_state: TeamState, options: BoardModelOptions): BoardModel {
+// A transition reason in the board's own words, by the move that ran into it.
+function refusalFor(move: MoveKey, problem: string, item: WorkItem): string {
+  if (problem === R.itemMissing) return REFUSALS.missing;
+  if (problem === R.itemTerminal) return REFUSALS.alreadySettled;
+  switch (move) {
+    case 'done': return problem === R.itemBlocked ? REFUSALS.doneBlocked : REFUSALS.doneNotNow;
+    case 'hold': return item.hold === true ? REFUSALS.alreadyHeld : REFUSALS.holdNotNow;
+    case 'release': return REFUSALS.notHeld;
+    case 'reopen': return REFUSALS.notTerminal;
+    case 'block': return problem === R.itemBlocked ? REFUSALS.alreadyBlocked : REFUSALS.blockNotNow;
+    case 'unblock': return REFUSALS.notBlocked;
+    case 'cancel': return REFUSALS.alreadySettled;
+  }
+}
+
+// The one function that decides a move: the exact intent to append, or a plain refusal that ends "Nothing was moved." (D-12, D-16, BOARD-03).
+export function planMove(state: TeamState, viewerId: string | undefined, itemId: string, move: MoveKey, input: { reason?: string } = {}): MoveResult {
+  const denied = moveDenial(state, viewerId);
+  if (denied !== undefined || viewerId === undefined) return { ok: false, reason: denied ?? REFUSALS.noDeviceKey };
+  const item = state.items.get(itemId);
+  if (item === undefined || !isCard(item)) return { ok: false, reason: REFUSALS.missing };
+  const intent = intentFor(itemId, move, (input.reason ?? '').trim());
+  const problem = transitionFor(state, viewerId, intent);
+  if (problem !== undefined) return { ok: false, reason: refusalFor(move, problem, item) };
+  if (move === 'hold' && effectiveColumn(state.items, item) !== 'ready') return { ok: false, reason: REFUSALS.holdNotReady };
+  return { ok: true, intent };
+}
+
+// The menu: each move whose plan succeeds, in menu order. The two moves that need a reason are asked with a placeholder.
+export function availableMoves(state: TeamState, viewerId: string | undefined, itemId: string): CardMove[] {
+  const moves: CardMove[] = [];
+  for (const key of MOVE_KEYS) {
+    if (!planMove(state, viewerId, itemId, key, { reason: PLACEHOLDER_REASON }).ok) continue;
+    const column = MOVE_COLUMN[key];
+    moves.push({ key, label: MOVE_LABELS[key], ...(column === undefined ? {} : { column }), prompt: MOVE_PROMPT[key] });
+  }
+  return moves;
+}
+
+const CLAIM_COLUMNS: readonly BoardColumn[] = ['claimed', 'in-progress', 'in-review', 'integrating'];
+
+// A drop target as a move: the key to plan, nothing to do when the card is already there, or the refusal to show on the card.
+export function columnMove(state: TeamState, viewerId: string | undefined, itemId: string, column: BoardColumn): { ok: true; move?: MoveKey } | { ok: false; reason: string } {
+  const item = state.items.get(itemId);
+  if (item === undefined || !isCard(item)) return { ok: false, reason: REFUSALS.missing };
+  const current = effectiveColumn(state.items, item);
+  if (current === column) return { ok: true };
+  const denied = moveDenial(state, viewerId);
+  if (denied !== undefined) return { ok: false, reason: denied };
+  if (CLAIM_COLUMNS.includes(column)) return { ok: false, reason: REFUSALS[column as 'claimed' | 'in-progress' | 'in-review' | 'integrating'] };
+  const move: MoveKey | undefined = column === 'done' ? 'done' : column === 'cancelled' ? 'cancel' : column === 'backlog' && current === 'ready' ? 'hold' : undefined;
+  if (move === undefined) return { ok: false, reason: REFUSALS.notNow };
+  const planned = planMove(state, viewerId, itemId, move, { reason: PLACEHOLDER_REASON });
+  return planned.ok ? { ok: true, move } : { ok: false, reason: planned.reason };
+}
+
+// ---- the model -------------------------------------------------------------------------------------------------------------------------------
+
+function memberName(state: TeamState, id: string | undefined): string {
+  const name = id === undefined ? undefined : state.members.get(id)?.name;
+  return name === undefined ? SOMEONE : flattenName(name);
+}
+
+function displayIdOf(item: WorkItem): string {
+  if (item.kind === 'plan') return item.id.slice('plan:'.length);
+  if (item.origin === 'board') return `${KIND_WORDS[item.kind] ?? item.kind} ${item.id.slice(-4)}`;
+  return item.id;
+}
+
+function milestoneOf(state: TeamState, item: WorkItem): string | undefined {
+  const phase = item.parentId === undefined ? undefined : state.items.get(item.parentId);
+  return phase?.kind === 'phase' ? phase.parentId : undefined;
+}
+
+function selectedMilestoneOf(state: TeamState): string {
+  const active = [...state.items.values()].filter((item) => item.kind === 'milestone' && item.active === true).map((item) => item.id).sort();
+  return active[0] ?? 'all';
+}
+
+function visibleUnder(card: BoardCard, selected: string): boolean {
+  return selected === 'all' || card.milestoneId === selected || card.milestoneId === undefined;
+}
+
+function viewerOf(state: TeamState, options: BoardModelOptions): BoardViewer {
+  const member = options.viewerId === undefined ? undefined : state.members.get(options.viewerId);
+  const active = member !== undefined && member.removedEvent === undefined;
+  const canWrite = options.canWrite && active;
+  const allowed = (ownDraft: boolean): boolean => canWrite && options.viewerId !== undefined && decideTeamAction(state, options.viewerId, { kind: 'item.create', ownDraft }).allowed;
+  const viewer: BoardViewer = { name: member === undefined ? '' : flattenName(member.name), canWrite, canImport: allowed(false), canCreate: allowed(true) };
+  if (member !== undefined) viewer.role = member.role;
+  return viewer;
+}
+
+function moveGateReason(state: TeamState, options: BoardModelOptions): string | undefined {
+  if (!options.canWrite) return options.readOnlyReason ?? (options.viewerId === undefined ? REFUSALS.noDeviceKey : REFUSALS.offline);
+  return moveDenial(state, options.viewerId);
+}
+
+function cardOf(state: TeamState, options: BoardModelOptions, gate: string | undefined, item: WorkItem): BoardCard {
+  const column = effectiveColumn(state.items, item);
+  const milestoneId = milestoneOf(state, item);
+  const phase = item.parentId !== undefined && state.items.get(item.parentId)?.kind === 'phase' ? item.parentId : undefined;
+  const refusals: Partial<Record<BoardColumn, string>> = {};
+  for (const target of BOARD_COLUMNS) {
+    if (target === column) continue;
+    const verdict = gate === undefined ? columnMove(state, options.viewerId, item.id, target) : { ok: false as const, reason: gate };
+    if (!verdict.ok) refusals[target] = verdict.reason;
+  }
+  const blocked = item.blocked === undefined ? undefined : { reason: flattenName(item.blocked.reason, 200), byName: memberName(state, item.blocked.by), since: item.blocked.since };
+  const doneInGsd = item.summary === true && item.state !== 'done' && item.state !== 'cancelled';
+  const age = ageText(options.nowMs, item.stateSince);
+  const card: BoardCard = {
+    id: item.id, displayId: displayIdOf(item), kind: item.kind, title: flattenName(item.title, 200), column, stateLabel: COLUMN_LABELS[column],
+    lane: { member: 'unassigned', phase: phase ?? 'board', milestone: milestoneId ?? 'board' }, requirements: [...item.requirements],
+    mine: item.origin === 'board' && options.viewerId !== undefined && item.createdBy === options.viewerId,
+    held: item.hold === true, doneInGsd, dependencyCount: item.dependsOn.length, estimateText: estimateText(item.estimate?.tokens), ageText: age,
+    moves: gate === undefined ? availableMoves(state, options.viewerId, item.id) : [], refusals,
+    a11yLabel: cardLabel({
+      isPlan: item.kind === 'plan', displayId: displayIdOf(item), title: flattenName(item.title, 200), stateLabel: COLUMN_LABELS[column], ...(blocked === undefined ? {} : { blockedReason: blocked.reason }),
+      held: item.hold === true, doneInGsd, cancelled: column === 'cancelled', dependencyCount: item.dependsOn.length, ...(item.estimate === undefined ? {} : { estimateTokens: item.estimate.tokens }), age
+    })
+  };
+  if (phase !== undefined) card.phaseId = phase;
+  if (milestoneId !== undefined) card.milestoneId = milestoneId;
+  if (blocked !== undefined) card.blocked = blocked;
+  if (item.origin === 'board' && item.createdBy !== undefined) card.createdByName = memberName(state, item.createdBy);
+  return card;
+}
+
+export function buildBoardModel(state: TeamState, options: BoardModelOptions): BoardModel {
+  const gate = moveGateReason(state, options);
+  // Grouped by column in board order; Array.prototype.sort is stable, so cards in one column keep the log order of the item map.
+  const cards = [...state.items.values()].filter(isCard).map((item) => cardOf(state, options, gate, item)).sort((a, b) => BOARD_COLUMNS.indexOf(a.column) - BOARD_COLUMNS.indexOf(b.column));
+  const selected = selectedMilestoneOf(state);
+  const shown = cards.filter((card) => visibleUnder(card, selected));
+  const columns: BoardColumnInfo[] = BOARD_COLUMNS.map((key) => {
+    const caption = COLUMN_CAPTIONS[key];
+    return { key, label: COLUMN_LABELS[key], ...(caption === undefined ? {} : { caption }), count: shown.filter((card) => card.column === key).length };
+  });
+  const viewer = viewerOf(state, options);
   const empty: BoardLane[] = [];
   return {
-    status: options.status, viewer: { name: '', canWrite: false, canImport: false, canCreate: false }, columns: [], milestones: [], selectedMilestone: '', phases: [], requirements: [],
-    lanes: { member: empty, phase: empty, milestone: empty, none: empty }, cards: [], counts: { cards: 0, ready: 0, blocked: 0 }
+    status: options.status, viewer, columns, milestones: [], selectedMilestone: selected, phases: [], requirements: [],
+    lanes: { member: empty, phase: empty, milestone: empty, none: empty }, cards,
+    counts: { cards: shown.length, ready: shown.filter((card) => card.column === 'ready').length, blocked: shown.filter((card) => card.blocked !== undefined).length }
   };
 }
 
