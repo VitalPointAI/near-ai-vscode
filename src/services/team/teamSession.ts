@@ -12,6 +12,7 @@ import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
 import type { GenesisAnchor, Role, TeamEvent, TeamFile, TeamState } from '../../domain/team/types';
 import { AuditStore } from '../auditStore';
 import type { SecretStorageLike } from '../auth';
+import type { FetchLike } from '../reportingSignIn';
 import { ROSTER_AUDIT_TYPES, fileMirrorMark, mirrorRosterEvents, projectMarkScope } from '../../team/auditMirror';
 import type { AuditSink } from '../../team/auditMirror';
 import { SNAPSHOT_ALREADY_WRITTEN, TeamLog } from '../../team/eventLog';
@@ -31,6 +32,9 @@ export const TEAM_OUTPUT_CHANNEL = 'NEAR AI Team';
 export const SHOW_DETAILS_ACTION = 'Show details';
 export const UPDATE_EXTENSION_TEXT = 'Some events need a newer version of NEAR AI. Update the extension to read them.';
 export const READ_ONLY_TEXT = 'This computer has no device key for this team, so it can read the team log but not write to it.';
+export const JOIN_COMMAND = 'nearAi.team.join';
+export const MANAGE_MEMBERS_COMMAND = 'nearAi.team.manageMembers';
+export const NOTIFIED_FILE = 'notified.json';
 const VERIFY_PROGRESS_TITLE = 'Verifying the team log';
 const AUDIT_FILE_PARTS = ['.planning', '.near-ai', 'audit.json'];
 
@@ -54,6 +58,10 @@ export interface TeamSessionDeps {
   timers?: SchedulerTimers;
   git?: GitRunner;
   withProgress?: <T>(title: string, task: () => Promise<T>) => Promise<T>;
+  /** NEAR AI Cloud's address (ending in /v1) for key checks and ending a NEAR session; the default is the public one. */
+  nearBaseUrl?: string;
+  fetch?: FetchLike;
+  runCommand?: (id: string, args?: unknown) => PromiseLike<unknown>;
 }
 
 function describeError(error: unknown): string {
@@ -211,6 +219,26 @@ export class TeamSession {
     });
     this.syncing = run.then(() => undefined);
     return run;
+  }
+
+  public currentLog(): TeamLog {
+    return this.log;
+  }
+
+  public memberId(): string | undefined {
+    return this.identity === undefined ? undefined : this.transport.state().deviceIndex.get(this.identity.fingerprint);
+  }
+
+  public isRemoved(): boolean {
+    return false;
+  }
+
+  public storageDir(): string {
+    return this.storage;
+  }
+
+  public state(): TeamState {
+    return this.transport.state();
   }
 
   public nudge(): void {

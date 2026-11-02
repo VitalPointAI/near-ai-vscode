@@ -26,7 +26,11 @@ function displayName(teamName: string): string {
   return teamName.replace(CONTROL_CHARACTERS, ' ').trim().replaceAll('$(', '\\$(');
 }
 
-export function statusText(status: TransportStatus, teamName: string): { text: string; tooltip: string } {
+export const REMOVED_TEXT = 'Team: removed';
+
+export interface TeamStatusExtras { pending?: number; removed?: boolean; nearLabel?: string; nearLinked?: boolean }
+
+export function statusText(status: TransportStatus, teamName: string, _extras: TeamStatusExtras = {}): { text: string; tooltip: string } {
   if (status.state === 'ok') {
     return { text: `Team: ${displayName(teamName)}`, tooltip: 'Team sync is working. Click to run Verify Team Log.' };
   }
@@ -48,7 +52,7 @@ export function statusText(status: TransportStatus, teamName: string): { text: s
 }
 
 export interface TeamStatusBar {
-  update(status: TransportStatus, teamName: string): void;
+  update(status: TransportStatus, teamName: string, extras?: TeamStatusExtras): void;
   dispose(): void;
 }
 
@@ -58,8 +62,8 @@ export function createTeamStatusBar(): TeamStatusBar {
   item.command = VERIFY_LOG_COMMAND;
   item.show();
   return {
-    update(status, teamName): void {
-      const shown = statusText(status, teamName);
+    update(status, teamName, extras): void {
+      const shown = statusText(status, teamName, extras);
       item.text = shown.text;
       item.tooltip = shown.tooltip;
       item.backgroundColor = status.state === 'ok' ? undefined : new vscode.ThemeColor('statusBarItem.warningBackground');
