@@ -27,6 +27,7 @@ import { initEmergencyStop, setEmergencyStop } from './services/emergencyStop';
 import { clearProviderCache } from './services/providerCache';
 import { setNearAiDiagnostics } from './services/nearAiClient';
 import { closeInterruptedRuns } from './services/activityStore';
+import { offerProxyAdvice } from './domain/proxyAdvice';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
@@ -47,6 +48,10 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   // A reload cut off any run still marked running in this project's history: record it as stopped.
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (projectRoot) void closeInterruptedRuns(projectRoot);
+
+  // In code-server and remote windows, suggest turning off VS Code's proxy support when no proxy is
+  // used: a background browser tab otherwise stalls agent runs. Asked once; changed only on the click.
+  void suggestProxySupportOff(context);
 
   const sidebar = new NearAiPanelViewProvider(context, auth);
   registerAgentActivity(context, sidebar);
@@ -92,6 +97,22 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
   return process.env.NEAR_AI_E2E === '1' ? { auth, sidebar } : undefined;
+}
+
+async function suggestProxySupportOff(context: vscode.ExtensionContext): Promise<void> {
+  const http = () => vscode.workspace.getConfiguration('http');
+  await offerProxyAdvice({
+    web: vscode.env.uiKind === vscode.UIKind.Web,
+    remoteName: vscode.env.remoteName,
+    proxySupport: http().get<string>('proxySupport'),
+    proxy: http().get<string>('proxy'),
+    env: process.env,
+    state: context.globalState,
+    ask: (text, ...items) => vscode.window.showInformationMessage(text, ...items),
+    turnOff: () => http().update('proxySupport', 'off', vscode.ConfigurationTarget.Global),
+    tell: (text, ...items) => vscode.window.showInformationMessage(text, ...items),
+    reload: () => vscode.commands.executeCommand('workbench.action.reloadWindow')
+  }).catch(() => undefined);
 }
 
 async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPanelViewProvider): Promise<void> {
