@@ -428,6 +428,28 @@ test('a lead who is already an organization member is told so, a skipped sign-in
   });
 });
 
+test('a lead is never joined to a different organization than the team\'s, even when that organization has invited their login', async () => {
+  await withNearFake(async (fake) => {
+    await withFixture(['a', 'b'], async (fixture) => {
+      const seed = await seedTeam(fixture, NEAR_LINK);
+      pointOriginAt(fixture, PUBLIC_URL);
+      // Another organization invited this login; the team's own organization did not.
+      const other = fake.addUser({ id: 'user-other-owner', username: 'otherowner', email: 'otherowner@example.invalid' });
+      fake.addOrganization({ id: 'org-other', name: 'Someone Else', members: [{ userId: 'user-other-owner', role: 'owner' }] });
+      const otherClient = new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(other.accessToken), sleep: NO_SLEEP });
+      const outcome = await otherClient.inviteByEmail('org-other', 'lena@example.invalid', 'admin');
+      assert.equal(outcome.ok, true);
+      const lena = fake.addUser({ id: 'user-lena', username: 'lena', email: 'lena@example.invalid' });
+      const { bundle } = await invite(fixture, seed, { role: 'lead', name: 'Lena Lead', email: 'lena@example.invalid' });
+      const joiner = await joinerOn(fixture, 'b', seed);
+      const result = await joinTeam(joinInput(joiner, await readyFor(joiner, bundle), { nearBaseUrl: fake.baseUrl, signIn: async () => lena }));
+      assert.equal(result.ok && result.nearInvitation, 'not-found');
+      assert.equal((await otherClient.listMembers('org-other')).some((member) => member.userId === 'user-lena'), false, 'the other organization was not accepted');
+      assert.equal(fake.requests.some((request) => request.method === 'POST' && request.path.includes('/accept')), false, 'no accept call was made');
+    });
+  });
+});
+
 test('a team with no NEAR organization checks a pasted key with check_api_key only and installs it with the not-capped notice', async () => {
   await withNearFake(async (fake) => {
     await withFixture(['a', 'b'], async (fixture) => {
@@ -489,9 +511,21 @@ test('a rejected pasted key or none at all leaves the join done and says so plai
       const { bundle } = await invite(fixture, seed);
       const joiner = await joinerOn(fixture, 'b', seed);
       let asked = 0;
-      const linked = await joinTeam(joinInput(joiner, await readyFor(joiner, bundle), { nearBaseUrl: fake.baseUrl, pasteOwnKey: async () => { asked += 1; return 'sk-whatever'; } }));
+      let signIns = 0;
+      const tokens = fake.addUser({ id: 'user-dev', username: 'dev', email: 'dana@example.invalid' });
+      const before = fake.requests.length;
+      const linked = await joinTeam(joinInput(joiner, await readyFor(joiner, bundle), {
+        nearBaseUrl: fake.baseUrl,
+        pasteOwnKey: async () => { asked += 1; return 'sk-whatever'; },
+        signIn: async () => { signIns += 1; return tokens; },
+        askInvitationLink: async () => { signIns += 1; return undefined; }
+      }));
       assert.equal(linked.ok && linked.key, 'awaiting-lead');
       assert.equal(asked, 0, 'pasting an own key is not offered in a NEAR-linked team');
+      // D-21: a developer is never signed in to NEAR, even when the caller hands over a sign-in and the login would match the invited email.
+      assert.equal(signIns, 0, 'a developer is never asked to sign in to NEAR');
+      assert.equal(fake.requests.length, before);
+      assert.equal(joiner.secrets.values.has(nearSessionSecretName(seed.teamId)), false);
     });
   });
 });
