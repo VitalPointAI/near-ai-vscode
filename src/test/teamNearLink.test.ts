@@ -5,10 +5,10 @@ import { writeFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import test from 'node:test';
-import { enableTeamMode } from '../team/enable';
-import { LINK_COMMIT_MESSAGE, linkChoices, linkNearOrganization } from '../team/nearLink';
+import { enableTeamMode, pushCodeBranch } from '../team/enable';
+import { LINK_COMMIT_MESSAGE, linkChoices, linkNearOrganization, teamFileUnpushed } from '../team/nearLink';
 import { NearAuth, NearOrgClient } from '../team/nearOrg';
-import { TEAM_FILE_REL, checkTrustPin, readTeamFile, teamFilePath, teamStorageDir } from '../team/teamFile';
+import { TEAM_FILE_REL, checkTrustPin, readTeamFile, teamFilePath, teamStorageDir, writeTeamFile } from '../team/teamFile';
 import type { TeamFile } from '../domain/team/types';
 import { FakeNear, startFakeNear } from './helpers/fakeNear';
 import { MemorySecrets, createTeamFixture, gitIn } from './helpers/teamHarness';
@@ -115,5 +115,116 @@ test('linking never writes a file when the team id is not the project team', asy
     assert.equal(result.ok ? undefined : result.code, 'team-file');
     assert.equal(await fs.readFile(teamFilePath(root), 'utf8'), before);
     assert.equal(teamFile.near, undefined);
+  });
+});
+
+const OWNED = { organizationId: 'org-owned', workspaceId: 'ws-owned-1' };
+const OTHER = { organizationId: 'org-admin', workspaceId: 'ws-admin-1' };
+
+test('linking twice with the same values changes nothing and makes no commit', async () => {
+  await withTeam(async ({ root, storageDir, teamFile }) => {
+    const first = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
+    assert.equal(first.ok ? first.status : undefined, 'linked');
+    const head = gitIn(root, ['rev-parse', 'HEAD']);
+    const text = await fs.readFile(teamFilePath(root), 'utf8');
+    const second = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    assert.equal(second.status, 'unchanged');
+    assert.equal(second.commit, undefined);
+    assert.equal(gitIn(root, ['rev-parse', 'HEAD']), head, 'no new commit');
+    assert.equal(await fs.readFile(teamFilePath(root), 'utf8'), text);
+  });
+});
+
+test('a different existing link is refused unless the caller passes replace', async () => {
+  await withTeam(async ({ root, storageDir, teamFile }) => {
+    await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
+    const head = gitIn(root, ['rev-parse', 'HEAD']);
+    const text = await fs.readFile(teamFilePath(root), 'utf8');
+
+    const refused = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OTHER });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.ok ? undefined : refused.code, 'different-link');
+    assert.equal(await fs.readFile(teamFilePath(root), 'utf8'), text, 'team.json is as it was');
+    assert.equal(gitIn(root, ['rev-parse', 'HEAD']), head);
+
+    const replaced = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OTHER, replace: true });
+    assert.equal(replaced.ok ? replaced.status : undefined, 'linked');
+    assert.deepEqual((await readTeamFile(root))?.near, OTHER);
+    assert.notEqual(gitIn(root, ['rev-parse', 'HEAD']), head);
+    assert.equal(gitIn(root, ['show', '--name-only', '--format=', 'HEAD']), TEAM_FILE_REL);
+  });
+});
+
+test('a team.json that cannot be parsed, or ids that are not valid, are refused and the file is not overwritten', async () => {
+  await withTeam(async ({ root, storageDir, teamFile }) => {
+    const head = gitIn(root, ['rev-parse', 'HEAD']);
+    const good = await fs.readFile(teamFilePath(root), 'utf8');
+
+    const badIds = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: { organizationId: 'has a space', workspaceId: 'ws-owned-1' } });
+    assert.equal(badIds.ok ? undefined : badIds.code, 'team-file');
+    assert.equal(await fs.readFile(teamFilePath(root), 'utf8'), good);
+
+    writeFileSync(teamFilePath(root), '{ this is not json', 'utf8');
+    const broken = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
+    assert.equal(broken.ok ? undefined : broken.code, 'team-file');
+    assert.equal(await fs.readFile(teamFilePath(root), 'utf8'), '{ this is not json', 'the damaged file is left for the user');
+    assert.equal(gitIn(root, ['rev-parse', 'HEAD']), head);
+  });
+});
+
+test('a team.json that names a different owner key than this computer pinned is never overwritten', async () => {
+  await withTeam(async ({ root, storageDir, teamFile }) => {
+    const forged: TeamFile = { ...teamFile, genesis: { ...teamFile.genesis, ownerDevice: { ...teamFile.genesis.ownerDevice, fingerprint: `${teamFile.genesis.ownerDevice.fingerprint.slice(0, -1)}${teamFile.genesis.ownerDevice.fingerprint.endsWith('a') ? 'b' : 'a'}` } } };
+    await writeTeamFile(root, forged);
+    const text = await fs.readFile(teamFilePath(root), 'utf8');
+    const result = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
+    assert.equal(result.ok ? undefined : result.code, 'team-file');
+    assert.equal(await fs.readFile(teamFilePath(root), 'utf8'), text);
+  });
+});
+
+test('a failing commit hook leaves the link on disk, nothing staged, and names the exact command', async () => {
+  await withTeam(async ({ root, storageDir, teamFile }) => {
+    const head = gitIn(root, ['rev-parse', 'HEAD']);
+    writeFileSync(path.join(root, '.git', 'hooks', 'commit-msg'), '#!/bin/sh\necho "hook rejected this commit message" >&2\nexit 1\n', { encoding: 'utf8', mode: 0o755 });
+    const result = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, 'commit-failed');
+    assert.match(result.message, /hook rejected this commit message/);
+    assert.ok(result.message.includes(`git add -f ${TEAM_FILE_REL} && git commit --only -m "${LINK_COMMIT_MESSAGE}" -- ${TEAM_FILE_REL}`));
+    assert.deepEqual((await readTeamFile(root))?.near, OWNED, 'the written file stays in place');
+    assert.equal(gitIn(root, ['diff', '--cached', '--name-only']), '', 'team.json is not left staged');
+    assert.equal(gitIn(root, ['rev-parse', 'HEAD']), head);
+  });
+});
+
+test('teamFileUnpushed answers true until the committed team.json reaches the upstream branch, and unknown without an upstream', async () => {
+  await withTeam(async ({ root, storageDir, teamFile }) => {
+    // Enable committed team.json but never pushed it.
+    assert.equal(await teamFileUnpushed(root), true);
+    assert.deepEqual(await pushCodeBranch(root, 'origin', 'main'), { ok: true });
+    assert.equal(await teamFileUnpushed(root), false);
+
+    const linked = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
+    assert.equal(linked.ok, true);
+    assert.equal(await teamFileUnpushed(root), true, 'the link commit is not on the upstream yet');
+    assert.deepEqual(await pushCodeBranch(root, 'origin', 'main'), { ok: true });
+    assert.equal(await teamFileUnpushed(root), false);
+
+    gitIn(root, ['checkout', '-q', '-b', 'no-upstream']);
+    assert.equal(await teamFileUnpushed(root), 'unknown');
+  });
+});
+
+test('linkChoices returns an empty list for a lead who is admin of no organization', async () => {
+  await withTeam(async ({ fake }) => {
+    const member = fake.addUser({ id: 'user-plain', username: 'plain', email: 'plain@example.invalid' });
+    fake.addOrganization({ id: 'org-plain', name: 'Plain Org', members: [{ userId: 'user-other', role: 'owner' }, { userId: 'user-plain', role: 'member' }] });
+    fake.addWorkspace({ id: 'ws-plain', organizationId: 'org-plain', name: 'Plain workspace' });
+    const client = new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(member.accessToken), sleep: never });
+    assert.deepEqual(await linkChoices(client), []);
   });
 });
