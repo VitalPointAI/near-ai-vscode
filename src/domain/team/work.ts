@@ -135,26 +135,110 @@ export function transitionProblem(state: Pick<TeamState, 'items'>, event: Implem
 }
 
 // ---- Board model (D-08, D-10, D-11, D-17) ------------------------------------------------------------------------------------------------
+// Everything below is derived from the items alone: pure, no clock, no I/O, so every client that replays the same log shows the same board.
 export const BOARD_COLUMNS = ['backlog', 'ready', 'claimed', 'in-progress', 'in-review', 'integrating', 'done', 'cancelled'] as const;
 export type BoardColumn = typeof BOARD_COLUMNS[number];
 export type NotReadyReason = 'not-unclaimed' | 'held' | 'blocked' | 'no-estimate' | 'no-scope' | 'dependency-open' | 'dependency-missing' | 'phase-held' | 'phase-dependency-open';
 
-export function isCard(_item: WorkItem): boolean {
-  return false;
+type Items = ReadonlyMap<string, WorkItem>;
+
+// Cards are what moves through the columns: plans and anything created on the board. Milestones, phases and tasks are graph nodes (D-08).
+export function isCard(item: WorkItem): boolean {
+  return item.kind === 'plan' || item.origin === 'board';
 }
 
-export function readiness(_items: ReadonlyMap<string, WorkItem>, _id: string): { ready: boolean; reasons: NotReadyReason[] } {
-  return { ready: false, reasons: [] };
+// The plans under each phase, built once per call so a scan of the whole board stays linear.
+function plansByPhase(items: Items): Map<string, WorkItem[]> {
+  const byPhase = new Map<string, WorkItem[]>();
+  for (const item of items.values()) {
+    if (item.kind !== 'plan' || item.parentId === undefined) continue;
+    const plans = byPhase.get(item.parentId);
+    if (plans === undefined) byPhase.set(item.parentId, [item]);
+    else plans.push(item);
+  }
+  return byPhase;
 }
 
-export function effectiveColumn(_items: ReadonlyMap<string, WorkItem>, _item: WorkItem): BoardColumn {
-  return 'backlog';
+// A phase is complete when every non-cancelled plan under it is done. A phase with no live plan has nothing to prove it, so it is complete
+// only when it is itself stored done: an unplanned phase never releases the phases that wait on it.
+function phaseComplete(phase: WorkItem, byPhase: ReadonlyMap<string, WorkItem[]>): boolean {
+  const live = (byPhase.get(phase.id) ?? []).filter((plan) => plan.state !== 'cancelled');
+  return live.length === 0 ? phase.state === 'done' : live.every((plan) => plan.state === 'done');
 }
 
-export function progressOf(_items: ReadonlyMap<string, WorkItem>, _groupId: string): { percent: number; done: number; total: number } {
-  return { percent: 0, done: 0, total: 0 };
+function dependencyProblem(items: Items, byPhase: ReadonlyMap<string, WorkItem[]>, id: string): 'dependency-open' | 'dependency-missing' | undefined {
+  const dependency = items.get(id);
+  if (dependency === undefined) return 'dependency-missing';
+  const complete = dependency.kind === 'phase' ? phaseComplete(dependency, byPhase) : dependency.state === 'done';
+  return complete ? undefined : 'dependency-open';
 }
 
-export function countReady(_items: ReadonlyMap<string, WorkItem>): number {
-  return 0;
+function readinessOf(items: Items, byPhase: ReadonlyMap<string, WorkItem[]>, item: WorkItem): { ready: boolean; reasons: NotReadyReason[] } {
+  if (!isCard(item)) return { ready: false, reasons: [] };
+  const reasons = new Set<NotReadyReason>();
+  if (!isUnclaimed(item)) reasons.add('not-unclaimed');
+  if (item.hold === true) reasons.add('held');
+  if (item.blocked !== undefined) reasons.add('blocked');
+  if (item.estimate === undefined) reasons.add('no-estimate');
+  if (item.scope.length === 0) reasons.add('no-scope');
+  for (const id of item.dependsOn) {
+    const problem = dependencyProblem(items, byPhase, id);
+    if (problem !== undefined) reasons.add(problem);
+  }
+  const phase = item.parentId === undefined ? undefined : items.get(item.parentId);
+  if (phase !== undefined && phase.kind === 'phase') {
+    if (phase.hold === true) reasons.add('phase-held');
+    for (const id of phase.dependsOn) {
+      const dependency = items.get(id);
+      if (dependency === undefined) reasons.add('dependency-missing');
+      else if (!phaseComplete(dependency, byPhase)) reasons.add('phase-dependency-open');
+    }
+  }
+  return { ready: reasons.size === 0, reasons: [...reasons].sort() };
+}
+
+// D-11 and open question 4: ready is computed, never moved. An id that is not on the board, or is not a card, is not ready and has no reasons.
+export function readiness(items: Items, id: string): { ready: boolean; reasons: NotReadyReason[] } {
+  const item = items.get(id);
+  return item === undefined ? { ready: false, reasons: [] } : readinessOf(items, plansByPhase(items), item);
+}
+
+function columnOf(items: Items, byPhase: ReadonlyMap<string, WorkItem[]>, item: WorkItem): BoardColumn {
+  if (item.state !== 'backlog' && item.state !== 'ready') return item.state;
+  return readinessOf(items, byPhase, item).ready ? 'ready' : 'backlog';
+}
+
+// Blocked is a flag, never a column (D-10), and a stored ready that is held or otherwise not ready shows in the backlog (D-11).
+export function effectiveColumn(items: Items, item: WorkItem): BoardColumn {
+  return columnOf(items, plansByPhase(items), item);
+}
+
+// The live plans of a phase, or of every phase under a milestone. Cancelled plans count on neither side.
+function plansOf(items: Items, byPhase: ReadonlyMap<string, WorkItem[]>, groupId: string): WorkItem[] {
+  const group = items.get(groupId);
+  if (group === undefined) return [];
+  const phases = group.kind === 'milestone' ? [...items.values()].filter((item) => item.kind === 'phase' && item.parentId === groupId) : group.kind === 'phase' ? [group] : [];
+  return phases.flatMap((phase) => byPhase.get(phase.id) ?? []).filter((plan) => plan.state !== 'cancelled');
+}
+
+// D-08: the done share of estimate tokens, as an integer percent rounded down; counts when no plan has an estimate. done and total are always
+// plan counts. BigInt keeps the sum and the multiplication exact however large the estimates are.
+export function progressOf(items: Items, groupId: string): { percent: number; done: number; total: number } {
+  const plans = plansOf(items, plansByPhase(items), groupId);
+  const done = plans.filter((plan) => plan.state === 'done');
+  if (plans.length === 0) return { percent: 0, done: 0, total: 0 };
+  const weighted = plans.some((plan) => plan.estimate !== undefined);
+  const weight = (plan: WorkItem): bigint => (weighted ? BigInt(plan.estimate?.tokens ?? 0) : 1n);
+  const whole = plans.reduce((sum, plan) => sum + weight(plan), 0n);
+  const finished = done.reduce((sum, plan) => sum + weight(plan), 0n);
+  const percent = whole === 0n ? 0 : Number((finished * 100n) / whole);
+  return { percent, done: done.length, total: plans.length };
+}
+
+// D-17: the N of the status bar line.
+export function countReady(items: Items): number {
+  const byPhase = plansByPhase(items);
+  let ready = 0;
+  for (const item of items.values()) if (isCard(item) && columnOf(items, byPhase, item) === 'ready') ready += 1;
+  return ready;
 }
