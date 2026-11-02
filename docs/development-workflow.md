@@ -88,8 +88,10 @@ or `npm run verify:release` when your change touches what they cover.
 GitHub, npm, Slack, Anthropic, OpenAI, Google and Stripe keys, and files that should never be
 committed (`.env`, `id_rsa`, `.near-credentials/`, `.p12`). It scans every commit in the PR, not
 only the final diff, because a PR's commits stay public on GitHub even after a squash merge.
-Findings are printed masked. Test fixtures with fake keys are listed, with a reason, in
-`.github/secret-scan-allow.txt`; a single line can carry the marker `secret-scan: allow`. Both
+Findings are printed masked. Test fixtures with fake keys are listed in
+`.github/secret-scan-allow.txt` with the rules their fake keys match and a reason; any other kind
+of key in such a file is still reported. A single line can carry the marker
+`secret-scan: allow`. Both
 are visible in review: the scan lists every marked line that matches a rule (masked), and fails
 when a marked line was added by one commit and removed by a later one, since the PR's final diff
 would no longer show it.

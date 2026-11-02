@@ -41,7 +41,7 @@ test('the range scan finds keys added and removed again in renames, merges and p
   const notes = Array.from({ length: 40 }, (_, i) => `note ${i}\n`).join('');
   write('notes.txt', notes);
   write('README.md', 'hello\n');
-  write('.github/secret-scan-allow.txt', 'fixture.txt # fake keys for a test\n');
+  write('.github/secret-scan-allow.txt', 'fixture.txt github-token # fake keys for a test\n');
   write('fixture.txt', 'fixture\n');
   const base = commit('base');
 
@@ -121,4 +121,20 @@ test('lines marked "secret-scan: allow" are listed, and one added then removed i
   assert.equal(gone.status, 1, gone.output);
   assert.match(gone.output, /gone\.txt\s+\[allowed-line-removed\]/);
   assert.doesNotMatch(gone.output, /kept\.txt\s+\[allowed-line-removed\]/);
+});
+
+test('an allowlisted fixture is skipped only for the rules listed for it', () => {
+  const { dir, write, commit } = fixture();
+  const aws = ['AKIA', 'Z'.repeat(16)].join('');
+  write('.github/secret-scan-allow.txt', 'fixture.ts github-token # fake GitHub token for a masking test\n');
+  write('fixture.ts', `const fake = "${TOKEN}";\n`);
+  const base = commit('fixture with a fake GitHub token');
+  assert.equal(scan(dir).status, 0, 'the listed rule is allowed');
+  write('fixture.ts', `const fake = "${TOKEN}";\nconst key = "${aws}";\n`);
+  commit('a different kind of key pasted into the fixture');
+  const head = scan(dir);
+  assert.equal(head.status, 1, head.output);
+  assert.match(head.output, /fixture\.ts:2\s+\[aws-access-key\]/);
+  assert.doesNotMatch(head.output, /\[github-token\]/);
+  assert.match(scan(dir, '--range', `${base}..HEAD`).output, /fixture\.ts\s+\[aws-access-key\]/);
 });

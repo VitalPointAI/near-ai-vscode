@@ -7,15 +7,15 @@
 // The range matters because a PR's individual commits stay public on GitHub even after a squash
 // merge, so a key added in one commit and removed in the next has still leaked.
 //
-// Known test fixtures with fake keys are listed in .github/secret-scan-allow.txt (one path per
-// line, with a reason). A single line can opt out with the marker "secret-scan: allow". Both
+// Known test fixtures with fake keys are listed in .github/secret-scan-allow.txt (a path, the
+// rules its fake keys match, and a reason); any other rule is still reported in that file. A single line can opt out with the marker "secret-scan: allow". Both
 // show up in review, so neither can hide a real key quietly: marked lines that match a rule are
 // listed (masked) in the output, and in a range scan a marked line that was added and removed
 // again before the end of the range fails, since the final diff reviewers read no longer shows
 // it. Matches are printed masked.
 import { readFileSync, existsSync } from 'node:fs';
 import { git, parseArgs } from './lib/gh.mjs';
-import { ALLOW_MARKER, isSecretFileName, maskLine, matchRules, parseAllowlist, scanLine } from './lib/workflow.mjs';
+import { ALLOW_MARKER, isAllowed, isSecretFileName, maskLine, matchRules, parseAllowlist, scanLine } from './lib/workflow.mjs';
 
 const ALLOWLIST = '.github/secret-scan-allow.txt';
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -32,12 +32,12 @@ function looksBinary(buffer) {
 // 1. Tracked files at HEAD.
 const files = git(['ls-files', '-z']).split('\0').filter(Boolean);
 for (const file of files) {
-  if (isSecretFileName(file) && !allow.has(file)) findings.push({ where: file, rule: 'secret-file-name', text: '(file name)' });
-  if (allow.has(file) || !existsSync(file)) continue;
+  if (isSecretFileName(file) && !isAllowed(allow, file, 'secret-file-name')) findings.push({ where: file, rule: 'secret-file-name', text: '(file name)' });
+  if (!existsSync(file)) continue;
   const buffer = readFileSync(file);
   if (buffer.length > MAX_FILE_BYTES || looksBinary(buffer)) continue;
   buffer.toString('utf8').split(/\r?\n/).forEach((line, index) => {
-    for (const rule of scanLine(line)) findings.push({ where: `${file}:${index + 1}`, rule, text: maskLine(line.trim()) });
+    for (const rule of scanLine(line)) if (!isAllowed(allow, file, rule)) findings.push({ where: `${file}:${index + 1}`, rule, text: maskLine(line.trim()) });
     if (line.includes(ALLOW_MARKER)) for (const rule of matchRules(line)) allowed.push({ where: `${file}:${index + 1}`, rule, text: maskLine(line.trim()) });
   });
 }
@@ -75,15 +75,14 @@ if (options.range) {
           const key = `${finding.where}\0${finding.rule}\0${finding.text}`;
           if (!seen.has(key)) { seen.add(key); findings.push(finding); }
         };
-        if (isSecretFileName(file) && !allow.has(file)) report({ where, rule: 'secret-file-name', text: '(file name)' });
-        if (allow.has(file)) continue;
+        if (isSecretFileName(file) && !isAllowed(allow, file, 'secret-file-name')) report({ where, rule: 'secret-file-name', text: '(file name)' });
         const diff = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=0', parent, commit, '--', `:(literal)${file}`]);
         let inHunk = false;
         for (const line of diff.split('\n')) {
           if (line.startsWith('@@')) { inHunk = true; continue; }
           if (!inHunk || !line.startsWith('+')) continue;
           const added = line.slice(1);
-          for (const rule of scanLine(added)) report({ where, rule, text: maskLine(added.trim()) });
+          for (const rule of scanLine(added)) if (!isAllowed(allow, file, rule)) report({ where, rule, text: maskLine(added.trim()) });
           if (added.includes(ALLOW_MARKER) && matchRules(added).length > 0 && !linesAtEnd(file).has(added)) {
             report({ where, rule: 'allowed-line-removed', text: maskLine(added.trim()) });
           }
@@ -104,6 +103,6 @@ if (findings.length === 0) {
   console.error(`Secret scan found ${findings.length} possible secret(s) in ${scope}:`);
   for (const finding of findings) console.error(`  ${finding.where}  [${finding.rule}]  ${finding.text}`);
   console.error('\nIf a real key was committed: revoke it now (removing it from git does not make it safe), then remove it.');
-  console.error(`If it is a fake test value: add the file to ${ALLOWLIST} with a reason, or mark the line "secret-scan: allow".`);
+  console.error(`If it is a fake test value: add "<path> <rule>" to ${ALLOWLIST} with a reason, or mark the line "secret-scan: allow".`);
   process.exit(1);
 }

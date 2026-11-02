@@ -68,8 +68,9 @@ PRs are squash-merged, so the PR title becomes the commit on `main`: write it in
   `main`, without conflicts, and with every review conversation resolved.
 - No new runtime dependencies. Third-party code the extension runs is vendored at build time
   (see SECURITY.md, "Dependencies").
-- Never commit secrets, real API keys or private data, including in tests. Fake test keys go in
-  files listed in `.github/secret-scan-allow.txt`.
+- Never commit secrets, real API keys or private data, including in tests. A test file that needs
+  a fake key is listed in `.github/secret-scan-allow.txt` with the scanner rules the fake key
+  matches and a reason, or the line carries the marker `secret-scan: allow`.
 - User-visible changes need a CHANGELOG entry written for users, and README or SECURITY.md
   updates when they change what those describe.
 

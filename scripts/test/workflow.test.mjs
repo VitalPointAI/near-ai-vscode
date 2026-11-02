@@ -298,6 +298,9 @@ test('committed credential files are flagged by name', () => {
   for (const path of ['.env.example', 'src/env.ts', 'docs/id_rsa.md']) assert.ok(!isSecretFileName(path), path);
 });
 
-test('the allowlist is one path per line with comments', () => {
-  assert.deepEqual([...parseAllowlist('# header\nsrc/a.ts   # fake key\n\n test/b.pem\n')], ['src/a.ts', 'test/b.pem']);
+test('the allowlist names, per path, only the rules its fake keys may match', () => {
+  const allow = parseAllowlist('# header\nsrc/a.ts   github-token,openai-key   # fake keys\n\n test/b.pem private-key\n');
+  assert.deepEqual([...allow].map(([path, rules]) => [path, [...rules]]), [['src/a.ts', ['github-token', 'openai-key']], ['test/b.pem', ['private-key']]]);
+  assert.throws(() => parseAllowlist('src/a.ts   # no rules named\n'), /names no rules/);
+  assert.throws(() => parseAllowlist('src/a.ts not-a-rule\n'), /unknown rule "not-a-rule"/);
 });

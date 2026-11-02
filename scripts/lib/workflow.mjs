@@ -377,9 +377,29 @@ export function isSecretFileName(path) {
   return SECRET_FILE_PATTERNS.some((pattern) => pattern.test(path));
 }
 
-/** Parses the allowlist: one repository path per line; `#` starts a comment. */
+/**
+ * Parses the allowlist: one entry per line, `<path> <rule>[,<rule>...]`, and `#` starts a
+ * comment. Returns a Map from path to the Set of rule ids (SECRET_RULES ids or
+ * `secret-file-name`) that may match in that file; every other rule is still reported there.
+ */
 export function parseAllowlist(text) {
-  return new Set(String(text ?? '').split(/\r?\n/).map((line) => line.replace(/#.*/, '').trim()).filter(Boolean));
+  const known = new Set([...SECRET_RULES.map((rule) => rule.id), 'secret-file-name']);
+  const allow = new Map();
+  for (const [index, raw] of String(text ?? '').split(/\r?\n/).entries()) {
+    const line = raw.replace(/#.*/, '').trim();
+    if (!line) continue;
+    const [file, rules = '', ...extra] = line.split(/\s+/);
+    if (!rules || extra.length > 0) throw new Error(`secret-scan allowlist line ${index + 1}: "${file}" names no rules; write "<path> <rule>[,<rule>...]"`);
+    const ids = rules.split(',').filter(Boolean);
+    for (const id of ids) if (!known.has(id)) throw new Error(`secret-scan allowlist line ${index + 1}: unknown rule "${id}"`);
+    allow.set(file, new Set([...(allow.get(file) ?? []), ...ids]));
+  }
+  return allow;
+}
+
+/** True when the allowlist lets `rule` match in `file`. */
+export function isAllowed(allow, file, rule) {
+  return allow.get(file)?.has(rule) ?? false;
 }
 
 /** Masks a matched line for logs so the scanner never prints a secret it found. */
