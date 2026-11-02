@@ -149,7 +149,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Moves are permission-checked and follow only permitted transitions; an illegal drop snaps back and says why. (BOARD-03)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
 
-**Plans**: 4/14 plans executed in 6 waves
+**Plans**: 5/14 plans executed in 6 waves
 **UI hint**: yes
 
 **Wave 1**
@@ -159,7 +159,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [x] 62-04-PLAN.md — Computed ready, columns, progress, ready count, card history, snapshots with items, determinism and forgery suites (BOARD-01, BOARD-02, BOARD-03)
-- [ ] 62-05-PLAN.md — Importer: idempotent import, cancel on vanish, cleaning, stale guard, two-lead race, live import of this repo's .planning, privacy canary (BOARD-01)
+- [x] 62-05-PLAN.md — Importer: idempotent import, cancel on vanish, cleaning, stale guard, two-lead race, live import of this repo's .planning, privacy canary (BOARD-01)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 62-06-PLAN.md — Pure board model and move planner: columns, lanes, filters, card face, detail, refusal copy (BOARD-01, BOARD-02, BOARD-03)
@@ -266,7 +266,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 14/14 | In Progress | - |
-| 62. Work model, GSD import, Team Board | v0.6.0 | 4/14 | In Progress | - |
+| 62. Work model, GSD import, Team Board | v0.6.0 | 5/14 | In Progress | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
 | 65. Integration merge train | v0.6.0 | 0/TBD | Not started | - |

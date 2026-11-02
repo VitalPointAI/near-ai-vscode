@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: executing
-stopped_at: Completed 62-04-PLAN.md
-last_updated: "2026-11-02T18:36:40.688Z"
+stopped_at: Completed 62-05-PLAN.md
+last_updated: "2026-11-02T18:58:51.457Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 0c479b895815e796439990269292f8724846c3ce
+state_head: b81eacab551320ec2f4a60c275e84337c9581b66
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 40
-  completed_plans: 30
+  completed_plans: 31
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 62 (Work model, GSD import, Team Board (live, read and move)) — EXECUTING
-Plan: 5 of 14
+Plan: 6 of 14
 Status: Ready to execute
 Last activity: 2026-11-02 — Phase 62 execution started
 
@@ -84,6 +84,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P02 | 8 min | 2 tasks | 2 files |
 | Phase 62 P03 | 10 min | 2 tasks | 9 files |
 | Phase 62 P04 | 35 min | 3 tasks | 8 files |
+| Phase 62 P05 | 40 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -143,6 +144,10 @@ Recent decisions affecting current work:
 - [Phase 62]: GsdMilestone.current means the repository's current milestone (STATE.md, construction sign, current bullet); archived milestones build from the bullet range and .planning/milestones folders only — Keeps the board's current flag independent of which milestone a lead asks to see (62-03)
 - [Phase 62]: 62-04: an unplanned phase (no live plan) counts complete for dependants only when stored done — An unplanned phase must not release the phases that wait on it
 - [Phase 62]: 62-04: snapshot parseWorkItem refuses claimId and ringFenceNanoUsd until a claim phase stores them — Nothing in Phase 62 writes them and claims must stay empty; parser and writer widen together
+- [Phase 62]: Dependencies outside the imported graph are dropped with a warning, so a plan waiting on an older milestone is not stuck as dependency-missing
+- [Phase 62]: import.json stores the milestone asked for (empty means current) so auto-mode unchanged-tree skips compare like with like
+- [Phase 62]: Size fit order: list caps, trailing must-haves (first stays), trailing file paths, then must-haves halved to 40 characters
+- [Phase 62]: Import permission is checked before any fetch; a developer gets 'not permitted' and nothing is touched
 
 ### Pending Todos
 
@@ -164,8 +169,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T18:36:40.421Z
-Stopped at: Completed 62-04-PLAN.md
+Last session: 2026-11-02T18:58:51.182Z
+Stopped at: Completed 62-05-PLAN.md
 Resume file: None
 
 ## Notes
