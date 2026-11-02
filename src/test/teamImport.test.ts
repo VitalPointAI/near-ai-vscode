@@ -7,6 +7,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import * as path from 'node:path';
 import test from 'node:test';
 import { MAX_EVENT_BYTES, canonicalBytes, canonicalize } from '../domain/team/canonical';
+import { parsePlanTasks } from '../domain/team/gsdImport';
 import type { GsdGraph, GsdPlan } from '../domain/team/gsdImport';
 import { serialiseState, teamMaterializer } from '../domain/team/materialize';
 import { defaultTeamPolicy } from '../domain/team/policy';
@@ -137,6 +138,7 @@ test('the fixture roadmap on the integration branch becomes 13 signed items in o
     assert.deepEqual(two?.estimate, { tokens: 52000, confidence: 'medium' });
     assert.deepEqual(two?.requirements, ['FIX-02']);
     assert.deepEqual(two?.tags, ['gap-closure']);
+    assert.equal(two?.mustHaves[1], WITHHELD_TEXT, 'the bearer token truth is stored as the placeholder');
     assert.deepEqual(two?.gsd, { phase: '90', plan: '02', wave: 2, file: '.planning/phases/90-alpha/90-02-PLAN.md' });
     assert.equal(items.get('task:90-02-2')?.state, 'backlog');
 
@@ -639,4 +641,44 @@ test('diffImport on an empty board returns every body, parents before children',
   const options = { milestoneId: 'milestone:v1.0.0', current: true, sourceCommit: COMMIT };
   const intents = diffImport({ items: new Map() }, built.bodies, options);
   assert.deepEqual(intents.map((intent) => intent.type === 'item.imported' ? intent.body.id : intent.type), ['milestone:v1.0.0', 'phase:1', 'plan:1-01', 'task:1-01-1']);
+});
+
+// ---- this repository's own .planning at HEAD (success criterion 1) ---------------------------------------------------------------------------------
+
+// The repository root is two levels above dist/test. The ref is HEAD, never main: main does not hold the Phase 60 to 67 roadmap (RESEARCH Pitfall 4).
+const REPO_ROOT = path.join(__dirname, '..', '..');
+
+test('this repository\'s own .planning at HEAD imports into a correct graph, and importing it again writes nothing', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    const source = { projectRoot: REPO_ROOT, ref: 'HEAD' };
+    const storageDir = path.join(fixture.storageDir('a'), 'import');
+    const result = okResult(await importPlans({ log: seed.a.log, source, storageDir, mode: 'command' }));
+    const items = seed.a.log.state().items;
+    assert.equal(result.milestone, 'v0.6.0');
+    assert.equal(result.written, items.size, 'every item written is on the board');
+    assert.ok(items.size > 100, `milestone, phases, plans and tasks, not just ${items.size}`);
+    assert.deepEqual(result.warnings.filter((warning) => /was left out|appears twice/.test(warning)), [], 'no item of this repository is skipped');
+
+    assert.equal(items.get('milestone:v0.6.0')?.active, true);
+    for (const phase of ['60', '61', '62', '63', '64', '65', '66', '67']) assert.equal(items.get(`phase:${phase}`)?.kind, 'phase', `phase:${phase}`);
+    const finished = [...items.values()].filter((item) => item.kind === 'plan' && /^plan:6[01]-/.test(item.id));
+    assert.ok(finished.length >= 26, `the 12 plans of Phase 60 and the 14 of Phase 61 (${finished.length})`);
+    for (const plan of finished) {
+      assert.equal(plan.state, 'done', plan.id);
+      assert.equal(plan.summary, true, plan.id);
+    }
+
+    const planFile = gitIn(REPO_ROOT, ['ls-tree', '-r', '--name-only', 'HEAD', '--', '.planning/phases']).split('\n').find((name) => name.endsWith('/61-05-PLAN.md'));
+    assert.ok(planFile !== undefined, '61-05-PLAN.md is committed');
+    const taskBlocks = parsePlanTasks(gitIn(REPO_ROOT, ['show', `HEAD:${planFile}`])).length;
+    const tasks = [...items.values()].filter((item) => item.parentId === 'plan:61-05');
+    assert.ok(taskBlocks > 0);
+    assert.equal(tasks.length, taskBlocks, 'one task item per task block of 61-05');
+    for (const task of tasks) assert.equal(task.state, 'done', task.id);
+
+    assert.ok(items.get('plan:61-02')?.mustHaves.includes(WITHHELD_TEXT), 'the bearer token must-have of 61-02 is withheld');
+    assert.ok((result.withheld ?? 0) >= 1);
+    assert.equal(okResult(await importPlans({ log: seed.a.log, source, storageDir, mode: 'command' })).written, 0, 'a re-import writes 0 events');
+  });
 });
