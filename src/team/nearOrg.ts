@@ -178,6 +178,31 @@ function parseKey(value: unknown): NearKey {
   };
 }
 
+function parseInvitation(value: unknown): NearInvitation {
+  const source = requireObject(value, 'invitation');
+  const expiresAt = optionalString(source, 'expires_at');
+  const organizationName = optionalString(source, 'organization_name');
+  return {
+    id: requireString(source, 'id', 'invitation'),
+    organizationId: requireString(source, 'organization_id', 'invitation'),
+    email: requireString(source, 'email', 'invitation'),
+    role: requireString(source, 'role', 'invitation'),
+    status: requireString(source, 'status', 'invitation'),
+    ...(expiresAt === undefined ? {} : { expiresAt }),
+    ...(organizationName === undefined ? {} : { organizationName })
+  };
+}
+
+function parseInvitationList(value: unknown): NearInvitation[] {
+  if (!Array.isArray(value)) throw badResponse(0, 'invitations');
+  return value.map(parseInvitation);
+}
+
+function checkEmail(email: string): string {
+  if (typeof email !== 'string' || email.length < 3 || email.length > 254 || !email.includes('@') || /[\s\u0000-\u001f]/.test(email)) throw new RangeError('That is not an email address.');
+  return email;
+}
+
 /** The only place a spend limit body is built. A limit is a safe integer of zero or more. */
 function spendLimitBody(nanoUsd: number): { spendLimit: { amount: number; currency: typeof NEAR_SPEND_CURRENCY } } {
   if (!Number.isSafeInteger(nanoUsd) || nanoUsd < 0) throw new RangeError('A spend limit is a whole number of nano-USD, zero or more.');
@@ -190,6 +215,8 @@ interface Answer { status: number; json: unknown }
 
 interface SendOptions {
   body?: unknown;
+  /** Extra values that must never appear in an error message (an emailed token in the path). */
+  secrets?: readonly string[];
   /** Safe to repeat: GET, DELETE and the spend-limit PATCH. POST is never retried. */
   idempotent?: boolean;
   /** Statuses that are returned to the caller instead of thrown. */
@@ -297,6 +324,128 @@ export class NearOrgClient {
     return answer.status === 404 ? 'missing' : 'revoked';
   }
 
+  // ---- organizations, workspaces and members ----
+
+  public async listOrganizations(): Promise<NearOrganization[]> {
+    const rows = await this.pageAll('/organizations', 'organizations');
+    return rows.map((row) => {
+      const source = requireObject(row, 'organization');
+      return { id: requireString(source, 'id', 'organization'), name: requireString(source, 'name', 'organization'), role: requireRole(source, 'organization') };
+    });
+  }
+
+  public async listWorkspaces(organizationId: string): Promise<NearWorkspace[]> {
+    const rows = await this.pageAll(`/organizations/${enc(organizationId)}/workspaces`, 'workspaces');
+    return rows.map((row) => {
+      const source = requireObject(row, 'workspace');
+      return { id: requireString(source, 'id', 'workspace'), name: requireString(source, 'name', 'workspace'), organizationId: requireString(source, 'organization_id', 'workspace') };
+    });
+  }
+
+  /** Members with their role. The email is there only when the server returns one. */
+  public async listMembers(organizationId: string): Promise<NearOrgMember[]> {
+    const rows = await this.pageAll(`/organizations/${enc(organizationId)}/members`, 'members');
+    return rows.map((row) => {
+      const source = requireObject(row, 'member');
+      const user = isObject(source['user']) ? source['user'] : {};
+      const userId = optionalString(user, 'id') ?? optionalString(source, 'user_id');
+      if (userId === undefined) throw badResponse(0, 'member.user.id');
+      const email = optionalString(user, 'email') ?? optionalString(source, 'email');
+      return { userId, role: requireRole(source, 'member'), ...(email === undefined ? {} : { email }) };
+    });
+  }
+
+  /** Removes someone from the organization. Needs org owner or admin; the last owner cannot be removed. */
+  public async removeMember(organizationId: string, userId: string): Promise<'removed' | 'missing'> {
+    const answer = await this.send('DELETE', `/organizations/${enc(organizationId)}/members/${enc(userId)}`, { idempotent: true, accept: [404] });
+    return answer.status === 404 ? 'missing' : 'removed';
+  }
+
+  // ---- invitations ----
+
+  /**
+   * Invites one email address to the organization. NEAR answers 200 even when the address failed, and
+   * never returns an invitation id, so the result is read from the per-email answer and the id is
+   * found afterwards with listInvitations. An owner cannot be invited, so the role is admin or member.
+   */
+  public async inviteByEmail(organizationId: string, email: string, role: 'admin' | 'member'): Promise<InviteOutcome> {
+    const body = { invitations: [{ email: checkEmail(email), role }] };
+    const answer = await this.send('POST', `/organizations/${enc(organizationId)}/members/invite-by-email`, { body });
+    const results = requireObject(answer.json, 'invitation answer')['results'];
+    const first = Array.isArray(results) ? results[0] : undefined;
+    if (!isObject(first) || typeof first['success'] !== 'boolean') throw badResponse(answer.status, 'invitation results');
+    if (first['success']) return { ok: true, alreadyMember: false };
+    const error = typeof first['error'] === 'string' ? first['error'] : '';
+    if (/already a member/i.test(error)) return { ok: true, alreadyMember: true };
+    if (/insufficient permission/i.test(error)) return { ok: false, reason: 'Your NEAR role cannot invite people to this organization.' };
+    return { ok: false, reason: scrubNearText(error) || 'NEAR AI Cloud did not send the invitation.' };
+  }
+
+  public async listInvitations(organizationId: string, status?: 'pending' | 'accepted' | 'declined' | 'expired'): Promise<NearInvitation[]> {
+    const query = status === undefined ? '' : `?${new URLSearchParams({ status }).toString()}`;
+    const answer = await this.send('GET', `/organizations/${enc(organizationId)}/members/invitations${query}`, { idempotent: true });
+    return parseInvitationList(answer.json);
+  }
+
+  /** Cancels a pending invitation. NEAR refuses an invitation that is no longer pending. */
+  public async cancelInvitation(organizationId: string, invitationId: string): Promise<'cancelled' | 'not-pending'> {
+    const answer = await this.send('DELETE', `/organizations/${enc(organizationId)}/members/invitations/${enc(invitationId)}`, { idempotent: true, accept: [400, 404] });
+    return answer.status === 400 || answer.status === 404 ? 'not-pending' : 'cancelled';
+  }
+
+  /** The signed-in user's own pending invitations, matched by login email. */
+  public async myInvitations(): Promise<NearInvitation[]> {
+    const answer = await this.send('GET', '/users/me/invitations', { idempotent: true });
+    return parseInvitationList(answer.json);
+  }
+
+  public async acceptInvitation(invitationId: string): Promise<'accepted' | 'already-member'> {
+    const answer = await this.send('POST', `/users/me/invitations/${enc(invitationId)}/accept`, { accept: [409], secrets: [invitationId] });
+    return answer.status === 409 ? 'already-member' : 'accepted';
+  }
+
+  /** Accepts with the token from the invitation email. The token is a credential: never in a message. */
+  public async acceptInvitationToken(token: string): Promise<'accepted' | 'already-member'> {
+    if (typeof token !== 'string' || token.length === 0 || token.length > 512) throw new RangeError('That is not an invitation token.');
+    const answer = await this.send('POST', `/invitations/${enc(token)}/accept`, { accept: [409], secrets: [token] });
+    return answer.status === 409 ? 'already-member' : 'accepted';
+  }
+
+  // ---- usage and the signed-in user ----
+
+  /** One key's spend entries, newest first. A 404 means this route is not offered. */
+  public async keyUsageHistory(workspaceId: string, keyId: string, page: { limit: number; offset: number } = { limit: 50, offset: 0 }): Promise<{ entries: NearUsageEntry[]; total: number } | 'not-offered'> {
+    if (!Number.isInteger(page.limit) || page.limit < 1 || page.limit > PAGE_SIZE || !Number.isInteger(page.offset) || page.offset < 0) throw new RangeError('A page is 1 to 100 entries from a whole-number offset.');
+    const query = new URLSearchParams({ limit: String(page.limit), offset: String(page.offset) });
+    const answer = await this.send('GET', `/workspaces/${enc(workspaceId)}/api-keys/${enc(keyId)}/usage/history?${query.toString()}`, { idempotent: true, accept: [404] });
+    if (answer.status === 404) return 'not-offered';
+    const body = requireObject(answer.json, 'usage history');
+    const data = body['data'];
+    const total = body['total'];
+    if (!Array.isArray(data) || typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0) throw badResponse(answer.status, 'usage history');
+    const entries = data.map((row): NearUsageEntry => {
+      const source = requireObject(row, 'usage entry');
+      const cost = source['total_cost'];
+      if (typeof cost !== 'number' || !Number.isSafeInteger(cost) || cost < 0) throw badResponse(answer.status, 'usage entry.total_cost');
+      return { id: requireString(source, 'id', 'usage entry'), model: requireString(source, 'model', 'usage entry'), totalCostNanoUsd: cost, createdAt: requireString(source, 'created_at', 'usage entry') };
+    });
+    return { entries, total };
+  }
+
+  public async currentUser(): Promise<{ id: string; username: string; email?: string; organizationIds: string[] }> {
+    const answer = await this.send('GET', '/users/me', { idempotent: true });
+    const source = requireObject(answer.json, 'user');
+    const organizations = source['organizations'];
+    if (organizations !== null && organizations !== undefined && !Array.isArray(organizations)) throw badResponse(answer.status, 'user.organizations');
+    const email = optionalString(source, 'email');
+    return {
+      id: requireString(source, 'id', 'user'),
+      username: requireString(source, 'username', 'user'),
+      ...(email === undefined ? {} : { email }),
+      organizationIds: (organizations ?? []).map((organization) => requireString(requireObject(organization, 'user.organization'), 'id', 'user.organization'))
+    };
+  }
+
   // ---- internals ----
 
   /** Revokes a key this call made but cannot hand over; says what happened, never throws. */
@@ -395,7 +544,7 @@ export class NearOrgClient {
         }
       }
       if (ok || (options.accept?.includes(status) ?? false)) return { status, json };
-      const detail = scrubNearText(bodyMessage(json), [token]);
+      const detail = scrubNearText(bodyMessage(json), [token, ...(options.secrets ?? [])]);
       throw new NearOrgError(status, codeForStatus(status), `NEAR AI Cloud answered HTTP ${status}${detail ? `: ${detail}` : '.'}`);
     }
   }
