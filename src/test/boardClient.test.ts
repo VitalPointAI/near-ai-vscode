@@ -426,3 +426,218 @@ test('a dismissed prompt (refused with an empty reason) clears the pending line 
   h.advance(500);
   assert.equal(h.announcements.length, spoken);
 });
+
+// ---- Task 3: keyboard, the client API, icons and the stylesheet --------------------------------------------------------------------------------
+
+const BOARD_CSS = readFileSync(path.join(MEDIA, 'board.css'), 'utf8');
+const focusedId = (h: BoardHarness): string | null => h.focused().closest('.card')?.getAttribute('data-id') ?? null;
+
+async function drawn(width = 800, viewer: 'owner' | 'dev' = 'owner'): Promise<{ h: BoardHarness; world: BoardWorld }> {
+  const world = await standard();
+  const h = start({ width });
+  h.deliver({ type: 'state', model: modelOf(world, viewer === 'owner' ? world.owner.memberId : world.dev.memberId) });
+  return { h, world };
+}
+
+test('kanban: one tab stop per lane, arrows move inside and across columns, Home and End and the Ctrl forms reach the ends', async () => {
+  const { h } = await drawn();
+  const stops = h.$$('.card-main').filter((b) => b.getAttribute('tabindex') === '0');
+  assert.equal(stops.length, 1, 'one card per lane takes the tab stop');
+  assert.equal(h.$$('.card-main').filter((b) => b.getAttribute('tabindex') === '-1').length, 2);
+
+  main(h, 'plan:90-02').focus();
+  h.press(h.focused(), 'ArrowDown');
+  assert.equal(focusedId(h), CHORE_ID);
+  assert.equal(main(h, CHORE_ID).getAttribute('tabindex'), '0', 'the stop follows the focus');
+  assert.equal(main(h, 'plan:90-02').getAttribute('tabindex'), '-1');
+  h.press(h.focused(), 'ArrowDown');
+  assert.equal(focusedId(h), CHORE_ID, 'nothing happens at the end of a cell');
+  h.press(h.focused(), 'ArrowRight');
+  assert.equal(focusedId(h), 'plan:90-01', 'Right lands on the last card when the row index does not exist');
+  h.press(h.focused(), 'ArrowLeft');
+  assert.equal(focusedId(h), 'plan:90-02');
+  h.press(h.focused(), 'End');
+  assert.equal(focusedId(h), CHORE_ID);
+  h.press(h.focused(), 'Home');
+  assert.equal(focusedId(h), 'plan:90-02');
+  h.press(h.focused(), 'End', { ctrlKey: true });
+  assert.equal(focusedId(h), 'plan:90-01');
+  h.press(h.focused(), 'Home', { ctrlKey: true });
+  assert.equal(focusedId(h), 'plan:90-02');
+  const before = h.focused();
+  assert.equal(h.press(before, 'Delete').defaultPrevented, false);
+  assert.equal(h.focused(), before, 'there is no delete');
+});
+
+test('the column header row is one stop; Left, Right, Home and End move between columns and Enter collapses', async () => {
+  const { h } = await drawn();
+  const heads = h.$$('.col-btn');
+  assert.equal(h.$('.colheads')!.getAttribute('role'), 'toolbar');
+  assert.deepEqual(heads.map((b) => b.getAttribute('tabindex')), ['0', '-1', '-1', '-1', '-1', '-1', '-1', '-1']);
+  heads[0].focus();
+  h.press(heads[0], 'ArrowRight');
+  assert.equal(h.focused(), heads[1]);
+  h.press(heads[1], 'End');
+  assert.equal(h.focused(), heads[7]);
+  h.press(heads[7], 'Home');
+  assert.equal(h.focused(), heads[0]);
+  h.press(heads[0], 'Enter');
+  assert.equal(h.$('.col-btn')!.getAttribute('aria-expanded'), 'false');
+  assert.equal(h.focused(), h.$('.col-btn'), 'focus stays on the header button');
+});
+
+test('list: rows of an open group are one roving stop with Up, Down, Home and End', async () => {
+  const { h } = await drawn(400);
+  main(h, 'plan:90-02').focus();
+  h.press(h.focused(), 'ArrowDown');
+  assert.equal(focusedId(h), CHORE_ID);
+  h.press(h.focused(), 'ArrowDown');
+  assert.equal(focusedId(h), CHORE_ID);
+  h.press(h.focused(), 'Home');
+  assert.equal(focusedId(h), 'plan:90-02');
+  h.press(h.focused(), 'End');
+  assert.equal(focusedId(h), CHORE_ID);
+  assert.equal(h.$$('.group[data-column="backlog"] .card-main').filter((b) => b.getAttribute('tabindex') === '0').length, 1);
+  assert.equal(h.$$('.group[data-column="ready"] .card-main').filter((b) => b.getAttribute('tabindex') === '0').length, 1, 'each open group has its own stop');
+});
+
+test('M, Shift+F10 and the ContextMenu key open the menu through the client API; Enter opens the detail; nothing registered is safe', async () => {
+  const { h } = await drawn();
+  const target = main(h, 'plan:90-01');
+  target.focus();
+  h.press(target, 'M');
+  h.press(target, 'Enter');
+  h.press(target, 'F10', { shiftKey: true });
+  h.press(target, 'ContextMenu');
+  assert.equal(h.$$('[role="menu"]').length, 0, 'with nothing registered nothing is built and nothing throws');
+
+  const menu: Array<[string, FakeNode]> = [];
+  const detail: Array<[string, FakeNode]> = [];
+  api(h).registerMenu((id: string, opener: FakeNode) => menu.push([id, opener]));
+  api(h).registerDetail((id: string, opener: FakeNode) => detail.push([id, opener]));
+  const moveButton = card(h, 'plan:90-01').querySelector('.move-btn')!;
+  h.press(target, 'M');
+  h.press(target, 'F10', { shiftKey: true });
+  h.press(target, 'ContextMenu');
+  h.press(target, 'F10');
+  assert.deepEqual(menu.map(([id]) => id), ['plan:90-01', 'plan:90-01', 'plan:90-01']);
+  assert.ok(menu.every(([, opener]) => opener === moveButton), 'focus returns to the Move to... button');
+  moveButton.click();
+  assert.equal(menu.length, 4);
+  h.press(target, 'Enter');
+  assert.deepEqual(detail, [['plan:90-01', target]]);
+  assert.equal(target.getAttribute('aria-current'), 'true', 'the opened card is the selected one');
+
+  const { h: dev } = await drawn(800, 'dev');
+  const calls: string[] = [];
+  api(dev).registerMenu((id: string) => calls.push(id));
+  main(dev, 'plan:90-01').focus();
+  dev.press(main(dev, 'plan:90-01'), 'M');
+  assert.deepEqual(calls, [], 'a card with no offered move opens nothing');
+});
+
+test('the selected card, the layout switch and a hidden view', async () => {
+  const { h, world } = await drawn();
+  api(h).registerDetail(() => undefined);
+  main(h, 'plan:90-02').click();
+  chip(h, 'Ready').click();
+  chip(h, 'Ready').click();
+  h.setWidth(300);
+  assert.equal(main(h, 'plan:90-02').getAttribute('aria-current'), 'true', 'the selection is kept across the layout switch');
+  assert.equal(h.root.getAttribute('data-layout'), 'list');
+  h.setWidth(900);
+  assert.equal(h.root.getAttribute('data-layout'), 'kanban');
+  assert.equal(h.live(), h.live(), 'a layout change announces nothing');
+  h.setVisible(false);
+  assert.deepEqual(h.posts.at(-1), { type: 'visible', value: false });
+  const drawnBefore = h.$$('.card').length;
+  world.accept(world.lead, 'item.blocked', { id: 'plan:90-02', reason: 'waiting' });
+  h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
+  assert.equal(card(h, 'plan:90-02').querySelector('.badge-blocked'), null, 'nothing is drawn while the view is hidden');
+  h.setVisible(true);
+  assert.deepEqual(h.posts.at(-1), { type: 'visible', value: true });
+  assert.ok(card(h, 'plan:90-02').querySelector('.badge-blocked'), 'the cached model is drawn when the view shows again');
+  assert.equal(h.$$('.card').length, drawnBefore);
+});
+
+test('NearAiBoard exposes the whole API; refusals and pending lines render, announce and clear', async () => {
+  const { h, world } = await drawn();
+  const board = api(h);
+  for (const name of ['post', 'announce', 'icon', 'layout', 'model', 'cardData', 'cardElement', 'focusCard', 'setPending', 'showRefusal', 'clearRefusal', 'setFilter', 'onRender', 'onMessage', 'registerMenu', 'openMenu', 'registerDetail', 'openDetail', 'registerForm', 'openForm']) {
+    assert.equal(typeof board[name], 'function', name);
+  }
+  assert.equal(board.layout(), 'kanban');
+  assert.equal(board.cardData('plan:90-01').displayId, '90-01');
+  assert.equal(board.cardElement('plan:90-01'), card(h, 'plan:90-01'));
+  assert.equal(board.focusCard('plan:90-01'), true);
+  assert.equal(focusedId(h), 'plan:90-01');
+  board.post({ type: 'retry' });
+  assert.deepEqual(h.posts.at(-1), { type: 'retry' });
+
+  const reason = 'Claiming a plan arrives in a later update. Nothing was moved.';
+  board.setPending('plan:90-01', 'Moving to Claimed...');
+  board.showRefusal('plan:90-01', 'Claimed', reason);
+  assert.equal(card(h, 'plan:90-01').querySelector('.pending-line'), null, 'a refusal ends the pending line');
+  assert.equal(text(card(h, 'plan:90-01').querySelector('.refusal-line')), reason);
+  assert.ok(card(h, 'plan:90-01').querySelector('.card-msg svg'), 'the refusal carries the error icon');
+  const dismiss = card(h, 'plan:90-01').querySelector('.dismiss')!;
+  assert.equal(dismiss.getAttribute('aria-label'), 'Dismiss message');
+  h.advance(150);
+  assert.equal(h.live(), `Can't move plan 90-01 to Claimed. ${reason}`);
+  dismiss.click();
+  assert.equal(card(h, 'plan:90-01').querySelector('.refusal-line'), null);
+
+  board.showRefusal('plan:90-01', 'Claimed', reason);
+  board.clearRefusal('plan:90-01');
+  assert.equal(card(h, 'plan:90-01').querySelector('.refusal-line'), null);
+
+  board.showRefusal('plan:90-01', 'Claimed', reason);
+  world.accept(world.owner, 'item.updated', { id: 'plan:90-01', changes: { hold: true } });
+  h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
+  assert.equal(card(h, 'plan:90-01').querySelector('.refusal-line'), null, 'the refusal goes when the card changes');
+
+  let renders = 0;
+  const messages: string[] = [];
+  board.onRender(() => { renders += 1; });
+  board.onMessage('detail', (m: { itemId: string }) => messages.push(m.itemId));
+  board.setFilter('ready', true);
+  assert.ok(renders >= 1);
+  h.deliver({ type: 'detail', itemId: 'plan:90-01', title: 'Alpha slice' });
+  assert.deepEqual(messages, ['plan:90-01']);
+});
+
+test('icon(name) draws an aria-hidden inline svg for every meaning in the table and an empty svg for an unknown name', async () => {
+  const { h } = await drawn();
+  const names = ['circle-outline', 'play-circle', 'person', 'sync', 'eye', 'git-merge', 'pass', 'circle-slash', 'lock', 'debug-pause', 'info', 'link', 'clock', 'arrow-swap', 'chevron-right', 'chevron-down', 'error', 'warning', 'filter', 'add', 'link-external', 'close', 'arrow-left', 'organization'];
+  for (const name of names) {
+    const svg = api(h).icon(name);
+    assert.equal(svg.localName, 'svg', name);
+    assert.equal(svg.getAttribute('aria-hidden'), 'true', name);
+    assert.equal(svg.getAttribute('stroke'), 'currentColor', name);
+    assert.ok(svg.children.length > 0, `${name} has a shape`);
+  }
+  const unknown = api(h).icon('no-such-icon');
+  assert.equal(unknown.children.length, 0);
+  assert.equal(unknown.getAttribute('aria-hidden'), 'true');
+});
+
+test('board.css: only theme variables for colour, borders kept in high contrast and forced colours, no motion when reduced, and the narrow rules', () => {
+  assert.doesNotMatch(BOARD_CSS, /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
+  assert.doesNotMatch(BOARD_CSS, /(?<![-\w])(?:white|black|red|green|blue|yellow|orange|purple|pink|brown|gr[ae]y|cyan|magenta|silver|gold|navy|teal|maroon|olive|lime|aqua|fuchsia)(?![-\w])/i);
+  const variables = [...BOARD_CSS.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]);
+  assert.ok(variables.length > 40);
+  assert.ok(variables.every((name) => name.startsWith('--vscode-')), `non-theme variable: ${variables.find((name) => !name.startsWith('--vscode-'))}`);
+  assert.match(BOARD_CSS, /@media \(prefers-reduced-motion: reduce\)[^{]*\{[^}]*transition-duration: 0\.01ms[^}]*animation-duration: 0\.01ms/);
+  assert.match(BOARD_CSS, /@media \(forced-colors: active\)[\s\S]*?\.card[\s\S]*?border: 1px solid/);
+  assert.match(BOARD_CSS, /body\.vscode-high-contrast \.card[\s\S]*?var\(--vscode-contrastBorder\)/);
+  assert.match(BOARD_CSS, /vscode-high-contrast-light/);
+  assert.match(BOARD_CSS, /@media \(max-width: 520px\)/);
+  assert.match(BOARD_CSS, /@media \(max-width: 280px\)/);
+  assert.match(BOARD_CSS, /button\.link:hover, button\.link:focus-visible \{ text-decoration: underline/);
+  assert.match(BOARD_CSS, /body\.vscode-high-contrast button\.link/);
+  assert.doesNotMatch(BOARD_CSS, /@import|url\(|@font-face|https?:/);
+  for (const selector of ['#toolbar', '#banner', '#detail', '#menu', '#item-form', '.column', '.lane', '.cell', '.card', '.card-main', '.move-btn', '.group-head', '.dragging', '.drop-ok', '.changed', '.pending', '.refusal-line']) {
+    assert.ok(BOARD_CSS.includes(selector), `${selector} is styled`);
+  }
+  assert.doesNotMatch(BOARD_CSS, /[—–]/);
+});
