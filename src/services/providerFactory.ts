@@ -2,12 +2,15 @@ import { OrganizationProfile, ProjectCredentialScope, ResolvedProvider, isProjec
 import { AuthService } from './auth';
 import { NearAiClient } from './nearAiClient';
 import { spendAccountFor } from './spendAccount';
+import type { KeyScope } from './spendLedger';
 
 export interface CreateNearAiProviderOptions {
   auth: AuthService;
   profile: OrganizationProfile;
   scope: ProjectCredentialScope;
   fetchFn?: typeof fetch;
+  /** Team Mode (D-14): tags every request this provider makes. Left out for solo projects. */
+  keyScope?: KeyScope;
 }
 
 /** Builds the clients for a profile: NEAR AI Cloud, a local runtime, or both (hybrid). */

@@ -469,3 +469,47 @@ test('a window that has its device key is not offered Join', async () => {
     assert.deepEqual(infoMessages().filter((message) => message.includes('has not joined')), []);
   });
 });
+
+// ---- a team project on a personal key (Task 3, D-14) ------------------------------------------------------------------------------------
+
+const PERSONAL_WARNING = 'This team project is using your personal NEAR key, so the spend cap your lead set does not apply. Runs are marked as personal-key runs.';
+
+async function switchToPersonal(w: World, person: Person): Promise<void> {
+  const projectRoot = w.fixture.clones[person.clone] as string;
+  const store = new ProfileStore(projectRoot, new AuthService(person.secrets), { validator: async () => undefined });
+  await store.configure({ profileId: 'profile-personal', displayName: 'Personal', organization: 'Me', baseUrl: w.fake.baseUrl, authMode: 'apiKey' }, 'sk-personal-session-test-key');
+  await store.select('profile-personal');
+}
+
+test('a member on a personal key in a team project is warned once and can switch back to the team key', async () => {
+  await inWorld({}, async (w) => {
+    const dana = await joinPerson(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    await confirmAndDeliver(w, dana);
+    const own = await startSession(w, dana);
+    assert.deepEqual(warnMessages(), [], 'on the team key there is nothing to warn about');
+
+    await switchToPersonal(w, dana);
+    stub.messageAnswers.push('Use team key');
+    await own.session.sync();
+    assert.deepEqual(warnMessages(), [PERSONAL_WARNING]);
+    assert.deepEqual(stub.notificationActions[stub.notifications.findIndex((entry) => entry.message === PERSONAL_WARNING)], ['Use team key']);
+    await until(() => warnMessages().length === 1, 'the warning');
+    await new Promise<void>((resolve) => { setTimeout(resolve, 150); });
+    assert.equal(await activeProfileOf(w, dana), teamProfileId(w.teamId), 'the action selected the team profile');
+
+    await switchToPersonal(w, dana);
+    await own.session.sync();
+    assert.equal(warnMessages().length, 1, 'once per session');
+  });
+});
+
+test('a window with no installed team key, and the owner window, get no personal-key warning', async () => {
+  await inWorld({}, async (w) => {
+    const dana = await joinPerson(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    await switchToPersonal(w, dana);
+    const own = await startSession(w, dana);
+    await own.session.sync();
+    await startSession(w, 'owner');
+    assert.deepEqual(warnMessages().filter((message) => message.includes('personal NEAR key')), []);
+  });
+});

@@ -139,7 +139,7 @@ export interface NearAiClientOptions {
   /** Where every billable response is recorded (the key's spend ledger), and the daily limit. */
   spend?: SpendSink;
   /** Tags every recorded response from this client carries (the project). */
-  spendTag?: Pick<SpendTag, 'projectId'>;
+  spendTag?: Pick<SpendTag, 'projectId' | 'keyScope'>;
 }
 
 /** Endpoints NEAR bills for; every 2xx answer from one is recorded in the spend ledger. */

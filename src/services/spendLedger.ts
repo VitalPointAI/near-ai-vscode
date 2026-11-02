@@ -15,6 +15,9 @@ export type SpendKind = 'main' | 'sub-agent' | 'safety' | 'summary' | 'attachmen
 /** `open` while a stream is still arriving; `partial` when it broke off; `aborted` when it was cancelled or timed out. */
 export type SpendStatus = 'open' | 'completed' | 'partial' | 'aborted';
 
+/** Whether a request used the team's key (with the lead's spend cap) or a personal key inside a Team Mode project (D-14). Solo projects have neither. */
+export type KeyScope = 'team' | 'personal';
+
 /** Who a request is billed to inside the extension: set by callers around the work they start. */
 export interface SpendTag {
   kind?: SpendKind;
@@ -22,6 +25,7 @@ export interface SpendTag {
   conversationId?: string;
   projectId?: string;
   agentId?: string;
+  keyScope?: KeyScope;
 }
 
 const tags = new AsyncLocalStorage<SpendTag>();
