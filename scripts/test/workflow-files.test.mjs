@@ -88,3 +88,22 @@ test('a release tag never replaces an existing GitHub release or its files', () 
   }
   assert.match(all.get('release'), /gh release create "\$TAG"[^\n]*--verify-tag/);
 });
+
+test('the release notes are checked against a checksum from the build job, like the VSIX', () => {
+  const all = jobs(read('release.yml'));
+  assert.match(all.get('build'), /notes_sha256=/, 'build records the notes checksum as an output');
+  assert.match(all.get('build'), /notes_sha256: \$\{\{ steps\.checksum\.outputs\.notes_sha256 \}\}/);
+  const check = steps(all.get('release')).find((step) => /sha256sum --check/.test(step));
+  assert.ok(check, 'release checks checksums');
+  assert.match(check, /needs\.build\.outputs\.notes_sha256/);
+  assert.match(check, /release-notes\.md/);
+  const order = steps(all.get('release'));
+  assert.ok(order.indexOf(check) < order.findIndex((step) => /gh release create/.test(step)), 'checked before the release is created');
+});
+
+test('the release workflow does not claim protections that depend on settings not yet applied', () => {
+  const header = read('release.yml').split('\nname:')[0];
+  assert.doesNotMatch(header, /Only the owner can create v\* tags/);
+  assert.match(header, /organization owners/);
+  assert.match(header, /once the tag rulesets .* are applied/is);
+});

@@ -220,10 +220,11 @@ the fix (for example `gh pr update-branch <number> --rebase`, then CI and a new 
 6. The tag starts `.github/workflows/release.yml`:
    - **build** has a read-only token. It checks that the tag matches package.json and points
      at a commit on `main` (or at the head of `hotfix/<x.y.z>`, see the hotfix section), runs
-     the tests, builds and verifies the VSIX, and records its SHA-256;
+     the tests, builds and verifies the VSIX, and records the SHA-256 of the VSIX and of the
+     release notes;
    - **release** creates the GitHub release named `<x.y.z>` with the VSIX, the checksum, and
      the CHANGELOG section as notes. It is the only job that can write to the repository, so it
-     installs and runs nothing: it downloads the build's files and checks the checksum first;
+     installs and runs nothing: it downloads the build's files and checks both checksums first;
    - **publish** runs in the protected `marketplace` environment. It **waits for the owner**:
      GitHub shows "Review deployments" on the run, and nothing is published until the owner
      approves. Its first step checks the VSIX against the checksum the build job recorded. It
@@ -243,6 +244,13 @@ gh api -X POST "repos/$repo/actions/runs/<run-id>/pending_deployments" \
 ```
 
 Rejecting it leaves the GitHub release in place and nothing published.
+
+What the checksum covers: it shows that the VSIX the release and publish jobs use is the one the
+build job made, so nothing can swap it on the way. It does not protect the build itself. The
+build job runs `npm ci` with dependency install scripts and runs the tests, so a compromised
+dependency could change the VSIX before its checksum is taken. That job has a read-only token
+and no secrets, which limits what such a dependency could reach, but not what it could put in
+the package.
 
 ## 7. Recovery
 
@@ -351,8 +359,8 @@ There is no "unpublish one version" that users reliably follow. Options, best fi
 ### The Release workflow failed
 
 - **build failed:** fix the cause in a PR. If the tag points at a commit that should not be
-  released, do not move the tag (the tag ruleset refuses that anyway); release the fix as the
-  next patch. If only an outside service failed, re-run the job.
+  released, do not move the tag (once the tag rulesets in section 8 are applied, GitHub refuses
+  that anyway); release the fix as the next patch. If only an outside service failed, re-run the job.
 - **release failed:** the workflow never changes an existing GitHub release (no `--clobber`), so
   a re-run refuses if the failed run already created one. The owner checks the partial release
   in the web UI, deletes it if it is incomplete, then re-runs the failed jobs.
@@ -415,6 +423,7 @@ JSON
 Merging and vulnerability reporting:
 
 ```bash
+repo=VitalPointAI/near-ai-vscode
 gh api -X PATCH "repos/$repo" -F allow_squash_merge=true -F allow_merge_commit=false \
   -F allow_rebase_merge=false -F delete_branch_on_merge=true
 gh api -X PUT "repos/$repo/private-vulnerability-reporting"
@@ -425,6 +434,7 @@ Rulesets accept roles, teams and apps as bypass actors, not single accounts, so 
 limited to the organization owner role; every organization owner can create a tag.
 
 ```bash
+repo=VitalPointAI/near-ai-vscode
 gh api -X POST "repos/$repo/rulesets" --input - <<'JSON'
 {"name": "release tags are permanent", "target": "tag", "enforcement": "active",
  "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
@@ -442,6 +452,7 @@ JSON
 The `marketplace` environment:
 
 ```bash
+repo=VitalPointAI/near-ai-vscode
 owner_id="$(gh api users/ALuhning --jq .id)"
 gh api -X PUT "repos/$repo/environments/marketplace" --input - <<JSON
 {"reviewers": [{"type": "User", "id": $owner_id}], "prevent_self_review": false,

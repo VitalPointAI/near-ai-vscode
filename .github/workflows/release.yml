@@ -2,17 +2,20 @@
 # squash commit of a release/x.y.z PR; scripts/tag-release.mjs can retry it or tag a hotfix).
 #
 #   build    read-only token. Checks the tag (and that no release exists for it yet), runs the
-#            tests, builds and verifies the VSIX, and records its SHA-256 as a job output.
+#            tests, builds and verifies the VSIX, and records the SHA-256 of the VSIX and of the
+#            release notes as job outputs. It runs `npm ci` with install scripts, so the
+#            checksums only show that later jobs use what this job made; they do not protect
+#            the build itself from a compromised dependency.
 #   release  holds contents: write to create the GitHub release, so it installs and runs nothing:
-#            it downloads the build's artifact, checks the checksum, and runs `gh release`.
+#            it downloads the build's artifact, checks both checksums, and runs `gh release`.
 #   publish  runs in the protected "marketplace" environment, so it waits until the owner
 #            approves it in GitHub. It checks the VSIX checksum before anything else, installs
 #            the vsce pinned in package-lock.json without install scripts, and publishes that
 #            exact VSIX with the VSCE_PAT secret, which exists only in that environment.
 #
-# Only the owner can create v* tags, and nobody can move or delete them (a tag ruleset), and
-# the "marketplace" environment cannot be bypassed by admins; see docs/development-workflow.md,
-# "Repository settings".
+# Once the tag rulesets in docs/development-workflow.md ("Repository settings") are applied,
+# only organization owners can create v* tags and nobody can move or delete them. The
+# "marketplace" environment cannot be bypassed by admins.
 name: Release
 
 on:
@@ -37,6 +40,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       vsix: ${{ steps.meta.outputs.vsix }}
       sha256: ${{ steps.checksum.outputs.sha256 }}
+      notes_sha256: ${{ steps.checksum.outputs.notes_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,7 +87,7 @@ jobs:
         run: npm test
       - name: Package the VSIX and check what it contains
         run: npm run verify:release
-      - name: Record the VSIX checksum
+      - name: Record the VSIX and release notes checksums
         id: checksum
         env:
           VSIX: ${{ steps.meta.outputs.vsix }}
@@ -91,6 +95,7 @@ jobs:
           sum="$(sha256sum "$VSIX" | cut -d ' ' -f 1)"
           echo "$sum  $VSIX" | tee "$VSIX.sha256"
           echo "sha256=$sum" >> "$GITHUB_OUTPUT"
+          echo "notes_sha256=$(sha256sum release-notes.md | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-vsix
@@ -113,12 +118,13 @@ jobs:
         with:
           name: release-vsix
           path: release
-      - name: Check the VSIX is the one the build job verified
+      - name: Check the VSIX and release notes are the ones the build job made
         working-directory: release
         env:
           SHA256: ${{ needs.build.outputs.sha256 }}
+          NOTES_SHA256: ${{ needs.build.outputs.notes_sha256 }}
           VSIX: ${{ needs.build.outputs.vsix }}
-        run: echo "$SHA256  $VSIX" | sha256sum --check --strict
+        run: printf '%s  %s\n%s  %s\n' "$SHA256" "$VSIX" "$NOTES_SHA256" release-notes.md | sha256sum --check --strict
       - name: Create the GitHub release
         working-directory: release
         env:
