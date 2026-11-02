@@ -9,7 +9,7 @@ import { sealCapableFingerprints } from '../domain/team/invite';
 import type { Member, SealedEntryBody, TeamFile } from '../domain/team/types';
 import type { SecretStorageLike } from '../services/auth';
 import type { FetchLike } from '../services/reportingSignIn';
-import type { CleanupChecklist } from './cleanupChecklist';
+import type { CleanupChecklist, CleanupStep } from './cleanupChecklist';
 import { NoDeviceKeyError } from './eventLog';
 import type { TeamLog } from './eventLog';
 import { loadSealIdentity } from './identity';
@@ -22,7 +22,7 @@ import { SecretLeakError } from '../domain/team/secrets';
 import { installTeamKey, readInstalledKey } from './teamKeyProfile';
 import type { AppendResult } from './transport';
 
-export type DeliveryResult = { ok: true; keyId: string } | { ok: false; code: 'no-device' | 'not-linked' | 'near' | 'log' | 'signed-out'; message: string };
+export type DeliveryResult = { ok: true; keyId: string; notice?: string } | { ok: false; code: 'no-device' | 'not-linked' | 'near' | 'log' | 'signed-out'; message: string };
 export type ConfirmResult =
   | { ok: true; roleChanged: boolean; key: 'delivered' | 'queued' | 'not-applicable'; message: string }
   | { ok: false; code: 'not-pending' | 'refused' | 'conflict' | 'offline'; message: string };
@@ -73,15 +73,87 @@ function fail(code: Extract<DeliveryResult, { ok: false }>['code'], message: str
   return { ok: false, code, message };
 }
 
+function errorText(error: unknown): string {
+  return scrubNearText(error instanceof Error ? error.message : String(error));
+}
+
 function nearFailure(error: unknown): DeliveryResult {
   if (error instanceof NearSessionError && (error.code === 'signed-out' || error.code === 'expired')) return fail('signed-out', error.message);
-  return fail('near', scrubNearText(error instanceof NearOrgError || error instanceof Error ? error.message : String(error)));
+  return fail('near', errorText(error));
+}
+
+export const signInToSendKeyText = (memberName: string): string => `Sign in to NEAR to send ${memberName}'s key.`;
+
+// ---- the lead's cleanup list (D-18, D-25) -------------------------------------------------------------------------------------------------
+
+type Person = { id: string; name: string };
+type OpenStatus = 'pending' | 'failed' | 'manual';
+
+// Records one unfinished NEAR step. An open item for the same member and step (and key, when one is named) is updated, so a retry never
+// piles up duplicates, and a failed attempt counts. Returns a sentence when the list itself could not be saved, never throws.
+async function note(checklist: CleanupChecklist, person: Person, step: CleanupStep, status: OpenStatus, lastError?: string, keyId?: string): Promise<string | undefined> {
+  try {
+    const open = (await checklist.forMember(person.id)).find((item) => item.step === step && item.status !== 'done' && (keyId === undefined || item.keyId === keyId));
+    if (open !== undefined) {
+      await checklist.update(open.id, { status, ...(lastError === undefined ? {} : { lastError }), ...(status === 'failed' ? { attempted: true } : {}) });
+      return undefined;
+    }
+    const [created] = await checklist.add([{ memberId: person.id, memberName: person.name, step, status, ...(keyId === undefined ? {} : { keyId }), ...(lastError === undefined ? {} : { lastError }) }]);
+    if (status === 'failed' && created !== undefined) await checklist.update(created.id, { attempted: true });
+    return undefined;
+  } catch (error) {
+    return `The cleanup list could not be saved: ${errorText(error)}`;
+  }
+}
+
+// A step that went through settles every open item for it.
+async function settle(checklist: CleanupChecklist, person: Person, step: CleanupStep): Promise<string | undefined> {
+  try {
+    for (const item of await checklist.forMember(person.id)) {
+      if (item.step === step && item.status !== 'done') await checklist.update(item.id, { status: 'done' });
+    }
+    return undefined;
+  } catch (error) {
+    return `The cleanup list could not be updated: ${errorText(error)}`;
+  }
+}
+
+const joinNotes = (notes: Array<string | undefined>): string => notes.filter((text): text is string => text !== undefined && text !== '').join(' ');
+
+// Sets a key to a limit of 0 and then revokes it, in that order so a half-finished clean-up never leaves a spendable key. A key NEAR no longer
+// has counts as done. A step that failed goes on the list with the key id; when the revoke worked the zero-limit step no longer matters.
+// Returns the sentences to add to what the lead is told.
+async function retireKey(input: LeadInput, person: Person, keyId: string): Promise<string[]> {
+  const near = input.teamFile.near;
+  if (near === undefined) return [];
+  let zeroError: string | undefined;
+  try {
+    await input.org.setSpendLimit(near.workspaceId, keyId, 0);
+  } catch (error) {
+    zeroError = errorText(error);
+  }
+  try {
+    await input.org.revokeKey(near.workspaceId, keyId);
+    return [];
+  } catch (error) {
+    const sentences = [await note(input.checklist, person, 'revoke-key', 'failed', errorText(error), keyId)];
+    if (zeroError !== undefined) sentences.push(await note(input.checklist, person, 'zero-limit', 'failed', zeroError, keyId));
+    return [zeroError === undefined ? 'The unused key could not be revoked. It has a limit of 0 and is on your cleanup list.' : 'The unused key could not be zeroed or revoked. It is on your cleanup list.', ...sentences.filter((text): text is string => text !== undefined)];
+  }
+}
+
+// Records a failed delivery and says what happened. A missing sign-in is pending (nothing was tried); everything else is a failed attempt.
+async function recordFailure(input: LeadInput, person: Person, step: CleanupStep, result: Extract<DeliveryResult, { ok: false }>, extra: string[] = []): Promise<DeliveryResult> {
+  const signedOut = result.code === 'signed-out';
+  const problem = await note(input.checklist, person, step, signedOut ? 'pending' : 'failed', signedOut ? signInToSendKeyText(person.name) : result.message);
+  const message = joinNotes([result.message, ...extra, problem]);
+  return { ok: false, code: result.code, message };
 }
 
 type Checked = { ok: true; member: Member; targets: SealTarget[] } | { ok: false; result: DeliveryResult };
 
 // Who can be given a key: joined, not removed, not the owner, and with at least one device that can receive a sealed key.
-function checkTarget(input: LeadInput): Checked {
+async function checkTarget(input: LeadInput, step: CleanupStep): Promise<Checked> {
   if (input.teamFile.near === undefined) return { ok: false, result: fail('not-linked', 'This team is not linked to a NEAR organization, so there is no key to send.') };
   const state = input.log.state();
   const member = state.members.get(input.memberId);
@@ -90,13 +162,17 @@ function checkTarget(input: LeadInput): Checked {
   }
   if (member.id === state.team.ownerId) return { ok: false, result: fail('log', 'The team owner does not get a key through the log.') };
   const targets = sealTargets(member);
-  if (targets.length === 0) return { ok: false, result: fail('no-device', `${member.name} has no device that can receive a key. Ask them to join again from their computer.`) };
+  if (targets.length === 0) {
+    const none = { ok: false as const, code: 'no-device' as const, message: `${member.name} has no device that can receive a key. Ask them to join again from their computer.` };
+    return { ok: false, result: await recordFailure(input, member, step, none) };
+  }
   return { ok: true, member, targets };
 }
 
 // Creates the key with its cap in the create call, seals it to every target, and appends member.key-sealed. The append builder re-checks the
 // fresh state: the member must still be there, still hold the key this delivery replaces, and still have exactly the sealed set of devices.
-async function sendKey(input: LeadInput, member: Member, targets: SealTarget[], limit: number): Promise<DeliveryResult> {
+// Whatever goes wrong, the confirmation stands, a key that was made is zeroed and revoked, and a Retry item is left (D-25).
+async function sendKey(input: LeadInput, step: CleanupStep, member: Member, targets: SealTarget[], limit: number): Promise<DeliveryResult> {
   const near = input.teamFile.near;
   if (near === undefined) return fail('not-linked', 'This team is not linked to a NEAR organization, so there is no key to send.');
   const replaces = member.nearApiKeyId;
@@ -105,12 +181,18 @@ async function sendKey(input: LeadInput, member: Member, targets: SealTarget[], 
   try {
     created = await input.org.createKey(near.workspaceId, teamKeyName(input.teamFile.name, member.name, deliveryToken(fingerprints)), limit);
   } catch (error) {
-    return nearFailure(error);
+    const failed = nearFailure(error);
+    return failed.ok ? failed : recordFailure(input, member, step, failed);
   }
   const keyId = created.key.id;
+  const abandon = async (failed: Extract<DeliveryResult, { ok: false }>): Promise<DeliveryResult> =>
+    recordFailure(input, member, step, failed, await retireKey(input, member, keyId));
+
   let sealed: SealedEntryBody[];
   try {
     sealed = targets.map((target) => sealTo(created.secret, target.sealKey, { teamId: input.teamFile.teamId, memberId: member.id, device: target.fingerprint, keyId }));
+  } catch (error) {
+    return abandon({ ok: false, code: 'log', message: `The key could not be sealed for ${member.name}: ${errorText(error)}` });
   } finally {
     wipe(created.secret);
   }
@@ -124,19 +206,20 @@ async function sendKey(input: LeadInput, member: Member, targets: SealTarget[], 
       return [{ type: 'member.key-sealed', body: { memberId: member.id, keyId, scheme: SEAL_SCHEME, sealed } }];
     });
   } catch (error) {
-    if (error instanceof SecretLeakError || error instanceof NoDeviceKeyError) return fail('log', error.message);
-    throw error;
+    const reason = error instanceof SecretLeakError || error instanceof NoDeviceKeyError ? error.message : redactGitMessage(errorText(error));
+    return abandon({ ok: false, code: 'log', message: reason });
   }
-  if (!appended.ok) return fail('log', redactGitMessage(appended.reason));
-  return { ok: true, keyId };
+  if (!appended.ok) return abandon({ ok: false, code: 'log', message: redactGitMessage(appended.reason) });
+  const notice = joinNotes([await settle(input.checklist, member, step)]);
+  return notice === '' ? { ok: true, keyId } : { ok: true, keyId, notice };
 }
 
 /** Sends a joined member their first key, capped at their allocation. */
 export async function deliverMemberKey(input: LeadInput): Promise<DeliveryResult> {
-  const checked = checkTarget(input);
+  const checked = await checkTarget(input, 'deliver-key');
   if (!checked.ok) return checked.result;
   if (checked.member.nearApiKeyId !== undefined) return fail('log', `${checked.member.name} already has a key.`);
-  return sendKey(input, checked.member, checked.targets, checked.member.allocationNanoUsd ?? 0);
+  return sendKey(input, 'deliver-key', checked.member, checked.targets, checked.member.allocationNanoUsd ?? 0);
 }
 
 export async function rotateMemberKey(_input: LeadInput): Promise<DeliveryResult> {
@@ -182,10 +265,14 @@ export async function confirmMember(input: Omit<LeadInput, 'org'> & { org?: Near
   const role = input.log.state().members.get(input.memberId)?.role ?? member.role;
   const confirmed = roleChanged ? `${member.name} is confirmed as ${role}.` : '';
   if (input.teamFile.near === undefined) return { ok: true, roleChanged, key: 'not-applicable', message: confirmed };
-  if (input.org === undefined) return { ok: true, roleChanged, key: 'queued', message: `${confirmed} Their key was not sent because you are not signed in to NEAR.`.trim() };
+  if (input.org === undefined) {
+    // No NEAR session on this computer: nothing can be created, so the key waits on the cleanup list with the way to send it.
+    const problem = keyDue ? await note(input.checklist, member, 'deliver-key', 'pending', signInToSendKeyText(member.name)) : undefined;
+    return { ok: true, roleChanged, key: 'queued', message: joinNotes([confirmed, 'Their key was not sent because you are not signed in to NEAR.', problem]) };
+  }
   const delivery = await deliverMemberKey({ log: input.log, teamFile: input.teamFile, memberId: input.memberId, org: input.org, checklist: input.checklist });
-  if (delivery.ok) return { ok: true, roleChanged, key: 'delivered', message: `${confirmed} Their NEAR key was sent to their computer.`.trim() };
-  return { ok: true, roleChanged, key: 'queued', message: `${confirmed} Their key was not sent: ${delivery.message}`.trim() };
+  if (delivery.ok) return { ok: true, roleChanged, key: 'delivered', message: joinNotes([confirmed, 'Their NEAR key was sent to their computer.', delivery.notice]) };
+  return { ok: true, roleChanged, key: 'queued', message: joinNotes([confirmed, `Their key was not sent: ${delivery.message}`]) };
 }
 
 // ---- the member side --------------------------------------------------------------------------------------------------------------------
