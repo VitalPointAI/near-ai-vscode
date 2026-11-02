@@ -98,6 +98,8 @@ test('tracer: member A blocks a card and member B sees it after exactly one poll
 
       b.timers.fire();
       await until(() => b.session.state().items.get(BLOCKED_PLAN)?.blocked !== undefined, 'the blocked card to arrive');
+      // The transport applies the entries, saves its pin and only then calls the listeners, so the state can be ahead of the notification by a moment.
+      await until(() => received.length > 0, 'the listener to be told');
       const after = b.session.state().items.get(BLOCKED_PLAN);
       assert.equal(after?.blocked?.reason, REASON);
       assert.equal(received.length, 1, 'the listener got the one new entry');

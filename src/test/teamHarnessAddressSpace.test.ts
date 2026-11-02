@@ -4,6 +4,7 @@
 // teamBoardView.test.js died at its 18th test with "Committing semi space failed ... heap out of memory" while its heap held under 50 MB
 // (.planning/debug/team-board-view-test-oom.md). Every rig-based test file talks to the fake NEAR server with fetch, so each one paid it.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -25,7 +26,20 @@ function mappings(): Mapping[] {
 
 const label = (mapping: Mapping): string => `${(mapping.size / MIB).toFixed(0)} MiB ${mapping.perms} ${mapping.name}`.trim();
 
+// V8 only gives up its 8 GiB guard region for wasm memory (and so shows no large reservation) when an address-space limit is in force, so the check
+// has to run under the cap it protects. A run of the suite without `ulimit -v` (the memory cap there is a cgroup) would otherwise report the guard
+// region and fail for a reason that costs nothing. The test therefore runs its own check in a child process started under the documented cap.
+const CHILD_FLAG = 'NEAR_AI_ADDRESS_SPACE_CHILD';
+const ADDRESS_SPACE_CAP_KB = 6_000_000;
+
 test('a team test process reserves no single range of 1 GiB or more after its first fetch, so the address-space cap is left to the heap', { skip: process.platform !== 'linux' }, async () => {
+  if (process.env[CHILD_FLAG] !== '1') {
+    const child = spawnSync('sh', ['-c', `ulimit -v ${ADDRESS_SPACE_CAP_KB} && exec "$0" "$@"`, process.execPath, __filename], {
+      encoding: 'utf8', env: { ...process.env, [CHILD_FLAG]: '1' }, timeout: 60_000
+    });
+    assert.equal(child.status, 0, `the check failed under ulimit -v ${ADDRESS_SPACE_CAP_KB}:\n${child.stdout}\n${child.stderr}`);
+    return;
+  }
   const server = createServer((_request, response) => { response.end('x'.repeat(4 * MIB)); });
   await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve); });
   try {
