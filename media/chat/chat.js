@@ -316,6 +316,11 @@
     transcript.querySelectorAll('.cut-action').forEach((button) => button.remove());
     if (type) postFor({ type: type });
   }
+  // Continue after a stopped run: used once, then removed; a new turn removes it too.
+  function settleContinue(send) {
+    transcript.querySelectorAll('.continue-action').forEach((button) => button.remove());
+    if (send) postFor({ type: 'continue-run' });
+  }
   function notice(text, actions, isError) {
     const node = el('div', isError ? 'turn notice error' : 'turn notice');
     node.append(el('span', '', text));
@@ -1021,7 +1026,7 @@
         profile.dataset.state = active ? (active.validation && active.validation.status === 'valid' ? 'ready' : 'attention') : 'missing';
         break;
       }
-      case 'assistant-start': runInfo = { model: m.model, privacy: m.privacy }; setBusy(true); if (!current) startAssistant(); if (m.status) status.textContent = m.status; break;
+      case 'assistant-start': settleContinue(false); runInfo = { model: m.model, privacy: m.privacy }; setBusy(true); if (!current) startAssistant(); if (m.status) status.textContent = m.status; break;
       case 'assistant-delta':
         if (!current) startAssistant();
         current.text += m.text || '';
@@ -1121,6 +1126,13 @@
         const actions = m.resumable ? [textButton('Resume', () => settleCut('resume-interrupted'), true), textButton('Dismiss', () => settleCut('dismiss-interrupted'), false)] : [];
         actions.forEach((button) => button.classList.add('cut-action'));
         notice(m.text || 'This run was cut off.', actions);
+        break;
+      }
+      // A run the agent stopped short (stuck, or at the turn limit): Continue sends "Continue." for the user.
+      case 'run-stopped': {
+        const actions = m.continuable ? [textButton('Continue', () => settleContinue(true), true)] : [];
+        actions.forEach((button) => button.classList.add('continue-action'));
+        notice(m.text || 'Stopped.', actions);
         break;
       }
       case 'run-interrupted-settled':

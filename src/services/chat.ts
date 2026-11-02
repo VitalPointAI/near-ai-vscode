@@ -87,6 +87,8 @@ interface ChatTab {
   post: (message: Record<string, unknown>) => void;
   /** Its run the extension host never finished, until the user resumes or dismisses it. */
   interrupted?: RunMarker;
+  /** Its last run stopped short (stuck, or at the turn limit) and offers Continue, until a new turn starts. */
+  continuable?: boolean;
   /** Announces its prompts still waiting that were not announced yet (the window got focus again). */
   focusRegained?: () => void;
 }
@@ -139,6 +141,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const tab: ChatTab = { id, log: new ConversationLog(), title: '', turns: 0, outcome: 'idle', unread: false, closing: false, stops: 0, outcomes: new Map(), steerTexts: new Map(), post: () => undefined };
     tab.post = (message) => {
       tab.outcome = outcomeOf(message) ?? tab.outcome;
+      if (message.type === 'run-stopped') tab.continuable = message.continuable === true;
+      // A new turn (Continue, or anything the user sent) settles the offer: shown again, it has no button.
+      else if (message.type === 'assistant-start' && tab.continuable) { tab.continuable = false; tab.log.update('run-stopped', { continuable: false }); }
       if (message.type === 'approval-expired' && typeof message.callId === 'string') tab.outcomes.set(message.callId, { outcome: 'expired', ...(typeof message.minutes === 'number' ? { detail: message.minutes } : {}) });
       if (message.type === 'prompt-closed' && typeof message.id === 'string') tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' ? 'cancelled' : 'closed' });
       const steerId = message.type === 'steer-state' ? String(message.id) : undefined;
@@ -206,6 +211,15 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (tab.id === activeId && !disposed) void panel.webview.postMessage({ type: 'user-turn', text });
     const model = tab.model ?? cut.model;
     await receive({ type: 'send', text, conversationId: tab.id, ...(model ? { model } : {}) });
+  };
+  /** Continue after a run stopped short: sends "Continue." as if the user typed it; nothing continues without the click. */
+  const continueStopped = async (tab: ChatTab): Promise<void> => {
+    if (!tab.continuable || isRunning(tab) || tab.closing) return;
+    tab.continuable = false;
+    tab.log.update('run-stopped', { continuable: false });
+    const text = 'Continue.';
+    if (tab.id === activeId && !disposed) void panel.webview.postMessage({ type: 'user-turn', text });
+    await receive({ type: 'send', text, conversationId: tab.id, ...(tab.model ? { model: tab.model } : {}) });
   };
   /** At the cap, asks which conversation to close; false when none was (or could be) closed. */
   const makeRoom = async (): Promise<boolean> => {
@@ -333,6 +347,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'close-conversation') { await closeConversation(message.id); return; }
     if (message.type === 'new-chat') { await newConversation(); return; }
     if (message.type === 'resume-conversation') { await openSaved(message.id); return; }
+    if (message.type === 'continue-run') { await continueStopped(tab); return; }
     if (message.type === 'resume-interrupted' || message.type === 'dismiss-interrupted') { await settleInterrupted(tab, message.type === 'resume-interrupted' ? 'resumed' : 'dismissed'); return; }
     if (message.type === 'questions-reply') {
       tab.outcomes.set(message.id, { outcome: 'answered', detail: message.answers.join('; ') });

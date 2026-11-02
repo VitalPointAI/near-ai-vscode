@@ -744,3 +744,87 @@ test('sidebar: a waiting approval is announced when the window is not focused, a
     await Promise.all([runA, runB]);
   });
 });
+
+// --- 0.4.12: a run stopped short says why, honestly, and offers Continue. ---
+
+const readCallNumbered = (n: number, file = 'app.ts'): Delta => ({ tool_calls: [{ index: 0, id: `call_read_${n}`, function: { name: 'Read', arguments: JSON.stringify({ file_path: file }) } }] });
+const assistantTurns = (messages: Wire) => messages.filter((message) => message.role === 'assistant').length;
+
+test('sidebar: an agent stuck repeating the same read is stopped with an honest message and a Continue button that sends "Continue." only when clicked', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  const near = fakeNear((messages) => (lastUser(messages) === 'Continue.' ? { content: 'Read the error and fixed it.' } : readCallNumbered(assistantTurns(messages))));
+  await withNear(near, async () => {
+    const sidebar = await openSidebar(root, auth, shared);
+    const a = sidebar.summary()!.activeId;
+    await sidebar.send({ type: 'send', text: 'check the port', model: MODEL, conversationId: a });
+    const stopped = sidebar.posted.filter((message) => message.type === 'run-stopped');
+    assert.equal(stopped.length, 1);
+    assert.equal(stopped[0].text, 'Stopped: the agent kept repeating Read app.ts with the same result.');
+    assert.equal(stopped[0].reason, 'loop');
+    assert.equal(stopped[0].continuable, true);
+    const said = sidebar.posted.filter((message) => message.type === 'assistant-delta').map((message) => String(message.text)).join('');
+    assert.doesNotMatch(said, /turn limit/, 'a loop stop is not called a turn limit');
+    assert.equal(sidebar.item(a)?.status, 'stopped');
+    const before = near.requests.length;
+    assert.ok(before >= 14 && before <= 16, `stopped after the warning, not at the turn limit (${before} requests)`);
+    assert.ok(near.requests.at(-1)!.some((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>Warning:')), 'warned before it was stopped');
+    assert.equal(near.requests.some((messages) => lastUser(messages) === 'Continue.'), false, 'nothing continues on its own');
+
+    const clicked = sidebar.posted.length;
+    await sidebar.send({ type: 'continue-run', conversationId: a });
+    await until(() => sidebar.item(a)?.status === 'done');
+    assert.deepEqual(since(sidebar.posted, clicked).find((message) => message.type === 'user-turn'), { type: 'user-turn', text: 'Continue.' }, 'the click shows the message it sends');
+    assert.equal(near.requests.length, before + 1);
+    assert.equal(lastUser(near.requests.at(-1)!), 'Continue.');
+    assert.equal(firstUser(near.requests.at(-1)!), 'check the port', 'the same conversation, with its context');
+
+    // Used once: a second click does nothing, and shown again the notice has no button.
+    await sidebar.send({ type: 'continue-run', conversationId: a });
+    assert.equal(near.requests.length, before + 1);
+    const shown = sidebar.posted.length;
+    await sidebar.send({ type: 'switch-conversation', id: a });
+    const replayed = since(sidebar.posted, shown).filter((message) => message.type === 'run-stopped');
+    assert.equal(replayed.length, 1);
+    assert.equal(replayed[0].continuable, false);
+  });
+});
+
+test('sidebar: the real turn limit names the limit and offers Continue; typing a message instead settles the offer', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  const original = vscodeStub.workspace.getConfiguration;
+  vscodeStub.workspace.getConfiguration = () => ({ get: (key: string, fallback?: unknown) => (key === 'agent.maxTurns' ? 5 : fallback), inspect: () => undefined });
+  // Varied, productive work: a different file each turn.
+  for (let index = 0; index < 8; index += 1) await writeFile(path.join(root, `part${index}.ts`), `export const part = ${index};\n`);
+  const near = fakeNear((messages) => (lastUser(messages) === 'go on' ? { content: 'Finished the rest.' } : readCallNumbered(assistantTurns(messages), `part${assistantTurns(messages)}.ts`)));
+  try {
+    await withNear(near, async () => {
+      const sidebar = await openSidebar(root, auth, shared);
+      const a = sidebar.summary()!.activeId;
+      await sidebar.send({ type: 'send', text: 'read every part', model: MODEL, conversationId: a });
+      assert.equal(near.requests.length, 5);
+      const stopped = sidebar.posted.find((message) => message.type === 'run-stopped');
+      assert.equal(stopped?.text, 'Stopped after reaching the turn limit (5 turns).');
+      assert.equal(stopped?.reason, 'turn-limit');
+      assert.equal(stopped?.continuable, true);
+      assert.equal(sidebar.posted.some((message) => /Send a message to continue/.test(String(message.text))), false, 'the old sentence is gone');
+
+      await sidebar.send({ type: 'send', text: 'go on', model: MODEL, conversationId: a });
+      await until(() => sidebar.item(a)?.status === 'done');
+      const after = near.requests.length;
+      await sidebar.send({ type: 'continue-run', conversationId: a });
+      assert.equal(near.requests.length, after, 'a message typed instead settles the offer');
+    });
+  } finally {
+    vscodeStub.workspace.getConfiguration = original;
+  }
+});
+
+test('the Continue button and its message are wired in the view and parsed strictly', () => {
+  assert.deepEqual(parseChatWebviewMessage({ type: 'continue-run', conversationId: 'conv-mf3k2-0a1b2c3d' }), { type: 'continue-run', conversationId: 'conv-mf3k2-0a1b2c3d' });
+  assert.deepEqual(parseChatWebviewMessage({ type: 'continue-run' }), { type: 'continue-run' });
+  assert.equal(parseChatWebviewMessage({ type: 'continue-run', text: 'rm -rf /' }), undefined);
+  const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  assert.match(script, /case 'run-stopped': \{[\s\S]*?textButton\('Continue', \(\) => settleContinue\(true\), true\)/);
+  assert.match(script, /postFor\(\{ type: 'continue-run' \}\)/);
+  assert.match(script, /case 'assistant-start': settleContinue\(false\);/, 'a new turn removes the button');
+});

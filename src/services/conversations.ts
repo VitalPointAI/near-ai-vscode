@@ -45,14 +45,14 @@ export function conversationStatus(input: { running: boolean; waiting: number; o
 export function outcomeOf(message: Record<string, unknown>): ConversationOutcome | undefined {
   switch (message.type) {
     case 'assistant-done': return 'done';
-    case 'assistant-cancelled': return 'stopped';
+    case 'assistant-cancelled': case 'run-stopped': return 'stopped';
     case 'assistant-error': case 'outbound-blocked': case 'auth-required': return 'error';
     default: return undefined;
   }
 }
 
 /** Messages that count as new output in a conversation that is not on screen. */
-const OUTPUT = new Set(['assistant-delta', 'assistant-done', 'assistant-error', 'assistant-cancelled', 'tool-start', 'notice', 'approval-request', 'questions-request', 'outbound-blocked', 'run-changes']);
+const OUTPUT = new Set(['assistant-delta', 'assistant-done', 'assistant-error', 'assistant-cancelled', 'tool-start', 'notice', 'approval-request', 'questions-request', 'outbound-blocked', 'run-changes', 'run-stopped']);
 export function isOutput(message: Record<string, unknown>): boolean { return OUTPUT.has(String(message.type)); }
 
 /** The open conversations, kept in the workspace's state so a reload reopens them. */
@@ -110,6 +110,9 @@ export class ConversationLog {
 
   /** Removes every entry of a type (a choice the user has since made, so it is not offered again). */
   public drop(type: string): void { this.entries = this.entries.filter((entry) => entry.type !== type); }
+
+  /** Changes every entry of a type (an offer the user has since answered, shown again without its button). */
+  public update(type: string, change: Message): void { this.entries = this.entries.map((entry) => entry.type === type ? { ...entry, ...change } : entry); }
 
   public add(message: Message): void {
     const last = this.entries.at(-1);
