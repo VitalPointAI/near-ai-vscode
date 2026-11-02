@@ -451,6 +451,11 @@ export class TeamSession {
       }
       this.clearIssue('auto-import');
       this.lastCheckedHead = head;
+      if (result.skipped === 'needs-command') {
+        // Told once per head that moved: the lead decides with the Import command (WR-02).
+        this.say('info', importResultText(result));
+        return false;
+      }
       if (result.written > 0 && !this.importAnnounced) {
         this.importAnnounced = true;
         this.say('info', importResultText(result));

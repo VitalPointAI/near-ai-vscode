@@ -11,12 +11,12 @@ import { parsePlanTasks } from '../domain/team/gsdImport';
 import type { GsdGraph, GsdPlan } from '../domain/team/gsdImport';
 import { serialiseState, teamMaterializer } from '../domain/team/materialize';
 import { defaultTeamPolicy } from '../domain/team/policy';
-import type { GenesisAnchor, ItemImportedBody, TeamFile, TeamState } from '../domain/team/types';
+import type { GenesisAnchor, ItemImportedBody, TeamFile, TeamState, WorkItem } from '../domain/team/types';
 import { TeamLog, buildGenesisEvents } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
 import {
-  IMPORT_STATE_FILE, NOT_IN_ROADMAP, WITHHELD_TEXT, diffImport, fitItemBody, graphToItems, importPlans, importResultText, listImportableMilestones
+  AUTO_IMPORT_MAX_CHANGES, IMPORT_STATE_FILE, MAX_IMPORT_ITEMS, NOT_IN_ROADMAP, WITHHELD_TEXT, diffImport, fitItemBody, graphToItems, importPlans, importResultText, listImportableMilestones
 } from '../team/importPlans';
 import type { ImportResult } from '../team/importPlans';
 import { emailHash, newTeamId } from '../team/identity';
@@ -554,6 +554,48 @@ test('600 task items are written in three appends of at most 250 intents, parent
 });
 
 // ---- milestones -----------------------------------------------------------------------------------------------------------------------------------
+
+test('WR-02: one import holds at most 2000 items, tasks are the ones left out, and an item left out by the cap is never cancelled', () => {
+  const plans = Array.from({ length: 50 }, (_, index) => syntheticPlan({
+    plan: String(index + 1).padStart(2, '0'), path: `.planning/phases/01-p/01-${String(index + 1).padStart(2, '0')}-PLAN.md`,
+    tasks: Array.from({ length: 50 }, (_, task) => ({ index: task + 1, title: `Task ${task + 1}`, type: 'auto', files: [] }))
+  }));
+  const built = graphToItems(syntheticGraph(plans), { sourceCommit: COMMIT });
+  assert.equal(built.bodies.length, MAX_IMPORT_ITEMS);
+  assert.equal(built.bodies.filter((body) => body.kind === 'plan').length, 50, 'every plan is kept');
+  assert.ok(built.warnings.some((warning) => warning === 'Only the first 2000 items were imported. The rest were left out.'), built.warnings.join(' | '));
+  const leftOut = 'task:1-50-50';
+  assert.equal(built.bodies.some((body) => body.id === leftOut), false);
+  assert.equal(built.unread.has(leftOut), true);
+
+  // The board already holds the left-out task (from an earlier, smaller roadmap): it stays as it is.
+  const items = new Map<string, WorkItem>();
+  for (const body of built.bodies) items.set(body.id, { ...body, origin: 'import' } as unknown as WorkItem);
+  items.set(leftOut, { id: leftOut, kind: 'task', origin: 'import', state: 'backlog', parentId: 'plan:1-50', title: 'Task 50', dependsOn: [], scope: [], requirements: [], mustHaves: [], tags: [] } as unknown as WorkItem);
+  const intents = diffImport({ items }, built.bodies, { milestoneId: 'milestone:v1.0.0', current: true, sourceCommit: COMMIT, unread: built.unread });
+  assert.deepEqual(intents.filter((intent) => intent.type === 'item.cancelled').length, 0);
+});
+
+test('WR-02: an automatic import with more changes than the ceiling writes nothing and says so; the command writes them all', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    const a = fixture.clones.a as string;
+    writeBigRoadmap(a, 12, 50);
+    commitAndPush(a, 'big roadmap');
+    const source = { projectRoot: a, remote: 'origin', branch: 'main' };
+    const storageDir = path.join(fixture.storageDir('a'), 'import');
+    const before = coordinationCommits(fixture);
+    const auto = okResult(await importPlans({ log: seed.a.log, source, storageDir, mode: 'auto' }));
+    assert.equal(auto.skipped, 'needs-command');
+    assert.equal(auto.written, 0);
+    assert.equal(auto.pending, 614);
+    assert.ok(614 > AUTO_IMPORT_MAX_CHANGES);
+    assert.equal(coordinationCommits(fixture), before, 'nothing was written');
+    assert.equal(importResultText(auto), 'The roadmap has 614 changes for the Team Board. An automatic import makes at most 300, so nothing was changed. Run "NEAR AI: Import Plans to Team Board" to bring them in.');
+    const command = okResult(await importPlans({ log: seed.a.log, source, storageDir, mode: 'command' }));
+    assert.equal(command.written, 614);
+  });
+});
 
 test('an archived milestone imports without becoming active or touching the current one, and a new current milestone switches active', async () => {
   await withImportedFixture(async (s) => {

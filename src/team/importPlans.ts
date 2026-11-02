@@ -34,6 +34,10 @@ export const IMPORT_STATE_FILE = 'import.json';
 // Internal: the source commit another lead recorded while this import was building, so the stale guard must be asked again.
 const RECHECK = 'import: source commit changed';
 const MAX_INTENTS_PER_APPEND = 250;
+// WR-02: one import never holds more than this many items (milestone, phases, plans, then tasks, so tasks are the ones left out), and an automatic
+// import in a lead's window writes at most AUTO_IMPORT_MAX_CHANGES events. A bigger change waits for the lead to run the Import command.
+export const MAX_IMPORT_ITEMS = 2000;
+export const AUTO_IMPORT_MAX_CHANGES = 300;
 const MAX_ROUNDS = 20;
 const MAX_WARNINGS = 100;
 const MAX_WARNING_CHARS = 200;
@@ -50,7 +54,12 @@ export interface ImportSource {
 }
 
 export type ImportResult =
-  | { ok: true; written: number; upToDate: boolean; milestone: string; withheld: number; reopenNeeded: number; warnings: string[]; skipped?: 'unchanged-tree' | 'stale-source' }
+  | {
+    ok: true; written: number; upToDate: boolean; milestone: string; withheld: number; reopenNeeded: number; warnings: string[];
+    skipped?: 'unchanged-tree' | 'stale-source' | 'needs-command';
+    /** With skipped 'needs-command': how many changes the automatic import left for the Import command. */
+    pending?: number;
+  }
   | { ok: false; message: string; written: number };
 
 // ---- Cleaning ---------------------------------------------------------------------------------------------------------------------------
@@ -274,14 +283,24 @@ function planEstimate(plan: GsdPlan): { tokens: number; confidence?: 'low' | 'me
 // that still fails (a malformed id, which only a hostile file name can cause) is a warning and is skipped together with its children.
 export function graphToItems(graph: GsdGraph, options: { sourceCommit: string }): { bodies: ItemImportedBody[]; withheld: number; warnings: string[]; unread: Set<string> } {
   const context = newContext();
-  // Plans whose text was not read: their bodies are skeletons, so diffImport must not change or cancel what the log already holds for them (CR-02).
+  // Plans whose text was not read (their bodies are skeletons) and items left out by the item cap: diffImport must not change or cancel what the log
+  // already holds for them or for their children (CR-02, WR-02).
   const unread = new Set<string>();
   for (const warning of graph.warnings) warn(context, warning);
   const bodies: ItemImportedBody[] = [];
   const taken = new Set<string>();
   const skipped = new Set<string>();
 
+  let capped = false;
   const accept = (draft: Draft): boolean => {
+    if (bodies.length >= MAX_IMPORT_ITEMS) {
+      // Left out because of the cap, not because it left the roadmap: diffImport must not cancel it (it joins `unread`).
+      if (!capped) warn(context, `Only the first ${MAX_IMPORT_ITEMS} items were imported. The rest were left out.`);
+      capped = true;
+      unread.add(draft.id);
+      skipped.add(draft.id);
+      return false;
+    }
     if (taken.has(draft.id)) {
       warn(context, `${draft.id} appears twice, so the second one was left out.`);
       return false;
@@ -467,7 +486,7 @@ export function diffImport(
   }
   const vanished = additiveOnly ? [] : [...state.items.values()].filter((item) => (
     item.origin === 'import' && item.kind !== 'milestone' && !ids.has(item.id) && item.state !== 'done' && item.state !== 'cancelled'
-    && !(item.parentId !== undefined && unread.has(item.parentId)) && belongsTo(state.items, item, options.milestoneId)
+    && !unread.has(item.id) && !(item.parentId !== undefined && unread.has(item.parentId)) && belongsTo(state.items, item, options.milestoneId)
   ));
   vanished.sort((a, b) => (KIND_RANK[a.kind] ?? 9) - (KIND_RANK[b.kind] ?? 9) || naturalCompare(a.id, b.id));
   for (const item of vanished) intents.push({ type: 'item.cancelled', body: { id: item.id, reason: NOT_IN_ROADMAP } });
@@ -584,7 +603,12 @@ export async function importPlans(input: {
           return { ok: true, written, upToDate: written === 0, ...base, reopenNeeded: reopenCount(state, built.bodies), skipped: 'stale-source' };
         }
       }
-      if (diffImport(state, built.bodies, options).length === 0) break;
+      const pending = diffImport(state, built.bodies, options);
+      if (pending.length === 0) break;
+      if (round === 0 && mode === 'auto' && pending.length > AUTO_IMPORT_MAX_CHANGES) {
+        // A lead's window does not sign a flood of events on its own: the lead brings them in with the Import command (WR-02).
+        return { ok: true, written: 0, upToDate: false, ...base, reopenNeeded: reopenCount(state, built.bodies), skipped: 'needs-command', pending: pending.length };
+      }
       const appended = await log.append((fresh) => {
         const freshSource = fresh.items.get(milestoneId)?.source;
         if (freshSource !== recorded && freshSource !== undefined && freshSource !== snapshot.commit) return { conflict: RECHECK };
@@ -626,6 +650,9 @@ export function importResultText(result: ImportResult): string {
     if (result.written === 0) return `The import did not finish: ${reason}. Nothing was changed.`;
     const noun = result.written === 1 ? '1 item was' : `${result.written} items were`;
     return `The import did not finish: ${reason}. ${noun} written; run the import again to finish.`;
+  }
+  if (result.skipped === 'needs-command') {
+    return `The roadmap has ${result.pending ?? 0} changes for the Team Board. An automatic import makes at most ${AUTO_IMPORT_MAX_CHANGES}, so nothing was changed. Run "NEAR AI: Import Plans to Team Board" to bring them in.`;
   }
   let text = result.written === 0 ? 'The Team Board is already up to date.' : `Imported ${result.written === 1 ? '1 item' : `${result.written} items`} to the Team Board.`;
   if (result.reopenNeeded > 0) {

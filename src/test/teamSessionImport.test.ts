@@ -162,6 +162,45 @@ test('tracer: an owner window imports after its first trusted sync, says so once
   });
 });
 
+// Seven more plans under phase 90 with 50 tasks each: 357 new items, more than an automatic import writes.
+function pushManyPlans(rig: Rig): string {
+  const dir = rootOf(rig, 'a');
+  for (let plan = 10; plan < 17; plan += 1) {
+    const tasks = Array.from({ length: 50 }, (_, index) => `<task type="auto">\n  <name>Task ${index + 1}: Step ${index + 1}</name>\n  <files>src/many/p${plan}t${index + 1}.ts</files>\n  <action>Do it.</action>\n</task>`).join('\n');
+    const target = path.join(dir, '.planning', 'phases', '90-alpha', `90-${plan}-PLAN.md`);
+    writeFileSync(target, `---\nphase: 90\nplan: ${plan}\nfiles_modified:\n  - src/many/p${plan}.ts\n---\n\n# Plan 90-${plan}: Many ${plan}\n\n<tasks>\n${tasks}\n</tasks>\n`, 'utf8');
+  }
+  return commitAndPush(dir, 'many plans');
+}
+
+test('WR-02: an automatic import with more changes than the ceiling writes nothing, tells the lead once in plain words, and the Import command brings them in', async () => {
+  await inRig(async (rig, world) => {
+    const owner = await startSession(rig, world, 'owner');
+    try {
+      assert.equal(owner.session.state().items.size, 13);
+      pushManyPlans(rig);
+      world.clock.value = MINUTE;
+      await owner.session.sync();
+      assert.equal(world.calls.integrationFetch, 2, 'the new head was read');
+      assert.equal(owner.session.state().items.size, 13, 'nothing was written');
+      const told = noticesOf('The roadmap has');
+      assert.deepEqual(told, ['The roadmap has 358 changes for the Team Board. An automatic import makes at most 300, so nothing was changed. Run "NEAR AI: Import Plans to Team Board" to bring them in.']);
+      assert.equal(/\u2014|\u2013/.test(told[0] ?? ''), false, 'no dash characters');
+
+      world.clock.value = 2 * MINUTE;
+      await owner.session.sync();
+      assert.equal(noticesOf('The roadmap has').length, 1, 'the same head is not announced again');
+      assert.equal(world.calls.integrationFetch, 2, 'and not read again');
+
+      const result = await owner.session.importPlans({ mode: 'command' });
+      assert.equal(result.ok && result.written, 358, 'the command writes them');
+      assert.equal(owner.session.state().items.size, 13 + 357);
+    } finally {
+      owner.session.dispose();
+    }
+  });
+});
+
 test('a developer, a window with no device key, a window with the check turned off and a folder with no roadmap never ask the remote; the command still imports in the last one', async () => {
   await inRig(async (rig, world) => {
     gitIn(rootOf(rig, 'b'), ['pull', '-q', '--ff-only', 'origin', 'main']);
