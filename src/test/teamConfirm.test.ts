@@ -495,6 +495,57 @@ test('a key that cannot be zeroed or revoked after a refused write is put on the
   });
 });
 
+// WR-01: a push whose answer was lost may still have landed. A log that answers "offline" stands for that; landing decides whether it did.
+function lostAnswerLog(log: TeamLog, options: { land: boolean; syncFails?: boolean }): TeamLog {
+  const lossy = Object.create(log) as TeamLog;
+  lossy.append = async (intents) => {
+    if (options.land) {
+      const written = await log.append(intents);
+      assert.equal(written.ok, true, written.ok ? '' : written.reason);
+    }
+    return { ok: false, kind: 'offline' as const, reason: 'The remote did not answer.', attempts: 1 };
+  };
+  if (options.syncFails === true) lossy.sync = async () => { throw new Error('The remote did not answer.'); };
+  return lossy;
+}
+
+test('WR-01: a key whose member.key-sealed landed although the push answer was lost is kept and reported as sent', async () => {
+  await inWorld(['a', 'b'], { role: 'observer', allocation: 2 * GIGA }, async (world) => {
+    const result = await deliverMemberKey({ log: lostAnswerLog(world.a.log, { land: true }), teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(memberOf(world).nearApiKeyId, result.keyId, 'the log names the new key');
+    assert.equal(world.fake.key(result.keyId)?.revoked, false, 'the key the log names was not revoked');
+    assert.equal(world.fake.key(result.keyId)?.spendLimitNanoUsd, 2 * GIGA);
+    assert.deepEqual(await world.checklist.list(), []);
+  });
+});
+
+test('WR-01: when it cannot be told whether the delivery landed, the key is kept and a manual item names it; a delivery that did not land is revoked', async () => {
+  await inWorld(['a', 'b'], { role: 'observer', allocation: 2 * GIGA }, async (world) => {
+    const before = world.fake.requests.length;
+    const unknown = await deliverMemberKey({ log: lostAnswerLog(world.a.log, { land: false, syncFails: true }), teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(unknown.ok, false);
+    if (!unknown.ok) assert.match(unknown.message, /not known whether/);
+    const made = world.fake.requests.slice(before).filter((request) => request.method === 'POST' && request.path.endsWith('/api-keys'));
+    assert.equal(made.length, 1);
+    assert.equal(world.fake.requests.slice(before).some((request) => request.method === 'DELETE' || request.method === 'PATCH'), false, 'the key was neither zeroed nor revoked');
+    const items = await world.checklist.list();
+    assert.deepEqual(items.map((item) => [item.step, item.status]), [['deliver-key', 'manual']]);
+    assert.ok(items[0]?.keyId !== undefined, 'the item names the key');
+    assert.equal(world.fake.key(items[0]?.keyId as string)?.revoked, false);
+  });
+  await inWorld(['a', 'b'], { role: 'observer', allocation: 2 * GIGA }, async (world) => {
+    const absent = await deliverMemberKey({ log: lostAnswerLog(world.a.log, { land: false }), teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(absent.ok, false);
+    const made = world.fake.requests.find((request) => request.method === 'POST' && request.path.endsWith('/api-keys'));
+    assert.ok(made !== undefined);
+    assert.equal(memberOf(world).nearApiKeyId, undefined);
+    const revoked = world.fake.requests.filter((request) => request.method === 'DELETE' && request.path.includes('/api-keys/'));
+    assert.equal(revoked.length, 1, 'a delivery the log shows did not land is revoked');
+  });
+});
+
 test('a member who joined with their final role gets a key through deliverMemberKey at their allocation', async () => {
   await inWorld(['a', 'b'], { role: 'observer', allocation: 2 * GIGA }, async (world) => {
     assert.equal(memberOf(world).pendingRole, undefined);

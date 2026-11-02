@@ -193,6 +193,21 @@ async function checkTarget(input: LeadInput, step: CleanupStep): Promise<Checked
   return { ok: true, member, targets, near };
 }
 
+// Whether a member.key-sealed whose push answer was lost is in the log: only a successful read of the log settles it.
+async function deliveryLanded(log: TeamLog, memberId: string, keyId: string): Promise<'landed' | 'absent' | 'unknown'> {
+  try {
+    await log.sync();
+    if (log.status().state !== 'ok') return 'unknown';
+    return log.state().members.get(memberId)?.nearApiKeyId === keyId ? 'landed' : 'absent';
+  } catch {
+    // The check itself could not be made, which is the same as not knowing.
+    return 'unknown';
+  }
+}
+
+const unknownDeliveryText = (name: string, keyId: string): string =>
+  `It is not known whether ${name}'s new key reached the team log, because the team's repository could not be reached to check. The key was kept, so a delivery that did land still works. When you are online, open "NEAR AI: Manage Team Members": if ${name} still needs a key, revoke key ${keyId} in the NEAR console and send a new one.`;
+
 // Creates the key with its cap in the create call, seals it to every target, and appends member.key-sealed. The append builder re-checks the
 // fresh state: the member must still be there, still hold the key this delivery replaces, and still have exactly the sealed set of devices.
 // Whatever goes wrong, the confirmation stands, a key that was made is zeroed and revoked, and a Retry item is left (D-25).
@@ -228,10 +243,22 @@ async function sendKey(input: LeadInput, near: NearLink, step: CleanupStep, memb
       return [{ type: 'member.key-sealed', body: { memberId: member.id, keyId, scheme: SEAL_SCHEME, sealed } }];
     });
   } catch (error) {
-    const reason = error instanceof SecretLeakError || error instanceof NoDeviceKeyError ? error.message : redactGitMessage(errorText(error));
-    return abandon({ ok: false, code: 'log', message: reason });
+    // Refused before anything was pushed: a secret in the event or no device key. Any other throw may have come after the push started.
+    if (error instanceof SecretLeakError || error instanceof NoDeviceKeyError) return abandon({ ok: false, code: 'log', message: error.message });
+    appended = { ok: false, kind: 'offline', reason: redactGitMessage(errorText(error)), attempts: 0 };
   }
-  if (!appended.ok) return abandon({ ok: false, code: 'log', message: redactGitMessage(appended.reason) });
+  if (!appended.ok) {
+    // WR-01: only an answer that says the event was not written may revoke the key. An offline answer may hide a push that landed, and then
+    // the log already names this key as the member's, so only a fresh read of the log decides.
+    if (appended.kind !== 'offline') return abandon({ ok: false, code: 'log', message: redactGitMessage(appended.reason) });
+    const landing = await deliveryLanded(input.log, member.id, keyId);
+    if (landing === 'absent') return abandon({ ok: false, code: 'log', message: redactGitMessage(appended.reason) });
+    if (landing === 'unknown') {
+      const text = unknownDeliveryText(member.name, keyId);
+      const problem = await note(input.checklist, member, step, 'manual', text, keyId);
+      return { ok: false, code: 'log', message: joinNotes([text, problem]) };
+    }
+  }
   // Only now, with the new key accepted by the log, is the old one taken away: zeroed first, then revoked.
   const settled = await settle(input.checklist, member, step);
   const retired = retire === undefined ? [] : await retireKey(input, near, member, retire);
