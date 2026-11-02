@@ -184,9 +184,18 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
 
   // ---- NEAR sign-in (D-01, D-02) -------------------------------------------------------------------------------------------------------
 
+  // One NEAR session per team for the life of this window (WR-04): a rotated refresh token that SecretStorage refused to save lives only in
+  // that object, so a later command must reuse it rather than read the burned token from storage again.
+  const nearSessions = new Map<string, NearSession>();
+  const storeFailure = (message: string): void => { deps.report('warn', message); };
+
   async function nearSessionFor(teamId: string): Promise<NearSession> {
+    const existing = nearSessions.get(teamId);
+    if (existing !== undefined) return existing;
     const { NearSession } = await import('../../team/nearSession');
-    return new NearSession({ teamId, secrets: deps.context.secrets, baseUrl: await baseUrl(), ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }) });
+    const made = new NearSession({ teamId, secrets: deps.context.secrets, baseUrl: await baseUrl(), onStoreFailure: storeFailure, ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }) });
+    nearSessions.set(teamId, made);
+    return made;
   }
 
   async function orgClientFor(auth: NearSession): Promise<NearOrgClient> {
@@ -250,7 +259,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       const options = { baseUrl: await baseUrl(), ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }) };
       const bearer = { accessToken: async (): Promise<string> => (tokens as SessionTokens).accessToken, refreshAfterUnauthorized: async (): Promise<undefined> => undefined };
       const me = await new NearOrgClient({ ...options, auth: bearer }).currentUser();
-      const session = await saveNearSession(deps.context.secrets, teamId, tokens, me.username, options);
+      const session = await saveNearSession(deps.context.secrets, teamId, tokens, me.username, { ...options, onStoreFailure: storeFailure });
+      nearSessions.set(teamId, session);
       return { session, org: await orgClientFor(session), label: me.username };
     } catch (error) {
       deps.report('error', `The NEAR sign-in did not finish: ${await describeNear(error, tokens)}`);

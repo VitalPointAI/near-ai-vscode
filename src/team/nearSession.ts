@@ -32,6 +32,7 @@ export class NearSessionError extends Error {
 const SIGNED_OUT_MESSAGE = 'You are not signed in to NEAR AI for this team. Sign in first.';
 const EXPIRED_MESSAGE = 'Your NEAR sign-in for this team expired. Sign in again.';
 const UNAVAILABLE_MESSAGE = 'Could not refresh your NEAR sign-in for this team. Try again in a moment.';
+export const STORE_FAILED_MESSAGE = 'NEAR AI could not save your renewed NEAR sign-in for this team to the VS Code secret store. It is kept in this window and saved again on the next NEAR step; if this window closes before then, sign in to NEAR again.';
 const REFRESH_PATH = '/users/me/access-tokens';
 /** NEAR access tokens last about an hour; renewing a little early avoids sending one that is about to lapse. */
 const ACCESS_TOKEN_MAX_AGE_MS = 50 * 60_000;
@@ -52,6 +53,8 @@ export interface NearSessionOptions {
   sleep?: (ms: number) => Promise<void>;
   /** The access token from the sign-in that created the session, so the first call needs no refresh. */
   initialAccessToken?: string;
+  /** Told once (fixed text, no token) when a rotated refresh token could not be saved and is kept in memory only (WR-04). */
+  onStoreFailure?: (message: string) => void;
 }
 
 interface StoredSession { v: 1; refreshToken: string; label: string }
@@ -105,8 +108,13 @@ export class NearSession implements NearAuth {
   private readonly fetchImpl: FetchLike;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly onStoreFailure: ((message: string) => void) | undefined;
   private cached: { token: string; obtainedAt: number } | undefined;
   private inFlight: Promise<string> | undefined;
+  // WR-04: a rotated session NEAR has already answered but SecretStorage refused. The stored token is burned then, so this one is the session.
+  private unsaved: StoredSession | undefined;
+  private storeWarned = false;
+  private saving: Promise<void> = Promise.resolve();
 
   public constructor(options: NearSessionOptions) {
     if (!isSecureEndpoint(options.baseUrl)) throw new RangeError('The NEAR AI address must be HTTPS (plain HTTP is only allowed on this computer).');
@@ -117,16 +125,19 @@ export class NearSession implements NearAuth {
     this.now = options.now ?? Date.now;
     this.sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
     if (options.initialAccessToken) this.cached = { token: options.initialAccessToken, obtainedAt: this.now() };
+    this.onStoreFailure = options.onStoreFailure;
   }
 
   /** The label of the kept session, or undefined when this team has none (a damaged value is deleted). */
   public async signedIn(): Promise<{ label: string } | undefined> {
+    if (this.unsaved !== undefined) return { label: this.unsaved.label };
     const stored = await this.readStored();
     return stored && { label: stored.label };
   }
 
-  /** A current access token: the one in memory while it is young, otherwise one fresh refresh. */
+  /** A current access token: the one in memory while it is young, otherwise one fresh refresh. An unsaved rotated session is saved again first. */
   public async accessToken(): Promise<string> {
+    if (this.unsaved !== undefined && !this.inFlight) await this.saveUnsaved();
     if (this.cached && this.now() - this.cached.obtainedAt < ACCESS_TOKEN_MAX_AGE_MS) return this.cached.token;
     return this.refresh();
   }
@@ -150,10 +161,11 @@ export class NearSession implements NearAuth {
     if (this.inFlight) await this.inFlight.catch(() => undefined);
     let serverConfirmed = true;
     try {
-      const stored = await this.readStored();
+      const stored = this.unsaved ?? await this.readStored();
       if (stored) serverConfirmed = await logoutAtNear(this.base, stored.refreshToken, this.fetchImpl);
     } finally {
       this.cached = undefined;
+      this.unsaved = undefined;
       await this.secrets.delete(nearSessionSecretName(this.teamId));
     }
     return { serverConfirmed };
@@ -168,7 +180,9 @@ export class NearSession implements NearAuth {
   }
 
   private async refreshNow(): Promise<string> {
-    const stored = await this.readStored();
+    if (this.unsaved !== undefined) await this.saveUnsaved();
+    // A session NEAR rotated but the store refused is the live one; the stored token was burned by that rotation.
+    const stored = this.unsaved ?? await this.readStored();
     if (!stored) {
       this.cached = undefined;
       throw new NearSessionError('signed-out', SIGNED_OUT_MESSAGE);
@@ -186,6 +200,7 @@ export class NearSession implements NearAuth {
       }
       if (!current) {
         this.cached = undefined;
+        this.unsaved = undefined;
         throw new NearSessionError('signed-out', SIGNED_OUT_MESSAGE);
       }
       if (current.refreshToken !== used.refreshToken) {
@@ -194,19 +209,48 @@ export class NearSession implements NearAuth {
       }
       if (answer === 'refused') {
         this.cached = undefined;
+        this.unsaved = undefined;
         throw new NearSessionError('expired', EXPIRED_MESSAGE);
       }
     }
-    // The single-use token is replaced on disk before the new access token is used anywhere.
-    const next: StoredSession = { v: 1, refreshToken: answer.refreshToken, label: used.label };
-    try {
-      await this.secrets.store(nearSessionSecretName(this.teamId), JSON.stringify(next));
-    } catch {
-      this.cached = undefined;
-      throw new NearSessionError('unavailable', UNAVAILABLE_MESSAGE);
-    }
+    // The single-use token is replaced on disk before the new access token is used anywhere. NEAR has already burned the old one, so a store
+    // that fails keeps the new one in memory (WR-04): it is used for the next refresh and saved again on the next call, and the user is told.
+    this.unsaved = { v: 1, refreshToken: answer.refreshToken, label: used.label };
+    await this.saveUnsaved();
     this.cached = { token: answer.accessToken, obtainedAt: this.now() };
     return answer.accessToken;
+  }
+
+  // Saves run one after another and each writes the newest kept session, so an older one can never land on disk after a newer one.
+  private saveUnsaved(): Promise<void> {
+    const run = this.saving.then(() => this.saveLatest());
+    this.saving = run;
+    return run;
+  }
+
+  // Tries to save the kept rotated session twice. Never throws: a failure keeps it in memory and tells the user once per failing stretch.
+  private async saveLatest(): Promise<void> {
+    const pending = this.unsaved;
+    if (pending === undefined) return;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.secrets.store(nearSessionSecretName(this.teamId), JSON.stringify(pending));
+        if (this.unsaved === pending) this.unsaved = undefined;
+        this.storeWarned = false;
+        return;
+      } catch {
+        // Tried again below, then kept in memory.
+      }
+    }
+    if (!this.storeWarned) {
+      this.storeWarned = true;
+      try {
+        this.onStoreFailure?.(STORE_FAILED_MESSAGE);
+      } catch {
+        // A listener that throws must not lose the session; the next failure tries to tell the user again.
+        this.storeWarned = false;
+      }
+    }
   }
 
   /** One call to the rotating refresh route. 'refused' means NEAR no longer accepts that refresh token. */

@@ -146,6 +146,50 @@ test('a NEAR outage while refreshing is unavailable, not expired, and the sessio
   });
 });
 
+// WR-04: NEAR burns the old refresh token as soon as it answers a refresh, so a secret store that fails right then must not lose the new one.
+class FlakySecrets extends MemorySecrets {
+  public failStores = 0;
+  public override async store(key: string, value: string): Promise<void> {
+    if (this.failStores > 0) {
+      this.failStores -= 1;
+      throw new Error('The keychain is locked.');
+    }
+    await super.store(key, value);
+  }
+}
+
+test('WR-04: a rotated refresh token is kept in memory when the secret store fails, used for the next refresh, saved later, and the user is told', async () => {
+  await withFake(async ({ fake, lead }) => {
+    const secrets = new FlakySecrets();
+    let clock = 0;
+    const warnings: string[] = [];
+    await saveNearSession(secrets, 'team-a', lead, 'lead', { baseUrl: fake.baseUrl, now: () => clock, sleep: never });
+    const session = new NearSession({ teamId: 'team-a', secrets, baseUrl: fake.baseUrl, now: () => clock, sleep: never, onStoreFailure: (message) => { warnings.push(message); } });
+    secrets.failStores = 10;
+    clock += 55 * MINUTE;
+    const first = await session.accessToken();
+    assert.ok(first.length > 0, 'the refresh still hands out its access token');
+    assert.equal(storedRefresh(secrets, 'team-a'), lead.refreshToken, 'the store failed, so the old (now burned) token is still on disk');
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0] as string, /could not save your renewed NEAR sign-in/);
+    assert.equal(warnings.some((text) => text.includes('rt_')), false, 'no token in the message');
+
+    // The next refresh uses the token kept in memory, so it is not refused as expired.
+    clock += 55 * MINUTE;
+    const second = await session.accessToken();
+    assert.notEqual(second, first);
+    assert.equal(warnings.length, 1, 'one warning while the store keeps failing');
+
+    // Once the store works again, the newest token is saved on the next call.
+    secrets.failStores = 0;
+    await session.accessToken();
+    const saved = storedRefresh(secrets, 'team-a');
+    assert.notEqual(saved, lead.refreshToken);
+    const fresh = new NearSession({ teamId: 'team-a', secrets, baseUrl: fake.baseUrl, now: () => clock, sleep: never });
+    assert.ok((await fresh.refreshAfterUnauthorized()) !== undefined, 'the saved token is the live one');
+  });
+});
+
 test('a damaged or foreign stored value is treated as signed out and deleted', async () => {
   await withFake(async ({ fake, secrets }) => {
     const session = new NearSession({ teamId: 'team-a', secrets, baseUrl: fake.baseUrl, sleep: never });
