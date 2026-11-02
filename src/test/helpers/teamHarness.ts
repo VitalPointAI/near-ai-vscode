@@ -1,5 +1,7 @@
 // Shared fixtures for the team tests: a bare remote with clones, an in-memory SecretStorage, and a signed genesis batch.
 // The file has no .test suffix on purpose so the test glob does not run it as a suite.
+// First, before anything can fetch: keeps the wasm reservation of fetch's parser from eating the test's address-space cap.
+import './addressSpace';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';

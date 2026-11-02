@@ -10,6 +10,8 @@
 //   - a refresh token is single use: refreshing returns a new one and the old one answers 401
 //   - invite, cancel and member removal need org owner or admin; key routes need any membership
 // The request log holds the method, the path and the kind of credential, never a token or a key.
+// First, before any client can fetch: keeps the wasm reservation of fetch's parser from eating the test's address-space cap.
+import './addressSpace';
 import { randomBytes } from 'node:crypto';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { AddressInfo } from 'node:net';
