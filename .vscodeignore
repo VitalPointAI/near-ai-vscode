@@ -22,3 +22,8 @@ resources/benchmark/**/reference/**
 
 # Live model-eval results (NEAR_LIVE_EVAL_OUT)
 eval-*.json
+
+# Repository workflow files (CI, PR template, contributor docs)
+.github/**
+CONTRIBUTING.md
+docs/development-workflow.md

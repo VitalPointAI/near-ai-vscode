@@ -295,5 +295,33 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 
-Report security issues through the repository's issue tracker with redacted
+## How changes reach a release
+
+The development process requires every change to reach `main` through a pull request. Before a
+pull request merges, CI type checks it, runs the unit tests and the end-to-end tests in a real
+VS Code, packages and inspects the VSIX, runs `npm audit` on runtime dependencies, and scans the
+files and every commit for secrets, and a security and code review must pass. Releases are
+built by GitHub Actions from a tagged commit on `main` (or, for an urgent fix to an older
+release, the reviewed head of its hotfix branch), attached to a GitHub release with a SHA-256
+checksum, and published to the Marketplace only after the owner approves that run. Every GitHub
+Action is pinned to a full commit hash.
+
+GitHub enforces these rules through repository settings (branch protection on `main`, a ruleset
+that keeps release tags from being moved or deleted, and a protected `marketplace` environment).
+They are listed, with the commands that apply them, in
+[docs/development-workflow.md](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs/development-workflow.md)
+(section 8), which also describes the whole process. A rule is in force only once its setting is
+applied.
+
+## Reporting a vulnerability
+
+Report vulnerabilities privately through GitHub's private vulnerability reporting: on the
+repository's **Security** tab, choose **Report a vulnerability**
+([direct link](https://github.com/VitalPointAI/near-ai-vscode/security/advisories/new)). Only the
+maintainers see the report. Please do not describe a vulnerability in a public issue.
+
+If that page does not offer **Report a vulnerability**, open an
+[issue](https://github.com/VitalPointAI/near-ai-vscode/issues) that only asks the maintainers for
+a private way to send a security report, with no details of the problem, and they will reply
+there. Other security issues, such as a hardening idea, can go to the issue tracker with redacted
 logs. Never include API keys, raw prompts, or private file contents.

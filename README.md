@@ -526,7 +526,7 @@ npm run check            # type check and tests
 npm run verify:release   # package and verify the VSIX
 ```
 
-Issues and contributions: [github.com/VitalPointAI/near-ai-vscode](https://github.com/VitalPointAI/near-ai-vscode).
+Issues and contributions: [github.com/VitalPointAI/near-ai-vscode](https://github.com/VitalPointAI/near-ai-vscode). See [CONTRIBUTING.md](https://github.com/VitalPointAI/near-ai-vscode/blob/main/CONTRIBUTING.md) for branches, pull requests and reviews.
 
 ## License
 
