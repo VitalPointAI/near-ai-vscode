@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
-import { createDeviceIdentity, deviceKeySecretName, sealKeySecretName } from '../team/identity';
+import { CleanupChecklist, repoAccessText } from '../team/cleanupChecklist';
+import { createDeviceIdentity, deviceKeySecretName, newMemberId, sealKeySecretName } from '../team/identity';
 import { parseInviteBundle } from '../team/inviteBundle';
 import { INVITE_FILE } from '../team/invite';
 import { nearSessionSecretName } from '../team/nearSession';
@@ -26,9 +27,11 @@ const commandsModule = require('../services/team/teamCommands') as typeof import
 const memberModule = require('../services/team/memberCommands') as typeof import('../services/team/memberCommands');
 test.after(() => { uninstall(); });
 const { ENABLE_COMMAND, registerTeamMode } = commandsModule;
-const { INVITE_COMMAND, JOIN_COMMAND, LINK_NEAR_COMMAND, SIGN_OUT_NEAR_COMMAND, parseUsdToNanoUsd } = memberModule;
+const { INVITE_COMMAND, JOIN_COMMAND, LINK_NEAR_COMMAND, MANAGE_MEMBERS_COMMAND, SIGN_OUT_NEAR_COMMAND, parseUsdToNanoUsd } = memberModule;
 
 const EM_DASH = '—';
+const WITHOUT_NEAR = 'Invite without NEAR';
+const WITHOUT_KEY_NOW = 'Continue without NEAR';
 const PUBLIC_URL = 'https://example.invalid/team.git';
 const NO_ORG_NOTICE = 'No NEAR organization linked: spend is not capped at the provider.';
 
@@ -135,8 +138,10 @@ async function withTeam(work: (team: Team) => Promise<void>, options: { near?: b
     });
     registeredHandle = handle;
     assert.equal(await handle.ready, 'solo');
+    // This window's handlers, kept so a later window registering the same command ids does not take over this one's calls.
+    const own = new Map(stub.commands);
     const run = async (command: string, ...args: unknown[]): Promise<void> => {
-      const handler = stub.commands.get(command);
+      const handler = own.get(command);
       assert.ok(handler !== undefined, `${command} is registered`);
       await handler(...args);
     };
@@ -180,8 +185,9 @@ async function openJoiner(t: Team, options: { folder?: boolean; pull?: boolean; 
   });
   await handle.ready;
   clearUi();
+  const own = new Map(stub.commands);
   const run = async (command: string, ...args: unknown[]): Promise<void> => {
-    const handler = stub.commands.get(command);
+    const handler = own.get(command);
     assert.ok(handler !== undefined, `${command} is registered`);
     await handler(...args);
   };
@@ -623,5 +629,269 @@ test('choosing Link a NEAR organization while inviting links the team first and 
     assert.equal(stub.clipboardWrites.length, 1);
     assert.deepEqual(parseInviteBundle(stub.clipboardWrites[0] as string).near, { organizationId: 'org-1', workspaceId: 'ws-1' });
     assert.equal(stub.notifications.some((entry) => entry.message === NO_ORG_NOTICE), false);
+  }, { near: true });
+});
+
+// ---- Manage Team Members ----------------------------------------------------------------------------------------------------------------
+
+// A teammate is invited, joins from the second clone, and the lead's window syncs so it knows about them.
+async function joinMember(t: Team, person: { name: string; email: string; role: string; displayName: string }): Promise<{ memberId: string; bundle: string; secrets: MemorySecrets }> {
+  const bundle = await inviteBundle(t, person);
+  gitIn(t.root, ['push', '-q', 'origin', 'main']);
+  const j = await openJoiner(t);
+  stub.inputAnswers.push(bundle, person.displayName);
+  await j.run(JOIN_COMMAND);
+  await closeWindow(j);
+  await t.handle.session()?.sync();
+  clearUi();
+  return { memberId: parseInviteBundle(bundle).member, bundle, secrets: j.secrets };
+}
+
+const lastList = (): string[] => stub.quickPickRequests[stub.quickPickRequests.length - 1]?.labels ?? [];
+const shownMessages = (): string[] => stub.notifications.map((entry) => entry.message);
+const manageActions = (): string[] => stub.quickPickRequests[1]?.labels ?? [];
+
+test('Manage Team Members lists the NEAR line first, then members with their state, invitations and cleanup items', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    const dana = await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    await inviteBundle(t, { name: 'Eve', email: 'eve@example.invalid', role: 'Reviewer' });
+    const fay = await inviteBundle(t, { name: 'Fay', email: 'fay@example.invalid', role: 'Observer' });
+    const cleanup = new CleanupChecklist(teamStorageDir(t.storage, (await readTeamFile(t.root))?.teamId as string));
+    await cleanup.add([{ memberId: dana.memberId, memberName: 'Dana D', step: 'repo-access', status: 'manual' }]);
+    clearUi();
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.deepEqual(lastList(), [
+      'NEAR: signed in as lead',
+      'Lead Owner, owner',
+      'Dana D, developer, waiting for confirmation',
+      'Invitation for Dana D, developer, used',
+      'Invitation for Eve, reviewer, pending',
+      'Invitation for Fay, observer, pending',
+      'Repository access for Dana D'
+    ]);
+    assert.ok(parseInviteBundle(fay).member.length > 0);
+    assert.equal(everythingShown().includes(EM_DASH), false);
+  }, { near: true });
+});
+
+test('Manage Team Members in a team without NEAR starts with the plain no-organization line and never talks about a cap', async () => {
+  await withTeam(async (t) => {
+    await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.equal(lastList()[0], NO_ORG_NOTICE);
+    stub.quickPickAnswers.push('Dana D, developer, waiting for confirmation', 'Confirm');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.ok(shownMessages().some((message) => message.startsWith('Dana D is now a developer.')), shownMessages().join(' | '));
+    assert.equal(shownMessages().some((message) => /spend cap|capped|limit/i.test(message.replace(NO_ORG_NOTICE, ''))), false, 'no cap is claimed without a NEAR organization');
+    assert.equal(t.handle.session()?.state().members.get(await readMemberId(t, 'Dana D'))?.role, 'developer');
+  });
+});
+
+async function readMemberId(t: Team, name: string): Promise<string> {
+  for (const member of t.handle.session()?.state().members.values() ?? []) if (member.name === name) return member.id;
+  throw new Error(`no member named ${name}`);
+}
+
+test('Confirm makes the member their invited role and in a linked team sends a key capped at their allocation', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    stub.quickPickAnswers.push('Dana D, developer, waiting for confirmation', 'Confirm');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.deepEqual(manageActions(), ['Confirm', 'Remove']);
+    assert.ok(shownMessages().includes('Dana D is now a developer. Their team key has a spend cap of $5.00 set by you.'), shownMessages().join(' | '));
+    const member = t.handle.session()?.state().members.get(await readMemberId(t, 'Dana D'));
+    assert.equal(member?.role, 'developer');
+    assert.ok(member?.nearApiKeyId !== undefined, 'the key id is in the log');
+    const key = t.fake?.key(member?.nearApiKeyId as string);
+    assert.equal(key?.spendLimitNanoUsd, 5_000_000_000);
+    assert.equal(everythingShown().includes(key?.secret as string), false, 'the clear key is never shown');
+    assert.equal(everythingShown().includes(EM_DASH), false);
+  }, { near: true });
+});
+
+test('Remove asks for confirmation, caps and revokes the key, and lists what is left with the repository reminder last', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    stub.quickPickAnswers.push('Dana D, developer, waiting for confirmation', 'Confirm');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    clearUi();
+    const id = await readMemberId(t, 'Dana D');
+    const keyId = t.handle.session()?.state().members.get(id)?.nearApiKeyId as string;
+
+    // Declining the confirmation changes nothing.
+    stub.quickPickAnswers.push('Dana D, developer', 'Remove');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.equal(t.handle.session()?.state().members.get(id)?.removedEvent, undefined);
+    const ask = stub.notifications.findIndex((entry) => entry.message === 'Remove Dana D from Invite team?');
+    assert.ok(ask >= 0, shownMessages().join(' | '));
+    assert.equal(stub.notificationOptions[ask]?.modal, true);
+    assert.deepEqual(stub.notificationActions[ask], ['Remove']);
+    clearUi();
+
+    stub.quickPickAnswers.push('Dana D, developer', 'Remove');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Remove') ? 'Remove' : undefined));
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.notEqual(t.handle.session()?.state().members.get(id)?.removedEvent, undefined, 'removed from the log');
+    assert.equal(t.fake?.key(keyId)?.revoked, true, 'the key was revoked');
+    assert.ok(shownMessages().some((message) => message.startsWith('Dana D was removed from Invite team.') && message.includes('capped at 0 and revoked')), shownMessages().join(' | '));
+    const lines = outputLines();
+    const todo = lines.slice(lines.indexOf('Still to do for Dana D:') + 1).filter((line) => line.startsWith('- '));
+    assert.ok(todo.length >= 1, lines.join(' | '));
+    assert.equal(todo[todo.length - 1], `- ${repoAccessText('Dana D')}`, 'the repository access reminder comes last');
+  }, { near: true });
+});
+
+test('Remove warns that the key can still spend when it could not be capped, and keeps the manual NEAR step in the message', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    stub.quickPickAnswers.push('Dana D, developer, waiting for confirmation', 'Confirm');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    clearUi();
+    const id = await readMemberId(t, 'Dana D');
+    const keyId = t.handle.session()?.state().members.get(id)?.nearApiKeyId as string;
+    t.fake?.fail({ method: 'PATCH', pathPrefix: `/v1/workspaces/ws-1/api-keys/${keyId}/spend-limit`, status: 500, times: 20 });
+    stub.quickPickAnswers.push('Dana D, developer', 'Remove');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Remove') ? 'Remove' : undefined));
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    const warning = stub.notifications.find((entry) => entry.level === 'warn' && entry.message.includes('can still spend'));
+    assert.ok(warning !== undefined, shownMessages().join(' | '));
+    assert.ok(warning.message.includes('set its limit to 0 in the NEAR console'), 'the manual step is shown as written');
+    assert.notEqual(t.handle.session()?.state().members.get(id)?.removedEvent, undefined, 'the removal still happened');
+  }, { near: true });
+});
+
+test('Cancel ends a pending invitation and Re-issue replaces it with a new bundle shown once with Copy', async () => {
+  await withTeam(async (t) => {
+    const eve = await inviteBundle(t, { name: 'Eve', email: 'eve@example.invalid', role: 'Reviewer' });
+    const eveId = parseInviteBundle(eve).member;
+    clearUi();
+    stub.quickPickAnswers.push('Invitation for Eve, reviewer, pending', 'Re-issue', '3 days');
+    stub.setMessageResponder(copyWhenOffered);
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.deepEqual(manageActions(), ['Cancel', 'Re-issue']);
+    assert.equal(stub.clipboardWrites.length, 1);
+    const fresh = parseInviteBundle(stub.clipboardWrites[0] as string);
+    assert.notEqual(fresh.member, eveId, 'a new invitation');
+    const state = t.handle.session()?.state();
+    assert.notEqual(state?.members.get(eveId)?.removedEvent, undefined, 'the old invitation stopped working');
+    assert.equal(state?.members.get(fresh.member)?.invite?.ttlSeconds, 259_200);
+    assert.equal(everythingShown().includes(stub.clipboardWrites[0] as string), false);
+    clearUi();
+
+    stub.setMessageResponder(undefined);
+    stub.quickPickAnswers.push('Invitation for Eve, reviewer, pending', 'Cancel');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.ok(shownMessages().includes('The invitation for Eve was cancelled.'), shownMessages().join(' | '));
+    assert.notEqual(t.handle.session()?.state().members.get(fresh.member)?.removedEvent, undefined);
+  });
+});
+
+test('Manage Team Members accepts {memberId, action} from a notification and runs that action without a list', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    const id = await readMemberId(t, 'Dana D');
+    await t.run(MANAGE_MEMBERS_COMMAND, { memberId: id, action: 'confirm' });
+    assert.equal(stub.quickPickRequests.length, 0, 'no list was shown');
+    assert.equal(t.handle.session()?.state().members.get(id)?.role, 'developer');
+    assert.ok(shownMessages().some((message) => message.startsWith('Dana D is now a developer.')));
+    clearUi();
+    await t.run(MANAGE_MEMBERS_COMMAND, { memberId: id, action: 'not-an-action' });
+    assert.equal(stub.quickPickRequests.length, 1, 'an argument it does not understand falls back to the list');
+  }, { near: true });
+});
+
+test('a member without management rights sees the list read-only with no actions', async () => {
+  await withTeam(async (t) => {
+    const dana = await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    const j = await openJoiner(t, { pull: false, secrets: dana.secrets });
+    assert.equal(j.handle.session()?.memberId(), dana.memberId, 'this window is Dana\'s');
+    stub.quickPickAnswers.push('Lead Owner, owner');
+    await j.run(MANAGE_MEMBERS_COMMAND);
+    assert.equal(stub.quickPickRequests.length, 1, 'no second list of actions');
+    assert.ok(lastList().includes('Lead Owner, owner'));
+    assert.ok(shownMessages().some((message) => message.includes('Only the owner or a lead can change the team')), shownMessages().join(' | '));
+    await closeWindow(j);
+  });
+});
+
+test('Retry sends a NEAR invitation left on the cleanup list after asking the lead to sign in, Mark done is only for repository access, and an unknown email is explained', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await t.run(SIGN_OUT_NEAR_COMMAND);
+    t.signIns.tokens = t.fake?.addUser({ id: 'user-lead', username: 'lead', email: 'lead@example.invalid' });
+    clearUi();
+    // A lead invited without NEAR leaves the NEAR invitation on the cleanup list.
+    stub.inputAnswers.push('Lee', 'lee@example.invalid', '5');
+    stub.quickPickAnswers.push('Lead', '7 days');
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    await t.run(INVITE_COMMAND);
+    assert.equal(t.fake?.emailedToken('lee@example.invalid'), undefined, 'nothing reached NEAR yet');
+    const teamId = (await readTeamFile(t.root))?.teamId as string;
+    const cleanup = new CleanupChecklist(teamStorageDir(t.storage, teamId));
+    const lee = parseInviteBundle(stub.clipboardWrites[0] as string);
+    await cleanup.add([
+      { memberId: lee.member, memberName: 'Lee', step: 'repo-access', status: 'manual' },
+      { memberId: newMemberId(), memberName: 'Zed', step: 'send-invitation', status: 'pending' }
+    ]);
+    clearUi();
+
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.ok(lastList().includes('NEAR cleanup: Send the NEAR invitation for Lee'), lastList().join(' | '));
+    assert.ok(lastList().includes('Repository access for Lee'));
+    clearUi();
+
+    stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Lee', 'Retry');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Sign in') ? 'Sign in' : undefined));
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.deepEqual(manageActions(), ['Retry']);
+    assert.notEqual(t.fake?.emailedToken('lee@example.invalid'), undefined, 'the invitation reached NEAR');
+    assert.equal((await cleanup.list()).find((item) => item.memberName === 'Lee' && item.step === 'send-invitation')?.status, 'done');
+    clearUi();
+
+    stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Zed', 'Retry');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.ok(shownMessages().some((message) => message.includes('only known on the computer that sent the invitation')), shownMessages().join(' | '));
+    clearUi();
+
+    stub.quickPickAnswers.push('Repository access for Lee', 'Mark done');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.deepEqual(manageActions(), ['Mark done']);
+    assert.equal((await cleanup.list()).find((item) => item.step === 'repo-access')?.status, 'done');
+  }, { near: true });
+});
+
+test('Confirm without a NEAR sign-in leaves the key pending, the list says so, and Send key signs in and delivers it', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    await t.run(SIGN_OUT_NEAR_COMMAND);
+    t.signIns.tokens = t.fake?.addUser({ id: 'user-lead', username: 'lead', email: 'lead@example.invalid' });
+    clearUi();
+
+    stub.quickPickAnswers.push('Dana D, developer, waiting for confirmation', 'Confirm');
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_KEY_NOW) ? WITHOUT_KEY_NOW : undefined));
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    const id = await readMemberId(t, 'Dana D');
+    assert.equal(t.handle.session()?.state().members.get(id)?.role, 'developer', 'the confirmation stands');
+    assert.equal(t.handle.session()?.state().members.get(id)?.nearApiKeyId, undefined, 'no key yet');
+    clearUi();
+
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.ok(lastList().includes('Dana D, developer, key pending'), lastList().join(' | '));
+    clearUi();
+
+    stub.quickPickAnswers.push('Dana D, developer, key pending', 'Send key');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Sign in') ? 'Sign in' : undefined));
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.deepEqual(manageActions(), ['Send key', 'Remove']);
+    const keyId = t.handle.session()?.state().members.get(id)?.nearApiKeyId;
+    assert.notEqual(keyId, undefined, 'the key was sent');
+    assert.equal(t.fake?.key(keyId as string)?.spendLimitNanoUsd, 5_000_000_000);
+    assert.equal(everythingShown().includes(t.fake?.key(keyId as string)?.secret as string), false);
   }, { near: true });
 });
