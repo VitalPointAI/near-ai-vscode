@@ -71,7 +71,8 @@ same PR.
 
 - The six jobs run **in parallel**; the slowest (e2e) takes a few minutes.
 - `npm ci` uses the setup-node npm cache; the VS Code download for e2e is cached weekly.
-- A new push to a PR **cancels** the superseded run. Runs on `main` always finish.
+- A new push to a PR **cancels** the superseded run. Runs on `main` (and runs started by hand)
+  each get their own concurrency group, so none is ever cancelled or replaced while queued.
 - `audit` and `secret-scan` do not install anything.
 - Every action is pinned to a full commit SHA; the workflow token is read-only and checkouts do
   not keep credentials.
