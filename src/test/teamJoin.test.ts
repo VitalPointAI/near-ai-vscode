@@ -4,20 +4,28 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import test from 'node:test';
-import { DEFAULT_INVITE_TTL_SECONDS, memberAttention } from '../domain/team/invite';
+import { execFileSync } from 'node:child_process';
+import { DEFAULT_INVITE_TTL_SECONDS, INVITE_SKEW_SECONDS, memberAttention } from '../domain/team/invite';
 import { teamMaterializer } from '../domain/team/materialize';
 import { defaultTeamPolicy } from '../domain/team/policy';
 import type { GenesisAnchor, TeamFile, TeamState } from '../domain/team/types';
+import { AuthService } from '../services/auth';
+import { ProfileStore } from '../services/profileStore';
 import { TeamLog, buildGenesisEvents } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
-import { deviceKeySecretName, emailHash, loadSealIdentity, newTeamId, sealKeySecretName } from '../team/identity';
+import { createDeviceIdentity, deviceKeySecretName, emailHash, loadSealIdentity, newTeamId, sealKeySecretName } from '../team/identity';
 import { inviteMember } from '../team/invite';
 import type { InviteInput } from '../team/invite';
 import { encodeInviteBundle, parseInviteBundle } from '../team/inviteBundle';
+import { generateInviteCode } from '../team/inviteCode';
 import { NO_ORG_NOTICE, joinTeam, prepareJoin } from '../team/join';
 import type { JoinInput, JoinPreparation } from '../team/join';
+import { NearOrgClient } from '../team/nearOrg';
+import type { NearAuth } from '../team/nearOrg';
 import { nearSessionSecretName } from '../team/nearSession';
+import { teamProfileId } from '../team/teamKeyProfile';
+import type { GitRunner } from '../team/runGit';
 import { canonicalTeamFile, writeTeamFile } from '../team/teamFile';
 import { startFakeNear } from './helpers/fakeNear';
 import type { FakeNear } from './helpers/fakeNear';
@@ -274,5 +282,328 @@ test('nothing from the bundle is written on the joining computer: no file holds 
       assert.equal(text.includes(Buffer.from(bundle)), false, `${file} holds the bundle`);
     }
     for (const value of joiner.secrets.values.values()) assert.equal(value.includes(code), false, 'SecretStorage holds the code');
+  });
+});
+
+// ---- Task 2: a lead invitee, the no-organization paste path, and rollback --------------------------------------------------------------
+
+const NO_SLEEP = async (): Promise<void> => undefined;
+
+function staticAuth(token: string): NearAuth {
+  return { accessToken: async () => token, refreshAfterUnauthorized: async () => undefined };
+}
+
+function everyObject(remote: string): Buffer {
+  return execFileSync('git', ['-C', remote, 'cat-file', '--batch-all-objects', '--batch'], { maxBuffer: 64 * 1024 * 1024 });
+}
+
+async function inviteLead(fixture: TeamFixture, seed: Seed, org: NearOrgClient, email = 'lena@example.invalid'): Promise<{ bundle: string; memberId: string }> {
+  return invite(fixture, seed, { role: 'lead', name: 'Lena Lead', email, org });
+}
+
+test('a lead joining a NEAR-linked team signs in, accepts the organization invitation as admin and keeps the per-team session', async () => {
+  await withNearFake(async (fake) => {
+    await withFixture(['a', 'b'], async (fixture) => {
+      const seed = await seedTeam(fixture, NEAR_LINK);
+      pointOriginAt(fixture, PUBLIC_URL);
+      const leadTokens = fake.addUser({ id: 'user-lena', username: 'lena', email: 'lena@example.invalid' });
+      const ownerSession = fake.addUser({ id: 'user-inviter', username: 'inviter', email: 'inviter@example.invalid' });
+      fake.addOrganization({ id: 'org-1', name: 'Team Org', members: [{ userId: 'user-lead', role: 'owner' }, { userId: 'user-inviter', role: 'owner' }] });
+      const inviter = new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(ownerSession.accessToken), sleep: NO_SLEEP });
+      const { bundle, memberId } = await inviteLead(fixture, seed, inviter);
+      const joiner = await joinerOn(fixture, 'b', seed);
+      const prepared = await readyFor(joiner, bundle);
+
+      let signIns = 0;
+      const result = await joinTeam(joinInput(joiner, prepared, { nearBaseUrl: fake.baseUrl, signIn: async () => { signIns += 1; return leadTokens; } }));
+      assert.equal(result.ok, true, result.ok ? '' : result.message);
+      if (!result.ok) return;
+      assert.equal(signIns, 1);
+      assert.equal(result.memberId, memberId);
+      assert.equal(result.nearInvitation, 'accepted');
+      assert.equal(result.key, 'awaiting-lead');
+      assert.equal(result.role, 'observer');
+      assert.equal(result.pendingRole, 'lead');
+
+      // The fake shows the lead as an organization admin, and the per-team session is stored with the NEAR login as its label.
+      const members = await inviter.listMembers('org-1');
+      assert.equal(members.find((member) => member.userId === 'user-lena')?.role, 'admin');
+      const stored = joiner.secrets.values.get(nearSessionSecretName(seed.teamId));
+      assert.ok(stored !== undefined);
+      assert.equal((JSON.parse(stored ?? '{}') as { label?: string }).label, 'lena');
+      for (const notice of result.notices) {
+        assert.equal(notice.includes(leadTokens.accessToken) || notice.includes(leadTokens.refreshToken), false);
+      }
+    });
+  });
+});
+
+test('a lead whose NEAR login email differs accepts with the emailed token, and a lead who skips it still joins with a plain notice', async () => {
+  await withNearFake(async (fake) => {
+    await withFixture(['a', 'b', 'c'], async (fixture) => {
+      const seed = await seedTeam(fixture, NEAR_LINK);
+      pointOriginAt(fixture, PUBLIC_URL);
+      const ownerSession = fake.addUser({ id: 'user-inviter', username: 'inviter', email: 'inviter@example.invalid' });
+      fake.addOrganization({ id: 'org-1', name: 'Team Org', members: [{ userId: 'user-lead', role: 'owner' }, { userId: 'user-inviter', role: 'owner' }] });
+      const inviter = new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(ownerSession.accessToken), sleep: NO_SLEEP });
+      const first = await inviteLead(fixture, seed, inviter, 'lena@example.invalid');
+      const second = await invite(fixture, seed, { role: 'lead', name: 'Sam Second', email: 'sam@example.invalid' });
+      const token = fake.emailedToken('lena@example.invalid');
+      assert.ok(token !== undefined);
+
+      // The login is a different address, so GET /users/me/invitations is empty and the emailed token is used.
+      const workLogin = fake.addUser({ id: 'user-lena-work', username: 'lenawork', email: 'lena.work@example.invalid' });
+      const joinerB = await joinerOn(fixture, 'b', seed);
+      const viaToken = await joinTeam(joinInput(joinerB, await readyFor(joinerB, first.bundle), {
+        nearBaseUrl: fake.baseUrl, signIn: async () => workLogin, askInvitationLink: async () => `https://cloud.example.invalid/invitations/${token ?? ''}/accept`
+      }));
+      assert.equal(viaToken.ok && viaToken.nearInvitation, 'accepted');
+      assert.equal((await inviter.listMembers('org-1')).some((member) => member.userId === 'user-lena-work'), true);
+
+      // No emailed link to hand over: the join is done, the NEAR step says not-found and tells them what to do.
+      const otherLogin = fake.addUser({ id: 'user-sam-work', username: 'samwork', email: 'sam.work@example.invalid' });
+      const joinerC = await joinerOn(fixture, 'c', seed);
+      const notFound = await joinTeam(joinInput(joinerC, await readyFor(joinerC, second.bundle), {
+        nearBaseUrl: fake.baseUrl, signIn: async () => otherLogin, askInvitationLink: async () => undefined
+      }));
+      assert.equal(notFound.ok, true, notFound.ok ? '' : notFound.message);
+      if (!notFound.ok) return;
+      assert.equal(notFound.nearInvitation, 'not-found');
+      assert.ok(notFound.notices.some((notice) => /sign in with the (invited )?email/i.test(notice) && /invite your NEAR/i.test(notice)));
+      assert.equal(notFound.pendingRole, 'lead', 'the team join stands');
+    });
+  });
+});
+
+test('a lead who is already an organization member is told so, a skipped sign-in is skipped, and a NEAR failure never undoes the join', async () => {
+  await withNearFake(async (fake) => {
+    await withFixture(['a', 'b', 'c', 'd'], async (fixture) => {
+      const seed = await seedTeam(fixture, NEAR_LINK);
+      pointOriginAt(fixture, PUBLIC_URL);
+      const member = fake.addUser({ id: 'user-already', username: 'already', email: 'already@example.invalid' });
+      const ownerSession = fake.addUser({ id: 'user-inviter', username: 'inviter', email: 'inviter@example.invalid' });
+      fake.addOrganization({ id: 'org-1', name: 'Team Org', members: [{ userId: 'user-lead', role: 'owner' }, { userId: 'user-already', role: 'admin' }, { userId: 'user-inviter', role: 'owner' }] });
+      const inviter = new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(ownerSession.accessToken), sleep: NO_SLEEP });
+      const one = await invite(fixture, seed, { role: 'lead', name: 'Al Ready', email: 'already@example.invalid' });
+      const two = await invite(fixture, seed, { role: 'lead', name: 'Si Kip', email: 'skip@example.invalid' });
+      const three = await inviteLead(fixture, seed, inviter, 'failure@example.invalid');
+
+      const joinerB = await joinerOn(fixture, 'b', seed);
+      const already = await joinTeam(joinInput(joinerB, await readyFor(joinerB, one.bundle), { nearBaseUrl: fake.baseUrl, signIn: async () => member }));
+      assert.equal(already.ok && already.nearInvitation, 'already-member');
+      assert.ok(joinerB.secrets.values.has(nearSessionSecretName(seed.teamId)), 'the session is kept for an existing member too');
+
+      const joinerC = await joinerOn(fixture, 'c', seed);
+      const skipped = await joinTeam(joinInput(joinerC, await readyFor(joinerC, two.bundle), { nearBaseUrl: fake.baseUrl, signIn: async () => undefined }));
+      assert.equal(skipped.ok && skipped.nearInvitation, 'skipped');
+      assert.ok(skipped.ok && skipped.notices.some((notice) => /sign in/i.test(notice)));
+      assert.equal(joinerC.secrets.values.has(nearSessionSecretName(seed.teamId)), false, 'no session without a sign-in');
+
+      // NEAR answers a server error on the accept call: the join stays done, the notice is plain, and no token is in it.
+      const failing = fake.addUser({ id: 'user-failure', username: 'failure', email: 'failure@example.invalid' });
+      fake.fail({ method: 'POST', pathPrefix: '/v1/users/me/invitations/', status: 500, times: 10, message: `broken ${failing.accessToken}` });
+      const joinerD = await joinerOn(fixture, 'd', seed);
+      const failed = await joinTeam(joinInput(joinerD, await readyFor(joinerD, three.bundle), { nearBaseUrl: fake.baseUrl, signIn: async () => failing }));
+      assert.equal(failed.ok, true, failed.ok ? '' : failed.message);
+      if (!failed.ok) return;
+      assert.equal(failed.nearInvitation, 'failed');
+      assert.ok(failed.notices.some((notice) => /NEAR/.test(notice)));
+      assert.equal(failed.notices.join(' ').includes(failing.accessToken), false);
+      await seed.a.log.sync();
+      assert.equal(seed.a.log.state().members.get(three.memberId)?.status, undefined, 'the member joined');
+    });
+  });
+});
+
+test('a team with no NEAR organization checks a pasted key with check_api_key only and installs it with the not-capped notice', async () => {
+  await withNearFake(async (fake) => {
+    await withFixture(['a', 'b'], async (fixture) => {
+      const seed = await seedTeam(fixture);
+      pointOriginAt(fixture, PUBLIC_URL);
+      const owner = fake.addUser({ id: 'user-keys', username: 'keys', email: 'keys@example.invalid' });
+      fake.addOrganization({ id: 'org-keys', name: 'Own Org', members: [{ userId: 'user-keys', role: 'owner' }] });
+      fake.addWorkspace({ id: 'ws-keys', organizationId: 'org-keys', name: 'Own workspace' });
+      const own = await new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(owner.accessToken), sleep: NO_SLEEP }).createKey('ws-keys', 'my own key', 5_000_000_000);
+      const secret = own.secret.toString('utf8');
+      const { bundle } = await invite(fixture, seed);
+      const joiner = await joinerOn(fixture, 'b', seed);
+      const before = fake.requests.length;
+      const result = await joinTeam(joinInput(joiner, await readyFor(joiner, bundle), { nearBaseUrl: fake.baseUrl, pasteOwnKey: async () => `  ${secret}\n` }));
+      assert.equal(result.ok, true, result.ok ? '' : result.message);
+      if (!result.ok) return;
+      assert.equal(result.key, 'installed');
+      assert.ok(result.notices.includes(NO_ORG_NOTICE));
+      assert.equal(result.nearInvitation, undefined);
+      // Only check_api_key was asked of NEAR, with the key as the bearer.
+      const calls = fake.requests.slice(before);
+      assert.ok(calls.length >= 1);
+      assert.ok(calls.every((call) => call.path === '/v1/check_api_key' && call.auth === 'api-key'));
+      const active = await new ProfileStore(joiner.projectRoot, new AuthService(joiner.secrets)).getActiveSelection();
+      assert.equal(active?.profileId, teamProfileId(seed.teamId));
+      // Nothing about the key reached the log, the notices or the stored join state.
+      assert.equal(everyObject(fixture.remote).includes(Buffer.from(secret)), false);
+      assert.equal(result.notices.join(' ').includes(secret), false);
+      for (const file of await filesUnder(joiner.globalStorageDir)) assert.equal((await fs.readFile(file)).includes(Buffer.from(secret)), false, `${file} holds the key`);
+    });
+  });
+});
+
+test('a rejected pasted key or none at all leaves the join done and says so plainly; a NEAR-linked team never asks for a key', async () => {
+  await withNearFake(async (fake) => {
+    await withFixture(['a', 'b', 'c', 'd'], async (fixture) => {
+      const seed = await seedTeam(fixture);
+      pointOriginAt(fixture, PUBLIC_URL);
+      const one = await invite(fixture, seed, { name: 'Ann One', email: 'one@example.invalid' });
+      const two = await invite(fixture, seed, { name: 'Bob Two', email: 'two@example.invalid' });
+      const joinerB = await joinerOn(fixture, 'b', seed);
+      const rejected = await joinTeam(joinInput(joinerB, await readyFor(joinerB, one.bundle), { nearBaseUrl: fake.baseUrl, pasteOwnKey: async () => 'sk-not-a-real-key-0123456789' }));
+      assert.equal(rejected.ok, true, rejected.ok ? '' : rejected.message);
+      if (!rejected.ok) return;
+      assert.equal(rejected.key, 'skipped');
+      assert.ok(rejected.notices.includes(NO_ORG_NOTICE));
+      assert.ok(rejected.notices.some((notice) => /did not accept/i.test(notice)));
+      assert.equal(rejected.notices.join(' ').includes('sk-not-a-real-key'), false);
+      assert.equal(await new ProfileStore(joinerB.projectRoot, new AuthService(joinerB.secrets)).getActiveSelection(), undefined);
+
+      const joinerC = await joinerOn(fixture, 'c', seed);
+      const none = await joinTeam(joinInput(joinerC, await readyFor(joinerC, two.bundle), { nearBaseUrl: fake.baseUrl, pasteOwnKey: async () => undefined }));
+      assert.equal(none.ok && none.key, 'skipped');
+      assert.ok(none.ok && none.notices.includes(NO_ORG_NOTICE));
+    });
+    await withFixture(['a', 'b'], async (fixture) => {
+      const seed = await seedTeam(fixture, NEAR_LINK);
+      pointOriginAt(fixture, PUBLIC_URL);
+      const { bundle } = await invite(fixture, seed);
+      const joiner = await joinerOn(fixture, 'b', seed);
+      let asked = 0;
+      const linked = await joinTeam(joinInput(joiner, await readyFor(joiner, bundle), { nearBaseUrl: fake.baseUrl, pasteOwnKey: async () => { asked += 1; return 'sk-whatever'; } }));
+      assert.equal(linked.ok && linked.key, 'awaiting-lead');
+      assert.equal(asked, 0, 'pasting an own key is not offered in a NEAR-linked team');
+    });
+  });
+});
+
+test('a cancelled, used or unknown invitation, a wrong code and a bad name are refused before any key exists', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    pointOriginAt(fixture, PUBLIC_URL);
+    const cancelled = await invite(fixture, seed, { name: 'Cal Cancelled', email: 'cal@example.invalid' });
+    const ok = await invite(fixture, seed, { name: 'Una Used', email: 'una@example.invalid' });
+    const removed = await seed.a.log.append(() => [{ type: 'member.removed', body: { memberId: cancelled.memberId } }]);
+    assert.equal(removed.ok, true);
+
+    const joinerB = await joinerOn(fixture, 'b', seed);
+    const cancelledResult = await joinTeam(joinInput(joinerB, await readyFor(joinerB, cancelled.bundle)));
+    assert.equal(cancelledResult.ok === false && cancelledResult.code, 'cancelled');
+    assert.equal(joinerB.secrets.values.size, 0);
+
+    // A tampered code is not the one the log recorded; a made-up member id is not on the list.
+    const parsed = parseInviteBundle(ok.bundle);
+    const wrong = encodeInviteBundle({ ...parsed, code: generateInviteCode().text });
+    const wrongResult = await joinTeam(joinInput(joinerB, await readyFor(joinerB, wrong)));
+    assert.equal(wrongResult.ok === false && wrongResult.code, 'wrong-code');
+    const stranger = encodeInviteBundle({ ...parsed, member: 'mbr-0123456789abcdef' });
+    const strangerResult = await joinTeam(joinInput(joinerB, await readyFor(joinerB, stranger)));
+    assert.equal(strangerResult.ok === false && strangerResult.code, 'not-invited');
+
+    const badName = await joinTeam(joinInput(joinerB, await readyFor(joinerB, ok.bundle), { displayName: 'two\nlines' }));
+    assert.equal(badName.ok === false && badName.code, 'invalid-name');
+    assert.equal(joinerB.secrets.values.size, 0, 'no key was made for any refusal');
+
+    // The same invitation joins once and is used afterwards, from any other computer.
+    const first = await joinTeam(joinInput(joinerB, await readyFor(joinerB, ok.bundle)));
+    assert.equal(first.ok, true, first.ok ? '' : first.message);
+    const joinerC = await joinerOn(fixture, 'c', seed);
+    const used = await joinTeam(joinInput(joinerC, await readyFor(joinerC, ok.bundle)));
+    assert.equal(used.ok === false && used.code, 'used');
+    assert.equal(joinerC.secrets.values.size, 0);
+  });
+});
+
+test('an expired invitation is refused, early by the local check and at write time by the materialiser, and the new keys are removed again', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    pointOriginAt(fixture, PUBLIC_URL);
+    const { bundle } = await invite(fixture, seed, { ttlSeconds: 3600 });
+    const late = (): number => Date.now() + (3600 + INVITE_SKEW_SECONDS + 600) * 1000;
+
+    const early = await joinerOn(fixture, 'b', seed);
+    const earlyResult = await joinTeam(joinInput(early, await readyFor(early, bundle), { now: late }));
+    assert.equal(earlyResult.ok === false && earlyResult.code, 'expired');
+    assert.equal(early.secrets.values.size, 0);
+
+    // The clock looks fine for the early check and late once the keys exist, so the refusal comes from the write-side check.
+    const lateJoiner = await joinerOn(fixture, 'c', seed);
+    const lateResult = await joinTeam(joinInput(lateJoiner, await readyFor(lateJoiner, bundle), { now: () => (lateJoiner.secrets.values.size > 0 ? late() : Date.now()) }));
+    assert.equal(lateResult.ok === false && lateResult.code, 'expired');
+    assert.equal(lateJoiner.secrets.values.size, 0, 'the device and seal keys were deleted again');
+    await seed.a.log.sync();
+    assert.equal(seed.a.log.state().members.values().next().value !== undefined, true);
+    assert.equal([...seed.a.log.state().members.values()].filter((member) => member.status === 'invited').length, 1, 'the invitation is untouched');
+  });
+});
+
+test('a cancel that lands while the join is being written fails the join and removes the new keys', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    pointOriginAt(fixture, PUBLIC_URL);
+    const { bundle, memberId } = await invite(fixture, seed);
+    const joiner = await joinerOn(fixture, 'b', seed);
+    const prepared = await readyFor(joiner, bundle);
+    // Just before the joiner's first push the lead cancels, so the push loses the race and the invitation is gone when the join is rebuilt.
+    let cancelled = false;
+    const real: GitRunner = (await import('../team/runGit')).runGit;
+    const git: GitRunner = async (args, options) => {
+      if (!cancelled && args.includes('push')) {
+        cancelled = true;
+        const removal = await seed.a.log.append(() => [{ type: 'member.removed', body: { memberId } }]);
+        assert.equal(removal.ok, true);
+      }
+      return real(args, options);
+    };
+    const result = await joinTeam(joinInput(joiner, prepared, { git }));
+    assert.equal(cancelled, true, 'the cancel ran between the keys and the write');
+    assert.equal(result.ok === false && result.code, 'cancelled');
+    assert.equal(joiner.secrets.values.size, 0, 'both keys are gone and no session or profile was made');
+  });
+});
+
+test('two devices racing with one bundle: one joins, the other is told it was used and keeps no keys', async () => {
+  await withFixture(['a', 'b', 'c'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    pointOriginAt(fixture, PUBLIC_URL);
+    const { bundle } = await invite(fixture, seed);
+    const joinerB = await joinerOn(fixture, 'b', seed);
+    const joinerC = await joinerOn(fixture, 'c', seed);
+    const [b, c] = await Promise.all([
+      joinTeam(joinInput(joinerB, await readyFor(joinerB, bundle))),
+      joinTeam(joinInput(joinerC, await readyFor(joinerC, bundle)))
+    ]);
+    const winners = [b, c].filter((result) => result.ok);
+    const losers = [b, c].filter((result) => !result.ok);
+    assert.equal(winners.length, 1);
+    assert.equal(losers.length, 1);
+    const loser = losers[0];
+    assert.ok(loser !== undefined && !loser.ok && (loser.code === 'used' || loser.code === 'conflict'), loser?.ok === false ? loser.code : 'loser joined');
+    const loserSecrets = b.ok ? joinerC.secrets : joinerB.secrets;
+    const winnerSecrets = b.ok ? joinerB.secrets : joinerC.secrets;
+    assert.equal(loserSecrets.values.size, 0, 'the loser left nothing behind');
+    assert.equal(winnerSecrets.values.size, 2);
+  });
+});
+
+test('a device that already holds a team key is not given a second one, and its key is left alone', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    pointOriginAt(fixture, PUBLIC_URL);
+    const { bundle } = await invite(fixture, seed);
+    const joiner = await joinerOn(fixture, 'b', seed);
+    await createDeviceIdentity(joiner.secrets, seed.teamId);
+    const stored = joiner.secrets.values.get(deviceKeySecretName(seed.teamId));
+    const result = await joinTeam(joinInput(joiner, await readyFor(joiner, bundle)));
+    assert.equal(result.ok === false && result.code, 'already-has-key');
+    assert.ok(result.ok === false && result.message.length > 0 && !result.message.includes('—'));
+    assert.equal(joiner.secrets.values.get(deviceKeySecretName(seed.teamId)), stored, 'the existing key is untouched');
+    assert.equal(joiner.secrets.values.size, 1);
   });
 });
