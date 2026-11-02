@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 61
 current_phase_name: Invitations, joining, removal, NEAR org and key integration
 status: executing
-stopped_at: Completed 61-07-PLAN.md
-last_updated: "2026-11-02T01:48:01.213Z"
+stopped_at: Completed 61-08-PLAN.md
+last_updated: "2026-11-02T01:53:08.441Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 61 execution started
-state_head: 72580ec48b6dfe90fb93ac247bef6c9c941829ec
+state_head: c6cb3f86c6096f6c54b54f12cc973b072ca253bd
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 26
-  completed_plans: 19
+  completed_plans: 20
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 61 (Invitations, joining, removal, NEAR org and key integration) — EXECUTING
-Plan: 8 of 14
+Plan: 9 of 14
 Status: Ready to execute
 Last activity: 2026-11-01 — Phase 61 execution started
 
@@ -73,6 +73,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P05 | 8 min | 3 tasks | 11 files |
 | Phase 61 P06 | 10 min | 2 tasks | 2 files |
 | Phase 61 P07 | 10min | 3 tasks | 5 files |
+| Phase 61 P08 | 12 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -112,6 +113,7 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-06: released claims keep their leaseIds; lease records are dropped from state.leases (Phase 63 decides on clearing the list)
 - [Phase 61]: 61-07: re-issue is bound to the original email and carries name, role and allocation over; a lost invites.json write never fails an invite already in the log
 - [Phase 61]: 61-07: cleanup.json errors are scrubbed with scrubNearText plus the team secret detectors, and a damaged checklist is reported and never replaced
+- [Phase 61]: 61-08: commitTeamFileOnly is shared by Enable and NEAR link; linkNearOrganization checks the trust pin before rewriting team.json and leaves the written link in place on a commit failure
 
 ### Pending Todos
 
@@ -133,8 +135,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T01:48:01.077Z
-Stopped at: Completed 61-07-PLAN.md
+Last session: 2026-11-02T01:53:08.305Z
+Stopped at: Completed 61-08-PLAN.md
 Resume file: None
 
 ## Notes
