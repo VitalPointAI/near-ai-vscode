@@ -71,11 +71,11 @@ interface World {
   watch: { memberId?: string };
 }
 
-interface WorldOptions { membersIncludeEmail?: boolean }
+interface WorldOptions { membersIncludeEmail?: boolean; ownerNearEmail?: string }
 
 async function startWorld(fixture: TeamFixture, options: WorldOptions = {}): Promise<World> {
   const fake = await startFakeNear(options.membersIncludeEmail === undefined ? {} : { membersIncludeEmail: options.membersIncludeEmail });
-  const lead = fake.addUser({ id: 'user-owner', username: 'owner', email: 'owner@example.invalid' });
+  const lead = fake.addUser({ id: 'user-owner', username: 'owner', email: options.ownerNearEmail ?? 'owner@example.invalid' });
   fake.addOrganization({ id: 'org-1', name: 'Team Org', members: [{ userId: 'user-owner', role: 'owner' }] });
   fake.addWorkspace({ id: 'ws-1', organizationId: 'org-1', name: 'Team workspace' });
   const teamId = newTeamId();
@@ -142,7 +142,7 @@ async function invite(w: World, name: string, email: string, role: MemberInvited
 }
 
 // Invited, joined from `clone`, and confirmed by the owner (member.role-changed to the invited role).
-async function addMember(w: World, clone: string, name: string, email: string, role: MemberInvitedBody['role'] = 'developer'): Promise<Person> {
+async function addMember(w: World, clone: string, name: string, email: string, role: MemberInvitedBody['role'] = 'developer', confirm = true): Promise<Person> {
   const { memberId, codeBytes } = await invite(w, name, email, role);
   const secrets = new MemorySecrets();
   const identity = await createDeviceIdentity(secrets, w.teamId);
@@ -152,8 +152,10 @@ async function addMember(w: World, clone: string, name: string, email: string, r
   const joined = await client.log.appendJoin(identity, (state) => joinBody(state, w.teamId, memberId, codeBytes, identity, seal.publicKey));
   assert.equal(joined.ok, true, joined.ok ? '' : joined.reason);
   await w.a.log.sync();
-  const confirmed = await w.a.log.append(() => [{ type: 'member.role-changed', body: { memberId, role } }]);
-  assert.equal(confirmed.ok, true, confirmed.ok ? '' : confirmed.reason);
+  if (confirm) {
+    const confirmed = await w.a.log.append(() => [{ type: 'member.role-changed', body: { memberId, role } }]);
+    assert.equal(confirmed.ok, true, confirmed.ok ? '' : confirmed.reason);
+  }
   await client.log.sync();
   return { memberId, name, email, clone, identity, seal, secrets, client };
 }
@@ -219,5 +221,380 @@ test('tracer: the owner removes a confirmed developer; NEAR sees limit 0, then t
     assert.deepEqual(result.checklist.map((item) => item.step), ['repo-access']);
     assert.equal(repoAccessText('Dana Developer').startsWith('Remove Dana Developer'), true);
     assert.ok(result.message.includes('Dana Developer'));
+  });
+});
+
+// ---- helpers for the failure, retry, organization, cancel and race tests -------------------------------------------------------------
+
+const stepsOf = (items: CleanupItem[]): string[] => items.map((item) => `${item.step}:${item.status}`);
+const requestsSince = (w: World, before: number): FakeRequest[] => w.fake.requests.slice(before);
+const deletesOf = (requests: FakeRequest[], includes: string): FakeRequest[] => requests.filter((request) => request.method === 'DELETE' && request.path.includes(includes));
+
+// The NEAR organization as it is after the people named here accepted (the owner stays the first owner).
+function setOrgMembers(w: World, others: Array<{ userId: string; role: 'owner' | 'admin' | 'member' }>): void {
+  w.fake.addOrganization({ id: 'org-1', name: 'Team Org', members: [{ userId: 'user-owner', role: 'owner' }, ...others] });
+}
+
+function addNearUser(w: World, id: string, email: string): void {
+  w.fake.addUser({ id, username: id, email });
+}
+
+function failSpendLimit(w: World, keyId: string, times: number): void {
+  w.fake.fail({ method: 'PATCH', pathPrefix: `/v1/workspaces/ws-1/api-keys/${keyId}/spend-limit`, status: 500, times });
+}
+
+// Three more tries than a request is retried, so one rule outlasts one removal and is spent by the time a retry runs.
+const ONE_CALL = 4;
+
+async function eventsOfType(client: Client, type: string): Promise<number> {
+  let count = 0;
+  for (const entry of await client.transport.readAll()) if (entry.text.includes(`"type":"${type}"`)) count += 1;
+  return count;
+}
+
+// ---- Task 2: failures, retries, organization removal, cancel, idempotency and races -----------------------------------------------
+
+test('a key that cannot be capped still lets the log removal through, is never revoked, and warns that it can still spend', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    const keyId = await giveKey(w, dana);
+    failSpendLimit(w, keyId, ONE_CALL);
+    const before = w.fake.requests.length;
+    const result = await removeMember(removeArgs(w, dana.memberId));
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(result.keyStillSpends, true);
+    assert.ok(result.message.includes(KEY_STILL_SPENDS_WARNING.replace('<name>', 'Dana Developer')), result.message);
+    assert.notEqual(w.a.log.state().members.get(dana.memberId)?.removedEvent, undefined, 'the log removal was written');
+    assert.deepEqual(deletesOf(requestsSince(w, before), `/api-keys/${keyId}`), [], 'no revoke is sent for a key that was not capped');
+    assert.equal(w.fake.key(keyId)?.revoked, false);
+    assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 5 * GIGA, 'the key is still capped at its allocation, not at 0');
+    assert.deepEqual(stepsOf(result.checklist), ['zero-limit:failed', 'revoke-key:pending', 'repo-access:manual']);
+    assert.deepEqual(result.checklist.map((item) => item.keyId), [keyId, keyId, undefined]);
+  });
+});
+
+test('a NEAR-linked team with no NEAR session still removes the member and queues the cap and the revoke as pending', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    const keyId = await giveKey(w, dana);
+    const before = w.fake.requests.length;
+    const result = await removeMember(removeArgs(w, dana.memberId, { org: null }));
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(result.keyStillSpends, true);
+    assert.deepEqual(stepsOf(result.checklist), ['zero-limit:pending', 'revoke-key:pending', 'repo-access:manual']);
+    assert.equal(result.checklist[0]?.keyId, keyId);
+    assert.equal(requestsSince(w, before).length, 0, 'no NEAR request was sent');
+    assert.ok(result.message.includes(KEY_STILL_SPENDS_WARNING.replace('<name>', 'Dana Developer')));
+  });
+});
+
+test('retrying the cleanup items caps first, refuses a revoke before the cap, then revokes; a key NEAR no longer has counts as done', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    const keyId = await giveKey(w, dana);
+    failSpendLimit(w, keyId, ONE_CALL);
+    const removed = await removeMember(removeArgs(w, dana.memberId));
+    assert.equal(removed.ok, true);
+    if (!removed.ok) return;
+    const [zero, revoke] = removed.checklist;
+    assert.ok(zero !== undefined && revoke !== undefined);
+    const retryArgs = (item: CleanupItem): Parameters<typeof retryCleanupItem>[0] => ({ item, teamFile: w.teamFile, log: w.a.log, org: w.org, checklist: w.checklist });
+
+    // The revoke is refused while the cap is not done, and nothing is sent.
+    const before = w.fake.requests.length;
+    const refused = await retryCleanupItem(retryArgs(revoke));
+    assert.equal(refused.status, 'pending');
+    assert.match(refused.lastError ?? '', /limit to 0 first/i);
+    assert.deepEqual(deletesOf(requestsSince(w, before), '/api-keys/'), []);
+
+    // The fault is spent: the cap goes through and the item is done.
+    const capped = await retryCleanupItem(retryArgs(zero));
+    assert.equal(capped.status, 'done');
+    assert.equal(capped.lastError, undefined);
+    assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 0);
+    assert.equal(w.fake.key(keyId)?.revoked, false);
+
+    const revoked = await retryCleanupItem(retryArgs(revoke));
+    assert.equal(revoked.status, 'done');
+    assert.equal(w.fake.key(keyId)?.revoked, true);
+
+    // A key that NEAR reports gone is done without an error.
+    const erin = await addMember(w, 'b', 'Erin Engineer', 'erin@example.invalid');
+    const erinKey = await giveKey(w, erin);
+    w.fake.fail({ method: 'DELETE', pathPrefix: `/v1/workspaces/ws-1/api-keys/${erinKey}`, status: 500, times: ONE_CALL });
+    const second = await removeMember(removeArgs(w, erin.memberId));
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    assert.equal(second.keyStillSpends, false, 'the key is capped, only the revoke failed');
+    assert.deepEqual(stepsOf(second.checklist), ['zero-limit:done', 'revoke-key:failed', 'repo-access:manual']);
+    assert.equal(await w.org.revokeKey('ws-1', erinKey), 'revoked');
+    const gone = await retryCleanupItem(retryArgs(second.checklist[1] as CleanupItem));
+    assert.equal(gone.status, 'done');
+    assert.equal(gone.lastError, undefined);
+  });
+});
+
+test('a member whose key was replaced by a rotation has both keys capped and revoked, and an interrupted removal keeps finished and unfinished steps', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    const first = await giveKey(w, dana);
+    const second = await giveKey(w, dana);
+    const member = w.a.log.state().members.get(dana.memberId);
+    assert.equal(member?.nearApiKeyId, second);
+    assert.deepEqual(member?.retiredNearKeyIds, [first]);
+
+    const result = await removeMember(removeArgs(w, dana.memberId));
+    assert.equal(result.ok && result.keyStillSpends, false);
+    for (const keyId of [first, second]) {
+      assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 0, `${keyId} is capped`);
+      assert.equal(w.fake.key(keyId)?.revoked, true, `${keyId} is revoked`);
+    }
+
+    // The same again, but the newer key cannot be capped: the older key's finished steps stay on the list next to the unfinished ones.
+    const erin = await addMember(w, 'b', 'Erin Engineer', 'erin@example.invalid');
+    const one = await giveKey(w, erin);
+    const two = await giveKey(w, erin);
+    failSpendLimit(w, two, ONE_CALL);
+    const partial = await removeMember(removeArgs(w, erin.memberId));
+    assert.equal(partial.ok, true);
+    if (!partial.ok) return;
+    assert.equal(partial.keyStillSpends, true);
+    assert.deepEqual(stepsOf(partial.checklist), ['zero-limit:failed', 'revoke-key:pending', 'zero-limit:done', 'revoke-key:done', 'repo-access:manual']);
+    assert.deepEqual(partial.checklist.map((item) => item.keyId), [two, two, one, one, undefined]);
+    assert.equal(w.fake.key(one)?.revoked, true);
+    assert.equal(w.fake.key(two)?.revoked, false);
+    const saved = await w.checklist.forMember(erin.memberId);
+    assert.deepEqual(stepsOf(saved), stepsOf(partial.checklist), 'the same list is on disk');
+  });
+});
+
+test('removing a confirmed lead also removes their NEAR organization membership, found by email hash and never by an id from the log', async () => {
+  await inWorld(['a', 'b'], { membersIncludeEmail: true }, async (w) => {
+    const lena = await addMember(w, 'b', 'Lena Lead', 'lena@example.invalid', 'lead');
+    addNearUser(w, 'user-lena', 'lena@example.invalid');
+    addNearUser(w, 'user-other', 'other@example.invalid');
+    setOrgMembers(w, [{ userId: 'user-lena', role: 'admin' }, { userId: 'user-other', role: 'admin' }]);
+    await giveKey(w, lena);
+    const before = w.fake.requests.length;
+    const result = await removeMember(removeArgs(w, lena.memberId));
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.deepEqual(stepsOf(result.checklist), ['repo-access:manual']);
+    const removedFromOrg = deletesOf(requestsSince(w, before), '/organizations/org-1/members/');
+    assert.deepEqual(removedFromOrg.map((request) => request.path), ['/v1/organizations/org-1/members/user-lena']);
+    assert.equal(await w.org.listMembers('org-1').then((members) => members.map((member) => member.userId).sort().join(',')), 'user-other,user-owner');
+  });
+});
+
+test('a lead who was invited as lead and has not been confirmed yet is also taken out of the organization', async () => {
+  await inWorld(['a', 'b'], { membersIncludeEmail: true }, async (w) => {
+    const lena = await addMember(w, 'b', 'Lena Lead', 'lena@example.invalid', 'lead', false);
+    assert.equal(w.a.log.state().members.get(lena.memberId)?.pendingRole, 'lead');
+    addNearUser(w, 'user-lena', 'lena@example.invalid');
+    setOrgMembers(w, [{ userId: 'user-lena', role: 'admin' }]);
+    const result = await removeMember(removeArgs(w, lena.memberId));
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    assert.equal(await w.org.listMembers('org-1').then((members) => members.some((member) => member.userId === 'user-lena')), false);
+  });
+});
+
+test('the organization member is never an owner or the remover; no safe match becomes a manual item naming the lead', async () => {
+  // The only member NEAR can match is an organization owner: nothing is removed.
+  await inWorld(['a', 'b'], { membersIncludeEmail: true }, async (w) => {
+    const lena = await addMember(w, 'b', 'Lena Lead', 'lena@example.invalid', 'lead');
+    addNearUser(w, 'user-co-owner', 'lena@example.invalid');
+    setOrgMembers(w, [{ userId: 'user-co-owner', role: 'owner' }]);
+    const before = w.fake.requests.length;
+    const result = await removeMember(removeArgs(w, lena.memberId));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(stepsOf(result.checklist), ['remove-org-member:manual', 'repo-access:manual']);
+    assert.match(result.checklist[0]?.lastError ?? '', /Lena Lead/);
+    assert.match(result.checklist[0]?.lastError ?? '', /NEAR console/);
+    assert.deepEqual(deletesOf(requestsSince(w, before), '/organizations/org-1/members/'), []);
+  });
+  // The matching NEAR user is the lead doing the removing: nothing is removed.
+  await inWorld(['a', 'b'], { membersIncludeEmail: true, ownerNearEmail: 'self@example.invalid' }, async (w) => {
+    const lena = await addMember(w, 'b', 'Lena Lead', 'self@example.invalid', 'lead');
+    const before = w.fake.requests.length;
+    const result = await removeMember(removeArgs(w, lena.memberId));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(stepsOf(result.checklist), ['remove-org-member:manual', 'repo-access:manual']);
+    assert.deepEqual(deletesOf(requestsSince(w, before), '/organizations/org-1/members/'), []);
+    assert.equal(await w.org.listMembers('org-1').then((members) => members.some((member) => member.userId === 'user-owner')), true);
+  });
+});
+
+test('NEAR does not return member emails (the real server): the lead is not removed by guesswork, a manual item says to do it in the NEAR console', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    const lena = await addMember(w, 'b', 'Lena Lead', 'lena@example.invalid', 'lead');
+    addNearUser(w, 'user-lena', 'lena@example.invalid');
+    setOrgMembers(w, [{ userId: 'user-lena', role: 'admin' }]);
+    assert.ok((await w.org.listMembers('org-1')).every((member) => member.email === undefined), 'the fake answers like the real server: no email');
+    const before = w.fake.requests.length;
+    const result = await removeMember(removeArgs(w, lena.memberId));
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.deepEqual(stepsOf(result.checklist), ['remove-org-member:manual', 'repo-access:manual']);
+    assert.match(result.checklist[0]?.lastError ?? '', /Lena Lead/);
+    assert.match(result.checklist[0]?.lastError ?? '', /NEAR console/);
+    assert.deepEqual(deletesOf(requestsSince(w, before), '/organizations/org-1/members/'), [], 'no organization member was removed');
+    assert.equal(await w.org.listMembers('org-1').then((members) => members.some((member) => member.userId === 'user-lena')), true);
+    assert.ok(result.message.includes('NEAR console'));
+  });
+});
+
+test('a refused organization removal is a failed item, and a retry with the emails available finishes it', async () => {
+  await inWorld(['a', 'b'], { membersIncludeEmail: true }, async (w) => {
+    const lena = await addMember(w, 'b', 'Lena Lead', 'lena@example.invalid', 'lead');
+    addNearUser(w, 'user-lena', 'lena@example.invalid');
+    setOrgMembers(w, [{ userId: 'user-lena', role: 'admin' }]);
+    w.fake.fail({ method: 'DELETE', pathPrefix: '/v1/organizations/org-1/members/user-lena', status: 403, times: 1 });
+    const result = await removeMember(removeArgs(w, lena.memberId));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(stepsOf(result.checklist), ['remove-org-member:failed', 'repo-access:manual']);
+    const item = result.checklist[0] as CleanupItem;
+    const done = await retryCleanupItem({ item, teamFile: w.teamFile, log: w.a.log, org: w.org, checklist: w.checklist });
+    assert.equal(done.status, 'done');
+    assert.equal(await w.org.listMembers('org-1').then((members) => members.some((member) => member.userId === 'user-lena')), false);
+  });
+});
+
+test('cancelling an invitation writes member.removed for the invited id; a developer needs no NEAR call, a lead has the pending NEAR invitation cancelled', async () => {
+  await inWorld(['a'], {}, async (w) => {
+    const dev = await invite(w, 'Dana Developer', 'dana@example.invalid', 'developer');
+    const before = w.fake.requests.length;
+    const cancelled = await removeMember(removeArgs(w, dev.memberId));
+    assert.equal(cancelled.ok, true, cancelled.ok ? '' : cancelled.message);
+    if (!cancelled.ok) return;
+    assert.equal(cancelled.kind, 'cancelled');
+    assert.equal(cancelled.keyStillSpends, false);
+    assert.deepEqual(cancelled.checklist, []);
+    assert.equal(requestsSince(w, before).length, 0, 'a developer invitation has no NEAR side');
+    assert.notEqual(w.a.log.state().members.get(dev.memberId)?.removedEvent, undefined);
+
+    const lead = await invite(w, 'Lena Lead', 'lena@example.invalid', 'lead');
+    assert.deepEqual(await w.org.inviteByEmail('org-1', 'lena@example.invalid', 'admin'), { ok: true, alreadyMember: false });
+    assert.notEqual(w.fake.emailedToken('lena@example.invalid'), undefined, 'the NEAR invitation is pending');
+    const result = await removeMember(removeArgs(w, lead.memberId));
+    assert.equal(result.ok && result.kind, 'cancelled');
+    assert.equal(w.fake.emailedToken('lena@example.invalid'), undefined, 'the NEAR invitation was cancelled');
+    assert.deepEqual(result.ok ? result.checklist : undefined, []);
+  });
+});
+
+test('cancelling a lead invitation without a NEAR session leaves a pending cancel-invitation item; one NEAR cannot find is a manual item', async () => {
+  await inWorld(['a'], {}, async (w) => {
+    const lead = await invite(w, 'Lena Lead', 'lena@example.invalid', 'lead');
+    assert.deepEqual(await w.org.inviteByEmail('org-1', 'lena@example.invalid', 'admin'), { ok: true, alreadyMember: false });
+    const noSession = await removeMember(removeArgs(w, lead.memberId, { org: null }));
+    assert.equal(noSession.ok && noSession.kind, 'cancelled');
+    assert.deepEqual(noSession.ok ? stepsOf(noSession.checklist) : undefined, ['cancel-invitation:pending']);
+    assert.notEqual(w.fake.emailedToken('lena@example.invalid'), undefined, 'the NEAR invitation is still pending until the item is retried');
+    const item = noSession.ok ? (noSession.checklist[0] as CleanupItem) : undefined;
+    assert.ok(item !== undefined);
+    const done = await retryCleanupItem({ item, teamFile: w.teamFile, log: w.a.log, org: w.org, checklist: w.checklist });
+    assert.equal(done.status, 'done');
+    assert.equal(w.fake.emailedToken('lena@example.invalid'), undefined);
+
+    // An invitation that went to NEAR and is no longer there (or was never sent under this address) cannot be cancelled automatically.
+    const other = await invite(w, 'Mina Lead', 'mina@example.invalid', 'lead');
+    const noMatch = await removeMember(removeArgs(w, other.memberId));
+    assert.equal(noMatch.ok && noMatch.kind, 'cancelled');
+    assert.deepEqual(noMatch.ok ? stepsOf(noMatch.checklist) : undefined, ['cancel-invitation:manual']);
+    assert.match(noMatch.ok ? noMatch.checklist[0]?.lastError ?? '' : '', /Mina Lead/);
+  });
+});
+
+test('removing someone who was already removed is refused locally and makes no NEAR call', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    await giveKey(w, dana);
+    assert.equal((await removeMember(removeArgs(w, dana.memberId))).ok, true);
+    const before = w.fake.requests.length;
+    const again = await removeMember(removeArgs(w, dana.memberId));
+    assert.deepEqual(again, { ok: false, code: 'already-removed', message: TEAM_REJECTION_REASONS.memberRemoved });
+    assert.equal(w.fake.requests.length, before, 'fake.requests is unchanged');
+    assert.equal((await w.checklist.forMember(dana.memberId)).length, 1, 'no second reminder was added');
+    const unknown = await removeMember(removeArgs(w, newMemberId()));
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.ok ? undefined : unknown.code, 'not-found');
+  });
+});
+
+test('nothing is capped when the caller may not remove the person: a developer, the owner, or yourself', async () => {
+  await inWorld(['a', 'b', 'c'], {}, async (w) => {
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    const eli = await addMember(w, 'c', 'Eli Engineer', 'eli@example.invalid');
+    await giveKey(w, eli);
+    await dana.client.log.sync();
+    const before = w.fake.requests.length;
+    const asDeveloper = await removeMember({ log: dana.client.log, teamFile: w.teamFile, memberId: eli.memberId, org: w.org, checklist: w.checklist });
+    assert.equal(asDeveloper.ok, false);
+    assert.equal(asDeveloper.ok ? undefined : asDeveloper.code, 'refused');
+    const owner = await removeMember(removeArgs(w, w.ownerMemberId));
+    assert.equal(owner.ok ? undefined : owner.code, 'refused');
+    const self = await removeMember({ log: dana.client.log, teamFile: w.teamFile, memberId: dana.memberId, org: w.org, checklist: w.checklist });
+    assert.equal(self.ok ? undefined : self.code, 'refused');
+    assert.equal(w.fake.requests.length, before, 'no NEAR request was sent for any refused removal');
+    assert.equal(w.a.log.state().members.get(eli.memberId)?.removedEvent, undefined);
+  });
+});
+
+test('two leads removing the same member at once: one member.removed is accepted, the other gets the reason, and the key ends capped and revoked', async () => {
+  await inWorld(['a', 'b', 'c'], {}, async (w) => {
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    const keyId = await giveKey(w, dana);
+    const lena = await addMember(w, 'c', 'Lena Lead', 'lena@example.invalid', 'lead');
+    await w.a.log.sync();
+    await lena.client.log.sync();
+    const leadChecklist = new CleanupChecklist(path.join(w.fixture.root, 'cleanup-lena'));
+    const [first, second] = await Promise.all([
+      removeMember(removeArgs(w, dana.memberId)),
+      removeMember({ log: lena.client.log, teamFile: w.teamFile, memberId: dana.memberId, org: w.org, checklist: leadChecklist })
+    ]);
+    const winners = [first, second].filter((result) => result.ok);
+    const losers = [first, second].filter((result) => !result.ok);
+    assert.equal(winners.length, 1, 'exactly one removal succeeded');
+    assert.equal(losers.length, 1);
+    const loser = losers[0];
+    assert.ok(loser !== undefined && !loser.ok);
+    if (loser === undefined || loser.ok) return;
+    assert.ok(loser.code === 'conflict' || loser.code === 'already-removed', loser.code);
+    assert.match(loser.message, /removed/);
+    assert.equal(await eventsOfType(w.a, 'member.removed'), 1, 'one member.removed is in the log');
+    assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 0);
+    assert.equal(w.fake.key(keyId)?.revoked, true);
+
+    // The loser's list records what it did (it capped the key), and nothing it left undone.
+    const loserList = first.ok ? await leadChecklist.forMember(dana.memberId) : await w.checklist.forMember(dana.memberId);
+    assert.deepEqual(stepsOf(loserList), ['zero-limit:done']);
+  });
+});
+
+test('items that are not removal steps are answered unchanged with the command that retries them; repo-access stays manual', async () => {
+  await inWorld(['a'], {}, async (w) => {
+    const memberId = newMemberId();
+    const [send, deliver, rotate, repo] = await w.checklist.add([
+      { memberId, memberName: 'Dana Developer', step: 'send-invitation', status: 'failed', lastError: 'NEAR said no' },
+      { memberId, memberName: 'Dana Developer', step: 'deliver-key', status: 'pending' },
+      { memberId, memberName: 'Dana Developer', step: 'rotate-key', status: 'manual' },
+      { memberId, memberName: 'Dana Developer', step: 'repo-access', status: 'manual' }
+    ]);
+    const before = w.fake.requests.length;
+    for (const item of [send, deliver, rotate]) {
+      assert.ok(item !== undefined);
+      const answered = await retryCleanupItem({ item, teamFile: w.teamFile, log: w.a.log, org: w.org, checklist: w.checklist });
+      assert.equal(answered.status, item.status, 'the status is unchanged');
+      assert.match(answered.lastError ?? '', /Manage Team Members/);
+    }
+    assert.ok(repo !== undefined);
+    const reminder = await retryCleanupItem({ item: repo, teamFile: w.teamFile, log: w.a.log, org: w.org, checklist: w.checklist });
+    assert.equal(reminder.status, 'manual');
+    assert.equal(w.fake.requests.length, before, 'none of these made a NEAR call');
   });
 });
