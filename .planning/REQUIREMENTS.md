@@ -15,9 +15,9 @@
 
 ### Team Board
 
-- [ ] **BOARD-01**: The board reflects GSD milestones, phases, plans and tasks, re-imports idempotently, and shows dependencies, scope, estimate and state.
-- [ ] **BOARD-02**: Board changes from any member appear on every other member's board within the poll interval (git) or within 2 s (relay).
-- [ ] **BOARD-03**: Moves are permission-checked and only follow permitted transitions.
+- [x] **BOARD-01**: The board reflects GSD milestones, phases, plans and tasks, re-imports idempotently, and shows dependencies, scope, estimate and state.
+- [x] **BOARD-02**: Board changes from any member appear on every other member's board within the poll interval (git) or within 2 s (relay). The git half is met in Phase 62; the 2 s relay half is proven in Phase 67.
+- [x] **BOARD-03**: Moves are permission-checked and only follow permitted transitions.
 - [ ] **BOARD-04**: A milestone card shows progress, burn, forecast and a release readiness checklist and can start milestone completion.
 
 ### Dispatch and assignment
@@ -90,9 +90,9 @@ Phases are numbered 60 to 67; spec phase 25 is Phase 60, and so on in order.
 | SEC-04 | Phase 60 | Complete |
 | TEAM-02 | Phase 61 | Complete |
 | TEAM-03 | Phase 61 | Complete |
-| BOARD-01 | Phase 62 | Pending |
-| BOARD-02 | Phase 62 | Pending |
-| BOARD-03 | Phase 62 | Pending |
+| BOARD-01 | Phase 62 | Complete |
+| BOARD-02 | Phase 62 | Complete |
+| BOARD-03 | Phase 62 | Complete |
 | CLAIM-01 | Phase 63 | Pending |
 | CLAIM-02 | Phase 63 | Pending |
 | CLAIM-03 | Phase 63 | Pending |
