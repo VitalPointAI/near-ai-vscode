@@ -18,7 +18,12 @@ export interface DeviceRef { fingerprint: string; publicKey: string }           
 export interface WorkingHours { tz: string; days: number[]; start: string; end: string }
 export interface NearLink { organizationId: string; workspaceId: string }
 export interface TeamCreatedBody { name: string; ownerId: string; ownerName: string; ownerEmailHashes: string[]; ownerDevice: DeviceRef; policy: TeamPolicy; near?: NearLink }
-export interface MemberJoinedBody { memberId: string; name: string; emailHashes: string[]; role: Role; device: DeviceRef }
+// Roles a lead can invite someone into. The owner is never invited: a team has exactly one owner, set at genesis.
+export const INVITABLE_ROLES = ['lead', 'developer', 'reviewer', 'observer'] as const;
+// The invitation id is the member id. invite.publicKey is the Ed25519 key derived from the single-use code; the code itself is never logged.
+export interface MemberInvitedBody { memberId: string; name: string; emailHashes: string[]; role: Exclude<Role, 'owner'>; allocationNanoUsd: number; ttlSeconds: number; invite: { publicKey: string } }
+// invite.sig and sealKey exist only on a join that follows an invitation. The owner's genesis join keeps its Phase 60 shape.
+export interface MemberJoinedBody { memberId: string; name: string; emailHashes: string[]; role: Role; device: DeviceRef; invite?: { sig: string }; sealKey?: { publicKey: string } }
 export interface MemberRoleChangedBody { memberId: string; role: Role }
 export interface MemberRemovedBody { memberId: string }
 export interface DeviceAddedBody { memberId: string; device: DeviceRef }
@@ -27,9 +32,9 @@ export interface MemberAvailabilityBody { availability: Availability; workingHou
 export interface MemberSkillsBody { memberId: string; skills: string[] }
 export interface PolicyChangedBody { changes: Partial<TeamPolicy> }
 export interface SnapshotWrittenBody { coversThrough: string; lamport: number; stateHash: string; path: string }
-export interface ImplementedEventBodies { 'team.created': TeamCreatedBody; 'member.joined': MemberJoinedBody; 'member.role-changed': MemberRoleChangedBody; 'member.removed': MemberRemovedBody; 'device.added': DeviceAddedBody; 'device.revoked': DeviceRevokedBody; 'member.availability': MemberAvailabilityBody; 'member.skills': MemberSkillsBody; 'policy.changed': PolicyChangedBody; 'snapshot.written': SnapshotWrittenBody }
+export interface ImplementedEventBodies { 'team.created': TeamCreatedBody; 'member.invited': MemberInvitedBody; 'member.joined': MemberJoinedBody; 'member.role-changed': MemberRoleChangedBody; 'member.removed': MemberRemovedBody; 'device.added': DeviceAddedBody; 'device.revoked': DeviceRevokedBody; 'member.availability': MemberAvailabilityBody; 'member.skills': MemberSkillsBody; 'policy.changed': PolicyChangedBody; 'snapshot.written': SnapshotWrittenBody }
 export type ImplementedEventType = keyof ImplementedEventBodies;
-export const IMPLEMENTED_EVENT_TYPES: readonly ImplementedEventType[] = ['team.created', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'policy.changed', 'snapshot.written'];
+export const IMPLEMENTED_EVENT_TYPES: readonly ImplementedEventType[] = ['team.created', 'member.invited', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'policy.changed', 'snapshot.written'];
 export type TeamEventBodyMap = ImplementedEventBodies & { [K in Exclude<TeamEventType, ImplementedEventType>]: JsonObject };
 // prev is the id of the accepted log head the author built on ('' for team.created). A reader requires it to equal the head at this position.
 export interface TeamEvent<T extends TeamEventType = TeamEventType> { v: 1; id: string; teamId: string; type: T; lamport: number; at: string; author: string; device: string; prev: string; body: TeamEventBodyMap[T]; sig: string }
@@ -43,8 +48,15 @@ export interface TeamPolicy {
   safetyFactorBp: number; overrunFactorBp: number; reconcileToleranceBp: number; allowedModels: Record<Role, string[]>; teeOnly: boolean;
   peerMetricsVisible: boolean; requireLeadConfirmation: boolean; developerMayIntegrate: boolean; dispatchWeightsBp: Record<DispatchWeight, number>;
 }
-export interface DeviceKey { fingerprint: string; publicKey: string; addedBy: string; addedEvent: string; revokedEvent?: string; revokedBy?: string }
-export interface Member { id: string; name: string; emailHashes: string[]; role: Role; devices: DeviceKey[]; skills: string[]; availability: Availability; workingHours?: WorkingHours; wipLimit: number; nearApiKeyId?: string; joinedAt: string; joinedEvent: string; removedAt?: string; removedEvent?: string }
+export interface DeviceKey { fingerprint: string; publicKey: string; addedBy: string; addedEvent: string; revokedEvent?: string; revokedBy?: string; sealKey?: string }
+// The invitation keys on Member are optional and left out when absent, so a team with no invitations serialises exactly as in Phase 60.
+// status is 'invited' only between member.invited and the join; pendingRole is the invited role until a lead confirms it.
+export interface MemberInvite { publicKey: string; ttlSeconds: number; eventId: string; commitTime: number }
+export interface Member {
+  id: string; name: string; emailHashes: string[]; role: Role; devices: DeviceKey[]; skills: string[]; availability: Availability; workingHours?: WorkingHours;
+  wipLimit: number; nearApiKeyId?: string; joinedAt: string; joinedEvent: string; removedAt?: string; removedEvent?: string;
+  status?: 'invited'; invite?: MemberInvite; invitedEvent?: string; pendingRole?: Role; allocationNanoUsd?: number;
+}
 
 // Spec 7 shapes declared now for later phases (money is integer nano-USD):
 export interface SpendSummary { inputTokens: number; cachedInputTokens: number; outputTokens: number; confirmedNanoUsd: number; pendingNanoUsd: number; estimatedNanoUsd: number; requests: number }
@@ -70,7 +82,8 @@ export type EntryKind = 'event' | 'snapshot' | 'genesis-copy' | 'anomaly';
 // authorRole is the author's role at this log position, read before the event's own transition runs.
 export type EntryVerdict = { accepted: true; event?: TeamEvent; authorRole?: Role } | { accepted: false; rejection: Rejection };
 export interface CommittedEvent { commit: string; commitTime: number; path: string; blob: string; size: number; text: string; kind: EntryKind; anomaly?: string; verdict?: EntryVerdict }
-export interface Materializer<S> { initial(): S; apply(state: S, entry: CommittedEvent): EntryVerdict; head(state: S): LogHead; check(state: S, events: TeamEvent[]): Rejection | undefined }
+// commitTime is the time the candidate would carry once committed, in seconds. It is 0 (unknown) when the caller has none.
+export interface Materializer<S> { initial(): S; apply(state: S, entry: CommittedEvent): EntryVerdict; head(state: S): LogHead; check(state: S, events: TeamEvent[], commitTime?: number): Rejection | undefined }
 
 export const TEAM_REJECTION_REASONS = {
   malformed: 'malformed event', notCanonical: 'event file is not canonical', tooLarge: 'event is larger than 16 KB',
@@ -85,6 +98,9 @@ export const TEAM_REJECTION_REASONS = {
   lastDevice: 'cannot revoke the last active device of a member', snapshotMismatch: 'snapshot does not match the replayed state',
   snapshotOrphan: 'snapshot file without a matching snapshot.written event', historyChanged: 'history changed an existing coordination file',
   mergeCommit: 'merge commit on the coordination branch', unexpectedPath: 'unexpected file on the coordination branch',
+  notInvited: 'no unused invitation for this member', inviteProof: 'invite code proof is not valid', inviteExpired: 'the invitation expired before this join',
+  inviteRole: 'joined role does not match the invitation', inviteEmail: 'joined email does not match the invitation',
+  alreadyInvited: 'this email is already a member or invited', memberTaken: 'member id is already in use', notJoined: 'member has not joined yet',
   logRefused: "This coordination log does not belong to this project's team",
   logRewritten: "The team's coordination log was rewritten on the remote; Team Mode is paused"
 } as const;

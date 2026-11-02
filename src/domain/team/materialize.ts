@@ -3,11 +3,12 @@
 // (acceptance must not depend on detector versions), and ordering comes only from the order entries are applied in (D-03).
 import { createHash } from 'node:crypto';
 import { canonicalBytes, canonicalize, eventPath, fingerprintOf, isStrictBase64url, snapshotPath, verifyEventSignature, verifySignature } from './canonical';
+import { expectedJoinRole, inviteExpired, joinProofBytes } from './invite';
 import { actionForEvent, decideTeamAction } from './permissions';
 import { DEFAULT_WIP_LIMIT, applyPolicyChanges, defaultTeamPolicy, validatePolicy } from './policy';
 import { AVAILABILITIES, ROLES, TEAM_REJECTION_REASONS } from './types';
-import type { Availability, CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, JsonObject, Materializer, Member, Rejection, Role, SnapshotRef, TeamEvent, TeamPolicy, TeamState, WorkingHours } from './types';
-import { EMAIL_HASH_PATTERN, EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, isRecord, parseEventFile } from './validate';
+import type { Availability, CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, JsonObject, Materializer, Member, MemberInvite, Rejection, Role, SnapshotRef, TeamEvent, TeamPolicy, TeamState, WorkingHours } from './types';
+import { EMAIL_HASH_PATTERN, EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, invalid, isRecord, parseEventFile } from './validate';
 
 export const MAX_LAMPORT_JUMP = 1000;
 const R = TEAM_REJECTION_REASONS;
@@ -101,10 +102,46 @@ function isOwnerJoin(state: TeamState, event: TeamEvent<'member.joined'>): boole
   return body.memberId === owner.id && body.role === 'owner' && sameDevice(body.device, state.genesis.ownerDevice);
 }
 
+// A join by an author who has an invitation on record is a self-bound join (D-09): the author's device is not on the roster yet, so it is
+// bound by the join itself. Any other non-genesis member.joined keeps the Phase 60 rejection.
+function claimsInvitation(state: TeamState, event: TeamEvent<'member.joined'>): boolean {
+  return state.accepted > 1 && state.members.get(event.author)?.invitedEvent !== undefined;
+}
+
+// D-09 steps 3 and 4 for a self-bound join: the device in the body must be the signing device, must be new, and the envelope signature is
+// verified against the key inside the body (the roster knows nothing of it yet). The invitation checks come later, at step 6.
+function selfBindingProblem(state: TeamState, event: TeamEvent<'member.joined'>): string | undefined {
+  const body = event.body;
+  if (event.author !== body.memberId) return invalid('body.memberId');
+  if (event.device !== body.device.fingerprint) return R.unboundDevice;
+  if (state.deviceIndex.has(body.device.fingerprint)) return R.deviceTaken;
+  return verifyEventSignature(event, body.device.publicKey) ? undefined : R.badSignature;
+}
+
+function sameList(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+// D-09 step 6 for a self-bound join, in the order the plan fixes: unused and not cancelled, code proof, email, role, expiry.
+function inviteProblem(state: TeamState, event: TeamEvent<'member.joined'>, commitTime: number): string | undefined {
+  const body = event.body;
+  const member = state.members.get(body.memberId);
+  const invite = member?.invite;
+  if (member === undefined || invite === undefined || member.status !== 'invited' || member.removedEvent !== undefined) return R.notInvited;
+  const proof = joinProofBytes(state.team.id, member.id, invite.eventId, body.device, body.sealKey?.publicKey ?? '');
+  if (body.invite === undefined || !verifySignature(proof, body.invite.sig, invite.publicKey)) return R.inviteProof;
+  if (!sameList(body.emailHashes, member.emailHashes)) return R.inviteEmail;
+  if (body.role !== expectedJoinRole(member.pendingRole ?? 'observer', state.team.policy)) return R.inviteRole;
+  return inviteExpired(invite.commitTime, invite.ttlSeconds, commitTime) ? R.inviteExpired : undefined;
+}
+
 // D-09 step 6: the same decideTeamAction the write side calls, evaluated against the state at this log position.
-function authorisationProblem(state: TeamState, event: ImplementedTeamEvent): string | undefined {
+function authorisationProblem(state: TeamState, event: ImplementedTeamEvent, commitTime: number): string | undefined {
   if (event.type === 'team.created') return R.genesisOnly;
-  if (event.type === 'member.joined') return isOwnerJoin(state, event) ? undefined : `${R.notPermitted}: ${R.ownerJoinOnly}`;
+  if (event.type === 'member.joined') {
+    if (isOwnerJoin(state, event)) return undefined;
+    return claimsInvitation(state, event) ? inviteProblem(state, event, commitTime) : `${R.notPermitted}: ${R.ownerJoinOnly}`;
+  }
   const action = actionForEvent(event);
   if (action === undefined) return R.notPermitted;
   const decision = decideTeamAction(state, event.author, action);
@@ -120,20 +157,33 @@ function lookupMember(state: TeamState, memberId: string): Member | string {
 // D-09 step 7: every entity the event names must exist at this position.
 function referenceProblem(state: TeamState, event: ImplementedTeamEvent): string | undefined {
   switch (event.type) {
-    case 'member.role-changed':
-    case 'member.removed':
-    case 'member.skills': {
+    case 'member.invited': {
+      // The invitation id is the member id, and a removed member's id is never reused, so a re-issue always mints a new one.
+      if (state.members.has(event.body.memberId)) return R.memberTaken;
+      const taken = event.body.emailHashes.some((hash) => [...state.members.values()].some((member) => member.removedEvent === undefined && member.emailHashes.includes(hash)));
+      return taken ? R.alreadyInvited : undefined;
+    }
+    // Removing an invited member is how an invitation is cancelled, so removal is the one change that is allowed before the join.
+    case 'member.removed': {
       const member = lookupMember(state, event.body.memberId);
       return typeof member === 'string' ? member : undefined;
+    }
+    case 'member.role-changed':
+    case 'member.skills': {
+      const member = lookupMember(state, event.body.memberId);
+      if (typeof member === 'string') return member;
+      return member.status === 'invited' ? R.notJoined : undefined;
     }
     case 'device.added': {
       const member = lookupMember(state, event.body.memberId);
       if (typeof member === 'string') return member;
+      if (member.status === 'invited') return R.notJoined;
       return state.deviceIndex.has(event.body.device.fingerprint) ? R.deviceTaken : undefined;
     }
     case 'device.revoked': {
       const member = lookupMember(state, event.body.memberId);
       if (typeof member === 'string') return member;
+      if (member.status === 'invited') return R.notJoined;
       const key = state.deviceIndex.get(event.body.fingerprint) === member.id
         ? member.devices.find((device) => device.fingerprint === event.body.fingerprint) : undefined;
       if (key === undefined) return R.deviceNotBound;
@@ -158,21 +208,62 @@ function memberOf(state: TeamState, memberId: string): Member {
   return member;
 }
 
-function applyTransition(state: TeamState, event: ImplementedTeamEvent): void {
+// The invited record: observer, no device, offline. The role the lead asked for waits in pendingRole. commitTime is stored so the expiry
+// rule can compare two transport commit times later without reading a clock.
+function applyInvited(state: TeamState, event: TeamEvent<'member.invited'>, commitTime: number): void {
+  const body = event.body;
+  const invite: MemberInvite = { publicKey: body.invite.publicKey, ttlSeconds: body.ttlSeconds, eventId: event.id, commitTime };
+  state.members.set(body.memberId, {
+    id: body.memberId, name: body.name, emailHashes: [...body.emailHashes], role: 'observer', devices: [], skills: [], availability: 'offline',
+    wipLimit: DEFAULT_WIP_LIMIT, joinedAt: event.at, joinedEvent: event.id,
+    status: 'invited', invite, invitedEvent: event.id, pendingRole: body.role, allocationNanoUsd: body.allocationNanoUsd
+  });
+}
+
+// The join binds the device, ends the invited status (which is what makes the code single use) and keeps pendingRole until it is confirmed.
+function applyJoiner(state: TeamState, member: Member, event: TeamEvent<'member.joined'>): void {
+  const body = event.body;
+  delete member.status;
+  delete member.invite;
+  member.name = body.name;
+  member.emailHashes = [...body.emailHashes];
+  member.role = body.role;
+  member.availability = 'available';
+  member.joinedAt = event.at;
+  member.joinedEvent = event.id;
+  const device: DeviceKey = { fingerprint: body.device.fingerprint, publicKey: body.device.publicKey, addedBy: member.id, addedEvent: event.id };
+  if (body.sealKey !== undefined) device.sealKey = body.sealKey.publicKey;
+  member.devices.push(device);
+  state.deviceIndex.set(device.fingerprint, member.id);
+  if (member.pendingRole === body.role) delete member.pendingRole;
+}
+
+function applyTransition(state: TeamState, event: ImplementedTeamEvent, commitTime: number): void {
   switch (event.type) {
     case 'team.created':
       return;
+    case 'member.invited':
+      applyInvited(state, event, commitTime);
+      return;
     case 'member.joined': {
-      const owner = memberOf(state, event.body.memberId);
-      owner.name = event.body.name;
-      owner.emailHashes = [...event.body.emailHashes];
-      owner.joinedEvent = event.id;
-      owner.joinedAt = event.at;
+      const member = memberOf(state, event.body.memberId);
+      if (member.status === 'invited') {
+        applyJoiner(state, member, event);
+        return;
+      }
+      member.name = event.body.name;
+      member.emailHashes = [...event.body.emailHashes];
+      member.joinedEvent = event.id;
+      member.joinedAt = event.at;
       return;
     }
-    case 'member.role-changed':
-      memberOf(state, event.body.memberId).role = event.body.role;
+    case 'member.role-changed': {
+      const member = memberOf(state, event.body.memberId);
+      member.role = event.body.role;
+      // Any role change by a lead settles the confirmation the member was waiting for.
+      delete member.pendingRole;
       return;
+    }
     case 'member.removed': {
       const member = memberOf(state, event.body.memberId);
       member.removedEvent = event.id;
@@ -228,23 +319,29 @@ export function applyEntry(state: TeamState, entry: CommittedEvent): EntryVerdic
   // Step 2: team and replay.
   if (event.teamId !== state.team.id) return reject(state, event.id, R.wrongTeam);
   if (state.seenEventIds.has(event.id)) return reject(state, event.id, R.duplicate);
-  // Steps 3 and 4: the bound device, then its signature.
-  const key = boundKey(state, event);
-  if (typeof key === 'string') return reject(state, event.id, key);
-  if (!verifyEventSignature(event, key.publicKey)) return reject(state, event.id, R.badSignature);
+  // Steps 3 and 4: the bound device, then its signature. A join by an invited member is self-bound: the device is new, so the signature is
+  // checked against the key in the body (D-09) and the invitation itself is checked at step 6.
+  if (event.type === 'member.joined' && claimsInvitation(state, event)) {
+    const problem = selfBindingProblem(state, event);
+    if (problem !== undefined) return reject(state, event.id, problem);
+  } else {
+    const key = boundKey(state, event);
+    if (typeof key === 'string') return reject(state, event.id, key);
+    if (!verifyEventSignature(event, key.publicKey)) return reject(state, event.id, R.badSignature);
+  }
   // The signed prev must name the accepted head this event follows, so the field is a real link and not decoration (WR-08).
   if (event.prev !== state.head.eventId) return reject(state, event.id, R.prevMismatch);
   // Step 5: Lamport counts accepted events only, so a rejected event can never poison the high-water mark.
   if (event.lamport <= state.highLamport) return reject(state, event.id, R.lamportNotGreater);
   if (event.lamport > state.highLamport + MAX_LAMPORT_JUMP) return reject(state, event.id, R.lamportJump);
   // Steps 6 and 7: permission at this position, then the entities the event names. Nothing is mutated before all checks pass.
-  const denied = authorisationProblem(state, event);
+  const denied = authorisationProblem(state, event, entry.commitTime);
   if (denied !== undefined) return reject(state, event.id, denied);
   const missing = referenceProblem(state, event);
   if (missing !== undefined) return reject(state, event.id, missing);
   // The role is read before the transition, so an event that changes its own author's role is still recorded under the role it was written with.
   const authorRole = state.members.get(event.author)?.role;
-  applyTransition(state, event);
+  applyTransition(state, event, entry.commitTime);
   return accept(state, event, authorRole);
 }
 
@@ -382,13 +479,18 @@ function emptyList(value: unknown, path: string): void {
 }
 
 function parseDeviceKey(value: unknown, path: string): DeviceKey {
-  const raw = plainRecord(value, path, ['fingerprint', 'publicKey', 'addedBy', 'addedEvent'], ['revokedEvent', 'revokedBy']);
+  const raw = plainRecord(value, path, ['fingerprint', 'publicKey', 'addedBy', 'addedEvent'], ['revokedEvent', 'revokedBy', 'sealKey']);
   const publicKey = shortText(raw.publicKey, `${path}.publicKey`);
   const fingerprint = patterned(raw.fingerprint, `${path}.fingerprint`, FINGERPRINT_PATTERN);
   if (!isStrictBase64url(publicKey, 32) || fingerprint !== fingerprintOf(Buffer.from(publicKey, 'base64url'))) bad(`${path}.publicKey`);
   const key: DeviceKey = { fingerprint, publicKey, addedBy: shortText(raw.addedBy, `${path}.addedBy`), addedEvent: shortText(raw.addedEvent, `${path}.addedEvent`) };
   if (raw.revokedEvent !== undefined) key.revokedEvent = shortText(raw.revokedEvent, `${path}.revokedEvent`);
   if (raw.revokedBy !== undefined) key.revokedBy = shortText(raw.revokedBy, `${path}.revokedBy`);
+  if (raw.sealKey !== undefined) {
+    const sealKey = shortText(raw.sealKey, `${path}.sealKey`);
+    if (!isStrictBase64url(sealKey, 32)) bad(`${path}.sealKey`);
+    key.sealKey = sealKey;
+  }
   return key;
 }
 
@@ -397,11 +499,21 @@ function parseWorkingHours(value: unknown, path: string): WorkingHours {
   return { tz: shortText(raw.tz, `${path}.tz`), days: items(raw.days, `${path}.days`, (day, dayPath) => integer(day, dayPath)), start: shortText(raw.start, `${path}.start`), end: shortText(raw.end, `${path}.end`) };
 }
 
+function parseInvite(value: unknown, path: string): MemberInvite {
+  const raw = plainRecord(value, path, ['publicKey', 'ttlSeconds', 'eventId', 'commitTime']);
+  const publicKey = shortText(raw.publicKey, `${path}.publicKey`);
+  if (!isStrictBase64url(publicKey, 32)) bad(`${path}.publicKey`);
+  return { publicKey, ttlSeconds: integer(raw.ttlSeconds, `${path}.ttlSeconds`, 1), eventId: patterned(raw.eventId, `${path}.eventId`, EVENT_ID_PATTERN), commitTime: integer(raw.commitTime, `${path}.commitTime`) };
+}
+
 function parseMember(value: unknown, path: string): Member {
   const raw = plainRecord(value, path, ['id', 'name', 'emailHashes', 'role', 'devices', 'skills', 'availability', 'wipLimit', 'joinedAt', 'joinedEvent'],
-    ['workingHours', 'nearApiKeyId', 'removedAt', 'removedEvent']);
+    ['workingHours', 'nearApiKeyId', 'removedAt', 'removedEvent', 'status', 'invite', 'invitedEvent', 'pendingRole', 'allocationNanoUsd']);
   const devices = items(raw.devices, `${path}.devices`, parseDeviceKey);
-  if (devices.length === 0) bad(`${path}.devices`);
+  // Only an invited member may have no device; everyone else was bound by a join.
+  if (raw.status !== undefined && raw.status !== 'invited') bad(`${path}.status`);
+  if (devices.length === 0 && raw.status !== 'invited') bad(`${path}.devices`);
+  if ((raw.status === 'invited') !== (raw.invite !== undefined)) bad(`${path}.invite`);
   const member: Member = {
     id: patterned(raw.id, `${path}.id`, MEMBER_ID_PATTERN), name: shortText(raw.name, `${path}.name`),
     emailHashes: items(raw.emailHashes, `${path}.emailHashes`, (hash, hashPath) => patterned(hash, hashPath, EMAIL_HASH_PATTERN)),
@@ -414,6 +526,11 @@ function parseMember(value: unknown, path: string): Member {
   if (raw.nearApiKeyId !== undefined) member.nearApiKeyId = shortText(raw.nearApiKeyId, `${path}.nearApiKeyId`);
   if (raw.removedAt !== undefined) member.removedAt = shortText(raw.removedAt, `${path}.removedAt`);
   if (raw.removedEvent !== undefined) member.removedEvent = shortText(raw.removedEvent, `${path}.removedEvent`);
+  if (raw.status !== undefined) member.status = 'invited';
+  if (raw.invite !== undefined) member.invite = parseInvite(raw.invite, `${path}.invite`);
+  if (raw.invitedEvent !== undefined) member.invitedEvent = patterned(raw.invitedEvent, `${path}.invitedEvent`, EVENT_ID_PATTERN);
+  if (raw.pendingRole !== undefined) member.pendingRole = choice<Role>(raw.pendingRole, `${path}.pendingRole`, ROLES);
+  if (raw.allocationNanoUsd !== undefined) member.allocationNanoUsd = integer(raw.allocationNanoUsd, `${path}.allocationNanoUsd`);
   return member;
 }
 
@@ -558,18 +675,19 @@ export function parseSnapshotFile(fileText: string, anchor: GenesisAnchor): Pars
   }
 }
 
-function asEntry(event: TeamEvent): CommittedEvent {
+function asEntry(event: TeamEvent, commitTime: number): CommittedEvent {
   const text = canonicalize(event);
-  return { commit: '', commitTime: 0, path: eventPath(event), blob: '', size: Buffer.byteLength(text, 'utf8'), text, kind: 'event' };
+  return { commit: '', commitTime, path: eventPath(event), blob: '', size: Buffer.byteLength(text, 'utf8'), text, kind: 'event' };
 }
 
-// The rejection a read of these events would produce, found on a copy so the live state is never touched.
-export function checkCandidate(state: TeamState, events: TeamEvent[]): Rejection | undefined {
+// The rejection a read of these events would produce, found on a copy so the live state is never touched. commitTime is the time the
+// candidate would be committed at (the transport passes its own clock, in seconds); 0 means unknown, which skips the invitation expiry rule.
+export function checkCandidate(state: TeamState, events: TeamEvent[], commitTime = 0): Rejection | undefined {
   const copy = cloneState(state);
   for (const event of events) {
     let entry: CommittedEvent;
     try {
-      entry = asEntry(event);
+      entry = asEntry(event, commitTime);
     } catch {
       // A candidate that cannot be written as a canonical file could never be committed, which a reader reports as malformed.
       return { eventId: event.id, reason: R.malformed };
@@ -585,6 +703,6 @@ export function teamMaterializer(anchor: GenesisAnchor): Materializer<TeamState>
     initial: () => createState(anchor),
     apply: (state, entry) => applyEntry(state, entry),
     head: (state) => ({ ...state.head }),
-    check: (state, events: TeamEvent[]) => checkCandidate(state, events)
+    check: (state, events: TeamEvent[], commitTime = 0) => checkCandidate(state, events, commitTime)
   };
 }

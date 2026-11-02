@@ -110,6 +110,29 @@ export function prepareEvents(state: TeamState, head: LogHead, signer: TeamSigne
   return events;
 }
 
+// The join of an invited person (D-09). The joiner has no roster entry and no signer, so this is the one event built without a TeamSigner: the
+// author is the invited member, the signing device is the new device, and the transport's candidate check applies the same invitation rules a reader
+// applies. Refused here, before signing, when the invitation is already used, cancelled or never existed in the state the builder was given.
+export function prepareJoinEvent(state: TeamState, head: LogHead, identity: DeviceIdentity, body: MemberJoinedBody, now: () => Date): TeamEvent[] | { conflict: string } {
+  assertNoSecrets(body, 'member.joined event');
+  const member = state.members.get(body.memberId);
+  if (member === undefined || member.status !== 'invited' || member.removedEvent !== undefined) return { conflict: R.notInvited };
+  if (body.device.fingerprint !== identity.fingerprint || body.device.publicKey !== identity.publicKey) return { conflict: R.unboundDevice };
+  const unsigned: UnsignedTeamEvent<'member.joined'> = {
+    v: 1, id: newEventId(), teamId: state.genesis.teamId, type: 'member.joined', lamport: head.lamport + 1, at: now().toISOString(),
+    author: body.memberId, device: identity.fingerprint, prev: head.eventId, body
+  };
+  let size: number;
+  try {
+    size = canonicalBytes({ ...unsigned, sig: SIGNATURE_PLACEHOLDER }).length;
+  } catch (error) {
+    if (error instanceof CanonicalJsonError) return { conflict: R.malformed };
+    throw error;
+  }
+  if (size > MAX_EVENT_BYTES) return { conflict: R.tooLarge };
+  return [signEvent(identity, unsigned)];
+}
+
 export interface TeamLogOptions {
   anchor: GenesisAnchor;
   transport: CoordinationTransport<TeamState>;
@@ -212,6 +235,17 @@ export class TeamLog {
     const result = await this.transport.append((state, head) => {
       const wanted = intents(state);
       return Array.isArray(wanted) ? prepareEvents(state, head, signer, wanted, this.now) : wanted;
+    });
+    if (result.ok) await this.trySnapshot();
+    return result;
+  }
+
+  // A joiner has no signer yet (the device key is made for this join), so the identity is passed in. The body function is called with the freshest
+  // state on every attempt: it re-reads the invitation, so a join that lost a race to a second device gets the notInvited conflict, not a duplicate.
+  public async appendJoin(identity: DeviceIdentity, body: (state: TeamState) => MemberJoinedBody | { conflict: string }): Promise<AppendResult> {
+    const result = await this.transport.append((state, head) => {
+      const wanted = body(state);
+      return 'conflict' in wanted ? wanted : prepareJoinEvent(state, head, identity, wanted, this.now);
     });
     if (result.ok) await this.trySnapshot();
     return result;

@@ -173,6 +173,7 @@ export function actionForEvent(event: ImplementedTeamEvent): TeamAction | undefi
     case 'team.created':
     case 'member.joined':
       return undefined;
+    case 'member.invited': return { kind: 'member.invite' };
     case 'member.role-changed': return { kind: 'member.change-role', targetId: event.body.memberId, role: event.body.role };
     case 'member.removed': return { kind: 'member.remove', targetId: event.body.memberId };
     case 'device.added': return { kind: 'device.add', memberId: event.body.memberId };

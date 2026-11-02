@@ -3,7 +3,7 @@
 // copied with spread syntax, so a hostile prototype key cannot survive into a trusted object (T-60-19).
 import { MAX_EVENT_BYTES, canonicalize, eventPath, fingerprintOf, isStrictBase64url, snapshotPath } from './canonical';
 import { validatePolicy, validatePolicyChanges } from './policy';
-import { AVAILABILITIES, IMPLEMENTED_EVENT_TYPES, ROLES, TEAM_REJECTION_REASONS } from './types';
+import { AVAILABILITIES, IMPLEMENTED_EVENT_TYPES, INVITABLE_ROLES, ROLES, TEAM_REJECTION_REASONS } from './types';
 import type { CommittedEvent, ImplementedEventType, ImplementedTeamEvent, Rejection } from './types';
 
 export const EVENT_ID_PATTERN = /^evt-[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -92,6 +92,9 @@ const NEAR_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const STATE_HASH_PATTERN = /^[0-9a-f]{64}$/;
 const PUBLIC_KEY_BYTES = 32;
 const LAST_WEEKDAY = 6;
+const MIN_INVITE_TTL_SECONDS = 3600;
+const MAX_INVITE_TTL_SECONDS = 2_592_000;
+const SIGNATURE_BYTES = 64;
 
 // Display names: 1..80 characters after trimming, no control characters or line separators.
 export function validateName(value: unknown, path: string): string | undefined {
@@ -164,6 +167,24 @@ function validateNear(value: unknown, path: string): string | undefined {
     ?? validateId(value.workspaceId, NEAR_ID_PATTERN, child(path, 'workspaceId'));
 }
 
+function has(body: Fields, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(body, key);
+}
+
+// A one-key object holding strict base64url of the given length, such as { publicKey } or { sig }.
+function validateKeyHolder(value: unknown, path: string, key: string, byteLength: number): string | undefined {
+  if (!isRecord(value)) return invalid(path);
+  const keyError = checkKeys(value, path, [key]);
+  if (keyError !== undefined) return keyError;
+  const text = value[key];
+  return typeof text === 'string' && isStrictBase64url(text, byteLength) ? undefined : invalid(child(path, key));
+}
+
+// Exactly one salted hash: an invitation is for one person's address.
+function validateSingleEmailHash(value: unknown, path: string): string | undefined {
+  return validateEmailHashes(value, path) ?? ((value as unknown[]).length === 1 ? undefined : invalid(path));
+}
+
 function validateLamportField(value: unknown, path: string): string | undefined {
   return isSafeIntegerInRange(value, 1, MAX_LAMPORT) ? undefined : invalid(path);
 }
@@ -180,12 +201,22 @@ const BODY_VALIDATORS: Record<ImplementedEventType, BodyValidator> = {
     ?? validateDeviceRef(body.ownerDevice, 'body.ownerDevice')
     ?? validatePolicy(body.policy, 'body.policy')
     ?? (Object.prototype.hasOwnProperty.call(body, 'near') ? validateNear(body.near, 'body.near') : undefined),
-  'member.joined': (body) => checkKeys(body, 'body', ['memberId', 'name', 'emailHashes', 'role', 'device'])
+  'member.invited': (body) => checkKeys(body, 'body', ['memberId', 'name', 'emailHashes', 'role', 'allocationNanoUsd', 'ttlSeconds', 'invite'])
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
+    ?? validateName(body.name, 'body.name')
+    ?? validateSingleEmailHash(body.emailHashes, 'body.emailHashes')
+    ?? validateChoice(body.role, INVITABLE_ROLES, 'body.role')
+    ?? (isSafeIntegerInRange(body.allocationNanoUsd, 0, Number.MAX_SAFE_INTEGER) ? undefined : invalid('body.allocationNanoUsd'))
+    ?? (isSafeIntegerInRange(body.ttlSeconds, MIN_INVITE_TTL_SECONDS, MAX_INVITE_TTL_SECONDS) ? undefined : invalid('body.ttlSeconds'))
+    ?? validateKeyHolder(body.invite, 'body.invite', 'publicKey', PUBLIC_KEY_BYTES),
+  'member.joined': (body) => checkKeys(body, 'body', ['memberId', 'name', 'emailHashes', 'role', 'device'], ['invite', 'sealKey'])
     ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
     ?? validateName(body.name, 'body.name')
     ?? validateEmailHashes(body.emailHashes, 'body.emailHashes')
     ?? validateChoice(body.role, ROLES, 'body.role')
-    ?? validateDeviceRef(body.device, 'body.device'),
+    ?? validateDeviceRef(body.device, 'body.device')
+    ?? (has(body, 'invite') ? validateKeyHolder(body.invite, 'body.invite', 'sig', SIGNATURE_BYTES) : undefined)
+    ?? (has(body, 'sealKey') ? validateKeyHolder(body.sealKey, 'body.sealKey', 'publicKey', PUBLIC_KEY_BYTES) : undefined),
   'member.role-changed': (body) => checkKeys(body, 'body', ['memberId', 'role'])
     ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
     ?? validateChoice(body.role, ROLES, 'body.role'),
