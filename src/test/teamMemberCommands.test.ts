@@ -822,7 +822,7 @@ test('Cancel ends a pending invitation and Re-issue replaces it with a new bundl
     stub.quickPickAnswers.push('Invitation for Eve, reviewer, pending', 'Re-issue', '3 days');
     stub.setMessageResponder(copyWhenOffered);
     await t.run(MANAGE_MEMBERS_COMMAND);
-    assert.deepEqual(manageActions(), ['Cancel', 'Re-issue']);
+    assert.deepEqual(manageActions(), ['Cancel invitation', 'Re-issue']);
     assert.equal(stub.clipboardWrites.length, 1);
     const fresh = parseInviteBundle(stub.clipboardWrites[0] as string);
     assert.notEqual(fresh.member, eveId, 'a new invitation');
@@ -832,8 +832,21 @@ test('Cancel ends a pending invitation and Re-issue replaces it with a new bundl
     assert.equal(everythingShown().includes(stub.clipboardWrites[0] as string), false);
     clearUi();
 
+    // UI review issue 2: Cancel invitation asks first, in a modal; declining changes nothing.
     stub.setMessageResponder(undefined);
-    stub.quickPickAnswers.push('Invitation for Eve, reviewer, pending', 'Cancel');
+    stub.quickPickAnswers.push('Invitation for Eve, reviewer, pending', 'Cancel invitation');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    const ask = stub.notifications.findIndex((entry) => entry.message === 'Cancel the invitation for Eve?');
+    assert.ok(ask >= 0, shownMessages().join(' | '));
+    assert.equal(stub.notificationOptions[ask]?.modal, true);
+    assert.match(stub.notificationOptions[ask]?.detail ?? '', /invite code stops working/);
+    assert.deepEqual(stub.notificationActions[ask], ['Cancel invitation']);
+    assert.equal(t.handle.session()?.state().members.get(fresh.member)?.removedEvent, undefined, 'declining kept the invitation');
+    assert.ok(shownMessages().includes('The invitation for Eve was not changed.'), shownMessages().join(' | '));
+    clearUi();
+
+    stub.setMessageResponder((_text, actions) => (actions.includes('Cancel invitation') ? 'Cancel invitation' : undefined));
+    stub.quickPickAnswers.push('Invitation for Eve, reviewer, pending', 'Cancel invitation');
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.ok(shownMessages().includes('The invitation for Eve was cancelled.'), shownMessages().join(' | '));
     assert.notEqual(t.handle.session()?.state().members.get(fresh.member)?.removedEvent, undefined);

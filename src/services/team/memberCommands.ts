@@ -32,6 +32,7 @@ const REPLACE_LINK_ACTION = 'Replace link';
 const RESET_ACTION = 'Remove unfinished keys';
 const CONTINUE_WITHOUT_NEAR_ACTION = 'Continue without NEAR';
 const REMOVE_ACTION = 'Remove';
+const CANCEL_INVITATION_ACTION = 'Cancel invitation';
 // UI review issue 1: what each long flow is doing, in plain words. The steps come from the vscode-free flows as codes.
 const INVITE_STEP_TEXT: Record<'log' | 'near', string> = { log: 'Saving the invitation to the team log', near: 'Sending the NEAR organization invitation' };
 const JOIN_STEP_TEXT: Record<'check' | 'keys' | 'log' | 'near' | 'key', string> = {
@@ -809,6 +810,13 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const name = await display(member.name);
     // Only a lead's invitation went to NEAR, so only that cancel needs the sign-in.
     const needsNear = (member.pendingRole ?? member.role) === 'lead';
+    // UI review issue 2: cancelling cannot be undone, so it is confirmed first, like Remove.
+    const detail = `The invite code stops working at once and cannot be used again. To bring ${name} in later, invite them again.${needsNear && ctx.teamFile.near !== undefined ? ' Their NEAR organization invitation is cancelled too.' : ''}`;
+    const confirmed = await vscode.window.showWarningMessage(`Cancel the invitation for ${name}?`, { modal: true, detail }, CANCEL_INVITATION_ACTION);
+    if (confirmed !== CANCEL_INVITATION_ACTION) {
+      deps.announce('info', `The invitation for ${name} was not changed.`);
+      return;
+    }
     const chosen = needsNear ? await orgForAction(ctx.teamFile, `Cancelling ${name}'s invitation also cancels it at NEAR, which needs your NEAR sign-in. Sign in now, or cancel now and finish that step later from this list.`, true) : {};
     if (chosen === undefined) return;
     await finishRemoval(ctx, memberId, name, chosen.org, `Cancelling the invitation for ${name}`);
@@ -975,7 +983,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       if (row.id !== myId && allowed({ kind: 'member.remove', targetId: row.id })) add('Remove', 'Take them off the team', () => runMemberAction(ctx, row.id, 'remove'));
     } else if (row.kind === 'invitation') {
       if (row.status === 'pending' || row.status === 'expired') {
-        if (allowed({ kind: 'member.remove', targetId: row.id })) add('Cancel', 'Cancel this invitation so its code stops working', () => cancelInvitation(ctx, row.id));
+        if (allowed({ kind: 'member.remove', targetId: row.id })) add(CANCEL_INVITATION_ACTION, 'Stop this invitation so its code no longer works', () => cancelInvitation(ctx, row.id));
         if (allowed({ kind: 'member.invite' })) add('Re-issue', 'Replace it with a new invite', () => reissue(ctx, row.id));
       }
     } else if (row.item.step === 'repo-access') {
