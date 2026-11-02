@@ -2,7 +2,10 @@
 // failure leaves on the cleanup list, retries, a lead leaving the organization, cancel, idempotency and racing removals, all over real git
 // and the fake NEAR server. Keys are made by the fake at run time; nothing here is a literal secret.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { expectedJoinRole, joinProofBytes } from '../domain/team/invite';
@@ -10,20 +13,25 @@ import { teamMaterializer } from '../domain/team/materialize';
 import { defaultTeamPolicy } from '../domain/team/policy';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { GenesisAnchor, MemberInvitedBody, MemberJoinedBody, MemberKeySealedBody, Role, TeamFile, TeamState } from '../domain/team/types';
+import { AuthService } from '../services/auth';
+import { ProfileStore } from '../services/profileStore';
 import type { FetchLike } from '../services/reportingSignIn';
 import { CleanupChecklist, repoAccessText } from '../team/cleanupChecklist';
 import type { CleanupItem } from '../team/cleanupChecklist';
 import { TeamLog, buildGenesisEvents } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
-import { createDeviceIdentity, createSealIdentity, emailHash, newMemberId, newTeamId } from '../team/identity';
+import { createDeviceIdentity, createSealIdentity, deviceKeySecretName, emailHash, newMemberId, newTeamId, sealKeySecretName } from '../team/identity';
 import type { DeviceIdentity, SealIdentity } from '../team/identity';
 import { deriveInviteKey, generateInviteCode } from '../team/inviteCode';
 import { SEAL_SCHEME, sealTo } from '../team/keySeal';
 import { NearOrgClient } from '../team/nearOrg';
 import type { NearAuth } from '../team/nearOrg';
+import { nearSessionSecretName, saveNearSession } from '../team/nearSession';
 import { KEY_STILL_SPENDS_WARNING, removeMember, retryCleanupItem } from '../team/remove';
-import { canonicalTeamFile } from '../team/teamFile';
+import { REMOVED_FILE, handleOwnRemoval, readRemovedMarker, removedText } from '../team/removedClient';
+import { canonicalTeamFile, teamStorageDir } from '../team/teamFile';
+import { installTeamKey, readInstalledKey, teamProfileId } from '../team/teamKeyProfile';
 import { startFakeNear } from './helpers/fakeNear';
 import type { FakeNear, FakeRequest } from './helpers/fakeNear';
 import { MemorySecrets, createOwner, createTeamFixture } from './helpers/teamHarness';
@@ -597,4 +605,177 @@ test('items that are not removal steps are answered unchanged with the command t
     assert.equal(reminder.status, 'manual');
     assert.equal(w.fake.requests.length, before, 'none of these made a NEAR call');
   });
+});
+
+// ---- Task 3: the removed member's own machine ----------------------------------------------------------------------------------------
+
+// A machine of a lead who joined: project folder under git with work in progress, a personal profile, the team key installed as the active
+// profile, a device key, a seal key and a kept NEAR session, plus another team's secrets and an unrelated one that must survive.
+interface Machine {
+  fake: FakeNear;
+  teamId: string;
+  teamFile: TeamFile;
+  secrets: MemorySecrets;
+  projectRoot: string;
+  globalStorageDir: string;
+  otherTeamSecret: string;
+}
+
+function gitOut(cwd: string, args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+// What the member's work looks like to git, leaving out the extension's own .planning folder where the profile list lives.
+async function workState(projectRoot: string): Promise<Record<string, string>> {
+  return {
+    head: gitOut(projectRoot, ['rev-parse', 'HEAD']).trim(),
+    branches: gitOut(projectRoot, ['branch', '--list']),
+    stash: gitOut(projectRoot, ['stash', 'list']),
+    status: gitOut(projectRoot, ['status', '--porcelain', '--', '.', ':!.planning']),
+    tracked: await fs.readFile(path.join(projectRoot, 'work.txt'), 'utf8'),
+    untracked: await fs.readFile(path.join(projectRoot, 'notes.txt'), 'utf8')
+  };
+}
+
+const REMOVED_EVENT = 'evt-0123456789ABCDEFGHJKMNPQRS';
+
+async function withMachine(run: (machine: Machine) => Promise<void>): Promise<void> {
+  const fake = await startFakeNear();
+  const projectRoot = await fs.mkdtemp(path.join(tmpdir(), 'near-ai-removed-project-'));
+  const globalStorageDir = await fs.mkdtemp(path.join(tmpdir(), 'near-ai-removed-storage-'));
+  try {
+    const lead = fake.addUser({ id: 'user-owner', username: 'owner', email: 'owner@example.invalid' });
+    const member = fake.addUser({ id: 'user-lena', username: 'lena', email: 'lena@example.invalid' });
+    fake.addOrganization({ id: 'org-1', name: 'Team Org', members: [{ userId: 'user-owner', role: 'owner' }, { userId: 'user-lena', role: 'admin' }] });
+    fake.addWorkspace({ id: 'ws-1', organizationId: 'org-1', name: 'Team workspace' });
+    const org = new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(lead.accessToken), sleep: noSleep });
+
+    // The member's work: committed, modified, on a second branch, plus a file git does not track.
+    gitOut(projectRoot, ['init', '-q', '-b', 'main']);
+    gitOut(projectRoot, ['config', 'user.email', 'lena@example.invalid']);
+    gitOut(projectRoot, ['config', 'user.name', 'Lena']);
+    await fs.writeFile(path.join(projectRoot, 'work.txt'), 'first\n');
+    gitOut(projectRoot, ['add', 'work.txt']);
+    gitOut(projectRoot, ['commit', '-q', '-m', 'first']);
+    gitOut(projectRoot, ['branch', 'feature/lena']);
+    await fs.writeFile(path.join(projectRoot, 'work.txt'), 'first\nunsaved change\n');
+    await fs.writeFile(path.join(projectRoot, 'notes.txt'), 'my own notes\n');
+
+    const teamId = newTeamId();
+    const secrets = new MemorySecrets();
+    const store = new ProfileStore(projectRoot, new AuthService(secrets), { validator: async () => undefined });
+    await store.configure({ profileId: 'profile-personal', displayName: 'Personal', organization: 'Me', baseUrl: 'https://example.test/v1', authMode: 'apiKey' }, 'sk-personal-key-value');
+    await createDeviceIdentity(secrets, teamId);
+    await createSealIdentity(secrets, teamId);
+    const created = await org.createKey('ws-1', 'lena-key', 5 * GIGA);
+    const installed = await installTeamKey({
+      projectRoot, globalStorageDir, teamId, teamName: 'Acme Team', secrets, apiKey: created.secret, baseUrl: fake.baseUrl,
+      expect: NEAR_LINK, keyId: created.key.id, sleep: noSleep
+    });
+    assert.equal(installed.ok, true);
+    await saveNearSession(secrets, teamId, member, 'lena', { baseUrl: fake.baseUrl });
+
+    const otherTeamSecret = deviceKeySecretName(newTeamId());
+    secrets.values.set(otherTeamSecret, 'other-team-device-key-value');
+    secrets.values.set('unrelated.secret', 'unrelated-value');
+    const teamFile: TeamFile = {
+      version: 1, teamId, name: 'Acme Team', coordination: { transport: 'git', ref: DEFAULT_COORDINATION_REF, remote: 'origin' },
+      genesis: { eventId: 'evt-00000000000000000000000000', ownerDevice: { fingerprint: 'fp', publicKey: 'pk' } }, near: NEAR_LINK, createdAt: '2026-02-03T04:05:06.000Z'
+    };
+    await run({ fake, teamId, teamFile, secrets, projectRoot, globalStorageDir, otherTeamSecret });
+  } finally {
+    await fake.close();
+    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.rm(globalStorageDir, { recursive: true, force: true });
+  }
+}
+
+test('a removed member machine forgets exactly this team secrets, gets the personal profile back and keeps all code and branches', async () => {
+  await withMachine(async (m) => {
+    const before = await workState(m.projectRoot);
+    const sessionName = nearSessionSecretName(m.teamId);
+    assert.ok(m.secrets.values.has(deviceKeySecretName(m.teamId)) && m.secrets.values.has(sealKeySecretName(m.teamId)) && m.secrets.values.has(sessionName));
+    const store = new ProfileStore(m.projectRoot, new AuthService(m.secrets));
+    assert.equal((await store.getActiveSelection())?.profileId, teamProfileId(m.teamId));
+    const memberId = newMemberId();
+
+    const result = await handleOwnRemoval({
+      projectRoot: m.projectRoot, globalStorageDir: m.globalStorageDir, teamFile: m.teamFile, memberId, removedEvent: REMOVED_EVENT, secrets: m.secrets, nearBaseUrl: m.fake.baseUrl
+    });
+    assert.equal(result.restoredProfileId, 'profile-personal');
+    for (const name of [deviceKeySecretName(m.teamId), sealKeySecretName(m.teamId), sessionName]) {
+      assert.equal(m.secrets.values.has(name), false, `${name} was deleted`);
+      assert.ok(result.removedSecrets.includes(name), `${name} is listed as deleted`);
+    }
+    const fresh = new ProfileStore(m.projectRoot, new AuthService(m.secrets));
+    assert.equal((await fresh.getActiveSelection())?.profileId, 'profile-personal');
+    assert.equal(await fresh.get(teamProfileId(m.teamId)), undefined, 'the team profile is gone');
+    assert.equal(await new AuthService(m.secrets).getScopedApiKey(fresh.getScope(teamProfileId(m.teamId))), undefined, 'the team key is gone');
+    assert.equal(await new AuthService(m.secrets).getScopedApiKey(fresh.getScope('profile-personal')), 'sk-personal-key-value', 'the personal key is untouched');
+    assert.equal(await readInstalledKey(m.globalStorageDir, m.teamId), undefined);
+    assert.ok(result.removedSecrets.some((name) => name.includes(teamProfileId(m.teamId))), 'the team key profile is listed');
+
+    // Only this team's entries went: another team's device key and an unrelated secret are as they were.
+    assert.equal(m.secrets.values.get(m.otherTeamSecret), 'other-team-device-key-value');
+    assert.equal(m.secrets.values.get('unrelated.secret'), 'unrelated-value');
+
+    // The marker holds the member id and the removal event, nothing else.
+    const raw = JSON.parse(await fs.readFile(path.join(teamStorageDir(m.globalStorageDir, m.teamId), REMOVED_FILE), 'utf8')) as unknown;
+    assert.deepEqual(raw, { memberId, removedEvent: REMOVED_EVENT });
+    assert.deepEqual(await readRemovedMarker(m.globalStorageDir, m.teamId), { memberId, removedEvent: REMOVED_EVENT });
+
+    // The member's code, branches, stash and working tree are exactly as they were.
+    assert.deepEqual(await workState(m.projectRoot), before);
+    assert.equal(removedText('Acme Team'), 'You were removed from Acme Team. Team sync has stopped; your code and branches are unchanged.');
+  });
+});
+
+test('the NEAR session is signed out at NEAR when possible and deleted either way', async () => {
+  await withMachine(async (m) => {
+    const sessionName = nearSessionSecretName(m.teamId);
+    m.fake.fail({ method: 'POST', pathPrefix: '/v1/auth/logout', status: 500, times: 5 });
+    const result = await handleOwnRemoval({
+      projectRoot: m.projectRoot, globalStorageDir: m.globalStorageDir, teamFile: m.teamFile, memberId: newMemberId(), removedEvent: REMOVED_EVENT, secrets: m.secrets, nearBaseUrl: m.fake.baseUrl
+    });
+    assert.ok(m.fake.requests.some((request) => request.method === 'POST' && request.path === '/v1/auth/logout'), 'the sign out was attempted');
+    assert.equal(m.secrets.values.has(sessionName), false, 'the session is deleted although NEAR refused the sign out');
+    assert.ok(result.removedSecrets.includes(sessionName));
+  });
+  await withMachine(async (m) => {
+    // No NEAR address known: nothing is sent, the secret still goes.
+    await handleOwnRemoval({ projectRoot: m.projectRoot, globalStorageDir: m.globalStorageDir, teamFile: m.teamFile, memberId: newMemberId(), removedEvent: REMOVED_EVENT, secrets: m.secrets });
+    assert.equal(m.secrets.values.has(nearSessionSecretName(m.teamId)), false);
+    assert.equal(m.fake.requests.some((request) => request.path === '/v1/auth/logout'), false);
+  });
+});
+
+test('running the removal twice is harmless, a damaged marker still reads as removed, and no marker reads as not removed', async () => {
+  await withMachine(async (m) => {
+    assert.equal(await readRemovedMarker(m.globalStorageDir, m.teamId), undefined);
+    const memberId = newMemberId();
+    const input = { projectRoot: m.projectRoot, globalStorageDir: m.globalStorageDir, teamFile: m.teamFile, memberId, removedEvent: REMOVED_EVENT, secrets: m.secrets, nearBaseUrl: m.fake.baseUrl };
+    await handleOwnRemoval(input);
+    const second = await handleOwnRemoval(input);
+    assert.deepEqual(second.removedSecrets, [], 'nothing was left to delete the second time');
+    assert.equal(second.restoredProfileId, undefined);
+    assert.deepEqual(await readRemovedMarker(m.globalStorageDir, m.teamId), { memberId, removedEvent: REMOVED_EVENT });
+    assert.equal(m.secrets.values.get('unrelated.secret'), 'unrelated-value');
+
+    // A marker that cannot be read as written is not a reason to let the machine sync again.
+    const file = path.join(teamStorageDir(m.globalStorageDir, m.teamId), REMOVED_FILE);
+    for (const damaged of ['{not json', '[]', '{"memberId":"mbr-0000000000000000"}', '{"memberId":1,"removedEvent":2}', `{"memberId":"${memberId}","removedEvent":"${REMOVED_EVENT}","extra":true}`]) {
+      await fs.writeFile(file, damaged);
+      assert.notEqual(await readRemovedMarker(m.globalStorageDir, m.teamId), undefined, `${damaged} reads as removed`);
+    }
+  });
+});
+
+test('the removal code makes no git call, never names the NEAR key folder, and deletes nothing outside the team storage folder', async () => {
+  const read = (name: string): Promise<string> => fs.readFile(path.join(__dirname, '..', '..', 'src', 'team', name), 'utf8');
+  const [client, removal] = [await read('removedClient.ts'), await read('remove.ts')];
+  const codeLines = (text: string): string => text.split('\n').filter((line) => !/^\s*\/\//.test(line)).join('\n');
+  for (const text of [codeLines(client), codeLines(removal)]) assert.equal(text.includes('near-credentials'), false);
+  assert.equal(/runGit|GitRunner|'git'/.test(client), false, 'removedClient.ts makes no git call');
+  assert.equal(/from 'vscode'|require\('vscode'\)/.test(client + removal), false);
+  assert.equal(/fs\.(rm|unlink|rmdir)|\bunlink\(|rmSync/.test(client), false, 'no file is deleted by the removed client itself');
 });
