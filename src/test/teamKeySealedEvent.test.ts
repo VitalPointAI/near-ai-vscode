@@ -269,13 +269,13 @@ test('every delivery is a new key: the current and every retired key id is refus
   const first = newKeyId();
   const second = newKeyId();
   accepted(deliver(world, world.owner, target.memberId, devices, first));
-  rejectedWith(deliver(world, world.owner, target.memberId, devices, first), R.keyReused);
+  rejectedWith(deliver(world, world.owner, target.memberId, devices, first), TEAM_REJECTION_REASONS.keyReused);
   accepted(deliver(world, world.owner, target.memberId, devices, second));
   const member = world.state.members.get(target.memberId);
   assert.equal(member?.nearApiKeyId, second);
   assert.deepEqual(member?.retiredNearKeyIds, [first]);
-  rejectedWith(deliver(world, world.owner, target.memberId, devices, first), R.keyReused);
-  rejectedWith(deliver(world, world.owner, target.memberId, devices, second), R.keyReused);
+  rejectedWith(deliver(world, world.owner, target.memberId, devices, first), TEAM_REJECTION_REASONS.keyReused);
+  rejectedWith(deliver(world, world.owner, target.memberId, devices, second), TEAM_REJECTION_REASONS.keyReused);
   assert.equal(member?.nearApiKeyId !== undefined && (member.retiredNearKeyIds ?? []).includes(member.nearApiKeyId), false, 'the current id is never in the retired list');
 });
 
@@ -306,7 +306,7 @@ test('the sealed devices must be exactly the active devices that have a seal key
   const [first] = fingerprintsOf(world, target.memberId);
   const both = fingerprintsOf(world, target.memberId);
   assert.equal(both.length, 2);
-  rejectedWith(deliver(world, world.owner, target.memberId, [first]), R.keyDevices);
+  rejectedWith(deliver(world, world.owner, target.memberId, [first]), TEAM_REJECTION_REASONS.keyDevices);
   accepted(deliver(world, world.owner, target.memberId, both));
   assert.deepEqual(world.state.members.get(target.memberId)?.nearKeyDevices, [...both].sort());
 });

@@ -3,7 +3,7 @@
 // (acceptance must not depend on detector versions), and ordering comes only from the order entries are applied in (D-03).
 import { createHash } from 'node:crypto';
 import { canonicalBytes, canonicalize, eventPath, fingerprintOf, isStrictBase64url, snapshotPath, verifyEventSignature, verifySignature } from './canonical';
-import { expectedJoinRole, inviteExpired, joinProofBytes } from './invite';
+import { expectedJoinRole, inviteExpired, joinProofBytes, sealCapableFingerprints } from './invite';
 import { actionForEvent, decideTeamAction } from './permissions';
 import { DEFAULT_WIP_LIMIT, applyPolicyChanges, defaultTeamPolicy, validatePolicy } from './policy';
 import { AVAILABILITIES, ROLES, TEAM_REJECTION_REASONS } from './types';
@@ -154,11 +154,6 @@ function lookupMember(state: TeamState, memberId: string): Member | string {
   return member.removedEvent === undefined ? member : R.memberRemoved;
 }
 
-// The member's devices that can receive a sealed key: bound to them, not revoked, and published with an X25519 key (D-24).
-function sealCapableDevices(member: Member): string[] {
-  return member.devices.filter((device) => device.revokedEvent === undefined && device.sealKey !== undefined).map((device) => device.fingerprint).sort(compareText);
-}
-
 // D-23 and D-24 for member.key-sealed, after the member itself was found: joined, a key id never delivered before (every delivery is a new
 // key, so a device change always means a new key and an existing key is never re-sealed), every sealed device one of the member's own active
 // devices with a seal key, and the sealed set equal to all of them.
@@ -169,7 +164,7 @@ function keyDeliveryProblem(state: TeamState, member: Member, keyId: string, sea
     const device = state.deviceIndex.get(fingerprint) === member.id ? member.devices.find((candidate) => candidate.fingerprint === fingerprint) : undefined;
     if (device === undefined || device.revokedEvent !== undefined || device.sealKey === undefined) return R.noSealKey;
   }
-  return sameList([...sealedDevices].sort(compareText), sealCapableDevices(member)) ? undefined : R.keyDevices;
+  return sameList([...sealedDevices].sort(compareText), sealCapableFingerprints(member)) ? undefined : R.keyDevices;
 }
 
 // D-09 step 7: every entity the event names must exist at this position.

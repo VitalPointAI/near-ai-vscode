@@ -1,7 +1,7 @@
 // Pure invite rules shared by the materialiser (read side) and the joiner and lead clients (write side): the bytes the code-derived key
 // countersigns, the role a join must carry, the commit-time expiry rule and the status shown for an invitation. No I/O, no clock, no vscode.
 import { canonicalBytes } from './canonical';
-import type { DeviceRef, Member, Role, TeamPolicy } from './types';
+import type { DeviceRef, Member, Role, TeamPolicy, TeamState } from './types';
 
 export const INVITE_PROOF_PURPOSE = 'near-ai.team.invite-join';
 // Allowance added to the invitation lifetime when comparing two commit times. It absorbs clock differences between the two machines that
@@ -45,4 +45,45 @@ export function invitationStatus(member: Member, nowSeconds: number): Invitation
   const invite = member.invite;
   if (invite === undefined) return undefined;
   return invite.commitTime !== 0 && nowSeconds > invite.commitTime + invite.ttlSeconds ? 'expired' : 'pending';
+}
+
+// ---- Key delivery (D-24) and the lead's attention list (D-16, D-25) ------------------------------------------------------------------
+
+// The fingerprints of the devices that can receive a sealed key: not revoked and published with an X25519 key. Sorted, so two clients
+// compare the same list. The sealed set of a member.key-sealed event must equal this list exactly.
+export function sealCapableFingerprints(member: Member): string[] {
+  return member.devices
+    .filter((device) => device.revokedEvent === undefined && device.sealKey !== undefined)
+    .map((device) => device.fingerprint)
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+// D-24: a delivered key is only good for the devices it was sealed to. After a seal-capable device is added or a device is revoked the set
+// no longer matches, and the key has to be created again and sealed to the new set (an existing key is never re-sealed).
+export function keyNeedsRotation(member: Member): boolean {
+  if (member.nearApiKeyId === undefined) return false;
+  const sealedTo = member.nearKeyDevices ?? [];
+  const wanted = sealCapableFingerprints(member);
+  return sealedTo.length !== wanted.length || sealedTo.some((fingerprint, index) => fingerprint !== wanted[index]);
+}
+
+export type MemberAttentionKind = 'confirm' | 'deliver-key' | 'rotate-key';
+export type MemberAttention = { memberId: string; kind: MemberAttentionKind };
+
+// What a lead's client has to act on, one item per member in roster (insertion) order so every client shows the same list. A member waiting
+// for confirmation is listed as confirm only: the key follows the confirmation (D-25). Invited and removed members and the owner never appear.
+// Without a linked NEAR organization nothing is created or delivered, so only confirmations are listed (D-04).
+export function memberAttention(state: Pick<TeamState, 'members' | 'team'>, nearLinked: boolean): MemberAttention[] {
+  const items: MemberAttention[] = [];
+  for (const member of state.members.values()) {
+    if (member.status === 'invited' || member.removedEvent !== undefined || member.id === state.team.ownerId) continue;
+    if (member.pendingRole !== undefined) {
+      items.push({ memberId: member.id, kind: 'confirm' });
+    } else if (nearLinked && member.nearApiKeyId === undefined && sealCapableFingerprints(member).length > 0) {
+      items.push({ memberId: member.id, kind: 'deliver-key' });
+    } else if (nearLinked && keyNeedsRotation(member)) {
+      items.push({ memberId: member.id, kind: 'rotate-key' });
+    }
+  }
+  return items;
 }
