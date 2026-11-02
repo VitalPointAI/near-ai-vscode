@@ -4,17 +4,17 @@ milestone: v0.6.0
 milestone_name: Team Mode
 current_phase: 61
 current_phase_name: Invitations, joining, removal, NEAR org and key integration
-status: executing
-stopped_at: Completed 61-13-PLAN.md
-last_updated: "2026-11-02T03:27:16.824Z"
+status: verifying
+stopped_at: Completed 61-14-PLAN.md
+last_updated: "2026-11-02T03:40:58.846Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 61 execution started
-state_head: d4c327b9e0e4a6008348d7aae18cfb7a507a8800
+state_head: a2def69c2d45a88833188de5e6cdaeb2c943eb80
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 26
-  completed_plans: 25
+  completed_plans: 26
   percent: 13
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 
 Phase: 61 (Invitations, joining, removal, NEAR org and key integration) — EXECUTING
 Plan: 14 of 14
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-01 — Phase 61 execution started
 
 Progress: [█░░░░░░░░░] 13%
@@ -79,6 +79,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P11 | 13 min | 3 tasks | 4 files |
 | Phase 61 P12 | 40min | 3 tasks | 8 files |
 | Phase 61 P13 | 55 min | 3 tasks | 8 files |
+| Phase 61 P14 | 15 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -130,6 +131,8 @@ Recent decisions affecting current work:
 - [Phase 61]: Commands read the fresh team.json for the NEAR link and restart the session after a link or a join
 - [Phase 61]: The spend-cap sentence is shown only in a team with a NEAR organization; an unlinked team gets the no-organization notice
 - [Phase 61]: The unfinished-join reset is offered only after a fresh sync shows this computer is not on the team list
+- [Phase 61]: 61-14: the lifecycle, privacy canary and full gate passed with no production change; the coordination push between cap and revoke is proven by counting remote event files at each NEAR call
+- [Phase 61]: 61-14: TEAM-02 and TEAM-03 ticked; only the manual real-NEAR organization check and the live test run remain for the owner
 
 ### Pending Todos
 
@@ -151,8 +154,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T03:27:16.675Z
-Stopped at: Completed 61-13-PLAN.md
+Last session: 2026-11-02T03:40:58.693Z
+Stopped at: Completed 61-14-PLAN.md
 Resume file: None
 
 ## Notes
