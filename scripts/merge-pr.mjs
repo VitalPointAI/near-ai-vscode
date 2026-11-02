@@ -2,17 +2,18 @@
 // The merge agent's gate. Squash-merges a PR only when every gate passes, and refuses with the
 // reasons otherwise:
 //   - the PR is open, not a draft, targets main, and comes from a branch named by the convention;
-//   - every required check (CI jobs plus `agent-review`) is green on the current head commit,
-//     and no other check failed;
+//   - every required check is green on the current head commit, and no other check failed. The
+//     CI jobs count only from the CI workflow (a job of the same name from anywhere else refuses)
+//     and `agent-review` only as a commit status set by the account this script runs as;
 //   - the branch is up to date with main and GitHub reports it mergeable;
 //   - no review conversation is unresolved.
 // For a release/x.y.z or hotfix/x.y.z PR it then waits for CI on the squash commit and tags it
 // v<x.y.z>, which starts the Release workflow (publishing still waits for the owner).
 //
 //   node scripts/merge-pr.mjs <pr> [--repo owner/name] [--dry-run] [--no-tag]
-import { behindBy, fail, gh, parseArgs, protectedContexts, resolveRepo, unresolvedThreads, viewPr, viewPrSettled } from './lib/gh.mjs';
+import { behindBy, commitChecks, currentLogin, fail, gh, parseArgs, protectedContexts, resolveRepo, unresolvedThreads, viewPr, viewPrSettled } from './lib/gh.mjs';
 import { tagRelease } from './lib/release.mjs';
-import { BRANCH_PATTERN, REQUIRED_CHECKS, evaluateChecks, normalizeChecks, releaseVersionFromBranch } from './lib/workflow.mjs';
+import { BRANCH_PATTERN, REQUIRED_CHECKS, evaluateCommit, releaseVersionFromBranch } from './lib/workflow.mjs';
 
 const usage = 'usage: merge-pr.mjs <pr> [--repo owner/name] [--dry-run] [--no-tag]';
 
@@ -30,7 +31,7 @@ async function main() {
   if (!BRANCH_PATTERN.test(pr.headRefName)) reasons.push(`branch "${pr.headRefName}" does not follow the naming rules (feat|fix|chore|docs/<name>, release|hotfix/x.y.z)`);
 
   const required = [...new Set([...REQUIRED_CHECKS, ...protectedContexts(repo, pr.baseRefName)])];
-  const checks = evaluateChecks(normalizeChecks(pr.statusCheckRollup), required);
+  const checks = evaluateCommit(commitChecks(repo, pr.headRefOid), { required, reviewer: currentLogin() });
   reasons.push(...checks.problems);
 
   const position = behindBy(repo, pr.baseRefName, pr.headRefOid);

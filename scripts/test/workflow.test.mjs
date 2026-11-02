@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, changelogSection, evaluateChecks, fitComment, isSecretFileName,
+  BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName,
   isVersionBump, maskLine, normalizeChecks, parseAllowlist, parseReview, releaseVersionFromBranch, reviewDecision, scanLine
 } from '../lib/workflow.mjs';
 
@@ -86,6 +86,77 @@ test('every required check must be green, and any other failed check blocks too'
   assert.match(evaluateChecks(extraFailure).problems.join(), /"codeql" failed/);
   assert.match(evaluateChecks(green.map((c) => (c.name === 'e2e' ? { ...c, state: 'pending' } : c))).problems.join(), /"e2e" is pending/);
   assert.ok(CI_CHECKS.every((name) => REQUIRED_CHECKS.includes(name)));
+});
+
+// ---- The merge and release gate over one commit's checks ----------------------------------------
+
+const OWNER = 'ALuhning';
+const CI_SUITE = 101;
+const ciWorkflowRun = { id: 1, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', suiteId: CI_SUITE };
+const ciRun = (name, extra = {}) => ({ id: name.length, name, status: 'completed', conclusion: 'success', startedAt: '2026-01-01T00:00:00Z', app: 'github-actions', suiteId: CI_SUITE, ...extra });
+const ownerReview = (state = 'success', extra = {}) => ({ id: 1, context: 'agent-review', state, createdAt: '2026-01-01T01:00:00Z', creator: OWNER, ...extra });
+const greenCommit = () => ({ checkRuns: CI_CHECKS.map((name) => ciRun(name)), workflowRuns: [ciWorkflowRun], statuses: [ownerReview()] });
+const gate = (commit, options = {}) => evaluateCommit(commit, { reviewer: OWNER, ...options });
+
+test('the gate passes green CI jobs from the CI workflow and the owner\'s agent-review status', () => {
+  assert.deepEqual(gate(greenCommit()), { ok: true, problems: [], waiting: false });
+  assert.equal(gate({ ...greenCommit(), statuses: [] }, { required: CI_CHECKS }).ok, true, 'CI only needs no review');
+});
+
+test('agent-review counts only as a commit status set by the expected account', () => {
+  const asCheckRun = { ...greenCommit(), checkRuns: [...greenCommit().checkRuns, ciRun('agent-review', { suiteId: 202 })], statuses: [] };
+  assert.match(gate(asCheckRun).problems.join('\n'), /check run named "agent-review"/);
+  const checkRunOverFailure = { ...asCheckRun, statuses: [ownerReview('failure')] };
+  assert.equal(gate(checkRunOverFailure).ok, false);
+  assert.match(gate(checkRunOverFailure).problems.join('\n'), /"agent-review" is failure/);
+  const byOther = { ...greenCommit(), statuses: [ownerReview('success', { creator: 'someone-else' })] };
+  assert.match(gate(byOther).problems.join('\n'), /set by someone-else/);
+  assert.match(gate(byOther).problems.join('\n'), /has not been set on this commit by ALuhning/);
+  const otherAfterOwner = { ...greenCommit(), statuses: [ownerReview('success'), ownerReview('success', { id: 2, creator: 'github-actions[bot]' })] };
+  assert.equal(gate(otherAfterOwner).ok, false, 'a status from another account refuses even beside the owner\'s');
+  assert.match(gate(greenCommit(), { reviewer: undefined }).problems.join('\n'), /account allowed to set "agent-review" is unknown/);
+  const newerFailure = { ...greenCommit(), statuses: [ownerReview('success'), ownerReview('failure', { id: 2, createdAt: '2026-01-01T02:00:00Z' })] };
+  assert.match(gate(newerFailure).problems.join('\n'), /"agent-review" is failure/);
+});
+
+test('a duplicate-named job from outside the CI workflow cannot mask a failing CI job', () => {
+  const commit = greenCommit();
+  commit.checkRuns = commit.checkRuns.map((run) => (run.name === 'test' ? { ...run, conclusion: 'failure' } : run));
+  commit.workflowRuns.push({ id: 2, name: 'Other', path: '.github/workflows/other.yml', event: 'pull_request', suiteId: 303 });
+  commit.checkRuns.push(ciRun('test', { suiteId: 303, startedAt: '2026-01-01T05:00:00Z' }));
+  const result = gate(commit);
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join('\n'), /required check "test" is failure/);
+  assert.match(result.problems.join('\n'), /"test" also comes from .*not the CI workflow/);
+  const fromOtherApp = greenCommit();
+  fromOtherApp.checkRuns.push(ciRun('lint', { app: 'some-app', suiteId: 404 }));
+  assert.match(gate(fromOtherApp).problems.join('\n'), /"lint" also comes from some-app/);
+  const workflowNamedCi = greenCommit();
+  workflowNamedCi.workflowRuns.push({ id: 3, name: 'CI', path: '.github/workflows/fake.yml', event: 'pull_request', suiteId: 505 });
+  workflowNamedCi.checkRuns.push(ciRun('e2e', { suiteId: 505 }));
+  assert.equal(gate(workflowNamedCi).ok, false, 'a second workflow named CI in another file does not count');
+  const asStatus = { ...greenCommit(), statuses: [ownerReview(), { id: 9, context: 'audit', state: 'success', creator: OWNER }] };
+  assert.match(gate(asStatus).problems.join('\n'), /commit status named "audit"/);
+});
+
+test('every CI run on the commit must pass; within one run the newest attempt counts', () => {
+  const rerun = greenCommit();
+  rerun.checkRuns.push(ciRun('e2e', { id: 99, conclusion: 'failure', startedAt: '2025-12-31T00:00:00Z' }));
+  assert.equal(gate(rerun).ok, true, 'a re-run that passed replaces the failed attempt');
+  const queued = greenCommit();
+  queued.checkRuns.push(ciRun('e2e', { id: 98, status: 'queued', conclusion: null, startedAt: null }));
+  assert.deepEqual(gate(queued), { ok: false, problems: ['required check "e2e" is still running'], waiting: true });
+  const twoRuns = greenCommit();
+  twoRuns.workflowRuns.push({ ...ciWorkflowRun, id: 2, event: 'workflow_dispatch', suiteId: 606 });
+  twoRuns.checkRuns.push(ciRun('test', { suiteId: 606, conclusion: 'failure' }));
+  assert.match(gate(twoRuns).problems.join('\n'), /required check "test" is failure/);
+  const missing = { ...greenCommit(), checkRuns: greenCommit().checkRuns.filter((run) => run.name !== 'audit') };
+  assert.deepEqual(gate(missing), { ok: false, problems: ['required check "audit" has not reported from the CI workflow on this commit'], waiting: true });
+  const otherFailure = greenCommit();
+  otherFailure.checkRuns.push(ciRun('codeql', { app: 'github-code-scanning', suiteId: 707, conclusion: 'failure' }));
+  assert.match(gate(otherFailure).problems.join('\n'), /check "codeql" failed/);
+  const extraRequired = greenCommit();
+  assert.match(gate(extraRequired, { required: [...REQUIRED_CHECKS, 'codeql'] }).problems.join('\n'), /"codeql" has not reported/);
 });
 
 test('branch names follow the convention', () => {

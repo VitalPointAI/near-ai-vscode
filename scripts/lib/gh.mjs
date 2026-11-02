@@ -86,14 +86,32 @@ export function fail(message) {
   process.exit(1);
 }
 
-/** Check runs and commit statuses on any commit, in the statusCheckRollup shape. */
+/** Every value of a paginated `gh api` call, one JSON value per line (the jq ends in `tojson`). */
+function ghLines(endpoint, jq) {
+  return gh(['api', '--paginate', endpoint, '--jq', jq]).split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line));
+}
+
+/**
+ * Everything the merge and release gates need about one commit (see evaluateCommit in
+ * workflow.mjs): every check run attempt with the app and check suite it came from, the workflow
+ * runs on the commit, and every commit status with the account that set it.
+ */
 export function commitChecks(repo, sha) {
-  const runs = ghJson(['api', `repos/${repo}/commits/${sha}/check-runs?per_page=100`, '--jq', '.check_runs']) ?? [];
-  const statuses = ghJson(['api', `repos/${repo}/commits/${sha}/status`, '--jq', '.statuses']) ?? [];
-  return [
-    ...runs.map((r) => ({ __typename: 'CheckRun', name: r.name, status: r.status, conclusion: r.conclusion, startedAt: r.started_at, detailsUrl: r.html_url })),
-    ...statuses.map((s) => ({ __typename: 'StatusContext', context: s.context, state: s.state, startedAt: s.updated_at, targetUrl: s.target_url }))
-  ];
+  return {
+    checkRuns: ghLines(`repos/${repo}/commits/${sha}/check-runs?per_page=100&filter=all`,
+      '.check_runs[] | {id, name, status, conclusion, startedAt: .started_at, completedAt: .completed_at, app: .app.slug, suiteId: .check_suite.id, url: .html_url} | tojson'),
+    workflowRuns: ghLines(`repos/${repo}/actions/runs?head_sha=${sha}&per_page=100`,
+      '.workflow_runs[] | {id, name, path, event, suiteId: .check_suite_id} | tojson'),
+    statuses: ghLines(`repos/${repo}/commits/${sha}/statuses?per_page=100`,
+      '.[] | {id, context, state, createdAt: .created_at, creator: .creator.login, url: .target_url} | tojson')
+  };
+}
+
+/** The GitHub account the scripts run as: the only account whose `agent-review` status counts. */
+export function currentLogin() {
+  const login = gh(['api', 'user', '--jq', '.login']).trim();
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(login)) throw new Error(`could not read the GitHub account gh runs as (got "${login}")`);
+  return login;
 }
 
 /** A file's text at a commit, through the API (no local checkout needed). */

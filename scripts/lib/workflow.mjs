@@ -6,6 +6,8 @@ export const CI_CHECKS = Object.freeze(['lint', 'test', 'e2e', 'release-content'
 /** Commit status set by scripts/agent-review.mjs after the agent review team has run. */
 export const AGENT_REVIEW_CONTEXT = 'agent-review';
 export const REQUIRED_CHECKS = Object.freeze([...CI_CHECKS, AGENT_REVIEW_CONTEXT]);
+/** Where the CI_CHECKS must come from: jobs of this workflow file, run by GitHub Actions. */
+export const CI_WORKFLOW = Object.freeze({ name: 'CI', path: '.github/workflows/ci.yml', app: 'github-actions' });
 
 export const BRANCH_PATTERN = /^(feat|fix|chore|docs)\/[a-z0-9][a-z0-9._-]*$|^(release|hotfix)\/\d+\.\d+\.\d+$/;
 export const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
@@ -85,7 +87,9 @@ export function reviewDecision(review, currentHeadSha) {
 
 /**
  * Normalizes `gh pr view --json statusCheckRollup` entries (CheckRun and StatusContext) into
- * { name, state } with state one of success, pending, failure, skipped, neutral.
+ * { name, state } with state one of success, pending, failure, skipped, neutral. For display in
+ * the review comment only: the merge and release gates use evaluateCommit, which also checks
+ * where each report comes from.
  */
 export function normalizeChecks(rollup) {
   const latest = new Map();
@@ -127,6 +131,115 @@ export function evaluateChecks(checks, required = REQUIRED_CHECKS) {
     if (!required.includes(check.name) && check.state === 'failure') problems.push(`check "${check.name}" failed`);
   }
   return { ok: problems.length === 0, problems };
+}
+
+// ---- The merge and release gate over one commit ------------------------------------------------
+
+const time = (value) => Date.parse(value ?? '') || 0;
+const sameLogin = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
+
+function checkRunState(run) {
+  if (String(run.status ?? '').toLowerCase() !== 'completed') return 'pending';
+  const conclusion = String(run.conclusion ?? '').toLowerCase();
+  return ['success', 'skipped', 'neutral'].includes(conclusion) ? conclusion : 'failure';
+}
+
+function statusState(status) {
+  const state = String(status.state ?? '').toLowerCase();
+  return state === 'success' || state === 'pending' ? state : 'failure';
+}
+
+/**
+ * The newest of several reports of one thing. For check runs (unfinishedFirst) an attempt that
+ * has not finished always wins, since a queued re-run has no start time yet.
+ */
+function newest(entries, startOf, { unfinishedFirst = false } = {}) {
+  const rank = (entry) => Number(unfinishedFirst && entry.state === 'pending');
+  return [...entries].sort((a, b) => (rank(b) - rank(a)) || (startOf(b) - startOf(a)) || ((b.id ?? 0) - (a.id ?? 0)))[0];
+}
+
+/**
+ * Decides whether the checks on one commit pass the merge or release gate.
+ *
+ * `commit` is what scripts/lib/gh.mjs commitChecks returns: every check run attempt
+ * ({ id, name, status, conclusion, startedAt, app, suiteId }), the workflow runs on the commit
+ * ({ name, path, event, suiteId }) and every commit status with who set it
+ * ({ id, context, state, createdAt, creator }).
+ *
+ * - The CI_CHECKS count only as check runs of CI_WORKFLOW (that file, GitHub Actions). Every CI
+ *   run on the commit must pass them; within one run the newest attempt counts. A report with
+ *   the same name from anywhere else refuses, so a duplicate-named job cannot stand in for or
+ *   mask the real one.
+ * - `agent-review` counts only as a commit status set by `reviewer` (the account the scripts run
+ *   as). A check run of that name, or the status set by any other account, refuses.
+ * - Any other required name must be green wherever it reports; any other failed check refuses.
+ *
+ * Returns { ok, problems, waiting }: `waiting` is true when the only problems are CI jobs that
+ * are still running or have not reported yet.
+ */
+export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer } = {}) {
+  const { checkRuns = [], workflowRuns = [], statuses = [] } = commit ?? {};
+  const ciSuites = new Set(workflowRuns
+    .filter((run) => run.name === CI_WORKFLOW.name && String(run.path ?? '').replace(/@.*$/, '') === CI_WORKFLOW.path)
+    .map((run) => run.suiteId));
+  const attempts = new Map();
+  for (const run of checkRuns) {
+    if (!run.name) continue;
+    const key = `${run.suiteId}\u0000${run.name}`;
+    attempts.set(key, [...(attempts.get(key) ?? []), { ...run, state: checkRunState(run) }]);
+  }
+  const runs = [...attempts.values()].map((list) => newest(list, (run) => time(run.startedAt ?? run.completedAt), { unfinishedFirst: true }))
+    .map((run) => ({ ...run, fromCi: run.app === CI_WORKFLOW.app && ciSuites.has(run.suiteId) }));
+  const reports = new Map();
+  for (const status of statuses) {
+    if (!status.context) continue;
+    const key = `${status.context}\u0000${String(status.creator ?? '').toLowerCase()}`;
+    reports.set(key, [...(reports.get(key) ?? []), { ...status, state: statusState(status) }]);
+  }
+  const latestStatuses = [...reports.values()].map((list) => newest(list, (status) => time(status.createdAt)));
+
+  const problems = [];
+  const block = (message) => problems.push({ message, waiting: false });
+  const wait = (message) => problems.push({ message, waiting: true });
+  const source = (run) => `${run.app ?? 'an unknown app'}${run.app === CI_WORKFLOW.app ? ` (check suite ${run.suiteId})` : ''}`;
+
+  for (const name of required) {
+    const named = runs.filter((run) => run.name === name);
+    const namedStatuses = latestStatuses.filter((status) => status.context === name);
+    if (name === AGENT_REVIEW_CONTEXT) {
+      for (const run of named) block(`a check run named "${name}" comes from ${source(run)}; only a commit status set by ${reviewer ?? 'the expected account'} counts`);
+      if (!reviewer) { block(`the account allowed to set "${name}" is unknown, so its status cannot be trusted`); continue; }
+      for (const status of namedStatuses.filter((s) => !sameLogin(s.creator, reviewer))) {
+        block(`"${name}" was also set by ${status.creator ?? 'an unknown account'}; only ${reviewer}'s status counts, so refusing`);
+      }
+      const own = namedStatuses.find((s) => sameLogin(s.creator, reviewer));
+      if (!own) block(`"${name}" has not been set on this commit by ${reviewer}; run the agent review`);
+      else if (own.state !== 'success') block(`"${name}" is ${own.state}`);
+      continue;
+    }
+    if (CI_CHECKS.includes(name)) {
+      for (const run of named.filter((r) => !r.fromCi)) block(`a check named "${name}" also comes from ${source(run)}, not the ${CI_WORKFLOW.name} workflow; refusing so it cannot stand in for the real job`);
+      for (const status of namedStatuses) block(`a commit status named "${name}" was set by ${status.creator ?? 'an unknown account'}; "${name}" must come from the ${CI_WORKFLOW.name} workflow`);
+      const fromCi = named.filter((r) => r.fromCi);
+      if (fromCi.length === 0) wait(`required check "${name}" has not reported from the ${CI_WORKFLOW.name} workflow on this commit`);
+      for (const run of fromCi) {
+        if (run.state === 'pending') wait(`required check "${name}" is still running`);
+        else if (run.state !== 'success') block(`required check "${name}" is ${run.state}`);
+      }
+      continue;
+    }
+    const all = [...named, ...namedStatuses];
+    if (all.length === 0) wait(`required check "${name}" has not reported on this commit`);
+    for (const entry of all) {
+      if (entry.state === 'pending') wait(`required check "${name}" is still running`);
+      else if (entry.state !== 'success') block(`required check "${name}" is ${entry.state}`);
+    }
+  }
+  for (const run of runs) if (!required.includes(run.name) && run.state === 'failure') block(`check "${run.name}" failed`);
+  for (const status of latestStatuses) if (!required.includes(status.context) && status.state === 'failure') block(`status "${status.context}" (set by ${status.creator ?? 'an unknown account'}) failed`);
+
+  const messages = [...new Set(problems.map((problem) => problem.message))];
+  return { ok: messages.length === 0, problems: messages, waiting: problems.length > 0 && problems.every((problem) => problem.waiting) };
 }
 
 /** The body of `## <version>` in CHANGELOG.md, without the heading, or undefined. */
