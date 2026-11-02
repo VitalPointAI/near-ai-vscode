@@ -456,7 +456,7 @@ export function diffImport(
 interface ImportState { treeHash: string; sourceCommit: string; milestone: string }
 const HASH_PATTERN = /^[0-9a-f]{40,64}$/;
 
-async function readImportState(storageDir: string): Promise<ImportState | undefined> {
+export async function readImportState(storageDir: string): Promise<ImportState | undefined> {
   let text: string;
   try {
     text = await fs.readFile(path.join(storageDir, IMPORT_STATE_FILE), 'utf8');

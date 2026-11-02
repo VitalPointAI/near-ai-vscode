@@ -113,7 +113,7 @@ test('Enable asks for team name, owner name and email with defaults, creates tea
     assert.equal(teamFile.name, 'Command team');
     assert.equal(p.handle.session()?.teamFile.teamId, teamFile.teamId, 'the session is running');
     assert.equal(stub.statusBarItems.length, 1);
-    assert.equal(stub.statusBarItems[0]?.text, 'Team: Command team');
+    assert.equal(stub.statusBarItems[0]?.text, '$(organization) Team: Command team');
     assert.equal(gitIn(p.root, ['log', '-1', '--format=%s']), 'chore(team): enable NEAR AI Team Mode');
     assert.equal(gitIn(p.root, ['show', '--name-only', '--format=', 'HEAD']), TEAM_FILE_REL);
 

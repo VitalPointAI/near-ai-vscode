@@ -59,6 +59,7 @@ async function startSession(rig: Rig, who: 'owner' | Participant, overrides: Par
     pollSeconds: () => 15, focused: () => focus.value, timers, nearBaseUrl: rig.fake.baseUrl, autoImport: false,
     ...rest
   });
+  await until(() => timers.live.length === 1, 'the first poll to be armed');
   const view = { get text(): string { return item?.text ?? ''; }, get tooltip(): string { return item?.tooltip ?? ''; }, get command(): string | undefined { return item?.command; } };
   return { session, lines, timers, focus, bar: view };
 }

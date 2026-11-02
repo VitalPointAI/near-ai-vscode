@@ -5,6 +5,7 @@
 // Only src/services/team may import vscode; the logic lives in src/team and src/domain/team.
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import * as vscode from 'vscode';
 import type { AuditEvent, AuditFilter } from '../../domain/approval';
 import { DEFAULT_BASE_URL } from '../../domain/config';
@@ -29,6 +30,9 @@ import { GitTransport } from '../../team/gitTransport';
 import { loadDeviceIdentity } from '../../team/identity';
 import { installDeliveredKey } from '../../team/keyDelivery';
 import type { DeviceIdentity } from '../../team/identity';
+import { importPlans as runImportPlans, importResultText, readImportState } from '../../team/importPlans';
+import type { ImportResult } from '../../team/importPlans';
+import { remoteBranchHead } from '../../team/integrationSource';
 import { handleOwnRemoval, readRemovedMarker, removedText } from '../../team/removedClient';
 import type { GitRunner } from '../../team/runGit';
 import { DEFAULT_POLL_SECONDS, SyncScheduler } from '../../team/syncScheduler';
@@ -54,6 +58,9 @@ export const USE_TEAM_KEY_ACTION = 'Use team key';
 const INSTALL_RETRY_MS = 5 * 60_000;
 const VERIFY_PROGRESS_TITLE = 'Verifying the team log';
 const AUDIT_FILE_PARTS = ['.planning', '.near-ai', 'audit.json'];
+// The integration branch is asked about at most this often (monotonic milliseconds), and only in an owner's or lead's window (D-03).
+const AUTO_IMPORT_INTERVAL_MS = 60_000;
+const ROADMAP_PARTS = ['.planning', 'ROADMAP.md'];
 
 export interface TeamOutput { appendLine(line: string): void; show(preserveFocus?: boolean): void }
 export interface TeamNotifier {
@@ -194,6 +201,13 @@ export class TeamSession {
   private removed = false;
   private personalKeyWarned = false;
   private installFailed: { event: string; retryAt: number } | undefined;
+  // Imports from the command and from the automatic check run one after another through this chain.
+  private importChain: Promise<unknown> = Promise.resolve();
+  private lastAutoCheckAt: number | undefined;
+  private lastCheckedHead: string | undefined;
+  private importAnnounced = false;
+  private lastStatus: TransportStatus | undefined;
+  private lastGoodAt: string | undefined;
 
   private constructor(deps: TeamSessionDeps, storage: string, identity: DeviceIdentity | undefined) {
     this.deps = deps;
@@ -320,6 +334,31 @@ export class TeamSession {
     return this.history.forItem(itemId);
   }
 
+  // Whether this window can write to the team log: it needs a device key that belongs to a member who has not been removed.
+  public canWrite(): boolean {
+    return this.signing && !this.removed && !this.disposed;
+  }
+
+  // The chip the board shows: the word, and for offline and paused the reason. lastUpdated is when a sync last read the log (display only, orders nothing).
+  public boardStatus(): { kind: 'live' | 'syncing' | 'offline' | 'paused' | 'removed'; text: string; lastUpdated?: string } {
+    const lastUpdated = this.lastGoodAt === undefined ? {} : { lastUpdated: this.lastGoodAt };
+    if (this.removed) return { kind: 'removed', text: 'Removed' };
+    const status = this.lastStatus;
+    if (status === undefined) return { kind: 'syncing', text: 'Syncing...', ...lastUpdated };
+    const reason = status.reason === undefined ? '' : `: ${safeReason(status.reason)}`;
+    if (status.state === 'ok') return { kind: 'live', text: 'Live', ...lastUpdated };
+    if (status.state === 'paused') return { kind: 'paused', text: `Paused${reason}`, ...lastUpdated };
+    return { kind: 'offline', text: `Offline${reason}`, ...lastUpdated };
+  }
+
+  // The one way to import the integration branch's plans (the command and the automatic check both come here). Runs are queued, so two never overlap:
+  // the later one starts after the earlier one finished and then finds nothing left to write.
+  public importPlans(options: { milestone?: string; mode: 'auto' | 'command' }): Promise<ImportResult> {
+    const run = this.importChain.then(() => this.runImport(options), () => this.runImport(options));
+    this.importChain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -356,6 +395,71 @@ export class TeamSession {
       this.announce('warn', `Team log checked, with problems: ${counts}.${extras}`);
     }
     return report;
+  }
+
+  private async runImport(options: { milestone?: string; mode: 'auto' | 'command' }): Promise<ImportResult> {
+    if (!this.signing) return { ok: false, message: READ_ONLY_TEXT, written: 0 };
+    if (this.removed || this.disposed) return { ok: false, message: removedText(displayText(this.teamFile.name)), written: 0 };
+    return runImportPlans({
+      log: this.log,
+      source: { projectRoot: this.deps.projectRoot, remote: this.teamFile.coordination.remote, branch: this.transport.state().team.policy.integrationBranch },
+      storageDir: this.storage, mode: options.mode, ...(options.milestone === undefined ? {} : { milestone: options.milestone }),
+      ...(this.deps.git === undefined ? {} : { git: this.deps.git })
+    });
+  }
+
+  private monotonicNow(): number {
+    if (this.deps.monotonicNow !== undefined) return this.deps.monotonicNow();
+    return this.deps.timers?.now() ?? performance.now();
+  }
+
+  private async hasRoadmapFile(): Promise<boolean> {
+    try {
+      return (await fs.stat(path.join(this.deps.projectRoot, ...ROADMAP_PARTS))).isFile();
+    } catch {
+      return false;
+    }
+  }
+
+  // D-03: an owner's or lead's window keeps the board in step with the integration branch. The role is checked before any git call, the roadmap file only
+  // says the project uses GSD, and the remote is asked at most once a minute. Returns true when the import wrote something. It never throws; a failure is
+  // written once to the output channel and shows no popup, and the notice that something was imported comes once per window.
+  private async checkIntegration(): Promise<boolean> {
+    if (this.deps.autoImport === false || !this.signing || this.disposed || this.removed) return false;
+    try {
+      const state = this.transport.state();
+      const id = this.memberId();
+      const me = id === undefined ? undefined : state.members.get(id);
+      if (me === undefined || me.removedEvent !== undefined || (me.role !== 'owner' && me.role !== 'lead')) return false;
+      if (!(await this.hasRoadmapFile())) return false;
+      const now = this.monotonicNow();
+      if (this.lastAutoCheckAt !== undefined && now >= this.lastAutoCheckAt && now - this.lastAutoCheckAt < AUTO_IMPORT_INTERVAL_MS) return false;
+      this.lastAutoCheckAt = now;
+      const head = await remoteBranchHead(this.deps.projectRoot, this.teamFile.coordination.remote, state.team.policy.integrationBranch, this.deps.git);
+      if (head === undefined) {
+        this.clearIssue('auto-import');
+        return false;
+      }
+      if (head === this.lastCheckedHead || head === (await readImportState(this.storage))?.sourceCommit) {
+        this.clearIssue('auto-import');
+        return false;
+      }
+      const result = await this.importPlans({ mode: 'auto' });
+      if (!result.ok) {
+        this.reportIssue('auto-import', `The roadmap on the integration branch was not imported: ${result.message}`);
+        return result.written > 0;
+      }
+      this.clearIssue('auto-import');
+      this.lastCheckedHead = head;
+      if (result.written > 0 && !this.importAnnounced) {
+        this.importAnnounced = true;
+        this.say('info', importResultText(result));
+      }
+      return result.written > 0;
+    } catch (error) {
+      this.reportIssue('auto-import', `The roadmap on the integration branch could not be checked: ${describeError(error)}`);
+      return false;
+    }
   }
 
   private entriesApplied(entries: readonly CommittedEvent[]): void {
@@ -432,6 +536,11 @@ export class TeamSession {
     const extras = await this.reactToMembers(trusted);
     if (trusted) this.countCards(extras);
     this.showStatus(status, extras);
+    if (trusted && (await this.checkIntegration())) {
+      // The import changed the board, so the count in the status bar follows it at once.
+      this.countCards(extras);
+      this.showStatus(status, extras);
+    }
     await this.mirror();
     return status.state === 'ok';
   }
@@ -459,6 +568,8 @@ export class TeamSession {
       this.showRemoved();
       return;
     }
+    this.lastStatus = status;
+    if (status.state === 'ok') this.lastGoodAt = new Date().toISOString();
     this.deps.statusBar.update(status, this.teamFile.name, extras);
     const key = `${status.state}:${status.reason ?? ''}`;
     if (key === this.lastStatusKey) return;
