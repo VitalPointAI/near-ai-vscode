@@ -20,9 +20,17 @@ export const JOIN_ACTION = 'Join Team';
 const OUTPUT_CHANNEL_NAME = 'NEAR AI Team';
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 const ENABLE_PROGRESS_TITLE = 'Enabling Team Mode';
+const IMPORT_PROGRESS_TITLE = 'Importing plans to the Team Board';
+const IMPORT_PICK_TITLE = 'Import plans to the Team Board';
+const IMPORT_PICK_PLACEHOLDER = 'Which milestone do you want to import?';
+const RECOMMENDED = 'Recommended';
+const TEAM_MODE_CONTEXT_KEY = 'nearAi.teamMode';
+const MILESTONE_ARGUMENT_MAX = 100;
 const EMAIL_PROMPT = 'Your email is stored only as a salted hash in the team log.';
 
 export type TeamModeState = 'solo' | 'team' | 'error';
+// What registerTeamMode keeps of the board, which is loaded only once a session runs (a solo project never loads it).
+interface BoardHandle { openPanel(): void; controller: { sessionChanged(): void } }
 export interface TeamModeHandle { ready: Promise<TeamModeState>; session(): TeamSession | undefined }
 // The extension passes nothing. Tests point the NEAR calls at a fake server and replace the browser sign-in.
 export interface TeamModeOptions { nearBaseUrl?: string; fetch?: FetchLike; signIn?: (teamId: string) => Promise<SessionTokens | undefined> }
@@ -105,6 +113,8 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   let channel: vscode.OutputChannel | undefined;
   let disposed = false;
   let projectRootForSlot: string | undefined;
+  let board: BoardHandle | undefined;
+  let contextKeySet = false;
 
   // Created on first use, so a solo project never gets one.
   const output = {
@@ -167,9 +177,37 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     }
   });
 
-  function startSession(projectRoot: string): Promise<TeamModeState> {
+  // Runs a context command without leaving a rejection behind: a failure goes to the channel.
+  function setContextKey(value: boolean): void {
+    Promise.resolve(vscode.commands.executeCommand('setContext', TEAM_MODE_CONTEXT_KEY, value)).catch((error: unknown) => {
+      output.appendLine(`The Team Board view could not be ${value ? 'shown' : 'hidden'}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
+  // Once a session runs, the board is loaded (once per extension lifetime), follows the session and the view is shown. Safe to call again after
+  // every start and restart. A failure here never stops the session: it is written to the channel and the next call tries again.
+  async function bringUpBoard(): Promise<void> {
+    if (disposed || slot.current() === undefined) return;
+    try {
+      if (board === undefined) {
+        const { registerTeamBoard } = await import('./boardView');
+        board ??= registerTeamBoard(context, { session: () => slot.current(), output });
+      }
+      board.controller.sessionChanged();
+      if (!contextKeySet) {
+        contextKeySet = true;
+        setContextKey(true);
+      }
+    } catch (error) {
+      output.appendLine(`The Team Board could not start: ${await describe(error)}`);
+    }
+  }
+
+  async function startSession(projectRoot: string): Promise<TeamModeState> {
     projectRootForSlot = projectRoot;
-    return slot.start();
+    const state = await slot.start();
+    if (state === 'team') await bringUpBoard();
+    return state;
   }
 
   async function detect(): Promise<TeamModeState> {
@@ -189,6 +227,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   async function restartSession(projectRoot: string): Promise<void> {
     projectRootForSlot = projectRoot;
     await slot.restart();
+    await bringUpBoard();
   }
 
   async function verifyLog(): Promise<void> {
@@ -282,11 +321,63 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     }
   }
 
+  // The team session of a command that needs one, started if this window has not started it yet. A solo project, or a session that did not start,
+  // is explained (or already reported) and gives undefined.
+  async function sessionForCommand(): Promise<TeamSession | undefined> {
+    const projectRoot = firstFolder();
+    if (projectRoot === undefined || !(await teamFileExists(projectRoot))) {
+      announce('info', SOLO_TEXT);
+      return undefined;
+    }
+    if (slot.current() === undefined) {
+      const state = await startSession(projectRoot);
+      if (state === 'solo') announce('info', SOLO_TEXT);
+    }
+    return slot.current();
+  }
+
+  async function openBoard(): Promise<void> {
+    if (await sessionForCommand() === undefined) return;
+    await bringUpBoard();
+    board?.openPanel();
+  }
+
+  // The milestone to import: the page's argument (always the current one), or from the Command Palette a pick when the roadmap has more than one.
+  // undefined means the current milestone; the symbol means the person dismissed the pick.
+  const DISMISSED = Symbol('dismissed');
+  async function chooseMilestone(running: TeamSession, projectRoot: string, argument: unknown): Promise<string | undefined | typeof DISMISSED> {
+    if (typeof argument === 'object' && argument !== null && typeof (argument as { milestone?: unknown }).milestone === 'string') {
+      const named = (argument as { milestone: string }).milestone;
+      return named === 'current' || named.length === 0 || named.length > MILESTONE_ARGUMENT_MAX ? undefined : named;
+    }
+    const { listImportableMilestones } = await import('../../team/importPlans');
+    const milestones = await listImportableMilestones({ projectRoot, remote: running.teamFile.coordination.remote, branch: running.state().team.policy.integrationBranch });
+    if (milestones.length < 2) return undefined;
+    const items = milestones.map((milestone) => ({ label: milestone.title, ...(milestone.current ? { description: RECOMMENDED } : {}), key: milestone.key, current: milestone.current }));
+    const picked = await vscode.window.showQuickPick(items, { title: IMPORT_PICK_TITLE, placeHolder: IMPORT_PICK_PLACEHOLDER, ignoreFocusOut: true });
+    if (picked === undefined) return DISMISSED;
+    return picked.current ? undefined : picked.key;
+  }
+
+  async function importPlansCommand(argument?: unknown): Promise<void> {
+    const running = await sessionForCommand();
+    const projectRoot = firstFolder();
+    if (running === undefined || projectRoot === undefined) return;
+    const milestone = await chooseMilestone(running, projectRoot, argument);
+    if (milestone === DISMISSED) return;
+    const { importResultText } = await import('../../team/importPlans');
+    const result = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: IMPORT_PROGRESS_TITLE, cancellable: false },
+      () => running.importPlans({ mode: 'command', ...(milestone === undefined ? {} : { milestone }) })
+    );
+    report(result.ok ? 'info' : 'error', importResultText(result));
+  }
+
   // A command never leaves a rejected promise behind: the failure is written to the channel and shown.
-  function guarded(title: string, handler: () => Promise<void>): () => Promise<void> {
-    return async (): Promise<void> => {
+  function guarded(title: string, handler: (...args: unknown[]) => Promise<void>): (...args: unknown[]) => Promise<void> {
+    return async (...args: unknown[]): Promise<void> => {
       try {
-        await handler();
+        await handler(...args);
       } catch (error) {
         report('error', `${title} did not finish: ${await describe(error)}`);
       }
@@ -296,13 +387,15 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   context.subscriptions.push(
     vscode.commands.registerCommand(ENABLE_COMMAND, guarded('Enable Team Mode', enable)),
     vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Verify Team Log', verifyLog)),
+    vscode.commands.registerCommand(OPEN_BOARD_COMMAND, guarded('Open Team Board', openBoard)),
+    vscode.commands.registerCommand(IMPORT_PLANS_COMMAND, guarded('Import Plans to Team Board', importPlansCommand)),
     ...registerMemberCommands({
       context, output, report, announce, soloText: SOLO_TEXT, firstFolder, session: () => slot.current(), startSession, restartSession,
       ...(options.nearBaseUrl === undefined ? {} : { nearBaseUrl: options.nearBaseUrl }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.signIn === undefined ? {} : { signIn: options.signIn })
     }),
-    { dispose: (): void => { disposed = true; slot.clear(); } }
+    { dispose: (): void => { disposed = true; slot.clear(); if (contextKeySet) setContextKey(false); } }
   );
 
   const ready = detect().catch(async (error: unknown): Promise<TeamModeState> => {

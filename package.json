@@ -243,6 +243,18 @@
         "title": "Sign Out of NEAR (Team)",
         "category": "NEAR AI",
         "icon": "$(sign-out)"
+      },
+      {
+        "command": "nearAi.team.openBoard",
+        "title": "Open Team Board",
+        "category": "NEAR AI",
+        "icon": "$(project)"
+      },
+      {
+        "command": "nearAi.team.importPlans",
+        "title": "Import Plans to Team Board",
+        "category": "NEAR AI",
+        "icon": "$(sync)"
       }
     ],
     "viewsContainers": {
@@ -261,6 +273,12 @@
           "id": "nearAiChatView",
           "name": "Chat",
           "visibility": "visible"
+        },
+        {
+          "type": "webview",
+          "id": "nearAiTeamBoardView",
+          "name": "Team Board",
+          "when": "nearAi.teamMode"
         }
       ]
     },

@@ -725,7 +725,7 @@ test('team project: the board comes up once the session starts, Open Team Board 
       assert.equal(stub.webviewPanels[0]?.revealCalls, 1);
       assert.equal(stub.viewProviders.length, 1, 'still one provider');
       assert.equal(setContexts().length, 1, 'the key was not set again');
-      assert.equal(stub.notifications.length, 0, 'no message appeared');
+      assert.deepEqual(stub.notifications.filter((entry) => /solo|Team Mode is not on/.test(entry.message)), [], 'no solo explanation appeared');
 
       // The panel shows this window's session: ready, then the model.
       await stub.webviewPanels[0]?.receive({ type: 'ready' });
@@ -780,7 +780,7 @@ test('Import Plans to Team Board: a palette run with two milestones asks first w
   });
 });
 
-test('Import Plans to Team Board by a developer or a window that cannot write reports the reason and changes nothing', async () => {
+test('Import Plans to Team Board by a developer reports the reason in plain words and changes nothing', async () => {
   resetStub();
   await withLiveTeam(async (rig) => {
     stub.setWorkspaceFolders([rootOf(rig, 'b')]);
@@ -793,8 +793,9 @@ test('Import Plans to Team Board by a developer or a window that cannot write re
       await stub.commands.get(commandsModule.IMPORT_PLANS_COMMAND)?.({ milestone: 'current' });
       const last = stub.notifications[stub.notifications.length - 1];
       assert.ok(last !== undefined);
-      assert.ok(last.message === 'The Team Board is already up to date.' || last.message.startsWith('The import did not finish:'), last.message);
-      assert.equal(remoteEventCount(rig) >= before, true);
+      assert.equal(last.level, 'error');
+      assert.equal(last.message, 'The import did not finish: not permitted: only the team owner and leads can import plans. Nothing was changed.');
+      assert.equal(remoteEventCount(rig), before, 'nothing was written');
     } finally {
       for (const subscription of context.subscriptions) subscription.dispose();
     }
