@@ -18,6 +18,7 @@ import { scrubNearText } from './nearOrg';
 import type { NearOrgClient } from './nearOrg';
 import { NearSessionError } from './nearSession';
 import { redactGitMessage } from './runGit';
+import { NearPinError, checkNearPin } from './teamFile';
 import type { AppendResult } from './transport';
 
 export const KEY_STILL_SPENDS_WARNING = "<name>'s NEAR key could not be capped and can still spend. Retry from Manage Team Members, or set its limit to 0 in the NEAR console now.";
@@ -42,6 +43,10 @@ const SIGN_IN_TEXT = 'Sign in to NEAR to finish this step.';
 const CAP_FIRST_TEXT = 'Set the limit to 0 first.';
 const OTHER_COMMAND_TEXT = 'Retry this step from NEAR AI: Manage Team Members.';
 const NO_LINK_TEXT = 'This team has no NEAR organization link, so do this step in the NEAR console.';
+// CR-01: NEAR not listing a key in the linked workspace never proves the key is gone, because the workspace id comes from team.json.
+const KEY_NOT_FOUND_CAP_TEXT = 'NEAR did not find this key in the linked workspace, so it may still be able to spend. Find it in the NEAR console and set its limit to 0.';
+const KEY_NOT_FOUND_REVOKE_TEXT = 'NEAR did not find this key in the linked workspace, so it was not revoked here. Find it in the NEAR console and revoke it.';
+const NO_LINK_KEY_TEXT = 'This computer has no NEAR organization link for this team, so the key was not capped. Find it in the NEAR console and set its limit to 0.';
 
 const errorText = (error: unknown): string => scrubNearText(error instanceof Error ? error.message : String(error));
 
@@ -63,24 +68,38 @@ function deliveredKeys(member: Member): string[] {
 
 const isLead = (member: Member): boolean => member.role === 'lead' || member.pendingRole === 'lead';
 
+// ---- which NEAR link the steps use (CR-01) ----------------------------------------------------------------------------------------------
+
+// The link in team.json, checked against the one this computer pinned (teamFile.checkNearPin). A mismatch is a reason, and no NEAR call
+// is made with either link: the lead is told to check with the team and to finish the step in the NEAR console.
+type LinkCheck = { ok: true; near: NearLink | undefined } | { ok: false; text: string };
+
+async function trustedLink(teamFile: TeamFile, checklist: CleanupChecklist): Promise<LinkCheck> {
+  try {
+    return { ok: true, near: await checkNearPin(checklist.storageDir, teamFile) };
+  } catch (error) {
+    if (error instanceof NearPinError) return { ok: false, text: error.message };
+    return { ok: false, text: `The saved NEAR link for this team could not be checked, so no NEAR key was changed: ${errorText(error)}` };
+  }
+}
+
 // ---- the NEAR steps ---------------------------------------------------------------------------------------------------------------------
 
-// Step 1. A key NEAR no longer lists is already gone, which is as good as capped.
+// Step 1. The limit is set straight away: a key NEAR does not have in the linked workspace is a manual item, never done (CR-01).
 async function capKey(org: NearOrgClient, near: NearLink, keyId: string): Promise<StepState> {
   try {
-    const key = await org.findKey(near.workspaceId, keyId);
-    if (key !== undefined) await org.setSpendLimit(near.workspaceId, keyId, 0);
-    return DONE;
+    const answer = await org.setSpendLimit(near.workspaceId, keyId, 0);
+    return answer === 'missing' ? { status: 'manual', text: KEY_NOT_FOUND_CAP_TEXT } : DONE;
   } catch (error) {
     return problem(error);
   }
 }
 
-// Step 3. Only called for a key whose cap is done. NEAR answering "no such key" is a key that is already gone, which is done.
+// Step 3. Only called for a key whose cap is done. NEAR answering "no such key" is a manual item, never done (CR-01).
 async function revokeKey(org: NearOrgClient, near: NearLink, keyId: string): Promise<StepState> {
   try {
-    await org.revokeKey(near.workspaceId, keyId);
-    return DONE;
+    const answer = await org.revokeKey(near.workspaceId, keyId);
+    return answer === 'missing' ? { status: 'manual', text: KEY_NOT_FOUND_REVOKE_TEXT } : DONE;
   } catch (error) {
     return problem(error);
   }
@@ -197,9 +216,13 @@ export async function removeMember(input: RemoveInput): Promise<RemoveResult> {
 interface KeyStep { keyId: string; cap: StepState; revoke: StepState }
 
 async function removeJoinedMember(input: RemoveInput, member: Member): Promise<RemoveResult> {
-  const near = input.teamFile.near;
-  const steps: KeyStep[] = (near === undefined ? [] : deliveredKeys(member)).map((keyId) => ({
-    keyId, cap: { status: 'pending', text: SIGN_IN_TEXT }, revoke: { status: 'pending', text: CAP_FIRST_TEXT }
+  const link = await trustedLink(input.teamFile, input.checklist);
+  const near = link.ok ? link.near : undefined;
+  // A key the log says was delivered is always a step, even when this computer has no link it trusts for it: then the step is manual and the
+  // lead is warned the key can still spend, instead of the key being left out of the message.
+  const unusable: StepState | undefined = !link.ok ? { status: 'manual', text: link.text } : near === undefined ? { status: 'manual', text: NO_LINK_KEY_TEXT } : undefined;
+  const steps: KeyStep[] = deliveredKeys(member).map((keyId) => ({
+    keyId, cap: unusable ?? { status: 'pending', text: SIGN_IN_TEXT }, revoke: { status: 'pending', text: CAP_FIRST_TEXT }
   }));
 
   // Step 1: cap every key at 0.
@@ -226,9 +249,10 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
   }
 
   // Step 4: a lead (by role, or invited as lead and waiting for confirmation) also leaves the NEAR organization.
-  const leaves = near !== undefined && isLead(member);
+  const leaves = (near !== undefined || !link.ok) && isLead(member);
   let organization: StepState = DONE;
-  if (near !== undefined && leaves) {
+  if (!link.ok && leaves) organization = { status: 'manual', text: `${link.text} ${manualOrganizationText(member.name)}` };
+  else if (near !== undefined && leaves) {
     organization = input.org === undefined ? { status: 'pending', text: SIGN_IN_TEXT } : await leaveOrganization(input.org, near, input.teamFile.teamId, member);
   }
 
@@ -242,9 +266,11 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
   const keyStillSpends = steps.some((step) => step.cap.status !== 'done');
   const plural = steps.length !== 1;
   const keyWords = plural ? `Their ${steps.length} NEAR keys` : 'Their NEAR key';
+  // Why a cap could not be done here, once each (a pin mismatch or a key NEAR did not find).
+  const capReasons = [...new Set(steps.flatMap((step) => (step.cap.status === 'manual' ? [step.cap.text] : [])))];
   let keyNote: string | undefined;
   if (steps.length > 0) {
-    if (keyStillSpends) keyNote = keyStillSpendsWarning(member.name);
+    if (keyStillSpends) keyNote = sentence([keyStillSpendsWarning(member.name), ...capReasons]);
     else if (steps.some((step) => step.revoke.status !== 'done')) keyNote = `${keyWords} ${plural ? 'are' : 'is'} capped at 0 but could not be revoked yet. ${plural ? 'They are' : 'It is'} on your cleanup list.`;
     else keyNote = `${keyWords} ${plural ? 'are' : 'is'} capped at 0 and revoked.`;
   }
@@ -258,7 +284,8 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
 }
 
 async function cancelInvitationFor(input: RemoveInput, member: Member): Promise<RemoveResult> {
-  const near = input.teamFile.near;
+  const link = await trustedLink(input.teamFile, input.checklist);
+  const near = link.ok ? link.near : undefined;
   // An invitation that never reached NEAR (its send is still on the list) has nothing to cancel there.
   let neverSent: CleanupItem[] = [];
   let notice: string | undefined;
@@ -272,7 +299,8 @@ async function cancelInvitationFor(input: RemoveInput, member: Member): Promise<
   if (!appended.ok) return { ok: false, ...appendFailure(appended) };
 
   let nearState: StepState = DONE;
-  if (near !== undefined && isLead(member) && neverSent.length === 0) {
+  if (!link.ok && isLead(member) && neverSent.length === 0) nearState = { status: 'manual', text: `${link.text} ${noInvitationText(member.name)}` };
+  else if (near !== undefined && isLead(member) && neverSent.length === 0) {
     nearState = input.org === undefined ? { status: 'pending', text: SIGN_IN_TEXT } : await cancelNearInvitation(input.org, near, input.teamFile.teamId, member);
   }
   for (const item of neverSent) {
@@ -309,7 +337,6 @@ async function leaveWithText(checklist: CleanupChecklist, item: CleanupItem, tex
 export async function retryCleanupItem(input: RetryInput): Promise<CleanupItem> {
   const stored = (await input.checklist.list()).find((candidate) => candidate.id === input.item.id) ?? input.item;
   if (stored.status === 'done') return stored;
-  const near = input.teamFile.near;
   switch (stored.step) {
     case 'repo-access':
       return stored;
@@ -317,6 +344,14 @@ export async function retryCleanupItem(input: RetryInput): Promise<CleanupItem> 
     case 'deliver-key':
     case 'rotate-key':
       return leaveWithText(input.checklist, stored, OTHER_COMMAND_TEXT);
+    default:
+      break;
+  }
+  // Every step below calls NEAR, so only with a link this computer trusts (CR-01).
+  const link = await trustedLink(input.teamFile, input.checklist);
+  if (!link.ok) return leaveWithText(input.checklist, stored, link.text, 'manual');
+  const near = link.near;
+  switch (stored.step) {
     case 'zero-limit': {
       if (near === undefined || stored.keyId === undefined) return leaveWithText(input.checklist, stored, NO_LINK_TEXT, 'manual');
       if (input.org === undefined) return leaveWithText(input.checklist, stored, SIGN_IN_TEXT, 'pending');

@@ -10,8 +10,8 @@ import { SecretLeakError } from '../domain/team/secrets';
 import type { TeamFile } from '../domain/team/types';
 import { newTeamId } from '../team/identity';
 import {
-  COORDINATION_REF_PATTERN, REMOTE_NAME_PATTERN, TEAM_FILE_REL, TeamFileError, TrustPinError, canonicalTeamFile, checkTrustPin, parseTeamFile, readTeamFile,
-  serialiseTeamFile, teamFilePath, teamStorageDir, writeTeamFile
+  COORDINATION_REF_PATTERN, NearPinError, REMOTE_NAME_PATTERN, TEAM_FILE_REL, TeamFileError, TrustPinError, canonicalTeamFile, checkNearPin, checkTrustPin,
+  parseTeamFile, pinNearLink, readTeamFile, serialiseTeamFile, teamFilePath, teamStorageDir, writeTeamFile
 } from '../team/teamFile';
 import { createOwner, testGenesis } from './helpers/teamHarness';
 
@@ -283,6 +283,37 @@ test('a corrupt trust record fails closed and concurrent first sights agree', as
     await assert.rejects(() => checkTrustPin(dir, file), TrustPinError);
     await fs.writeFile(path.join(dir, 'trust.json'), JSON.stringify({ version: 9 }), 'utf8');
     await assert.rejects(() => checkTrustPin(dir, file), TrustPinError);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('CR-01: the NEAR link pin is taken on first sight of a linked team.json and refuses a changed or dropped link afterwards', async () => {
+  const dir = await workDir();
+  try {
+    const unlinked = await validFile();
+    assert.equal(await checkNearPin(dir, unlinked), undefined, 'an unlinked team has nothing to pin');
+    await assert.rejects(() => fs.stat(path.join(dir, 'near-pin.json')), { code: 'ENOENT' });
+
+    const file = { ...unlinked, near: { organizationId: 'org_123', workspaceId: 'ws:456' } };
+    assert.deepEqual(await checkNearPin(dir, file), file.near);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(dir, 'near-pin.json'), 'utf8')), { version: 1, teamId: file.teamId, organizationId: 'org_123', workspaceId: 'ws:456' });
+    assert.deepEqual(await checkNearPin(dir, { ...file, name: 'Renamed' }), file.near);
+
+    const otherWorkspace = { ...file, near: { organizationId: 'org_123', workspaceId: 'ws-decoy' } };
+    await assert.rejects(() => checkNearPin(dir, otherWorkspace), (error: unknown) => error instanceof NearPinError && error instanceof TrustPinError && /different NEAR organization or workspace/.test(error.message));
+    await assert.rejects(() => checkNearPin(dir, { ...file, near: { organizationId: 'org-other', workspaceId: 'ws:456' } }), NearPinError);
+    await assert.rejects(() => checkNearPin(dir, unlinked), (error: unknown) => error instanceof NearPinError && /no longer names/.test(error.message), 'dropping the link is refused too');
+    await assert.rejects(() => checkNearPin(dir, { ...file, teamId: newTeamId() }), NearPinError);
+    assert.deepEqual(await checkNearPin(dir, file), file.near, 'refused attempts leave the pin as it was');
+
+    // Only an explicit link by a lead moves the pin.
+    await pinNearLink(dir, file.teamId, otherWorkspace.near);
+    assert.deepEqual(await checkNearPin(dir, otherWorkspace), otherWorkspace.near);
+    await assert.rejects(() => checkNearPin(dir, file), NearPinError);
+
+    await fs.writeFile(path.join(dir, 'near-pin.json'), '{broken', 'utf8');
+    await assert.rejects(() => checkNearPin(dir, file), NearPinError, 'a damaged pin fails closed');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

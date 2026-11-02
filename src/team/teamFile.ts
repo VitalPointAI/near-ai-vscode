@@ -238,3 +238,80 @@ export async function checkTrustPin(storageDir: string, file: TeamFile): Promise
     return 'match';
   });
 }
+
+// ---- the NEAR link pin (CR-01) --------------------------------------------------------------------------------------------------------
+//
+// team.json `near` decides which NEAR organization and workspace a lead's client caps, revokes and creates keys in, and which one a member's
+// client expects a delivered key to belong to. Any committer can edit it, so the first link this computer trusts (when it links, joins, or
+// first reads a linked team.json) is pinned next to trust.json, and every later NEAR key step checks the file against that pin. The pin holds
+// two ids, nothing secret. Only the lead's own Link command, where the organization and workspace are picked from NEAR's lists, changes it.
+
+const NEAR_PIN_FILE = 'near-pin.json';
+
+interface NearPin { version: 1; teamId: string; organizationId: string; workspaceId: string }
+
+export const NEAR_PIN_MISMATCH = "This project's team.json names a different NEAR organization or workspace than this computer linked before, so no NEAR key was changed there. Check with your team which link is right; a lead can confirm it with \"NEAR AI: Link Team to NEAR Organization\".";
+const NEAR_PIN_GONE = "This project's team.json no longer names the NEAR organization this computer linked before, so no NEAR key was changed. Check with your team why the link was removed; a lead can link it again with \"NEAR AI: Link Team to NEAR Organization\".";
+const NEAR_PIN_DAMAGED = 'The saved NEAR link for this team cannot be read, so no NEAR key was changed. A lead can link the team again with "NEAR AI: Link Team to NEAR Organization".';
+
+/** A team.json `near` that does not match the link this computer pinned. Also a TrustPinError, so every pin catch handles it. */
+export class NearPinError extends TrustPinError {
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'NearPinError';
+  }
+}
+
+function parseNearPin(text: string): NearPin {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new NearPinError(NEAR_PIN_DAMAGED, { cause: error });
+  }
+  if (!isRecord(parsed) || parsed.version !== TRUST_VERSION || typeof parsed.teamId !== 'string' || typeof parsed.organizationId !== 'string' || typeof parsed.workspaceId !== 'string') {
+    throw new NearPinError(NEAR_PIN_DAMAGED);
+  }
+  return { version: 1, teamId: parsed.teamId, organizationId: parsed.organizationId, workspaceId: parsed.workspaceId };
+}
+
+async function readNearPin(pinFile: string): Promise<NearPin | undefined> {
+  try {
+    return parseNearPin(await fs.readFile(pinFile, 'utf8'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+async function writeNearPin(pinFile: string, teamId: string, near: NearLink): Promise<void> {
+  const pin: NearPin = { version: 1, teamId, organizationId: near.organizationId, workspaceId: near.workspaceId };
+  await writeFileAtomic(pinFile, `${JSON.stringify(pin, null, 2)}\n`);
+}
+
+/**
+ * The NEAR link to use for this team's keys: team.json `near`, but only when it matches the link this computer pinned. The first linked
+ * team.json seen is pinned (trust on first use). A file without `near` and no pin is an unlinked team (undefined). A file that names a
+ * different link, or drops a pinned one, throws NearPinError, and the caller must not call NEAR for keys.
+ */
+export async function checkNearPin(storageDir: string, file: TeamFile): Promise<NearLink | undefined> {
+  const pinFile = path.resolve(storageDir, NEAR_PIN_FILE);
+  return runSerialised<NearLink | undefined>(pinFile, async () => {
+    const pinned = await readNearPin(pinFile);
+    if (pinned === undefined) {
+      if (file.near === undefined) return undefined;
+      await writeNearPin(pinFile, file.teamId, file.near);
+      return { organizationId: file.near.organizationId, workspaceId: file.near.workspaceId };
+    }
+    if (pinned.teamId !== file.teamId) throw new NearPinError(NEAR_PIN_MISMATCH);
+    if (file.near === undefined) throw new NearPinError(NEAR_PIN_GONE);
+    if (pinned.organizationId !== file.near.organizationId || pinned.workspaceId !== file.near.workspaceId) throw new NearPinError(NEAR_PIN_MISMATCH);
+    return { organizationId: pinned.organizationId, workspaceId: pinned.workspaceId };
+  });
+}
+
+/** Records the link a lead just chose from NEAR's lists with the Link command, replacing any earlier pin. */
+export async function pinNearLink(storageDir: string, teamId: string, near: NearLink): Promise<void> {
+  const pinFile = path.resolve(storageDir, NEAR_PIN_FILE);
+  await runSerialised(pinFile, () => writeNearPin(pinFile, teamId, near));
+}

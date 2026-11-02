@@ -32,7 +32,7 @@ import { DEFAULT_POLL_SECONDS, SyncScheduler } from '../../team/syncScheduler';
 import type { SchedulerTimers } from '../../team/syncScheduler';
 import { NearSession } from '../../team/nearSession';
 import { readInstalledKey, teamProfileId } from '../../team/teamKeyProfile';
-import { checkTrustPin, runSerialised, teamStorageDir, writeFileAtomic } from '../../team/teamFile';
+import { checkNearPin, checkTrustPin, runSerialised, teamStorageDir, writeFileAtomic } from '../../team/teamFile';
 import type { TransportStatus } from '../../team/transport';
 import { PAUSED_REFUSED_TEXT, createTeamStatusBar, displayText, safeReason, statusText } from './teamStatusBar';
 import type { TeamStatusBar, TeamStatusExtras } from './teamStatusBar';
@@ -218,6 +218,14 @@ export class TeamSession {
       return stopped;
     }
     await checkTrustPin(storage, deps.teamFile);
+    // CR-01: the first linked team.json this computer reads is pinned for NEAR key steps. A different link does not stop the session (the log
+    // and the Link command still work); every key step refuses it and says why, and the reason is written here once.
+    let nearPinProblem: string | undefined;
+    try {
+      await checkNearPin(storage, deps.teamFile);
+    } catch (error) {
+      nearPinProblem = describeError(error);
+    }
     let identity: DeviceIdentity | undefined;
     let identityProblem: string | undefined;
     try {
@@ -226,6 +234,7 @@ export class TeamSession {
       identityProblem = `The device key for this team could not be read, so this computer runs read-only: ${describeError(error)}`;
     }
     const session = new TeamSession(deps, storage, identity);
+    if (nearPinProblem !== undefined) session.line(nearPinProblem);
     if (identityProblem !== undefined) session.line(identityProblem);
     else if (identity === undefined) session.line(READ_ONLY_TEXT);
     // The scheduler runs the first sync as soon as it starts, so start waits for that run instead of syncing twice.

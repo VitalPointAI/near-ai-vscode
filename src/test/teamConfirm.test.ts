@@ -25,7 +25,7 @@ import { confirmMember, deliverMemberKey, installDeliveredKey, rotateMemberKey, 
 import { NearOrgClient } from '../team/nearOrg';
 import type { CreatedNearKey, NearAuth, NearOrgClientOptions } from '../team/nearOrg';
 import { NearSessionError } from '../team/nearSession';
-import { canonicalTeamFile, teamStorageDir } from '../team/teamFile';
+import { canonicalTeamFile, checkNearPin, teamStorageDir } from '../team/teamFile';
 import { readInstalledKey, teamProfileId } from '../team/teamKeyProfile';
 import { startFakeNear } from './helpers/fakeNear';
 import type { FakeNear } from './helpers/fakeNear';
@@ -268,6 +268,33 @@ test('tracer: the owner confirms a developer, the key is created with the alloca
     await fs.mkdir(world.first.globalStorageDir, { recursive: true });
     await fs.writeFile(path.join(world.first.globalStorageDir, 'leak.txt'), stored?.secret ?? '', 'utf8');
     await assert.rejects(assertKeyNowhere(world, stored?.secret ?? ''), /the key is not in/);
+  });
+});
+
+// CR-01: a team.json whose NEAR link differs from the one this computer pinned must not decide where a key is made or which organization and
+// workspace a delivered key has to belong to.
+test('CR-01: a key is never created in, or installed from, a NEAR link that differs from the one this computer pinned', async () => {
+  await inWorld(['a', 'b'], {}, async (world) => {
+    world.fake.addWorkspace({ id: 'ws-2', organizationId: 'org-1', name: 'Decoy workspace' });
+    assert.deepEqual(await checkNearPin(world.checklist.storageDir, world.teamFile), NEAR_LINK);
+    const forged: TeamFile = { ...world.teamFile, near: { organizationId: 'org-1', workspaceId: 'ws-2' } };
+    const before = world.fake.requests.length;
+    const result = await confirmMember({ log: world.a.log, teamFile: forged, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(result.key, 'queued');
+    assert.match(result.message, /different NEAR organization or workspace/);
+    assert.equal(world.fake.requests.slice(before).some((request) => request.path.includes('/api-keys')), false, 'no key was made anywhere');
+
+    // With the pinned link the key is delivered; the member's computer pinned the real link too, and refuses a forged one when installing.
+    const sent = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+    assert.equal(sent.ok, true, sent.ok ? '' : sent.message);
+    await world.first.client.log.sync();
+    assert.deepEqual(await checkNearPin(teamStorageDir(world.first.globalStorageDir, world.teamId), world.teamFile), NEAR_LINK);
+    const refused = await installDeliveredKey({ ...installFor(world, world.first), teamFile: forged });
+    assert.equal(refused.status, 'failed');
+    if (refused.status === 'failed') assert.match(refused.message, /different NEAR organization or workspace/);
+    assert.equal((await activeKeyOf(world, world.first)).key, undefined, 'nothing was installed');
   });
 });
 
@@ -662,8 +689,10 @@ test('an old key NEAR no longer has gives the new key a cap of 0 and a manual no
     if (!rotated.ok) return;
     assert.equal(world.fake.key(rotated.keyId)?.spendLimitNanoUsd, 0);
     const items = await world.checklist.list();
-    assert.deepEqual(items.map((item) => [item.step, item.status, item.keyId]), [['rotate-key', 'manual', oldKeyId]]);
-    assert.ok((items[0]?.lastError ?? '').length > 0, 'the note says what to check');
+    // CR-01: the old key NEAR does not list is also a manual revoke item for the NEAR console, never counted as revoked.
+    assert.deepEqual(items.map((item) => [item.step, item.status, item.keyId]), [['revoke-key', 'manual', oldKeyId], ['rotate-key', 'manual', oldKeyId]]);
+    assert.match(items[0]?.lastError ?? '', /NEAR console/);
+    assert.ok((items[1]?.lastError ?? '').length > 0, 'the note says what to check');
     assert.match(rotated.notice ?? '', /limit of 0/);
     assert.equal(memberOf(world).nearApiKeyId, rotated.keyId);
   });

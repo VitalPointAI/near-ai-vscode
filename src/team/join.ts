@@ -25,7 +25,7 @@ import type { NearAuth, NearInvitation } from './nearOrg';
 import { saveNearSession } from './nearSession';
 import { redactGitMessage } from './runGit';
 import type { GitRunner } from './runGit';
-import { TeamFileError, TrustPinError, checkTrustPin, readTeamFile, teamStorageDir } from './teamFile';
+import { TeamFileError, TrustPinError, checkNearPin, checkTrustPin, readTeamFile, teamStorageDir } from './teamFile';
 import { installTeamKey } from './teamKeyProfile';
 
 export const NO_ORG_NOTICE = 'No NEAR organization linked: spend is not capped at the provider.';
@@ -297,6 +297,8 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
   try {
     storageDir = teamStorageDir(input.globalStorageDir, teamId);
     await checkTrustPin(storageDir, teamFile);
+    // CR-01: the NEAR link this computer joins under is the one a delivered key must belong to later; a NearPinError is a TrustPinError.
+    await checkNearPin(storageDir, teamFile);
   } catch (error) {
     if (error instanceof TrustPinError || error instanceof TeamFileError) return fail('team-file', error.message);
     throw error;

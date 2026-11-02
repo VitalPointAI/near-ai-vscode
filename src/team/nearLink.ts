@@ -8,7 +8,7 @@ import { commitTeamFileOnly } from './enable';
 import type { NearOrgClient, NearOrganization, NearWorkspace } from './nearOrg';
 import { runGit } from './runGit';
 import type { GitRunner } from './runGit';
-import { TEAM_FILE_REL, TeamFileError, TrustPinError, checkTrustPin, readTeamFile, teamStorageDir, writeTeamFile } from './teamFile';
+import { TEAM_FILE_REL, TeamFileError, TrustPinError, checkTrustPin, pinNearLink, readTeamFile, teamStorageDir, writeTeamFile } from './teamFile';
 
 const LOCAL_TIMEOUT_MS = 30_000;
 
@@ -50,7 +50,17 @@ export async function linkNearOrganization(input: { projectRoot: string; globalS
   }
   if (existing === undefined) return fail('team-file', `This project has no ${TEAM_FILE_REL}, so there is no team to link. Nothing was changed.`);
   if (existing.teamId !== input.teamId) return fail('team-file', `${TEAM_FILE_REL} names a different team than the one you chose to link. Nothing was changed.`);
-  if (sameLink(existing.near, input.near)) return { ok: true, status: 'unchanged', teamFile: existing };
+  if (sameLink(existing.near, input.near)) {
+    // CR-01: the lead picked this organization and workspace from NEAR's own lists, so this computer now trusts it for key steps.
+    try {
+      await checkTrustPin(teamStorageDir(input.globalStorageDir, existing.teamId), existing);
+      await pinNearLink(teamStorageDir(input.globalStorageDir, existing.teamId), existing.teamId, input.near);
+    } catch (error) {
+      if (error instanceof TeamFileError || error instanceof TrustPinError) return fail('team-file', `${error.message} Nothing was changed.`);
+      throw error;
+    }
+    return { ok: true, status: 'unchanged', teamFile: existing };
+  }
   if (existing.near !== undefined && input.replace !== true) {
     return fail('different-link', 'This team is already linked to a different NEAR organization or workspace. Nothing was changed. Replace the link only if your team agrees.');
   }
@@ -60,6 +70,8 @@ export async function linkNearOrganization(input: { projectRoot: string; globalS
     // The pin is checked before the file changes, so a file that names a different team or owner key is never overwritten.
     await checkTrustPin(teamStorageDir(input.globalStorageDir, existing.teamId), linked);
     await writeTeamFile(input.projectRoot, linked);
+    // CR-01: the link the lead chose is the one this computer caps, revokes and creates keys in from now on.
+    await pinNearLink(teamStorageDir(input.globalStorageDir, existing.teamId), existing.teamId, input.near);
   } catch (error) {
     if (error instanceof TeamFileError || error instanceof TrustPinError || error instanceof SecretLeakError) return fail('team-file', `${error.message} Nothing was changed.`);
     throw error;

@@ -6,7 +6,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { SecretLeakError, assertNoSecrets } from '../domain/team/secrets';
 import { INVITABLE_ROLES, ROLES } from '../domain/team/types';
-import type { Role, TeamFile, TeamState } from '../domain/team/types';
+import type { NearLink, Role, TeamFile, TeamState } from '../domain/team/types';
 import { MEMBER_ID_PATTERN, validateName } from '../domain/team/validate';
 import { CleanupChecklist } from './cleanupChecklist';
 import { NoDeviceKeyError } from './eventLog';
@@ -16,7 +16,7 @@ import { encodeInviteBundle, cleanRepoUrl } from './inviteBundle';
 import { deriveInviteKey, generateInviteCode } from './inviteCode';
 import { scrubNearText } from './nearOrg';
 import type { NearOrgClient } from './nearOrg';
-import { REMOTE_NAME_PATTERN, runSerialised, teamStorageDir, writeFileAtomic } from './teamFile';
+import { NearPinError, REMOTE_NAME_PATTERN, checkNearPin, runSerialised, teamStorageDir, writeFileAtomic } from './teamFile';
 import { gitText, redactGitMessage, runGit } from './runGit';
 import type { GitRunner } from './runGit';
 import type { AppendResult } from './transport';
@@ -168,8 +168,7 @@ function errorText(error: unknown): string {
 
 // Only a lead is invited to the NEAR organization, as an admin (D-22). Everyone else gets a key from the lead's client and never touches NEAR
 // (D-21). Nothing here can stop the team invitation: it is already in the log, and a failure becomes a checklist item with Retry (D-18).
-async function inviteToNear(input: ReissueInput | InviteInput, ids: { memberId: string; name: string; email: string; role: Role; reissue: boolean }, storageDir: string): Promise<NearStep> {
-  const near = input.teamFile.near;
+async function inviteToNear(input: ReissueInput | InviteInput, near: NearLink | undefined, ids: { memberId: string; name: string; email: string; role: Role; reissue: boolean }, storageDir: string): Promise<NearStep> {
   if (near === undefined || ids.role !== 'lead') return { nearInvitation: 'not-applicable' };
   const checklist = new CleanupChecklist(storageDir);
   const queue = async (status: 'pending' | 'failed', lastError?: string): Promise<NearStep> => {
@@ -212,6 +211,16 @@ async function issue(input: InviteInput | ReissueInput, email: string, plan: Pla
   const cleaned = cleanRepoUrl(raw);
   if (!cleaned.ok) return { ok: false, code: 'remote-url', message: cleaned.reason };
 
+  // CR-01: the organization a lead is invited to, and the link the bundle names, come only from a link this computer trusts.
+  const storageDir = teamStorageDir(input.globalStorageDir, teamId);
+  let near: NearLink | undefined;
+  try {
+    near = await checkNearPin(storageDir, input.teamFile);
+  } catch (error) {
+    if (error instanceof NearPinError) return refuse(`${error.message} No invitation was made.`);
+    throw error;
+  }
+
   const memberId = newMemberId();
   const code = generateInviteCode();
   try {
@@ -242,7 +251,6 @@ async function issue(input: InviteInput | ReissueInput, email: string, plan: Pla
     if (invitedEvent === undefined || chosen === undefined) return refuse('The invitation was saved but its event could not be found.');
     const { name, role } = chosen;
 
-    const storageDir = teamStorageDir(input.globalStorageDir, teamId);
     const notices: string[] = [];
     try {
       await recordInvite(storageDir, { memberId, name, email, role, invitedEvent: invitedEvent.id });
@@ -252,11 +260,11 @@ async function issue(input: InviteInput | ReissueInput, email: string, plan: Pla
     }
     const bundle = encodeInviteBundle({
       v: 1, repo: cleaned.url, team: teamId, ref: input.teamFile.coordination.ref, member: memberId, code: code.text,
-      ...(input.teamFile.near === undefined ? {} : { near: { organizationId: input.teamFile.near.organizationId, workspaceId: input.teamFile.near.workspaceId } })
+      ...(near === undefined ? {} : { near: { organizationId: near.organizationId, workspaceId: near.workspaceId } })
     });
-    const near = await inviteToNear(input, { memberId, name, email, role, reissue }, storageDir);
-    if (near.notice !== undefined) notices.push(near.notice);
-    const result: InviteResult = { ok: true, memberId, bundle, nearInvitation: near.nearInvitation };
+    const step = await inviteToNear(input, near, { memberId, name, email, role, reissue }, storageDir);
+    if (step.notice !== undefined) notices.push(step.notice);
+    const result: InviteResult = { ok: true, memberId, bundle, nearInvitation: step.nearInvitation };
     if (notices.length > 0) result.notice = notices.join(' ');
     return result;
   } finally {

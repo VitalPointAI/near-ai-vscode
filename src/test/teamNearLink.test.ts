@@ -8,7 +8,7 @@ import test from 'node:test';
 import { enableTeamMode, pushCodeBranch } from '../team/enable';
 import { LINK_COMMIT_MESSAGE, linkChoices, linkNearOrganization, teamFileUnpushed } from '../team/nearLink';
 import { NearAuth, NearOrgClient } from '../team/nearOrg';
-import { TEAM_FILE_REL, checkTrustPin, readTeamFile, teamFilePath, teamStorageDir, writeTeamFile } from '../team/teamFile';
+import { NearPinError, TEAM_FILE_REL, checkNearPin, checkTrustPin, readTeamFile, teamFilePath, teamStorageDir, writeTeamFile } from '../team/teamFile';
 import type { TeamFile } from '../domain/team/types';
 import { FakeNear, startFakeNear } from './helpers/fakeNear';
 import { MemorySecrets, createTeamFixture, gitIn } from './helpers/teamHarness';
@@ -154,6 +154,28 @@ test('a different existing link is refused unless the caller passes replace', as
     assert.deepEqual((await readTeamFile(root))?.near, OTHER);
     assert.notEqual(gitIn(root, ['rev-parse', 'HEAD']), head);
     assert.equal(gitIn(root, ['show', '--name-only', '--format=', 'HEAD']), TEAM_FILE_REL);
+  });
+});
+
+test('CR-01: linking pins the chosen NEAR link on this computer, replacing moves the pin, and an edited team.json is refused against it', async () => {
+  await withTeam(async ({ root, storageDir, teamFile }) => {
+    const pinDir = teamStorageDir(storageDir, teamFile.teamId);
+    const linked = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
+    assert.equal(linked.ok, true);
+    const onDisk = await readTeamFile(root);
+    assert.ok(onDisk !== undefined);
+    assert.deepEqual(await checkNearPin(pinDir, onDisk), OWNED);
+    await assert.rejects(() => checkNearPin(pinDir, { ...onDisk, near: OTHER }), NearPinError, 'a hand-edited link does not match the pin');
+
+    const replaced = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OTHER, replace: true });
+    assert.equal(replaced.ok, true);
+    assert.deepEqual(await checkNearPin(pinDir, { ...onDisk, near: OTHER }), OTHER);
+
+    // A teammate's forged edit is fixed by the lead linking the right one again (picked from NEAR's lists), which moves the pin back.
+    await writeTeamFile(root, { ...onDisk, near: OWNED });
+    const confirmed = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
+    assert.equal(confirmed.ok ? confirmed.status : undefined, 'unchanged');
+    assert.deepEqual(await checkNearPin(pinDir, onDisk), OWNED);
   });
 });
 

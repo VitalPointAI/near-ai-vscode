@@ -30,7 +30,7 @@ import type { NearAuth } from '../team/nearOrg';
 import { nearSessionSecretName, saveNearSession } from '../team/nearSession';
 import { KEY_STILL_SPENDS_WARNING, removeMember, retryCleanupItem } from '../team/remove';
 import { REMOVED_FILE, handleOwnRemoval, readRemovedMarker, removedText } from '../team/removedClient';
-import { canonicalTeamFile, teamStorageDir } from '../team/teamFile';
+import { canonicalTeamFile, checkNearPin, teamStorageDir } from '../team/teamFile';
 import { installTeamKey, readInstalledKey, teamProfileId } from '../team/teamKeyProfile';
 import { startFakeNear } from './helpers/fakeNear';
 import type { FakeNear, FakeRequest } from './helpers/fakeNear';
@@ -282,6 +282,61 @@ test('a key that cannot be capped still lets the log removal through, is never r
   });
 });
 
+// CR-01: the workspace a removal caps and revokes in comes from team.json, which any committer can edit. The member being removed changes
+// near.workspaceId to another workspace the lead can read; the removal must not report the real key as capped and revoked.
+test('CR-01: a team.json whose NEAR workspace differs from the one this computer pinned caps and revokes nothing there and warns that the key can still spend', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    w.fake.addWorkspace({ id: 'ws-2', organizationId: 'org-1', name: 'Decoy workspace' });
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    const keyId = await giveKey(w, dana);
+    // The lead's computer has trusted the real link (as linking, joining or a first read does).
+    assert.deepEqual(await checkNearPin(w.checklist.storageDir, w.teamFile), NEAR_LINK);
+    const forged: TeamFile = { ...w.teamFile, near: { organizationId: 'org-1', workspaceId: 'ws-2' } };
+    const before = w.fake.requests.length;
+    const result = await removeMember({ ...removeArgs(w, dana.memberId), teamFile: forged });
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.notEqual(w.a.log.state().members.get(dana.memberId)?.removedEvent, undefined, 'the log removal is still written');
+    assert.equal(result.keyStillSpends, true, 'a key that was not capped in the pinned workspace is reported as able to spend');
+    assert.ok(result.message.includes(KEY_STILL_SPENDS_WARNING.replace('<name>', 'Dana Developer')), result.message);
+    assert.doesNotMatch(result.message, /capped at 0 and revoked/);
+    assert.deepEqual(requestsSince(w, before).filter((request) => request.path.includes('/workspaces/')), [], 'no key call went to any workspace');
+    assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 5 * GIGA);
+    assert.equal(w.fake.key(keyId)?.revoked, false);
+    assert.deepEqual(stepsOf(result.checklist), ['zero-limit:manual', 'revoke-key:pending', 'repo-access:manual']);
+    assert.match(result.checklist[0]?.lastError ?? '', /different NEAR organization or workspace/);
+
+    // A retry with the forged file is refused the same way; with the pinned file it caps and revokes the real key.
+    const zero = result.checklist[0] as CleanupItem;
+    const refused = await retryCleanupItem({ item: zero, teamFile: forged, log: w.a.log, org: w.org, checklist: w.checklist });
+    assert.equal(refused.status, 'manual');
+    assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 5 * GIGA);
+    const capped = await retryCleanupItem({ item: zero, teamFile: w.teamFile, log: w.a.log, org: w.org, checklist: w.checklist });
+    assert.equal(capped.status, 'done');
+    assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 0);
+  });
+});
+
+test('CR-01: a key the linked workspace does not list is a manual item for the NEAR console, never a finished cap or revoke', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    w.fake.addWorkspace({ id: 'ws-2', organizationId: 'org-1', name: 'Decoy workspace' });
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    const keyId = await giveKey(w, dana);
+    // This computer never saw a link before, so the forged one is the first it trusts: the pin cannot help, the key lookup must.
+    const fresh = new CleanupChecklist(path.join(w.fixture.root, 'cleanup-fresh'));
+    const forged: TeamFile = { ...w.teamFile, near: { organizationId: 'org-1', workspaceId: 'ws-2' } };
+    const result = await removeMember({ ...removeArgs(w, dana.memberId), teamFile: forged, checklist: fresh });
+    assert.equal(result.ok, true, result.ok ? '' : result.message);
+    if (!result.ok) return;
+    assert.equal(result.keyStillSpends, true);
+    assert.ok(result.message.includes(KEY_STILL_SPENDS_WARNING.replace('<name>', 'Dana Developer')), result.message);
+    assert.deepEqual(stepsOf(result.checklist), ['zero-limit:manual', 'revoke-key:pending', 'repo-access:manual']);
+    assert.match(result.checklist[0]?.lastError ?? '', /NEAR console/);
+    assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 5 * GIGA);
+    assert.equal(w.fake.key(keyId)?.revoked, false);
+  });
+});
+
 test('a NEAR-linked team with no NEAR session still removes the member and queues the cap and the revoke as pending', async () => {
   await inWorld(['a', 'b'], {}, async (w) => {
     const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
@@ -298,7 +353,7 @@ test('a NEAR-linked team with no NEAR session still removes the member and queue
   });
 });
 
-test('retrying the cleanup items caps first, refuses a revoke before the cap, then revokes; a key NEAR no longer has counts as done', async () => {
+test('retrying the cleanup items caps first, refuses a revoke before the cap, then revokes; a key NEAR no longer has is a manual item (CR-01)', async () => {
   await inWorld(['a', 'b'], {}, async (w) => {
     const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
     const keyId = await giveKey(w, dana);
@@ -328,7 +383,7 @@ test('retrying the cleanup items caps first, refuses a revoke before the cap, th
     assert.equal(revoked.status, 'done');
     assert.equal(w.fake.key(keyId)?.revoked, true);
 
-    // A key that NEAR reports gone is done without an error.
+    // A key that NEAR no longer lists is not counted as revoked (CR-01): the lead is asked to check it in the NEAR console.
     const erin = await addMember(w, 'b', 'Erin Engineer', 'erin@example.invalid');
     const erinKey = await giveKey(w, erin);
     w.fake.fail({ method: 'DELETE', pathPrefix: `/v1/workspaces/ws-1/api-keys/${erinKey}`, status: 500, times: ONE_CALL });
@@ -339,8 +394,8 @@ test('retrying the cleanup items caps first, refuses a revoke before the cap, th
     assert.deepEqual(stepsOf(second.checklist), ['zero-limit:done', 'revoke-key:failed', 'repo-access:manual']);
     assert.equal(await w.org.revokeKey('ws-1', erinKey), 'revoked');
     const gone = await retryCleanupItem(retryArgs(second.checklist[1] as CleanupItem));
-    assert.equal(gone.status, 'done');
-    assert.equal(gone.lastError, undefined);
+    assert.equal(gone.status, 'manual');
+    assert.match(gone.lastError ?? '', /NEAR console/);
   });
 });
 

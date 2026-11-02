@@ -91,10 +91,13 @@ function checkNewItem(item: NewCleanupItem): void {
 }
 
 export class CleanupChecklist {
+  /** The team's storage folder the list lives in; the NEAR link pin (teamFile.checkNearPin) is kept in the same folder. */
+  public readonly storageDir: string;
   private readonly file: string;
   private readonly now: () => Date;
 
   public constructor(storageDir: string, now: () => Date = () => new Date()) {
+    this.storageDir = path.resolve(storageDir);
     this.file = path.resolve(storageDir, CLEANUP_FILE);
     this.now = now;
   }

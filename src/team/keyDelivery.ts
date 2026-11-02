@@ -6,7 +6,7 @@
 // a local file or an event. This module never imports `vscode`.
 import { createHash, randomBytes } from 'node:crypto';
 import { keyNeedsRotation, sealCapableFingerprints } from '../domain/team/invite';
-import type { Member, SealedEntryBody, TeamFile } from '../domain/team/types';
+import type { Member, NearLink, SealedEntryBody, TeamFile } from '../domain/team/types';
 import type { SecretStorageLike } from '../services/auth';
 import type { FetchLike } from '../services/reportingSignIn';
 import type { CleanupChecklist, CleanupStep } from './cleanupChecklist';
@@ -19,6 +19,7 @@ import { NearOrgError, scrubNearText } from './nearOrg';
 import { NearSessionError } from './nearSession';
 import { redactGitMessage } from './runGit';
 import { SecretLeakError } from '../domain/team/secrets';
+import { NearPinError, checkNearPin, teamStorageDir } from './teamFile';
 import { installTeamKey, readInstalledKey } from './teamKeyProfile';
 import type { AppendResult } from './transport';
 
@@ -84,6 +85,18 @@ function nearFailure(error: unknown): DeliveryResult {
 
 export const signInToSendKeyText = (memberName: string): string => `Sign in to NEAR to send ${memberName}'s key.`;
 
+const NOT_LINKED_TEXT = 'This team is not linked to a NEAR organization, so there is no key to send.';
+
+// CR-01: the workspace a key is created, capped and revoked in is team.json `near`, but only when it matches the link this computer pinned.
+async function trustedLink(teamFile: TeamFile, storageDir: string): Promise<{ ok: true; near: NearLink | undefined } | { ok: false; message: string }> {
+  try {
+    return { ok: true, near: await checkNearPin(storageDir, teamFile) };
+  } catch (error) {
+    if (error instanceof NearPinError) return { ok: false, message: error.message };
+    return { ok: false, message: `The saved NEAR link for this team could not be checked, so no NEAR key was changed: ${errorText(error)}` };
+  }
+}
+
 // ---- the lead's cleanup list (D-18, D-25) -------------------------------------------------------------------------------------------------
 
 type Person = { id: string; name: string };
@@ -120,24 +133,27 @@ async function settle(checklist: CleanupChecklist, person: Person, step: Cleanup
 
 const joinNotes = (notes: Array<string | undefined>): string => notes.filter((text): text is string => text !== undefined && text !== '').join(' ');
 
-// Sets a key to a limit of 0 and then revokes it, in that order so a half-finished clean-up never leaves a spendable key. A key NEAR no longer
-// has counts as done. A step that failed goes on the list with the key id; when the revoke worked the zero-limit step no longer matters.
-// Returns the sentences to add to what the lead is told.
-async function retireKey(input: LeadInput, person: Person, keyId: string): Promise<string[]> {
-  const near = input.teamFile.near;
-  if (near === undefined) return [];
+const KEY_NOT_FOUND_TEXT = 'NEAR did not find this key in the linked workspace, so it was not capped or revoked here. Find it in the NEAR console, set its limit to 0 and revoke it.';
+
+// Sets a key to a limit of 0 and then revokes it, in that order so a half-finished clean-up never leaves a spendable key. A key NEAR does not
+// find in the linked workspace is never counted as done (CR-01): it becomes a manual item for the NEAR console. A step that failed goes on the
+// list with the key id; when the revoke worked the zero-limit step no longer matters. Returns the sentences to add to what the lead is told.
+async function retireKey(input: LeadInput, near: NearLink, person: Person, keyId: string): Promise<string[]> {
   let zeroError: string | undefined;
   try {
-    await input.org.setSpendLimit(near.workspaceId, keyId, 0);
+    if (await input.org.setSpendLimit(near.workspaceId, keyId, 0) === 'missing') zeroError = KEY_NOT_FOUND_TEXT;
   } catch (error) {
     zeroError = errorText(error);
   }
   try {
-    await input.org.revokeKey(near.workspaceId, keyId);
+    if (await input.org.revokeKey(near.workspaceId, keyId) === 'missing') {
+      const problem = await note(input.checklist, person, 'revoke-key', 'manual', KEY_NOT_FOUND_TEXT, keyId);
+      return ['NEAR did not find a key it should have in the linked workspace, so that key was not revoked here. It is on your cleanup list; check it in the NEAR console.', ...(problem === undefined ? [] : [problem])];
+    }
     return [];
   } catch (error) {
     const sentences = [await note(input.checklist, person, 'revoke-key', 'failed', errorText(error), keyId)];
-    if (zeroError !== undefined) sentences.push(await note(input.checklist, person, 'zero-limit', 'failed', zeroError, keyId));
+    if (zeroError !== undefined) sentences.push(await note(input.checklist, person, 'zero-limit', zeroError === KEY_NOT_FOUND_TEXT ? 'manual' : 'failed', zeroError, keyId));
     return [zeroError === undefined ? 'The unused key could not be revoked. It has a limit of 0 and is on your cleanup list.' : 'The unused key could not be zeroed or revoked. It is on your cleanup list.', ...sentences.filter((text): text is string => text !== undefined)];
   }
 }
@@ -150,11 +166,15 @@ async function recordFailure(input: LeadInput, person: Person, step: CleanupStep
   return { ok: false, code: result.code, message };
 }
 
-type Checked = { ok: true; member: Member; targets: SealTarget[] } | { ok: false; result: DeliveryResult };
+type Checked = { ok: true; member: Member; targets: SealTarget[]; near: NearLink } | { ok: false; result: DeliveryResult };
 
-// Who can be given a key: joined, not removed, not the owner, and with at least one device that can receive a sealed key.
+// Who can be given a key: joined, not removed, not the owner, and with at least one device that can receive a sealed key. The team must have
+// a NEAR link this computer trusts.
 async function checkTarget(input: LeadInput, step: CleanupStep): Promise<Checked> {
-  if (input.teamFile.near === undefined) return { ok: false, result: fail('not-linked', 'This team is not linked to a NEAR organization, so there is no key to send.') };
+  const link = await trustedLink(input.teamFile, input.checklist.storageDir);
+  if (!link.ok) return { ok: false, result: fail('not-linked', link.message) };
+  const near = link.near;
+  if (near === undefined) return { ok: false, result: fail('not-linked', NOT_LINKED_TEXT) };
   const state = input.log.state();
   const member = state.members.get(input.memberId);
   if (member === undefined || member.removedEvent !== undefined || member.status === 'invited') {
@@ -170,15 +190,13 @@ async function checkTarget(input: LeadInput, step: CleanupStep): Promise<Checked
       : `${member.name} has no device that can receive a key. Ask them to join again from their computer.`;
     return { ok: false, result: await recordFailure(input, member, step, { ok: false, code: 'no-device', message }) };
   }
-  return { ok: true, member, targets };
+  return { ok: true, member, targets, near };
 }
 
 // Creates the key with its cap in the create call, seals it to every target, and appends member.key-sealed. The append builder re-checks the
 // fresh state: the member must still be there, still hold the key this delivery replaces, and still have exactly the sealed set of devices.
 // Whatever goes wrong, the confirmation stands, a key that was made is zeroed and revoked, and a Retry item is left (D-25).
-async function sendKey(input: LeadInput, step: CleanupStep, member: Member, targets: SealTarget[], limit: number, retire?: string): Promise<DeliveryResult> {
-  const near = input.teamFile.near;
-  if (near === undefined) return fail('not-linked', 'This team is not linked to a NEAR organization, so there is no key to send.');
+async function sendKey(input: LeadInput, near: NearLink, step: CleanupStep, member: Member, targets: SealTarget[], limit: number, retire?: string): Promise<DeliveryResult> {
   const replaces = member.nearApiKeyId;
   const fingerprints = targets.map((target) => target.fingerprint);
   let created: CreatedNearKey;
@@ -190,7 +208,7 @@ async function sendKey(input: LeadInput, step: CleanupStep, member: Member, targ
   }
   const keyId = created.key.id;
   const abandon = async (failed: Extract<DeliveryResult, { ok: false }>): Promise<DeliveryResult> =>
-    recordFailure(input, member, step, failed, await retireKey(input, member, keyId));
+    recordFailure(input, member, step, failed, await retireKey(input, near, member, keyId));
 
   let sealed: SealedEntryBody[];
   try {
@@ -216,7 +234,7 @@ async function sendKey(input: LeadInput, step: CleanupStep, member: Member, targ
   if (!appended.ok) return abandon({ ok: false, code: 'log', message: redactGitMessage(appended.reason) });
   // Only now, with the new key accepted by the log, is the old one taken away: zeroed first, then revoked.
   const settled = await settle(input.checklist, member, step);
-  const retired = retire === undefined ? [] : await retireKey(input, member, retire);
+  const retired = retire === undefined ? [] : await retireKey(input, near, member, retire);
   const notice = joinNotes([settled, ...retired]);
   return notice === '' ? { ok: true, keyId } : { ok: true, keyId, notice };
 }
@@ -226,7 +244,7 @@ export async function deliverMemberKey(input: LeadInput): Promise<DeliveryResult
   const checked = await checkTarget(input, 'deliver-key');
   if (!checked.ok) return checked.result;
   if (checked.member.nearApiKeyId !== undefined) return fail('log', `${checked.member.name} already has a key.`);
-  return sendKey(input, 'deliver-key', checked.member, checked.targets, checked.member.allocationNanoUsd ?? 0);
+  return sendKey(input, checked.near, 'deliver-key', checked.member, checked.targets, checked.member.allocationNanoUsd ?? 0);
 }
 
 /**
@@ -236,10 +254,9 @@ export async function deliverMemberKey(input: LeadInput): Promise<DeliveryResult
 export async function rotateMemberKey(input: LeadInput): Promise<DeliveryResult> {
   const checked = await checkTarget(input, 'rotate-key');
   if (!checked.ok) return checked.result;
-  const { member, targets } = checked;
-  const near = input.teamFile.near;
+  const { member, targets, near } = checked;
   const oldKeyId = member.nearApiKeyId;
-  if (near === undefined || oldKeyId === undefined) return fail('log', `${member.name} has no key to replace.`);
+  if (oldKeyId === undefined) return fail('log', `${member.name} has no key to replace.`);
 
   let limit = 0;
   let manual: string | undefined;
@@ -257,7 +274,7 @@ export async function rotateMemberKey(input: LeadInput): Promise<DeliveryResult>
     return failed.ok ? failed : recordFailure(input, member, 'rotate-key', failed);
   }
 
-  const sent = await sendKey(input, 'rotate-key', member, targets, limit, oldKeyId);
+  const sent = await sendKey(input, near, 'rotate-key', member, targets, limit, oldKeyId);
   if (!sent.ok || manual === undefined) return sent;
   const problem = await note(input.checklist, member, 'rotate-key', 'manual', manual, oldKeyId);
   return { ok: true, keyId: sent.keyId, notice: joinNotes([sent.notice, manual, problem]) };
@@ -348,6 +365,11 @@ export async function installDeliveredKey(input: InstallDeliveredInput): Promise
   const entry = body.sealed.find((candidate) => candidate.device === input.deviceFingerprint);
   if (entry === undefined) return { status: 'not-for-this-device' };
 
+  // CR-01: the organization and workspace the key must belong to come from a link this computer trusts, never from an edited team.json alone.
+  const link = await trustedLink(input.teamFile, teamStorageDir(input.globalStorageDir, input.teamFile.teamId));
+  if (!link.ok) return { status: 'failed', message: link.message };
+  const expect = link.near;
+
   const seal = await loadSealIdentity(input.secrets, input.teamFile.teamId);
   if (seal === undefined) return { status: 'failed', message: 'This computer has no key to open the delivery with. Join the team again from this computer.' };
   const opened = seal.open(entry, { teamId: input.teamFile.teamId, memberId, device: input.deviceFingerprint, keyId });
@@ -355,7 +377,7 @@ export async function installDeliveredKey(input: InstallDeliveredInput): Promise
   try {
     const installed = await installTeamKey({
       projectRoot: input.projectRoot, globalStorageDir: input.globalStorageDir, teamId: input.teamFile.teamId, teamName: input.teamFile.name, secrets: input.secrets,
-      apiKey: opened, baseUrl: input.baseUrl, ...(input.teamFile.near === undefined ? {} : { expect: input.teamFile.near }), keyId,
+      apiKey: opened, baseUrl: input.baseUrl, ...(expect === undefined ? {} : { expect }), keyId,
       ...(input.fetch === undefined ? {} : { fetch: input.fetch }), ...(input.sleep === undefined ? {} : { sleep: input.sleep })
     });
     return installed.ok ? { status: 'installed', keyId } : { status: 'failed', message: installed.message };
