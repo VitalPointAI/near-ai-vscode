@@ -192,7 +192,7 @@ test('prepareJoin answers clone-needed without a folder or with another team, re
   });
 });
 
-test('prepareJoin takes the NEAR link from team.json, else from the bundle, and refuses when they disagree', async () => {
+test('prepareJoin takes the NEAR link only from team.json, refuses a bundle link team.json does not have (WR-03), and refuses when they disagree', async () => {
   await withFixture(['a', 'b'], async (fixture) => {
     const linked = await seedTeam(fixture, NEAR_LINK);
     pointOriginAt(fixture, PUBLIC_URL);
@@ -201,11 +201,20 @@ test('prepareJoin takes the NEAR link from team.json, else from the bundle, and 
     const ready = await prepareJoin({ projectRoot: joiner.projectRoot, bundleText: bundle });
     assert.equal(ready.kind === 'ready' && ready.near?.organizationId, 'org-1');
 
-    // A project whose team.json has no link yet (the lead's link commit was not pulled) falls back to the bundle's.
+    // WR-03: the bundle has no MAC, so its link is never trusted on its own. A team.json without a link (the lead's link commit was not
+    // pulled, or someone changed the bundle) is refused before anything is written, with what to do next.
     const { near: _dropped, ...withoutNear } = linked.teamFile;
     await writeTeamFile(joiner.projectRoot, withoutNear);
     const fallback = await prepareJoin({ projectRoot: joiner.projectRoot, bundleText: bundle });
-    assert.deepEqual(fallback.kind === 'ready' ? fallback.near : undefined, NEAR_LINK);
+    assert.equal(fallback.kind, 'refused');
+    if (fallback.kind === 'refused') assert.match(fallback.message, /push the NEAR link/);
+    const direct = await joinTeam({
+      projectRoot: joiner.projectRoot, globalStorageDir: joiner.globalStorageDir, teamFile: withoutNear, bundle: parseInviteBundle(bundle), near: NEAR_LINK,
+      secrets: joiner.secrets, displayName: 'Dana'
+    });
+    assert.equal(direct.ok, false);
+    if (!direct.ok) assert.equal(direct.code, 'team-file');
+    assert.equal(joiner.secrets.values.size, 0, 'no device or seal key was made');
 
     // Two different links are never merged: the join is refused.
     await writeTeamFile(joiner.projectRoot, { ...linked.teamFile, near: { organizationId: 'org-2', workspaceId: 'ws-9' } });

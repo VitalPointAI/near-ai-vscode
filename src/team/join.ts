@@ -41,6 +41,11 @@ function sameNear(left: NearLink, right: NearLink): boolean {
   return left.organizationId === right.organizationId && left.workspaceId === right.workspaceId;
 }
 
+// WR-03: the bundle is plain base64url JSON with no MAC, so anyone who handles it can change its link. team.json is the only source of the
+// link; a bundle link that team.json does not have is refused, never used.
+const BUNDLE_LINK_NOT_IN_PROJECT = 'This invite names a NEAR organization, but this project has no NEAR link yet. Ask your lead to push the NEAR link (or pull it if they already did), then run "NEAR AI: Join Team" again. Nothing was changed.';
+const DIFFERENT_LINK = 'This invite names a different NEAR organization than this project does. Ask your lead to check the link and send a new invite.';
+
 // D-07 and D-26: nothing is kept between this call and the next. After a clone the invitee pastes the bundle again, so the answer here depends on
 // the folder that is open right now and on the bundle in this call only. Nothing in a refusal repeats the pasted text.
 export async function prepareJoin(input: { projectRoot: string | undefined; bundleText: string }): Promise<JoinPreparation> {
@@ -64,10 +69,9 @@ export async function prepareJoin(input: { projectRoot: string | undefined; bund
   if (teamFile.coordination.ref !== bundle.ref) {
     return { kind: 'refused', message: 'This invite names a different coordination branch than this project does. Ask your lead for a new invite.' };
   }
-  if (teamFile.near !== undefined && bundle.near !== undefined && !sameNear(teamFile.near, bundle.near)) {
-    return { kind: 'refused', message: 'This invite names a different NEAR organization than this project does. Ask your lead to check the link and send a new invite.' };
-  }
-  const near = teamFile.near ?? bundle.near;
+  if (bundle.near !== undefined && teamFile.near === undefined) return { kind: 'refused', message: BUNDLE_LINK_NOT_IN_PROJECT };
+  if (teamFile.near !== undefined && bundle.near !== undefined && !sameNear(teamFile.near, bundle.near)) return { kind: 'refused', message: DIFFERENT_LINK };
+  const near = teamFile.near;
   return { kind: 'ready', bundle, teamFile, ...(near === undefined ? {} : { near }) };
 }
 
@@ -76,6 +80,7 @@ export interface JoinInput {
   globalStorageDir: string;
   teamFile: TeamFile;
   bundle: InviteBundle;
+  /** The link the invite named, only ever compared with team.json, never used in its place (WR-03). */
   near?: NearLink;
   secrets: SecretStorageLike;
   displayName: string;
@@ -286,10 +291,13 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
   const teamId = teamFile.teamId;
   const now = input.now ?? ((): number => Date.now());
   if (bundle.team !== teamId) return fail('team-file', 'This invite is for a different team than the one open in this project.');
-  if (input.near !== undefined && teamFile.near !== undefined && !sameNear(input.near, teamFile.near)) {
-    return fail('team-file', 'This invite names a different NEAR organization than this project does. Ask your lead to check the link and send a new invite.');
+  // WR-03: only team.json decides the link; a link given with the invite is only ever compared with it.
+  for (const offered of [input.near, bundle.near]) {
+    if (offered === undefined) continue;
+    if (teamFile.near === undefined) return fail('team-file', BUNDLE_LINK_NOT_IN_PROJECT);
+    if (!sameNear(offered, teamFile.near)) return fail('team-file', DIFFERENT_LINK);
   }
-  const near = input.near ?? teamFile.near;
+  const near = teamFile.near;
   const displayName = input.displayName.trim();
   if (validateName(displayName, 'displayName') !== undefined) return fail('invalid-name', 'Your display name must be 1 to 80 characters with no line breaks.');
 
