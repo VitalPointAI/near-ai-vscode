@@ -36,6 +36,9 @@ const MAX_FILE_CHARS = 200;
 const MAX_TASK_START_TAG = 400;
 const MAX_KEY_CHARS = 40;
 const MAX_REQUIREMENT_SPAN = 64;
+const MAX_MILESTONES = 200;
+const MAX_SECTIONS = 500;
+const MAX_ROADMAP_PHASES = 2000;
 
 const ROADMAP_PATH = '.planning/ROADMAP.md';
 const STATE_PATH = '.planning/STATE.md';
@@ -393,10 +396,12 @@ export function parsePlanTasks(text: string): GsdTask[] {
     from = start + 5;
     const after = text[start + 5];
     if ((after !== ' ' && after !== '>' && after !== '\n' && after !== '\t') || !startsLine(text, start)) continue;
-    const tagEnd = text.indexOf('>', start);
-    if (tagEnd === -1 || tagEnd - start > MAX_TASK_START_TAG) continue;
+    // The start tag is looked for inside a short window, and one missing closing tag ends the scan: no later task can close either.
+    const headEnd = text.slice(start, start + MAX_TASK_START_TAG).indexOf('>');
+    if (headEnd === -1) continue;
+    const tagEnd = start + headEnd;
     const close = text.indexOf('</task>', tagEnd);
-    if (close === -1) continue;
+    if (close === -1) break;
     const startTag = text.slice(start, tagEnd + 1);
     const block = text.slice(tagEnd + 1, close);
     from = close + 7;
@@ -460,7 +465,7 @@ function phaseRefs(text: string): string[] {
   return out;
 }
 
-const REQUIREMENT_SCAN = /([A-Z][A-Z0-9]{0,15})-(\d{1,3})(?:\s*(?:…|\.{3}|–|—|\bto\b)\s*(?:\1-)?(\d{1,3}))?/g;
+const REQUIREMENT_SCAN = /([A-Z][A-Z0-9]{0,15})-(\d{1,3})(?:\s*(?:\u2026|\.{3}|\u2013|\u2014|\bto\b)\s*(?:\1-)?(\d{1,3}))?/g;
 
 // Requirement ids in a comma list, expanding the range form "CYBER-01 ... CYBER-12".
 function requirementIds(text: string): string[] {
@@ -504,6 +509,7 @@ export function parseRoadmap(text: string): Roadmap {
   let phase: RoadmapPhase | undefined;
   let wave: number | undefined;
   let fenced = false;
+  let phaseCount = 0;
   for (const line of lines) {
     if (line.startsWith('```')) { fenced = !fenced; continue; }
     if (fenced) continue;
@@ -513,6 +519,12 @@ export function parseRoadmap(text: string): Roadmap {
       phase = undefined;
       wave = undefined;
       if (title.toLowerCase() === 'milestones') { mode = 'milestones'; section = undefined; continue; }
+      if (roadmap.sections.length >= MAX_SECTIONS) {
+        addLimited(roadmap.problems, `the roadmap has more than ${MAX_SECTIONS} sections and the rest was ignored`, MAX_PROBLEMS);
+        mode = 'none';
+        section = undefined;
+        continue;
+      }
       mode = 'section';
       section = { key: milestoneKeyOf(title), title, phases: [] };
       roadmap.sections.push(section);
@@ -521,7 +533,8 @@ export function parseRoadmap(text: string): Roadmap {
     if (mode === 'milestones') {
       const bullet = /^[-*]\s+(.+)$/.exec(line);
       const milestone = bullet === null ? undefined : parseMilestoneBullet(bullet[1] ?? '');
-      if (milestone !== undefined) roadmap.milestones.push(milestone);
+      if (milestone !== undefined && roadmap.milestones.length < MAX_MILESTONES) roadmap.milestones.push(milestone);
+      else if (milestone !== undefined) addLimited(roadmap.problems, `the roadmap lists more than ${MAX_MILESTONES} milestones and the rest was ignored`, MAX_PROBLEMS);
       continue;
     }
     if (mode !== 'section' || section === undefined) continue;
@@ -529,7 +542,7 @@ export function parseRoadmap(text: string): Roadmap {
     if (heading !== null) {
       const title = tidy((heading[2] ?? '').replace(/\s*\(INSERTED\)\s*/gi, ' '), MAX_TITLE_CHARS);
       phase = { number: normalisePhase(heading[1] ?? ''), title, dependsOn: [], requirements: [], plans: [] };
-      section.phases.push(phase);
+      if (phaseCount < MAX_ROADMAP_PHASES) { section.phases.push(phase); phaseCount += 1; } else addLimited(roadmap.problems, `the roadmap has more than ${MAX_ROADMAP_PHASES} phases and the rest was ignored`, MAX_PROBLEMS);
       wave = undefined;
       continue;
     }
@@ -658,7 +671,9 @@ export function buildGsdGraph(source: GsdSource, options: { milestone?: string }
 
   const sectionPhases = chosen.section !== undefined && chosen.section.phases.length > 0 ? chosen.section.phases : undefined;
   const sectionSet = new Set((sectionPhases ?? []).map((item) => item.number));
-  const knownAnywhere = (phase: string): boolean => known.some((item) => inRange(phase, item) || (item.section?.phases.some((p) => p.number === phase) ?? false));
+  const roadmapPhases = new Set<string>();
+  for (const item of known) for (const entry of item.section?.phases ?? []) roadmapPhases.add(entry.number);
+  const knownAnywhere = (phase: string): boolean => roadmapPhases.has(phase) || known.some((item) => inRange(phase, item));
 
   // Locate every plan and summary by its file name, anywhere under .planning.
   const groups = new Map<string, Located[]>();
