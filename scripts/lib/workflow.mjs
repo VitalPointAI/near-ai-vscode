@@ -279,11 +279,17 @@ export function isVersionBump(current, next) {
   return false;
 }
 
-/** GitHub comments are limited to 65536 characters. */
-export function fitComment(body, limit = 65_000) {
-  if (body.length <= limit) return body;
-  const note = '\n\n_(Truncated: the full review is longer than a GitHub comment allows.)_\n';
-  return body.slice(0, limit - note.length) + note;
+/**
+ * Joins the review text and the footer (verdict, CI table, head marker) into one comment within
+ * GitHub's 65536-character limit. Only the end of the review text is cut; the footer is always
+ * kept whole.
+ */
+export function fitComment(review, footer = '', limit = 65_000) {
+  const join = (text) => (footer ? `${text}\n\n${footer}` : text);
+  if (join(review).length <= limit) return join(review);
+  const note = '\n\n_(Truncated: the full review is longer than a GitHub comment allows.)_';
+  const room = Math.max(0, limit - join('').length - note.length);
+  return join(`${review.slice(0, room)}${note}`);
 }
 
 // ---- Secret scanning ----------------------------------------------------------------------------

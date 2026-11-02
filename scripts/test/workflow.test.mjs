@@ -228,6 +228,17 @@ test('long review comments are truncated to fit GitHub', () => {
   assert.match(body, /Truncated/);
 });
 
+test('truncating a review keeps its verdict and the footer with the head marker', () => {
+  const review = `Verdict: PASS\nHead-SHA: ${SHA}\n${'- [NIT] long finding\n'.repeat(5_000)}`;
+  const footer = `---\n**agent-review: success.**\n\n<!-- agent-review head=${SHA} state=success -->`;
+  const body = fitComment(review, footer);
+  assert.ok(body.length <= 65_000);
+  assert.ok(body.startsWith(`Verdict: PASS\nHead-SHA: ${SHA}\n`));
+  assert.ok(body.endsWith(footer));
+  assert.match(body, /Truncated/);
+  assert.equal(fitComment('short', footer), `short\n\n${footer}`);
+});
+
 test('the secret scan catches common key formats and masks them in its output', () => {
   const gh = ['ghp', '_', 'Z'.repeat(36)].join('');
   const near = ['ed25519', ':', '3'.repeat(88)].join('');

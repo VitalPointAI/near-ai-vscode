@@ -59,9 +59,7 @@ function submit(repo, number, reviewPath, dryRun) {
   const verdictLine = decision.state === 'success'
     ? '**agent-review: success.** The review passed with no open blockers.'
     : `**agent-review: failure.**\n${decision.reasons.map((reason) => `- ${reason}`).join('\n')}`;
-  const body = fitComment([
-    text.trim(),
-    '',
+  const body = fitComment(text.trim(), [
     '---',
     verdictLine,
     '',
