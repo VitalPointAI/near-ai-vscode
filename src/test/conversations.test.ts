@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -11,6 +11,7 @@ import { deriveProfileId } from '../domain/auth';
 import { ActivityStore, closeInterruptedRuns } from '../services/activityStore';
 import { historyPage } from '../services/activityOverview';
 import { TranscriptStore } from '../services/transcripts';
+import { RunMarkers } from '../services/runMarkers';
 import { ConversationLog, conversationStatus, conversationTitle, MAX_OPEN_CONVERSATIONS, parseSavedConversations, savedConversations } from '../services/conversations';
 
 // Several conversations in the sidebar at once, as in Claude Code: each has its own run,
@@ -608,4 +609,98 @@ test('sidebar: a conversation stopped or closed while its turn is still being pr
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+// --- 0.4.11: a run cut off by code-server or a reload is reported and can be resumed. ---
+
+/** The marker a run left in the extension's storage, rewritten as if its extension host had died. */
+function killHost(root: string, conversationId: string, steps?: string[]): Record<string, unknown> {
+  const runs = path.join(root, '.global', 'runs');
+  const file = path.join(runs, readdirSync(runs)[0], `${conversationId}.json`);
+  const marker = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  const dead = { ...marker, pid: 2_147_483_646, ...(steps ? { steps } : {}) };
+  writeFileSync(file, JSON.stringify(dead));
+  return marker;
+}
+
+test('sidebar: a run the extension host never finished is reported with Resume, which continues from its saved state and names the step that may not have completed', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  const gate = gates();
+  const readCall: Delta = { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'Read', arguments: '{"file_path":"app.ts"}' } }] };
+  const near = fakeNear(async (messages) => {
+    if (!messages.some((message) => message.role === 'tool')) return readCall;
+    if (!lastUser(messages).startsWith('Continue the task')) await gate.hold('long refactor');
+    return { content: 'Checked app.ts and finished the refactor.' };
+  });
+  await withNear(near, async () => {
+    const first = await openSidebar(root, auth, shared);
+    const a = first.summary()!.activeId;
+    void first.send({ type: 'send', text: 'long refactor', model: MODEL, conversationId: a });
+    await until(() => gate.holding('long refactor'));
+    // The run saved its state after the Read finished, and recorded that it is running.
+    const marker = killHost(root, a, ['Edit']);
+    assert.equal(marker.runId !== undefined && marker.endedAt === undefined, true);
+    assert.equal(typeof marker.savedAt, 'string', 'the state after each finished step is saved');
+    assert.deepEqual(marker.steps, [], 'no step was started after the last save');
+    assert.equal(JSON.stringify(marker).includes('long refactor'), false, 'the marker holds no prompt');
+
+    // code-server killed the extension host, and the window's own list of open conversations was lost.
+    const second = await openSidebar(root, auth, { secrets: shared.secrets, workspaceState: new Memento() });
+    assert.equal(second.summary()!.activeId, a, 'the cut-off conversation is opened and shown');
+    assert.equal(second.item(a)?.status, 'stopped');
+    const cut = second.posted.find((message) => message.type === 'run-interrupted');
+    assert.ok(cut, 'the chat says the run was cut off');
+    assert.match(String(cut.text), /^This run was cut off \(the window or code-server closed it\) at .+\.$/);
+    assert.equal(cut.resumable, true);
+    assert.deepEqual((second.posted.find((message) => message.type === 'transcript')!.turns as Array<{ text: string }>)[0].text, 'long refactor');
+    assert.equal(second.posted.some((message) => message.type === 'notice' && /stopped when VS Code reloaded/.test(String(message.text))), false, 'one message, not two');
+    assert.equal(near.requests.length, 2, 'nothing is resumed until the user clicks Resume');
+
+    await second.send({ type: 'resume-interrupted', conversationId: a });
+    await until(() => second.item(a)?.status === 'done');
+    const resumed = near.requests.at(-1)!;
+    assert.equal(near.requests.length, 3);
+    assert.equal(firstUser(resumed), 'long refactor', 'the same conversation');
+    assert.ok(resumed.some((message) => message.role === 'tool' && String(message.content).includes('export const port = 3000;')), 'with the step that finished before the cut');
+    assert.match(lastUser(resumed), /^Continue the task\. Your previous run was cut off at /);
+    assert.match(lastUser(resumed), /this step: Edit\. Its result was never recorded/);
+    assert.deepEqual(await new RunMarkers(path.join(root, '.global'), root).interrupted(), [], 'resumed: not reported again');
+
+    // A second click does nothing; a later window does not report it again.
+    await second.send({ type: 'resume-interrupted', conversationId: a });
+    assert.equal(near.requests.length, 3);
+    const third = await openSidebar(root, auth, { secrets: shared.secrets, workspaceState: new Memento() });
+    assert.equal(third.posted.some((message) => message.type === 'run-interrupted'), false);
+
+    await first.send({ type: 'stop', conversationId: a });
+    gate.release('long refactor');
+  });
+});
+
+test('sidebar: Dismiss settles a cut-off run without running anything; a cut-off run with no saved transcript is not reopened', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  const cut = 'conv-dism00-0a0b0c0d';
+  const lost = 'conv-lost00-0a0b0c0d';
+  const transcripts = new TranscriptStore(path.join(root, '.global'), root, (await import('../services/transcripts')).transcriptKey(shared.secrets));
+  await transcripts.save({ id: cut, title: 'Write the report', model: MODEL, updatedAt: new Date().toISOString(), turns: 1, messages: [{ role: 'system', content: 'system' }, { role: 'user', content: 'Write the report' }] });
+  const dead = new RunMarkers(path.join(root, '.global'), root, { pid: 2_147_483_646 });
+  await dead.start({ conversationId: cut, runId: 'run-1-dddddd', model: MODEL });
+  await dead.start({ conversationId: lost, runId: 'run-2-eeeeee', model: MODEL });
+  await shared.workspaceState.update('nearAi.chat.openConversations', { activeId: cut, items: [{ id: cut, title: 'Write the report', status: 'running' }] });
+  const near = fakeNear(() => ({ content: 'should not run' }));
+  await withNear(near, async () => {
+    const sidebar = await openSidebar(root, auth, shared);
+    assert.deepEqual(sidebar.summary()!.items.map((item) => item.id), [cut], 'no tab for a conversation that was never saved');
+    assert.ok(sidebar.posted.some((message) => message.type === 'run-interrupted' && message.resumable === true));
+    assert.equal(sidebar.posted.some((message) => message.type === 'notice' && /stopped when VS Code reloaded/.test(String(message.text))), false);
+    const before = sidebar.posted.length;
+    await sidebar.send({ type: 'dismiss-interrupted', conversationId: cut });
+    assert.ok(since(sidebar.posted, before).some((message) => message.type === 'run-interrupted-settled' && message.outcome === 'dismissed'));
+    assert.equal(near.requests.length, 0);
+    // Shown again, the conversation no longer offers Resume.
+    const again = sidebar.posted.length;
+    await sidebar.send({ type: 'switch-conversation', id: cut });
+    assert.equal(since(sidebar.posted, again).some((message) => message.type === 'run-interrupted'), false);
+    assert.deepEqual((await new RunMarkers(path.join(root, '.global'), root).interrupted()).map((marker) => marker.conversationId), [lost]);
+  });
 });

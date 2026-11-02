@@ -27,6 +27,7 @@ import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
+import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
 import { PreparedAttachments } from '../agent/attachments';
 import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
@@ -174,6 +175,8 @@ export class AgentConversation {
   private readonly waiting = new Map<string, Record<string, unknown>>();
   /** Told how many prompts are waiting whenever that changes, so the host can badge the view. */
   public onWaitingChange: ((count: number) => void) | undefined;
+  /** Records each run's start, steps, and end, so a run the extension host never finished can be reported and resumed. */
+  public runMarkers: RunMarkers | undefined;
   private readonly runs = new Map<string, RunCheckpoints>();
   private readonly agents = new Map<string, LiveAgent>();
   private readonly background = new Set<Promise<void>>();
@@ -257,6 +260,9 @@ export class AgentConversation {
     this.messages.push({ role: 'user', content: prompt });
     // Saved before the run, so a run a reload cuts off still keeps what was asked.
     await this.saveTranscript(request.model);
+    const conversationId = this.conversationId;
+    let ended: RunEnd = 'failed';
+    await this.runMarkers?.start({ conversationId, runId, model: request.model });
     const mainId = `main-${runId}`;
     const boundary = runBoundary(request);
     this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
@@ -287,7 +293,9 @@ export class AgentConversation {
         this.enforceBudget(request, abort);
         const pending = this.drainNotifications();
         const managed = await this.manageContext(pending.length ? [...transcript, ...pending] : transcript, lastUsage, request, signal, true);
-        return managed ?? (pending.length ? [...transcript, ...pending] : undefined);
+        const next = managed ?? (pending.length ? [...transcript, ...pending] : undefined);
+        await this.saveRunState(request.model, runId, next ?? transcript);
+        return next;
       },
       afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
       input: this.steeringInput,
@@ -296,6 +304,7 @@ export class AgentConversation {
       emit: (event) => {
         this.track(mainId, event);
         if (event.type !== 'reasoning' && event.type !== 'turn') this.markVisible();
+        if (event.type === 'tool-start') void this.runMarkers?.step(conversationId, runId, event.tool);
         if (event.type === 'todos') this.post({ type: 'todos', todos: this.tasks.write(event.todos) });
         else this.forward(event, request.model, record);
       }
@@ -317,6 +326,7 @@ export class AgentConversation {
         throw error;
       }
       this.activity?.agentEnded(mainId, result.outcome);
+      ended = result.outcome;
       await this.persistAgent(request, mainId, result.outcome);
       this.messages = result.messages;
       const allUsage = [...result.usage, ...extraUsage];
@@ -354,6 +364,7 @@ export class AgentConversation {
       this.releasePending();
       // Stopped or failed runs are reconciled too: NEAR bills what they used.
       if (account && !costAsked) void account.settleNow((entry) => entry.runId === runId);
+      await this.runMarkers?.end(conversationId, runId, ended);
     }
   }
 
@@ -767,9 +778,18 @@ export class AgentConversation {
     this.heartbeats = 0;
   }
 
-  private async saveTranscript(model: string): Promise<void> {
-    if (!this.transcripts || this.messages.length < 2) return;
-    await this.transcripts.save({ id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: this.messages.filter((message) => message.role === 'user').length, messages: this.messages, display: [...this.display.entries()].filter(([key]) => this.messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) }).catch(() => undefined);
+  private async saveTranscript(model: string, messages = this.messages, during = false): Promise<boolean> {
+    if (!this.transcripts || messages.length < 2) return false;
+    const transcript = { id: this.conversationId, title: this.title || 'Conversation', model, updatedAt: new Date().toISOString(), turns: messages.filter((message) => message.role === 'user').length, messages, display: [...this.display.entries()].filter(([key]) => messages.some((message) => message.role === 'user' && contentKey(message.content) === key)) };
+    return (during ? this.transcripts.checkpoint(transcript) : this.transcripts.save(transcript)).then(() => true, () => false);
+  }
+
+  /**
+   * Saves a running run's state before each model turn: every step so far, with its result. If the
+   * extension host dies mid-run (code-server closed it, a reload, a crash), Resume continues from here.
+   */
+  private async saveRunState(model: string, runId: string, messages: AgentMessage[]): Promise<void> {
+    if (await this.saveTranscript(model, messages, true)) await this.runMarkers?.saved(this.conversationId, runId);
   }
 
   private tally(usage: UsageMetadata): void {
