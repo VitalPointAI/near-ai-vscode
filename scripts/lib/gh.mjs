@@ -111,7 +111,7 @@ export function commitChecks(repo, sha) {
     checkRuns: ghLines(`repos/${repo}/commits/${sha}/check-runs?per_page=100&filter=all`,
       '.check_runs[] | {id, name, status, conclusion, startedAt: .started_at, completedAt: .completed_at, app: .app.slug, suiteId: .check_suite.id, url: .html_url} | tojson'),
     workflowRuns: ghLines(`repos/${repo}/actions/runs?head_sha=${sha}&per_page=100`,
-      '.workflow_runs[] | {id, name, path, event, suiteId: .check_suite_id} | tojson'),
+      '.workflow_runs[] | {id, name, path, event, status, conclusion, suiteId: .check_suite_id} | tojson'),
     statuses: ghLines(`repos/${repo}/commits/${sha}/statuses?per_page=100`,
       '.[] | {id, context, state, createdAt: .created_at, creator: .creator.login, url: .target_url} | tojson')
   };

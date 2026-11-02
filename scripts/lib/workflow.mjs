@@ -154,11 +154,14 @@ export function evaluateChecks(checks, required = REQUIRED_CHECKS) {
 const time = (value) => Date.parse(value ?? '') || 0;
 const sameLogin = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 
+const CONCLUSIONS = ['success', 'skipped', 'neutral', 'cancelled', 'timed_out', 'action_required', 'startup_failure', 'stale', 'failure'];
+/** pending until it finished; then its conclusion (cancelled stays cancelled), unknown ones as failure. */
 function checkRunState(run) {
   if (String(run.status ?? '').toLowerCase() !== 'completed') return 'pending';
   const conclusion = String(run.conclusion ?? '').toLowerCase();
-  return ['success', 'skipped', 'neutral'].includes(conclusion) ? conclusion : 'failure';
+  return CONCLUSIONS.includes(conclusion) ? conclusion : 'failure';
 }
+const failed = (state) => !['success', 'skipped', 'neutral', 'pending'].includes(state);
 
 function statusState(status) {
   const state = String(status.state ?? '').toLowerCase();
@@ -179,27 +182,31 @@ function newest(entries, startOf, { unfinishedFirst = false } = {}) {
  *
  * `commit` is what scripts/lib/gh.mjs commitChecks returns: every check run attempt
  * ({ id, name, status, conclusion, startedAt, app, suiteId }), the workflow runs on the commit
- * ({ name, path, event, suiteId }) and every commit status with who set it
+ * ({ id, name, path, event, status, conclusion, suiteId }) and every commit status with who set it
  * ({ id, context, state, createdAt, creator }).
  *
- * - The CI_CHECKS count only as check runs of CI_WORKFLOW (that file, GitHub Actions). Every CI
- *   run on the commit must pass them; within one run the newest attempt counts. A report with
+ * - The CI_CHECKS count only as check runs of CI_WORKFLOW (that file, GitHub Actions). For the
+ *   merge gate every CI run on the commit must pass them; within one run the newest attempt
+ *   counts. A report with
  *   the same name from anywhere else refuses, so a duplicate-named job cannot stand in for or
  *   mask the real one.
  * - `agent-review` counts only as a commit status set by `reviewer` (the account the scripts run
  *   as). A check run of that name, or the status set by any other account, refuses.
  * - Any other required name must be green wherever it reports; any other failed check refuses.
- * - With exactCommitCi (tagging a release), at least one CI run must have tested the commit
- *   itself (a push or a run started by hand), not only a pull request's merge with main.
+ * - With exactCommitCi (tagging a release), the CI_CHECKS are judged only on the newest CI run
+ *   that tested the commit itself (a push or a run started by hand), not a pull request's merge
+ *   with main. That run must have finished with conclusion success and every CI job green:
+ *   queued or running is waited for; cancelled, startup_failure, a failed or missing job refuse.
  *
  * Returns { ok, problems, waiting }: `waiting` is true when the only problems are CI jobs that
  * are still running or have not reported yet.
  */
 export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, exactCommitCi = false } = {}) {
   const { checkRuns = [], workflowRuns = [], statuses = [] } = commit ?? {};
-  const ciSuites = new Set(workflowRuns
-    .filter((run) => run.name === CI_WORKFLOW.name && String(run.path ?? '').replace(/@.*$/, '') === CI_WORKFLOW.path)
-    .map((run) => run.suiteId));
+  const ciWorkflowRuns = workflowRuns
+    .filter((run) => run.name === CI_WORKFLOW.name && String(run.path ?? '').replace(/@.*$/, '') === CI_WORKFLOW.path);
+  const ciSuites = new Set(ciWorkflowRuns.map((run) => run.suiteId));
+  const runIdOfSuite = new Map(ciWorkflowRuns.map((run) => [run.suiteId, run.id]));
   const attempts = new Map();
   for (const run of checkRuns) {
     if (!run.name) continue;
@@ -220,6 +227,34 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
   const block = (message) => problems.push({ message, waiting: false });
   const wait = (message) => problems.push({ message, waiting: true });
   const source = (run) => `${run.app ?? 'an unknown app'}${run.app === CI_WORKFLOW.app ? ` (check suite ${run.suiteId})` : ''}`;
+  const inRun = (run) => {
+    const id = runIdOfSuite.get(run.suiteId);
+    return id === undefined ? '' : ` in ${CI_WORKFLOW.name} run ${id} (gh run rerun ${id} --failed)`;
+  };
+
+  // Which CI runs judge the CI_CHECKS. For the merge gate, every CI run on the commit. For tagging
+  // (exactCommitCi), only the newest run that tested the commit itself (a push or a run started
+  // by hand): it must have finished, with conclusion success, and every CI job in it green.
+  // Pull request runs test the PR merged with main, not the commit, so they do not count there.
+  let judged = ciSuites;
+  let judgedRunDone = false;
+  if (exactCommitCi) {
+    const own = ciWorkflowRuns.filter((run) => run.event !== 'pull_request').sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+    judged = new Set(own.slice(0, 1).map((run) => run.suiteId));
+    if (ciWorkflowRuns.length === 0) wait(`no ${CI_WORKFLOW.name} run has started on this commit yet`);
+    else if (own.length === 0) {
+      block(`${CI_WORKFLOW.name} ran on this commit only as part of a pull request, which tests its merge with main; run it on the commit itself (gh workflow run ci.yml --ref <branch>) and tag once it passes`);
+    } else {
+      const latest = own[0];
+      const status = String(latest.status ?? '').toLowerCase();
+      const conclusion = String(latest.conclusion ?? '').toLowerCase();
+      if (status !== 'completed') wait(`${CI_WORKFLOW.name} run ${latest.id} on this commit is ${status || 'not finished'}`);
+      else {
+        judgedRunDone = true;
+        if (conclusion !== 'success') block(`${CI_WORKFLOW.name} run ${latest.id} on this commit ended ${conclusion || 'without a conclusion'}; re-run it (gh run rerun ${latest.id}) or start a new one, and tag once it passes`);
+      }
+    }
+  }
 
   for (const name of required) {
     const named = runs.filter((run) => run.name === name);
@@ -238,11 +273,15 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
     if (CI_CHECKS.includes(name)) {
       for (const run of named.filter((r) => !r.fromCi)) block(`a check named "${name}" also comes from ${source(run)}, not the ${CI_WORKFLOW.name} workflow; refusing so it cannot stand in for the real job`);
       for (const status of namedStatuses) block(`a commit status named "${name}" was set by ${status.creator ?? 'an unknown account'}; "${name}" must come from the ${CI_WORKFLOW.name} workflow`);
-      const fromCi = named.filter((r) => r.fromCi);
-      if (fromCi.length === 0) wait(`required check "${name}" has not reported from the ${CI_WORKFLOW.name} workflow on this commit`);
+      const fromCi = named.filter((r) => r.fromCi && judged.has(r.suiteId));
+      if (fromCi.length === 0) {
+        const missing = `required check "${name}" has not reported from the ${CI_WORKFLOW.name} workflow on this commit`;
+        if (judgedRunDone) block(`${missing}, and the run has finished`);
+        else wait(missing);
+      }
       for (const run of fromCi) {
         if (run.state === 'pending') wait(`required check "${name}" is still running`);
-        else if (run.state !== 'success') block(`required check "${name}" is ${run.state}`);
+        else if (run.state !== 'success') block(`required check "${name}" is ${run.state}${inRun(run)}`);
       }
       continue;
     }
@@ -253,14 +292,7 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
       else if (entry.state !== 'success') block(`required check "${name}" is ${entry.state}`);
     }
   }
-  if (exactCommitCi) {
-    const ciRuns = workflowRuns.filter((run) => ciSuites.has(run.suiteId));
-    if (ciRuns.length === 0) wait(`no ${CI_WORKFLOW.name} run has started on this commit yet`);
-    else if (!ciRuns.some((run) => run.event !== 'pull_request')) {
-      block(`${CI_WORKFLOW.name} ran on this commit only as part of a pull request, which tests its merge with main; run it on the commit itself (gh workflow run ci.yml --ref <branch>) and tag once it passes`);
-    }
-  }
-  for (const run of runs) if (!required.includes(run.name) && run.state === 'failure') block(`check "${run.name}" failed`);
+  for (const run of runs) if (!required.includes(run.name) && failed(run.state)) block(`check "${run.name}" ${run.state === 'failure' ? 'failed' : `is ${run.state}`}`);
   for (const status of latestStatuses) if (!required.includes(status.context) && status.state === 'failure') block(`status "${status.context}" (set by ${status.creator ?? 'an unknown account'}) failed`);
 
   const messages = [...new Set(problems.map((problem) => problem.message))];

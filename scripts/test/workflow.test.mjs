@@ -133,7 +133,7 @@ test('every required check must be green, and any other failed check blocks too'
 
 const OWNER = 'ALuhning';
 const CI_SUITE = 101;
-const ciWorkflowRun = { id: 1, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', suiteId: CI_SUITE };
+const ciWorkflowRun = { id: 1, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', status: 'completed', conclusion: 'success', suiteId: CI_SUITE };
 const ciRun = (name, extra = {}) => ({ id: name.length, name, status: 'completed', conclusion: 'success', startedAt: '2026-01-01T00:00:00Z', app: 'github-actions', suiteId: CI_SUITE, ...extra });
 const ownerReview = (state = 'success', extra = {}) => ({ id: 1, context: 'agent-review', state, createdAt: '2026-01-01T01:00:00Z', creator: OWNER, ...extra });
 const greenCommit = () => ({ checkRuns: CI_CHECKS.map((name) => ciRun(name)), workflowRuns: [ciWorkflowRun], statuses: [ownerReview()] });
@@ -219,6 +219,60 @@ test('tagging needs a CI run that tested the commit itself, not only a pull requ
   assert.equal(gate(dispatched, { exactCommitCi: true }).ok, true);
   const notStarted = { checkRuns: [], workflowRuns: [], statuses: [] };
   assert.equal(gate(notStarted, { required: CI_CHECKS, exactCommitCi: true }).waiting, true, 'CI that has not started yet is waited for');
+});
+
+/** A green PR run plus a CI run on the commit itself (workflow_dispatch) with the given jobs. */
+function withExactRun(run, jobs = CI_CHECKS.map((name) => ciRun(name, { suiteId: 909 }))) {
+  const commit = greenCommit();
+  commit.workflowRuns.push({ ...ciWorkflowRun, id: 77, event: 'workflow_dispatch', suiteId: 909, ...run });
+  commit.checkRuns.push(...jobs);
+  return commit;
+}
+
+test('tagging needs the CI run on the commit itself to have finished with every job green', () => {
+  const exact = (commit) => gate(commit, { exactCommitCi: true });
+  // Reproduced in review: a green PR run plus a dispatched run that has no jobs yet passed.
+  const queued = exact(withExactRun({ status: 'queued', conclusion: null }, []));
+  assert.equal(queued.ok, false);
+  assert.equal(queued.waiting, true, 'a queued run is waited for');
+  assert.match(queued.problems.join('\n'), /run 77 .*queued/);
+  const running = exact(withExactRun({ status: 'in_progress', conclusion: null }, CI_CHECKS.map((name) => ciRun(name, { suiteId: 909, status: 'in_progress', conclusion: null }))));
+  assert.deepEqual([running.ok, running.waiting], [false, true]);
+  for (const conclusion of ['startup_failure', 'cancelled', 'failure', 'timed_out']) {
+    const result = exact(withExactRun({ conclusion }, conclusion === 'startup_failure' ? [] : undefined));
+    assert.equal(result.ok, false, conclusion);
+    assert.equal(result.waiting, false, `${conclusion} is refused, not waited for`);
+    assert.match(result.problems.join('\n'), new RegExp(`run 77 .*${conclusion}.*gh run rerun 77`), conclusion);
+  }
+  const failedJob = exact(withExactRun({}, CI_CHECKS.map((name) => ciRun(name, { suiteId: 909, conclusion: name === 'e2e' ? 'failure' : 'success' }))));
+  assert.equal(failedJob.ok, false, 'a failed job refuses even if the run reports success');
+  assert.match(failedJob.problems.join('\n'), /"e2e" is failure/);
+  const cancelledJob = exact(withExactRun({}, CI_CHECKS.map((name) => ciRun(name, { suiteId: 909, conclusion: name === 'audit' ? 'cancelled' : 'success' }))));
+  assert.match(cancelledJob.problems.join('\n'), /"audit" is cancelled/, 'cancelled is reported as cancelled');
+  const missingJob = exact(withExactRun({}, CI_CHECKS.filter((name) => name !== 'lint').map((name) => ciRun(name, { suiteId: 909 }))));
+  assert.deepEqual([missingJob.ok, missingJob.waiting], [false, false], 'a finished run that never ran a job is refused');
+  assert.equal(exact(withExactRun({})).ok, true, 'a finished, green run on the commit passes');
+});
+
+test('for tagging only the newest run on the commit itself counts, not pull request runs', () => {
+  const exact = (commit) => gate(commit, { exactCommitCi: true });
+  // A hotfix whose PR run (its merge with main) failed, while CI on the hotfix head passed.
+  const prFailed = withExactRun({});
+  prFailed.checkRuns = prFailed.checkRuns.map((run) => (run.suiteId === CI_SUITE && run.name === 'test' ? { ...run, conclusion: 'failure' } : run));
+  assert.equal(exact(prFailed).ok, true);
+  assert.equal(gate(prFailed).ok, false, 'the merge gate still needs every run green');
+  // A newer run on the commit that failed wins over an older one that passed.
+  const newerFailure = withExactRun({});
+  newerFailure.workflowRuns.push({ ...ciWorkflowRun, id: 78, event: 'workflow_dispatch', conclusion: 'failure', suiteId: 910 });
+  newerFailure.checkRuns.push(...CI_CHECKS.map((name) => ciRun(name, { suiteId: 910, conclusion: name === 'test' ? 'failure' : 'success' })));
+  assert.match(exact(newerFailure).problems.join('\n'), /run 78 .*failure/);
+});
+
+test('a failed CI job names its run and how to re-run it', () => {
+  const commit = greenCommit();
+  commit.checkRuns = commit.checkRuns.map((run) => (run.name === 'e2e' ? { ...run, conclusion: 'cancelled' } : run));
+  const message = gate(commit).problems.join('\n');
+  assert.match(message, /"e2e" is cancelled in CI run 1 \(gh run rerun 1 --failed\)/);
 });
 
 test('a release PR is checked before it merges, not only when it is tagged afterwards', () => {

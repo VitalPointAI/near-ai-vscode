@@ -277,8 +277,11 @@ gh run list --workflow ci.yml --branch hotfix/<next> --limit 1   # wait until it
 ```
 
 Then tag the hotfix head. `tag-release.mjs` refuses unless the commit is the head of
-`hotfix/<next>`, a CI run on that commit passed, and the owner's `agent-review` on it is
-success; the Release workflow also accepts only the head of `hotfix/<version>`:
+`hotfix/<next>`, the newest CI run on that exact commit (not the PR's run) has finished with
+all six jobs green, and the owner's `agent-review` on it is success. A run that is queued or
+still running is waited for; one that was cancelled, failed to start or has a failed job is
+refused, with the run id to re-run. The Release workflow also accepts only the head of
+`hotfix/<version>`:
 
 ```bash
 node scripts/tag-release.mjs <next> --sha "$(git rev-parse HEAD)"
