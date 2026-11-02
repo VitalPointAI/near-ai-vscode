@@ -317,8 +317,9 @@ earlier do). All three paths are needed:
   without the allowlist the `secret-scan` job fails on every run.
 - `scripts` brings the scripts those workflows run (`secret-scan.mjs`, `lib/workflow.mjs`,
   `verify-release-content.mjs` and the rest).
-- `.vscodeignore` keeps `.github/` and `.claude/` out of the VSIX. An older one does not, so
-  `release-content` in CI and the `build` job of the Release workflow refuse the package.
+- `.vscodeignore` keeps `.github/` (and the contributor docs) out of the VSIX. An older one
+  does not, so `release-content` in CI and the `build` job of the Release workflow refuse the
+  package.
 
 Check the staged diff before committing: it should only add or update workflow and gate files.
 If `main` changed a script the old code still relies on (for example the vendoring or SBOM
@@ -364,7 +365,8 @@ There is no "unpublish one version" that users reliably follow. Options, best fi
 
 - **build failed:** fix the cause in a PR. If the tag points at a commit that should not be
   released, do not move the tag (once the tag rulesets in section 8 are applied, GitHub refuses
-  that anyway); release the fix as the next patch. If only an outside service failed, re-run the job.
+  that anyway); release the fix as the next patch. If only an outside service failed, re-run
+  the job.
 - **release failed:** the workflow never changes an existing GitHub release (no `--clobber`), so
   a re-run refuses if the failed run already created one. The owner checks the partial release
   in the web UI, deletes it if it is incomplete, then re-runs the failed jobs.

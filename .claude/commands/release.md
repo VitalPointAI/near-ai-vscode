@@ -33,7 +33,7 @@ the owner's approval in GitHub; never try to publish from this session.
 
    `.github` carries the workflows and the secret-scan allowlist for the fake keys already in
    old test fixtures, `scripts` the scripts the workflows run, and `.vscodeignore` keeps
-   `.github/` and `.claude/` out of the VSIX. Without any one of them CI or the Release workflow
+   `.github/` out of the VSIX. Without any one of them CI or the Release workflow
    fails. Do everything below inside that worktree.
 
 3. **Bump the version** (package.json and package-lock.json together):
