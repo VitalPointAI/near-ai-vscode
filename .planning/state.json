@@ -11,7 +11,7 @@
     {
       "number": "61",
       "name": "Invitations, joining, removal, NEAR org and key integration",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "number": "62",
@@ -46,8 +46,8 @@
   ],
   "next": {
     "command": "/gsd-progress --next",
-    "label": "Advance to the next step (plan phase 61)",
-    "reason": "Phase 2 of 8 — needs a plan"
+    "label": "Advance to the next step",
+    "reason": "Phase 2 of 8 · 13% · executing"
   },
-  "updated_at": "2026-11-01T18:57:41.224Z"
+  "updated_at": "2026-11-02T00:42:58.955Z"
 }
