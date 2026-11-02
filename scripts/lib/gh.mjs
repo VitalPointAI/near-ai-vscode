@@ -2,7 +2,7 @@
 // through a shell, so PR titles, branch names and file contents cannot inject commands.
 import { execFileSync } from 'node:child_process';
 
-export function run(command, args, options = {}) {
+function execRun(command, args, options = {}) {
   try {
     return execFileSync(command, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'], ...options });
   } catch (error) {
@@ -10,6 +10,25 @@ export function run(command, args, options = {}) {
     throw new Error(`${command} ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`);
   }
 }
+
+let runner = execRun;
+
+/** Runs a command (gh or git) and returns its standard output; throws with stderr on failure. */
+export function run(command, args, options = {}) {
+  return runner(command, args, options);
+}
+
+/**
+ * Replaces how commands are run, for tests: `next(command, args, options)` returns the output or
+ * throws. Returns the previous runner; call with no argument to restore the real one.
+ */
+export function setRunner(next) {
+  const previous = runner;
+  runner = next ?? execRun;
+  return previous;
+}
+
+export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function gh(args, options) { return run('gh', args, options); }
 export function ghJson(args, options) { return JSON.parse(gh(args, options) || 'null'); }
@@ -32,10 +51,10 @@ export function viewPr(repo, number) {
 }
 
 /** Polls while GitHub is still computing mergeability (mergeable UNKNOWN). */
-export async function viewPrSettled(repo, number, attempts = 6) {
+export async function viewPrSettled(repo, number, { attempts = 6, wait = sleep } = {}) {
   let pr = viewPr(repo, number);
   for (let i = 1; i < attempts && (pr.mergeable === 'UNKNOWN' || pr.mergeStateStatus === 'UNKNOWN'); i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 2_000 * i));
+    await wait(2_000 * i);
     pr = viewPr(repo, number);
   }
   return pr;
