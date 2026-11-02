@@ -175,6 +175,8 @@ test('Verdict and Head-SHA lines GitHub hides or shows differently fail the revi
   fails(`${head}<!-- never closed\n- [MAJOR] x\n`, /HTML comment opened on line 3 is never closed/);
   fails(`${head}> Verdict: FAIL\n`, /quote, list or indented block/);
   fails(`${head}- Head-SHA: ${OTHER}\n`, /quote, list or indented block/);
+  fails(`${head}* Verdict: FAIL\n`, /quote, list or indented block/);
+  fails(`${head}1. **Verdict:** FAIL\n`, /quote, list or indented block/);
   fails(`${head}    Verdict: FAIL\n`, /quote, list or indented block/);
   // Comments that say nothing about the verdict, and comment markers in inline code, are fine.
   const ok = `${head}<!-- reviewers: list findings below -->\n- [MINOR] the footer marker \`<!-- agent-review head=... -->\` is fine\n`;

@@ -93,9 +93,11 @@ export function parseReview(text) {
     // Emphasis and code marks are ignored: **Verdict:** PASS and Head-SHA: `<sha>` are fine.
     const plain = visible.replace(/[*_`]/g, '').trim();
     // A Verdict or Head-SHA inside a quote, a list item or an indented block is shown as part of
-    // that block, not as the review's own line, so it is refused rather than guessed at.
-    const unwrapped = plain.replace(/^(?:(?:>|[-+*]|\d{1,9}[.)])\s*)+/, '');
-    if ((indent > 3 || unwrapped !== plain) && /^(?:verdict|head-sha)\s*:/i.test(unwrapped)) {
+    // that block, not as the review's own line, so it is refused rather than guessed at. A list
+    // marker needs a space after it, so **Verdict:** is not a list item.
+    const unwrappedRaw = visible.replace(/^(?:>\s*|(?:[-+*]|\d{1,9}[.)])\s+)+/, '');
+    const unwrapped = unwrappedRaw.replace(/[*_`]/g, '').trim();
+    if ((indent > 3 || unwrappedRaw !== visible) && /^(?:verdict|head-sha)\s*:/i.test(unwrapped)) {
       problems.push(`line ${index + 1} ("${line.slice(0, 80)}") has a Verdict or Head-SHA inside a quote, list or indented block; put it on its own line, not indented`);
       continue;
     }
