@@ -14,6 +14,7 @@ import { memberAttention } from '../../domain/team/invite';
 import type { MemberAttention } from '../../domain/team/invite';
 import { teamMaterializer } from '../../domain/team/materialize';
 import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
+import { countReady, isCard } from '../../domain/team/work';
 import type { CommittedEvent, GenesisAnchor, Role, TeamEvent, TeamFile, TeamState } from '../../domain/team/types';
 import { AuditStore } from '../auditStore';
 import { AuthService } from '../auth';
@@ -427,10 +428,25 @@ export class TeamSession {
       }
     }
     // The reactions run after the sync steps above and only on a log that was read and is trusted; they never throw out of here.
-    const extras = await this.reactToMembers(synced && refused === undefined);
+    const trusted = synced && refused === undefined;
+    const extras = await this.reactToMembers(trusted);
+    if (trusted) this.countCards(extras);
     this.showStatus(status, extras);
     await this.mirror();
     return status.state === 'ok';
+  }
+
+  // Once the log has cards the status bar shows how many are ready; before that it shows no count (D-17). The count is derived on every sync from the
+  // materialised items, so it follows the same poll that brought the change.
+  private countCards(extras: TeamStatusExtras): void {
+    if (extras.removed === true) return;
+    const items = this.transport.state().items;
+    for (const item of items.values()) {
+      if (isCard(item)) {
+        extras.ready = countReady(items);
+        return;
+      }
+    }
   }
 
   private showRemoved(): void {
@@ -453,7 +469,7 @@ export class TeamSession {
       return;
     }
     const shown = statusText(status, this.teamFile.name);
-    this.line(status.reason === undefined ? shown.text : `${shown.text}. ${status.reason}`);
+    this.line(status.reason === undefined ? shown.plain : `${shown.plain}. ${status.reason}`);
   }
 
   // Rejected events go to the channel once per event and reason in a session. They never reach the audit log (D-26).
