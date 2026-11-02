@@ -33,3 +33,47 @@ test('CI runs on main never share a concurrency group, so none is cancelled', ()
   assert.doesNotMatch(group, /github\.ref\b/);
   assert.match(concurrency, /cancel-in-progress:\s*\$\{\{\s*github\.event_name == 'pull_request'\s*\}\}/);
 });
+
+/** Each job of a workflow, by id, as its block of text. */
+function jobs(text) {
+  const body = block(text, 'jobs');
+  assert.ok(body, 'the workflow has jobs');
+  const result = new Map();
+  let current;
+  for (const line of body.split('\n').slice(1)) {
+    const id = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line)?.[1];
+    if (id) { current = id; result.set(id, ''); continue; }
+    if (current) result.set(current, `${result.get(current)}${line}\n`);
+  }
+  return result;
+}
+
+/** The `- uses:` / `- name:` / `- run:` steps of a job, in order, as text. */
+function steps(job) {
+  return job.split(/\n(?= {6}- )/).slice(1);
+}
+
+test('release jobs that hold a write token or VSCE_PAT run no npm install scripts and no npm cache', () => {
+  const all = jobs(read('release.yml'));
+  const privileged = [...all].filter(([, job]) => /contents:\s*write|environment:|secrets\.VSCE_PAT/.test(job));
+  assert.ok(privileged.length >= 2, 'the release and publish jobs are found');
+  for (const [id, job] of privileged) {
+    for (const line of job.split('\n').filter((l) => /\bnpm (ci|install|i)\b/.test(l))) {
+      assert.match(line, /--ignore-scripts/, `${id}: ${line.trim()}`);
+    }
+    assert.doesNotMatch(job, /cache:\s*npm/, `${id} must not restore an npm cache`);
+  }
+  assert.doesNotMatch(all.get('build'), /contents:\s*write/, 'build, which runs npm ci with scripts, is read-only');
+  const writers = [...all].filter(([, job]) => /contents:\s*write/.test(job)).map(([id]) => id);
+  for (const id of writers) assert.doesNotMatch(all.get(id), /npm (ci|install|test|run)|actions\/checkout/, `${id} only handles the built artifact`);
+});
+
+test('publish checks the VSIX checksum from the build job before it does anything else', () => {
+  const publish = jobs(read('release.yml')).get('publish');
+  const list = steps(publish);
+  assert.match(list[0], /actions\/download-artifact@[0-9a-f]{40}/);
+  assert.match(list[1], /sha256sum --check/);
+  assert.match(list[1], /needs\.build\.outputs\.sha256/, 'the expected checksum comes from the build job, not the artifact');
+  assert.match(publish, /environment:\s*\n\s*name: marketplace/);
+  assert.equal((publish.match(/secrets\.VSCE_PAT/g) ?? []).length, 1);
+});

@@ -1,11 +1,14 @@
 # Builds and publishes a release when a v<x.y.z> tag is pushed (scripts/merge-pr.mjs tags the
-# squash commit of a release/x.y.z PR; scripts/tag-release.mjs can retry it).
+# squash commit of a release/x.y.z PR; scripts/tag-release.mjs can retry it or tag a hotfix).
 #
-#   build    checks the tag, builds and verifies the VSIX, creates the GitHub release with the
-#            VSIX and the CHANGELOG section as notes.
+#   build    read-only token. Checks the tag, runs the tests, builds and verifies the VSIX, and
+#            records its SHA-256 as a job output.
+#   release  holds contents: write to create the GitHub release, so it installs and runs nothing:
+#            it downloads the build's artifact, checks the checksum, and runs `gh release`.
 #   publish  runs in the protected "marketplace" environment, so it waits until the owner
-#            approves it in GitHub, then publishes that exact VSIX with the VSCE_PAT secret,
-#            which exists only in that environment.
+#            approves it in GitHub. It checks the VSIX checksum before anything else, installs
+#            the vsce pinned in package-lock.json without install scripts, and publishes that
+#            exact VSIX with the VSCE_PAT secret, which exists only in that environment.
 name: Release
 
 on:
@@ -25,10 +28,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: write # create the GitHub release
+      contents: read
     outputs:
       version: ${{ steps.meta.outputs.version }}
       vsix: ${{ steps.meta.outputs.vsix }}
+      sha256: ${{ steps.checksum.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,23 +75,48 @@ jobs:
       - name: Package the VSIX and check what it contains
         run: npm run verify:release
       - name: Record the VSIX checksum
+        id: checksum
         env:
           VSIX: ${{ steps.meta.outputs.vsix }}
-        run: sha256sum "$VSIX" | tee "$VSIX.sha256"
+        run: |
+          sum="$(sha256sum "$VSIX" | cut -d ' ' -f 1)"
+          echo "$sum  $VSIX" | tee "$VSIX.sha256"
+          echo "sha256=$sum" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-vsix
           path: |
             ${{ steps.meta.outputs.vsix }}
             ${{ steps.meta.outputs.vsix }}.sha256
+            release-notes.md
           retention-days: 90
           if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the GitHub release
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-vsix
+          path: release
+      - name: Check the VSIX is the one the build job verified
+        working-directory: release
+        env:
+          SHA256: ${{ needs.build.outputs.sha256 }}
+          VSIX: ${{ needs.build.outputs.vsix }}
+        run: echo "$SHA256  $VSIX" | sha256sum --check --strict
       - name: Create or update the GitHub release
+        working-directory: release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-          VERSION: ${{ steps.meta.outputs.version }}
-          VSIX: ${{ steps.meta.outputs.vsix }}
+          VERSION: ${{ needs.build.outputs.version }}
+          VSIX: ${{ needs.build.outputs.vsix }}
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" "$VSIX" "$VSIX.sha256" --clobber --repo "$GITHUB_REPOSITORY"
@@ -98,7 +127,7 @@ jobs:
 
   publish:
     name: publish
-    needs: build
+    needs: [build, release]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Protected environment: the job waits here until the owner approves it in GitHub.
@@ -106,24 +135,31 @@ jobs:
       name: marketplace
       url: https://marketplace.visualstudio.com/items?itemName=VitalPoint.near-ai-vscode
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
-          cache: npm
-      # Installs the vsce version pinned in package-lock.json, so npx never fetches another one.
-      - run: npm ci
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-vsix
+          path: release
       - name: Check the VSIX is the one the build job verified
+        working-directory: release
         env:
+          SHA256: ${{ needs.build.outputs.sha256 }}
           VSIX: ${{ needs.build.outputs.vsix }}
-        run: sha256sum --check "$VSIX.sha256"
+        run: echo "$SHA256  $VSIX" | sha256sum --check --strict
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      # Only package.json and the lockfile are needed, to install the pinned vsce. The checkout
+      # goes into its own folder so it cannot replace the verified VSIX.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: tools
+      - name: Install the vsce version pinned in package-lock.json, without install scripts
+        working-directory: tools
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Publish to the Visual Studio Marketplace
+        working-directory: tools
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           VSIX: ${{ needs.build.outputs.vsix }}
-        run: npx --no-install vsce publish --packagePath "$VSIX"
+        run: ./node_modules/.bin/vsce publish --packagePath "../release/$VSIX"

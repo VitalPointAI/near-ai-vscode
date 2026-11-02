@@ -170,14 +170,18 @@ the fix (for example `gh pr update-branch <number> --rebase`, then CI and a new 
 5. `/merge-pr` squash-merges it, waits for CI on the new `main` commit, and tags that commit
    `v<x.y.z>` (`scripts/tag-release.mjs` does the same by hand, and can retry a missed tag).
 6. The tag starts `.github/workflows/release.yml`:
-   - **build** checks that the tag matches package.json and is on `main`, runs the tests,
-     builds and verifies the VSIX, records its SHA-256, and creates the GitHub release named
-     `<x.y.z>` with the VSIX, the checksum, and the CHANGELOG section as notes;
+   - **build** has a read-only token. It checks that the tag matches package.json and points
+     at a commit on `main` (or at the head of `hotfix/<x.y.z>`, see the hotfix section), runs
+     the tests, builds and verifies the VSIX, and records its SHA-256;
+   - **release** creates the GitHub release named `<x.y.z>` with the VSIX, the checksum, and
+     the CHANGELOG section as notes. It is the only job that can write to the repository, so it
+     installs and runs nothing: it downloads the build's files and checks the checksum first;
    - **publish** runs in the protected `marketplace` environment. It **waits for the owner**:
      GitHub shows "Review deployments" on the run, and nothing is published until the owner
-     approves. It then checks the VSIX checksum and runs
-     `npx vsce publish --packagePath <the verified VSIX>` with the `VSCE_PAT` secret, which is
-     stored only in that environment.
+     approves. Its first step checks the VSIX against the checksum the build job recorded. It
+     then installs the `vsce` pinned in package-lock.json with `npm ci --ignore-scripts` (no
+     cache, no install scripts) and runs `vsce publish --packagePath <the verified VSIX>` with
+     the `VSCE_PAT` secret, which is stored only in that environment.
 
 The owner approves from the run page (Actions, Release, the run, "Review deployments") or with
 `gh run view <run-id>`. Rejecting it leaves the GitHub release in place and nothing published.
