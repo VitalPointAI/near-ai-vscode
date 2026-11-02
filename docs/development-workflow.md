@@ -90,7 +90,9 @@ committed (`.env`, `id_rsa`, `.near-credentials/`, `.p12`). It scans every commi
 only the final diff, because a PR's commits stay public on GitHub even after a squash merge.
 Findings are printed masked. Test fixtures with fake keys are listed, with a reason, in
 `.github/secret-scan-allow.txt`; a single line can carry the marker `secret-scan: allow`. Both
-are visible in review.
+are visible in review: the scan lists every marked line that matches a rule (masked), and fails
+when a marked line was added by one commit and removed by a later one, since the PR's final diff
+would no longer show it.
 
 ## 4. The agent review gate
 

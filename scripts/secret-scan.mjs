@@ -9,10 +9,13 @@
 //
 // Known test fixtures with fake keys are listed in .github/secret-scan-allow.txt (one path per
 // line, with a reason). A single line can opt out with the marker "secret-scan: allow". Both
-// show up in review, so neither can hide a real key quietly. Matches are printed masked.
+// show up in review, so neither can hide a real key quietly: marked lines that match a rule are
+// listed (masked) in the output, and in a range scan a marked line that was added and removed
+// again before the end of the range fails, since the final diff reviewers read no longer shows
+// it. Matches are printed masked.
 import { readFileSync, existsSync } from 'node:fs';
 import { git, parseArgs } from './lib/gh.mjs';
-import { isSecretFileName, maskLine, parseAllowlist, scanLine } from './lib/workflow.mjs';
+import { ALLOW_MARKER, isSecretFileName, maskLine, matchRules, parseAllowlist, scanLine } from './lib/workflow.mjs';
 
 const ALLOWLIST = '.github/secret-scan-allow.txt';
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -20,6 +23,7 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const { options } = parseArgs(process.argv.slice(2), { string: ['range'] });
 const allow = parseAllowlist(existsSync(ALLOWLIST) ? readFileSync(ALLOWLIST, 'utf8') : '');
 const findings = [];
+const allowed = [];
 
 function looksBinary(buffer) {
   return buffer.subarray(0, 8000).includes(0);
@@ -34,6 +38,7 @@ for (const file of files) {
   if (buffer.length > MAX_FILE_BYTES || looksBinary(buffer)) continue;
   buffer.toString('utf8').split(/\r?\n/).forEach((line, index) => {
     for (const rule of scanLine(line)) findings.push({ where: `${file}:${index + 1}`, rule, text: maskLine(line.trim()) });
+    if (line.includes(ALLOW_MARKER)) for (const rule of matchRules(line)) allowed.push({ where: `${file}:${index + 1}`, rule, text: maskLine(line.trim()) });
   });
 }
 
@@ -44,8 +49,18 @@ for (const file of files) {
 // hunk header, so no added line can be mistaken for a file header.
 let commitCount = 0;
 if (options.range) {
-  const [from, to] = options.range.split('..');
+  const [from, to = from] = options.range.split('..');
   const revisions = /^0+$/.test(from) || from === '' ? [to] : [options.range];
+  // The lines of each file at the end of the range, to tell whether a marked line survived.
+  const finalLines = new Map();
+  const linesAtEnd = (file) => {
+    if (!finalLines.has(file)) {
+      let text = '';
+      try { text = git(['show', `${to}:${file}`]); } catch { text = ''; }
+      finalLines.set(file, new Set(text.split(/\r?\n/)));
+    }
+    return finalLines.get(file);
+  };
   const commits = git(['rev-list', '--reverse', ...revisions, '--']).split('\n').filter(Boolean);
   const emptyTree = git(['hash-object', '-t', 'tree', '--stdin'], { input: '' }).trim();
   const seen = new Set();
@@ -67,7 +82,11 @@ if (options.range) {
         for (const line of diff.split('\n')) {
           if (line.startsWith('@@')) { inHunk = true; continue; }
           if (!inHunk || !line.startsWith('+')) continue;
-          for (const rule of scanLine(line.slice(1))) report({ where, rule, text: maskLine(line.slice(1).trim()) });
+          const added = line.slice(1);
+          for (const rule of scanLine(added)) report({ where, rule, text: maskLine(added.trim()) });
+          if (added.includes(ALLOW_MARKER) && matchRules(added).length > 0 && !linesAtEnd(file).has(added)) {
+            report({ where, rule: 'allowed-line-removed', text: maskLine(added.trim()) });
+          }
         }
       }
     }
@@ -75,6 +94,10 @@ if (options.range) {
 }
 
 const scope = `${files.length} tracked files${options.range ? ` and ${commitCount} commit(s) in ${options.range}` : ''}`;
+if (allowed.length > 0) {
+  console.log(`Lines marked "${ALLOW_MARKER}" that match a rule (check each holds a fake value):`);
+  for (const line of allowed) console.log(`  ${line.where}  [${line.rule}]  ${line.text}`);
+}
 if (findings.length === 0) {
   console.log(`Secret scan clean: ${scope}. Allowlisted fixtures: ${allow.size}.`);
 } else {

@@ -362,12 +362,14 @@ const SECRET_FILE_EXCEPTIONS = [/(^|\/)\.env\.(example|sample|template)$/];
 
 export const ALLOW_MARKER = 'secret-scan: allow';
 
+/** The ids of every secret rule a line matches, whether or not it carries the allow marker. */
+export function matchRules(line) {
+  return SECRET_RULES.filter((rule) => rule.pattern.test(line)).map((rule) => rule.id);
+}
+
 /** Findings for one line of text. Lines carrying `secret-scan: allow` are skipped. */
 export function scanLine(line) {
-  if (line.includes(ALLOW_MARKER)) return [];
-  const found = [];
-  for (const rule of SECRET_RULES) if (rule.pattern.test(line)) found.push(rule.id);
-  return found;
+  return line.includes(ALLOW_MARKER) ? [] : matchRules(line);
 }
 
 export function isSecretFileName(path) {

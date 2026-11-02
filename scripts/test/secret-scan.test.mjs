@@ -100,3 +100,25 @@ test('a range scan of a clean history passes', () => {
   assert.equal(status, 0, output);
   assert.match(output, /1 commit\(s\)/);
 });
+
+test('lines marked "secret-scan: allow" are listed, and one added then removed in the range fails', () => {
+  const { dir, write, commit } = fixture();
+  const marker = ['secret-scan', 'allow'].join(': ');
+  write('README.md', 'hello\n');
+  const base = commit('base');
+  write('kept.txt', `fake = "${TOKEN}" // ${marker}\n`);
+  commit('a fake key that stays, marked');
+  const kept = scan(dir, '--range', `${base}..HEAD`);
+  assert.equal(kept.status, 0, kept.output);
+  assert.match(kept.output, /marked "secret-scan: allow".*\n.*kept\.txt.*\[github-token\]/);
+  assert.ok(!kept.output.includes(TOKEN), 'marked lines are masked too');
+
+  write('gone.txt', `real = "${TOKEN}" // ${marker}\n`);
+  commit('a key hidden by the marker');
+  write('gone.txt', 'nothing here\n');
+  commit('and removed again');
+  const gone = scan(dir, '--range', `${base}..HEAD`);
+  assert.equal(gone.status, 1, gone.output);
+  assert.match(gone.output, /gone\.txt\s+\[allowed-line-removed\]/);
+  assert.doesNotMatch(gone.output, /kept\.txt\s+\[allowed-line-removed\]/);
+});
