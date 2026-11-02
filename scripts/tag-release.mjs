@@ -5,8 +5,10 @@
 //
 //   node scripts/tag-release.mjs <x.y.z> [--sha <commit>] [--repo owner/name] [--no-wait]
 //
-// Without --sha it tags the current head of main. It refuses unless package.json at that commit
-// is <x.y.z>, CHANGELOG.md has a "## <x.y.z>" section, and every CI job on the commit passed.
+// Without --sha it tags the current head of main. It refuses unless the commit is on main or is
+// the head of hotfix/<x.y.z>, package.json there is <x.y.z>, CHANGELOG.md has a "## <x.y.z>"
+// section, and every CI job passed in a CI run on that exact commit. A hotfix head also needs
+// the owner's agent-review status on that commit.
 import { fail, gh, parseArgs, resolveRepo } from './lib/gh.mjs';
 import { tagRelease } from './lib/release.mjs';
 import { VERSION_PATTERN } from './lib/workflow.mjs';

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName,
+  BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName, releaseGate,
   isVersionBump, maskLine, normalizeChecks, parseAllowlist, parseReview, releaseVersionFromBranch, reviewDecision, scanLine
 } from '../lib/workflow.mjs';
 
@@ -197,6 +197,27 @@ test('every CI run on the commit must pass; within one run the newest attempt co
   assert.match(gate(otherFailure).problems.join('\n'), /check "codeql" failed/);
   const extraRequired = greenCommit();
   assert.match(gate(extraRequired, { required: [...REQUIRED_CHECKS, 'codeql'] }).problems.join('\n'), /"codeql" has not reported/);
+});
+
+test('a release commit on main needs CI; a hotfix head also needs the owner\'s agent-review', () => {
+  assert.deepEqual(releaseGate({ version: '1.2.3', sha: SHA, onMain: true }), { ok: true, hotfix: false, required: CI_CHECKS });
+  assert.deepEqual(releaseGate({ version: '1.2.3', sha: SHA, onMain: false, hotfixHead: SHA }), { ok: true, hotfix: true, required: REQUIRED_CHECKS });
+  const stray = releaseGate({ version: '1.2.3', sha: SHA, onMain: false, hotfixHead: OTHER });
+  assert.equal(stray.ok, false);
+  assert.match(stray.reason, /neither on main nor the head of hotfix\/1\.2\.3/);
+  assert.equal(releaseGate({ version: '1.2.3', sha: SHA, onMain: false }).ok, false);
+});
+
+test('tagging needs a CI run that tested the commit itself, not only a pull request merge', () => {
+  const prOnly = greenCommit();
+  assert.match(gate(prOnly, { exactCommitCi: true }).problems.join('\n'), /gh workflow run ci\.yml/);
+  assert.equal(gate(prOnly, { exactCommitCi: true }).waiting, false);
+  const dispatched = greenCommit();
+  dispatched.workflowRuns.push({ ...ciWorkflowRun, id: 2, event: 'workflow_dispatch', suiteId: 808 });
+  dispatched.checkRuns.push(...CI_CHECKS.map((name) => ciRun(name, { suiteId: 808 })));
+  assert.equal(gate(dispatched, { exactCommitCi: true }).ok, true);
+  const notStarted = { checkRuns: [], workflowRuns: [], statuses: [] };
+  assert.equal(gate(notStarted, { required: CI_CHECKS, exactCommitCi: true }).waiting, true, 'CI that has not started yet is waited for');
 });
 
 test('branch names follow the convention', () => {

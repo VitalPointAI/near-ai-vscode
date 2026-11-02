@@ -120,6 +120,21 @@ export function fileAt(repo, filePath, ref) {
   return Buffer.from(encoded, 'base64').toString('utf8');
 }
 
+/** True when a failed gh call failed because GitHub answered 404 Not Found. */
+export function isNotFound(error) {
+  return /\(HTTP 404\)/.test(error instanceof Error ? error.message : String(error));
+}
+
+/** The commit a branch points at on GitHub, or undefined when the branch does not exist. */
+export function branchHead(repo, branch) {
+  try {
+    return ghJson(['api', `repos/${repo}/git/ref/heads/${branch}`]).object.sha;
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+}
+
 /** The commit a tag points at, or undefined when the tag does not exist. */
 export function tagCommit(repo, tag) {
   let ref;

@@ -189,11 +189,13 @@ function newest(entries, startOf, { unfinishedFirst = false } = {}) {
  * - `agent-review` counts only as a commit status set by `reviewer` (the account the scripts run
  *   as). A check run of that name, or the status set by any other account, refuses.
  * - Any other required name must be green wherever it reports; any other failed check refuses.
+ * - With exactCommitCi (tagging a release), at least one CI run must have tested the commit
+ *   itself (a push or a run started by hand), not only a pull request's merge with main.
  *
  * Returns { ok, problems, waiting }: `waiting` is true when the only problems are CI jobs that
  * are still running or have not reported yet.
  */
-export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer } = {}) {
+export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, exactCommitCi = false } = {}) {
   const { checkRuns = [], workflowRuns = [], statuses = [] } = commit ?? {};
   const ciSuites = new Set(workflowRuns
     .filter((run) => run.name === CI_WORKFLOW.name && String(run.path ?? '').replace(/@.*$/, '') === CI_WORKFLOW.path)
@@ -251,11 +253,30 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer } 
       else if (entry.state !== 'success') block(`required check "${name}" is ${entry.state}`);
     }
   }
+  if (exactCommitCi) {
+    const ciRuns = workflowRuns.filter((run) => ciSuites.has(run.suiteId));
+    if (ciRuns.length === 0) wait(`no ${CI_WORKFLOW.name} run has started on this commit yet`);
+    else if (!ciRuns.some((run) => run.event !== 'pull_request')) {
+      block(`${CI_WORKFLOW.name} ran on this commit only as part of a pull request, which tests its merge with main; run it on the commit itself (gh workflow run ci.yml --ref <branch>) and tag once it passes`);
+    }
+  }
   for (const run of runs) if (!required.includes(run.name) && run.state === 'failure') block(`check "${run.name}" failed`);
   for (const status of latestStatuses) if (!required.includes(status.context) && status.state === 'failure') block(`status "${status.context}" (set by ${status.creator ?? 'an unknown account'}) failed`);
 
   const messages = [...new Set(problems.map((problem) => problem.message))];
   return { ok: messages.length === 0, problems: messages, waiting: problems.length > 0 && problems.every((problem) => problem.waiting) };
+}
+
+/**
+ * What tagging `sha` as v<version> requires. A commit on main reached it through a reviewed PR, so
+ * it needs green CI. The head of hotfix/<version> (a hotfix cut from an older tag) has not been
+ * merged, so it also needs the owner's agent-review on that exact commit. Anything else is
+ * refused, as the Release workflow would refuse it.
+ */
+export function releaseGate({ version, sha, onMain, hotfixHead }) {
+  if (onMain) return { ok: true, hotfix: false, required: CI_CHECKS };
+  if (hotfixHead && hotfixHead === sha) return { ok: true, hotfix: true, required: REQUIRED_CHECKS };
+  return { ok: false, reason: `${sha.slice(0, 7)} is neither on main nor the head of hotfix/${version}, so the Release workflow would refuse it` };
 }
 
 /** The body of `## <version>` in CHANGELOG.md, without the heading, or undefined. */
