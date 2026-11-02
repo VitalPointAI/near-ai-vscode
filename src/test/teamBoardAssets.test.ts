@@ -49,6 +49,15 @@ test('CR-01: no board script calls an Array method straight on a querySelectorAl
   for (const file of BOARD_SCRIPTS) assert.equal(misuse.test(text(file)), false, `${file} calls an Array method on a NodeList or HTMLCollection`);
 });
 
+test('T-62-46: form.js keeps every host secret pattern, so the stored draft leaves out what the host would refuse', () => {
+  const { SECRET_PATTERNS } = require('../domain/team/secrets') as typeof import('../domain/team/secrets');
+  const form = text('form.js');
+  for (const pattern of SECRET_PATTERNS) {
+    const literal = `/${pattern.source.replace(/\\\//g, '/')}/${pattern.flags}`;
+    assert.ok(form.includes(literal), `form.js has ${literal}`);
+  }
+});
+
 test('every board script is one strict-mode IIFE', () => {
   for (const file of BOARD_SCRIPTS) {
     const code = text(file).split('\n').filter((line) => !/^\s*(\/\/.*)?$/.test(line));

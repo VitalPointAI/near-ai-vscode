@@ -63,6 +63,8 @@ function fill(h: BoardHarness, values: Record<string, string>): void {
   for (const [name, value] of Object.entries(values)) h.setValue(input(h, name), value, name === 'type' ? 'change' : 'input');
 }
 
+const setTitle = (h: BoardHarness, value: string): void => { h.setValue(input(h, 'title'), value, 'input'); };
+
 function openNew(h: BoardHarness): void {
   const button = newItemButton(h);
   button.focus();
@@ -348,6 +350,37 @@ test('the draft is kept with setState on every change, and a reloaded page reope
   assert.equal(posts(again, 'new-item').length, 1);
   again.deliver({ type: 'saved', itemId: NEW_ID });
   assert.equal((again.state as Record<string, any>)['draft'], undefined);
+});
+
+test('T-62-46: a field that looks like a key or password is never stored in the draft, the other fields are, and the host still gets what was typed', async () => {
+  const { h } = await drawn();
+  openNew(h);
+  const key = `sk-${'q'.repeat(24)}`;
+  fill(h, { type: 'bug', title: 'Login fails', description: `Use the key ${key} to reproduce`, files: 'src/a/**', estimate: '2000' });
+  const stored = JSON.stringify(h.state);
+  assert.equal(stored.includes(key), false, 'the key is not in the stored state');
+  assert.deepEqual((h.state as Record<string, any>)['draft'], { mode: 'new', values: { type: 'bug', title: 'Login fails', description: '', files: 'src/a/**', estimate: '2000' } });
+  for (const secret of ['Bearer abcdefghijk', 'api_key=hunter2hunter2', `ghp_${'A1b2'.repeat(9)}`, '-----BEGIN PRIVATE KEY-----']) {
+    setTitle(h, secret);
+    assert.equal(JSON.stringify(h.state).includes(secret), false, `${secret.slice(0, 12)} is not stored`);
+  }
+  setTitle(h, 'Login fails');
+  h.click(buttonNamed(h, 'Add item')!);
+  assert.equal(posts(h, 'new-item')[0]?.draft.description, `Use the key ${key} to reproduce`, 'what is sent is what was typed; the host refuses it');
+});
+
+test('IN-08: an edit form is never stored, so a teammate\'s card text does not outlive the page, and an older stored edit draft is dropped', async () => {
+  const { h, world } = await drawn();
+  openEditFromDetail(h, world);
+  setTitle(h, 'Edited title');
+  assert.equal((h.state as Record<string, any>)['draft'], undefined, 'no draft for an edit');
+  assert.equal(JSON.stringify(h.state).includes('Edited title'), false);
+
+  const old = start({ state: { groupBy: 'member', draft: { mode: 'edit', id: CHORE_ID, values: { type: 'chore', title: 'Their card', description: 'Their words', files: '', estimate: '' } } } });
+  old.deliver({ type: 'state', model: modelOf(world, 'dev') });
+  assert.equal(form(old), null, 'the edit is not reopened');
+  assert.equal(posts(old, 'detail').length, 0, 'and its detail is not asked for');
+  assert.equal(JSON.stringify(old.state).includes('Their words'), false, 'the stored edit text is gone');
 });
 
 // ---- edit -----------------------------------------------------------------------------------------------------------------------------------

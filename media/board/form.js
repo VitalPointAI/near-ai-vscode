@@ -51,6 +51,25 @@
   }
   const FIELD_ORDER = ['title', 'description', 'files', 'estimate'];
 
+  // ---- what may be kept in the stored draft (T-62-46, IN-08) ------------------------------------------------------------------------------------
+  // VS Code keeps the page's stored state on disk, and the host's secret check runs only when the item is sent. So only the person's own unsent new
+  // item is stored, never an edit form (it starts from a teammate's card), and a field that looks like a key or password is left out of it. These
+  // are the host's patterns (src/domain/team/secrets.ts and redaction.ts) plus a long random token; the host still refuses on submit.
+  const SECRET_LIKE = [
+    /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}/, /(?<![A-Za-z0-9])sk_(?:live|test)_[A-Za-z0-9]{8,}/, /(?<![A-Za-z0-9])rpt-[A-Za-z0-9_-]{8,}/,
+    /(?<![A-Za-z0-9])rt_[A-Za-z0-9_-]{8,}/, /(?<![A-Za-z0-9])adm_[A-Za-z0-9_-]{8,}/, /(?<![A-Za-z0-9])oc_[A-Za-z0-9_-]{8,}/, /(?<![A-Za-z0-9])bearer\s+[^\s,;]+/i,
+    /(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/, /-----BEGIN [A-Z ]*PRIVATE KEY-----/, /MC4CAQAwBQYDK2VwBCIEI[A-Za-z0-9+/_-]*/,
+    /MC4CAQAwBQYDK2VuBCIEI[A-Za-z0-9+/_-]*/, /(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|authorization)\s*[:=]\s*[^\s,;]+/i,
+    /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])/
+  ];
+  const looksSecret = (text) => typeof text === 'string' && SECRET_LIKE.some((pattern) => pattern.test(text));
+  function storable(mode, values) {
+    if (mode !== 'new' || !values) return undefined;
+    const out = { type: KINDS.some((kind) => kind[0] === values.type) ? values.type : 'chore' };
+    for (const name of ['title', 'description', 'files', 'estimate']) out[name] = looksSecret(values[name]) ? '' : String(values[name] || '');
+    return { mode: 'new', values: out };
+  }
+
   // ---- the form --------------------------------------------------------------------------------------------------------------------------------
   let f; // { mode, id, kind, opener, form, nodes, errors, hints, counter, alert, submit, discardRow, initial, busy, sent, wasHidden, hidden }
   let waitingFocus;
@@ -183,7 +202,7 @@
   function draftNow() {
     if (!f || f.busy) return;
     const v = read();
-    board.setDraft({ mode: f.mode, ...(f.mode === 'edit' ? { id: f.id } : {}), values: { type: v.type, title: v.title, description: v.description, files: v.files, estimate: v.estimate } });
+    board.setDraft(storable(f.mode, { type: v.type, title: v.title, description: v.description, files: v.files, estimate: v.estimate }));
   }
 
   function present(mode, itemId, values, initial, opener, extra) {
@@ -386,14 +405,17 @@
   window.NearAiBoard.registerForm((itemId) => open(itemId));
 
   // The unsent draft of a form that was open before the view was hidden or reloaded comes back once the first state has arrived.
-  const kept = board.getDraft();
-  if (kept && kept.values) {
+  // Only a new item comes back, and only the fields that are safe to keep; an edit draft stored by an older version is dropped.
+  const stored = board.getDraft();
+  const kept = stored ? storable(stored.mode, stored.values) : undefined;
+  if (stored && !kept) board.setDraft(undefined);
+  else if (kept) {
+    board.setDraft(kept);
     let once = true;
     board.onMessage('state', () => {
       if (!once) return;
       once = false;
-      if (kept.mode === 'edit' && typeof kept.id === 'string') open(kept.id, kept);
-      else open(undefined, kept);
+      open(undefined, kept);
     });
   }
 }());
