@@ -256,6 +256,31 @@ function applyJoiner(state: TeamState, member: Member, event: TeamEvent<'member.
   if (member.pendingRole === body.role) delete member.pendingRole;
 }
 
+const RELEASABLE_CLAIM_STATUSES: readonly string[] = ['active', 'in-review', 'integrating'];
+
+// D-19, TEAM-03: everything a removed member held goes back to the team in this one transition, so every client computes the same release.
+// Claims keep their branch name, base and spend; their items return to ready; the member's leases and allocations are dropped (the unspent
+// amount returns to the pool); released claims leave the integration queue. Map iteration is insertion order, so the result is deterministic.
+// Merged, handed-off, expired and already released claims are history and stay as they are.
+function releaseHeldWork(state: TeamState, memberId: string): void {
+  const releasedIds = new Set<string>();
+  for (const claim of state.claims.values()) {
+    if (claim.memberId !== memberId || !RELEASABLE_CLAIM_STATUSES.includes(claim.status)) continue;
+    claim.status = 'released';
+    releasedIds.add(claim.id);
+    const item = state.items.get(claim.itemId);
+    if (item !== undefined && item.claimId === claim.id) {
+      item.state = 'ready';
+      delete item.claimId;
+    }
+  }
+  for (const [leaseId, lease] of state.leases) {
+    if (lease.holder === memberId || (lease.claimId !== undefined && releasedIds.has(lease.claimId))) state.leases.delete(leaseId);
+  }
+  state.allocations = state.allocations.filter((allocation) => allocation.memberId !== memberId);
+  state.integrationQueue = state.integrationQueue.filter((claimId) => !releasedIds.has(claimId));
+}
+
 function applyTransition(state: TeamState, event: ImplementedTeamEvent, commitTime: number): void {
   switch (event.type) {
     case 'team.created':
@@ -284,8 +309,11 @@ function applyTransition(state: TeamState, event: ImplementedTeamEvent, commitTi
     }
     case 'member.removed': {
       const member = memberOf(state, event.body.memberId);
+      // Cancelling an invitation only marks the record; an invited member holds nothing to release.
+      const held = member.status !== 'invited';
       member.removedEvent = event.id;
       member.removedAt = event.at;
+      if (held) releaseHeldWork(state, member.id);
       return;
     }
     case 'device.added': {

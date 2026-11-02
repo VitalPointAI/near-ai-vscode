@@ -5,7 +5,8 @@ import test from 'node:test';
 import { applyEntry, createState, reduce } from '../domain/team/materialize';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
 import type { Allocation, Claim, GenesisAnchor, Lease, TeamEvent, TeamState, WorkItem } from '../domain/team/types';
-import { newTeamId } from '../team/identity';
+import { emailHash, newMemberId, newTeamId } from '../team/identity';
+import { deriveInviteKey, generateInviteCode } from '../team/inviteCode';
 import { addFixtureMember, entryOf, genesisEntries, makeActor, signed } from './helpers/teamEvents';
 import type { TestActor } from './helpers/teamEvents';
 
@@ -162,4 +163,25 @@ test('createState alone has nothing to release and removal of a joined member wi
   assert.equal(applyEntry(state, entryOf(removal)).accepted, true);
   assert.equal(state.claims.size + state.leases.size + state.allocations.length + state.integrationQueue.length, 0);
   assert.equal(createState(cast.anchor).claims.size, 0);
+});
+
+test('cancelling an invitation only marks the record removed and releases nothing', async () => {
+  const cast = await makeCast();
+  const state = fixtureState(cast);
+  const memberId = newMemberId();
+  const code = generateInviteCode();
+  const invited = signed(cast.lead, {
+    teamId: cast.teamId, type: 'member.invited', lamport: state.highLamport + 1, prev: state.head.eventId,
+    body: { memberId, name: 'Invited Ines', emailHashes: [emailHash(cast.teamId, 'ines@example.invalid')], role: 'developer', allocationNanoUsd: 1, ttlSeconds: 604_800, invite: { publicKey: deriveInviteKey(code.bytes, cast.teamId, memberId).publicKey } }
+  });
+  assert.equal(applyEntry(state, entryOf(invited)).accepted, true);
+  // An invited member cannot hold work, so any entry that names the id is left alone by a cancel.
+  state.allocations.push(allocation('alloc-invited', memberId, 9));
+  state.leases.set('lease-invited', lease('lease-invited', memberId, 'resource'));
+  const before = JSON.stringify(dump(state));
+  const cancel = signed(cast.lead, { teamId: cast.teamId, type: 'member.removed', lamport: state.highLamport + 1, prev: state.head.eventId, body: { memberId } });
+  const verdict = applyEntry(state, entryOf(cancel));
+  assert.equal(verdict.accepted, true, verdict.accepted ? '' : verdict.rejection.reason);
+  assert.equal(state.members.get(memberId)?.removedEvent, cancel.id);
+  assert.equal(JSON.stringify(dump(state)), before);
 });
