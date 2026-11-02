@@ -297,14 +297,21 @@ maps, `node_modules`, `.planning`, `.codex`, `.agents`, or `.git`.
 
 ## How changes reach a release
 
-Every change reaches `main` through a pull request. Before it can merge, CI type checks it,
-runs the unit tests and the end-to-end tests in a real VS Code, packages and inspects the VSIX,
-runs `npm audit` on runtime dependencies, and scans the files and every commit for secrets. A
-security and code review must also pass. Releases are built from a tagged commit on `main` by
-GitHub Actions, attached to a GitHub release with a SHA-256 checksum, and published to the
-Marketplace only after the owner approves that run. Every GitHub Action is pinned to a full
-commit hash. The process is described in
-[docs/development-workflow.md](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs/development-workflow.md).
+The development process requires every change to reach `main` through a pull request. Before a
+pull request merges, CI type checks it, runs the unit tests and the end-to-end tests in a real
+VS Code, packages and inspects the VSIX, runs `npm audit` on runtime dependencies, and scans the
+files and every commit for secrets, and a security and code review must pass. Releases are
+built by GitHub Actions from a tagged commit on `main` (or, for an urgent fix to an older
+release, the reviewed head of its hotfix branch), attached to a GitHub release with a SHA-256
+checksum, and published to the Marketplace only after the owner approves that run. Every GitHub
+Action is pinned to a full commit hash.
+
+GitHub enforces these rules through repository settings (branch protection on `main`, a ruleset
+that keeps release tags from being moved or deleted, and a protected `marketplace` environment).
+They are listed, with the commands that apply them, in
+[docs/development-workflow.md](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs/development-workflow.md)
+(section 8), which also describes the whole process. A rule is in force only once its setting is
+applied.
 
 ## Reporting a vulnerability
 

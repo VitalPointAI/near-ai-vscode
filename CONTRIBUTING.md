@@ -17,8 +17,10 @@ CI uses Node.js 24.
 
 ## Branches
 
-`main` is protected. Nobody pushes to it, including the owner. Every change reaches `main`
-through a pull request from a short-lived branch:
+Nobody pushes to `main`, including the owner. Every change reaches `main` through a pull
+request from a short-lived branch. Branch protection enforces this once the owner has applied the
+required settings ([docs/development-workflow.md](docs/development-workflow.md), section 8).
+Branch names:
 
 | Branch | For |
 | --- | --- |

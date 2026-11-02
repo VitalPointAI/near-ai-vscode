@@ -14,8 +14,10 @@ branch + worktree -> commits -> PR -> CI (6 jobs) + agent review -> merge agent 
 
 ## 1. Branches and worktrees
 
-`main` is protected: no direct pushes (the owner included), no force pushes, no deletion, a
-linear history, and every change arrives as a squash-merged PR. Branch names:
+Every change reaches `main` as a squash-merged PR: no direct pushes (the owner included), no
+force pushes, no deletion, a linear history. GitHub enforces this through the branch protection
+in section 8, which is part of the required configuration and is applied with the commands
+there; until it is applied, only the scripts enforce these rules. Branch names:
 
 | Branch | For |
 | --- | --- |
@@ -61,9 +63,9 @@ A PR can merge only when all of these hold:
 | No conflicts | GitHub reports the PR mergeable |
 | Conversations resolved | Branch protection: every review thread resolved |
 
-These seven check names are the required status checks in branch protection. Renaming a CI job
-means updating branch protection, `scripts/lib/workflow.mjs` (`CI_CHECKS`) and this page in the
-same PR.
+These seven check names are the required status checks in the branch protection (section 8).
+Renaming a CI job means updating branch protection, `scripts/lib/workflow.mjs` (`CI_CHECKS`) and
+this page in the same PR.
 
 ## 3. CI: fast by design
 
@@ -96,6 +98,13 @@ The owner's agents use the owner's GitHub account, and GitHub does not let an ac
 its own PR. So the review team's result is recorded as a **commit status** named
 `agent-review` on the PR's head commit, and branch protection requires it. A push to the branch
 creates a new head commit without that status, so new commits always need a new review.
+
+A commit status is not a strong signature: GitHub accepts an `agent-review` status from any
+account or workflow with write access, and branch protection cannot require a particular
+account. `merge-pr.mjs` therefore counts only the status set by the account it runs as (the
+owner), and refuses when another account set one or when a check run uses that name. Merges
+outside `merge-pr.mjs` rely on trust in everyone with write access, until the review result comes
+from a GitHub App or check run that only the review process can write.
 
 ### Running the review team from Claude Code
 
@@ -278,12 +287,19 @@ key from an agent session; the owner handles that.
 
 ## 8. Repository settings (owner only)
 
-These are applied once by the owner; agents never change them.
+This is the required configuration. The owner applies it once with the commands below; agents
+never change it. Until a setting is applied, GitHub does not enforce it, so check with
+`gh api repos/VitalPointAI/near-ai-vscode/branches/main/protection` and
+`gh api repos/VitalPointAI/near-ai-vscode/rulesets` before relying on it.
 
-- `main` protection: required checks `lint`, `test`, `e2e`, `release-content`, `audit`,
-  `secret-scan`, `agent-review`; branches must be up to date; admins included; linear history;
-  no force pushes or deletion; conversations must be resolved.
-- Merging: squash only, the PR title as the commit message, branches deleted after merge.
+- `main` protection: a PR is required (no approvals, since the owner cannot approve their own
+  PRs; the `agent-review` status stands in for one), required checks `lint`, `test`, `e2e`,
+  `release-content`, `audit` and `secret-scan` from GitHub Actions, plus `agent-review`;
+  branches must be up to date; admins included; linear history; no force pushes or deletion;
+  conversations must be resolved.
+- Merging: squash only, branches deleted after merge. The squash commit's subject is the PR
+  title followed by ` (#<number>)`.
+- Private vulnerability reporting turned on, so SECURITY.md's reporting link works.
 - Environment `marketplace`: the owner as the required reviewer, deployments only from `v*.*.*`
   tags, admins cannot bypass it (`can_admins_bypass: false`), and the `VSCE_PAT` secret stored
   in this environment only.
@@ -291,12 +307,40 @@ These are applied once by the owner; agents never change them.
   owners can create one. A tag push runs the `release.yml` of the tagged commit, so this is what
   keeps an unreviewed commit from carrying its own release workflow.
 
+`main` protection (the six CI checks are pinned to GitHub Actions, app id 15368, so another app
+cannot report them):
+
+```bash
+repo=VitalPointAI/near-ai-vscode
+gh api -X PUT "repos/$repo/branches/main/protection" --input - <<'JSON'
+{"required_status_checks": {"strict": true, "checks": [
+   {"context": "lint", "app_id": 15368}, {"context": "test", "app_id": 15368},
+   {"context": "e2e", "app_id": 15368}, {"context": "release-content", "app_id": 15368},
+   {"context": "audit", "app_id": 15368}, {"context": "secret-scan", "app_id": 15368},
+   {"context": "agent-review"}]},
+ "enforce_admins": true,
+ "required_pull_request_reviews": {"required_approving_review_count": 0},
+ "restrictions": null,
+ "required_linear_history": true,
+ "allow_force_pushes": false,
+ "allow_deletions": false,
+ "required_conversation_resolution": true}
+JSON
+```
+
+Merging and vulnerability reporting:
+
+```bash
+gh api -X PATCH "repos/$repo" -F allow_squash_merge=true -F allow_merge_commit=false \
+  -F allow_rebase_merge=false -F delete_branch_on_merge=true
+gh api -X PUT "repos/$repo/private-vulnerability-reporting"
+```
+
 Release tags (two rulesets: one without any bypass for moving and deleting, one for creating).
 Rulesets accept roles, teams and apps as bypass actors, not single accounts, so creating is
 limited to the organization owner role; every organization owner can create a tag.
 
 ```bash
-repo=VitalPointAI/near-ai-vscode
 gh api -X POST "repos/$repo/rulesets" --input - <<'JSON'
 {"name": "release tags are permanent", "target": "tag", "enforcement": "active",
  "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
