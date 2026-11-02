@@ -252,7 +252,7 @@ const DESCRIPTION_CONTROL_CHARACTERS = /[\u0000-\u0009\u000B-\u001F\u007F\u2028\
 const CONFIDENCES: readonly string[] = ['low', 'medium', 'high'];
 const IMPORTED_KINDS: readonly string[] = ['milestone', 'phase', 'plan', 'task'];
 const BOARD_KINDS: readonly string[] = ['bug', 'chore', 'spike'];
-// The kind a parent must have, by the kind of the child. A milestone has no parent.
+// Kinds that carry a parent. A milestone has none; the parent kind each of these needs is checked by transitionProblem.
 const PARENT_KINDS: Readonly<Record<string, ItemKind>> = { phase: 'milestone', plan: 'phase', task: 'plan' };
 
 function validateText(value: unknown, path: string, max: number): string | undefined {
@@ -313,11 +313,11 @@ function validateImportedId(body: Fields): string | undefined {
   return matches(body.id, GSD_ITEM_ID_PATTERN) && itemKindOf(body.id) === body.kind ? undefined : invalid('body.id');
 }
 
-// A milestone has no parent; a phase, plan or task names a parent whose id carries the parent kind.
+// A milestone has no parent; a phase, plan or task names one by an imported id. Whether that parent exists and has the kind above it is
+// a question about the log's state, answered at the reference step (itemParent), not by the schema.
 function validateParent(body: Fields): string | undefined {
-  const wanted = PARENT_KINDS[body.kind as string];
-  if (wanted === undefined) return has(body, 'parentId') ? invalid('body.parentId') : undefined;
-  return matches(body.parentId, GSD_ITEM_ID_PATTERN) && itemKindOf(body.parentId) === wanted ? undefined : invalid('body.parentId');
+  if (PARENT_KINDS[body.kind as string] === undefined) return has(body, 'parentId') ? invalid('body.parentId') : undefined;
+  return matches(body.parentId, GSD_ITEM_ID_PATTERN) ? undefined : invalid('body.parentId');
 }
 
 function validateLiteralTrue(value: unknown, path: string): string | undefined {
