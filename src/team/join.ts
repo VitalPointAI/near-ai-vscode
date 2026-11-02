@@ -8,17 +8,25 @@ import type { Member, MemberInvite, NearLink, Role, TeamFile, TeamState } from '
 import { expectedJoinRole, inviteExpired, joinProofBytes } from '../domain/team/invite';
 import { teamMaterializer } from '../domain/team/materialize';
 import { validateName } from '../domain/team/validate';
+import { DEFAULT_BASE_URL } from '../domain/config';
 import type { SecretStorageLike } from '../services/auth';
+import { SignInError } from '../services/reportingSignIn';
 import type { FetchLike, SessionTokens } from '../services/reportingSignIn';
+import { SecretLeakError } from '../domain/team/secrets';
 import { TeamLog } from './eventLog';
 import { GitTransport } from './gitTransport';
-import { createDeviceIdentity, createSealIdentity, loadDeviceIdentity, loadSealIdentity } from './identity';
+import { createDeviceIdentity, createSealIdentity, forgetDeviceIdentity, loadDeviceIdentity, loadSealIdentity } from './identity';
+import type { DeviceIdentity } from './identity';
 import { InviteBundleError, parseInviteBundle } from './inviteBundle';
 import type { InviteBundle } from './inviteBundle';
 import { deriveInviteKey, inviteKeyMatches, parseInviteCode } from './inviteCode';
+import { NearOrgClient, scrubNearText } from './nearOrg';
+import type { NearAuth, NearInvitation } from './nearOrg';
+import { saveNearSession } from './nearSession';
 import { redactGitMessage } from './runGit';
 import type { GitRunner } from './runGit';
 import { TeamFileError, TrustPinError, checkTrustPin, readTeamFile, teamStorageDir } from './teamFile';
+import { installTeamKey } from './teamKeyProfile';
 
 export const NO_ORG_NOTICE = 'No NEAR organization linked: spend is not capped at the provider.';
 
@@ -109,14 +117,18 @@ type Standing =
 // D-10: an invitation is cancelled by removing its member, and used once the member has joined (status leaves invited).
 function standingOf(state: TeamState, memberId: string): Standing {
   const member = state.members.get(memberId);
-  if (member === undefined || member.invitedEvent === undefined || member.invite === undefined) {
+  if (member === undefined || member.invitedEvent === undefined) {
     return { ok: false, code: 'not-invited', message: 'This invitation is not on the team list. Ask your lead to send a new one.' };
   }
   if (member.status === 'invited' && member.removedEvent !== undefined) {
     return { ok: false, code: 'cancelled', message: 'This invitation was cancelled. Ask your lead to send a new one.' };
   }
+  // A joined member keeps invitedEvent but drops the invite record, so "used" is read from the status before the record is needed.
   if (member.status !== 'invited') {
     return { ok: false, code: 'used', message: 'This invitation was already used. Ask your lead to send a new one if that was not you.' };
+  }
+  if (member.invite === undefined) {
+    return { ok: false, code: 'not-invited', message: 'This invitation is not on the team list. Ask your lead to send a new one.' };
   }
   return { ok: true, member, invite: member.invite };
 }
@@ -125,6 +137,148 @@ function describe(error: unknown): string {
   return redactGitMessage(error instanceof Error ? error.message : String(error));
 }
 
+// ---- undoing a join that did not happen ----------------------------------------------------------------------------------------------------
+
+// Everything this call created before the write is the device key and the seal key; the NEAR session and the team key profile come only after a
+// successful write, so a failed join has nothing else to undo. Every failure is returned as text, never dropped.
+async function removeNewKeys(secrets: SecretStorageLike, teamId: string): Promise<string> {
+  try {
+    await forgetDeviceIdentity(secrets, teamId);
+    return '';
+  } catch (error) {
+    return ` The new keys on this computer could not be removed: ${describe(error)}`;
+  }
+}
+
+type Landing = 'landed' | 'absent' | 'unknown';
+
+// A write whose answer was lost may still have landed. Only a successful read of the log settles it.
+async function didJoinLand(log: TeamLog, identity: DeviceIdentity): Promise<Landing> {
+  try {
+    await log.sync();
+    if (log.status().state !== 'ok') return 'unknown';
+    return log.state().deviceIndex.has(identity.fingerprint) ? 'landed' : 'absent';
+  } catch {
+    // The check itself could not be made, which is the same as not knowing.
+    return 'unknown';
+  }
+}
+
+function failureOf(log: TeamLog, memberId: string, kind: string, reason: string): JoinFailure {
+  const standing = standingOf(log.state(), memberId);
+  if (!standing.ok) return fail(standing.code, standing.message);
+  const text = redactGitMessage(reason);
+  if (text.includes(R.inviteExpired)) return fail('expired', 'This invitation has expired. Ask your lead to send a new one.');
+  if (text.includes(R.inviteProof)) return fail('wrong-code', 'The code in this invite does not match the team record. Paste the whole invite exactly as you were sent it, or ask for a new one.');
+  if (kind === 'offline') return fail('offline', `Your join could not be saved because the team's repository could not be reached: ${text}`);
+  if (kind === 'paused') return fail('team-file', text);
+  if (kind === 'remote-rejected') return fail('conflict', `The team's repository did not accept your join: ${text}`);
+  if (kind === 'busy') return fail('conflict', 'The team log changed too often while your join was being saved. Try again in a moment.');
+  return fail('conflict', `Your join was not accepted: ${text}`);
+}
+
+// ---- NEAR for a lead invitee (D-22) ---------------------------------------------------------------------------------------------------------
+
+type NearStep = { nearInvitation: NonNullable<Extract<JoinResult, { ok: true }>['nearInvitation']>; notice?: string };
+
+const NO_MATCHING_INVITATION = 'NEAR AI found no invitation for the NEAR login you used. Sign in with the email address you were invited with, or ask the lead to invite your NEAR address.';
+
+function bearer(tokens: SessionTokens): NearAuth {
+  return { accessToken: async () => tokens.accessToken, refreshAfterUnauthorized: async () => undefined };
+}
+
+// The emailed link can be the address of the invitation page or the bare token. Only the token is passed on, and nothing of it is ever shown.
+function tokenFromLink(text: string): string {
+  const trimmed = text.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return trimmed;
+  try {
+    const url = new URL(trimmed);
+    const queried = url.searchParams.get('token');
+    if (queried !== null && queried !== '') return queried;
+    const segments = url.pathname.split('/').filter((segment) => segment !== '');
+    const marker = segments.lastIndexOf('invitations');
+    const next = marker >= 0 ? segments[marker + 1] : undefined;
+    return next ?? segments[segments.length - 1] ?? '';
+  } catch {
+    // The text looked like an address but is not one; the caller treats an empty token as a link that did not work.
+    return '';
+  }
+}
+
+async function acceptAsLead(input: JoinInput, near: NearLink, teamId: string): Promise<NearStep> {
+  if (input.signIn === undefined) return { nearInvitation: 'skipped', notice: 'You were not signed in to NEAR, so the organization invitation was not accepted. Sign in to NEAR for this team to accept it.' };
+  const baseUrl = input.nearBaseUrl ?? DEFAULT_BASE_URL;
+  let tokens: SessionTokens | undefined;
+  try {
+    tokens = await input.signIn();
+  } catch (error) {
+    if (error instanceof SignInError && error.code === 'cancelled') {
+      return { nearInvitation: 'skipped', notice: 'The NEAR sign-in was cancelled, so the organization invitation was not accepted. Sign in to NEAR for this team to accept it.' };
+    }
+    return { nearInvitation: 'failed', notice: `NEAR sign-in did not finish, so the organization invitation was not accepted: ${scrubNearText(error instanceof Error ? error.message : String(error))}` };
+  }
+  if (tokens === undefined) return { nearInvitation: 'skipped', notice: 'You were not signed in to NEAR, so the organization invitation was not accepted. Sign in to NEAR for this team to accept it.' };
+
+  try {
+    const options = { baseUrl, ...(input.fetch === undefined ? {} : { fetch: input.fetch }) };
+    const me = await new NearOrgClient({ ...options, auth: bearer(tokens) }).currentUser();
+    // D-02: the lead's session is kept for this team, under the NEAR login's name.
+    const session = await saveNearSession(input.secrets, teamId, tokens, me.username, { ...options, ...(input.now === undefined ? {} : { now: input.now }) });
+    const org = new NearOrgClient({ ...options, auth: session });
+    // T-61-39: only this team's organization counts, whatever other invitations the login has.
+    // A list that cannot be read is not proof that there is no invitation, so the emailed link is still offered.
+    let listProblem: string | undefined;
+    let waiting: NearInvitation[] = [];
+    try {
+      waiting = await org.myInvitations();
+    } catch (error) {
+      listProblem = scrubNearText(error instanceof Error ? error.message : String(error), [tokens.accessToken, tokens.refreshToken]);
+    }
+    const found = waiting.find((invitation) => invitation.organizationId === near.organizationId);
+    if (found !== undefined) return { nearInvitation: await org.acceptInvitation(found.id) };
+    if (me.organizationIds.includes(near.organizationId)) return { nearInvitation: 'already-member' };
+    const link = input.askInvitationLink === undefined ? undefined : await input.askInvitationLink();
+    const token = link === undefined ? '' : tokenFromLink(link);
+    if (token === '') {
+      return listProblem === undefined
+        ? { nearInvitation: 'not-found', notice: NO_MATCHING_INVITATION }
+        : { nearInvitation: 'failed', notice: `NEAR AI could not list your invitations: ${listProblem} You are on the team; try accepting the organization invitation again later.` };
+    }
+    return { nearInvitation: await org.acceptInvitationToken(token) };
+  } catch (error) {
+    return { nearInvitation: 'failed', notice: `The NEAR organization invitation could not be accepted: ${scrubNearText(error instanceof Error ? error.message : String(error), [tokens.accessToken, tokens.refreshToken])} You are on the team; try accepting it again from Manage Team Members.` };
+  }
+}
+
+// ---- a team with no NEAR organization (D-04, D-21) --------------------------------------------------------------------------------------------
+
+const KEY_SHAPE = /^[\x21-\x7e]{8,512}$/;
+
+async function installPastedKey(input: JoinInput, teamId: string): Promise<{ key: 'installed' | 'skipped'; notices: string[] }> {
+  const notices = [NO_ORG_NOTICE];
+  if (input.pasteOwnKey === undefined) return { key: 'skipped', notices: [...notices, 'No API key was added. Add your own NEAR AI API key from the NEAR AI settings to start working.'] };
+  let pasted: string | undefined;
+  try {
+    pasted = await input.pasteOwnKey();
+  } catch (error) {
+    return { key: 'skipped', notices: [...notices, `Your API key could not be read: ${describe(error)}`] };
+  }
+  const trimmed = pasted?.trim() ?? '';
+  if (trimmed === '') return { key: 'skipped', notices: [...notices, 'No API key was added. Add your own NEAR AI API key from the NEAR AI settings to start working.'] };
+  if (!KEY_SHAPE.test(trimmed)) return { key: 'skipped', notices: [...notices, 'That does not look like an API key, so it was not used. Add your own NEAR AI API key from the NEAR AI settings.'] };
+  // D-12 as amended by D-21: check_api_key only, no organization or workspace check, one try because a key that already exists needs no activation wait.
+  const installed = await installTeamKey({
+    projectRoot: input.projectRoot, globalStorageDir: input.globalStorageDir, teamId, teamName: input.teamFile.name, secrets: input.secrets,
+    apiKey: Buffer.from(trimmed, 'utf8'), baseUrl: input.nearBaseUrl ?? DEFAULT_BASE_URL, attempts: 1,
+    ...(input.fetch === undefined ? {} : { fetch: input.fetch })
+  });
+  if (!installed.ok) return { key: 'skipped', notices: [...notices, `${installed.message} You are on the team; add your own NEAR AI API key from the NEAR AI settings.`] };
+  if (installed.capped) notices.push('NEAR AI says this key has already reached its spend limit.');
+  return { key: 'installed', notices };
+}
+
+// ---- joining ----------------------------------------------------------------------------------------------------------------------------------
+
 const AWAITING_LEAD = 'The lead sends your team key from their NEAR AI window once you are confirmed. You do not sign in to NEAR.';
 
 export async function joinTeam(input: JoinInput): Promise<JoinResult> {
@@ -132,6 +286,10 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
   const teamId = teamFile.teamId;
   const now = input.now ?? ((): number => Date.now());
   if (bundle.team !== teamId) return fail('team-file', 'This invite is for a different team than the one open in this project.');
+  if (input.near !== undefined && teamFile.near !== undefined && !sameNear(input.near, teamFile.near)) {
+    return fail('team-file', 'This invite names a different NEAR organization than this project does. Ask your lead to check the link and send a new invite.');
+  }
+  const near = input.near ?? teamFile.near;
   const displayName = input.displayName.trim();
   if (validateName(displayName, 'displayName') !== undefined) return fail('invalid-name', 'Your display name must be 1 to 80 characters with no line breaks.');
 
@@ -144,6 +302,7 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
     throw error;
   }
 
+  // Keys this call did not make are never touched: a device that already has a key is refused before anything is created.
   let hasKey: boolean;
   try {
     hasKey = (await loadDeviceIdentity(secrets, teamId)) !== undefined || (await loadSealIdentity(secrets, teamId)) !== undefined;
@@ -172,31 +331,58 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
 
   const standing = standingOf(log.state(), bundle.member);
   if (!standing.ok) return fail(standing.code, standing.message);
-  const { invite } = standing;
 
   const codeBytes = parseInviteCode(bundle.code);
   if (codeBytes === undefined) return fail('wrong-code', 'The code in this invite is not valid. Paste the whole invite exactly as you were sent it.');
   try {
-    if (!inviteKeyMatches(codeBytes, teamId, bundle.member, invite.publicKey)) {
+    if (!inviteKeyMatches(codeBytes, teamId, bundle.member, standing.invite.publicKey)) {
       return fail('wrong-code', 'The code in this invite does not match the team record. Paste the whole invite exactly as you were sent it, or ask for a new one.');
     }
     // Only an early answer for the person at the keyboard: the materialiser decides from commit times when the join is read.
-    if (inviteExpired(invite.commitTime, invite.ttlSeconds, Math.floor(now() / 1000))) return fail('expired', 'This invitation has expired. Ask your lead to send a new one.');
+    if (inviteExpired(standing.invite.commitTime, standing.invite.ttlSeconds, Math.floor(now() / 1000))) {
+      return fail('expired', 'This invitation has expired. Ask your lead to send a new one.');
+    }
 
     const identity = await createDeviceIdentity(secrets, teamId);
-    const seal = await createSealIdentity(secrets, teamId);
-    const device = { fingerprint: identity.fingerprint, publicKey: identity.publicKey };
-    const proofKey = deriveInviteKey(codeBytes, teamId, bundle.member);
-    const appended = await log.appendJoin(identity, (state) => {
-      // Read again from the freshest state: a lost race, a cancel or a second device shows up here.
-      const fresh = standingOf(state, bundle.member);
-      if (!fresh.ok) return { conflict: R.notInvited };
-      const pending = fresh.member.pendingRole ?? 'observer';
-      const role = expectedJoinRole(pending, state.team.policy);
-      const sig = proofKey.sign(joinProofBytes(teamId, bundle.member, fresh.invite.eventId, device, seal.publicKey));
-      return { memberId: bundle.member, name: displayName, emailHashes: [...fresh.member.emailHashes], role, device, invite: { sig }, sealKey: { publicKey: seal.publicKey } };
-    });
-    if (!appended.ok) return fail('conflict', redactGitMessage(appended.reason));
+    let failure: JoinFailure | undefined;
+    try {
+      const seal = await createSealIdentity(secrets, teamId);
+      const device = { fingerprint: identity.fingerprint, publicKey: identity.publicKey };
+      const proofKey = deriveInviteKey(codeBytes, teamId, bundle.member);
+      const appended = await log.appendJoin(identity, (state) => {
+        // Read again from the freshest state: a lost race, a cancel or a second device shows up here.
+        const fresh = standingOf(state, bundle.member);
+        if (!fresh.ok) return { conflict: R.notInvited };
+        const pending = fresh.member.pendingRole ?? 'observer';
+        const role = expectedJoinRole(pending, state.team.policy);
+        const sig = proofKey.sign(joinProofBytes(teamId, bundle.member, fresh.invite.eventId, device, seal.publicKey));
+        return { memberId: bundle.member, name: displayName, emailHashes: [...fresh.member.emailHashes], role, device, invite: { sig }, sealKey: { publicKey: seal.publicKey } };
+      });
+      if (!appended.ok) {
+        failure = failureOf(log, bundle.member, appended.kind, appended.reason);
+        if (appended.kind === 'offline') {
+          // The push may have landed with its answer lost: only a read of the log settles it.
+          const landing = await didJoinLand(log, identity);
+          if (landing === 'landed') failure = undefined;
+          else if (landing === 'unknown') {
+            return fail('offline', `Your join may or may not have been saved, because the team's repository could not be reached to check. The keys made for this join were kept on this computer. Check the team list when you are online; if you are not on it, ask your lead to re-issue your invitation.`);
+          }
+        }
+      }
+    } catch (error) {
+      const message = error instanceof SecretLeakError ? error.message : undefined;
+      const landing = message === undefined ? await didJoinLand(log, identity) : 'absent';
+      if (landing === 'unknown') throw error;
+      if (landing === 'absent') {
+        const left = await removeNewKeys(secrets, teamId);
+        if (message !== undefined) return fail('invalid-name', `${message}${left}`);
+        throw error;
+      }
+    }
+    if (failure !== undefined) {
+      const left = await removeNewKeys(secrets, teamId);
+      return left === '' ? failure : fail(failure.code, `${failure.message}${left}`);
+    }
   } finally {
     // The clear code is not needed again once the proof is signed.
     codeBytes.fill(0);
@@ -205,8 +391,25 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
   const member = log.state().members.get(bundle.member);
   const role: Role = member?.role ?? 'observer';
   const pendingRole = member?.pendingRole;
+  const invitedRole: Role = pendingRole ?? role;
   const notices: string[] = [];
-  const near = input.near ?? teamFile.near;
-  if (near !== undefined) notices.push(AWAITING_LEAD);
-  return { ok: true, memberId: bundle.member, role, ...(pendingRole === undefined ? {} : { pendingRole }), key: near === undefined ? 'skipped' : 'awaiting-lead', notices };
+  let keyOutcome: 'awaiting-lead' | 'installed' | 'skipped' = 'awaiting-lead';
+  let nearInvitation: NearStep['nearInvitation'] | undefined;
+  if (near !== undefined) {
+    // D-21: only a lead invitee ever signs in to NEAR here. Everyone else waits for the lead's client to make and send their capped key.
+    notices.push(AWAITING_LEAD);
+    if (invitedRole === 'lead') {
+      const step = await acceptAsLead(input, near, teamId);
+      nearInvitation = step.nearInvitation;
+      if (step.notice !== undefined) notices.push(step.notice);
+    }
+  } else {
+    const pasted = await installPastedKey(input, teamId);
+    keyOutcome = pasted.key;
+    notices.push(...pasted.notices);
+  }
+  return {
+    ok: true, memberId: bundle.member, role, ...(pendingRole === undefined ? {} : { pendingRole }), key: keyOutcome,
+    ...(nearInvitation === undefined ? {} : { nearInvitation }), notices
+  };
 }

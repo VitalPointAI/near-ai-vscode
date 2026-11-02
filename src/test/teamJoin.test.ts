@@ -338,9 +338,9 @@ test('a lead joining a NEAR-linked team signs in, accepts the organization invit
   });
 });
 
-test('a lead whose NEAR login email differs accepts with the emailed token, and a lead who skips it still joins with a plain notice', async () => {
+test('a lead whose invitation list cannot be read accepts with the emailed link, and a lead with no matching invitation still joins with a plain notice', async () => {
   await withNearFake(async (fake) => {
-    await withFixture(['a', 'b', 'c'], async (fixture) => {
+    await withFixture(['a', 'b', 'c', 'd'], async (fixture) => {
       const seed = await seedTeam(fixture, NEAR_LINK);
       pointOriginAt(fixture, PUBLIC_URL);
       const ownerSession = fake.addUser({ id: 'user-inviter', username: 'inviter', email: 'inviter@example.invalid' });
@@ -348,19 +348,22 @@ test('a lead whose NEAR login email differs accepts with the emailed token, and 
       const inviter = new NearOrgClient({ baseUrl: fake.baseUrl, auth: staticAuth(ownerSession.accessToken), sleep: NO_SLEEP });
       const first = await inviteLead(fixture, seed, inviter, 'lena@example.invalid');
       const second = await invite(fixture, seed, { role: 'lead', name: 'Sam Second', email: 'sam@example.invalid' });
+      const third = await inviteLead(fixture, seed, inviter, 'tess@example.invalid');
       const token = fake.emailedToken('lena@example.invalid');
       assert.ok(token !== undefined);
 
-      // The login is a different address, so GET /users/me/invitations is empty and the emailed token is used.
-      const workLogin = fake.addUser({ id: 'user-lena-work', username: 'lenawork', email: 'lena.work@example.invalid' });
+      // The list route answers 404 once, so the emailed link (pasted as the address NEAR sends) is used.
+      const lena = fake.addUser({ id: 'user-lena', username: 'lena', email: 'lena@example.invalid' });
+      fake.fail({ method: 'GET', pathPrefix: '/v1/users/me/invitations', status: 404, times: 1 });
       const joinerB = await joinerOn(fixture, 'b', seed);
       const viaToken = await joinTeam(joinInput(joinerB, await readyFor(joinerB, first.bundle), {
-        nearBaseUrl: fake.baseUrl, signIn: async () => workLogin, askInvitationLink: async () => `https://cloud.example.invalid/invitations/${token ?? ''}/accept`
+        nearBaseUrl: fake.baseUrl, signIn: async () => lena, askInvitationLink: async () => `https://cloud.example.invalid/invitations/${token ?? ''}/accept`
       }));
       assert.equal(viaToken.ok && viaToken.nearInvitation, 'accepted');
-      assert.equal((await inviter.listMembers('org-1')).some((member) => member.userId === 'user-lena-work'), true);
+      assert.equal((await inviter.listMembers('org-1')).some((member) => member.userId === 'user-lena'), true);
+      assert.equal(viaToken.ok && viaToken.notices.join(' ').includes(token ?? ''), false, 'the emailed token is never shown');
 
-      // No emailed link to hand over: the join is done, the NEAR step says not-found and tells them what to do.
+      // A login with another email has no invitation, and no link is handed over: the join is done, and the notice says what to do.
       const otherLogin = fake.addUser({ id: 'user-sam-work', username: 'samwork', email: 'sam.work@example.invalid' });
       const joinerC = await joinerOn(fixture, 'c', seed);
       const notFound = await joinTeam(joinInput(joinerC, await readyFor(joinerC, second.bundle), {
@@ -369,8 +372,18 @@ test('a lead whose NEAR login email differs accepts with the emailed token, and 
       assert.equal(notFound.ok, true, notFound.ok ? '' : notFound.message);
       if (!notFound.ok) return;
       assert.equal(notFound.nearInvitation, 'not-found');
-      assert.ok(notFound.notices.some((notice) => /sign in with the (invited )?email/i.test(notice) && /invite your NEAR/i.test(notice)));
+      assert.ok(notFound.notices.some((notice) => /sign in with the email/i.test(notice) && /invite your NEAR/i.test(notice)));
       assert.equal(notFound.pendingRole, 'lead', 'the team join stands');
+
+      // The emailed token only works for the address it was sent to: NEAR refuses it for another login, and the join still stands.
+      const tessToken = fake.emailedToken('tess@example.invalid');
+      const wrongLogin = fake.addUser({ id: 'user-tess-work', username: 'tesswork', email: 'tess.work@example.invalid' });
+      const joinerD = await joinerOn(fixture, 'd', seed);
+      const refused = await joinTeam(joinInput(joinerD, await readyFor(joinerD, third.bundle), {
+        nearBaseUrl: fake.baseUrl, signIn: async () => wrongLogin, askInvitationLink: async () => tessToken
+      }));
+      assert.equal(refused.ok && refused.nearInvitation, 'failed');
+      assert.equal(refused.ok && refused.notices.join(' ').includes(tessToken ?? ''), false);
     });
   });
 });
@@ -602,7 +615,7 @@ test('a device that already holds a team key is not given a second one, and its 
     const stored = joiner.secrets.values.get(deviceKeySecretName(seed.teamId));
     const result = await joinTeam(joinInput(joiner, await readyFor(joiner, bundle)));
     assert.equal(result.ok === false && result.code, 'already-has-key');
-    assert.ok(result.ok === false && result.message.length > 0 && !result.message.includes('—'));
+    assert.ok(result.ok === false && result.message.length > 0 && !result.message.includes('\u2014'));
     assert.equal(joiner.secrets.values.get(deviceKeySecretName(seed.teamId)), stored, 'the existing key is untouched');
     assert.equal(joiner.secrets.values.size, 1);
   });
