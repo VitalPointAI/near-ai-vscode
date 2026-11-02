@@ -75,5 +75,6 @@ PRs are squash-merged, so the PR title becomes the commit on `main`: write it in
 
 ## Reporting security issues
 
-See [SECURITY.md](SECURITY.md#reporting-a-vulnerability). Please do not open a public issue for
-a vulnerability.
+Report vulnerabilities privately through GitHub's **Report a vulnerability** button on the
+repository's Security tab; [SECURITY.md](SECURITY.md#reporting-a-vulnerability) explains it and
+what to do if the button is missing. Please do not describe a vulnerability in a public issue.

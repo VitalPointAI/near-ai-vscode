@@ -315,9 +315,13 @@ applied.
 
 ## Reporting a vulnerability
 
-Report vulnerabilities privately through GitHub: on the repository's **Security** tab, choose
-**Report a vulnerability**
-([direct link](https://github.com/VitalPointAI/near-ai-vscode/security/advisories/new)). Please
-do not open a public issue for a vulnerability. Other security issues can go to the
-[issue tracker](https://github.com/VitalPointAI/near-ai-vscode/issues) with redacted logs.
-Never include API keys, raw prompts, or private file contents.
+Report vulnerabilities privately through GitHub's private vulnerability reporting: on the
+repository's **Security** tab, choose **Report a vulnerability**
+([direct link](https://github.com/VitalPointAI/near-ai-vscode/security/advisories/new)). Only the
+maintainers see the report. Please do not describe a vulnerability in a public issue.
+
+If that page does not offer **Report a vulnerability**, open an
+[issue](https://github.com/VitalPointAI/near-ai-vscode/issues) that only asks the maintainers for
+a private way to send a security report, with no details of the problem, and they will reply
+there. Other security issues, such as a hardening idea, can go to the issue tracker with redacted
+logs. Never include API keys, raw prompts, or private file contents.
