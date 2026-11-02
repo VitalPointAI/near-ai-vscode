@@ -73,8 +73,8 @@ function gitFailureText(result: GitResult): string {
 }
 
 // Fixed text for the user: the only variable part is the redacted git output.
-function manualCommitCommand(): string {
-  return `git add -f ${TEAM_FILE_REL} && git commit --only -m "${ENABLE_COMMIT_MESSAGE}" -- ${TEAM_FILE_REL}`;
+function manualCommitCommand(message: string): string {
+  return `git add -f ${TEAM_FILE_REL} && git commit --only -m "${message}" -- ${TEAM_FILE_REL}`;
 }
 
 async function isDirectory(target: string): Promise<boolean> {
@@ -205,6 +205,28 @@ async function pushGenesis(args: { transport: GitTransport<TeamState>; events: T
   return { kind: 'unconfirmed', reason, detail };
 }
 
+// D-20: commits team.json and nothing else, for Enable and for linking a NEAR organization. add -f because projects ignore .planning/.near-ai/,
+// and --only so nothing else the user has staged is committed. It never pushes. On a failure team.json is unstaged again and stays on disk;
+// the message is written to follow "..., but " and ends with the exact command that finishes the job by hand.
+export async function commitTeamFileOnly(projectRoot: string, message: string, git: GitRunner = runGit): Promise<{ ok: true; commit: string; branch?: string } | { ok: false; message: string }> {
+  const added = await git(['add', '-f', '--', TEAM_FILE_REL], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  const committed = added.code === 0
+    ? await git(['commit', '--only', '-m', message, '--', TEAM_FILE_REL], { cwd: projectRoot, timeoutMs: COMMIT_TIMEOUT_MS })
+    : added;
+  if (committed.code !== 0) {
+    const reset = await git(['reset', '-q', '--', TEAM_FILE_REL], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+    const resetNote = reset.code === 0 ? '' : ` Removing ${TEAM_FILE_REL} from the staging area also failed: ${gitFailureText(reset)}`;
+    return {
+      ok: false,
+      message: `committing ${TEAM_FILE_REL} failed: ${gitFailureText(committed)}${resetNote} The file is saved in your project and nothing else was committed. To finish, run: ${manualCommitCommand(message)}`
+    };
+  }
+  const head = await git(['rev-parse', 'HEAD'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  const branch = await git(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  const name = branch.code === 0 ? gitText(branch) : '';
+  return name === '' ? { ok: true, commit: gitText(head) } : { ok: true, commit: gitText(head), branch: name };
+}
+
 export async function enableTeamMode(input: EnableInput): Promise<EnableResult> {
   const git = input.git ?? runGit;
   const now = input.now ?? ((): Date => new Date());
@@ -303,21 +325,9 @@ export async function enableTeamMode(input: EnableInput): Promise<EnableResult> 
     };
   }
 
-  // D-20: add -f because projects ignore .planning/.near-ai/, and --only so nothing else the user has staged is committed.
-  const added = await git(['add', '-f', '--', TEAM_FILE_REL], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
-  const committed = added.code === 0
-    ? await git(['commit', '--only', '-m', ENABLE_COMMIT_MESSAGE, '--', TEAM_FILE_REL], { cwd: projectRoot, timeoutMs: COMMIT_TIMEOUT_MS })
-    : added;
-  if (committed.code !== 0) {
-    const reset = await git(['reset', '-q', '--', TEAM_FILE_REL], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
-    const resetNote = reset.code === 0 ? '' : ` Removing ${TEAM_FILE_REL} from the staging area also failed: ${gitFailureText(reset)}`;
-    return {
-      ok: false, code: 'commit-failed', teamFile,
-      message: `The team was created, but committing ${TEAM_FILE_REL} failed: ${gitFailureText(committed)}${resetNote} The file is saved in your project and nothing else was committed. To finish, run: ${manualCommitCommand()}`
-    };
-  }
-  const head = await git(['rev-parse', 'HEAD'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
-  const result: EnableResult = { ok: true, teamFile, commit: gitText(head), remote };
+  const committed = await commitTeamFileOnly(projectRoot, ENABLE_COMMIT_MESSAGE, git);
+  if (!committed.ok) return { ok: false, code: 'commit-failed', teamFile, message: `The team was created, but ${committed.message}` };
+  const result: EnableResult = { ok: true, teamFile, commit: committed.commit, remote };
   if (checked.branch !== undefined) result.branch = checked.branch;
   return result;
 }
