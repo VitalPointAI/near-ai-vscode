@@ -150,6 +150,8 @@ test('tracer: a lead invites a developer over real git and gets a bundle whose c
     assert.ok(codeBytes !== undefined);
     if (codeBytes === undefined || pending?.invite === undefined) return;
     assert.equal(inviteKeyMatches(codeBytes, seed.teamId, result.memberId, pending.invite.publicKey), true);
+    // The state object is live and the join below ends the invitation, so the event id is read first.
+    const inviteEventId = pending.invite.eventId;
 
     // The same code joins from the second clone.
     const identity = await createDeviceIdentity(new MemorySecrets(), seed.teamId);
@@ -165,7 +167,7 @@ test('tracer: a lead invites a developer over real git and gets a bundle whose c
     assert.equal(directory[0]?.name, 'Dana Developer');
     assert.equal(directory[0]?.email, 'dana@example.invalid');
     assert.equal(directory[0]?.role, 'developer');
-    assert.equal(directory[0]?.invitedEvent, pending.invite.eventId);
+    assert.equal(directory[0]?.invitedEvent, inviteEventId);
   });
 });
 
