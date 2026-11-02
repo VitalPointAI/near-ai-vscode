@@ -210,17 +210,17 @@ const DROPS: Array<{ name: string; id: string; drops: Array<[BoardColumn, Drop]>
   },
   {
     name: 'a plan with no estimate and no files', id: 'plan:91-07',
-    drops: [['backlog', OK()], ['ready', NO('This plan is not ready yet: it has no estimate, it lists no files. Nothing was moved.')], ['done', OK('done')], ['cancelled', OK('cancel')]]
+    drops: [['backlog', OK()], ['ready', NO('This plan is not ready yet: it has no estimate, it lists no files. Nothing was moved.')], ...claimDrops(), ['done', OK('done')], ['cancelled', OK('cancel')]]
   },
   { name: 'a held plan', id: 'plan:91-02', drops: [['backlog', OK()], ['ready', OK('release')], ...claimDrops(), ['done', OK('done')], ['cancelled', OK('cancel')]] },
   {
     name: 'a held plan that is also missing its estimate', id: 'plan:91-08',
-    drops: [['ready', NO('This plan is not ready yet: it is on hold, it has no estimate. Nothing was moved.')], ['backlog', OK()]]
+    drops: [['ready', NO('This plan is not ready yet: it is on hold, it has no estimate. Nothing was moved.')], ['backlog', OK()], ...claimDrops(), ['done', OK('done')], ['cancelled', OK('cancel')]]
   },
   {
     name: 'a blocked plan', id: 'plan:91-03',
     drops: [
-      ['ready', NO('This plan is not ready yet: it is blocked. Nothing was moved.')], ['backlog', OK()],
+      ['ready', NO('This plan is not ready yet: it is blocked. Nothing was moved.')], ['backlog', OK()], ...claimDrops(),
       ['done', NO('This card is blocked, so it cannot be marked done. Unblock it first. Nothing was moved.')], ['cancelled', OK('cancel')]
     ]
   },
@@ -234,7 +234,7 @@ const DROPS: Array<{ name: string; id: string; drops: Array<[BoardColumn, Drop]>
   },
   {
     name: 'a board item with no estimate and no files', id: CHORE_ID,
-    drops: [['ready', NO('This item is not ready yet: it has no estimate, it lists no files. Nothing was moved.')], ['backlog', OK()], ['done', OK('done')]]
+    drops: [['ready', NO('This item is not ready yet: it has no estimate, it lists no files. Nothing was moved.')], ['backlog', OK()], ...claimDrops(), ['done', OK('done')], ['cancelled', OK('cancel')]]
   }
 ];
 
@@ -257,11 +257,10 @@ test('the card carries the same answers: a refusal for every column it may not e
     for (const column of BOARD_COLUMNS) {
       if (column === card.column) continue;
       const listed = row.drops.find(([target]) => target === column);
-      // A column the table does not list is one the card was never meant to enter from here; it must still be refused with a sentence.
-      if (listed === undefined) assert.ok(card.refusals[column]?.endsWith('Nothing was moved.'), `${row.name} -> ${column} has a refusal`);
-      else if (!listed[1].ok) expected[column] = listed[1].reason;
+      assert.ok(listed, `${row.name}: the table lists ${column}`);
+      if (!listed[1].ok) expected[column] = listed[1].reason;
     }
-    for (const [column, text] of Object.entries(expected)) assert.equal(card.refusals[column as BoardColumn], text, `${row.name} refusal for ${column}`);
+    assert.deepEqual(card.refusals, expected, `${row.name}: the card refuses exactly the columns the table refuses, with the table's words`);
     for (const [column, drop] of row.drops) if (drop.ok) assert.equal(card.refusals[column], undefined, `${row.name} has no refusal for ${column}`);
   }
 });

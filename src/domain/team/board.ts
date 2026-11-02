@@ -1,14 +1,16 @@
 // Team Board model (D-07, D-08, D-12, D-13, D-15, D-16, D-18): the whole board as a pure function of the log, and the one place that decides a move.
 // The menu, the drop targets and the write path all ask planMove, so the board offers only what the log would accept, and the host re-runs the same
 // function on fresh state inside the append. Pure: no vscode, no I/O, no clock reads (nowMs is a parameter used for display text only).
-import { COLUMN_CAPTIONS, COLUMN_LABELS, KIND_WORDS, MOVE_LABELS, REFUSALS, cardLabel, ageText, estimateText, flattenName, SOMEONE } from './boardText';
+import { COLUMN_CAPTIONS, COLUMN_LABELS, KIND_WORDS, MOVE_LABELS, REFUSALS, SOMEONE, ageText, cardLabel, estimateText, flattenName, notReadyRefusal } from './boardText';
 import type { HistoryEntry } from './itemHistory';
 import { decideTeamAction } from './permissions';
+import { findSecrets } from './secrets';
 import type {
   ImplementedTeamEvent, ItemBlockedBody, ItemCancelledBody, ItemKind, ItemReopenedBody, ItemUnblockedBody, ItemUpdatedBody, Role, TeamState, WorkItem
 } from './types';
 import { TEAM_REJECTION_REASONS } from './types';
-import { BOARD_COLUMNS, effectiveColumn, isCard, transitionProblem } from './work';
+import { REASON_MAX } from './validate';
+import { BOARD_COLUMNS, effectiveColumn, isCard, progressOf, readiness, transitionProblem } from './work';
 import type { BoardColumn } from './work';
 
 export const MOVE_KEYS = ['done', 'cancel', 'hold', 'release', 'reopen', 'block', 'unblock'] as const;
@@ -100,17 +102,40 @@ function refusalFor(move: MoveKey, problem: string, item: WorkItem): string {
   }
 }
 
+// A reason for block or cancel: one line, 1 to 200 characters, and nothing that looks like a password or key. The check runs before any intent exists,
+// so a secret-like reason never reaches the log; assertNoSecrets still runs on write as the second line of defence.
+function cleanReason(raw: string | undefined): { ok: true; reason: string } | { ok: false; reason: string } {
+  const reason = flattenName(raw ?? '', Number.MAX_SAFE_INTEGER);
+  if (reason === '' || reason.length > REASON_MAX) return { ok: false, reason: REFUSALS.reasonInvalid };
+  return findSecrets(reason).length > 0 ? { ok: false, reason: REFUSALS.secret } : { ok: true, reason };
+}
+
+const REASON_REQUIRED: readonly MoveKey[] = ['cancel', 'block'];
+
 // The one function that decides a move: the exact intent to append, or a plain refusal that ends "Nothing was moved." (D-12, D-16, BOARD-03).
 export function planMove(state: TeamState, viewerId: string | undefined, itemId: string, move: MoveKey, input: { reason?: string } = {}): MoveResult {
   const denied = moveDenial(state, viewerId);
   if (denied !== undefined || viewerId === undefined) return { ok: false, reason: denied ?? REFUSALS.noDeviceKey };
   const item = state.items.get(itemId);
   if (item === undefined || !isCard(item)) return { ok: false, reason: REFUSALS.missing };
-  const intent = intentFor(itemId, move, (input.reason ?? '').trim());
+  let reason = '';
+  if (REASON_REQUIRED.includes(move)) {
+    const cleaned = cleanReason(input.reason);
+    if (!cleaned.ok) return cleaned;
+    reason = cleaned.reason;
+  }
+  const intent = intentFor(itemId, move, reason);
   const problem = transitionFor(state, viewerId, intent);
   if (problem !== undefined) return { ok: false, reason: refusalFor(move, problem, item) };
   if (move === 'hold' && effectiveColumn(state.items, item) !== 'ready') return { ok: false, reason: REFUSALS.holdNotReady };
   return { ok: true, intent };
+}
+
+// How many unfinished plans wait for this card, so the host can ask for a second confirmation before a cancel leaves them waiting.
+function dependentsOf(state: TeamState, itemId: string): number {
+  let waiting = 0;
+  for (const item of state.items.values()) if (item.kind === 'plan' && item.state !== 'done' && item.state !== 'cancelled' && item.dependsOn.includes(itemId)) waiting += 1;
+  return waiting;
 }
 
 // The menu: each move whose plan succeeds, in menu order. The two moves that need a reason are asked with a placeholder.
@@ -119,14 +144,35 @@ export function availableMoves(state: TeamState, viewerId: string | undefined, i
   for (const key of MOVE_KEYS) {
     if (!planMove(state, viewerId, itemId, key, { reason: PLACEHOLDER_REASON }).ok) continue;
     const column = MOVE_COLUMN[key];
-    moves.push({ key, label: MOVE_LABELS[key], ...(column === undefined ? {} : { column }), prompt: MOVE_PROMPT[key] });
+    moves.push({
+      key, label: MOVE_LABELS[key], ...(column === undefined ? {} : { column }), prompt: MOVE_PROMPT[key],
+      ...(key === 'cancel' ? { dependents: dependentsOf(state, itemId) } : {})
+    });
   }
   return moves;
 }
 
 const CLAIM_COLUMNS: readonly BoardColumn[] = ['claimed', 'in-progress', 'in-review', 'integrating'];
 
-// A drop target as a move: the key to plan, nothing to do when the card is already there, or the refusal to show on the card.
+// How many of the card's dependencies are on the board and not finished yet (a phase counts as finished when its live plans are).
+function waitingOn(state: TeamState, item: WorkItem): number {
+  let waiting = 0;
+  for (const id of item.dependsOn) {
+    const dependency = state.items.get(id);
+    if (dependency === undefined) continue;
+    const progress = dependency.kind === 'phase' ? progressOf(state.items, id) : undefined;
+    const complete = progress === undefined ? dependency.state === 'done' : progress.total > 0 ? progress.done === progress.total : dependency.state === 'done';
+    if (!complete) waiting += 1;
+  }
+  return waiting;
+}
+
+function asDrop(planned: MoveResult, move: MoveKey): { ok: true; move: MoveKey } | { ok: false; reason: string } {
+  return planned.ok ? { ok: true, move } : { ok: false, reason: planned.reason };
+}
+
+// A drop target as a move: the key to plan, nothing to do when the card is already there, or the one refusal to show on the card (D-13, D-16).
+// The viewer's own permission comes first, so a viewer who may not move anything hears that, not a sentence about claims.
 export function columnMove(state: TeamState, viewerId: string | undefined, itemId: string, column: BoardColumn): { ok: true; move?: MoveKey } | { ok: false; reason: string } {
   const item = state.items.get(itemId);
   if (item === undefined || !isCard(item)) return { ok: false, reason: REFUSALS.missing };
@@ -134,11 +180,22 @@ export function columnMove(state: TeamState, viewerId: string | undefined, itemI
   if (current === column) return { ok: true };
   const denied = moveDenial(state, viewerId);
   if (denied !== undefined) return { ok: false, reason: denied };
+  const ask = (move: MoveKey): { ok: true; move: MoveKey } | { ok: false; reason: string } => asDrop(planMove(state, viewerId, itemId, move, { reason: PLACEHOLDER_REASON }), move);
+  if (current === 'done' || current === 'cancelled') return column === 'backlog' ? ask('reopen') : { ok: false, reason: REFUSALS.terminal };
   if (CLAIM_COLUMNS.includes(column)) return { ok: false, reason: REFUSALS[column as 'claimed' | 'in-progress' | 'in-review' | 'integrating'] };
-  const move: MoveKey | undefined = column === 'done' ? 'done' : column === 'cancelled' ? 'cancel' : column === 'backlog' && current === 'ready' ? 'hold' : undefined;
-  if (move === undefined) return { ok: false, reason: REFUSALS.notNow };
-  const planned = planMove(state, viewerId, itemId, move, { reason: PLACEHOLDER_REASON });
-  return planned.ok ? { ok: true, move } : { ok: false, reason: planned.reason };
+  switch (column) {
+    case 'done': return ask('done');
+    case 'cancelled': return ask('cancel');
+    case 'backlog': return current === 'ready' ? ask('hold') : { ok: false, reason: REFUSALS.notNow };
+    case 'ready': {
+      if (current !== 'backlog') return { ok: false, reason: REFUSALS.notNow };
+      const { reasons } = readiness(state.items, itemId);
+      // A hold that is the only thing in the way is released; anything else is named, so the person knows what to fix.
+      if (reasons.length === 1 && reasons[0] === 'held') return ask('release');
+      return { ok: false, reason: notReadyRefusal(reasons, waitingOn(state, item), item.kind === 'plan') };
+    }
+    default: return { ok: false, reason: REFUSALS.notNow };
+  }
 }
 
 // ---- the model -------------------------------------------------------------------------------------------------------------------------------
