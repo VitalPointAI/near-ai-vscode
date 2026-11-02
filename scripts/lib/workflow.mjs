@@ -488,17 +488,62 @@ export function latestReleaseVersion(lsRemoteOutput) {
   return versions.reduce((best, version) => (best === undefined || isVersionBump(best, version) ? version : best), undefined);
 }
 
+/** The first `length` UTF-16 units of text, one less if that would split a surrogate pair. */
+function sliceSafe(text, length) {
+  const cut = text.slice(0, Math.max(0, length));
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
+/** The line that closes the code fence left open at the end of text, or '' when none is open. */
+function closingFence(text) {
+  let fence;
+  for (const line of text.split('\n')) {
+    const marker = indentOf(line) <= 3 ? fenceMarker(line.trim()) : undefined;
+    if (!marker) continue;
+    if (!fence) fence = marker;
+    else if (marker.char === fence.char && marker.length >= fence.length && marker.info === '') fence = undefined;
+  }
+  return fence ? fence.char.repeat(fence.length) : '';
+}
+
 /**
  * Joins the review text and the footer (verdict, CI table, head marker) into one comment within
- * GitHub's 65536-character limit. Only the end of the review text is cut; the footer is always
- * kept whole.
+ * GitHub's 65536-character limit. The end of the review text is cut, never inside a surrogate
+ * pair, and a code fence left open by the cut is closed so the footer is not shown as code. The
+ * footer is kept whole unless it alone would take more than half the limit; then its middle is
+ * cut and its last line (the head marker) is kept.
  */
 export function fitComment(review, footer = '', limit = 65_000) {
-  const join = (text) => (footer ? `${text}\n\n${footer}` : text);
-  if (join(review).length <= limit) return join(review);
+  const whole = footer ? `${review}\n\n${footer}` : review;
+  if (whole.length <= limit) return whole;
+  let tail = footer;
+  if (tail.length > limit / 2) {
+    const lastBreak = tail.lastIndexOf('\n');
+    const last = tail.slice(lastBreak + 1);
+    const gap = '\n\n_(Cut: too long for a GitHub comment.)_\n\n';
+    tail = `${sliceSafe(tail.slice(0, Math.max(0, lastBreak)), Math.floor(limit / 2) - last.length - gap.length)}${gap}${last}`;
+  }
+  const join = (text) => (tail ? `${text}\n\n${tail}` : text);
   const note = '\n\n_(Truncated: the full review is longer than a GitHub comment allows.)_';
   const room = Math.max(0, limit - join('').length - note.length);
-  return join(`${review.slice(0, room)}${note}`);
+  let cut = sliceSafe(review, room);
+  let close = closingFence(cut);
+  if (close) {
+    cut = sliceSafe(review, room - close.length - 1);
+    close = closingFence(cut);
+    if (close) cut = `${cut}\n${close}`;
+  }
+  return join(`${cut}${note}`);
+}
+
+/**
+ * Changed files that are part of the gates themselves (CI and release workflows, the secret-scan
+ * allowlist, the gate scripts, the agent commands). CI runs the PR's own copies of these, so a PR
+ * can weaken the checks it is judged by; merge-pr points them out.
+ */
+export function gateFileChanges(paths) {
+  const gates = [/^\.github\//, /^scripts\/lib\//, /^scripts\/(secret-scan|merge-pr|agent-review|tag-release|prepare-release|verify-release-content)\.mjs$/, /^\.claude\/commands\//];
+  return (paths ?? []).filter((file) => gates.some((pattern) => pattern.test(file)));
 }
 
 // ---- Secret scanning ----------------------------------------------------------------------------

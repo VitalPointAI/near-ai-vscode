@@ -1,6 +1,7 @@
 # Required checks for every PR into main. The job names (lint, test, e2e, release-content, audit,
 # secret-scan) are the branch protection's required status checks: do not rename them without
-# updating branch protection and docs/development-workflow.md in the same PR.
+# updating branch protection, CI_CHECKS in scripts/lib/workflow.mjs and
+# docs/development-workflow.md in the same PR.
 name: CI
 
 on:

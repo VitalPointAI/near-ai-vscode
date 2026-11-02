@@ -1,8 +1,8 @@
 // The merge agent's gate (scripts/merge-pr.mjs), as a function so it can be tested with a fake
 // gh (scripts/test/merge.test.mjs). See merge-pr.mjs for what it checks.
-import { behindBy, commitChecks, fileAt, gh, ghJson, protectedContexts, sleep, tagCommit, unresolvedThreads, viewPrSettled } from './gh.mjs';
+import { behindBy, commitChecks, fileAt, gh, ghJson, prFiles, protectedContexts, sleep, tagCommit, unresolvedThreads, viewPrSettled } from './gh.mjs';
 import { tagRelease } from './release.mjs';
-import { AGENT_REVIEW_ACCOUNT, BRANCH_PATTERN, REQUIRED_CHECKS, evaluateCommit, mergeOutcomeProblem, releasePrProblems, releaseVersionFromBranch } from './workflow.mjs';
+import { AGENT_REVIEW_ACCOUNT, BRANCH_PATTERN, REQUIRED_CHECKS, evaluateCommit, gateFileChanges, mergeOutcomeProblem, releasePrProblems, releaseVersionFromBranch } from './workflow.mjs';
 
 /**
  * Checks every gate for PR `number` and, unless dryRun, squash-merges it and tags a release PR.
@@ -47,6 +47,10 @@ export async function mergePr(repo, number, { dryRun = false, noTag = false, log
   if (reasons.length > 0) throw new Error(`Refusing to merge #${number} (${pr.title}):\n- ${reasons.join('\n- ')}`);
 
   log(`All gates pass for #${number} at ${pr.headRefOid.slice(0, 7)}: ${required.join(', ')}.`);
+  const gateFiles = gateFileChanges(prFiles(repo, number));
+  if (gateFiles.length > 0) {
+    log(`Note: this PR changes the gates themselves (${gateFiles.join(', ')}). CI ran the PR's own copies of these files, so check that the agent review covered what they change.`);
+  }
   if (dryRun) { log('[dry run] not merging.'); return { merged: false }; }
 
   // --repo keeps gh from touching local branches (it skips local branch deletion and checkout),

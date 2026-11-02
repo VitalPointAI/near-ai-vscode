@@ -3,11 +3,14 @@ description: Prepare a release/x.y.z PR (version bump, CHANGELOG, README) for th
 argument-hint: <x.y.z> [hotfix]
 ---
 
-Prepare release **$ARGUMENTS** of the extension. The full flow is in
-`docs/development-workflow.md` ("Releasing"). Publishing to the Marketplace always waits for
+Prepare release **$ARGUMENTS** of the extension. If the arguments include `hotfix`, this is a
+hotfix: use a `hotfix/<x.y.z>` branch instead of `release/<x.y.z>` (step 2). The full flow is
+in `docs/development-workflow.md` ("Releasing"). Publishing to the Marketplace always waits for
 the owner's approval in GitHub; never try to publish from this session.
 
-1. **Pick the version.** Read `git describe --tags --abbrev=0` and `git log <last-tag>..origin/main`.
+1. **Pick the version.** Find the last release tag on GitHub, not in local tags, which can be
+   stale: `git fetch origin --tags` and `git ls-remote --tags origin 'v*'` (the highest
+   `v<x.y.z>`), then read `git log v<last>..origin/main`.
    Patch (x.y.Z) for fixes and small improvements, minor (x.Y.0) for new features. If the
    argument disagrees with the changes, say so before going on.
 

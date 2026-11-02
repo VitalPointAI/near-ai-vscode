@@ -422,6 +422,23 @@ test('truncating a review keeps its verdict and the footer with the head marker'
   assert.equal(fitComment('short', footer), `short\n\n${footer}`);
 });
 
+test('truncating never cuts inside a code fence or a surrogate pair, and caps a huge footer', () => {
+  const footer = `---\n**agent-review: failure.**\n\n<!-- agent-review head=${SHA} state=failure -->`;
+  // A cut inside an open fence would render the footer as code.
+  const fenced = fitComment(`Verdict: PASS\n\`\`\`\n${'x\n'.repeat(40_000)}`, footer, 1_000);
+  assert.ok(fenced.length <= 1_000);
+  assert.deepEqual(parseReview(fenced).problems, [], 'the fence is closed before the footer');
+  assert.ok(fenced.endsWith(footer));
+  // A cut between the two halves of an emoji would leave a lone surrogate.
+  const emoji = fitComment('\u{1F600}'.repeat(600), footer, 1_000);
+  assert.doesNotMatch(emoji, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  // A footer longer than the limit is cut too, keeping its last line (the head marker).
+  const long = `${'- reason\n'.repeat(500)}<!-- agent-review head=${SHA} state=failure -->`;
+  const body = fitComment('review', long, 1_000);
+  assert.ok(body.length <= 1_000);
+  assert.ok(body.endsWith(`<!-- agent-review head=${SHA} state=failure -->`));
+});
+
 test('the secret scan catches common key formats and masks them in its output', () => {
   const gh = ['ghp', '_', 'Z'.repeat(36)].join('');
   const near = ['ed25519', ':', '3'.repeat(88)].join('');

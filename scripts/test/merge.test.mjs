@@ -2,7 +2,7 @@
 // what is called, in which order, and what is never done when a gate refuses.
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { setRunner } from '../lib/gh.mjs';
+import { setRunner, tagCommit } from '../lib/gh.mjs';
 import { mergePr } from '../lib/merge.mjs';
 import { tagRelease, waitForCi } from '../lib/release.mjs';
 import { CI_CHECKS } from '../lib/workflow.mjs';
@@ -165,4 +165,34 @@ test('only the configured owner\'s agent-review counts, whoever runs merge-pr or
   const hotfix = greenCommit({ reviewer: 'Em-kale', event: 'workflow_dispatch' });
   install({ login: 'Em-kale', commits: { [HEAD]: hotfix }, branches: { 'hotfix/1.2.3': HEAD }, files: releaseFiles(HEAD) });
   await assert.rejects(tagRelease(REPO, '1.2.3', HEAD, { log: () => {}, wait: false }), /has not been set on this commit by ALuhning/);
+});
+
+test('merge-pr points out a PR that changes the gates themselves', async () => {
+  const logs = [];
+  install(readyToMerge({ prs: { 7: openPr(7, 'fix/thing', HEAD, { files: [{ path: 'src/x.ts' }, { path: '.github/workflows/ci.yml' }, { path: 'scripts/lib/workflow.mjs' }] }) } }));
+  await mergePr(REPO, '7', { ...quiet, log: (m) => logs.push(m), dryRun: true });
+  assert.match(logs.join('\n'), /changes the gates themselves.*\.github\/workflows\/ci\.yml, scripts\/lib\/workflow\.mjs/s);
+  logs.length = 0;
+  install(readyToMerge());
+  await mergePr(REPO, '7', { ...quiet, log: (m) => logs.push(m), dryRun: true });
+  assert.doesNotMatch(logs.join('\n'), /gates themselves/);
+});
+
+test('branch protection is read as unprotected only on a 404; other errors refuse', async () => {
+  install(readyToMerge({ failOn: /protection\/required_status_checks/ }));
+  await assert.rejects(mergePr(REPO, '7', quiet), /HTTP 500/);
+  install(readyToMerge({ protection: ['agent-review', 'codeql'] }));
+  await assert.rejects(mergePr(REPO, '7', quiet), /"codeql" has not reported/);
+});
+
+test('a tag that points at another tag is followed down to its commit', () => {
+  const commit = '4'.repeat(40);
+  setRunner((command, args) => {
+    const endpoint = args[1];
+    if (endpoint.endsWith('/git/ref/tags/v1.2.3')) return JSON.stringify({ object: { type: 'tag', sha: 'a1' } });
+    if (endpoint.endsWith('/git/tags/a1')) return JSON.stringify({ object: { type: 'tag', sha: 'a2' } });
+    if (endpoint.endsWith('/git/tags/a2')) return JSON.stringify({ object: { type: 'commit', sha: commit } });
+    throw new Error(`unexpected ${args.join(' ')}`);
+  });
+  assert.equal(tagCommit(REPO, 'v1.2.3'), commit);
 });

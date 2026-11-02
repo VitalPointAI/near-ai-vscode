@@ -60,14 +60,17 @@ export async function viewPrSettled(repo, number, { attempts = 6, wait = sleep }
   return pr;
 }
 
-/** Required status check contexts from branch protection, or [] when the branch is not protected. */
+/** Required status check contexts from branch protection, or [] when GitHub says there are none (404). */
 export function protectedContexts(repo, branch) {
   try {
     const result = ghJson(['api', `repos/${repo}/branches/${branch}/protection/required_status_checks`]);
     const fromChecks = (result?.checks ?? []).map((check) => check.context);
     return [...new Set([...(result?.contexts ?? []), ...fromChecks])];
-  } catch {
-    return [];
+  } catch (error) {
+    // Only "not found" means the branch has no required checks; any other failure (no access,
+    // an outage) is raised, so the merge gate refuses rather than skipping protected checks.
+    if (isNotFound(error)) return [];
+    throw error;
   }
 }
 
@@ -178,8 +181,14 @@ export function tagCommit(repo, tag) {
     if (isNotFound(error)) return undefined;
     throw error;
   }
-  if (ref.object.type === 'commit') return ref.object.sha;
-  return ghJson(['api', `repos/${repo}/git/tags/${ref.object.sha}`]).object.sha;
+  // An annotated tag can point at another tag object; follow the chain down to the commit.
+  let object = ref.object;
+  for (let depth = 0; object.type === 'tag'; depth += 1) {
+    if (depth >= 10) throw new Error(`${tag} is a chain of more than 10 tag objects`);
+    object = ghJson(['api', `repos/${repo}/git/tags/${object.sha}`]).object;
+  }
+  if (object.type !== 'commit') throw new Error(`${tag} points at a ${object.type}, not a commit`);
+  return object.sha;
 }
 
 /** Creates the annotated tag v<version> on sha. Pushing a v*.*.* tag starts release.yml. */

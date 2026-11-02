@@ -199,6 +199,10 @@ The merge agent runs `node scripts/merge-pr.mjs <number>` (first with `--dry-run
   the meantime, and `--repo` keeps `gh` from touching local branches or worktrees. A release PR
   is tagged only after GitHub confirms the merge and its squash commit.
 
+When a PR changes the gates themselves (the workflows, the secret-scan allowlist, the gate
+scripts or the agent commands), the script says so before merging: CI ran the PR's own copies
+of those files, so the review must have covered what they change.
+
 It never uses `--admin` and never changes branch protection. A refusal names each reason and
 the fix (for example `gh pr update-branch <number> --rebase`, then CI and a new review).
 
