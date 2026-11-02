@@ -4,12 +4,17 @@
 // the permission and the state always come from the log, never from the page.
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import { MOVE_KEYS, buildBoardModel, planMove } from '../../domain/team/board';
+import { MOVE_KEYS, availableMoves, buildBoardModel, buildCardDetail, planMove } from '../../domain/team/board';
 import type { BoardModel, MoveKey } from '../../domain/team/board';
-import { REFUSALS } from '../../domain/team/boardText';
+import { REFUSALS, SOMEONE, flattenName, staleRefusal } from '../../domain/team/boardText';
+import { SecretLeakError } from '../../domain/team/secrets';
+import { REASON_MAX } from '../../domain/team/validate';
 import { BOARD_ITEM_ID_PATTERN, GSD_ITEM_ID_PATTERN } from '../../domain/team/work';
+import { NoDeviceKeyError } from '../../team/eventLog';
+import type { AppendResult } from '../../team/transport';
 import { IMPORT_PLANS_COMMAND, OPEN_BOARD_COMMAND } from './teamCommands';
 import type { TeamOutput, TeamSession } from './teamSession';
+import { safeReason } from './teamStatusBar';
 
 export const BOARD_VIEW_ID = 'nearAiTeamBoardView';
 export const BOARD_PANEL_TYPE = 'nearAiTeamBoard';
@@ -25,6 +30,25 @@ const SCOPE_LINES_MAX = 64;
 const SCOPE_LINE_MAX = 200;
 const ESTIMATE_MAX = 1_000_000_000_000;
 const PAUSED_TEXT = 'The board shows the last update and cannot be changed until team sync resumes.';
+const NOT_READY_TEXT = 'The Team Board is not ready yet. Nothing was moved.';
+const NOT_SAVED_TEXT = 'The change could not be saved. Nothing was moved.';
+const LOG_DECLINED_TEXT = 'The team log did not accept this change. Nothing was moved.';
+// Stands in for a reason while a move is planned only to learn whether it is allowed and which prompt follows (the real reason is asked afterwards).
+const PROBE_REASON = 'placeholder';
+const DONE_DETAIL = 'Use this when the work is finished and merged. The whole team will see it as done, and plans that wait for it can become ready. You can reopen it later.';
+const MARK_DONE = 'Mark done';
+const NOT_YET = 'Not yet';
+const CANCEL_ITEM = 'Cancel this item';
+const KEEP_ITEM = 'Keep item';
+const REASON_PROMPTS = Object.freeze({
+  block: { prompt: 'Why is this blocked? The team will see your answer.', placeHolder: 'For example: waiting for the API key' },
+  cancel: { prompt: 'Why is this being cancelled? The team will see your answer.', placeHolder: 'For example: replaced by another plan' }
+});
+// Refusals that describe the card's state. When the page was offered the move and the log now says no, someone changed the card first.
+const CARD_STATE_REFUSALS: ReadonlySet<string> = new Set([
+  REFUSALS.alreadySettled, REFUSALS.doneBlocked, REFUSALS.doneNotNow, REFUSALS.alreadyHeld, REFUSALS.notHeld, REFUSALS.holdNotReady, REFUSALS.holdNotNow,
+  REFUSALS.notTerminal, REFUSALS.alreadyBlocked, REFUSALS.notBlocked, REFUSALS.blockNotNow, REFUSALS.notNow
+]);
 
 /**
  * Set by the extension-host tests to observe both directions of the page protocol. `request` is set by the controller: it posts
@@ -343,6 +367,9 @@ export class BoardController {
       case 'move':
         await this.move(state, message.itemId, message.target);
         return;
+      case 'detail':
+        this.detail(state, message.itemId);
+        return;
       case 'import-plans':
         // From the page the import always takes the current milestone, so no pick is shown (D-09).
         await vscode.commands.executeCommand(IMPORT_PLANS_COMMAND, { milestone: 'current' });
@@ -357,25 +384,151 @@ export class BoardController {
         this.deps.output.show(true);
         return;
       default:
-        // new-item and edit-item are parsed here and handled by the form plan; detail follows in the next step.
+        // new-item and edit-item are parsed here and handled by the form plan.
         return;
     }
   }
 
-  // The tracer's move: planned and appended on the freshest state. Prompts, stale answers and error mapping follow in the next step.
+  // ---- moves --------------------------------------------------------------------------------------------------------------------------
+
+  private refuse(state: SurfaceState, itemId: string, reason: string, target?: MoveKey): void {
+    this.post(state, { type: 'refused', itemId, reason });
+    // A dismissed prompt is not a failure. The channel gets the move and the sentence, never the card's text.
+    if (reason !== '') this.deps.output.appendLine(`Team Board: ${target === undefined ? 'the request' : `the ${target} move`} was not done. ${reason}`);
+  }
+
+  private async askReason(target: 'block' | 'cancel', label: string): Promise<string | undefined> {
+    const answer = await vscode.window.showInputBox({
+      title: `${target === 'block' ? 'Block' : 'Cancel'} ${label}`, ...REASON_PROMPTS[target], ignoreFocusOut: true,
+      validateInput: (value) => (value.trim().length === 0 || value.trim().length > REASON_MAX ? REFUSALS.reasonInvalid : undefined)
+    });
+    return answer === undefined ? undefined : answer.trim();
+  }
+
+  private async confirmDone(label: string): Promise<boolean> {
+    const choice = await vscode.window.showWarningMessage(`Mark ${label} as done?`, { modal: true, detail: DONE_DETAIL }, { title: MARK_DONE }, { title: NOT_YET, isCloseAffordance: true });
+    return choice?.title === MARK_DONE;
+  }
+
+  private async confirmCancel(label: string, waiting: number): Promise<boolean> {
+    const who = waiting === 1 ? '1 plan waits' : `${waiting} plans wait`;
+    const stays = waiting === 1 ? 'It stays' : 'They stay';
+    const dependency = waiting === 1 ? 'it depends' : 'they depend';
+    const detail = `${who} for this card. ${stays} waiting until someone changes what ${dependency} on. You can reopen this card later.`;
+    const choice = await vscode.window.showWarningMessage(`Cancel ${label}?`, { modal: true, detail }, { title: CANCEL_ITEM }, { title: KEEP_ITEM, isCloseAffordance: true });
+    return choice?.title === CANCEL_ITEM;
+  }
+
+  // The words for a refusal the log gave on fresh state. A card-state refusal after the page was offered the move means someone got there first.
+  private staleOrPlain(session: TeamSession, itemId: string, reason: string, offered: boolean): string {
+    if (!offered || !CARD_STATE_REFUSALS.has(reason)) return reason;
+    const author = session.itemHistory(itemId)[0]?.author;
+    const name = author === undefined ? '' : session.state().members.get(author)?.name ?? '';
+    return staleRefusal(flattenName(name) === '' ? SOMEONE : name);
+  }
+
+  // The words for an append that did not land (the log refused it, the remote could not be reached, or the write threw).
+  private failureText(target: MoveKey, result: Extract<AppendResult, { ok: false }>): string {
+    this.deps.output.appendLine(`Team Board: the ${target} move was not saved (${result.kind}): ${safeReason(result.reason)}`);
+    switch (result.kind) {
+      case 'offline':
+      case 'paused':
+        return REFUSALS.offline;
+      case 'busy':
+        return `${result.reason} Nothing was moved.`;
+      case 'refused':
+      case 'conflict':
+        return LOG_DECLINED_TEXT;
+      default:
+        return NOT_SAVED_TEXT;
+    }
+  }
+
   private async move(state: SurfaceState, itemId: string, target: MoveKey): Promise<void> {
     const session = this.deps.session();
-    if (session === undefined) return;
-    const viewerId = session.memberId();
-    const planned = planMove(session.state(), viewerId, itemId, target);
-    if (!planned.ok) {
-      this.post(state, { type: 'refused', itemId, reason: planned.reason });
+    if (session === undefined) {
+      this.refuse(state, itemId, NOT_READY_TEXT, target);
       return;
     }
-    await session.currentLog().append((fresh) => {
-      const again = planMove(fresh, viewerId, itemId, target);
-      return again.ok ? [again.intent] : { conflict: again.reason };
-    });
+    const viewerId = session.memberId();
+    // Plan once on what this window knows, to decide which prompt follows. A refusal is answered at once and nothing is asked.
+    const known = session.state();
+    const probe = planMove(known, viewerId, itemId, target, { reason: PROBE_REASON });
+    if (!probe.ok) {
+      this.refuse(state, itemId, probe.reason, target);
+      return;
+    }
+    const offered = availableMoves(known, viewerId, itemId).find((move) => move.key === target);
+    const label = buildCardDetail(known, itemId, { ...(viewerId === undefined ? {} : { viewerId }), nowMs: (this.deps.nowMs ?? Date.now)(), history: [] })?.displayId ?? itemId;
+
+    let reason: string | undefined;
+    if (target === 'block' || target === 'cancel') {
+      reason = await this.askReason(target, label);
+      if (reason === undefined) {
+        this.refuse(state, itemId, '');
+        return;
+      }
+    }
+    if (offered?.prompt === 'confirm' && !(await this.confirmDone(label))) {
+      this.refuse(state, itemId, '');
+      return;
+    }
+    if (target === 'cancel' && (offered?.dependents ?? 0) > 0 && !(await this.confirmCancel(label, offered?.dependents ?? 0))) {
+      this.refuse(state, itemId, '');
+      return;
+    }
+
+    // The prompts took time, so plan again on what the log says now with the real reason: a bad reason is explained, a changed card is named.
+    const input = reason === undefined ? {} : { reason };
+    const again = planMove(session.state(), viewerId, itemId, target, input);
+    if (!again.ok) {
+      this.refuse(state, itemId, this.staleOrPlain(session, itemId, again.reason, true), target);
+      if (CARD_STATE_REFUSALS.has(again.reason)) this.catchUp(state);
+      return;
+    }
+
+    // The write plans a third time inside the append, on the state fetched just before it, so a page that was behind gets a fresh refusal.
+    let builderRefusal: string | undefined;
+    try {
+      const result = await session.currentLog().append((fresh) => {
+        const planned = planMove(fresh, viewerId, itemId, target, input);
+        if (planned.ok) return [planned.intent];
+        builderRefusal = planned.reason;
+        return { conflict: planned.reason };
+      });
+      if (result.ok) return;
+      if (builderRefusal !== undefined && result.reason === builderRefusal) {
+        this.refuse(state, itemId, this.staleOrPlain(session, itemId, builderRefusal, true), target);
+        this.catchUp(state);
+        return;
+      }
+      this.refuse(state, itemId, this.failureText(target, result), target);
+    } catch (error) {
+      if (error instanceof SecretLeakError) this.refuse(state, itemId, REFUSALS.secret, target);
+      else if (error instanceof NoDeviceKeyError) this.refuse(state, itemId, REFUSALS.noDeviceKey, target);
+      else {
+        this.deps.output.appendLine(`Team Board: the ${target} move failed: ${describe(error)}`);
+        this.refuse(state, itemId, NOT_SAVED_TEXT, target);
+      }
+    }
+  }
+
+  // After a stale answer the page must show the latest, not wait for the throttle.
+  private catchUp(state: SurfaceState): void {
+    state.lastJson = undefined;
+    this.flush(state);
+  }
+
+  private detail(state: SurfaceState, itemId: string): void {
+    const session = this.deps.session();
+    if (session === undefined) {
+      this.refuse(state, itemId, NOT_READY_TEXT);
+      return;
+    }
+    const viewerId = session.memberId();
+    const detail = buildCardDetail(session.state(), itemId, { ...(viewerId === undefined ? {} : { viewerId }), nowMs: (this.deps.nowMs ?? Date.now)(), history: session.itemHistory(itemId) });
+    if (detail === undefined) this.refuse(state, itemId, REFUSALS.missing);
+    else this.post(state, { type: 'detail', ...detail });
   }
 }
 
