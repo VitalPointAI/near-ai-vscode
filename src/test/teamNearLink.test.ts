@@ -174,13 +174,15 @@ test('a team.json that cannot be parsed, or ids that are not valid, are refused 
   });
 });
 
-test('a team.json that names a different owner key than this computer pinned is never overwritten', async () => {
+test('a team.json that names a different genesis than this computer pinned is never overwritten', async () => {
   await withTeam(async ({ root, storageDir, teamFile }) => {
-    const forged: TeamFile = { ...teamFile, genesis: { ...teamFile.genesis, ownerDevice: { ...teamFile.genesis.ownerDevice, fingerprint: `${teamFile.genesis.ownerDevice.fingerprint.slice(0, -1)}${teamFile.genesis.ownerDevice.fingerprint.endsWith('a') ? 'b' : 'a'}` } } };
+    const id = teamFile.genesis.eventId;
+    const forged: TeamFile = { ...teamFile, genesis: { ...teamFile.genesis, eventId: `${id.slice(0, -1)}${id.endsWith('0') ? '1' : '0'}` } };
     await writeTeamFile(root, forged);
     const text = await fs.readFile(teamFilePath(root), 'utf8');
     const result = await linkNearOrganization({ projectRoot: root, globalStorageDir: storageDir, teamId: teamFile.teamId, near: OWNED });
     assert.equal(result.ok ? undefined : result.code, 'team-file');
+    assert.match(result.ok ? '' : result.message, /different team or owner key/);
     assert.equal(await fs.readFile(teamFilePath(root), 'utf8'), text);
   });
 });

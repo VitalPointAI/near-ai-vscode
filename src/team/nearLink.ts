@@ -10,6 +10,8 @@ import { runGit } from './runGit';
 import type { GitRunner } from './runGit';
 import { TEAM_FILE_REL, TeamFileError, TrustPinError, checkTrustPin, readTeamFile, teamStorageDir, writeTeamFile } from './teamFile';
 
+const LOCAL_TIMEOUT_MS = 30_000;
+
 export const LINK_COMMIT_MESSAGE = 'chore(team): link NEAR organization';
 
 export type LinkResult =
@@ -68,4 +70,14 @@ export async function linkNearOrganization(input: { projectRoot: string; globalS
   const result: LinkResult = { ok: true, status: 'linked', teamFile: linked, commit: committed.commit };
   if (committed.branch !== undefined) result.branch = committed.branch;
   return result;
+}
+
+// Does the committed team.json differ from the upstream branch? An invitee who clones now would not see a NEAR link that is still only
+// local (research Pitfall 11), so the invite command warns on true. 'unknown' when there is no upstream or git cannot answer.
+export async function teamFileUnpushed(projectRoot: string, git: GitRunner = runGit): Promise<boolean | 'unknown'> {
+  const upstream = await git(['rev-parse', '--verify', '-q', '@{u}'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  if (upstream.code !== 0) return 'unknown';
+  const diff = await git(['diff', '--quiet', '@{u}', 'HEAD', '--', TEAM_FILE_REL], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  if (diff.code === 0) return false;
+  return diff.code === 1 ? true : 'unknown';
 }
