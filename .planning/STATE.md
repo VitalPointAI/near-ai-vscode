@@ -5,11 +5,11 @@ milestone_name: Team Mode
 current_phase: 61
 current_phase_name: Invitations, joining, removal, NEAR org and key integration
 status: verifying
-stopped_at: Completed 61-14-PLAN.md
-last_updated: "2026-11-02T03:40:58.846Z"
+stopped_at: Phase 61 executed and reviewed; verification human_needed (real NEAR org check and opt-in live test)
+last_updated: "2026-11-02T04:56:54.367Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 61 execution started
-state_head: a2def69c2d45a88833188de5e6cdaeb2c943eb80
+state_head: 248bc8223805fa81ef380eab88765b2dd443219a
 progress:
   total_phases: 8
   completed_phases: 1
@@ -154,9 +154,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T03:40:58.693Z
-Stopped at: Completed 61-14-PLAN.md
-Resume file: None
+Last session: 2026-11-02T04:56:54.195Z
+Stopped at: Phase 61 executed and reviewed; verification human_needed (real NEAR org check and opt-in live test)
+Resume file: .planning/phases/61-invitations-joining-removal-near-org-and-key-integration/61-VERIFICATION.md
 
 ## Notes
 
