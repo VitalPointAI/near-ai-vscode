@@ -28,9 +28,24 @@ export const keyStillSpendsWarning = (name: string): string => KEY_STILL_SPENDS_
 
 export type RemoveResult =
   | { ok: true; kind: 'removed' | 'cancelled'; keyStillSpends: boolean; checklist: CleanupItem[]; message: string }
-  | { ok: false; code: 'not-found' | 'already-removed' | 'refused' | 'conflict' | 'offline'; message: string };
+  | { ok: false; code: 'not-found' | 'already-removed' | 'refused' | 'conflict' | 'offline' | 'stopped'; message: string };
 
-export interface RemoveInput { log: TeamLog; teamFile: TeamFile; memberId: string; org?: NearOrgClient; checklist: CleanupChecklist }
+/** The steps a removal or cancel reports while it runs, so the caller can say what is happening (UI review issue 1). */
+export type RemoveStep = 'cap' | 'log' | 'revoke' | 'organization' | 'cancel-near';
+
+export interface RemoveInput {
+  log: TeamLog;
+  teamFile: TeamFile;
+  memberId: string;
+  org?: NearOrgClient;
+  checklist: CleanupChecklist;
+  onStep?: (step: RemoveStep) => void;
+  /**
+   * The person asked to stop. It is honoured only where stopping is safe: before any NEAR call or log write (nothing changes), and after the
+   * log removal, when every key still to revoke is already capped at 0 (the rest goes on the cleanup list). Never between the cap and the log.
+   */
+  stopRequested?: () => boolean;
+}
 export interface RetryInput { item: CleanupItem; teamFile: TeamFile; log: TeamLog; org?: NearOrgClient; checklist: CleanupChecklist }
 
 // ---- how a NEAR step ended --------------------------------------------------------------------------------------------------------------
@@ -44,6 +59,8 @@ const SIGN_IN_TEXT = 'Sign in to NEAR to finish this step.';
 const CAP_FIRST_TEXT = 'Set the limit to 0 first.';
 const OTHER_COMMAND_TEXT = 'Retry this step from NEAR AI: Manage Team Members.';
 const NO_LINK_TEXT = 'This team has no NEAR organization link, so do this step in the NEAR console.';
+const STOPPED_TEXT = 'You stopped the removal before this step. Retry it from NEAR AI: Manage Team Members.';
+export const STOPPED_BEFORE_START = 'You stopped the removal before anything was changed. Nothing was changed.';
 // CR-01: NEAR not listing a key in the linked workspace never proves the key is gone, because the workspace id comes from team.json.
 const KEY_NOT_FOUND_CAP_TEXT = 'NEAR did not find this key in the linked workspace, so it may still be able to spend. Find it in the NEAR console and set its limit to 0.';
 const KEY_NOT_FOUND_REVOKE_TEXT = 'NEAR did not find this key in the linked workspace, so it was not revoked here. Find it in the NEAR console and revoke it.';
@@ -227,12 +244,17 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
     keyId, cap: unusable ?? { status: 'pending', text: SIGN_IN_TEXT }, revoke: { status: 'pending', text: CAP_FIRST_TEXT }
   }));
 
+  // A stop asked for now changes nothing. From here to the log removal the steps always run together.
+  if (input.stopRequested?.() === true) return { ok: false, code: 'stopped', message: STOPPED_BEFORE_START };
+
   // Step 1: cap every key at 0.
-  if (near !== undefined && input.org !== undefined) {
+  if (near !== undefined && input.org !== undefined && steps.length > 0) {
+    input.onStep?.('cap');
     for (const step of steps) step.cap = await capKey(input.org, near, step.keyId);
   }
 
   // Step 2: the removal, written whatever happened above.
+  input.onStep?.('log');
   const appended = await input.log.append(removalIntents(member.id));
   if (!appended.ok) {
     const failure = appendFailure(appended);
@@ -247,9 +269,17 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
   // CR-02: a lead's NEAR invitation that never went out must not go out after the removal.
   const invitationNote = await closeInvitationSends(input.checklist, member.id, REMOVED_INVITEE_TEXT);
 
-  // Step 3: revoke each key whose cap is done.
+  // Step 3: revoke each key whose cap is done. A stop asked for now is safe: every key left to revoke is already capped at 0.
+  const stopped = (): boolean => input.stopRequested?.() === true;
+  let stoppedEarly = false;
+  if (steps.some((step) => step.cap.status === 'done') && near !== undefined && input.org !== undefined) input.onStep?.('revoke');
   for (const step of steps) {
     if (step.cap.status !== 'done') continue;
+    if (stopped()) {
+      stoppedEarly = true;
+      step.revoke = { status: 'pending', text: STOPPED_TEXT };
+      continue;
+    }
     step.revoke = near !== undefined && input.org !== undefined ? await revokeKey(input.org, near, step.keyId) : { status: 'pending', text: SIGN_IN_TEXT };
   }
 
@@ -258,7 +288,14 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
   let organization: StepState = DONE;
   if (!link.ok && leaves) organization = { status: 'manual', text: `${link.text} ${manualOrganizationText(member.name)}` };
   else if (near !== undefined && leaves) {
-    organization = input.org === undefined ? { status: 'pending', text: SIGN_IN_TEXT } : await leaveOrganization(input.org, near, input.teamFile.teamId, member);
+    if (input.org === undefined) organization = { status: 'pending', text: SIGN_IN_TEXT };
+    else if (stopped()) {
+      stoppedEarly = true;
+      organization = { status: 'pending', text: STOPPED_TEXT };
+    } else {
+      input.onStep?.('organization');
+      organization = await leaveOrganization(input.org, near, input.teamFile.teamId, member);
+    }
   }
 
   const items: NewCleanupItem[] = [];
@@ -282,7 +319,8 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
   return {
     ok: true, kind: 'removed', keyStillSpends, checklist: saved.items,
     message: sentence([
-      `${member.name} was removed from ${input.teamFile.name}.`, keyNote, leftToDo(organization, `${member.name} is still in the NEAR organization.`),
+      `${member.name} was removed from ${input.teamFile.name}.`, stoppedEarly ? 'You stopped before the last NEAR steps; they are on your cleanup list.' : undefined,
+      keyNote, leftToDo(organization, `${member.name} is still in the NEAR organization.`),
       'Remove their repository access last; it is on your cleanup list.', saved.notice, invitationNote
     ])
   };
@@ -300,13 +338,20 @@ async function cancelInvitationFor(input: RemoveInput, member: Member): Promise<
     notice = `The cleanup list could not be read: ${errorText(error)}`;
   }
 
+  if (input.stopRequested?.() === true) return { ok: false, code: 'stopped', message: STOPPED_BEFORE_START };
+  input.onStep?.('log');
   const appended = await input.log.append(removalIntents(member.id));
   if (!appended.ok) return { ok: false, ...appendFailure(appended) };
 
   let nearState: StepState = DONE;
   if (!link.ok && isLead(member) && neverSent.length === 0) nearState = { status: 'manual', text: `${link.text} ${noInvitationText(member.name)}` };
   else if (near !== undefined && isLead(member) && neverSent.length === 0) {
-    nearState = input.org === undefined ? { status: 'pending', text: SIGN_IN_TEXT } : await cancelNearInvitation(input.org, near, input.teamFile.teamId, member);
+    if (input.org === undefined) nearState = { status: 'pending', text: SIGN_IN_TEXT };
+    else if (input.stopRequested?.() === true) nearState = { status: 'pending', text: STOPPED_TEXT };
+    else {
+      input.onStep?.('cancel-near');
+      nearState = await cancelNearInvitation(input.org, near, input.teamFile.teamId, member);
+    }
   }
   for (const item of neverSent) {
     try {

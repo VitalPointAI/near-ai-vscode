@@ -94,7 +94,11 @@ export interface JoinInput {
   askInvitationLink?: () => Promise<string | undefined>;
   // Used only when the team has no NEAR organization (D-04, D-21).
   pasteOwnKey?: () => Promise<string | undefined>;
+  /** Says which step is running, so the caller can show it (UI review issue 1). */
+  onStep?: (step: JoinStep) => void;
 }
+
+export type JoinStep = 'check' | 'keys' | 'log' | 'near' | 'key';
 
 export type JoinResult =
   | {
@@ -329,6 +333,7 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
   });
   // No signer: this device has no key yet, so the log can be read and the one join event written, nothing else.
   const log = new TeamLog({ anchor, transport });
+  input.onStep?.('check');
   try {
     await log.sync();
   } catch (error) {
@@ -353,10 +358,12 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
       return fail('expired', 'This invitation has expired. Ask your lead to send a new one.');
     }
 
+    input.onStep?.('keys');
     const identity = await createDeviceIdentity(secrets, teamId);
     let failure: JoinFailure | undefined;
     try {
       const seal = await createSealIdentity(secrets, teamId);
+      input.onStep?.('log');
       const device = { fingerprint: identity.fingerprint, publicKey: identity.publicKey };
       const proofKey = deriveInviteKey(codeBytes, teamId, bundle.member);
       const appended = await log.appendJoin(identity, (state) => {
@@ -409,11 +416,13 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
     // D-21: only a lead invitee ever signs in to NEAR here. Everyone else waits for the lead's client to make and send their capped key.
     notices.push(AWAITING_LEAD);
     if (invitedRole === 'lead') {
+      input.onStep?.('near');
       const step = await acceptAsLead(input, near, teamId);
       nearInvitation = step.nearInvitation;
       if (step.notice !== undefined) notices.push(step.notice);
     }
   } else {
+    input.onStep?.('key');
     const pasted = await installPastedKey(input, teamId);
     keyOutcome = pasted.key;
     notices.push(...pasted.notices);

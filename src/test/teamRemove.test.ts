@@ -697,6 +697,22 @@ test('CR-02: a NEAR invitation is sent on Retry only to a lead still waiting on 
   });
 });
 
+test('UI review issue 1: a stop asked for before a removal starts changes nothing and makes no NEAR call', async () => {
+  await inWorld(['a', 'b'], {}, async (w) => {
+    const dana = await addMember(w, 'b', 'Dana Developer', 'dana@example.invalid');
+    const keyId = await giveKey(w, dana);
+    const before = w.fake.requests.length;
+    const steps: string[] = [];
+    const result = await removeMember({ ...removeArgs(w, dana.memberId), stopRequested: () => true, onStep: (step) => { steps.push(step); } });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, 'stopped');
+    assert.equal(w.fake.requests.length, before);
+    assert.deepEqual(steps, []);
+    assert.equal(w.a.log.state().members.get(dana.memberId)?.removedEvent, undefined);
+    assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 5 * GIGA);
+  });
+});
+
 test('items that are not removal steps are answered unchanged with the command that retries them; repo-access stays manual', async () => {
   await inWorld(['a'], {}, async (w) => {
     const memberId = newMemberId();

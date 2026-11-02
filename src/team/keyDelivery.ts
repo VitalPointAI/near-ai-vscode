@@ -29,7 +29,10 @@ export type ConfirmResult =
   | { ok: false; code: 'not-pending' | 'refused' | 'conflict' | 'offline'; message: string };
 export type InstallDeliveredResult = { status: 'installed'; keyId: string } | { status: 'none' | 'already-installed' | 'not-for-this-device' } | { status: 'failed'; message: string };
 
-interface LeadInput { log: TeamLog; teamFile: TeamFile; memberId: string; org: NearOrgClient; checklist: CleanupChecklist }
+/** The steps a confirmation or key delivery reports while it runs, so the caller can say what is happening (UI review issue 1). */
+export type DeliveryStep = 'confirm' | 'read-old' | 'create' | 'seal' | 'log' | 'retire';
+
+interface LeadInput { log: TeamLog; teamFile: TeamFile; memberId: string; org: NearOrgClient; checklist: CleanupChecklist; onStep?: (step: DeliveryStep) => void }
 
 const MAX_KEY_NAME = 100;
 const NAME_SEPARATOR = ' - ';
@@ -215,6 +218,7 @@ async function sendKey(input: LeadInput, near: NearLink, step: CleanupStep, memb
   const replaces = member.nearApiKeyId;
   const fingerprints = targets.map((target) => target.fingerprint);
   let created: CreatedNearKey;
+  input.onStep?.('create');
   try {
     created = await input.org.createKey(near.workspaceId, teamKeyName(input.teamFile.name, member.name, deliveryToken(fingerprints)), limit);
   } catch (error) {
@@ -226,6 +230,7 @@ async function sendKey(input: LeadInput, near: NearLink, step: CleanupStep, memb
     recordFailure(input, member, step, failed, await retireKey(input, near, member, keyId));
 
   let sealed: SealedEntryBody[];
+  input.onStep?.('seal');
   try {
     sealed = targets.map((target) => sealTo(created.secret, target.sealKey, { teamId: input.teamFile.teamId, memberId: member.id, device: target.fingerprint, keyId }));
   } catch (error) {
@@ -234,6 +239,7 @@ async function sendKey(input: LeadInput, near: NearLink, step: CleanupStep, memb
     wipe(created.secret);
   }
   let appended: AppendResult;
+  input.onStep?.('log');
   try {
     appended = await input.log.append((state) => {
       const fresh = state.members.get(member.id);
@@ -261,6 +267,7 @@ async function sendKey(input: LeadInput, near: NearLink, step: CleanupStep, memb
   }
   // Only now, with the new key accepted by the log, is the old one taken away: zeroed first, then revoked.
   const settled = await settle(input.checklist, member, step);
+  if (retire !== undefined) input.onStep?.('retire');
   const retired = retire === undefined ? [] : await retireKey(input, near, member, retire);
   const notice = joinNotes([settled, ...retired]);
   return notice === '' ? { ok: true, keyId } : { ok: true, keyId, notice };
@@ -287,6 +294,7 @@ export async function rotateMemberKey(input: LeadInput): Promise<DeliveryResult>
 
   let limit = 0;
   let manual: string | undefined;
+  input.onStep?.('read-old');
   try {
     const old = await input.org.findKey(near.workspaceId, oldKeyId);
     if (old === undefined) {
@@ -334,6 +342,7 @@ export async function confirmMember(input: Omit<LeadInput, 'org'> & { org?: Near
 
   let roleChanged = false;
   if (member.pendingRole !== undefined) {
+    input.onStep?.('confirm');
     const appended = await input.log.append((fresh) => {
       const current = fresh.members.get(input.memberId);
       if (current === undefined || current.removedEvent !== undefined) return { conflict: `${member.name} was removed from the team, so nothing was confirmed.` };
@@ -351,7 +360,7 @@ export async function confirmMember(input: Omit<LeadInput, 'org'> & { org?: Near
     const problem = keyDue ? await note(input.checklist, member, 'deliver-key', 'pending', signInToSendKeyText(member.name)) : undefined;
     return { ok: true, roleChanged, key: 'queued', message: joinNotes([confirmed, 'Their key was not sent because you are not signed in to NEAR.', problem]) };
   }
-  const delivery = await deliverMemberKey({ log: input.log, teamFile: input.teamFile, memberId: input.memberId, org: input.org, checklist: input.checklist });
+  const delivery = await deliverMemberKey({ log: input.log, teamFile: input.teamFile, memberId: input.memberId, org: input.org, checklist: input.checklist, ...(input.onStep === undefined ? {} : { onStep: input.onStep }) });
   if (delivery.ok) return { ok: true, roleChanged, key: 'delivered', message: joinNotes([confirmed, 'Their NEAR key was sent to their computer.', delivery.notice]) };
   return { ok: true, roleChanged, key: 'queued', message: joinNotes([confirmed, `Their key was not sent: ${delivery.message}`]) };
 }

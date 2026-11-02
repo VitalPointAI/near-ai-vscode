@@ -30,6 +30,11 @@ export interface VscodeStub {
   externalCommands: Array<{ command: string; args: unknown[] }>;
   // Every address passed to vscode.env.openExternal, in order.
   openedExternal: string[];
+  // Every withProgress call, in order: its title, whether it offered Cancel, and each message it reported.
+  progress: Array<{ title?: string; cancellable: boolean; messages: string[] }>;
+  // When set, a progress whose reported message makes this return true has its cancellation token cancelled at that moment, as if the person
+  // clicked Cancel on the notification.
+  setProgressCancel(when: ((title: string, message: string) => boolean) | undefined): void;
   // When set, decides the button each show*Message call returns (given its text, its buttons and its options) instead of the messageAnswers queue.
   // Use it where which messages carry buttons is not the point of the test, so a message without buttons cannot use up an answer.
   setMessageResponder(responder: ((text: string, actions: string[], options?: { modal?: boolean; detail?: string }) => string | undefined) | undefined): void;
@@ -61,6 +66,8 @@ export function createVscodeStub(): VscodeStub {
   const clipboardWrites: string[] = [];
   const externalCommands: VscodeStub['externalCommands'] = [];
   const openedExternal: string[] = [];
+  const progress: VscodeStub['progress'] = [];
+  let progressCancel: Parameters<VscodeStub['setProgressCancel']>[0];
   let messageResponder: Parameters<VscodeStub['setMessageResponder']>[0];
   const config = new Map<string, unknown>();
   const windowListeners = new Set<(state: { focused: boolean; active: boolean }) => void>();
@@ -150,7 +157,31 @@ export function createVscodeStub(): VscodeStub {
         return { title: '', prompt: '', password: false, ignoreFocusOut: false, placeholder: '', value: '', validationMessage: undefined as string | undefined,
           onDidChangeValue: none, onDidAccept: none, onDidHide: none, show: (): void => undefined, dispose: (): void => undefined };
       },
-      withProgress: async <T>(_options: unknown, task: (progress: { report(value: unknown): void }) => PromiseLike<T>): Promise<T> => task({ report: (): void => undefined })
+      withProgress: async <T>(
+        options: { title?: string; cancellable?: boolean } | undefined,
+        task: (progress: { report(value: { message?: string }): void }, token: { isCancellationRequested: boolean; onCancellationRequested(listener: () => void): { dispose(): void } }) => PromiseLike<T>
+      ): Promise<T> => {
+        const record = { ...(options?.title === undefined ? {} : { title: options.title }), cancellable: options?.cancellable === true, messages: [] as string[] };
+        progress.push(record);
+        const listeners = new Set<() => void>();
+        const token = {
+          isCancellationRequested: false,
+          onCancellationRequested(listener: () => void): { dispose(): void } {
+            listeners.add(listener);
+            return { dispose: (): void => { listeners.delete(listener); } };
+          }
+        };
+        return task({
+          report(value: { message?: string }): void {
+            if (value.message === undefined) return;
+            record.messages.push(value.message);
+            if (record.cancellable && !token.isCancellationRequested && progressCancel?.(record.title ?? '', value.message) === true) {
+              token.isCancellationRequested = true;
+              for (const listener of [...listeners]) listener();
+            }
+          }
+        }, token);
+      }
     },
     workspace: {
       get workspaceFolders(): typeof workspaceFolders { return workspaceFolders; },
@@ -195,7 +226,10 @@ export function createVscodeStub(): VscodeStub {
 
   return {
     vscode, outputChannels, statusBarItems, notifications, notificationActions, notificationOptions, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
-    quickPickAnswers, quickPickRequests, clipboardWrites, externalCommands, openedExternal,
+    quickPickAnswers, quickPickRequests, clipboardWrites, externalCommands, openedExternal, progress,
+    setProgressCancel(when): void {
+      progressCancel = when;
+    },
     setMessageResponder(responder): void {
       messageResponder = responder;
     },

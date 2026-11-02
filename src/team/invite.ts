@@ -45,6 +45,8 @@ export interface InviteInput {
   ttlSeconds: number;
   org?: NearOrgClient;
   git?: GitRunner;
+  /** Says which step is running, so the caller can show it (UI review issue 1). */
+  onStep?: (step: 'log' | 'near') => void;
 }
 
 export type InviteResult =
@@ -183,6 +185,7 @@ async function inviteToNear(input: ReissueInput | InviteInput, near: NearLink | 
     return { nearInvitation: 'queued', notice: status === 'pending' ? SESSION_NEEDED : QUEUED };
   };
   if (input.org === undefined) return queue('pending');
+  input.onStep?.('near');
   try {
     // A re-issue keeps the NEAR invitation the first issue sent if it is still pending: NEAR refuses a second one for the same address anyway.
     if (ids.reissue) {
@@ -230,6 +233,7 @@ async function issue(input: InviteInput | ReissueInput, email: string, plan: Pla
     let chosen: IssuePlan | undefined;
     let replaced: string | undefined;
     let appended: AppendResult;
+    input.onStep?.('log');
     try {
       // The builder runs again after every lost race, so the plan is always read from the state the event will sit on.
       appended = await input.log.append((state) => {

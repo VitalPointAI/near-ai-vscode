@@ -51,6 +51,8 @@ function resetStub(): void {
   stub.clipboardWrites.length = 0;
   stub.externalCommands.length = 0;
   stub.openedExternal.length = 0;
+  stub.progress.length = 0;
+  stub.setProgressCancel(undefined);
   stub.setMessageResponder(undefined);
   stub.commands.clear();
   stub.setWorkspaceFolders([]);
@@ -68,8 +70,11 @@ function clearUi(): void {
   stub.quickPickRequests.length = 0;
   stub.clipboardWrites.length = 0;
   stub.externalCommands.length = 0;
+  stub.progress.length = 0;
   stub.outputChannels.forEach((channel) => { channel.lines.length = 0; });
 }
+
+const progressNamed = (title: string): { title?: string; cancellable: boolean; messages: string[] } | undefined => stub.progress.find((entry) => entry.title === title);
 
 interface Team {
   fixture: TeamFixture;
@@ -248,6 +253,9 @@ test('tracer: Invite to Team asks its questions, writes member.invited, and show
 
     // The skip path says plainly that there is no provider cap, once.
     assert.equal(stub.notifications.filter((entry) => entry.message === NO_ORG_NOTICE).length, 1);
+
+    // UI review issue 1: the write runs in a progress notification that says what it is doing.
+    assert.deepEqual(progressNamed('Inviting Ana'), { title: 'Inviting Ana', cancellable: false, messages: ['Saving the invitation to the team log'] });
   });
 });
 
@@ -415,6 +423,8 @@ test('Join inside the matching project joins as an observer, says what comes nex
     assert.ok(stub.notifications.some((entry) => entry.message === 'You joined Invite team as an observer. Your lead confirms you and sends your team key.'), stub.notifications.map((entry) => entry.message).join(' | '));
     const memberId = parseInviteBundle(bundleText).member;
     assert.equal(j.handle.session()?.memberId(), memberId, 'the restarted session signs with the new device key');
+    // UI review issue 1: Join says each step.
+    assert.deepEqual(progressNamed('Joining Invite team')?.messages, ['Reading the team log and checking your invitation', 'Making the keys for this computer', 'Saving your join to the team log']);
     assert.ok(j.secrets.values.has(deviceKeySecretName((await readTeamFile(j.root))?.teamId as string)));
     assert.equal(everythingShown().includes(bundleText), false);
     assert.equal(everythingShown().includes(parseInviteBundle(bundleText).code), false);
@@ -511,6 +521,9 @@ test('Link signs in, lists only organizations the lead owns or administers, comm
     assert.ok(offer >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
     assert.deepEqual(stub.notificationActions[offer], ['Push']);
     assert.equal(t.handle.session()?.teamFile.near?.workspaceId, 'ws-2', 'the session was restarted on the new team.json');
+    // UI review issue 1: reading the lists can be stopped; the write cannot.
+    assert.equal(progressNamed('Reading your NEAR organizations')?.cancellable, true);
+    assert.deepEqual(progressNamed('Linking Invite team to Team Org'), { title: 'Linking Invite team to Team Org', cancellable: false, messages: ['Writing the link to team.json and committing it'] });
     assert.equal(everythingShown().includes(t.signIns.tokens?.refreshToken as string), false);
   }, { near: true });
 
@@ -704,6 +717,10 @@ test('Confirm makes the member their invited role and in a linked team sends a k
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.deepEqual(manageActions(), ['Confirm', 'Remove']);
     assert.ok(shownMessages().includes('Dana D is now a developer. Their team key has a spend cap of $5.00 set by you.'), shownMessages().join(' | '));
+    assert.deepEqual(progressNamed('Confirming Dana D'), {
+      title: 'Confirming Dana D', cancellable: false,
+      messages: ['Saving the confirmation to the team log', 'Creating the key with its spend cap', 'Sealing the key to their computer', 'Saving the key delivery to the team log']
+    });
     const member = t.handle.session()?.state().members.get(await readMemberId(t, 'Dana D'));
     assert.equal(member?.role, 'developer');
     assert.ok(member?.nearApiKeyId !== undefined, 'the key id is in the log');
@@ -740,10 +757,40 @@ test('Remove asks for confirmation, caps and revokes the key, and lists what is 
     assert.notEqual(t.handle.session()?.state().members.get(id)?.removedEvent, undefined, 'removed from the log');
     assert.equal(t.fake?.key(keyId)?.revoked, true, 'the key was revoked');
     assert.ok(shownMessages().some((message) => message.startsWith('Dana D was removed from Invite team.') && message.includes('capped at 0 and revoked')), shownMessages().join(' | '));
+    // UI review issue 1: each removal step is shown while it runs; the removal can be stopped only where that is safe.
+    assert.deepEqual(progressNamed('Removing Dana D from Invite team'), {
+      title: 'Removing Dana D from Invite team', cancellable: true, messages: ['Setting the NEAR key limit to 0', 'Saving the removal to the team log', 'Revoking the NEAR key']
+    });
     const lines = outputLines();
     const todo = lines.slice(lines.indexOf('Still to do for Dana D:') + 1).filter((line) => line.startsWith('- '));
     assert.ok(todo.length >= 1, lines.join(' | '));
     assert.equal(todo[todo.length - 1], `- ${repoAccessText('Dana D')}`, 'the repository access reminder comes last');
+  }, { near: true });
+});
+
+test('UI review issue 1: stopping a removal after the log write leaves the key capped at 0 and the revoke on the cleanup list; nothing is ever left uncapped', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    stub.quickPickAnswers.push('Dana D, developer, waiting for confirmation', 'Confirm');
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    clearUi();
+    const id = await readMemberId(t, 'Dana D');
+    const keyId = t.handle.session()?.state().members.get(id)?.nearApiKeyId as string;
+
+    // The person clicks Cancel while the key is being capped: the cap and the log removal still finish together, then the revoke waits.
+    stub.setProgressCancel((_title, message) => message === 'Setting the NEAR key limit to 0');
+    stub.quickPickAnswers.push('Dana D, developer', 'Remove');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Remove') ? 'Remove' : undefined));
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    assert.notEqual(t.handle.session()?.state().members.get(id)?.removedEvent, undefined, 'the removal was written');
+    assert.equal(t.fake?.key(keyId)?.spendLimitNanoUsd, 0, 'the key is capped');
+    assert.equal(t.fake?.key(keyId)?.revoked, false, 'the revoke waits on the cleanup list');
+    assert.ok(shownMessages().some((message) => message.includes('You stopped before the last NEAR steps')), shownMessages().join(' | '));
+    assert.equal(shownMessages().some((message) => message.includes('can still spend')), false);
+    const teamId = (await readTeamFile(t.root))?.teamId as string;
+    const items = await new CleanupChecklist(teamStorageDir(t.storage, teamId)).forMember(id);
+    assert.deepEqual(items.filter((item) => item.step !== 'repo-access').map((item) => `${item.step}:${item.status}`), ['zero-limit:done', 'revoke-key:pending']);
   }, { near: true });
 });
 
@@ -790,6 +837,7 @@ test('Cancel ends a pending invitation and Re-issue replaces it with a new bundl
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.ok(shownMessages().includes('The invitation for Eve was cancelled.'), shownMessages().join(' | '));
     assert.notEqual(t.handle.session()?.state().members.get(fresh.member)?.removedEvent, undefined);
+    assert.deepEqual(progressNamed('Cancelling the invitation for Eve')?.messages, ['Saving the removal to the team log']);
   });
 });
 

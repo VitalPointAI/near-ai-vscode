@@ -32,6 +32,20 @@ const REPLACE_LINK_ACTION = 'Replace link';
 const RESET_ACTION = 'Remove unfinished keys';
 const CONTINUE_WITHOUT_NEAR_ACTION = 'Continue without NEAR';
 const REMOVE_ACTION = 'Remove';
+// UI review issue 1: what each long flow is doing, in plain words. The steps come from the vscode-free flows as codes.
+const INVITE_STEP_TEXT: Record<'log' | 'near', string> = { log: 'Saving the invitation to the team log', near: 'Sending the NEAR organization invitation' };
+const JOIN_STEP_TEXT: Record<'check' | 'keys' | 'log' | 'near' | 'key', string> = {
+  check: 'Reading the team log and checking your invitation', keys: 'Making the keys for this computer', log: 'Saving your join to the team log',
+  near: 'Accepting the NEAR organization invitation', key: 'Adding your API key'
+};
+const DELIVERY_STEP_TEXT: Record<'confirm' | 'read-old' | 'create' | 'seal' | 'log' | 'retire', string> = {
+  confirm: 'Saving the confirmation to the team log', 'read-old': 'Reading the limit and spend of the old key', create: 'Creating the key with its spend cap',
+  seal: 'Sealing the key to their computer', log: 'Saving the key delivery to the team log', retire: 'Setting the old key limit to 0 and revoking it'
+};
+const REMOVE_STEP_TEXT: Record<'cap' | 'log' | 'revoke' | 'organization' | 'cancel-near', string> = {
+  cap: 'Setting the NEAR key limit to 0', log: 'Saving the removal to the team log', revoke: 'Revoking the NEAR key',
+  organization: 'Removing them from the NEAR organization', 'cancel-near': 'Cancelling the NEAR invitation'
+};
 const READ_ONLY_TEXT = 'Only the owner or a lead can change the team. You can see everyone here, but not change anything.';
 const STEP_TEXT: Record<CleanupStep, string> = {
   'send-invitation': 'Send the NEAR invitation', 'cancel-invitation': 'Cancel the NEAR invitation', 'deliver-key': 'Send the team key',
@@ -130,6 +144,13 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
 
   async function pick<T extends vscode.QuickPickItem>(items: T[], options: { title: string; placeHolder: string }): Promise<T | undefined> {
     return vscode.window.showQuickPick(items, { ignoreFocusOut: true, ...options });
+  }
+
+  // A long flow in a progress notification with plain step messages (UI review issue 1). `cancellable` is only set where the flow can stop
+  // safely between steps; the flow decides where that is.
+  function withSteps<T>(title: string, cancellable: boolean, task: (step: (message: string) => void, token: vscode.CancellationToken) => Promise<T>): Promise<T> {
+    return Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title, cancellable }, (progress, token) =>
+      task((message) => { progress.report({ message }); }, token)));
   }
 
   function guarded(title: string, handler: (...args: unknown[]) => Promise<void>): (...args: unknown[]) => Promise<void> {
@@ -316,10 +337,21 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     if (kept === undefined) return false;
 
     let choices: Awaited<ReturnType<typeof linkChoices>>;
+    let stopped = false;
     try {
-      choices = await linkChoices(kept.org);
+      // Reading the lists changes nothing, so it can be stopped: a stop is honoured once the lists come back.
+      choices = await withSteps('Reading your NEAR organizations', true, async (step, token) => {
+        step('Listing the organizations and workspaces you can link');
+        const read = await linkChoices(kept.org);
+        stopped = token.isCancellationRequested;
+        return read;
+      });
     } catch (error) {
       deps.report('error', `Your NEAR organizations could not be read: ${await describeNear(error)}`);
+      return false;
+    }
+    if (stopped) {
+      deps.report('info', 'You stopped reading your NEAR organizations. The link was not changed.');
       return false;
     }
     if (choices.length === 0) {
@@ -339,7 +371,11 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
 
     const near = { organizationId: organization.choice.organization.id, workspaceId: workspace.workspace.id };
     const link = { projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamId: teamFile.teamId, near };
-    let result = await linkNearOrganization(link);
+    const saveLink = (replace: boolean): ReturnType<typeof linkNearOrganization> => withSteps(`Linking ${teamName} to ${organization.label}`, false, async (step) => {
+      step('Writing the link to team.json and committing it');
+      return linkNearOrganization(replace ? { ...link, replace: true } : link);
+    });
+    let result = await saveLink(false);
     if (!result.ok && result.code === 'different-link') {
       const confirmed = await vscode.window.showWarningMessage(
         `${teamName} is already linked to a different NEAR organization or workspace. Replace the link only if your whole team agrees.`,
@@ -349,7 +385,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
         deps.report('info', 'The link was not changed.');
         return false;
       }
-      result = await linkNearOrganization({ ...link, replace: true });
+      result = await saveLink(true);
     }
     if (!result.ok) {
       // A link that was written but not committed is still on disk, so the session is replaced to read it.
@@ -526,10 +562,14 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       }
     }
 
-    const result = await (await import('../../team/invite')).inviteMember({
-      projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamFile, log: session.currentLog(),
-      name, email, role: roleChoice.role, allocationNanoUsd, ttlSeconds: lifetime, ...(org === undefined ? {} : { org })
-    });
+    const { inviteMember } = await import('../../team/invite');
+    const log = session.currentLog();
+    const linkedFile = teamFile;
+    const result = await withSteps(`Inviting ${shownName}`, false, (step) => inviteMember({
+      projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamFile: linkedFile, log,
+      name, email, role: roleChoice.role, allocationNanoUsd, ttlSeconds: lifetime, ...(org === undefined ? {} : { org }),
+      onStep: (code) => { step(INVITE_STEP_TEXT[code]); }
+    }));
     if (!result.ok) {
       deps.report('error', await safe(result.message));
       return;
@@ -582,7 +622,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     if (displayName === undefined) return;
 
     const nearBaseUrl = await baseUrl();
-    const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Joining ${teamName}` }, () => joinTeam({
+    const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Joining ${teamName}` }, (progress) => joinTeam({
+      onStep: (code) => { progress.report({ message: JOIN_STEP_TEXT[code] }); },
       projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamFile, bundle, ...(near === undefined ? {} : { near }),
       secrets: deps.context.secrets, displayName, nearBaseUrl, ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
       // Only a lead invited to a NEAR-linked team reaches the sign-in (D-22); only a team without NEAR reaches the key box (D-21).
@@ -691,7 +732,9 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       case 'confirm': {
         const chosen = await orgForAction(teamFile, `Confirming ${name} also sends their NEAR key, which needs your NEAR sign-in. Sign in now, or confirm now and send the key later from this list.`, true);
         if (chosen === undefined) return;
-        const result = await keys.confirmMember({ log, teamFile, memberId, checklist, ...(chosen.org === undefined ? {} : { org: chosen.org }) });
+        const result = await withSteps(`Confirming ${name}`, false, (step) => keys.confirmMember({
+          log, teamFile, memberId, checklist, ...(chosen.org === undefined ? {} : { org: chosen.org }), onStep: (code) => { step(DELIVERY_STEP_TEXT[code]); }
+        }));
         if (!result.ok) {
           deps.report(result.code === 'not-pending' ? 'info' : 'error', await safe(result.message));
           return;
@@ -712,8 +755,12 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
           deps.announce('info', signInToSendKeyText(name));
           return;
         }
-        const input = { log, teamFile, memberId, org: chosen.org, checklist };
-        const result = action === 'deliver-key' ? await keys.deliverMemberKey(input) : await keys.rotateMemberKey(input);
+        const org = chosen.org;
+        // Not cancellable: a key that was made must be delivered or zeroed and revoked, and an old key must be zeroed before it is revoked.
+        const result = await withSteps(action === 'deliver-key' ? `Sending ${name}'s team key` : `Replacing ${name}'s team key`, false, (step) => {
+          const input = { log, teamFile, memberId, org, checklist, onStep: (code: keyof typeof DELIVERY_STEP_TEXT): void => { step(DELIVERY_STEP_TEXT[code]); } };
+          return action === 'deliver-key' ? keys.deliverMemberKey(input) : keys.rotateMemberKey(input);
+        });
         if (!result.ok) {
           deps.report('warn', await safe(result.message));
           return;
@@ -733,18 +780,22 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
         if (confirmed !== REMOVE_ACTION) return;
         const chosen = await orgForAction(teamFile, `Removing ${name} also ends their NEAR key, which needs your NEAR sign-in. Sign in now, or remove them now and finish the NEAR steps later from this list.`, true);
         if (chosen === undefined) return;
-        await finishRemoval(ctx, memberId, name, chosen.org);
+        await finishRemoval(ctx, memberId, name, chosen.org, `Removing ${name} from ${team}`);
         return;
       }
     }
   }
 
   // Removing a joined member and cancelling an invitation are the same flow; the result is shown as written (it carries the warning and the manual step).
-  async function finishRemoval(ctx: ManageContext, memberId: string, name: string, org: NearOrgClient | undefined): Promise<void> {
+  async function finishRemoval(ctx: ManageContext, memberId: string, name: string, org: NearOrgClient | undefined, title: string): Promise<void> {
     const { removeMember } = await import('../../team/remove');
-    const result = await removeMember({ log: ctx.session.currentLog(), teamFile: ctx.teamFile, memberId, checklist: ctx.checklist, ...(org === undefined ? {} : { org }) });
+    // Cancellable: the flow stops only before anything changes, or after the log removal once every key left to revoke is capped at 0.
+    const result = await withSteps(title, true, (step, token) => removeMember({
+      log: ctx.session.currentLog(), teamFile: ctx.teamFile, memberId, checklist: ctx.checklist, ...(org === undefined ? {} : { org }),
+      onStep: (code) => { step(REMOVE_STEP_TEXT[code]); }, stopRequested: () => token.isCancellationRequested
+    }));
     if (!result.ok) {
-      deps.report('error', await safe(result.message));
+      deps.report(result.code === 'stopped' ? 'info' : 'error', await safe(result.message));
       return;
     }
     deps.report(result.keyStillSpends ? 'warn' : 'info', await safe(result.message));
@@ -760,7 +811,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const needsNear = (member.pendingRole ?? member.role) === 'lead';
     const chosen = needsNear ? await orgForAction(ctx.teamFile, `Cancelling ${name}'s invitation also cancels it at NEAR, which needs your NEAR sign-in. Sign in now, or cancel now and finish that step later from this list.`, true) : {};
     if (chosen === undefined) return;
-    await finishRemoval(ctx, memberId, name, chosen.org);
+    await finishRemoval(ctx, memberId, name, chosen.org, `Cancelling the invitation for ${name}`);
   }
 
   async function reissue(ctx: ManageContext, memberId: string): Promise<void> {
@@ -781,10 +832,10 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       if (chosen === 'cancelled') return;
       org = chosen;
     }
-    const result = await reissueInvite({
+    const result = await withSteps(`Issuing a new invitation for ${name}`, false, (step) => reissueInvite({
       projectRoot: ctx.projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamFile: ctx.teamFile, log: ctx.session.currentLog(),
-      oldMemberId: memberId, email: entry.email, ttlSeconds, ...(org === undefined ? {} : { org })
-    });
+      oldMemberId: memberId, email: entry.email, ttlSeconds, ...(org === undefined ? {} : { org }), onStep: (code) => { step(INVITE_STEP_TEXT[code]); }
+    }));
     if (!result.ok) {
       deps.report('error', await safe(result.message));
       return;
@@ -804,9 +855,10 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     if (item.step === 'send-invitation') {
       // CR-02: the log is checked before any sign-in or NEAR call; an invitation for someone removed, joined or re-invited is closed instead.
       const { retryNearInvitation } = await import('../../team/invite');
-      const outcome = await retryNearInvitation({
-        item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist,
-        org: async () => (await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false))?.org
+      const org = async (): Promise<NearOrgClient | undefined> => (await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false))?.org;
+      const outcome = await withSteps(`Retrying: ${what}`, false, (step) => {
+        step('Checking the team log, then sending the NEAR invitation');
+        return retryNearInvitation({ item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist, org });
       });
       switch (outcome.outcome) {
         case 'sent':
@@ -835,7 +887,11 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const chosen = await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false);
     if (chosen === undefined) return;
     const { retryCleanupItem } = await import('../../team/remove');
-    const updated = await retryCleanupItem({ item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist, ...(chosen.org === undefined ? {} : { org: chosen.org }) });
+    const nearOrg = chosen.org;
+    const updated = await withSteps(`Retrying: ${what}`, false, (step) => {
+      step(`${STEP_TEXT[item.step]} at NEAR`);
+      return retryCleanupItem({ item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist, ...(nearOrg === undefined ? {} : { org: nearOrg }) });
+    });
     if (updated.status === 'done') deps.report('info', `Done: ${what}.`);
     else deps.report('warn', `${what} is not finished yet: ${await safe(updated.lastError ?? 'try again in a moment')}`);
   }
