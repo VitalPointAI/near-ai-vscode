@@ -598,8 +598,9 @@ export function importResultText(result: ImportResult): string {
   let text = result.written === 0 ? 'The Team Board is already up to date.' : `Imported ${result.written === 1 ? '1 item' : `${result.written} items`} to the Team Board.`;
   if (result.reopenNeeded > 0) {
     const plans = result.reopenNeeded === 1 ? '1 plan is' : `${result.reopenNeeded} plans are`;
+    const them = result.reopenNeeded === 1 ? 'it' : 'them';
     const they = result.reopenNeeded === 1 ? 'it' : 'they';
-    text += ` ${plans} back in the roadmap but cancelled on the board; reopen ${they} if ${they} should continue.`;
+    text += ` ${plans} back in the roadmap but cancelled on the board; reopen ${them} if ${they} should continue.`;
   }
   return text;
 }
