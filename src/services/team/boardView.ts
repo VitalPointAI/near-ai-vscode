@@ -81,8 +81,9 @@ const CARD_STATE_REFUSALS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Set by the extension-host tests to observe both directions of the page protocol. `request` is set by the controller: it posts
- * { type: 'host-request', payload } to every visible surface, which the real board.js re-posts to the host (the chat sidebar's precedent).
+ * Set by the extension-host tests to observe both directions of the page protocol. `request` and `probe` are set by the controller only under
+ * those tests (NEAR_AI_E2E=1, IN-05): `request` posts { type: 'host-request', payload } to every visible surface, which the real board.js re-posts to
+ * the host (the chat sidebar's precedent) only on a page the host marked with data-e2e.
  */
 export const boardTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void; request?: (payload: unknown) => Promise<void>; probe?: (probe: BoardProbe) => Promise<void> } = {};
 
@@ -336,8 +337,10 @@ export class BoardController {
     this.deps = deps;
     this.timers = deps.timers ?? REAL_TIMERS;
     this.throttleMs = deps.throttleMs ?? THROTTLE_MS;
-    boardTap.request = (payload) => this.request(payload);
-    if (deps.testSeams === true) boardTap.probe = (probe) => this.probe(probe);
+    if (deps.testSeams === true) {
+      boardTap.request = (payload) => this.request(payload);
+      boardTap.probe = (probe) => this.probe(probe);
+    }
   }
 
   /** Starts serving a surface. It is sent nothing until its page says ready. */

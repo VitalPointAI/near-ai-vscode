@@ -219,13 +219,21 @@ test('the page has one nonce CSP, one script tag per client file in order and no
   }
 });
 
-test('host-request reaches the visible surfaces and nothing that is hidden', async () => {
+test('host-request reaches the visible surfaces and nothing that is hidden, and exists only under the extension-host tests (IN-05)', async () => {
   resetStub();
   await withLiveTeam(async (rig) => {
     await importFixture(rig);
     const a = await startSession(rig, 'owner');
-    const { panel, board } = openBoard(a.session, new LiveTimers(), a.lines);
+    const plain = openBoard(a.session, new LiveTimers(), a.lines);
+    assert.equal(boardTap.request === undefined, true, 'a normal board offers no request hook');
+    assert.equal(boardTap.probe === undefined, true, 'and no page probe');
+    assert.equal(plain.panel.html.includes('data-e2e'), false, 'and does not mark its page for the tests');
+    plain.board.controller.dispose();
+    const board = registerTeamBoard(createFakeContext(EXTENSION_ROOT, {}) as never, { session: () => a.session, output: { appendLine: (line) => { a.lines.push(line); }, show: () => undefined }, timers: new LiveTimers(), testSeams: true });
+    board.openPanel();
+    const panel = stub.webviewPanels[stub.webviewPanels.length - 1] as RecordedWebviewPanel;
     try {
+      assert.equal(panel.html.includes('data-e2e="1"'), true, 'the test board marks its page');
       const { view, record } = stub.createWebviewView();
       stub.viewProviders[0]?.provider.resolveWebviewView(view);
       record.setVisible(false);

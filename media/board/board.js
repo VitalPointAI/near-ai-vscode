@@ -864,7 +864,7 @@
     if (!m || typeof m.type !== 'string') return;
     switch (m.type) {
       case 'state': onState(m); break;
-      case 'host-request': if (m.payload && typeof m.payload === 'object') post(m.payload); break;
+      case 'host-request': if (E2E && m.payload && typeof m.payload === 'object') post(m.payload); break;
       case 'e2e-probe': if (E2E) { try { probe(m); } catch (error) { pageErrors.push(String((error && error.message) || error)); } } break;
       case 'notice': if (typeof m.text === 'string' && m.text) { notice = m.text; render(); announce(m.text); } break;
       case 'refused': if (m.reason === '' && typeof m.itemId === 'string') { delete pending[m.itemId]; refreshCard(m.itemId); } break;

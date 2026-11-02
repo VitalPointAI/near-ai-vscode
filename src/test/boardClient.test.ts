@@ -74,8 +74,15 @@ test('tracer: a real model draws as the kanban at 800 px, the list at 400 px, an
   h.setWidth(800);
   buttonNamed(h, 'Import plans')!.click();
   assert.deepEqual(h.posts.at(-1), { type: 'import-plans' });
+  // host-request is a test seam: a page the host did not mark for the extension-host tests ignores it (IN-05).
+  const count = h.posts.length;
   h.deliver({ type: 'host-request', payload: { type: 'retry' } });
-  assert.deepEqual(h.posts.at(-1), { type: 'retry' });
+  assert.equal(h.posts.length, count, 'an unmarked page does not re-post');
+  const marked = createBoardHarness({ width: 800 });
+  marked.document.body.setAttribute('data-e2e', '1');
+  marked.load(['board.js']);
+  marked.deliver({ type: 'host-request', payload: { type: 'retry' } });
+  assert.deepEqual(marked.posts.at(-1), { type: 'retry' });
 });
 
 test('the e2e probe answers only on a page the host marked for the extension-host tests, and reports the drawn cards and no page error', async () => {
