@@ -37,7 +37,8 @@ export interface FakeNear {
   /** http://127.0.0.1:<port>/v1 */
   baseUrl: string;
   requests: FakeRequest[];
-  addUser(user: { id: string; username: string; email: string }): { accessToken: string; refreshToken: string };
+  /** Tokens are random unless the caller passes its own (a canary test passes run-time canaries; a refresh token must start with rt_). */
+  addUser(user: { id: string; username: string; email: string; accessToken?: string; refreshToken?: string }): { accessToken: string; refreshToken: string };
   addOrganization(org: { id: string; name: string; members: Array<{ userId: string; role: FakeRole }> }): void;
   addWorkspace(ws: { id: string; organizationId: string; name: string }): void;
   key(id: string): { spendLimitNanoUsd: number | null; usageNanoUsd: number; revoked: boolean; secret: string } | undefined;
@@ -492,7 +493,7 @@ export async function startFakeNear(options: { keySecretPrefix?: string; members
     baseUrl: `http://127.0.0.1:${port}/v1`,
     requests,
     addUser(user) {
-      const record: UserRecord = { ...user, accessToken: randomToken('fa-'), refreshToken: randomToken('rt_') };
+      const record: UserRecord = { id: user.id, username: user.username, email: user.email, accessToken: user.accessToken ?? randomToken('fa-'), refreshToken: user.refreshToken ?? randomToken('rt_') };
       users.set(user.id, record);
       return { accessToken: record.accessToken, refreshToken: record.refreshToken };
     },
