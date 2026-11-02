@@ -71,6 +71,12 @@ export class TranscriptStore {
     await this.prune();
   }
 
+  /** Saves a running conversation's state; cheaper than `save`, which also prunes old transcripts. */
+  public async checkpoint(transcript: Transcript): Promise<void> {
+    if (!/^conv-[a-z0-9-]{6,60}$/.test(transcript.id)) throw new Error('Invalid transcript id.');
+    await this.write(transcript);
+  }
+
   private async write(transcript: Transcript): Promise<void> {
     await mkdir(this.dir, { recursive: true });
     const file = path.join(this.dir, `${transcript.id}.json`);

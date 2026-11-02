@@ -311,6 +311,11 @@
     current = undefined;
     setBusy(false);
   }
+  // Resume and Dismiss of a cut-off run: used once, then removed (the host ignores a second click).
+  function settleCut(type) {
+    transcript.querySelectorAll('.cut-action').forEach((button) => button.remove());
+    if (type) postFor({ type: type });
+  }
   function notice(text, actions, isError) {
     const node = el('div', isError ? 'turn notice error' : 'turn notice');
     node.append(el('span', '', text));
@@ -1111,6 +1116,17 @@
       case 'attachments-cleared': staged.clear(); renderChips(); break;
       case 'commands': if (Array.isArray(m.commands) && m.commands.length) commands = m.commands; break;
       case 'notice': notice(m.text || '', []); break;
+      // A run the extension host never finished: nothing continues until the user clicks Resume.
+      case 'run-interrupted': {
+        const actions = m.resumable ? [textButton('Resume', () => settleCut('resume-interrupted'), true), textButton('Dismiss', () => settleCut('dismiss-interrupted'), false)] : [];
+        actions.forEach((button) => button.classList.add('cut-action'));
+        notice(m.text || 'This run was cut off.', actions);
+        break;
+      }
+      case 'run-interrupted-settled':
+        settleCut();
+        if (m.text) notice(m.text, []);
+        break;
       case 'progress': {
         const last = transcript.lastElementChild;
         if (last && last.classList.contains('progress')) { last.firstChild.textContent = m.text || ''; announce(m.text || ''); }

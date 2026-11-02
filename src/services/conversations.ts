@@ -108,6 +108,9 @@ export class ConversationLog {
 
   public clear(): void { this.entries = []; this.trimmed = false; }
 
+  /** Removes every entry of a type (a choice the user has since made, so it is not offered again). */
+  public drop(type: string): void { this.entries = this.entries.filter((entry) => entry.type !== type); }
+
   public add(message: Message): void {
     const last = this.entries.at(-1);
     if (message.type === 'assistant-delta' && last?.type === 'assistant-delta') { last.text = `${String(last.text ?? '')}${String(message.text ?? '')}`; return; }

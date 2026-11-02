@@ -28,6 +28,8 @@ export type ChatWebviewMessage =
   | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' }
   /** Opens a saved conversation as a tab, or shows it if it is already open. */
   | { type: 'resume-conversation'; id: string }
+  /** Resume or dismiss a conversation's run the extension host never finished. */
+  | { type: 'resume-interrupted' | 'dismiss-interrupted'; conversationId?: string }
   | { type: 'open-artifact'; path: string; kind: GsdArtifactKind }
   | { type: 'send'; text: string; model?: string; overrideToken?: string; attachmentIds?: string[]; conversationId?: string }
   /** A message typed while a run is going: queued for the running agent, or sent as a new turn if it has ended. */
@@ -255,6 +257,10 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   if (message.type === 'insert-code' && typeof message.text === 'string' && message.text.length > 0 && message.text.length <= 100_000) {
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'text')) return undefined;
     return { type: 'insert-code', text: message.text };
+  }
+  if (message.type === 'resume-interrupted' || message.type === 'dismiss-interrupted') {
+    if (Object.keys(message).some((key) => key !== 'type' && key !== 'conversationId')) return undefined;
+    return { type: message.type, ...scoped };
   }
   if (message.type === 'stop') {
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'conversationId')) return undefined;

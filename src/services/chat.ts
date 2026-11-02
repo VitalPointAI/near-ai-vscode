@@ -38,6 +38,8 @@ import { ConversationLog, ConversationOutcome, ConversationStatus, ConversationS
 import { ReputationStore } from './reputation';
 import { hostAttribution } from '../domain/activity';
 import { ContextGraphMemory } from './contextGraphMemory';
+import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
+import { WaitingNotices } from './waitingNotices';
 
 /** Chat model and safety model pairs already told that auto approve has no private safety model. */
 const warnedSafetyModels = new Set<string>();
@@ -83,6 +85,10 @@ interface ChatTab {
   steerTexts: Map<string, string>;
   /** Sends a message of this conversation: logged, and posted to the view when it is on screen. */
   post: (message: Record<string, unknown>) => void;
+  /** Its run the extension host never finished, until the user resumes or dismisses it. */
+  interrupted?: RunMarker;
+  /** Announces its prompts still waiting that were not announced yet (the window got focus again). */
+  focusRegained?: () => void;
 }
 
 async function initializeChat(context: vscode.ExtensionContext, auth: AuthService, panel: ChatHost, html: string, initialPrompt?: string): Promise<void> {
@@ -147,7 +153,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   };
   const ensureAgent = (tab: ChatTab, root: string): AgentConversation => {
     if (!tab.agent) {
-      tab.agent = conversationFor(context, root, panel, tab.post, () => tab.title || 'a conversation');
+      const created = conversationFor(context, root, panel, tab.post, () => tab.title || 'a conversation');
+      tab.agent = created.agent;
+      tab.focusRegained = created.focusRegained;
       tab.agent.adopt(tab.id);
       tab.agent.onWaitingChange = () => sendSummary();
     }
@@ -175,7 +183,29 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     tab.outcomes.clear();
     tab.outcome = 'done';
     tab.log.add({ type: 'transcript', turns, note });
+    // A run of it that the extension host never finished (code-server closed it, a reload, a crash).
+    const cut = await runMarkersFor(context, root).interruptedRun(tab.id).catch(() => undefined);
+    tab.interrupted = cut;
+    if (cut) {
+      tab.outcome = 'stopped';
+      tab.log.add({ type: 'run-interrupted', text: cutOffNotice(cut), resumable: true });
+    }
     return true;
+  };
+  /** Resume (continue from the last saved state) or Dismiss a cut-off run; nothing runs without the click. */
+  const settleInterrupted = async (tab: ChatTab, outcome: 'resumed' | 'dismissed'): Promise<void> => {
+    const cut = tab.interrupted;
+    const root = workspaceRoot();
+    if (!cut || !root) return;
+    tab.interrupted = undefined;
+    tab.log.drop('run-interrupted');
+    await runMarkersFor(context, root).settle(tab.id, outcome).catch(() => undefined);
+    tab.post({ type: 'run-interrupted-settled', outcome, text: outcome === 'resumed' ? 'Resuming from the last saved point.' : 'Dismissed. Everything up to the last saved point is kept; send a message to continue.' });
+    if (outcome === 'dismissed') return;
+    const text = resumePrompt(cut);
+    if (tab.id === activeId && !disposed) void panel.webview.postMessage({ type: 'user-turn', text });
+    const model = tab.model ?? cut.model;
+    await receive({ type: 'send', text, conversationId: tab.id, ...(model ? { model } : {}) });
   };
   /** At the cap, asks which conversation to close; false when none was (or could be) closed. */
   const makeRoom = async (): Promise<boolean> => {
@@ -256,12 +286,21 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       tab.title = item.title;
       if (root && await restoreInto(tab, item.id, root, 'Reopened after VS Code reloaded, with its full context.').catch(() => false)) tab.title ||= item.title;
       else if (root) ensureAgent(tab, root);
-      tab.outcome = item.status === 'running' ? 'stopped' : item.status;
-      if (item.status === 'running') tab.log.add({ type: 'notice', text: 'This conversation\'s run was stopped when VS Code reloaded (a run cannot continue across a reload). Everything up to the last saved turn is kept; send a message to continue.' });
+      if (!tab.interrupted) tab.outcome = item.status === 'running' ? 'stopped' : item.status;
+      if (item.status === 'running' && !tab.interrupted) tab.log.add({ type: 'notice', text: 'This conversation\'s run was stopped when VS Code reloaded (a run cannot continue across a reload). Everything up to the last saved turn is kept; send a message to continue.' });
       tabs.push(tab);
     }
+    // Runs cut off in conversations the saved list lost (the window state is saved late) reopen too.
+    let cutOff: string | undefined;
+    for (const marker of root ? await runMarkersFor(context, root).interrupted().catch(() => []) : []) {
+      if (tabs.length >= MAX_OPEN_CONVERSATIONS || tabs.some((tab) => tab.id === marker.conversationId)) continue;
+      const tab = newTab(marker.conversationId);
+      if (!(await restoreInto(tab, marker.conversationId, root!, 'Reopened with its full context.').catch(() => false))) continue;
+      tabs.push(tab);
+      cutOff ??= tab.id;
+    }
     if (!tabs.length) tabs.push(newTab());
-    activeId = saved.activeId ?? tabs[0].id;
+    activeId = saved.activeId ?? cutOff ?? tabs[0].id;
     feed.focusConversation(activeId);
     sendSummary(true);
   })();
@@ -294,6 +333,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'close-conversation') { await closeConversation(message.id); return; }
     if (message.type === 'new-chat') { await newConversation(); return; }
     if (message.type === 'resume-conversation') { await openSaved(message.id); return; }
+    if (message.type === 'resume-interrupted' || message.type === 'dismiss-interrupted') { await settleInterrupted(tab, message.type === 'resume-interrupted' ? 'resumed' : 'dismissed'); return; }
     if (message.type === 'questions-reply') {
       tab.outcomes.set(message.id, { outcome: 'answered', detail: message.answers.join('; ') });
       tab.agent?.answerQuestions(message.id, message.answers);
@@ -572,7 +612,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const policyWatch = vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi.actionPolicy')) sendPolicyState(panel); });
   // Setting or clearing the usage reporting token (anywhere) updates the spend line's link.
   const tokenWatch = onReportingTokenChange(() => { void statusMessage({ agents: runningAgents(), account: state.spend }).then((status) => panel.webview.postMessage(status)); });
-  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  // Back in the window (or its browser tab): prompts that waited unannounced are announced now.
+  const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
+  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -631,21 +673,41 @@ function ripgrepPath(): string | undefined {
   return appRoot ? findRipgrep(appRoot, (candidate) => existsSync(candidate)) : undefined;
 }
 
-function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string): AgentConversation {
+/** One run-marker store per extension storage and project, shared by every conversation, so its writes stay in order. */
+const runMarkerStores = new Map<string, RunMarkers>();
+function runMarkersFor(context: vscode.ExtensionContext, root: string): RunMarkers {
+  const key = `${context.globalStorageUri.fsPath}\n${root}`;
+  let store = runMarkerStores.get(key);
+  if (!store) { store = new RunMarkers(context.globalStorageUri.fsPath, root); runMarkerStores.set(key, store); }
+  return store;
+}
+
+function conversationFor(context: vscode.ExtensionContext, root: string, panel: ChatHost, post: (message: Record<string, unknown>) => void, title: () => string): { agent: AgentConversation; focusRegained: () => void } {
   const storage = context.globalStorageUri.fsPath;
   const transcripts = readAgentLimits().saveTranscripts ? new TranscriptStore(storage, root, sharedTranscriptKey(context.secrets)) : undefined;
+  // An agent held for approval or an answer waits; say so when nobody may be looking: the chat is
+  // hidden, or the window (in code-server, its browser tab) is in the background. Once per prompt.
+  const notices = new WaitingNotices();
+  const waitingIds = () => conversation.waitingPrompts().map((prompt) => promptIdOf(prompt)).filter((id): id is string => Boolean(id));
+  const announce = (prompt: Record<string, unknown>) => {
+    const text = prompt.type === 'approval-request' ? `An agent in "${title()}" is waiting for your approval: ${String(prompt.title ?? 'an action')}` : `NEAR AI has a question for you in "${title()}" and is waiting for the answer.`;
+    void Promise.resolve(vscode.window.showWarningMessage(text, 'Show chat')).then((choice) => { if (choice) void vscode.commands.executeCommand('nearAiChatView.focus'); });
+  };
   const forward = (outbound: Record<string, unknown>) => {
     post(outbound);
-    // An agent held for approval or an answer waits; say so when the chat isn't on screen.
-    if ((outbound.type === 'approval-request' || outbound.type === 'questions-request') && (panel as { visible?: boolean }).visible === false) {
-      const text = outbound.type === 'approval-request' ? `An agent in "${title()}" is waiting for your approval: ${String(outbound.title ?? 'an action')}` : `NEAR AI has a question for you in "${title()}" and is waiting for the answer.`;
-      void vscode.window.showWarningMessage(text, 'Show chat').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAiChatView.focus'); });
-    }
+    const id = promptIdOf(outbound);
+    if (id && notices.opened(id, { panelVisible: (panel as { visible?: boolean }).visible, windowFocused: vscode.window.state?.focused }, waitingIds())) announce(outbound);
   };
   const conversation = new AgentConversation(root, forward, path.join(storage, 'checkpoints'), ripgrepPath(), transcripts, sharedActivityFeed());
+  conversation.runMarkers = runMarkersFor(context, root);
   const minutes = vscode.workspace.getConfiguration('nearAi').get<number>('agent.approvalTimeoutMinutes', AGENT_DEFAULTS.approvalTimeoutMinutes);
   conversation.approvalTimeoutMs = Math.max(0, Math.min(1_440, typeof minutes === 'number' && Number.isFinite(minutes) ? minutes : AGENT_DEFAULTS.approvalTimeoutMinutes)) * 60_000;
-  return conversation;
+  const focusRegained = () => {
+    const prompts = conversation.waitingPrompts();
+    const fresh = new Set(notices.focusRegained(waitingIds()));
+    for (const prompt of prompts) if (fresh.has(promptIdOf(prompt) ?? '')) announce(prompt);
+  };
+  return { agent: conversation, focusRegained };
 }
 
 /** The view's badge while prompts wait for the user, in one conversation or several. */
