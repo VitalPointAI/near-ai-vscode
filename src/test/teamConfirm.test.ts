@@ -8,12 +8,12 @@ import * as path from 'node:path';
 import test from 'node:test';
 import { AuthService } from '../services/auth';
 import { ProfileStore } from '../services/profileStore';
-import { expectedJoinRole, joinProofBytes, memberAttention } from '../domain/team/invite';
+import { expectedJoinRole, joinProofBytes, keyNeedsRotation, memberAttention } from '../domain/team/invite';
 import { teamMaterializer } from '../domain/team/materialize';
 import { defaultTeamPolicy } from '../domain/team/policy';
 import { parseEventFile } from '../domain/team/validate';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
-import type { GenesisAnchor, MemberInvitedBody, MemberJoinedBody, Role, TeamFile, TeamState } from '../domain/team/types';
+import type { GenesisAnchor, MemberInvitedBody, MemberJoinedBody, Role, TeamEvent, TeamFile, TeamState } from '../domain/team/types';
 import { CleanupChecklist } from '../team/cleanupChecklist';
 import { TeamLog, buildGenesisEvents } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
@@ -21,7 +21,7 @@ import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
 import { createDeviceIdentity, createSealIdentity, emailHash, newMemberId, newTeamId } from '../team/identity';
 import type { DeviceIdentity, SealIdentity } from '../team/identity';
 import { deriveInviteKey, generateInviteCode } from '../team/inviteCode';
-import { confirmMember, deliverMemberKey, installDeliveredKey, teamKeyName } from '../team/keyDelivery';
+import { confirmMember, deliverMemberKey, installDeliveredKey, rotateMemberKey, teamKeyName } from '../team/keyDelivery';
 import { NearOrgClient } from '../team/nearOrg';
 import type { CreatedNearKey, NearAuth, NearOrgClientOptions } from '../team/nearOrg';
 import { NearSessionError } from '../team/nearSession';
@@ -517,5 +517,234 @@ test('the owner never gets a key through the log and a member who has not joined
     assert.equal(invited.ok, false);
     if (!invited.ok) assert.equal(invited.code, 'no-device');
     assert.equal(world.fake.requests.some((request) => request.path.includes('/api-keys')), false);
+  });
+});
+
+// ---- rotation (Task 3) ------------------------------------------------------------------------------------------------------------------
+
+// A further device for the member, added by the member's first device. withSeal false publishes no X25519 key, so it cannot receive a key.
+async function addDevice(world: World, clone: string, withSeal = true): Promise<Device> {
+  const secrets = new MemorySecrets();
+  const identity = await createDeviceIdentity(secrets, world.teamId);
+  const seal = await createSealIdentity(secrets, world.teamId);
+  const client = clientFor(world.fixture, clone, world.anchor, { identity, memberId: world.memberId });
+  await world.first.client.log.sync();
+  const added = await world.first.client.log.append(() => [{
+    type: 'device.added',
+    body: { memberId: world.memberId, device: { fingerprint: identity.fingerprint, publicKey: identity.publicKey }, ...(withSeal ? { sealKey: { publicKey: seal.publicKey } } : {}) }
+  }]);
+  assert.equal(added.ok, true, added.ok ? '' : added.reason);
+  await world.a.log.sync();
+  await client.log.sync();
+  return { clone, secrets, identity, seal, client, globalStorageDir: path.join(world.fixture.root, `global-${clone}`) };
+}
+
+// The member joined with their final role, so the first key is one call away; the cap is the allocation.
+async function withFirstKey(world: World): Promise<string> {
+  const first = await deliverMemberKey({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+  assert.equal(first.ok, true, first.ok ? '' : first.message);
+  return first.ok ? first.keyId : '';
+}
+
+const leadInput = (world: World) => ({ log: world.a.log, teamFile: world.teamFile, memberId: world.memberId, org: world.org, checklist: world.checklist });
+
+function sealedDevicesOfLastKeyEvent(entries: TeamEvent[]): string[] {
+  const last = [...entries].reverse().find((event): event is TeamEvent<'member.key-sealed'> => event.type === 'member.key-sealed');
+  return (last?.body.sealed ?? []).map((entry) => entry.device).sort();
+}
+
+async function acceptedEvents(client: Client): Promise<TeamEvent[]> {
+  const events: TeamEvent[] = [];
+  for (const entry of await client.transport.readAll()) {
+    const parsed = parseEventFile(entry);
+    if (parsed.ok) events.push(parsed.event);
+  }
+  return events;
+}
+
+test('adding a device gives a new key with the remaining cap, then revoking it gives another sealed to the one device left', async () => {
+  await inWorld(['a', 'b', 'c'], { role: 'observer', allocation: 5 * GIGA }, async (world) => {
+    const oldKeyId = await withFirstKey(world);
+    world.fake.addUsage(oldKeyId, 1_200_000_000);
+    await world.first.client.log.sync();
+    assert.equal((await installDeliveredKey(installFor(world, world.first))).status, 'installed');
+    const oldSecret = world.fake.key(oldKeyId)?.secret ?? '';
+
+    const second = await addDevice(world, 'c');
+    assert.equal(keyNeedsRotation(memberOf(world)), true);
+    assert.deepEqual(memberAttention(world.a.log.state(), true), [{ memberId: world.memberId, kind: 'rotate-key' }]);
+
+    const rotated = await rotateMemberKey(leadInput(world));
+    assert.equal(rotated.ok, true, rotated.ok ? '' : rotated.message);
+    if (!rotated.ok) return;
+    const newKeyId = rotated.keyId;
+    assert.notEqual(newKeyId, oldKeyId);
+    // 5 USD minus 1.2 USD already spent.
+    assert.equal(world.fake.key(newKeyId)?.spendLimitNanoUsd, 3_800_000_000);
+    assert.equal(world.fake.key(oldKeyId)?.spendLimitNanoUsd, 0);
+    assert.equal(world.fake.key(oldKeyId)?.revoked, true);
+    // Order: the new key is made and delivered before the old one is touched, and the old one is zeroed before it is revoked.
+    const trail = world.fake.requests
+      .filter((request) => request.path.includes('/api-keys') && request.method !== 'GET')
+      .map((request) => `${request.method} ${request.path.endsWith('/spend-limit') ? 'limit' : request.path.endsWith('/api-keys') ? 'create' : 'key'}${request.path.includes(oldKeyId) ? ' old' : ''}`);
+    assert.deepEqual(trail, ['POST create', 'POST create', 'PATCH limit old', 'DELETE key old']);
+
+    const member = memberOf(world);
+    assert.equal(member.nearApiKeyId, newKeyId);
+    assert.deepEqual(member.retiredNearKeyIds, [oldKeyId]);
+    assert.deepEqual(member.nearKeyDevices, [world.first.identity.fingerprint, second.identity.fingerprint].sort());
+    assert.equal(keyNeedsRotation(member), false);
+    assert.deepEqual(sealedDevicesOfLastKeyEvent(await acceptedEvents(world.a)), [world.first.identity.fingerprint, second.identity.fingerprint].sort());
+    assert.deepEqual(await world.checklist.list(), []);
+
+    // Both computers install the newest key.
+    await world.first.client.log.sync();
+    await second.client.log.sync();
+    assert.deepEqual(await installDeliveredKey(installFor(world, world.first)), { status: 'installed', keyId: newKeyId });
+    assert.deepEqual(await installDeliveredKey(installFor(world, second)), { status: 'installed', keyId: newKeyId });
+    const newSecret = world.fake.key(newKeyId)?.secret ?? '';
+    assert.equal((await activeKeyOf(world, world.first)).key, newSecret);
+    assert.equal((await activeKeyOf(world, second)).key, newSecret);
+    await assertKeyNowhere(world, oldSecret);
+    await assertKeyNowhere(world, newSecret);
+
+    // The second device is revoked: the next key is for the remaining device only, capped at what the second key had left.
+    world.fake.addUsage(newKeyId, 500_000_000);
+    await world.first.client.log.sync();
+    const revoked = await world.first.client.log.append(() => [{ type: 'device.revoked', body: { memberId: world.memberId, fingerprint: second.identity.fingerprint } }]);
+    assert.equal(revoked.ok, true, revoked.ok ? '' : revoked.reason);
+    await world.a.log.sync();
+    assert.equal(keyNeedsRotation(memberOf(world)), true);
+    const third = await rotateMemberKey(leadInput(world));
+    assert.equal(third.ok, true, third.ok ? '' : third.message);
+    if (!third.ok) return;
+    assert.equal(world.fake.key(third.keyId)?.spendLimitNanoUsd, 3_300_000_000);
+    assert.equal(world.fake.key(newKeyId)?.revoked, true);
+    assert.deepEqual(sealedDevicesOfLastKeyEvent(await acceptedEvents(world.a)), [world.first.identity.fingerprint]);
+    assert.deepEqual(memberOf(world).retiredNearKeyIds, [oldKeyId, newKeyId]);
+    await world.first.client.log.sync();
+    await second.client.log.sync();
+    assert.deepEqual(await installDeliveredKey(installFor(world, world.first)), { status: 'installed', keyId: third.keyId });
+    assert.deepEqual(await installDeliveredKey(installFor(world, second)), { status: 'not-for-this-device' });
+  });
+});
+
+test('the new cap is the old cap minus lifetime usage, never below zero, including usage that meets or passes the old cap', async () => {
+  const cases: Array<{ usage: number; expected: number }> = [
+    { usage: 0, expected: 5 * GIGA },
+    { usage: 1_200_000_000, expected: 3_800_000_000 },
+    { usage: 5 * GIGA - 1, expected: 1 },
+    { usage: 5 * GIGA, expected: 0 },
+    { usage: 7 * GIGA, expected: 0 }
+  ];
+  for (const { usage, expected } of cases) {
+    await inWorld(['a', 'b', 'c'], { role: 'observer', allocation: 5 * GIGA }, async (world) => {
+      const oldKeyId = await withFirstKey(world);
+      if (usage > 0) world.fake.addUsage(oldKeyId, usage);
+      await addDevice(world, 'c');
+      const rotated = await rotateMemberKey(leadInput(world));
+      assert.equal(rotated.ok, true, `usage ${usage}: ${rotated.ok ? '' : rotated.message}`);
+      if (!rotated.ok) return;
+      assert.equal(world.fake.key(rotated.keyId)?.spendLimitNanoUsd, expected, `usage ${usage}`);
+      assert.equal(world.fake.key(oldKeyId)?.revoked, true);
+      assert.equal(world.fake.key(oldKeyId)?.spendLimitNanoUsd, 0);
+    });
+  }
+});
+
+test('an old key NEAR no longer has gives the new key a cap of 0 and a manual note, and the rotation still completes', async () => {
+  await inWorld(['a', 'b', 'c'], { role: 'observer', allocation: 5 * GIGA }, async (world) => {
+    const oldKeyId = await withFirstKey(world);
+    assert.equal(await world.org.revokeKey('ws-1', oldKeyId), 'revoked');
+    await addDevice(world, 'c');
+    const rotated = await rotateMemberKey(leadInput(world));
+    assert.equal(rotated.ok, true, rotated.ok ? '' : rotated.message);
+    if (!rotated.ok) return;
+    assert.equal(world.fake.key(rotated.keyId)?.spendLimitNanoUsd, 0);
+    const items = await world.checklist.list();
+    assert.deepEqual(items.map((item) => [item.step, item.status, item.keyId]), [['rotate-key', 'manual', oldKeyId]]);
+    assert.ok((items[0]?.lastError ?? '').length > 0, 'the note says what to check');
+    assert.match(rotated.notice ?? '', /limit of 0/);
+    assert.equal(memberOf(world).nearApiKeyId, rotated.keyId);
+  });
+});
+
+test('an old key that cannot be revoked is listed by id, and one that cannot be zeroed but is revoked needs no item', async () => {
+  await inWorld(['a', 'b', 'c'], { role: 'observer', allocation: 5 * GIGA }, async (world) => {
+    const oldKeyId = await withFirstKey(world);
+    await addDevice(world, 'c');
+    world.fake.fail({ method: 'DELETE', pathPrefix: '/v1/workspaces/ws-1/api-keys', status: 500, times: 20 });
+    const rotated = await rotateMemberKey(leadInput(world));
+    assert.equal(rotated.ok, true, rotated.ok ? '' : rotated.message);
+    if (!rotated.ok) return;
+    assert.equal(memberOf(world).nearApiKeyId, rotated.keyId, 'the delivery stands');
+    assert.equal(world.fake.key(oldKeyId)?.spendLimitNanoUsd, 0, 'the old key is at least zeroed');
+    assert.equal(world.fake.key(oldKeyId)?.revoked, false);
+    const items = await world.checklist.list();
+    assert.deepEqual(items.map((item) => [item.step, item.status, item.keyId]), [['revoke-key', 'failed', oldKeyId]]);
+    assert.match(rotated.notice ?? '', /revoke/i);
+  });
+  await inWorld(['a', 'b', 'c'], { role: 'observer', allocation: 5 * GIGA }, async (world) => {
+    const oldKeyId = await withFirstKey(world);
+    await addDevice(world, 'c');
+    world.fake.fail({ method: 'PATCH', pathPrefix: '/v1/workspaces/ws-1/api-keys', status: 500, times: 20 });
+    const rotated = await rotateMemberKey(leadInput(world));
+    assert.equal(rotated.ok, true, rotated.ok ? '' : rotated.message);
+    assert.equal(world.fake.key(oldKeyId)?.revoked, true);
+    assert.deepEqual(await world.checklist.list(), []);
+  });
+});
+
+test('a failure while making the new key leaves the old key working and puts rotate-key on the list', async () => {
+  await inWorld(['a', 'b', 'c'], { role: 'observer', allocation: 5 * GIGA }, async (world) => {
+    const oldKeyId = await withFirstKey(world);
+    await addDevice(world, 'c');
+    world.fake.fail({ method: 'POST', pathPrefix: '/v1/workspaces/ws-1/api-keys', status: 500, times: 1 });
+    const failed = await rotateMemberKey(leadInput(world));
+    assert.equal(failed.ok, false);
+    if (!failed.ok) assert.equal(failed.code, 'near');
+    assert.equal(world.fake.key(oldKeyId)?.revoked, false);
+    assert.equal(world.fake.key(oldKeyId)?.spendLimitNanoUsd, 5 * GIGA);
+    assert.equal(memberOf(world).nearApiKeyId, oldKeyId);
+    const items = await world.checklist.list();
+    assert.deepEqual(items.map((item) => [item.step, item.status]), [['rotate-key', 'failed']]);
+    const retried = await rotateMemberKey(leadInput(world));
+    assert.equal(retried.ok, true, retried.ok ? '' : retried.message);
+    assert.deepEqual((await world.checklist.list()).map((item) => [item.step, item.status]), [['rotate-key', 'done']]);
+  });
+});
+
+test('a member with no device left that can receive a key is told so, nothing is made, and the old key is not touched', async () => {
+  await inWorld(['a', 'b', 'c'], { role: 'observer', allocation: 5 * GIGA }, async (world) => {
+    const oldKeyId = await withFirstKey(world);
+    const plain = await addDevice(world, 'c', false);
+    const revoked = await plain.client.log.append(() => [{ type: 'device.revoked', body: { memberId: world.memberId, fingerprint: world.first.identity.fingerprint } }]);
+    assert.equal(revoked.ok, true, revoked.ok ? '' : revoked.reason);
+    await world.a.log.sync();
+    assert.equal(keyNeedsRotation(memberOf(world)), true);
+    assert.deepEqual(memberAttention(world.a.log.state(), true), [{ memberId: world.memberId, kind: 'rotate-key' }]);
+    const result = await rotateMemberKey(leadInput(world));
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, 'no-device');
+      assert.match(result.message, /no device that can receive a new key/);
+      assert.match(result.message, /old key stays valid/);
+    }
+    assert.equal(world.fake.requests.filter((request) => request.method === 'POST' && request.path.endsWith('/api-keys')).length, 1, 'no second key was made');
+    assert.equal(world.fake.key(oldKeyId)?.revoked, false);
+    assert.deepEqual((await world.checklist.list()).map((item) => [item.step, item.status]), [['rotate-key', 'failed']]);
+  });
+});
+
+test('rotation is refused when the key already matches the devices, and for a member who never had a key', async () => {
+  await inWorld(['a', 'b'], { role: 'observer' }, async (world) => {
+    const never = await rotateMemberKey(leadInput(world));
+    assert.equal(never.ok, false);
+    await withFirstKey(world);
+    const current = await rotateMemberKey(leadInput(world));
+    assert.equal(current.ok, false);
+    if (!current.ok) assert.equal(current.code, 'log');
+    assert.equal(world.fake.requests.filter((request) => request.method === 'POST' && request.path.endsWith('/api-keys')).length, 1);
+    assert.deepEqual(await world.checklist.list(), []);
   });
 });
