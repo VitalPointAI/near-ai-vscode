@@ -25,6 +25,13 @@ test('an open blocker fails the review even when the verdict says PASS', () => {
   assert.match(decision.reasons.join(), /1 open BLOCKER/);
 });
 
+test('every severity tag on a line counts, so a resolved one cannot hide an open one', () => {
+  const review = parseReview(`Verdict: PASS\nHead-SHA: ${SHA}\n- [BLOCKER][RESOLVED] fixed in abc1234; [BLOCKER] the token is still logged\n- [MAJOR] one [MAJOR] two`);
+  assert.equal(review.openBlockers.length, 1);
+  assert.deepEqual(review.counts, { blocker: 1, major: 2, minor: 0, nit: 0, resolved: 1 });
+  assert.equal(reviewDecision(review, SHA).state, 'failure');
+});
+
 test('a FAIL verdict, a missing verdict, or a missing head fails the review', () => {
   assert.equal(reviewDecision(parseReview(`Verdict: FAIL\nHead-SHA: ${SHA}`), SHA).state, 'failure');
   assert.match(reviewDecision(parseReview(`Head-SHA: ${SHA}`), SHA).reasons.join(), /no "Verdict/);

@@ -40,13 +40,13 @@ export function parseReview(text) {
   const counts = { blocker: 0, major: 0, minor: 0, nit: 0, resolved: 0 };
   for (const [index, raw] of lines.entries()) {
     const line = raw.trim();
+    // Every tag on the line counts: "[BLOCKER][RESOLVED] ... [BLOCKER] ..." has one open blocker.
     for (const severity of ['BLOCKER', 'MAJOR', 'MINOR', 'NIT']) {
-      const tag = new RegExp(`\\[${severity}\\]`, 'i');
-      if (!tag.test(line)) continue;
-      const resolved = new RegExp(`\\[${severity}\\]\\s*\\[RESOLVED\\]`, 'i').test(line);
-      if (resolved) { counts.resolved += 1; continue; }
-      counts[severity.toLowerCase()] += 1;
-      if (severity === 'BLOCKER') openBlockers.push(line);
+      const resolved = line.match(new RegExp(`\\[${severity}\\]\\s*\\[RESOLVED\\]`, 'gi'))?.length ?? 0;
+      const open = (line.match(new RegExp(`\\[${severity}\\]`, 'gi'))?.length ?? 0) - resolved;
+      counts.resolved += resolved;
+      counts[severity.toLowerCase()] += open;
+      if (severity === 'BLOCKER') for (let i = 0; i < open; i += 1) openBlockers.push(line);
     }
     const marker = fenceMarker(line);
     if (fence) {
