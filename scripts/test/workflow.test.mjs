@@ -31,6 +31,31 @@ test('a FAIL verdict, a missing verdict, or a missing head fails the review', ()
   assert.match(reviewDecision(parseReview('Verdict: PASS'), SHA).reasons.join(), /no "Head-SHA/);
 });
 
+test('the verdict must be exactly one "Verdict: PASS" or "Verdict: FAIL" line', () => {
+  const fails = (text, pattern) => {
+    const decision = reviewDecision(parseReview(text), SHA);
+    assert.equal(decision.state, 'failure', text);
+    assert.match(decision.reasons.join('\n'), pattern, text);
+  };
+  fails(`Verdict: PASS\nVerdict: FAIL\nHead-SHA: ${SHA}`, /2 Verdict lines/);
+  fails(`Verdict: PASS\nVerdict: PASS\nHead-SHA: ${SHA}`, /2 Verdict lines/);
+  fails(`Verdict: PASS | FAIL\nHead-SHA: ${SHA}`, /not exactly "Verdict: PASS" or "Verdict: FAIL"/);
+  fails(`Verdict: Pass with blockers\nHead-SHA: ${SHA}`, /not exactly/);
+  fails(`Verdict: pass\nHead-SHA: ${SHA}`, /not exactly/);
+  fails(`Verdict: PASS            <- or FAIL\nHead-SHA: ${SHA}`, /not exactly/);
+  for (const ok of ['Verdict: PASS', '**Verdict:** PASS', '**Verdict: PASS**', 'verdict:PASS']) {
+    assert.deepEqual(reviewDecision(parseReview(`${ok}\nHead-SHA: ${SHA}`), SHA), { state: 'success', reasons: [] }, ok);
+  }
+});
+
+test('the Head-SHA must be exactly one full 40-character commit hash', () => {
+  const reasons = (text, head = SHA) => reviewDecision(parseReview(text), head).reasons.join('\n');
+  assert.match(reasons(`Verdict: PASS\nHead-SHA: ${SHA}abcd`), /not exactly "Head-SHA: <40-character commit>"/);
+  assert.match(reasons(`Verdict: PASS\nHead-SHA: ${SHA}\nHead-SHA: ${OTHER}`), /2 Head-SHA lines/);
+  assert.match(reasons(`Verdict: PASS\nHead-SHA: \`${SHA}\``), /^$/);
+  assert.match(reviewDecision(parseReview(`Verdict: PASS\nHead-SHA: ${SHA}`), undefined).reasons.join(), /current head of the PR is unknown/);
+});
+
 test('a review of an older head is stale once new commits are pushed', () => {
   const decision = reviewDecision(parseReview(`Verdict: PASS\nHead-SHA: ${OTHER}`), SHA);
   assert.equal(decision.state, 'failure');

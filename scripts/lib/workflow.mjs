@@ -22,8 +22,8 @@ export function releaseVersionFromBranch(branch) {
  * Reads a review file written by the agent review team.
  *
  * Expected shape (see docs/development-workflow.md):
- *   Verdict: PASS            (or FAIL)
- *   Head-SHA: <40-hex commit the team reviewed>
+ *   Verdict: PASS            (or FAIL; exactly one such line, nothing else on it)
+ *   Head-SHA: <40-hex commit the team reviewed>   (exactly one)
  *   - [BLOCKER] ... (open)    - [BLOCKER][RESOLVED] ... (closed)
  * Verdict and Head-SHA lines inside code fences are ignored, so quoted code cannot fake them.
  * Severity tags count everywhere, fences included, and a fence that is never closed (or is
@@ -33,8 +33,8 @@ export function releaseVersionFromBranch(branch) {
 export function parseReview(text) {
   const lines = String(text ?? '').split(/\r?\n/);
   let fence;
-  let verdict;
-  let headSha;
+  const verdicts = [];
+  const headShas = [];
   const problems = [];
   const openBlockers = [];
   const counts = { blocker: 0, major: 0, minor: 0, nit: 0, resolved: 0 };
@@ -54,13 +54,25 @@ export function parseReview(text) {
       continue;
     }
     if (marker) { fence = { ...marker, line: index + 1 }; continue; }
-    const verdictMatch = /^\**verdict\**\s*:\s*\**\s*(PASS|FAIL)\b/i.exec(line);
-    if (verdictMatch && verdict === undefined) verdict = verdictMatch[1].toUpperCase();
-    const shaMatch = /^\**head-sha\**\s*:\s*`?([0-9a-f]{40})`?/i.exec(line);
-    if (shaMatch && headSha === undefined) headSha = shaMatch[1].toLowerCase();
+    // Emphasis and code marks are ignored: **Verdict:** PASS and Head-SHA: `<sha>` are fine.
+    const plain = line.replace(/[*_`]/g, '').trim();
+    if (/^verdict\b/i.test(plain)) {
+      const value = /^verdict\s*:\s*(.*)$/i.exec(plain)?.[1];
+      if (value === 'PASS' || value === 'FAIL') verdicts.push(value);
+      else problems.push(`line ${index + 1} ("${line.slice(0, 80)}") is not exactly "Verdict: PASS" or "Verdict: FAIL"`);
+    }
+    if (/^head-sha\b/i.test(plain)) {
+      const value = /^head-sha\s*:\s*([0-9a-f]{40})$/i.exec(plain)?.[1];
+      if (value) headShas.push(value.toLowerCase());
+      else problems.push(`line ${index + 1} ("${line.slice(0, 80)}") is not exactly "Head-SHA: <40-character commit>"`);
+    }
   }
   if (fence) problems.push(`the code fence opened on line ${fence.line} is never closed, so the review's structure is ambiguous`);
-  return { verdict, headSha, openBlockers, counts, problems };
+  if (verdicts.length > 1) problems.push(`the review has ${verdicts.length} Verdict lines; it must have exactly one`);
+  if (headShas.length > 1) problems.push(`the review has ${headShas.length} Head-SHA lines; it must have exactly one`);
+  const verdict = verdicts.length === 1 ? verdicts[0] : undefined;
+  const headSha = headShas.length === 1 ? headShas[0] : undefined;
+  return { verdict, headSha, openBlockers, counts, problems, verdictLines: verdicts.length, headShaLines: headShas.length };
 }
 
 /** A CommonMark code fence line: three or more ` or ~, then an info string (no ` after backticks). */
@@ -75,10 +87,13 @@ function fenceMarker(line) {
 /** Decides the `agent-review` status for a parsed review and the PR's current head. */
 export function reviewDecision(review, currentHeadSha) {
   const reasons = [...(review.problems ?? [])];
-  if (!review.verdict) reasons.push('the review file has no "Verdict: PASS" or "Verdict: FAIL" line');
-  else if (review.verdict !== 'PASS') reasons.push('the review verdict is FAIL');
-  if (!review.headSha) reasons.push('the review file has no "Head-SHA:" line naming the commit reviewed');
-  else if (currentHeadSha && review.headSha !== currentHeadSha.toLowerCase()) {
+  if (review.verdict === 'FAIL') reasons.push('the review verdict is FAIL');
+  else if (review.verdict !== 'PASS' && !review.verdictLines) reasons.push('the review file has no "Verdict: PASS" or "Verdict: FAIL" line');
+  if (!review.headSha) {
+    if (!review.headShaLines) reasons.push('the review file has no "Head-SHA:" line naming the commit reviewed');
+  } else if (!/^[0-9a-f]{40}$/i.test(currentHeadSha ?? '')) {
+    reasons.push('the current head of the PR is unknown, so the review cannot be matched to it');
+  } else if (review.headSha !== currentHeadSha.toLowerCase()) {
     reasons.push(`the review covers ${review.headSha.slice(0, 7)} but the PR head is now ${currentHeadSha.slice(0, 7)}; review the new commits`);
   }
   if (review.openBlockers.length > 0) reasons.push(`${review.openBlockers.length} open BLOCKER finding(s)`);

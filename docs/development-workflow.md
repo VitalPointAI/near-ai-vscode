@@ -123,11 +123,13 @@ The command (`.claude/commands/review-pr.md`) does the following:
 4. **Submit.** `node scripts/agent-review.mjs submit <number> --review <file>` posts the file as
    a PR comment (with a snapshot of CI) and sets `agent-review` on the head commit.
 
-`agent-review` is **success** only when the file says `Verdict: PASS`, its `Head-SHA` is the
-PR's current head, and it has no open `[BLOCKER]` (a fixed one is written
-`[BLOCKER][RESOLVED]`). Otherwise it is **failure** and the comment lists why. Text inside code
-fences is ignored, so quoted code cannot fake a verdict. Use `--dry-run` to see the comment
-and the status without posting.
+`agent-review` is **success** only when the file has exactly one verdict line and it reads
+`Verdict: PASS`, its one `Head-SHA` line names the PR's current head, and it has no open
+`[BLOCKER]` anywhere, code blocks included (a fixed one is written `[BLOCKER][RESOLVED]`).
+Otherwise it is **failure** and the comment lists why. Verdict and Head-SHA lines inside code
+fences are ignored, so quoted code cannot fake them, and a code fence left open fails the review
+rather than hiding what follows it. Use `--dry-run` to see the comment and the status without
+posting.
 
 The format of the review file is shown in `.claude/commands/review-pr.md`.
 

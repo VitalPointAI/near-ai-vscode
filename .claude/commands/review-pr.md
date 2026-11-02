@@ -55,12 +55,15 @@ weakened test, a secret, a broken release, or missing required docs for a user-v
 
 Deduplicate the findings, keep the highest severity when reviewers disagree, and drop anything
 you checked and found to be wrong (say why in one line under "Dismissed"). Write
-`$SCRATCH/pr-$ARGUMENTS/review.md` in exactly this shape:
+`$SCRATCH/pr-$ARGUMENTS/review.md` in exactly this shape. The file must have exactly one
+`Verdict:` line, reading `Verdict: PASS` or `Verdict: FAIL` with nothing else on it (PASS only
+when there is no open BLOCKER), and exactly one `Head-SHA:` line with the full 40-character SHA.
+Anything else, including a second verdict line or a code fence left open, fails the review.
 
 ```markdown
 ## Agent review for #<number>
 
-Verdict: PASS            <- or FAIL; PASS only when there is no open BLOCKER
+Verdict: PASS
 Head-SHA: <the 40-character head SHA from gather>
 
 ### Summary
