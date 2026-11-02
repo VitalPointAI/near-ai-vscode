@@ -3,8 +3,34 @@
 // The file has no .test suffix on purpose so the test glob does not run it as a suite.
 export interface RecordedStatusBarItem { text: string; tooltip: string; command?: string; visible: boolean; disposed: boolean; backgroundColor?: unknown; accessibilityInformation?: { label: string; role?: string } }
 
+// A webview surface the stub hands to code under test: the recorded html, options and posted messages, plus the hooks a test uses to play the page
+// (receive) and the editor (setVisible, dispose). Both createWebviewPanel and a resolved view provider produce one.
+export interface RecordedWebview {
+  html: string;
+  options: { enableScripts?: boolean; retainContextWhenHidden?: boolean; localResourceRoots?: Array<{ fsPath: string }> };
+  cspSource: string;
+  // Every message the host posted to the page, in order.
+  posted: unknown[];
+  visible: boolean;
+  disposed: boolean;
+  // Messages posted while the surface was hidden (VS Code would drop them).
+  postedWhileHidden: number;
+  // As if the page posted this message; resolves when every host listener has finished.
+  receive(message: unknown): Promise<void>;
+  setVisible(visible: boolean): void;
+  dispose(): void;
+}
+export interface RecordedWebviewPanel extends RecordedWebview { viewType: string; title: string; column: unknown; revealCalls: number }
+export interface RecordedViewProvider { viewType: string; provider: { resolveWebviewView(view: unknown, context?: unknown, token?: unknown): unknown }; options?: unknown }
+
 export interface VscodeStub {
   vscode: unknown;
+  // Every createWebviewPanel call, in order.
+  webviewPanels: RecordedWebviewPanel[];
+  // Every registerWebviewViewProvider call, in order (removed again when its disposable is disposed).
+  viewProviders: RecordedViewProvider[];
+  // A webview view as VS Code would hand to resolveWebviewView, with the same recording hooks as a panel.
+  createWebviewView(): { view: unknown; record: RecordedWebview };
   outputChannels: Array<{ name: string; lines: string[] }>;
   statusBarItems: RecordedStatusBarItem[];
   notifications: Array<{ level: 'info' | 'warn' | 'error'; message: string }>;
@@ -74,16 +100,21 @@ export function createVscodeStub(): VscodeStub {
   const configListeners = new Set<ConfigListener>();
   const windowState = { focused: true, active: true };
 
-  // showInformationMessage(text, ...actions) or showInformationMessage(text, { modal, detail }, ...actions), as in VS Code.
-  const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...rest: Array<string | { modal?: boolean; detail?: string }>): Promise<string | undefined> => {
+  // showInformationMessage(text, ...actions) or showInformationMessage(text, { modal, detail }, ...actions), as in VS Code. An action is a string or a
+  // MessageItem ({ title, isCloseAffordance }); the answer queue holds titles, and a MessageItem action is answered with the item itself, as VS Code does.
+  const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...rest: Array<string | { title: string; isCloseAffordance?: boolean } | { modal?: boolean; detail?: string }>): Promise<unknown> => {
     const first = rest[0];
-    const options = typeof first === 'object' && first !== null ? first : undefined;
-    const actions = rest.filter((item): item is string => typeof item === 'string');
+    const isOptions = (value: unknown): value is { modal?: boolean; detail?: string } => typeof value === 'object' && value !== null && !('title' in value);
+    const options = isOptions(first) ? first : undefined;
+    const items = rest.filter((item): item is string | { title: string; isCloseAffordance?: boolean } => typeof item === 'string' || (typeof item === 'object' && item !== null && 'title' in item));
+    const actions = items.map((item) => (typeof item === 'string' ? item : item.title));
     notifications.push({ level, message: text });
     notificationActions.push(actions);
     notificationOptions.push(options === undefined ? undefined : { ...options });
-    if (messageResponder !== undefined) return messageResponder(text, actions, options);
-    return messageAnswers.shift();
+    const answer = messageResponder !== undefined ? messageResponder(text, actions, options) : messageAnswers.shift();
+    if (answer === undefined) return undefined;
+    const index = actions.indexOf(answer);
+    return index < 0 ? answer : items[index];
   };
 
   const showQuickPick = async (
@@ -104,7 +135,100 @@ export function createVscodeStub(): VscodeStub {
     return chosen;
   };
 
+  const webviewPanels: RecordedWebviewPanel[] = [];
+  const viewProviders: RecordedViewProvider[] = [];
+
+  class StubUri {
+    public constructor(public readonly scheme: string, public readonly fsPath: string) {}
+    public get path(): string { return this.fsPath; }
+    public toString(): string { return `${this.scheme}://${this.fsPath}`; }
+    public static file(fsPath: string): StubUri { return new StubUri('file', fsPath); }
+    public static joinPath(base: { scheme?: string; fsPath: string }, ...parts: string[]): StubUri { return new StubUri(base.scheme ?? 'file', [base.fsPath, ...parts].join('/').replace(/\/{2,}/g, '/')); }
+  }
+
+  // The members of a Webview, a WebviewPanel and a WebviewView that code under test touches. `kind` decides which visibility and dispose events exist.
+  const makeWebview = (options: RecordedWebview['options']): { record: RecordedWebview; webview: unknown; visibilityListeners: Set<(visible: boolean) => void>; disposeListeners: Set<() => void> } => {
+    const receivers = new Set<(message: unknown) => unknown>();
+    const visibilityListeners = new Set<(visible: boolean) => void>();
+    const disposeListeners = new Set<() => void>();
+    const record: RecordedWebview = {
+      html: '', options: { ...options }, cspSource: 'CSP_SOURCE', posted: [], visible: true, disposed: false, postedWhileHidden: 0,
+      receive: async (message: unknown): Promise<void> => { await Promise.all([...receivers].map((listener) => listener(message))); },
+      setVisible: (visible: boolean): void => {
+        if (record.visible === visible) return;
+        record.visible = visible;
+        for (const listener of [...visibilityListeners]) listener(visible);
+      },
+      dispose: (): void => {
+        if (record.disposed) return;
+        record.disposed = true;
+        for (const listener of [...disposeListeners]) listener();
+      }
+    };
+    const webview = {
+      get html(): string { return record.html; },
+      set html(value: string) { record.html = value; },
+      get options(): RecordedWebview['options'] { return record.options; },
+      set options(value: RecordedWebview['options']) { record.options = { ...value }; },
+      cspSource: record.cspSource,
+      asWebviewUri: (uri: { fsPath: string }): StubUri => new StubUri('webview', uri.fsPath),
+      postMessage: async (message: unknown): Promise<boolean> => {
+        if (!record.visible) record.postedWhileHidden += 1;
+        record.posted.push(message);
+        return true;
+      },
+      onDidReceiveMessage: (listener: (message: unknown) => unknown): { dispose(): void } => {
+        receivers.add(listener);
+        return { dispose: (): void => { receivers.delete(listener); } };
+      }
+    };
+    return { record, webview, visibilityListeners, disposeListeners };
+  };
+
+  const createWebviewPanel = (viewType: string, title: string, column: unknown, options: RecordedWebview['options'] = {}): unknown => {
+    const made = makeWebview(options);
+    const record = Object.assign(made.record, { viewType, title, column, revealCalls: 0 }) as RecordedWebviewPanel;
+    webviewPanels.push(record);
+    return {
+      viewType, title, webview: made.webview, iconPath: undefined as unknown,
+      get visible(): boolean { return record.visible; },
+      reveal: (): void => { record.revealCalls += 1; record.setVisible(true); },
+      onDidChangeViewState: (listener: (event: { webviewPanel: { visible: boolean } }) => void): { dispose(): void } => {
+        const wrapped = (visible: boolean): void => { listener({ webviewPanel: { visible } }); };
+        made.visibilityListeners.add(wrapped);
+        return { dispose: (): void => { made.visibilityListeners.delete(wrapped); } };
+      },
+      onDidDispose: (listener: () => void): { dispose(): void } => {
+        made.disposeListeners.add(listener);
+        return { dispose: (): void => { made.disposeListeners.delete(listener); } };
+      },
+      dispose: (): void => { record.dispose(); }
+    };
+  };
+
+  const createWebviewView = (): { view: unknown; record: RecordedWebview } => {
+    const made = makeWebview({});
+    return {
+      record: made.record,
+      view: {
+        webview: made.webview,
+        get visible(): boolean { return made.record.visible; },
+        onDidChangeVisibility: (listener: () => void): { dispose(): void } => {
+          const wrapped = (): void => { listener(); };
+          made.visibilityListeners.add(wrapped);
+          return { dispose: (): void => { made.visibilityListeners.delete(wrapped); } };
+        },
+        onDidDispose: (listener: () => void): { dispose(): void } => {
+          made.disposeListeners.add(listener);
+          return { dispose: (): void => { made.disposeListeners.delete(listener); } };
+        }
+      }
+    };
+  };
+
   const vscode = {
+    Uri: StubUri,
+    ViewColumn: { Active: -1, Beside: -2, One: 1, Two: 2, Three: 3 },
     StatusBarAlignment: { Left: 1, Right: 2 },
     ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
@@ -144,6 +268,12 @@ export function createVscodeStub(): VscodeStub {
           hide: (): void => { item.visible = false; },
           dispose: (): void => { item.disposed = true; item.visible = false; }
         };
+      },
+      createWebviewPanel,
+      registerWebviewViewProvider: (viewType: string, provider: RecordedViewProvider['provider'], options?: unknown): { dispose(): void } => {
+        const entry: RecordedViewProvider = { viewType, provider, ...(options === undefined ? {} : { options }) };
+        viewProviders.push(entry);
+        return { dispose: (): void => { const index = viewProviders.indexOf(entry); if (index >= 0) viewProviders.splice(index, 1); } };
       },
       showInformationMessage: message('info'),
       showWarningMessage: message('warn'),
@@ -227,7 +357,7 @@ export function createVscodeStub(): VscodeStub {
   };
 
   return {
-    vscode, outputChannels, statusBarItems, notifications, notificationActions, notificationOptions, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
+    vscode, webviewPanels, viewProviders, createWebviewView, outputChannels, statusBarItems, notifications, notificationActions, notificationOptions, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
     quickPickAnswers, quickPickRequests, clipboardWrites, externalCommands, openedExternal, progress,
     setProgressCancel(when): void {
       progressCancel = when;
@@ -275,10 +405,12 @@ export function installVscodeStub(stub: VscodeStub): () => void {
 export interface FakeContext {
   subscriptions: Array<{ dispose(): void }>;
   globalStorageUri: { fsPath: string };
+  // The extension folder (the repository root), for code that builds webview resource addresses.
+  extensionUri: { scheme: string; fsPath: string };
   secrets: unknown;
 }
 
 // The few ExtensionContext members Team Mode uses. Cast it with `as never` where an ExtensionContext is expected.
 export function createFakeContext(globalStoragePath: string, secrets: unknown): FakeContext {
-  return { subscriptions: [], globalStorageUri: { fsPath: globalStoragePath }, secrets };
+  return { subscriptions: [], globalStorageUri: { fsPath: globalStoragePath }, extensionUri: { scheme: 'file', fsPath: require('node:path').resolve(__dirname, '..', '..', '..') as string }, secrets };
 }
