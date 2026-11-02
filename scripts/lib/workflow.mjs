@@ -29,9 +29,11 @@ export function releaseVersionFromBranch(branch) {
  * spaced, fullwidth or zero-width-split [BLOCKER] still counts, and a tag written with lookalike
  * letters from another script is reported in `problems`.
  * Verdict and Head-SHA lines inside code fences are ignored, so quoted code cannot fake them.
- * Severity tags count everywhere, fences included, and a fence that is never closed (or is
- * closed by a different character or a shorter run) makes the structure ambiguous, which is
- * reported in `problems` so the review fails closed.
+ * Severity tags count everywhere, fences and HTML comments included. Anything GitHub would show
+ * differently from how it is read here is reported in `problems`, so the review fails closed:
+ * a fence never closed (or closed by a different character or a shorter run), a fence-like line
+ * indented 4 or more spaces (text or code on GitHub, never a fence), a Verdict or Head-SHA inside
+ * an HTML comment, a quote, a list item or an indented block, and an HTML comment never closed.
  */
 export function parseReview(text) {
   const lines = String(text ?? '').split(/\r?\n/);
@@ -41,8 +43,10 @@ export function parseReview(text) {
   const problems = [];
   const openBlockers = [];
   const counts = { blocker: 0, major: 0, minor: 0, nit: 0, resolved: 0 };
+  let comment;
   for (const [index, raw] of lines.entries()) {
-    const line = normalizeReviewLine(raw).trim();
+    const full = normalizeReviewLine(raw);
+    const line = full.trim();
     // Every tag on the line counts: "[BLOCKER][RESOLVED] ... [BLOCKER] ..." has one open blocker.
     const tags = severityTags(line);
     for (const [i, tag] of tags.entries()) {
@@ -57,14 +61,38 @@ export function parseReview(text) {
         if (tag.word === 'BLOCKER') openBlockers.push(line);
       }
     }
-    const marker = fenceMarker(line);
     if (fence) {
+      // A closing fence may be indented at most 3 spaces; a deeper one is content.
+      const marker = indentOf(full) <= 3 ? fenceMarker(line) : undefined;
       if (marker && marker.char === fence.char && marker.length >= fence.length && marker.info === '') fence = undefined;
       continue;
     }
-    if (marker) { fence = { ...marker, line: index + 1 }; continue; }
+    // HTML comments are not shown on GitHub, so a Verdict or Head-SHA inside one is refused.
+    const startsInComment = Boolean(comment);
+    const parts = splitComments(full, startsInComment);
+    if (!startsInComment && parts.open) comment = { line: index + 1 };
+    if (!parts.open) comment = undefined;
+    if (/\b(?:verdict|head-sha)\s*:/i.test(parts.hidden.replace(/[*_`]/g, ''))) {
+      problems.push(`line ${index + 1} has a Verdict or Head-SHA inside an HTML comment, which GitHub does not show; remove it`);
+    }
+    const visible = parts.visible.trim();
+    if (!visible) continue;
+    const indent = startsInComment ? 0 : indentOf(parts.visible);
+    const marker = fenceMarker(visible);
+    if (marker && indent <= 3) { fence = { ...marker, line: index + 1 }; continue; }
+    if (marker) {
+      problems.push(`line ${index + 1} looks like a code fence but is indented 4 or more spaces, so GitHub may show it as text; indent code fences by at most 3 spaces`);
+    }
     // Emphasis and code marks are ignored: **Verdict:** PASS and Head-SHA: `<sha>` are fine.
-    const plain = line.replace(/[*_`]/g, '').trim();
+    const plain = visible.replace(/[*_`]/g, '').trim();
+    // A Verdict or Head-SHA inside a quote, a list item or an indented block is shown as part of
+    // that block, not as the review's own line, so it is refused rather than guessed at.
+    const unwrapped = plain.replace(/^(?:(?:>|[-+*]|\d{1,9}[.)])\s*)+/, '');
+    if ((indent > 3 || unwrapped !== plain) && /^(?:verdict|head-sha)\s*:/i.test(unwrapped)) {
+      problems.push(`line ${index + 1} ("${line.slice(0, 80)}") has a Verdict or Head-SHA inside a quote, list or indented block; put it on its own line, not indented`);
+      continue;
+    }
+    if (indent > 3) continue;
     if (/^verdict\b/i.test(plain)) {
       const value = /^verdict\s*:\s*(.*)$/i.exec(plain)?.[1];
       if (value === 'PASS' || value === 'FAIL') verdicts.push(value);
@@ -77,6 +105,7 @@ export function parseReview(text) {
     }
   }
   if (fence) problems.push(`the code fence opened on line ${fence.line} is never closed, so the review's structure is ambiguous`);
+  if (comment) problems.push(`the HTML comment opened on line ${comment.line} is never closed, so GitHub hides everything after it`);
   if (verdicts.length > 1) problems.push(`the review has ${verdicts.length} Verdict lines; it must have exactly one`);
   if (headShas.length > 1) problems.push(`the review has ${headShas.length} Head-SHA lines; it must have exactly one`);
   const verdict = verdicts.length === 1 ? verdicts[0] : undefined;
@@ -130,6 +159,39 @@ function severityTags(line) {
     tags.push({ word, lookalike, start: match.index, end: match.index + match[0].length });
   }
   return tags;
+}
+
+/** Leading indentation in columns, a tab advancing to the next multiple of 4. */
+function indentOf(line) {
+  let width = 0;
+  for (const char of line) {
+    if (char === ' ') width += 1;
+    else if (char === '\t') width += 4 - (width % 4);
+    else break;
+  }
+  return width;
+}
+
+/**
+ * Splits a line into the text GitHub shows and the text inside HTML comments (<!-- ... -->),
+ * given whether a comment is already open. Comment markers inside inline code do not count.
+ * Returns { visible, hidden, open } with `open` true when a comment is still open at the end.
+ */
+function splitComments(line, open) {
+  // Blank out inline code spans (same length) so their contents cannot open or close a comment.
+  const scan = line.replace(/(`+)(?:(?!\1)[^\n])*?\1/g, (span) => ' '.repeat(span.length));
+  let visible = '';
+  let hidden = '';
+  let at = 0;
+  while (at < line.length) {
+    const next = scan.indexOf(open ? '-->' : '<!--', at);
+    const end = next < 0 ? line.length : next;
+    if (open) hidden += line.slice(at, end); else visible += line.slice(at, end);
+    if (next < 0) break;
+    at = next + (open ? 3 : 4);
+    open = !open;
+  }
+  return { visible, hidden, open };
 }
 
 /** A CommonMark code fence line: three or more ` or ~, then an info string (no ` after backticks). */

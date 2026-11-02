@@ -146,6 +146,44 @@ test('a code fence closes only on the same character, at least as long, with not
   assert.equal(reviewDecision(parseReview(`${head}~~~\n\`\`\`\n~~~\n`), SHA).state, 'success');
 });
 
+test('a fence indented 4 or more spaces is not a fence, so it cannot hide a verdict GitHub shows', () => {
+  // Reproduced in review: after a paragraph, an indented ``` line is paragraph text on GitHub,
+  // so the FAIL between two of them is visible, but the parser read them as a fence around it.
+  const text = `Verdict: PASS\nHead-SHA: ${SHA}\n\nSome notes\n    \`\`\`\nVerdict: FAIL\n    \`\`\`\n`;
+  const decision = reviewDecision(parseReview(text), SHA);
+  assert.equal(decision.state, 'failure');
+  assert.match(decision.reasons.join('\n'), /2 Verdict lines/);
+  assert.match(decision.reasons.join('\n'), /line 5 .*indented 4 or more spaces/);
+  assert.match(reviewDecision(parseReview(`Verdict: PASS\nHead-SHA: ${SHA}\n\t\`\`\`\n`), SHA).reasons.join('\n'), /indented 4 or more spaces/, 'a tab counts as 4 spaces');
+  // Up to 3 spaces is still a fence, on both ends.
+  const fenced = parseReview(`Verdict: FAIL\nHead-SHA: ${SHA}\n   \`\`\`\nVerdict: PASS\n   \`\`\`\n`);
+  assert.deepEqual([fenced.verdict, fenced.problems], ['FAIL', []]);
+  // Inside a fence, an indented ``` line is content and does not close it.
+  assert.match(parseReview(`Verdict: PASS\nHead-SHA: ${SHA}\n\`\`\`\n    \`\`\`\n`).problems.join(), /never closed/);
+});
+
+test('Verdict and Head-SHA lines GitHub hides or shows differently fail the review', () => {
+  const head = `Verdict: PASS\nHead-SHA: ${SHA}\n`;
+  const fails = (text, pattern) => {
+    const decision = reviewDecision(parseReview(text), SHA);
+    assert.equal(decision.state, 'failure', text);
+    assert.match(decision.reasons.join('\n'), pattern, text);
+  };
+  fails(`${head}<!-- Verdict: FAIL -->\n`, /inside an HTML comment/);
+  fails(`<!--\nVerdict: FAIL\n-->\n${head}`, /line 2 .*inside an HTML comment/);
+  fails(`<!-- notes\n${head}-->\n`, /inside an HTML comment/);
+  fails(`${head}<!-- never closed\n- [MAJOR] x\n`, /HTML comment opened on line 3 is never closed/);
+  fails(`${head}> Verdict: FAIL\n`, /quote, list or indented block/);
+  fails(`${head}- Head-SHA: ${OTHER}\n`, /quote, list or indented block/);
+  fails(`${head}    Verdict: FAIL\n`, /quote, list or indented block/);
+  // Comments that say nothing about the verdict, and comment markers in inline code, are fine.
+  const ok = `${head}<!-- reviewers: list findings below -->\n- [MINOR] the footer marker \`<!-- agent-review head=... -->\` is fine\n`;
+  assert.deepEqual(reviewDecision(parseReview(ok), SHA), { state: 'success', reasons: [] });
+  // Text after a comment closes on the same line is visible again.
+  assert.equal(parseReview(`<!-- note --> Verdict: PASS\nHead-SHA: ${SHA}\n`).verdict, 'PASS');
+  assert.match(parseReview(`<!--\nx\n--> Verdict: FAIL\n${head}`).problems.join(), /not exactly "Verdict: PASS"|2 Verdict lines/);
+});
+
 test('check runs and commit statuses are normalized, keeping the latest run per name', () => {
   const checks = normalizeChecks([
     { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: '2026-01-01T00:00:00Z' },

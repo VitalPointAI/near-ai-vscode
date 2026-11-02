@@ -147,8 +147,12 @@ fullwidth or other bracket characters, in bold, in any case, or with invisible c
 inside. A tag spelled with lookalike letters from another alphabet fails the review.
 
 Verdict and Head-SHA lines inside code fences are ignored, so quoted code cannot fake them, and a
-code fence left open fails the review rather than hiding what follows it. Use `--dry-run` to see
-the comment and the status without posting.
+code fence left open fails the review rather than hiding what follows it. The file is read the
+way GitHub shows it, and anything that could look different there fails the review: a fence
+indented 4 or more spaces (GitHub shows it as text or code, never as a fence), a Verdict or
+Head-SHA line inside an HTML comment (hidden on GitHub), inside a quote, a list item or an
+indented block, and an HTML comment that is never closed. Use `--dry-run` to see the comment and
+the status without posting.
 
 The format of the review file is shown in `.claude/commands/review-pr.md`.
 

@@ -59,6 +59,8 @@ you checked and found to be wrong (say why in one line under "Dismissed"). Write
 `Verdict:` line, reading `Verdict: PASS` or `Verdict: FAIL` with nothing else on it (PASS only
 when there is no open BLOCKER), and exactly one `Head-SHA:` line with the full 40-character SHA.
 Anything else, including a second verdict line or a code fence left open, fails the review.
+Keep both lines at the start of a line, outside quotes, lists and HTML comments, and indent code
+fences by at most 3 spaces.
 
 ```markdown
 ## Agent review for #<number>
