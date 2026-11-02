@@ -149,8 +149,34 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Moves are permission-checked and follow only permitted transitions; an illegal drop snaps back and says why. (BOARD-03)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
 
-**Plans**: TBD
+**Plans**: 14 plans in 6 waves
 **UI hint**: yes
+
+**Wave 1**
+- [ ] 62-01-PLAN.md — Item events: confirm the signed bodies, then validators, item.move permission row and the state machine on write and read, two-clone tracer (BOARD-01, BOARD-03)
+- [ ] 62-02-PLAN.md — Integration-branch reader: private ref fetch, .planning snapshot, tree hash, remote head, ancestry, size caps (BOARD-01)
+- [ ] 62-03-PLAN.md — Pure GSD parser and fixtures: roadmap, frontmatter, tasks, current and archived milestones, HEAD survey (BOARD-01)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 62-04-PLAN.md — Computed ready, columns, progress, ready count, card history, snapshots with items, determinism and forgery suites (BOARD-01, BOARD-02, BOARD-03)
+- [ ] 62-05-PLAN.md — Importer: idempotent import, cancel on vanish, cleaning, stale guard, two-lead race, live import of this repo's .planning, privacy canary (BOARD-01)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 62-06-PLAN.md — Pure board model and move planner: columns, lanes, filters, card face, detail, refusal copy (BOARD-01, BOARD-02, BOARD-03)
+- [ ] 62-07-PLAN.md — Session: change hook, board-visible polling, automatic import, D-17 status bar, one-poll proof (BOARD-01, BOARD-02)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 62-08-PLAN.md — Board host: view and panel, CSP, message parser, moves with native prompts, commands, solo parity (BOARD-01, BOARD-02, BOARD-03)
+- [ ] 62-09-PLAN.md — Board client core: both layouts, filters, lanes, states, live region, keyboard model, styles (BOARD-01, BOARD-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 62-10-PLAN.md — Move to... menu (BOARD-03)
+- [ ] 62-11-PLAN.md — Kanban drag and drop with snap-back and reasons (BOARD-03)
+- [ ] 62-12-PLAN.md — Card detail drawer and drill-in (BOARD-01)
+- [ ] 62-13-PLAN.md — New item and edit: form and host handling (BOARD-01, BOARD-03)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 62-14-PLAN.md — E2E team scenario in a real VS Code, release content, phase gate (BOARD-01, BOARD-02, BOARD-03)
 
 ### Phase 63: Claims, leases, claim workspaces, LeaseGuard, duplicate checks
 

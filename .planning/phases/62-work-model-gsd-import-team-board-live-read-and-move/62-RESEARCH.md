@@ -558,7 +558,16 @@ if (!result.ok && result.reason === IMPORT_NOOP) return { changed: 0 };
 | A15 | E2E needs a test seam in `NearAiTestApi` (or an exposed `TeamModeHandle`) to enable a team in the real host | Live updates | Without it the board cannot be exercised in e2e; alternative is a pre-seeded workspace with a committed team and a stored device key |
 | A16 | `/gsd-ui-phase 62` (roadmap marks `UI hint: yes`) is worth running before planning the webview plans | Webview design | Skipping risks rework of layout/a11y decisions; the UX contract asks for owner review of visual surfaces |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+Resolved by the orchestrator on 2026-11-02 under the owner's auto-advance, taking the researcher's recommendations (Q3 adjusted to the approved UI-SPEC):
+
+- Q1 RESOLVED: no roadmap Goal text on lane headers this phase.
+- Q2 RESOLVED: fetch the integration branch into a private ref in the project repo, behind one function boundary; the ref is a parameter.
+- Q3 RESOLVED: the Team status bar always gets its icon, tooltip and accessibility label (UI-SPEC, fixes the Phase 61 UI review); with no items on the log it shows the team text without counts, and once items exist it shows `Team: N ready · M pending`.
+- Q4 RESOLVED: a missing dependency blocks readiness with reason `dependency-missing` shown on the card.
+- Q5 RESOLVED: no confirmation for auto-import; one notice per window ("Imported N items to the Team Board") when something was written, none on a no-op.
+
 
 1. **Should phase and milestone `**Goal**` text appear on lane headers?**
    - What we know: CONTEXT forbids plan bodies beyond must-have strings; a Goal is roadmap text, not a plan body, but not a title or must-have either.
