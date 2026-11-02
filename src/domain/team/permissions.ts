@@ -6,11 +6,12 @@ import type { ImplementedTeamEvent, ItemKind, Role, TeamState } from './types';
 export type TeamActionKind = 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'member.remove' | 'member.change-role'
   | 'item.create' | 'item.edit' | 'item.estimate' | 'item.claim' | 'item.assign' | 'lease.manual' | 'review.submit'
   | 'merge.approve-out-of-scope' | 'lease.integrator' | 'budget.set' | 'allocation.grant' | 'allocation.revoke' | 'allocation.request'
-  | 'team.stop' | 'team.resume' | 'policy.change' | 'device.add' | 'device.revoke' | 'member.availability' | 'member.skills' | 'snapshot.write';
+  | 'team.stop' | 'team.resume' | 'policy.change' | 'device.add' | 'device.revoke' | 'member.availability' | 'member.skills' | 'snapshot.write' | 'member.key-deliver';
 
 export type TeamAction =
   | { kind: 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'item.assign' | 'lease.manual' | 'merge.approve-out-of-scope' | 'lease.integrator' | 'allocation.request' | 'team.stop' | 'team.resume' | 'policy.change' | 'member.availability' | 'snapshot.write' }
   | { kind: 'member.remove'; targetId: string }
+  | { kind: 'member.key-deliver'; targetId: string }
   | { kind: 'member.change-role'; targetId: string; role: Role }
   | { kind: 'item.create' | 'item.edit' | 'item.estimate'; ownDraft: boolean }
   | { kind: 'item.claim'; itemKind: ItemKind }
@@ -60,7 +61,8 @@ export const PERMISSION_MATRIX: Readonly<Record<TeamActionKind, Row>> = Object.f
   'device.revoke': row(true, true, 'self', 'self', 'self'),
   'member.availability': row(true, true, true, true, true),
   'member.skills': row('self-or-manager', 'self-or-manager', 'self-or-manager', 'self-or-manager', 'self-or-manager'),
-  'snapshot.write': MANAGERS
+  'snapshot.write': MANAGERS,
+  'member.key-deliver': MANAGERS
 });
 
 export const ACTION_LABELS: Readonly<Record<TeamActionKind, string>> = Object.freeze({
@@ -90,7 +92,8 @@ export const ACTION_LABELS: Readonly<Record<TeamActionKind, string>> = Object.fr
   'device.revoke': 'revoking devices',
   'member.availability': 'setting availability',
   'member.skills': 'editing skills',
-  'snapshot.write': 'writing snapshots'
+  'snapshot.write': 'writing snapshots',
+  'member.key-deliver': 'delivering team API keys'
 });
 
 export const PERMISSION_REASONS = {
@@ -101,7 +104,8 @@ export const PERMISSION_REASONS = {
   leadOnOwner: 'a lead cannot act on the owner',
   ownerCannotBeRemoved: 'the owner cannot be removed',
   leadOnOwnerDevice: 'a lead cannot add or revoke a device of the owner',
-  policyOwnerOnly: 'only the owner can change team policy'
+  policyOwnerOnly: 'only the owner can change team policy',
+  ownerKey: "the owner's NEAR key is not delivered through the team log"
 } as const;
 
 // Added after the role and action label to explain why a conditional cell said no.
@@ -144,6 +148,8 @@ function overrideDenial(state: PermissionView, role: Role, actorId: string, acti
     case 'member.remove':
       if (action.targetId !== ownerId) { return undefined; }
       return role === 'lead' ? PERMISSION_REASONS.leadOnOwner : PERMISSION_REASONS.ownerCannotBeRemoved;
+    case 'member.key-deliver':
+      return action.targetId === ownerId ? PERMISSION_REASONS.ownerKey : undefined;
     case 'device.add':
     case 'device.revoke':
       return action.memberId === ownerId && role === 'lead' ? PERMISSION_REASONS.leadOnOwnerDevice : undefined;
@@ -182,5 +188,6 @@ export function actionForEvent(event: ImplementedTeamEvent): TeamAction | undefi
     case 'member.skills': return { kind: 'member.skills', memberId: event.body.memberId };
     case 'policy.changed': return { kind: 'policy.change' };
     case 'snapshot.written': return { kind: 'snapshot.write' };
+    case 'member.key-sealed': return { kind: 'member.key-deliver', targetId: event.body.memberId };
   }
 }

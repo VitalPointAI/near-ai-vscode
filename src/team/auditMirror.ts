@@ -9,9 +9,11 @@ import { assertNoSecrets } from '../domain/team/secrets';
 import type { ImplementedEventType, Role, TeamEvent } from '../domain/team/types';
 import { runSerialised, writeFileAtomic } from './teamFile';
 
-// Spec 5.2 roster group, limited to the types Phase 60 implements. policy.changed and snapshot.written are not roster events.
+// Spec 5.2 roster group, limited to the roster types implemented through Phase 61. policy.changed and snapshot.written are not roster events.
+// The entries carry ids, role, type and Lamport only, so invitations and sealed key deliveries expose no email hash, key or sealed field.
 export const ROSTER_AUDIT_TYPES: readonly ImplementedEventType[] = [
-  'team.created', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills'
+  'team.created', 'member.invited', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills',
+  'member.key-sealed'
 ];
 
 const MARK_FILE = 'audit-mark.json';

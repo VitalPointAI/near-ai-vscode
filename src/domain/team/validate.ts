@@ -95,6 +95,13 @@ const LAST_WEEKDAY = 6;
 const MIN_INVITE_TTL_SECONDS = 3600;
 const MAX_INVITE_TTL_SECONDS = 2_592_000;
 const SIGNATURE_BYTES = 64;
+const NONCE_BYTES = 12;
+const TAG_BYTES = 16;
+const MIN_CIPHERTEXT_BYTES = 16;
+const MAX_CIPHERTEXT_BYTES = 525;
+const MAX_SEALED_ENTRIES = 8;
+// The only sealing scheme this version reads. A new scheme is a new string and a new reader, never a silent change.
+const SEAL_SCHEME_NAME = 'x25519-hkdf-sha256-aes-256-gcm-v1';
 
 // Display names: 1..80 characters after trimming, no control characters or line separators.
 export function validateName(value: unknown, path: string): string | undefined {
@@ -185,11 +192,44 @@ function validateSingleEmailHash(value: unknown, path: string): string | undefin
   return validateEmailHashes(value, path) ?? ((value as unknown[]).length === 1 ? undefined : invalid(path));
 }
 
+// A ciphertext is strict base64url of 16 to 525 bytes with no padding. The byte length follows from the text length, then the strict check
+// confirms the alphabet and that re-encoding gives the same text.
+function validateCiphertext(value: unknown, path: string): string | undefined {
+  if (typeof value !== 'string') return invalid(path);
+  const bytes = Math.floor((value.length * 3) / 4);
+  return bytes >= MIN_CIPHERTEXT_BYTES && bytes <= MAX_CIPHERTEXT_BYTES && isStrictBase64url(value, bytes) ? undefined : invalid(path);
+}
+
+function validateSealedEntry(value: unknown, path: string): string | undefined {
+  if (!isRecord(value)) return invalid(path);
+  return checkKeys(value, path, ['device', 'ephemeral', 'nonce', 'tag', 'ciphertext'])
+    ?? validateId(value.device, FINGERPRINT_PATTERN, child(path, 'device'))
+    ?? validateKeyHolder(value.ephemeral, child(path, 'ephemeral'), 'publicKey', PUBLIC_KEY_BYTES)
+    ?? (typeof value.nonce === 'string' && isStrictBase64url(value.nonce, NONCE_BYTES) ? undefined : invalid(child(path, 'nonce')))
+    ?? (typeof value.tag === 'string' && isStrictBase64url(value.tag, TAG_BYTES) ? undefined : invalid(child(path, 'tag')))
+    ?? validateCiphertext(value.ciphertext, child(path, 'ciphertext'));
+}
+
+// One to eight entries, each for a different device.
+function validateSealedList(value: unknown, path: string): string | undefined {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_SEALED_ENTRIES) return invalid(path);
+  const seen = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const entry: unknown = value[index];
+    const problem = validateSealedEntry(entry, `${path}[${index}]`);
+    if (problem !== undefined) return problem;
+    const device = (entry as Fields).device as string;
+    if (seen.has(device)) return invalid(path);
+    seen.add(device);
+  }
+  return undefined;
+}
+
 function validateLamportField(value: unknown, path: string): string | undefined {
   return isSafeIntegerInRange(value, 1, MAX_LAMPORT) ? undefined : invalid(path);
 }
 
-// Exact-key bodies for the ten Phase 60 types (D-31). The signed shapes are permanent, so a test pins each one.
+// Exact-key bodies for the implemented types (D-31). The signed shapes are permanent, so a test pins each one.
 type BodyValidator = (body: Fields) => string | undefined;
 
 const BODY_VALIDATORS: Record<ImplementedEventType, BodyValidator> = {
@@ -222,9 +262,10 @@ const BODY_VALIDATORS: Record<ImplementedEventType, BodyValidator> = {
     ?? validateChoice(body.role, ROLES, 'body.role'),
   'member.removed': (body) => checkKeys(body, 'body', ['memberId'])
     ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId'),
-  'device.added': (body) => checkKeys(body, 'body', ['memberId', 'device'])
+  'device.added': (body) => checkKeys(body, 'body', ['memberId', 'device'], ['sealKey'])
     ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
-    ?? validateDeviceRef(body.device, 'body.device'),
+    ?? validateDeviceRef(body.device, 'body.device')
+    ?? (has(body, 'sealKey') ? validateKeyHolder(body.sealKey, 'body.sealKey', 'publicKey', PUBLIC_KEY_BYTES) : undefined),
   'device.revoked': (body) => checkKeys(body, 'body', ['memberId', 'fingerprint'])
     ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
     ?? validateId(body.fingerprint, FINGERPRINT_PATTERN, 'body.fingerprint'),
@@ -234,6 +275,11 @@ const BODY_VALIDATORS: Record<ImplementedEventType, BodyValidator> = {
   'member.skills': (body) => checkKeys(body, 'body', ['memberId', 'skills'])
     ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
     ?? validateSkills(body.skills, 'body.skills'),
+  'member.key-sealed': (body) => checkKeys(body, 'body', ['memberId', 'keyId', 'scheme', 'sealed'])
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId')
+    ?? validateId(body.keyId, NEAR_ID_PATTERN, 'body.keyId')
+    ?? (body.scheme === SEAL_SCHEME_NAME ? undefined : invalid('body.scheme'))
+    ?? validateSealedList(body.sealed, 'body.sealed'),
   'policy.changed': (body) => checkKeys(body, 'body', ['changes'])
     ?? validatePolicyChanges(body.changes, 'body.changes'),
   'snapshot.written': (body) => checkKeys(body, 'body', ['coversThrough', 'lamport', 'stateHash', 'path'])

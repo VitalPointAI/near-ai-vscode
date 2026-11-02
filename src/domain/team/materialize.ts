@@ -1,4 +1,4 @@
-// Materialiser for the team event log: the full D-09 validation pipeline and the state transitions for the ten Phase 60 event types.
+// Materialiser for the team event log: the full D-09 validation pipeline and the state transitions for the implemented event types.
 // Every client runs exactly this code on every committed entry, so it is pure and deterministic: no I/O, no clock, no secret scanning
 // (acceptance must not depend on detector versions), and ordering comes only from the order entries are applied in (D-03).
 import { createHash } from 'node:crypto';
@@ -154,6 +154,24 @@ function lookupMember(state: TeamState, memberId: string): Member | string {
   return member.removedEvent === undefined ? member : R.memberRemoved;
 }
 
+// The member's devices that can receive a sealed key: bound to them, not revoked, and published with an X25519 key (D-24).
+function sealCapableDevices(member: Member): string[] {
+  return member.devices.filter((device) => device.revokedEvent === undefined && device.sealKey !== undefined).map((device) => device.fingerprint).sort(compareText);
+}
+
+// D-23 and D-24 for member.key-sealed, after the member itself was found: joined, a key id never delivered before (every delivery is a new
+// key, so a device change always means a new key and an existing key is never re-sealed), every sealed device one of the member's own active
+// devices with a seal key, and the sealed set equal to all of them.
+function keyDeliveryProblem(state: TeamState, member: Member, keyId: string, sealedDevices: string[]): string | undefined {
+  if (member.status === 'invited') return R.notJoined;
+  if (member.nearApiKeyId === keyId || (member.retiredNearKeyIds ?? []).includes(keyId)) return R.keyReused;
+  for (const fingerprint of sealedDevices) {
+    const device = state.deviceIndex.get(fingerprint) === member.id ? member.devices.find((candidate) => candidate.fingerprint === fingerprint) : undefined;
+    if (device === undefined || device.revokedEvent !== undefined || device.sealKey === undefined) return R.noSealKey;
+  }
+  return sameList([...sealedDevices].sort(compareText), sealCapableDevices(member)) ? undefined : R.keyDevices;
+}
+
 // D-09 step 7: every entity the event names must exist at this position.
 function referenceProblem(state: TeamState, event: ImplementedTeamEvent): string | undefined {
   switch (event.type) {
@@ -189,6 +207,11 @@ function referenceProblem(state: TeamState, event: ImplementedTeamEvent): string
       if (key === undefined) return R.deviceNotBound;
       if (key.revokedEvent !== undefined) return R.deviceRevoked;
       return member.devices.filter((device) => device.revokedEvent === undefined).length === 1 ? R.lastDevice : undefined;
+    }
+    case 'member.key-sealed': {
+      const member = lookupMember(state, event.body.memberId);
+      if (typeof member === 'string') return member;
+      return keyDeliveryProblem(state, member, event.body.keyId, event.body.sealed.map((entry) => entry.device));
     }
     case 'snapshot.written': {
       // The hash is computed before the transition and only when such an event arrives, about once per 500 events.
@@ -270,12 +293,13 @@ function applyTransition(state: TeamState, event: ImplementedTeamEvent, commitTi
       member.removedAt = event.at;
       return;
     }
-    case 'device.added':
-      memberOf(state, event.body.memberId).devices.push({
-        fingerprint: event.body.device.fingerprint, publicKey: event.body.device.publicKey, addedBy: event.author, addedEvent: event.id
-      });
+    case 'device.added': {
+      const added: DeviceKey = { fingerprint: event.body.device.fingerprint, publicKey: event.body.device.publicKey, addedBy: event.author, addedEvent: event.id };
+      if (event.body.sealKey !== undefined) added.sealKey = event.body.sealKey.publicKey;
+      memberOf(state, event.body.memberId).devices.push(added);
       state.deviceIndex.set(event.body.device.fingerprint, event.body.memberId);
       return;
+    }
     case 'device.revoked': {
       const key = memberOf(state, event.body.memberId).devices.find((device) => device.fingerprint === event.body.fingerprint);
       if (key === undefined) throw new Error(`Device ${event.body.fingerprint} vanished between the reference check and the transition.`);
@@ -293,6 +317,15 @@ function applyTransition(state: TeamState, event: ImplementedTeamEvent, commitTi
     case 'member.skills':
       memberOf(state, event.body.memberId).skills = [...event.body.skills];
       return;
+    case 'member.key-sealed': {
+      // The previous key moves to the retired list, so removal can revoke every key ever sealed to this member (D-24).
+      const member = memberOf(state, event.body.memberId);
+      if (member.nearApiKeyId !== undefined) member.retiredNearKeyIds = [...(member.retiredNearKeyIds ?? []), member.nearApiKeyId];
+      member.nearApiKeyId = event.body.keyId;
+      member.nearKeyDevices = event.body.sealed.map((entry) => entry.device).sort(compareText);
+      member.nearKeyEvent = event.id;
+      return;
+    }
     case 'policy.changed':
       state.team.policy = applyPolicyChanges(state.team.policy, event.body.changes);
       return;
@@ -508,7 +541,7 @@ function parseInvite(value: unknown, path: string): MemberInvite {
 
 function parseMember(value: unknown, path: string): Member {
   const raw = plainRecord(value, path, ['id', 'name', 'emailHashes', 'role', 'devices', 'skills', 'availability', 'wipLimit', 'joinedAt', 'joinedEvent'],
-    ['workingHours', 'nearApiKeyId', 'removedAt', 'removedEvent', 'status', 'invite', 'invitedEvent', 'pendingRole', 'allocationNanoUsd']);
+    ['workingHours', 'nearApiKeyId', 'removedAt', 'removedEvent', 'status', 'invite', 'invitedEvent', 'pendingRole', 'allocationNanoUsd', 'nearKeyDevices', 'nearKeyEvent', 'retiredNearKeyIds']);
   const devices = items(raw.devices, `${path}.devices`, parseDeviceKey);
   // Only an invited member may have no device; everyone else was bound by a join.
   if (raw.status !== undefined && raw.status !== 'invited') bad(`${path}.status`);
@@ -531,6 +564,9 @@ function parseMember(value: unknown, path: string): Member {
   if (raw.invitedEvent !== undefined) member.invitedEvent = patterned(raw.invitedEvent, `${path}.invitedEvent`, EVENT_ID_PATTERN);
   if (raw.pendingRole !== undefined) member.pendingRole = choice<Role>(raw.pendingRole, `${path}.pendingRole`, ROLES);
   if (raw.allocationNanoUsd !== undefined) member.allocationNanoUsd = integer(raw.allocationNanoUsd, `${path}.allocationNanoUsd`);
+  if (raw.nearKeyDevices !== undefined) member.nearKeyDevices = items(raw.nearKeyDevices, `${path}.nearKeyDevices`, (device, devicePath) => patterned(device, devicePath, FINGERPRINT_PATTERN));
+  if (raw.nearKeyEvent !== undefined) member.nearKeyEvent = patterned(raw.nearKeyEvent, `${path}.nearKeyEvent`, EVENT_ID_PATTERN);
+  if (raw.retiredNearKeyIds !== undefined) member.retiredNearKeyIds = items(raw.retiredNearKeyIds, `${path}.retiredNearKeyIds`, (keyId, keyPath) => shortText(keyId, keyPath));
   return member;
 }
 
