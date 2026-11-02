@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 61
 current_phase_name: Invitations, joining, removal, NEAR org and key integration
 status: executing
-stopped_at: Completed 61-11-PLAN.md
-last_updated: "2026-11-02T02:42:23.742Z"
+stopped_at: Completed 61-12-PLAN.md
+last_updated: "2026-11-02T02:56:29.496Z"
 last_activity: 2026-11-01
 last_activity_desc: Phase 61 execution started
-state_head: 82c660d42a0b65dbe9ba33223b53d811947f0f81
+state_head: 2cb7510b5b048326db668d8083f435c46ec81d3b
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 26
-  completed_plans: 23
+  completed_plans: 24
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 61 (Invitations, joining, removal, NEAR org and key integration) — EXECUTING
-Plan: 12 of 14
+Plan: 13 of 14
 Status: Ready to execute
 Last activity: 2026-11-01 — Phase 61 execution started
 
@@ -77,6 +77,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P09 | 45min | 2 tasks | 2 files |
 | Phase 61 P10 | 20 min | 3 tasks | 3 files |
 | Phase 61 P11 | 13 min | 3 tasks | 4 files |
+| Phase 61 P12 | 40min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -121,6 +122,9 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-10: rotation cap is old limit minus lifetime usage floored at 0; old key is zeroed then revoked only after the new key is in the log; a member with no seal-capable device left is told the old key stays valid on computers that already hold it
 - [Phase 61]: 61-10: deliverMemberKey refuses a member who already has a key and the append builder re-checks the key being replaced, so two leads cannot leave an unrecorded spendable key; TeamLog.findEvent added to read sealed entries
 - [Phase 61]: 61-11: removeMember asks the permission question and refuses self-removal before any NEAR call; finished NEAR steps are kept as done items only when a step is unfinished; the lead's NEAR organization member is matched by email hash, and with no email from NEAR (the real server) the step is a manual item naming the lead
+- [Phase 61]: 61-12: notification buttons call nearAi.team.manageMembers with action confirm, remove, deliver-key or rotate-key; shown-once messages are remembered by event id in notified.json (ids only)
+- [Phase 61]: 61-12: keyScope is decided when a provider entry is built; team profile = team, other profile in a project with team.json = personal, solo = no tag and no ledger field
+- [Phase 61]: 61-12: Join offer only where a command runner is supplied; a failed key install is not retried for 5 minutes
 
 ### Pending Todos
 
@@ -142,8 +146,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T02:42:23.602Z
-Stopped at: Completed 61-11-PLAN.md
+Last session: 2026-11-02T02:56:29.354Z
+Stopped at: Completed 61-12-PLAN.md
 Resume file: None
 
 ## Notes

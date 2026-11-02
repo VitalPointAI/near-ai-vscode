@@ -105,7 +105,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. After the full invite, join and remove flow, a privacy canary finds no secret (API key, session token, clear-text invite code) in the coordination branch, `team.json`, settings, audit or transcripts.
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 11/14 plans executed in 7 waves
+**Plans**: 12/14 plans executed in 7 waves
 **UI hint**: yes
 
 **Wave 1**
@@ -128,7 +128,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [x] 61-11-PLAN.md — Remove: limit 0, member.removed, revoke, org removal for leads, checklist, removed member's cleanup (TEAM-03)
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 61-12-PLAN.md — Session reactions: confirmation notifications, pending count, key install, own removal, Join offer, key-scope tagging (TEAM-02, TEAM-03)
+- [x] 61-12-PLAN.md — Session reactions: confirmation notifications, pending count, key install, own removal, Join offer, key-scope tagging (TEAM-02, TEAM-03)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 - [ ] 61-13-PLAN.md — Commands: Invite, Join, Manage Team Members, Link NEAR Organization, Sign Out of NEAR (TEAM-02, TEAM-03)
@@ -239,7 +239,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
-| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 11/14 | In Progress | - |
+| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 12/14 | In Progress | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 0/TBD | Not started | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
