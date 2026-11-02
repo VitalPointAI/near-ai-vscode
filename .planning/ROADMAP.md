@@ -105,8 +105,36 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. After the full invite, join and remove flow, a privacy canary finds no secret (API key, session token, clear-text invite code) in the coordination branch, `team.json`, settings, audit or transcripts.
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: TBD
+**Plans**: 14 plans in 7 waves
 **UI hint**: yes
+
+**Wave 1**
+- [ ] 61-01-PLAN.md — Tracer: invite and self-bound join with a code-derived countersignature over real git; join rules, commit-time expiry, cancel, re-issue (TEAM-02)
+- [ ] 61-02-PLAN.md — Typed NEAR org, invitation, key, spend-limit and usage client plus a fake NEAR server with the real quirks (TEAM-02, TEAM-03)
+- [ ] 61-03-PLAN.md — X25519 seal key per device, sealed key delivery crypto, strict-shape secret exemptions (TEAM-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 61-04-PLAN.md — Kept per-team NEAR session with refresh rotation, team key profile, shared browser sign-in (TEAM-02)
+- [ ] 61-05-PLAN.md — member.key-sealed event, device seal keys, rotation rule and the lead's attention list (TEAM-02)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 61-06-PLAN.md — Release of claims, leases and allocations on removal; snapshot compatibility and determinism (TEAM-03)
+- [ ] 61-07-PLAN.md — Lead invites: one-string bundle, repo URL cleaning, lead NEAR admin invitation, re-issue, cleanup checklist (TEAM-02)
+- [ ] 61-08-PLAN.md — Link a team to a NEAR organization with a team.json-only commit (TEAM-02)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 61-09-PLAN.md — Join: bundle, clone offer, observer until confirmed, lead accepts NEAR invitation, own key without an organization (TEAM-02)
+- [ ] 61-10-PLAN.md — Confirm: lead-created key capped at the allocation, sealed to the member's device and installed; rotation (TEAM-02)
+- [ ] 61-11-PLAN.md — Remove: limit 0, member.removed, revoke, org removal for leads, checklist, removed member's cleanup (TEAM-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 61-12-PLAN.md — Session reactions: confirmation notifications, pending count, key install, own removal, Join offer, key-scope tagging (TEAM-02, TEAM-03)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 61-13-PLAN.md — Commands: Invite, Join, Manage Team Members, Link NEAR Organization, Sign Out of NEAR (TEAM-02, TEAM-03)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [ ] 61-14-PLAN.md — Full-flow test on three clones and the fake NEAR, privacy canary, opt-in live test, phase gate (TEAM-02, TEAM-03)
 
 ### Phase 62: Work model, GSD import, Team Board (live, read and move)
 
@@ -211,7 +239,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
-| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 0/TBD | Not started | - |
+| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 0/14 | Planned | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 0/TBD | Not started | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
