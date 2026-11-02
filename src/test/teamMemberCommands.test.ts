@@ -6,9 +6,14 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
+import { createDeviceIdentity, deviceKeySecretName, sealKeySecretName } from '../team/identity';
 import { parseInviteBundle } from '../team/inviteBundle';
 import { INVITE_FILE } from '../team/invite';
-import { teamStorageDir } from '../team/teamFile';
+import { nearSessionSecretName } from '../team/nearSession';
+import { LINK_COMMIT_MESSAGE } from '../team/nearLink';
+import { TEAM_FILE_REL, readTeamFile, teamStorageDir } from '../team/teamFile';
+import { startFakeNear } from './helpers/fakeNear';
+import type { FakeNear } from './helpers/fakeNear';
 import { makeCanaries } from './helpers/teamCanary';
 import { MemorySecrets, createTeamFixture, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
@@ -21,7 +26,7 @@ const commandsModule = require('../services/team/teamCommands') as typeof import
 const memberModule = require('../services/team/memberCommands') as typeof import('../services/team/memberCommands');
 test.after(() => { uninstall(); });
 const { ENABLE_COMMAND, registerTeamMode } = commandsModule;
-const { INVITE_COMMAND, parseUsdToNanoUsd } = memberModule;
+const { INVITE_COMMAND, JOIN_COMMAND, LINK_NEAR_COMMAND, SIGN_OUT_NEAR_COMMAND, parseUsdToNanoUsd } = memberModule;
 
 const EM_DASH = '—';
 const PUBLIC_URL = 'https://example.invalid/team.git';
@@ -70,12 +75,40 @@ interface Team {
   context: FakeContext;
   handle: ReturnType<typeof registerTeamMode>;
   canaries: ReturnType<typeof makeCanaries>;
+  fake: FakeNear | undefined;
+  // How many times the lead's browser sign-in was asked for, and the tokens it hands back (the lead's by default).
+  signIns: { count: number; tokens: { accessToken: string; refreshToken: string } | undefined };
   run(command: string, ...args: unknown[]): Promise<void>;
 }
 
+function leadLog(team: Team): NonNullable<ReturnType<Team['handle']['session']>> {
+  const session = team.handle.session();
+  assert.ok(session !== undefined, 'the lead window has a session');
+  return session;
+}
+
+// Waits for a sync that a command nudged to finish, then stops the window, so the folders can be removed without a sync writing into them.
+async function closeWindow(window: { context: FakeContext; handle: ReturnType<typeof registerTeamMode> | undefined }): Promise<void> {
+  await window.handle?.session()?.sync();
+  for (const subscription of window.context.subscriptions) subscription.dispose();
+}
+
+async function removeFixture(fixture: TeamFixture): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fixture.cleanup();
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOTEMPTY' || attempt >= 5) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+
 // A lead's window: Enable Team Mode through the command (so the session, device key and team.json are the product's own), then the project's
-// origin is given a public-looking address, which the bundle must carry.
-async function withTeam(work: (team: Team) => Promise<void>): Promise<void> {
+// origin is given a public-looking address, which the bundle must carry. With `near` there is also a fake NEAR with one organization the lead
+// owns (two workspaces), one the lead is only a member of, and a second person who can be invited as a lead.
+async function withTeam(work: (team: Team) => Promise<void>, options: { near?: boolean } = {}): Promise<void> {
   resetStub();
   const fixture = await createTeamFixture({ clones: ['a', 'b'], initialised: true });
   const root = fixture.clones['a'] as string;
@@ -83,9 +116,24 @@ async function withTeam(work: (team: Team) => Promise<void>): Promise<void> {
   const canaries = makeCanaries();
   const storage = fixture.storageDir('a');
   const context = createFakeContext(storage, secrets);
+  const fake = options.near === true ? await startFakeNear() : undefined;
+  const signIns: Team['signIns'] = { count: 0, tokens: undefined };
+  if (fake !== undefined) {
+    signIns.tokens = fake.addUser({ id: 'user-lead', username: 'lead', email: 'lead@example.invalid' });
+    fake.addOrganization({ id: 'org-1', name: 'Team Org', members: [{ userId: 'user-lead', role: 'owner' }] });
+    fake.addOrganization({ id: 'org-2', name: 'Other Org', members: [{ userId: 'user-other', role: 'owner' }, { userId: 'user-lead', role: 'member' }] });
+    fake.addWorkspace({ id: 'ws-1', organizationId: 'org-1', name: 'Team workspace' });
+    fake.addWorkspace({ id: 'ws-2', organizationId: 'org-1', name: 'Second workspace' });
+    fake.addWorkspace({ id: 'ws-9', organizationId: 'org-2', name: 'Other workspace' });
+  }
+  let registeredHandle: ReturnType<typeof registerTeamMode> | undefined;
   try {
     stub.setWorkspaceFolders([root]);
-    const handle = registerTeamMode(context as never);
+    const handle = registerTeamMode(context as never, fake === undefined ? {} : {
+      nearBaseUrl: fake.baseUrl,
+      signIn: async () => { signIns.count += 1; return signIns.tokens; }
+    });
+    registeredHandle = handle;
     assert.equal(await handle.ready, 'solo');
     const run = async (command: string, ...args: unknown[]): Promise<void> => {
       const handler = stub.commands.get(command);
@@ -98,11 +146,59 @@ async function withTeam(work: (team: Team) => Promise<void>): Promise<void> {
     gitIn(root, ['config', `url.${fixture.remote}.insteadOf`, PUBLIC_URL]);
     gitIn(root, ['remote', 'set-url', 'origin', PUBLIC_URL]);
     clearUi();
-    await work({ fixture, root, storage, secrets, context, handle, canaries, run });
+    await work({ fixture, root, storage, secrets, context, handle, canaries, fake, signIns, run });
   } finally {
-    for (const subscription of context.subscriptions) subscription.dispose();
-    await fixture.cleanup();
+    await closeWindow({ context, handle: registeredHandle });
+    await fake?.close();
+    await removeFixture(fixture);
   }
+}
+
+// The lead links the team to Team Org / Team workspace through the Link command, then pushes the code branch so a clone sees team.json.
+async function linkAndPush(t: Team): Promise<void> {
+  stub.quickPickAnswers.push('Team Org', 'Team workspace');
+  await t.run(LINK_NEAR_COMMAND);
+  gitIn(t.root, ['push', '-q', 'origin', 'main']);
+  clearUi();
+}
+
+interface Joiner { root: string; storage: string; secrets: MemorySecrets; context: FakeContext; handle: ReturnType<typeof registerTeamMode>; run(command: string, ...args: unknown[]): Promise<void> }
+
+// A teammate's window on the second clone, after the lead pushed team.json. Opening it replaces the lead window's registered commands in the stub,
+// as a second VS Code window would have its own. `folder: false` is a window with no project open.
+async function openJoiner(t: Team, options: { folder?: boolean; pull?: boolean; secrets?: MemorySecrets } = {}): Promise<Joiner> {
+  const root = t.fixture.clones['b'] as string;
+  if (options.pull !== false) gitIn(root, ['pull', '-q', '--ff-only']);
+  const secrets = options.secrets ?? new MemorySecrets();
+  const storage = t.fixture.storageDir('b');
+  const context = createFakeContext(storage, secrets);
+  stub.setWorkspaceFolders(options.folder === false ? [] : [root]);
+  const fake = t.fake;
+  const handle = registerTeamMode(context as never, fake === undefined ? {} : {
+    nearBaseUrl: fake.baseUrl,
+    signIn: async () => { t.signIns.count += 1; return t.signIns.tokens; }
+  });
+  await handle.ready;
+  clearUi();
+  const run = async (command: string, ...args: unknown[]): Promise<void> => {
+    const handler = stub.commands.get(command);
+    assert.ok(handler !== undefined, `${command} is registered`);
+    await handler(...args);
+  };
+  return { root, storage, secrets, context, handle, run };
+}
+
+// The lead invites someone and the bundle comes back from the clipboard.
+async function inviteBundle(t: Team, person: { name: string; email: string; role: string; amount?: string }): Promise<string> {
+  stub.inputAnswers.push(person.name, person.email, person.amount ?? '5');
+  stub.quickPickAnswers.push(person.role, '7 days');
+  if (t.handle.session()?.teamFile.near === undefined) stub.quickPickAnswers.push('Skip');
+  stub.setMessageResponder(copyWhenOffered);
+  const before = stub.clipboardWrites.length;
+  await t.run(INVITE_COMMAND);
+  stub.setMessageResponder(undefined);
+  assert.equal(stub.clipboardWrites.length, before + 1, 'the bundle was copied');
+  return stub.clipboardWrites[before] as string;
 }
 
 const outputLines = (): string[] => stub.outputChannels.flatMap((channel) => channel.lines);
@@ -266,4 +362,263 @@ test('nothing the Invite command shows contains an em-dash', async () => {
     await t.run(INVITE_COMMAND);
     assert.equal(everythingShown().includes(EM_DASH), false);
   });
+});
+
+// ---- Join Team --------------------------------------------------------------------------------------------------------------------------
+
+test('Join with no project open offers Clone repository, runs git.clone with the invite address, and writes nothing', async () => {
+  await withTeam(async (t) => {
+    const bundleText = await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
+    gitIn(t.root, ['push', '-q', 'origin', 'main']);
+    const j = await openJoiner(t, { folder: false });
+    stub.inputAnswers.push(bundleText);
+    stub.setMessageResponder((_text, actions) => (actions.includes('Clone repository') ? 'Clone repository' : undefined));
+    await j.run(JOIN_COMMAND);
+
+    assert.equal(stub.inputRequests[0]?.password, true, 'the pasted invite is masked');
+    assert.deepEqual(stub.notifications.map((entry) => entry.message), [
+      'This invite is for a project that is not open. Clone it, then run NEAR AI: Join Team in the new window and paste the invite again.'
+    ]);
+    assert.deepEqual(stub.notificationActions[0], ['Clone repository']);
+    assert.deepEqual(stub.externalCommands, [{ command: 'git.clone', args: [PUBLIC_URL] }]);
+    assert.equal(j.secrets.values.size, 0, 'nothing was stored in SecretStorage');
+    assert.equal(existsSync(j.storage), false, 'nothing was written to the extension storage');
+    assert.equal(everythingShown().includes(PUBLIC_URL), false, 'the repository address is not shown or logged');
+    assert.equal(everythingShown().includes(bundleText), false);
+    await closeWindow(j);
+  });
+});
+
+test('Join inside the matching project joins as an observer, says what comes next, and restarts the session with the new device key', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    const bundleText = await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
+    gitIn(t.root, ['push', '-q', 'origin', 'main']);
+    const j = await openJoiner(t);
+    assert.equal(j.handle.session()?.memberId(), undefined, 'before joining this computer is not on the team');
+    const requestsBefore = (t.fake?.requests.length ?? 0);
+    stub.inputAnswers.push(bundleText, 'Dana D');
+    await j.run(JOIN_COMMAND);
+
+    assert.equal(stub.inputRequests[0]?.password, true, 'the bundle is masked');
+    assert.equal(stub.inputRequests[1]?.value, 'Team Test', 'the display name defaults to git user.name');
+    assert.equal(t.signIns.count, 0, 'a developer never signs in to NEAR');
+    assert.equal(t.fake?.requests.length, requestsBefore, 'and the join made no NEAR request');
+    assert.ok(stub.notifications.some((entry) => entry.message === 'You joined Invite team as an observer. Your lead confirms you and sends your team key.'), stub.notifications.map((entry) => entry.message).join(' | '));
+    const memberId = parseInviteBundle(bundleText).member;
+    assert.equal(j.handle.session()?.memberId(), memberId, 'the restarted session signs with the new device key');
+    assert.ok(j.secrets.values.has(deviceKeySecretName((await readTeamFile(j.root))?.teamId as string)));
+    assert.equal(everythingShown().includes(bundleText), false);
+    assert.equal(everythingShown().includes(parseInviteBundle(bundleText).code), false);
+    await closeWindow(j);
+  }, { near: true });
+});
+
+test('Join in a team without a NEAR organization asks for the member\'s own key in a masked input and says spend is not capped', async () => {
+  await withTeam(async (t) => {
+    const bundleText = await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
+    gitIn(t.root, ['push', '-q', 'origin', 'main']);
+    const j = await openJoiner(t);
+    stub.inputAnswers.push(bundleText, 'Dana D');
+    await j.run(JOIN_COMMAND);
+    const keyPrompt = stub.inputRequests[2];
+    assert.equal(keyPrompt?.password, true, 'the key is masked');
+    assert.equal(stub.notifications.filter((entry) => entry.message.includes(NO_ORG_NOTICE)).length, 1, 'the notice is shown once');
+    assert.ok(stub.notifications.some((entry) => entry.message.startsWith('You joined Invite team as an observer.')));
+    assert.equal(j.handle.session()?.memberId(), parseInviteBundle(bundleText).member);
+    await closeWindow(j);
+  });
+});
+
+test('Join as a lead invitee signs in to NEAR once and reports the organization invitation', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    const bundleText = await inviteBundle(t, { name: 'Lee', email: 'lee@example.invalid', role: 'Lead' });
+    gitIn(t.root, ['push', '-q', 'origin', 'main']);
+    const j = await openJoiner(t);
+    const before = t.signIns.count;
+    t.signIns.tokens = t.fake?.addUser({ id: 'user-lee-2', username: 'lee2', email: 'lee@example.invalid' });
+    stub.inputAnswers.push(bundleText, 'Lee L');
+    await j.run(JOIN_COMMAND);
+    assert.equal(t.signIns.count, before + 1, 'the lead invitee signed in once');
+    assert.ok(stub.notifications.some((entry) => entry.message.includes('NEAR organization')), stub.notifications.map((entry) => entry.message).join(' | '));
+    assert.equal(everythingShown().includes(t.signIns.tokens?.refreshToken as string), false, 'no token is shown');
+    await closeWindow(j);
+  }, { near: true });
+});
+
+test('Join refuses text that is not an invite without echoing it, and cancelling the paste changes nothing', async () => {
+  await withTeam(async (t) => {
+    gitIn(t.root, ['push', '-q', 'origin', 'main']);
+    const j = await openJoiner(t);
+    await j.run(JOIN_COMMAND);
+    assert.equal(stub.notifications.length, 0, 'cancelling the paste says nothing');
+    stub.inputAnswers.push('definitely not an invite');
+    await j.run(JOIN_COMMAND);
+    assert.equal(stub.notifications.length, 1);
+    assert.equal(stub.notifications[0]?.level, 'error');
+    assert.equal(everythingShown().includes('definitely not an invite'), false);
+    assert.equal(j.secrets.values.size, 0);
+    await closeWindow(j);
+  });
+});
+
+test('an unfinished earlier join is offered a reset only when the team list does not show this computer', async () => {
+  await withTeam(async (t) => {
+    const bundleText = await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
+    gitIn(t.root, ['push', '-q', 'origin', 'main']);
+    const teamId = (await readTeamFile(t.root))?.teamId as string;
+    // An interrupted join left a device key behind on the teammate's computer.
+    const leftover = new MemorySecrets();
+    await createDeviceIdentity(leftover, teamId);
+    assert.ok(leftover.values.has(deviceKeySecretName(teamId)));
+    const j = await openJoiner(t, { secrets: leftover });
+    stub.inputAnswers.push(bundleText, 'Dana D');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Remove unfinished keys') ? 'Remove unfinished keys' : undefined));
+    await j.run(JOIN_COMMAND);
+    assert.equal(j.secrets.values.has(deviceKeySecretName(teamId)), false, 'the unfinished keys were removed');
+    assert.equal(j.secrets.values.has(sealKeySecretName(teamId)), false);
+    assert.ok(stub.notifications.some((entry) => entry.message.includes('re-issue')), 'it tells the person to ask for a re-issued invite');
+    await closeWindow(j);
+  });
+});
+
+// ---- Link Team to NEAR Organization -----------------------------------------------------------------------------------------------------
+
+test('Link signs in, lists only organizations the lead owns or administers, commits team.json only, and pushes only when asked', async () => {
+  await withTeam(async (t) => {
+    stub.quickPickAnswers.push('Team Org', 'Second workspace');
+    const remoteBefore = gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']);
+    await t.run(LINK_NEAR_COMMAND);
+
+    assert.equal(t.signIns.count, 1, 'signed in once');
+    assert.deepEqual(stub.quickPickRequests[0]?.labels, ['Team Org'], 'the organization where the lead is only a member is not offered');
+    assert.deepEqual(stub.quickPickRequests[1]?.labels, ['Team workspace', 'Second workspace']);
+    assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-2' });
+    assert.equal(gitIn(t.root, ['log', '-1', '--format=%s']), LINK_COMMIT_MESSAGE);
+    assert.equal(gitIn(t.root, ['show', '--name-only', '--format=', 'HEAD']), TEAM_FILE_REL);
+    assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), remoteBefore, 'nothing was pushed');
+    assert.ok(t.secrets.values.has(nearSessionSecretName((await readTeamFile(t.root))?.teamId as string)), 'the sign-in is kept for this team');
+    const offer = stub.notifications.findIndex((entry) => entry.message.startsWith('Linked Invite team to Team Org'));
+    assert.ok(offer >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
+    assert.deepEqual(stub.notificationActions[offer], ['Push']);
+    assert.equal(t.handle.session()?.teamFile.near?.workspaceId, 'ws-2', 'the session was restarted on the new team.json');
+    assert.equal(everythingShown().includes(t.signIns.tokens?.refreshToken as string), false);
+  }, { near: true });
+
+  await withTeam(async (t) => {
+    stub.quickPickAnswers.push('Team Org', 'Team workspace');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Push') ? 'Push' : undefined));
+    await t.run(LINK_NEAR_COMMAND);
+    assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), gitIn(t.root, ['rev-parse', 'HEAD']), 'choosing Push pushed the branch');
+  }, { near: true });
+});
+
+test('Link does not sign in again when this team already has a NEAR session, says so when already linked, and asks before replacing a link', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    const signIns = t.signIns.count;
+    stub.quickPickAnswers.push('Team Org', 'Team workspace');
+    const head = gitIn(t.root, ['rev-parse', 'HEAD']);
+    await t.run(LINK_NEAR_COMMAND);
+    assert.equal(t.signIns.count, signIns, 'no second sign-in');
+    assert.equal(gitIn(t.root, ['rev-parse', 'HEAD']), head, 'linking the same organization again commits nothing');
+    assert.ok(stub.notifications.some((entry) => entry.message.includes('already linked')), stub.notifications.map((entry) => entry.message).join(' | '));
+  }, { near: true });
+});
+
+test('Link of a different organization is only done after a clear confirmation', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    const head = gitIn(t.root, ['rev-parse', 'HEAD']);
+    stub.quickPickAnswers.push('Team Org', 'Second workspace');
+    await t.run(LINK_NEAR_COMMAND);
+    assert.equal(gitIn(t.root, ['rev-parse', 'HEAD']), head, 'declining the confirmation changes nothing');
+    assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' });
+    clearUi();
+    stub.quickPickAnswers.push('Team Org', 'Second workspace');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Replace link') ? 'Replace link' : undefined));
+    await t.run(LINK_NEAR_COMMAND);
+    assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-2' });
+  }, { near: true });
+});
+
+// ---- Sign Out of NEAR (Team) ------------------------------------------------------------------------------------------------------------
+
+test('Sign out deletes only this team\'s NEAR session, and with none says there is nothing to sign out of', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    const teamId = (await readTeamFile(t.root))?.teamId as string;
+    t.secrets.values.set(nearSessionSecretName('team-other'), 'another team session');
+    assert.ok(t.secrets.values.has(deviceKeySecretName(teamId)));
+    await t.run(SIGN_OUT_NEAR_COMMAND);
+    assert.equal(t.secrets.values.has(nearSessionSecretName(teamId)), false);
+    assert.equal(t.secrets.values.has(nearSessionSecretName('team-other')), true, 'another team keeps its session');
+    assert.ok(t.secrets.values.has(deviceKeySecretName(teamId)), 'the device key is untouched');
+    assert.deepEqual(stub.notifications.map((entry) => entry.message), ['Signed out of NEAR for Invite team.']);
+    clearUi();
+    await t.run(SIGN_OUT_NEAR_COMMAND);
+    assert.equal(stub.notifications.length, 1);
+    assert.ok(stub.notifications[0]?.message.includes('nothing to sign out of'));
+  }, { near: true });
+});
+
+// ---- Invite in a team linked to NEAR ----------------------------------------------------------------------------------------------------
+
+test('inviting a developer in a linked team never signs in to NEAR or invites them to the organization', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await t.run(SIGN_OUT_NEAR_COMMAND);
+    clearUi();
+    const before = { signIns: t.signIns.count, requests: t.fake?.requests.length };
+    await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
+    assert.equal(t.signIns.count, before.signIns);
+    assert.equal(t.fake?.requests.length, before.requests, 'no NEAR request at all');
+    assert.equal(stub.notifications.some((entry) => entry.message === NO_ORG_NOTICE), false, 'no degraded-team notice in a linked team');
+  }, { near: true });
+});
+
+test('inviting a lead in a linked team asks the lead to sign in to NEAR first, and then invites them to the organization', async () => {
+  await withTeam(async (t) => {
+    await linkAndPush(t);
+    await t.run(SIGN_OUT_NEAR_COMMAND);
+    clearUi();
+    stub.inputAnswers.push('Lee', 'lee@example.invalid', '5');
+    stub.quickPickAnswers.push('Lead', '7 days');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Sign in') ? 'Sign in' : actions.includes('Copy') ? 'Copy' : undefined));
+    const before = t.signIns.count;
+    await t.run(INVITE_COMMAND);
+    assert.equal(t.signIns.count, before + 1, 'the lead was asked to sign in');
+    assert.notEqual(t.fake?.emailedToken('lee@example.invalid'), undefined, 'the NEAR organization invitation was sent');
+    assert.equal(stub.clipboardWrites.length, 1);
+  }, { near: true });
+});
+
+test('inviting in a linked team whose NEAR link is not pushed yet warns that a teammate who clones now would not see it', async () => {
+  await withTeam(async (t) => {
+    stub.quickPickAnswers.push('Team Org', 'Team workspace');
+    await t.run(LINK_NEAR_COMMAND);
+    clearUi();
+    await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
+    const warning = stub.notifications.findIndex((entry) => entry.level === 'warn' && entry.message.includes('not pushed'));
+    assert.ok(warning >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
+    assert.deepEqual(stub.notificationActions[warning], ['Push']);
+    clearUi();
+    gitIn(t.root, ['push', '-q', 'origin', 'main']);
+    await inviteBundle(t, { name: 'Eve', email: 'eve@example.invalid', role: 'Developer' });
+    assert.equal(stub.notifications.some((entry) => entry.message.includes('not pushed')), false, 'no warning once the link is pushed');
+  }, { near: true });
+});
+
+test('choosing Link a NEAR organization while inviting links the team first and the bundle carries the link', async () => {
+  await withTeam(async (t) => {
+    stub.inputAnswers.push('Dana', 'dana@example.invalid', '5');
+    stub.quickPickAnswers.push('Developer', '7 days', 'Link a NEAR organization', 'Team Org', 'Team workspace');
+    stub.setMessageResponder(copyWhenOffered);
+    await t.run(INVITE_COMMAND);
+    assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' });
+    assert.equal(stub.clipboardWrites.length, 1);
+    assert.deepEqual(parseInviteBundle(stub.clipboardWrites[0] as string).near, { organizationId: 'org-1', workspaceId: 'ws-1' });
+    assert.equal(stub.notifications.some((entry) => entry.message === NO_ORG_NOTICE), false);
+  }, { near: true });
 });

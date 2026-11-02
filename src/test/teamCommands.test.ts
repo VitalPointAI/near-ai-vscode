@@ -198,18 +198,28 @@ test('cancelling any input box returns quietly: no team.json, no message, no key
   }
 });
 
-test('running Enable again names the existing team and asks nothing', async () => {
+test('running Enable again names the existing team, asks no question, and offers Join Team instead of promising invitations later', async () => {
   await withProject(async (p) => {
     await p.enable(['Existing team', 'Lead Owner', '']);
     const asked = stub.inputRequests.length;
     stub.notifications.length = 0;
+    stub.notificationActions.length = 0;
     const commitsBefore = gitIn(p.root, ['rev-list', '--count', 'HEAD']);
     await p.enable([]);
     assert.equal(stub.inputRequests.length, asked, 'no question was asked');
     assert.equal(stub.notifications.length, 1);
     assert.equal(stub.notifications[0]?.level, 'info');
     assert.ok(stub.notifications[0]?.message.startsWith('This project already has a team: Existing team.'));
+    assert.equal(stub.notifications[0]?.message.includes('arrives with team invitations'), false, 'the old promise of a later version is gone');
+    assert.deepEqual(stub.notificationActions[0], ['Join Team']);
     assert.equal(gitIn(p.root, ['rev-list', '--count', 'HEAD']), commitsBefore, 'no second team and no new commit');
+
+    // Choosing Join Team runs the Join command, which asks for the invite in a masked box.
+    stub.notifications.length = 0;
+    stub.messageAnswers.push('Join Team');
+    await p.enable([]);
+    const joinPrompt = stub.inputRequests[asked];
+    assert.equal(joinPrompt?.password, true, 'the Join command ran and asked for the pasted invite');
   });
 });
 

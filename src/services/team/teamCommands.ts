@@ -6,6 +6,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { registerMemberCommands } from './memberCommands';
+import type { FetchLike, SessionTokens } from '../reportingSignIn';
 import type { TeamSession } from './teamSession';
 
 export const ENABLE_COMMAND = 'nearAi.team.enable';
@@ -20,6 +21,8 @@ const EMAIL_PROMPT = 'Your email is stored only as a salted hash in the team log
 
 export type TeamModeState = 'solo' | 'team' | 'error';
 export interface TeamModeHandle { ready: Promise<TeamModeState>; session(): TeamSession | undefined }
+// The extension passes nothing. Tests point the NEAR calls at a fake server and replace the browser sign-in.
+export interface TeamModeOptions { nearBaseUrl?: string; fetch?: FetchLike; signIn?: (teamId: string) => Promise<SessionTokens | undefined> }
 
 type Level = 'info' | 'warn' | 'error';
 
@@ -43,7 +46,7 @@ async function teamFileExists(projectRoot: string): Promise<boolean> {
   }
 }
 
-export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHandle {
+export function registerTeamMode(context: vscode.ExtensionContext, options: TeamModeOptions = {}): TeamModeHandle {
   let channel: vscode.OutputChannel | undefined;
   let session: TeamSession | undefined;
   let starting: Promise<TeamModeState> | undefined;
@@ -241,7 +244,10 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
     vscode.commands.registerCommand(ENABLE_COMMAND, guarded('Enable Team Mode', enable)),
     vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Verify Team Log', verifyLog)),
     ...registerMemberCommands({
-      context, output, report, announce, soloText: SOLO_TEXT, firstFolder, session: () => session, startSession, restartSession
+      context, output, report, announce, soloText: SOLO_TEXT, firstFolder, session: () => session, startSession, restartSession,
+      ...(options.nearBaseUrl === undefined ? {} : { nearBaseUrl: options.nearBaseUrl }),
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      ...(options.signIn === undefined ? {} : { signIn: options.signIn })
     }),
     { dispose: (): void => { disposed = true; session = undefined; } }
   );
