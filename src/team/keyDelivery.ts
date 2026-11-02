@@ -5,7 +5,7 @@
 // the open and the install on the member's side; both are zero-filled in finally blocks. It is never logged, put in an error, a checklist item,
 // a local file or an event. This module never imports `vscode`.
 import { createHash, randomBytes } from 'node:crypto';
-import { sealCapableFingerprints } from '../domain/team/invite';
+import { keyNeedsRotation, sealCapableFingerprints } from '../domain/team/invite';
 import type { Member, SealedEntryBody, TeamFile } from '../domain/team/types';
 import type { SecretStorageLike } from '../services/auth';
 import type { FetchLike } from '../services/reportingSignIn';
@@ -161,10 +161,14 @@ async function checkTarget(input: LeadInput, step: CleanupStep): Promise<Checked
     return { ok: false, result: fail('no-device', 'That person has not joined the team, so there is no device to send a key to.') };
   }
   if (member.id === state.team.ownerId) return { ok: false, result: fail('log', 'The team owner does not get a key through the log.') };
+  if (step === 'rotate-key' && !keyNeedsRotation(member)) return { ok: false, result: fail('log', `${member.name}'s key already matches their devices, so it does not need to be replaced.`) };
   const targets = sealTargets(member);
   if (targets.length === 0) {
-    const none = { ok: false as const, code: 'no-device' as const, message: `${member.name} has no device that can receive a key. Ask them to join again from their computer.` };
-    return { ok: false, result: await recordFailure(input, member, step, none) };
+    // 61-05 leaves this wording to the delivery step: after a revoke the old key is still valid wherever it was already installed.
+    const message = step === 'rotate-key'
+      ? `${member.name} has no device that can receive a new key. Ask them to add a device from a computer that has joined the team. Until a new key is sent, their old key stays valid on every computer that already has it.`
+      : `${member.name} has no device that can receive a key. Ask them to join again from their computer.`;
+    return { ok: false, result: await recordFailure(input, member, step, { ok: false, code: 'no-device', message }) };
   }
   return { ok: true, member, targets };
 }
@@ -172,7 +176,7 @@ async function checkTarget(input: LeadInput, step: CleanupStep): Promise<Checked
 // Creates the key with its cap in the create call, seals it to every target, and appends member.key-sealed. The append builder re-checks the
 // fresh state: the member must still be there, still hold the key this delivery replaces, and still have exactly the sealed set of devices.
 // Whatever goes wrong, the confirmation stands, a key that was made is zeroed and revoked, and a Retry item is left (D-25).
-async function sendKey(input: LeadInput, step: CleanupStep, member: Member, targets: SealTarget[], limit: number): Promise<DeliveryResult> {
+async function sendKey(input: LeadInput, step: CleanupStep, member: Member, targets: SealTarget[], limit: number, retire?: string): Promise<DeliveryResult> {
   const near = input.teamFile.near;
   if (near === undefined) return fail('not-linked', 'This team is not linked to a NEAR organization, so there is no key to send.');
   const replaces = member.nearApiKeyId;
@@ -210,7 +214,10 @@ async function sendKey(input: LeadInput, step: CleanupStep, member: Member, targ
     return abandon({ ok: false, code: 'log', message: reason });
   }
   if (!appended.ok) return abandon({ ok: false, code: 'log', message: redactGitMessage(appended.reason) });
-  const notice = joinNotes([await settle(input.checklist, member, step)]);
+  // Only now, with the new key accepted by the log, is the old one taken away: zeroed first, then revoked.
+  const settled = await settle(input.checklist, member, step);
+  const retired = retire === undefined ? [] : await retireKey(input, member, retire);
+  const notice = joinNotes([settled, ...retired]);
   return notice === '' ? { ok: true, keyId } : { ok: true, keyId, notice };
 }
 
@@ -222,8 +229,38 @@ export async function deliverMemberKey(input: LeadInput): Promise<DeliveryResult
   return sendKey(input, 'deliver-key', checked.member, checked.targets, checked.member.allocationNanoUsd ?? 0);
 }
 
-export async function rotateMemberKey(_input: LeadInput): Promise<DeliveryResult> {
-  throw new Error('not implemented');
+/**
+ * Replaces a member's key after a device was added or revoked (D-24). The new key's cap is the old key's cap minus its lifetime usage, never
+ * below 0, so a rotation cannot give a member a second budget. The new key is delivered first; only then is the old key set to 0 and revoked.
+ */
+export async function rotateMemberKey(input: LeadInput): Promise<DeliveryResult> {
+  const checked = await checkTarget(input, 'rotate-key');
+  if (!checked.ok) return checked.result;
+  const { member, targets } = checked;
+  const near = input.teamFile.near;
+  const oldKeyId = member.nearApiKeyId;
+  if (near === undefined || oldKeyId === undefined) return fail('log', `${member.name} has no key to replace.`);
+
+  let limit = 0;
+  let manual: string | undefined;
+  try {
+    const old = await input.org.findKey(near.workspaceId, oldKeyId);
+    if (old === undefined) {
+      manual = `NEAR no longer has ${member.name}'s earlier key, so the new key was given a limit of 0. Raise it in the NEAR console once you know what is left.`;
+    } else if (old.spendLimitNanoUsd === null || old.usageNanoUsd === null || !Number.isSafeInteger(old.spendLimitNanoUsd) || !Number.isSafeInteger(old.usageNanoUsd)) {
+      manual = `NEAR did not report the limit and usage of ${member.name}'s earlier key, so the new key was given a limit of 0. Raise it in the NEAR console once you know what is left.`;
+    } else {
+      limit = Math.max(0, old.spendLimitNanoUsd - old.usageNanoUsd);
+    }
+  } catch (error) {
+    const failed = nearFailure(error);
+    return failed.ok ? failed : recordFailure(input, member, 'rotate-key', failed);
+  }
+
+  const sent = await sendKey(input, 'rotate-key', member, targets, limit, oldKeyId);
+  if (!sent.ok || manual === undefined) return sent;
+  const problem = await note(input.checklist, member, 'rotate-key', 'manual', manual, oldKeyId);
+  return { ok: true, keyId: sent.keyId, notice: joinNotes([sent.notice, manual, problem]) };
 }
 
 function confirmFailure(result: Extract<AppendResult, { ok: false }>): ConfirmResult {
