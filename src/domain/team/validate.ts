@@ -232,21 +232,21 @@ function validateLamportField(value: unknown, path: string): string | undefined 
 
 // ---- Work item fields (D-04, D-10 to D-14) -------------------------------------------------------------------------------------------
 export const TITLE_MAX = 200;
-const DESCRIPTION_MAX = 2000;
+export const DESCRIPTION_MAX = 2000;
 export const REASON_MAX = 200;
-const MUST_HAVE_MAX = 600;
-const MAX_SCOPE_ENTRIES = 64;
-const MAX_REQUIREMENTS = 32;
-const MAX_MUST_HAVES = 16;
-const MAX_DEPENDENCIES = 32;
-const MAX_TAGS = 8;
-const MAX_ESTIMATE_TOKENS = 1_000_000_000_000;
-const MAX_WAVE = 99;
-const REQUIREMENT_PATTERN = /^[A-Z][A-Z0-9]{0,15}-\d{1,3}$/;
-const ITEM_TAG_PATTERN = /^[a-z][a-z0-9:-]{0,39}$/;
-const GSD_PHASE_PATTERN = /^\d{1,3}(\.\d{1,2})?$/;
-const GSD_PLAN_PATTERN = /^\d{2,3}$/;
-const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+export const MUST_HAVE_MAX = 600;
+export const MAX_SCOPE_ENTRIES = 64;
+export const MAX_REQUIREMENTS = 32;
+export const MAX_MUST_HAVES = 16;
+export const MAX_DEPENDENCIES = 32;
+export const MAX_TAGS = 8;
+export const MAX_ESTIMATE_TOKENS = 1_000_000_000_000;
+export const MAX_WAVE = 99;
+export const REQUIREMENT_PATTERN = /^[A-Z][A-Z0-9]{0,15}-\d{1,3}$/;
+export const ITEM_TAG_PATTERN = /^[a-z][a-z0-9:-]{0,39}$/;
+export const GSD_PHASE_PATTERN = /^\d{1,3}(\.\d{1,2})?$/;
+export const GSD_PLAN_PATTERN = /^\d{2,3}$/;
+export const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 // A description may hold line feeds; nothing else below the space character is allowed.
 const DESCRIPTION_CONTROL_CHARACTERS = /[\u0000-\u0009\u000B-\u001F\u007F\u2028\u2029]/;
 const CONFIDENCES: readonly string[] = ['low', 'medium', 'high'];
