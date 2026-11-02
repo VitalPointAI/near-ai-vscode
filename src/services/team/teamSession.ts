@@ -22,7 +22,9 @@ import { SNAPSHOT_ALREADY_WRITTEN, TeamLog } from '../../team/eventLog';
 import type { TeamSigner, VerifyReport } from '../../team/eventLog';
 import { GitTransport } from '../../team/gitTransport';
 import { loadDeviceIdentity } from '../../team/identity';
+import { installDeliveredKey } from '../../team/keyDelivery';
 import type { DeviceIdentity } from '../../team/identity';
+import { handleOwnRemoval, readRemovedMarker, removedText } from '../../team/removedClient';
 import type { GitRunner } from '../../team/runGit';
 import { DEFAULT_POLL_SECONDS, SyncScheduler } from '../../team/syncScheduler';
 import type { SchedulerTimers } from '../../team/syncScheduler';
@@ -39,6 +41,9 @@ export const READ_ONLY_TEXT = 'This computer has no device key for this team, so
 export const JOIN_COMMAND = 'nearAi.team.join';
 export const MANAGE_MEMBERS_COMMAND = 'nearAi.team.manageMembers';
 export const NOTIFIED_FILE = 'notified.json';
+export const JOIN_ACTION = 'Join Team';
+// After a key install failed, the same key is not tried again for this long, so a wrong organization does not hold up every poll.
+const INSTALL_RETRY_MS = 5 * 60_000;
 const VERIFY_PROGRESS_TITLE = 'Verifying the team log';
 const AUDIT_FILE_PARTS = ['.planning', '.near-ai', 'audit.json'];
 
@@ -169,6 +174,8 @@ export class TeamSession {
   private readonly rosterRoles = new Map<string, Role>();
   // What this storage folder has already told the user (ids only), loaded on first use and written back after each addition.
   private notified: Set<string> | undefined;
+  private removed = false;
+  private installFailed: { event: string; retryAt: number } | undefined;
 
   private constructor(deps: TeamSessionDeps, storage: string, identity: DeviceIdentity | undefined) {
     this.deps = deps;
@@ -195,6 +202,15 @@ export class TeamSession {
   // D-16: the pin is checked before anything else exists, so a changed team.json stops the session with no timer and no transport work.
   public static async start(deps: TeamSessionDeps): Promise<TeamSession> {
     const storage = teamStorageDir(deps.globalStorageDir, deps.teamFile.teamId);
+    // D-20: a computer that already saw its own removal stays removed: no pin check, no timer, no git call.
+    const marker = await readRemovedMarker(deps.globalStorageDir, deps.teamFile.teamId);
+    if (marker !== undefined) {
+      const stopped = new TeamSession(deps, storage, undefined);
+      stopped.removed = true;
+      stopped.line(removedText(deps.teamFile.name));
+      stopped.showRemoved();
+      return stopped;
+    }
     await checkTrustPin(storage, deps.teamFile);
     let identity: DeviceIdentity | undefined;
     let identityProblem: string | undefined;
@@ -209,6 +225,7 @@ export class TeamSession {
     // The scheduler runs the first sync as soon as it starts, so start waits for that run instead of syncing twice.
     session.scheduler.start();
     await session.firstRun;
+    if (identity === undefined && identityProblem === undefined) await session.offerJoin();
     return session;
   }
 
@@ -236,7 +253,7 @@ export class TeamSession {
   }
 
   public isRemoved(): boolean {
-    return false;
+    return this.removed;
   }
 
   public storageDir(): string {
@@ -321,7 +338,7 @@ export class TeamSession {
   }
 
   private async syncOnce(): Promise<boolean> {
-    if (this.disposed) return false;
+    if (this.disposed || this.removed) return false;
     let status: TransportStatus;
     let synced = false;
     try {
@@ -355,8 +372,16 @@ export class TeamSession {
     return status.state === 'ok';
   }
 
+  private showRemoved(): void {
+    if (!this.disposed) this.deps.statusBar.update({ state: 'ok' }, this.teamFile.name, { removed: true });
+  }
+
   private showStatus(status: TransportStatus, extras: TeamStatusExtras = {}): void {
     if (this.disposed) return;
+    if (this.removed) {
+      this.showRemoved();
+      return;
+    }
     this.deps.statusBar.update(status, this.teamFile.name, extras);
     const key = `${status.state}:${status.reason ?? ''}`;
     if (key === this.lastStatusKey) return;
@@ -497,6 +522,12 @@ export class TeamSession {
       const state = this.transport.state();
       const id = this.memberId();
       const me = id === undefined ? undefined : state.members.get(id);
+      if (id !== undefined && me?.removedEvent !== undefined) {
+        await this.handleRemoval(id, me.removedEvent);
+        extras.removed = true;
+        return extras;
+      }
+      if (me !== undefined) await this.installKey(me);
       if (me !== undefined && me.removedEvent === undefined && this.signing && (me.role === 'owner' || me.role === 'lead')) {
         const items = memberAttention(state, this.teamFile.near !== undefined);
         extras.pending = items.filter((item) => item.kind === 'confirm').length;
@@ -507,6 +538,75 @@ export class TeamSession {
       this.reportIssue('members', `Team Mode could not check the members after the sync: ${describeError(error)}`);
     }
     return extras;
+  }
+
+  // D-20: this computer's own member was removed. The scheduler is stopped first, the flag is set before any await so nothing re-enters,
+  // and the clean-up (this team's secrets only) runs once; removed.json makes a reload start in the same state.
+  private async handleRemoval(memberId: string, removedEvent: string): Promise<void> {
+    if (this.removed) return;
+    this.removed = true;
+    this.scheduler.stop();
+    const team = displayText(this.teamFile.name);
+    try {
+      const result = await handleOwnRemoval({
+        projectRoot: this.deps.projectRoot, globalStorageDir: this.deps.globalStorageDir, teamFile: this.teamFile, memberId, removedEvent,
+        secrets: this.deps.secrets, nearBaseUrl: this.deps.nearBaseUrl ?? DEFAULT_BASE_URL, ...(this.deps.fetch === undefined ? {} : { fetch: this.deps.fetch })
+      });
+      if (result.failed !== undefined) this.line(`After your removal, these clean-up steps did not finish: ${result.failed.join(', ')}.`);
+    } catch (error) {
+      this.line(`The clean-up after your removal could not finish: ${describeError(error)}`);
+    }
+    this.line(removedText(this.teamFile.name));
+    this.announce('warn', removedText(team));
+  }
+
+  // The member's side of key delivery (D-14, D-23): open the sealed key meant for this device and make it the project's team key.
+  private async installKey(member: { nearKeyEvent?: string }): Promise<void> {
+    const identity = this.identity;
+    if (identity === undefined || member.nearKeyEvent === undefined) return;
+    const now = this.deps.timers?.now() ?? Date.now();
+    if (this.installFailed !== undefined && this.installFailed.event === member.nearKeyEvent && now < this.installFailed.retryAt) return;
+    const team = displayText(this.teamFile.name);
+    const result = await installDeliveredKey({
+      projectRoot: this.deps.projectRoot, globalStorageDir: this.deps.globalStorageDir, teamFile: this.teamFile, log: this.log,
+      deviceFingerprint: identity.fingerprint, secrets: this.deps.secrets, baseUrl: this.deps.nearBaseUrl ?? DEFAULT_BASE_URL,
+      ...(this.deps.fetch === undefined ? {} : { fetch: this.deps.fetch })
+    });
+    if (result.status === 'installed') {
+      this.installFailed = undefined;
+      this.clearIssue('key-install');
+      this.line(`The team key for ${this.teamFile.name} was installed for this project.`);
+      this.say('info', `Your team key for ${team} is ready. NEAR AI uses it for this project now.`);
+    } else if (result.status === 'failed') {
+      this.installFailed = { event: member.nearKeyEvent, retryAt: now + INSTALL_RETRY_MS };
+      const text = `The team key for ${this.teamFile.name} could not be installed: ${safeReason(result.message)}`;
+      const before = this.reportedIssues.get('key-install');
+      this.reportIssue('key-install', text);
+      if (before !== text) this.say('warn', `The team key for ${team} could not be installed: ${displayText(result.message, 300)}`);
+    } else {
+      this.installFailed = undefined;
+    }
+  }
+
+  // A message with no buttons, shown without waiting.
+  private say(level: 'info' | 'warn', message: string): void {
+    const shown = level === 'info' ? this.deps.notify.info(message) : this.deps.notify.warn(message);
+    Promise.resolve(shown).catch((error: unknown) => { this.line(`A Team Mode message could not be shown: ${describeError(error)}`); });
+  }
+
+  // D-07 and Phase 60 D-22: the project has a team this computer is not in. Offered once per storage folder, only where a command can run.
+  private async offerJoin(): Promise<void> {
+    if (this.deps.runCommand === undefined || this.removed || this.disposed) return;
+    try {
+      if (!(await this.firstTime('join-offer'))) return;
+    } catch (error) {
+      this.reportIssue('join-offer', `Team Mode could not check whether Join was offered: ${describeError(error)}`);
+      return;
+    }
+    const run = this.deps.runCommand;
+    this.offer('info', `${displayText(this.teamFile.name)} uses Team Mode and this computer has not joined it. Join it to work with the team.`, [
+      { label: JOIN_ACTION, run: () => run(JOIN_COMMAND) }
+    ]);
   }
 
   // One message per item, remembered by the event that created the need so it is shown once even across reloads.

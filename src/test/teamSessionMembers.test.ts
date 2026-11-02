@@ -22,7 +22,7 @@ import { NO_ORG_NOTICE } from '../team/join';
 import { confirmMember } from '../team/keyDelivery';
 import { NearOrgClient } from '../team/nearOrg';
 import type { NearAuth } from '../team/nearOrg';
-import { nearSessionSecretName, saveNearSession } from '../team/nearSession';
+import { saveNearSession } from '../team/nearSession';
 import { REMOVED_FILE, removedText } from '../team/removedClient';
 import { removeMember } from '../team/remove';
 import { runGit } from '../team/runGit';
@@ -424,7 +424,6 @@ test('the removed member window cleans up once, stops syncing, and shows a remov
     assert.equal(w.gitCalls.count, calls, 'no git call after the removal was handled');
     assert.equal(w.timers.live, 0, 'still no poll waiting');
     assert.deepEqual(warnMessages(), [removedText(TEAM_NAME)], 'the warning was not repeated');
-    void nearSessionSecretName;
   });
 });
 
