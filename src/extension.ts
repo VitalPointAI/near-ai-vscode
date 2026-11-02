@@ -13,6 +13,7 @@ import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerTeamMode } from './services/team/teamCommands';
+import type { TeamModeHandle } from './services/team/teamCommands';
 import { registerMcpConnections } from './services/mcpView';
 import { openTools } from './services/toolsPage';
 import { registerModelComparison } from './services/modelComparisonPanel';
@@ -31,7 +32,11 @@ import { closeInterruptedRuns } from './services/activityStore';
 import { offerProxyAdvice } from './domain/proxyAdvice';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
-export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
+export interface NearAiTestApi {
+  auth: AuthService;
+  sidebar: NearAiPanelViewProvider;
+  team: { handle: TeamModeHandle; secrets: vscode.SecretStorage; globalStorageDir: string };
+}
 
 export function activate(context: vscode.ExtensionContext): NearAiTestApi | undefined {
   const auth = new AuthService(context.secrets);
@@ -60,7 +65,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
   registerSpendTracking(context, auth);
-  registerTeamMode(context);
+  const team = registerTeamMode(context);
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
   registerModelComparison(context, auth);
@@ -98,7 +103,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
-  return process.env.NEAR_AI_E2E === '1' ? { auth, sidebar } : undefined;
+  return process.env.NEAR_AI_E2E === '1' ? { auth, sidebar, team: { handle: team, secrets: context.secrets, globalStorageDir: context.globalStorageUri.fsPath } } : undefined;
 }
 
 async function suggestProxySupportOff(context: vscode.ExtensionContext): Promise<void> {

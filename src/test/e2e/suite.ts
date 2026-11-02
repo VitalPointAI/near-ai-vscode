@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -33,7 +34,7 @@ class Observer {
 
 export async function run(): Promise<void> {
   const scenario = process.env.NEAR_AI_E2E_SCENARIO;
-  const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : projectTests();
+  const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : scenario === 'team' ? teamTests() : projectTests();
   let failed = 0;
   for (const [name, body] of tests) {
     try { await body(); console.log(`✔ [${scenario}] ${name}`); } catch (error) { failed += 1; console.error(`✖ [${scenario}] ${name}\n`, error); }
@@ -151,6 +152,130 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       await observer.next('toView', (message) => message.type === 'run-reverted', before);
       assert.equal(existsSync(path.join(workspace, 'notes.txt')), false);
       server?.close();
+    }],
+    ['Open Team Board in a project with no team opens no board and posts nothing', async () => {
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { boardTap, BOARD_PANEL_TYPE } = require(path.join(extension.extensionPath, 'dist/services/team/boardView')) as typeof import('../../services/team/boardView');
+      const page = new Observer();
+      boardTap.toView = (message) => page.record(page.toView, message);
+      boardTap.fromView = (message) => page.record(page.fromView, message);
+      try {
+        await vscode.commands.executeCommand('nearAi.team.openBoard');
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        assert.deepEqual([...page.toView, ...page.fromView], [], 'no message in either direction');
+        const panels = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+          .filter((tab) => tab.input instanceof vscode.TabInputWebview && tab.input.viewType.endsWith(BOARD_PANEL_TYPE));
+        assert.equal(panels.length, 0, 'no board panel');
+      } finally {
+        boardTap.toView = undefined;
+        boardTap.fromView = undefined;
+      }
+    }]
+  ];
+}
+
+// ---- the team scenario: a git project whose integration branch holds the fixture roadmap -------------------------------------------------------
+
+interface BoardCardView { id: string; column: string; held: boolean; blocked?: { reason: string } }
+
+function cardsOf(message: Message): BoardCardView[] {
+  return ((message.model as { cards: BoardCardView[] }).cards);
+}
+
+function cardOf(message: Message, id: string): BoardCardView | undefined {
+  return cardsOf(message).find((card) => card.id === id);
+}
+
+function teamTests(): Array<[string, () => Promise<void>]> {
+  const board = new Observer();
+  const extension = (): vscode.Extension<NearAiTestApi | undefined> => vscode.extensions.getExtension<NearAiTestApi | undefined>(EXTENSION_ID)!;
+  const load = <T>(file: string): T => require(path.join(extension().extensionPath, 'dist', file)) as T;
+  let api: NearAiTestApi;
+  let tap: typeof import('../../services/team/boardView')['boardTap'];
+  let remote = '';
+  const countOnRemote = (): number => Number(execFileSync('git', ['-C', remote, 'rev-list', '--count', 'refs/heads/near-ai/coordination'], { encoding: 'utf8' }).trim());
+  return [
+    ['activates in a git project and registers every contributed command, the board commands included', async () => {
+      api = (await extension().activate())!;
+      assert.ok(api?.team, 'the test API carries the team handle');
+      const registered = new Set(await vscode.commands.getCommands(true));
+      const contributed = (extension().packageJSON.contributes.commands as Array<{ command: string }>).map((entry) => entry.command);
+      assert.deepEqual(contributed.filter((command) => !registered.has(command)), [], 'contributed commands without a handler');
+      for (const command of ['nearAi.team.openBoard', 'nearAi.team.importPlans']) assert.ok(registered.has(command), command);
+      assert.equal(await api.team.handle.ready, 'solo', 'no team yet');
+      remote = execFileSync('git', ['-C', workspace, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim();
+    }],
+    ['Team Mode is enabled and the real board page loads under the CSP and asks for its state', async () => {
+      const { enableTeamMode } = load<typeof import('../../team/enable')>('team/enable');
+      const enabled = await enableTeamMode({
+        projectRoot: workspace, globalStorageDir: api.team.globalStorageDir, secrets: api.team.secrets,
+        teamName: 'E2E team', ownerName: 'E2E Owner', remote: 'origin', integrationBranch: 'main'
+      });
+      assert.equal(enabled.ok, true, enabled.ok ? '' : enabled.message);
+      tap = load<typeof import('../../services/team/boardView')>('services/team/boardView').boardTap;
+      tap.toView = (message) => board.record(board.toView, message);
+      tap.fromView = (message) => board.record(board.fromView, message);
+      await vscode.commands.executeCommand('nearAi.team.openBoard');
+      await board.next('fromView', (message) => message.type === 'ready');
+      await board.next('toView', (message) => message.type === 'state');
+    }],
+    ['the board shows the fixture roadmap, and Import Plans can be run again', async () => {
+      // The session imports the roadmap when it starts, so the cards may already be on the board; the command then changes nothing.
+      await vscode.commands.executeCommand('nearAi.team.importPlans', { milestone: 'current' });
+      const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, 'plan:90-01') !== undefined && cardOf(message, 'plan:90-02') !== undefined);
+      assert.equal(cardOf(state, 'plan:90-01')?.column, 'done');
+      assert.equal(cardOf(state, 'plan:90-02')?.column, 'ready');
+    }],
+    ['a move sent through the real page reaches the host, and the next state shows the card on hold', async () => {
+      const fromBefore = board.fromView.length;
+      const toBefore = board.toView.length;
+      await tap.request!({ type: 'move', itemId: 'plan:90-02', target: 'hold' });
+      const posted = await board.next('fromView', (message) => message.type === 'move', fromBefore);
+      assert.deepEqual(posted, { type: 'move', itemId: 'plan:90-02', target: 'hold' });
+      const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, 'plan:90-02')?.held === true, toBefore);
+      assert.equal(cardOf(state, 'plan:90-02')?.column, 'backlog');
+    }],
+    ['a refused move produces a refused message and writes no event', async () => {
+      const events = countOnRemote();
+      const toBefore = board.toView.length;
+      await tap.request!({ type: 'move', itemId: 'plan:90-01', target: 'release' });
+      const refused = await board.next('toView', (message) => message.type === 'refused', toBefore);
+      assert.equal(refused.itemId, 'plan:90-01');
+      assert.ok(typeof refused.reason === 'string' && refused.reason.length > 0, 'the refusal says why');
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      assert.equal(countOnRemote(), events, 'the remote holds no new event');
+    }],
+    ['an event from a second client appears in the open board after the session polls, without a reload', async () => {
+      const session = api.team.handle.session();
+      assert.ok(session, 'a session is running');
+      const { TeamLog } = load<typeof import('../../team/eventLog')>('team/eventLog');
+      const { GitTransport } = load<typeof import('../../team/gitTransport')>('team/gitTransport');
+      const { teamMaterializer } = load<typeof import('../../domain/team/materialize')>('domain/team/materialize');
+      const { loadDeviceIdentity } = load<typeof import('../../team/identity')>('team/identity');
+      const { teamStorageDir } = load<typeof import('../../team/teamFile')>('team/teamFile');
+      const teamFile = session!.teamFile;
+      const anchor = { teamId: teamFile.teamId, eventId: teamFile.genesis.eventId, ownerDevice: { ...teamFile.genesis.ownerDevice } };
+      // The second client has its own mirror of the coordination branch, as another computer would.
+      const mirrorRoot = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-second-'));
+      const transport = new GitTransport({
+        mirrorDir: path.join(teamStorageDir(mirrorRoot, teamFile.teamId), 'coordination.git'), projectRoot: workspace,
+        remote: teamFile.coordination.remote, ref: teamFile.coordination.ref, materializer: teamMaterializer(anchor), baseDelayMs: 1
+      });
+      const identity = await loadDeviceIdentity(api.team.secrets, teamFile.teamId);
+      assert.ok(identity, 'the owner device key is in SecretStorage');
+      const reader = new TeamLog({ anchor, transport });
+      await reader.sync();
+      const memberId = reader.state().deviceIndex.get(identity!.fingerprint);
+      assert.ok(memberId, 'the device is a member');
+      const second = new TeamLog({ anchor, transport, signer: { identity: identity!, memberId: memberId! } });
+      await second.sync();
+      const toBefore = board.toView.length;
+      const reason = 'waiting for the API key';
+      const appended = await second.append(() => [{ type: 'item.blocked', body: { id: 'plan:90-02', reason } }]);
+      assert.equal(appended.ok, true, appended.ok ? '' : appended.reason);
+      session!.nudge();
+      const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, 'plan:90-02')?.blocked?.reason === reason, toBefore, 20_000);
+      assert.ok(state, 'the open board received the other client\'s change');
     }]
   ];
 }
