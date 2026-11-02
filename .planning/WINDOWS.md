@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 11
+open_count: 12
 waived_count: 0
 fixed_count: 0
-total_count: 11
-last_updated: 2026-10-26T04:53:31.061Z
+total_count: 12
+last_updated: 2026-11-02T20:08:58.850Z
 ---
 
 # Broken Windows Ledger
@@ -26,6 +26,7 @@ last_updated: 2026-10-26T04:53:31.061Z
 | 9 | 06 | unrun-verify | package.json |  | Full npm test and npm run package were not run after Plan 06 focused green verification per user instruction. | open |  | 2026-10-26T04:28:46.450Z |  |
 | 10 | 06 | unrun-verify | .planning/phases/06-team-studio-and-multimodal-agent-skills/06-07-PLAN.md |  | Full npm run package gate was not run; requested lint and focused tests passed. | open |  | 2026-10-26T04:42:04.856Z |  |
 | 11 | 06 | unrun-verify | .planning/phases/06-team-studio-and-multimodal-agent-skills/06-08-PLAN.md |  | Full npm run package verification was not run; requested lint, compile, and focused multimodal/chat suites passed. | open |  | 2026-10-26T04:53:31.061Z |  |
+| 12 | 62 | stub | src/services/team/boardView.ts | 25 | BOARD_SCRIPTS and BOARD_STYLES name media/board files that plans 62-09 to 62-13 create; until then the board page loads empty | open |  | 2026-11-02T20:08:58.850Z |  |
 
 ````json
 [
@@ -171,6 +172,19 @@ last_updated: 2026-10-26T04:53:31.061Z
     "recorded_at": "2026-10-26T04:53:31.061Z",
     "resolved_at": null,
     "milestone": null
+  },
+  {
+    "id": 12,
+    "kind": "stub",
+    "phase": "62",
+    "file": "src/services/team/boardView.ts",
+    "line": 25,
+    "description": "BOARD_SCRIPTS and BOARD_STYLES name media/board files that plans 62-09 to 62-13 create; until then the board page loads empty",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-02T20:08:58.850Z",
+    "resolved_at": null,
+    "milestone": "v0.6.0"
   }
 ]
 ````
