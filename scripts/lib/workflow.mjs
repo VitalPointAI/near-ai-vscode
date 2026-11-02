@@ -126,7 +126,8 @@ export function normalizeChecks(rollup) {
       else state = 'failure';
     }
     if (!name) continue;
-    const startedAt = Date.parse(entry.startedAt ?? entry.completedAt ?? '') || 0;
+    // A run that has not finished wins over a finished one: a queued re-run has no start time.
+    const startedAt = state === 'pending' ? Infinity : Date.parse(entry.startedAt ?? entry.completedAt ?? '') || 0;
     const previous = latest.get(name);
     if (!previous || startedAt >= previous.startedAt) latest.set(name, { name, state, startedAt, url: entry.detailsUrl ?? entry.targetUrl });
   }

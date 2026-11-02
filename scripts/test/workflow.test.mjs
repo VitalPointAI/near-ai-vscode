@@ -109,6 +109,14 @@ test('check runs and commit statuses are normalized, keeping the latest run per 
   assert.deepEqual(checks.map(({ name, state }) => [name, state]), [['test', 'success'], ['e2e', 'pending'], ['agent-review', 'success']]);
 });
 
+test('a queued re-run with no start time replaces an older finished run', () => {
+  const checks = normalizeChecks([
+    { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-01-01T00:00:00Z' },
+    { __typename: 'CheckRun', name: 'test', status: 'QUEUED', conclusion: '' }
+  ]);
+  assert.deepEqual(checks.map(({ name, state }) => [name, state]), [['test', 'pending']]);
+});
+
 test('every required check must be green, and any other failed check blocks too', () => {
   const green = REQUIRED_CHECKS.map((name) => ({ name, state: 'success' }));
   assert.deepEqual(evaluateChecks(green), { ok: true, problems: [] });
