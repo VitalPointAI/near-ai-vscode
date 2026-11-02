@@ -397,12 +397,13 @@ test('Join inside the matching project joins as an observer, says what comes nex
     const j = await openJoiner(t);
     assert.equal(j.handle.session()?.memberId(), undefined, 'before joining this computer is not on the team');
     const requestsBefore = (t.fake?.requests.length ?? 0);
+    const signInsBefore = t.signIns.count;
     stub.inputAnswers.push(bundleText, 'Dana D');
     await j.run(JOIN_COMMAND);
 
     assert.equal(stub.inputRequests[0]?.password, true, 'the bundle is masked');
     assert.equal(stub.inputRequests[1]?.value, 'Team Test', 'the display name defaults to git user.name');
-    assert.equal(t.signIns.count, 0, 'a developer never signs in to NEAR');
+    assert.equal(t.signIns.count, signInsBefore, 'a developer never signs in to NEAR');
     assert.equal(t.fake?.requests.length, requestsBefore, 'and the join made no NEAR request');
     assert.ok(stub.notifications.some((entry) => entry.message === 'You joined Invite team as an observer. Your lead confirms you and sends your team key.'), stub.notifications.map((entry) => entry.message).join(' | '));
     const memberId = parseInviteBundle(bundleText).member;
@@ -582,6 +583,8 @@ test('inviting a lead in a linked team asks the lead to sign in to NEAR first, a
   await withTeam(async (t) => {
     await linkAndPush(t);
     await t.run(SIGN_OUT_NEAR_COMMAND);
+    // Signing out ended the old session at NEAR, so the next browser sign-in hands back a fresh one.
+    t.signIns.tokens = t.fake?.addUser({ id: 'user-lead', username: 'lead', email: 'lead@example.invalid' });
     clearUi();
     stub.inputAnswers.push('Lee', 'lee@example.invalid', '5');
     stub.quickPickAnswers.push('Lead', '7 days');

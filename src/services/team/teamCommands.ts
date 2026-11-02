@@ -5,7 +5,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { registerMemberCommands } from './memberCommands';
+import { JOIN_COMMAND, registerMemberCommands } from './memberCommands';
 import type { FetchLike, SessionTokens } from '../reportingSignIn';
 import type { TeamSession } from './teamSession';
 
@@ -14,6 +14,7 @@ export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 export const SOLO_TEXT = 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.';
 export const PUSH_ACTION = 'Push';
 export const VERIFY_ACTION = 'Verify Team Log';
+export const JOIN_ACTION = 'Join Team';
 const OUTPUT_CHANNEL_NAME = 'NEAR AI Team';
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 const ENABLE_PROGRESS_TITLE = 'Enabling Team Mode';
@@ -178,7 +179,10 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     try {
       const existing = await readTeamFile(projectRoot);
       if (existing !== undefined) {
-        report('info', `This project already has a team: ${existing.name}. Joining an existing team arrives with team invitations.`);
+        const message = `This project already has a team: ${existing.name}. If your lead sent you an invite, join with it.`;
+        output.appendLine(message);
+        const choice = await vscode.window.showInformationMessage(message, JOIN_ACTION);
+        if (choice === JOIN_ACTION) await vscode.commands.executeCommand(JOIN_COMMAND);
         return;
       }
     } catch (error) {
