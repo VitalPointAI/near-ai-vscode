@@ -36,9 +36,31 @@ export interface SealedEntryBody { device: string; ephemeral: { publicKey: strin
 export interface MemberKeySealedBody { memberId: string; keyId: string; scheme: 'x25519-hkdf-sha256-aes-256-gcm-v1'; sealed: SealedEntryBody[] }
 export interface PolicyChangedBody { changes: Partial<TeamPolicy> }
 export interface SnapshotWrittenBody { coversThrough: string; lamport: number; stateHash: string; path: string }
-export interface ImplementedEventBodies { 'team.created': TeamCreatedBody; 'member.invited': MemberInvitedBody; 'member.joined': MemberJoinedBody; 'member.role-changed': MemberRoleChangedBody; 'member.removed': MemberRemovedBody; 'device.added': DeviceAddedBody; 'device.revoked': DeviceRevokedBody; 'member.availability': MemberAvailabilityBody; 'member.skills': MemberSkillsBody; 'member.key-sealed': MemberKeySealedBody; 'policy.changed': PolicyChangedBody; 'snapshot.written': SnapshotWrittenBody }
+// Work events (spec 5.2, D-04, D-10 to D-14). Ids are permanent: imported items use milestone:<version>, phase:<n>, plan:<phase>-<plan> and
+// task:<phase>-<plan>-<index>; board items use item:<ulid>. Each body is exact-key and its shape is signed into the log for good.
+export type ItemOrigin = 'import' | 'board';
+export interface ItemEstimate { tokens: number; confidence?: 'low' | 'medium' | 'high' }
+export interface ItemGsdRef { phase: string; plan?: string; wave?: number; file?: string }
+export interface ItemImportedBody {
+  id: string; kind: 'milestone' | 'phase' | 'plan' | 'task'; title: string; state: 'backlog' | 'done'; dependsOn: string[]; scope: string[]; requirements: string[]; mustHaves: string[]; tags: string[];
+  parentId?: string; gsd?: ItemGsdRef; estimate?: ItemEstimate; summary?: true; active?: true; source?: string;
+}
+export interface ItemCreatedBody { id: string; kind: 'bug' | 'chore' | 'spike'; title: string; scope: string[]; requirements: string[]; mustHaves: string[]; description?: string; estimate?: ItemEstimate; tags?: string[] }
+// hold and state are each the only key when present. state can only be the literal done (mark done); every other move has its own event.
+export interface ItemChanges {
+  title?: string; description?: string; scope?: string[]; requirements?: string[]; mustHaves?: string[]; dependsOn?: string[]; estimate?: ItemEstimate; gsd?: ItemGsdRef; tags?: string[];
+  summary?: boolean; active?: boolean; source?: string; hold?: boolean; state?: 'done';
+}
+export interface ItemUpdatedBody { id: string; changes: ItemChanges }
+export interface ItemEstimatedBody { id: string; estimate: ItemEstimate }
+export interface ItemBlockedBody { id: string; reason: string }
+export interface ItemUnblockedBody { id: string }
+export interface ItemCancelledBody { id: string; reason: string }
+export interface ItemReopenedBody { id: string }
+export interface ImplementedEventBodies { 'team.created': TeamCreatedBody; 'member.invited': MemberInvitedBody; 'member.joined': MemberJoinedBody; 'member.role-changed': MemberRoleChangedBody; 'member.removed': MemberRemovedBody; 'device.added': DeviceAddedBody; 'device.revoked': DeviceRevokedBody; 'member.availability': MemberAvailabilityBody; 'member.skills': MemberSkillsBody; 'member.key-sealed': MemberKeySealedBody; 'item.imported': ItemImportedBody; 'item.created': ItemCreatedBody; 'item.updated': ItemUpdatedBody; 'item.estimated': ItemEstimatedBody; 'item.blocked': ItemBlockedBody; 'item.unblocked': ItemUnblockedBody; 'item.cancelled': ItemCancelledBody; 'item.reopened': ItemReopenedBody; 'policy.changed': PolicyChangedBody; 'snapshot.written': SnapshotWrittenBody }
 export type ImplementedEventType = keyof ImplementedEventBodies;
-export const IMPLEMENTED_EVENT_TYPES: readonly ImplementedEventType[] = ['team.created', 'member.invited', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'member.key-sealed', 'policy.changed', 'snapshot.written'];
+// The 20 types this version reads: the 12 of Phases 60 and 61 plus the eight work events of Phase 62. The other 35 stay unsupported until their phase.
+export const IMPLEMENTED_EVENT_TYPES: readonly ImplementedEventType[] = ['team.created', 'member.invited', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'member.key-sealed', 'item.imported', 'item.created', 'item.updated', 'item.estimated', 'item.blocked', 'item.unblocked', 'item.cancelled', 'item.reopened', 'policy.changed', 'snapshot.written'];
 export type TeamEventBodyMap = ImplementedEventBodies & { [K in Exclude<TeamEventType, ImplementedEventType>]: JsonObject };
 // prev is the id of the accepted log head the author built on ('' for team.created). A reader requires it to equal the head at this position.
 export interface TeamEvent<T extends TeamEventType = TeamEventType> { v: 1; id: string; teamId: string; type: T; lamport: number; at: string; author: string; device: string; prev: string; body: TeamEventBodyMap[T]; sig: string }
@@ -67,7 +89,15 @@ export interface Member {
 
 // Spec 7 shapes declared now for later phases (money is integer nano-USD):
 export interface SpendSummary { inputTokens: number; cachedInputTokens: number; outputTokens: number; confirmedNanoUsd: number; pendingNanoUsd: number; estimatedNanoUsd: number; requests: number }
-export interface WorkItem { id: string; kind: ItemKind; title: string; parentId?: string; gsd?: { phase: string; plan?: string; wave?: number; file?: string }; dependsOn: string[]; scope: string[]; requirements: string[]; mustHaves: string[]; estimate?: { tokens: number; nanoUsd?: number; confidence?: 'low' | 'medium' | 'high' }; state: ItemState; blocked?: { reason: string; by: string; since: string }; claimId?: string; tags: string[]; ringFenceNanoUsd?: number }
+// The stored key set enters the state hash once items exist, so it is as permanent as the event bodies and a test pins it. Optional keys are
+// left out when absent. stateSince is the display-only `at` of the event that last changed the stored state or the hold flag; it orders nothing.
+// origin says who owns the content: import (the GSD importer) or board (created on the board by createdBy). hold, summary and active are only ever true.
+export interface WorkItem {
+  id: string; kind: ItemKind; title: string; parentId?: string; gsd?: ItemGsdRef; dependsOn: string[]; scope: string[]; requirements: string[]; mustHaves: string[];
+  estimate?: { tokens: number; nanoUsd?: number; confidence?: 'low' | 'medium' | 'high' }; state: ItemState; blocked?: { reason: string; by: string; since: string };
+  claimId?: string; tags: string[]; ringFenceNanoUsd?: number;
+  origin: ItemOrigin; stateSince: string; createdBy?: string; description?: string; hold?: true; summary?: true; active?: true; source?: string;
+}
 export interface Claim { id: string; itemId: string; memberId: string; branch: string; base: string; leaseIds: string[]; startedAt: string; lastHeartbeatAt: string; status: 'active' | 'in-review' | 'integrating' | 'released' | 'expired' | 'handed-off' | 'merged'; spend: SpendSummary }
 export interface Lease { id: string; claimId?: string; holder: string; kind: 'paths' | 'resource'; paths?: string[]; resource?: string; grantedAt: string; ttlMinutes: number; parentLeaseId?: string }
 export interface Allocation { id: string; memberId: string; nanoUsd: number; scope?: { milestone?: string; phase?: string; itemId?: string }; period: string; grantedBy: string }
@@ -109,6 +139,9 @@ export const TEAM_REJECTION_REASONS = {
   inviteRole: 'joined role does not match the invitation', inviteEmail: 'joined email does not match the invitation',
   keyReused: 'this key was already delivered', keyDevices: "sealed devices do not match the member's active devices", noSealKey: 'a device has no key for sealed delivery',
   alreadyInvited: 'this email is already a member or invited', memberTaken: 'member id is already in use', notJoined: 'member has not joined yet',
+  itemExists: 'item already exists', itemMissing: 'referenced item does not exist', itemParent: 'parent item does not exist or has the wrong kind',
+  itemState: 'item cannot make that move from its current state', itemBlocked: 'item is blocked', itemNotBlocked: 'item is not blocked',
+  itemTerminal: 'item is already done or cancelled', itemField: 'that change is not allowed on this item',
   logRefused: "This coordination log does not belong to this project's team",
   logRewritten: "The team's coordination log was rewritten on the remote; Team Mode is paused"
 } as const;

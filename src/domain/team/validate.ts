@@ -4,7 +4,8 @@
 import { MAX_EVENT_BYTES, canonicalize, eventPath, fingerprintOf, isStrictBase64url, snapshotPath } from './canonical';
 import { validatePolicy, validatePolicyChanges } from './policy';
 import { AVAILABILITIES, IMPLEMENTED_EVENT_TYPES, INVITABLE_ROLES, ROLES, TEAM_REJECTION_REASONS } from './types';
-import type { CommittedEvent, ImplementedEventType, ImplementedTeamEvent, Rejection } from './types';
+import type { CommittedEvent, ImplementedEventType, ImplementedTeamEvent, ItemKind, Rejection } from './types';
+import { BOARD_ITEM_ID_PATTERN, GSD_ITEM_ID_PATTERN, isScopePattern, itemKindOf } from './work';
 
 export const EVENT_ID_PATTERN = /^evt-[0-9A-HJKMNP-TV-Z]{26}$/;
 export const MEMBER_ID_PATTERN = /^mbr-[0-9a-f]{16}$/;
@@ -229,6 +230,146 @@ function validateLamportField(value: unknown, path: string): string | undefined 
   return isSafeIntegerInRange(value, 1, MAX_LAMPORT) ? undefined : invalid(path);
 }
 
+// ---- Work item fields (D-04, D-10 to D-14) -------------------------------------------------------------------------------------------
+const TITLE_MAX = 200;
+const DESCRIPTION_MAX = 2000;
+const REASON_MAX = 200;
+const MUST_HAVE_MAX = 600;
+const MAX_SCOPE_ENTRIES = 64;
+const MAX_REQUIREMENTS = 32;
+const MAX_MUST_HAVES = 16;
+const MAX_DEPENDENCIES = 32;
+const MAX_TAGS = 8;
+const MAX_ESTIMATE_TOKENS = 1_000_000_000_000;
+const MAX_WAVE = 99;
+const REQUIREMENT_PATTERN = /^[A-Z][A-Z0-9]{0,15}-\d{1,3}$/;
+const ITEM_TAG_PATTERN = /^[a-z][a-z0-9:-]{0,39}$/;
+const GSD_PHASE_PATTERN = /^\d{1,3}(\.\d{1,2})?$/;
+const GSD_PLAN_PATTERN = /^\d{2,3}$/;
+const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+// A description may hold line feeds; nothing else below the space character is allowed.
+const DESCRIPTION_CONTROL_CHARACTERS = /[\u0000-\u0009\u000B-\u001F\u007F\u2028\u2029]/;
+const CONFIDENCES: readonly string[] = ['low', 'medium', 'high'];
+const IMPORTED_KINDS: readonly string[] = ['milestone', 'phase', 'plan', 'task'];
+const BOARD_KINDS: readonly string[] = ['bug', 'chore', 'spike'];
+// The kind a parent must have, by the kind of the child. A milestone has no parent.
+const PARENT_KINDS: Readonly<Record<string, ItemKind>> = { phase: 'milestone', plan: 'phase', task: 'plan' };
+
+function validateText(value: unknown, path: string, max: number): string | undefined {
+  return typeof value === 'string' && value.trim().length >= 1 && value.length <= max && !CONTROL_CHARACTERS.test(value) ? undefined : invalid(path);
+}
+
+function validateDescription(value: unknown, path: string): string | undefined {
+  return typeof value === 'string' && value.length <= DESCRIPTION_MAX && !DESCRIPTION_CONTROL_CHARACTERS.test(value) ? undefined : invalid(path);
+}
+
+function validateItemList(value: unknown, path: string, max: number, entry: (item: string) => boolean): string | undefined {
+  if (!Array.isArray(value) || value.length > max) return invalid(path);
+  return value.every((item: unknown) => typeof item === 'string' && entry(item)) ? undefined : invalid(path);
+}
+
+function validateScope(value: unknown, path: string): string | undefined {
+  return validateItemList(value, path, MAX_SCOPE_ENTRIES, isScopePattern);
+}
+
+function validateRequirements(value: unknown, path: string): string | undefined {
+  return validateItemList(value, path, MAX_REQUIREMENTS, (item) => REQUIREMENT_PATTERN.test(item));
+}
+
+function validateMustHaves(value: unknown, path: string): string | undefined {
+  return validateItemList(value, path, MAX_MUST_HAVES, (item) => item.trim().length >= 1 && item.length <= MUST_HAVE_MAX && !CONTROL_CHARACTERS.test(item));
+}
+
+// Dependencies name plans or phases, never tasks, milestones or board items.
+function validateDependencies(value: unknown, path: string): string | undefined {
+  return validateItemList(value, path, MAX_DEPENDENCIES, (item) => {
+    const kind = itemKindOf(item);
+    return kind === 'plan' || kind === 'phase';
+  });
+}
+
+function validateItemTags(value: unknown, path: string): string | undefined {
+  return validateItemList(value, path, MAX_TAGS, (item) => ITEM_TAG_PATTERN.test(item));
+}
+
+function validateEstimate(value: unknown, path: string): string | undefined {
+  if (!isRecord(value)) return invalid(path);
+  return checkKeys(value, path, ['tokens'], ['confidence'])
+    ?? (isSafeIntegerInRange(value.tokens, 1, MAX_ESTIMATE_TOKENS) ? undefined : invalid(child(path, 'tokens')))
+    ?? (has(value, 'confidence') ? validateChoice(value.confidence, CONFIDENCES, child(path, 'confidence')) : undefined);
+}
+
+function validateGsdRef(value: unknown, path: string): string | undefined {
+  if (!isRecord(value)) return invalid(path);
+  return checkKeys(value, path, ['phase'], ['plan', 'wave', 'file'])
+    ?? validateId(value.phase, GSD_PHASE_PATTERN, child(path, 'phase'))
+    ?? (has(value, 'plan') ? validateId(value.plan, GSD_PLAN_PATTERN, child(path, 'plan')) : undefined)
+    ?? (has(value, 'wave') ? (isSafeIntegerInRange(value.wave, 1, MAX_WAVE) ? undefined : invalid(child(path, 'wave'))) : undefined)
+    ?? (has(value, 'file') ? (typeof value.file === 'string' && isScopePattern(value.file) ? undefined : invalid(child(path, 'file'))) : undefined);
+}
+
+// The id of an imported item names its kind (D-04), and the kind in the body must agree with the prefix.
+function validateImportedId(body: Fields): string | undefined {
+  return matches(body.id, GSD_ITEM_ID_PATTERN) && itemKindOf(body.id) === body.kind ? undefined : invalid('body.id');
+}
+
+// A milestone has no parent; a phase, plan or task names a parent whose id carries the parent kind.
+function validateParent(body: Fields): string | undefined {
+  const wanted = PARENT_KINDS[body.kind as string];
+  if (wanted === undefined) return has(body, 'parentId') ? invalid('body.parentId') : undefined;
+  return matches(body.parentId, GSD_ITEM_ID_PATTERN) && itemKindOf(body.parentId) === wanted ? undefined : invalid('body.parentId');
+}
+
+function validateLiteralTrue(value: unknown, path: string): string | undefined {
+  return value === true ? undefined : invalid(path);
+}
+
+function validateBoolean(value: unknown, path: string): string | undefined {
+  return typeof value === 'boolean' ? undefined : invalid(path);
+}
+
+function validateSource(value: unknown, path: string): string | undefined {
+  return matches(value, COMMIT_PATTERN) ? undefined : invalid(path);
+}
+
+function validateItemRef(body: Fields): string | undefined {
+  return matches(body.id, GSD_ITEM_ID_PATTERN) || matches(body.id, BOARD_ITEM_ID_PATTERN) ? undefined : invalid('body.id');
+}
+
+const CHANGE_KEYS = ['title', 'description', 'scope', 'requirements', 'mustHaves', 'dependsOn', 'estimate', 'gsd', 'tags', 'summary', 'active', 'source', 'hold', 'state'];
+
+const CHANGE_VALIDATORS: Readonly<Record<string, (value: unknown, path: string) => string | undefined>> = {
+  title: (value, path) => validateText(value, path, TITLE_MAX),
+  description: validateDescription,
+  scope: validateScope,
+  requirements: validateRequirements,
+  mustHaves: validateMustHaves,
+  dependsOn: validateDependencies,
+  estimate: validateEstimate,
+  gsd: validateGsdRef,
+  tags: validateItemTags,
+  summary: validateBoolean,
+  active: validateBoolean,
+  source: validateSource,
+  hold: validateBoolean,
+  state: (value, path) => (value === 'done' ? undefined : invalid(path))
+};
+
+// At least one change, only known keys, and a hold or a mark-done never travels with anything else, so one event is one move.
+function validateChanges(value: unknown, path: string): string | undefined {
+  if (!isRecord(value)) return invalid(path);
+  const keyError = checkKeys(value, path, [], CHANGE_KEYS);
+  if (keyError !== undefined) return keyError;
+  const keys = Object.keys(value);
+  if (keys.length === 0) return invalid(path);
+  if (keys.length > 1 && (keys.includes('hold') || keys.includes('state'))) return invalid(path);
+  for (const key of keys) {
+    const problem = (CHANGE_VALIDATORS[key] as (value: unknown, path: string) => string | undefined)(value[key], child(path, key));
+    if (problem !== undefined) return problem;
+  }
+  return undefined;
+}
+
 // Exact-key bodies for the implemented types (D-31). The signed shapes are permanent, so a test pins each one.
 type BodyValidator = (body: Fields) => string | undefined;
 
@@ -280,6 +421,48 @@ const BODY_VALIDATORS: Record<ImplementedEventType, BodyValidator> = {
     ?? validateId(body.keyId, NEAR_ID_PATTERN, 'body.keyId')
     ?? (body.scheme === SEAL_SCHEME_NAME ? undefined : invalid('body.scheme'))
     ?? validateSealedList(body.sealed, 'body.sealed'),
+  'item.imported': (body) => checkKeys(body, 'body', ['id', 'kind', 'title', 'state', 'dependsOn', 'scope', 'requirements', 'mustHaves', 'tags'], ['parentId', 'gsd', 'estimate', 'summary', 'active', 'source'])
+    ?? validateChoice(body.kind, IMPORTED_KINDS, 'body.kind')
+    ?? validateImportedId(body)
+    ?? validateText(body.title, 'body.title', TITLE_MAX)
+    ?? validateChoice(body.state, ['backlog', 'done'], 'body.state')
+    ?? validateDependencies(body.dependsOn, 'body.dependsOn')
+    ?? validateScope(body.scope, 'body.scope')
+    ?? validateRequirements(body.requirements, 'body.requirements')
+    ?? validateMustHaves(body.mustHaves, 'body.mustHaves')
+    ?? validateItemTags(body.tags, 'body.tags')
+    ?? validateParent(body)
+    ?? (has(body, 'gsd') ? validateGsdRef(body.gsd, 'body.gsd') : undefined)
+    ?? (has(body, 'estimate') ? validateEstimate(body.estimate, 'body.estimate') : undefined)
+    ?? (has(body, 'summary') ? (body.kind === 'plan' ? validateLiteralTrue(body.summary, 'body.summary') : invalid('body.summary')) : undefined)
+    ?? (has(body, 'active') ? (body.kind === 'milestone' ? validateLiteralTrue(body.active, 'body.active') : invalid('body.active')) : undefined)
+    ?? (has(body, 'source') ? (body.kind === 'milestone' ? validateSource(body.source, 'body.source') : invalid('body.source')) : undefined),
+  'item.created': (body) => checkKeys(body, 'body', ['id', 'kind', 'title', 'scope', 'requirements', 'mustHaves'], ['description', 'estimate', 'tags'])
+    ?? validateChoice(body.kind, BOARD_KINDS, 'body.kind')
+    ?? validateId(body.id, BOARD_ITEM_ID_PATTERN, 'body.id')
+    ?? validateText(body.title, 'body.title', TITLE_MAX)
+    ?? validateScope(body.scope, 'body.scope')
+    ?? validateRequirements(body.requirements, 'body.requirements')
+    ?? validateMustHaves(body.mustHaves, 'body.mustHaves')
+    ?? (has(body, 'description') ? validateDescription(body.description, 'body.description') : undefined)
+    ?? (has(body, 'estimate') ? validateEstimate(body.estimate, 'body.estimate') : undefined)
+    ?? (has(body, 'tags') ? validateItemTags(body.tags, 'body.tags') : undefined),
+  'item.updated': (body) => checkKeys(body, 'body', ['id', 'changes'])
+    ?? validateItemRef(body)
+    ?? validateChanges(body.changes, 'body.changes'),
+  'item.estimated': (body) => checkKeys(body, 'body', ['id', 'estimate'])
+    ?? validateItemRef(body)
+    ?? validateEstimate(body.estimate, 'body.estimate'),
+  'item.blocked': (body) => checkKeys(body, 'body', ['id', 'reason'])
+    ?? validateItemRef(body)
+    ?? validateText(body.reason, 'body.reason', REASON_MAX),
+  'item.unblocked': (body) => checkKeys(body, 'body', ['id'])
+    ?? validateItemRef(body),
+  'item.cancelled': (body) => checkKeys(body, 'body', ['id', 'reason'])
+    ?? validateItemRef(body)
+    ?? validateText(body.reason, 'body.reason', REASON_MAX),
+  'item.reopened': (body) => checkKeys(body, 'body', ['id'])
+    ?? validateItemRef(body),
   'policy.changed': (body) => checkKeys(body, 'body', ['changes'])
     ?? validatePolicyChanges(body.changes, 'body.changes'),
   'snapshot.written': (body) => checkKeys(body, 'body', ['coversThrough', 'lamport', 'stateHash', 'path'])

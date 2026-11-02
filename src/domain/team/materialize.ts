@@ -7,7 +7,8 @@ import { expectedJoinRole, inviteExpired, joinProofBytes, sealCapableFingerprint
 import { actionForEvent, decideTeamAction } from './permissions';
 import { DEFAULT_WIP_LIMIT, applyPolicyChanges, defaultTeamPolicy, validatePolicy } from './policy';
 import { AVAILABILITIES, ROLES, TEAM_REJECTION_REASONS } from './types';
-import type { Availability, CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, JsonObject, Materializer, Member, MemberInvite, Rejection, Role, SnapshotRef, TeamEvent, TeamPolicy, TeamState, WorkingHours } from './types';
+import { transitionProblem } from './work';
+import type { Availability, CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, ItemEstimate, ItemGsdRef, JsonObject, Materializer, Member, MemberInvite, Rejection, Role, SnapshotRef, TeamEvent, TeamPolicy, TeamState, WorkItem, WorkingHours } from './types';
 import { EMAIL_HASH_PATTERN, EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, invalid, isRecord, parseEventFile } from './validate';
 
 export const MAX_LAMPORT_JUMP = 1000;
@@ -142,7 +143,7 @@ function authorisationProblem(state: TeamState, event: ImplementedTeamEvent, com
     if (isOwnerJoin(state, event)) return undefined;
     return claimsInvitation(state, event) ? inviteProblem(state, event, commitTime) : `${R.notPermitted}: ${R.ownerJoinOnly}`;
   }
-  const action = actionForEvent(event);
+  const action = actionForEvent(event, state);
   if (action === undefined) return R.notPermitted;
   const decision = decideTeamAction(state, event.author, action);
   return decision.allowed ? undefined : `${R.notPermitted}: ${decision.reason ?? ''}`;
@@ -208,6 +209,17 @@ function referenceProblem(state: TeamState, event: ImplementedTeamEvent): string
       if (typeof member === 'string') return member;
       return keyDeliveryProblem(state, member, event.body.keyId, event.body.sealed.map((entry) => entry.device));
     }
+    // D-09 step 7 for work items: the item and its parent exist and the move is legal from the stored state (D-11, D-12). The same function
+    // runs on the write path through the transport's replay of the batch, so a refusal there is exactly the rejection recorded here.
+    case 'item.imported':
+    case 'item.created':
+    case 'item.updated':
+    case 'item.estimated':
+    case 'item.blocked':
+    case 'item.unblocked':
+    case 'item.cancelled':
+    case 'item.reopened':
+      return transitionProblem(state, event);
     case 'snapshot.written': {
       // The hash is computed before the transition and only when such an event arrives, about once per 500 events.
       const body = event.body;
@@ -281,6 +293,95 @@ function releaseHeldWork(state: TeamState, memberId: string): void {
   state.integrationQueue = state.integrationQueue.filter((claimId) => !releasedIds.has(claimId));
 }
 
+function itemOf(state: TeamState, itemId: string): WorkItem {
+  const item = state.items.get(itemId);
+  if (item === undefined) throw new Error(`Item ${itemId} vanished between the reference check and the transition.`);
+  return item;
+}
+
+// Stored copies are built key by key from the validated body, so nothing the parser accepted can alias or extend a stored item.
+function copyEstimate(estimate: ItemEstimate): ItemEstimate {
+  return estimate.confidence === undefined ? { tokens: estimate.tokens } : { tokens: estimate.tokens, confidence: estimate.confidence };
+}
+
+function copyGsd(gsd: ItemGsdRef): ItemGsdRef {
+  const copy: ItemGsdRef = { phase: gsd.phase };
+  if (gsd.plan !== undefined) copy.plan = gsd.plan;
+  if (gsd.wave !== undefined) copy.wave = gsd.wave;
+  if (gsd.file !== undefined) copy.file = gsd.file;
+  return copy;
+}
+
+// An imported item starts backlog or done (done when its SUMMARY already existed on the integration branch, D-06). Optional keys are only
+// assigned when present, so a state without them serialises as it would without the feature.
+function importedItem(body: TeamEvent<'item.imported'>['body'], at: string): WorkItem {
+  const item: WorkItem = {
+    id: body.id, kind: body.kind, title: body.title, dependsOn: [...body.dependsOn], scope: [...body.scope], requirements: [...body.requirements],
+    mustHaves: [...body.mustHaves], state: body.state, tags: [...body.tags], origin: 'import', stateSince: at
+  };
+  if (body.parentId !== undefined) item.parentId = body.parentId;
+  if (body.gsd !== undefined) item.gsd = copyGsd(body.gsd);
+  if (body.estimate !== undefined) item.estimate = copyEstimate(body.estimate);
+  if (body.summary === true) item.summary = true;
+  if (body.active === true) item.active = true;
+  if (body.source !== undefined) item.source = body.source;
+  return item;
+}
+
+// A board item is always born in backlog: it becomes ready by the computed rule, never by an event.
+function createdItem(body: TeamEvent<'item.created'>['body'], author: string, at: string): WorkItem {
+  const item: WorkItem = {
+    id: body.id, kind: body.kind, title: body.title, dependsOn: [], scope: [...body.scope], requirements: [...body.requirements],
+    mustHaves: [...body.mustHaves], state: 'backlog', tags: body.tags === undefined ? [] : [...body.tags], origin: 'board', stateSince: at, createdBy: author
+  };
+  if (body.description !== undefined) item.description = body.description;
+  if (body.estimate !== undefined) item.estimate = copyEstimate(body.estimate);
+  return item;
+}
+
+// Cancelling and reopening both end a block and a hold; stateSince moves because the stored state moved.
+function settle(item: WorkItem, state: 'cancelled' | 'backlog', at: string): void {
+  item.state = state;
+  item.stateSince = at;
+  delete item.blocked;
+  delete item.hold;
+}
+
+// A false summary, active or hold is stored as an absent key. Hold and mark done are the only key of their event, so the first two
+// branches are whole moves; marking done also ends a hold, since a finished item waits for nothing.
+function applyChanges(item: WorkItem, changes: TeamEvent<'item.updated'>['body']['changes'], at: string): void {
+  if (changes.hold !== undefined) {
+    if (changes.hold) item.hold = true;
+    else delete item.hold;
+    item.stateSince = at;
+    return;
+  }
+  if (changes.state !== undefined) {
+    item.state = 'done';
+    item.stateSince = at;
+    delete item.hold;
+    return;
+  }
+  if (changes.title !== undefined) item.title = changes.title;
+  if (changes.description !== undefined) item.description = changes.description;
+  if (changes.scope !== undefined) item.scope = [...changes.scope];
+  if (changes.requirements !== undefined) item.requirements = [...changes.requirements];
+  if (changes.mustHaves !== undefined) item.mustHaves = [...changes.mustHaves];
+  if (changes.dependsOn !== undefined) item.dependsOn = [...changes.dependsOn];
+  if (changes.estimate !== undefined) item.estimate = copyEstimate(changes.estimate);
+  if (changes.gsd !== undefined) item.gsd = copyGsd(changes.gsd);
+  if (changes.tags !== undefined) item.tags = [...changes.tags];
+  if (changes.source !== undefined) item.source = changes.source;
+  if (changes.summary !== undefined) {
+    if (changes.summary) item.summary = true;
+    else delete item.summary;
+  }
+  if (changes.active !== undefined) {
+    if (changes.active) item.active = true;
+    else delete item.active;
+  }
+}
+
 function applyTransition(state: TeamState, event: ImplementedTeamEvent, commitTime: number): void {
   switch (event.type) {
     case 'team.created':
@@ -349,6 +450,30 @@ function applyTransition(state: TeamState, event: ImplementedTeamEvent, commitTi
       member.nearKeyEvent = event.id;
       return;
     }
+    case 'item.imported':
+      state.items.set(event.body.id, importedItem(event.body, event.at));
+      return;
+    case 'item.created':
+      state.items.set(event.body.id, createdItem(event.body, event.author, event.at));
+      return;
+    case 'item.updated':
+      applyChanges(itemOf(state, event.body.id), event.body.changes, event.at);
+      return;
+    case 'item.estimated':
+      itemOf(state, event.body.id).estimate = copyEstimate(event.body.estimate);
+      return;
+    case 'item.blocked':
+      itemOf(state, event.body.id).blocked = { reason: event.body.reason, by: event.author, since: event.at };
+      return;
+    case 'item.unblocked':
+      delete itemOf(state, event.body.id).blocked;
+      return;
+    case 'item.cancelled':
+      settle(itemOf(state, event.body.id), 'cancelled', event.at);
+      return;
+    case 'item.reopened':
+      settle(itemOf(state, event.body.id), 'backlog', event.at);
+      return;
     case 'policy.changed':
       state.team.policy = applyPolicyChanges(state.team.policy, event.body.changes);
       return;

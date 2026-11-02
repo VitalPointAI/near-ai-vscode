@@ -92,7 +92,7 @@ export function prepareEvents(state: TeamState, head: LogHead, signer: TeamSigne
     if (intent.type === 'member.joined') return { conflict: `${R.notPermitted}: ${R.ownerJoinOnly}` };
     const unsigned = stamp(state, head, signer, intent, index, prev, now);
     const candidate = { ...unsigned, sig: SIGNATURE_PLACEHOLDER } as ImplementedTeamEvent;
-    const action = actionForEvent(candidate);
+    const action = actionForEvent(candidate, state);
     if (action === undefined) return { conflict: R.notPermitted };
     const decision = decideTeamAction(state, signer.memberId, action);
     if (!decision.allowed) return { conflict: `${R.notPermitted}: ${decision.reason ?? ''}` };

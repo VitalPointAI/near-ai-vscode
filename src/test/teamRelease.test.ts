@@ -34,7 +34,7 @@ function claim(id: string, itemId: string, memberId: string, status: Claim['stat
 }
 
 function item(id: string, state: WorkItem['state'], claimId?: string): WorkItem {
-  const base: WorkItem = { id, kind: 'task', title: `Item ${id}`, dependsOn: [], scope: [], requirements: [], mustHaves: [], state, tags: [] };
+  const base: WorkItem = { id, kind: 'task', title: `Item ${id}`, dependsOn: [], scope: [], requirements: [], mustHaves: [], state, tags: [], origin: 'import', stateSince: '2026-01-01T00:00:00.000Z' };
   if (claimId !== undefined) base.claimId = claimId;
   return base;
 }

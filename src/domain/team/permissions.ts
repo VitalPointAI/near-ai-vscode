@@ -2,14 +2,15 @@
 // The matrix is data so a reviewer can diff it against the spec row by row. The same decision runs when an
 // event is written (refuse locally) and when it is read (reject at that log position).
 import type { ImplementedTeamEvent, ItemKind, Role, TeamState } from './types';
+import { isOwnDraft } from './work';
 
 export type TeamActionKind = 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'member.remove' | 'member.change-role'
-  | 'item.create' | 'item.edit' | 'item.estimate' | 'item.claim' | 'item.assign' | 'lease.manual' | 'review.submit'
+  | 'item.create' | 'item.edit' | 'item.estimate' | 'item.move' | 'item.claim' | 'item.assign' | 'lease.manual' | 'review.submit'
   | 'merge.approve-out-of-scope' | 'lease.integrator' | 'budget.set' | 'allocation.grant' | 'allocation.revoke' | 'allocation.request'
   | 'team.stop' | 'team.resume' | 'policy.change' | 'device.add' | 'device.revoke' | 'member.availability' | 'member.skills' | 'snapshot.write' | 'member.key-deliver';
 
 export type TeamAction =
-  | { kind: 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'item.assign' | 'lease.manual' | 'merge.approve-out-of-scope' | 'lease.integrator' | 'allocation.request' | 'team.stop' | 'team.resume' | 'policy.change' | 'member.availability' | 'snapshot.write' }
+  | { kind: 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'item.assign' | 'item.move' | 'lease.manual' | 'merge.approve-out-of-scope' | 'lease.integrator' | 'allocation.request' | 'team.stop' | 'team.resume' | 'policy.change' | 'member.availability' | 'snapshot.write' }
   | { kind: 'member.remove'; targetId: string }
   | { kind: 'member.key-deliver'; targetId: string }
   | { kind: 'member.change-role'; targetId: string; role: Role }
@@ -44,6 +45,9 @@ export const PERMISSION_MATRIX: Readonly<Record<TeamActionKind, Row>> = Object.f
   'item.create': row(true, true, 'own-draft', false, false),
   'item.edit': row(true, true, 'own-draft', false, false),
   'item.estimate': row(true, true, 'own-draft', false, false),
+  // Lifecycle moves (hold, release, mark done, block, unblock, cancel, reopen) and import: not in the spec 6.3 table, which has no transition row;
+  // D-12 names the owner and leads for every move this phase, and the claimant joins in Phase 63.
+  'item.move': MANAGERS,
   'item.claim': row(true, true, true, 'review-items', false),
   'item.assign': MANAGERS,
   'lease.manual': MANAGERS,
@@ -75,6 +79,7 @@ export const ACTION_LABELS: Readonly<Record<TeamActionKind, string>> = Object.fr
   'item.create': 'creating items',
   'item.edit': 'editing items',
   'item.estimate': 'estimating items',
+  'item.move': 'moving items',
   'item.claim': 'claiming items',
   'item.assign': 'assigning items to others',
   'lease.manual': 'granting or revoking leases',
@@ -174,7 +179,10 @@ export function decideTeamAction(state: PermissionView, actorId: string, action:
 
 // Maps an accepted event to the matrix action, so the read path asks the same question the write path asked.
 // Genesis events (team.created, member.joined) are validated by the materializer's genesis rules instead.
-export function actionForEvent(event: ImplementedTeamEvent): TeamAction | undefined {
+// The item events need the state to answer "is this the author's own draft"; callers that pass none get ownDraft false, which is only
+// ever the stricter answer. Both the reader and prepareEvents pass the state as it stands before the event.
+export function actionForEvent(event: ImplementedTeamEvent, state?: Pick<TeamState, 'items'>): TeamAction | undefined {
+  const ownDraft = (itemId: string): boolean => state !== undefined && isOwnDraft(state, itemId, event.author);
   switch (event.type) {
     case 'team.created':
     case 'member.joined':
@@ -189,5 +197,18 @@ export function actionForEvent(event: ImplementedTeamEvent): TeamAction | undefi
     case 'policy.changed': return { kind: 'policy.change' };
     case 'snapshot.written': return { kind: 'snapshot.write' };
     case 'member.key-sealed': return { kind: 'member.key-deliver', targetId: event.body.memberId };
+    case 'item.imported': return { kind: 'item.create', ownDraft: false };
+    case 'item.created': return { kind: 'item.create', ownDraft: true };
+    case 'item.updated': {
+      const changes = event.body.changes;
+      const isMove = Object.prototype.hasOwnProperty.call(changes, 'hold') || Object.prototype.hasOwnProperty.call(changes, 'state');
+      return isMove ? { kind: 'item.move' } : { kind: 'item.edit', ownDraft: ownDraft(event.body.id) };
+    }
+    case 'item.estimated': return { kind: 'item.estimate', ownDraft: ownDraft(event.body.id) };
+    case 'item.blocked':
+    case 'item.unblocked':
+    case 'item.cancelled':
+    case 'item.reopened':
+      return { kind: 'item.move' };
   }
 }
