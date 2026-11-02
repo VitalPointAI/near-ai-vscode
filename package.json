@@ -213,6 +213,36 @@
         "title": "Verify Team Log",
         "category": "NEAR AI",
         "icon": "$(verified)"
+      },
+      {
+        "command": "nearAi.team.invite",
+        "title": "Invite to Team",
+        "category": "NEAR AI",
+        "icon": "$(mail)"
+      },
+      {
+        "command": "nearAi.team.join",
+        "title": "Join Team",
+        "category": "NEAR AI",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "nearAi.team.manageMembers",
+        "title": "Manage Team Members",
+        "category": "NEAR AI",
+        "icon": "$(account)"
+      },
+      {
+        "command": "nearAi.team.linkNearOrganization",
+        "title": "Link Team to NEAR Organization",
+        "category": "NEAR AI",
+        "icon": "$(link)"
+      },
+      {
+        "command": "nearAi.team.signOutNear",
+        "title": "Sign Out of NEAR (Team)",
+        "category": "NEAR AI",
+        "icon": "$(sign-out)"
       }
     ],
     "viewsContainers": {

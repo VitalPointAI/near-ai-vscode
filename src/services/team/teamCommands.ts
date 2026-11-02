@@ -5,6 +5,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { registerMemberCommands } from './memberCommands';
 import type { TeamSession } from './teamSession';
 
 export const ENABLE_COMMAND = 'nearAi.team.enable';
@@ -130,6 +131,14 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
     return startSession(projectRoot);
   }
 
+  // After a join or a NEAR link the running session is out of date (a new device key, a changed team.json), so it is replaced by a fresh one.
+  async function restartSession(projectRoot: string): Promise<void> {
+    const old = session;
+    session = undefined;
+    old?.dispose();
+    await startSession(projectRoot);
+  }
+
   async function verifyLog(): Promise<void> {
     const projectRoot = firstFolder();
     if (projectRoot === undefined || !(await teamFileExists(projectRoot))) {
@@ -231,6 +240,9 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
   context.subscriptions.push(
     vscode.commands.registerCommand(ENABLE_COMMAND, guarded('Enable Team Mode', enable)),
     vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Verify Team Log', verifyLog)),
+    ...registerMemberCommands({
+      context, output, report, announce, soloText: SOLO_TEXT, firstFolder, session: () => session, startSession, restartSession
+    }),
     { dispose: (): void => { disposed = true; session = undefined; } }
   );
 
