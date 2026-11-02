@@ -182,3 +182,70 @@ test('the detector patterns carry no global or sticky flag so repeated tests are
   const secret = `sk-${hex()}`;
   assert.deepEqual(findSecrets([secret, secret, secret]), ['$[0]', '$[1]', '$[2]']);
 });
+
+function x25519Pkcs8(encoding: 'base64' | 'base64url'): string {
+  const { privateKey } = generateKeyPairSync('x25519');
+  return privateKey.export({ type: 'pkcs8', format: 'der' }).toString(encoding);
+}
+
+function sealedShape(): { device: string; ephemeral: { publicKey: string }; nonce: string; tag: string; ciphertext: string } {
+  return {
+    device: hex(8),
+    ephemeral: { publicKey: randomBytes(32).toString('base64url') },
+    nonce: randomBytes(12).toString('base64url'),
+    tag: randomBytes(16).toString('base64url'),
+    ciphertext: randomBytes(51).toString('base64url')
+  };
+}
+
+test('x25519 private keys start with the documented prefix in both encodings and are detected anywhere', () => {
+  assert.ok(x25519Pkcs8('base64').startsWith('MC4CAQAwBQYDK2VuBCIEI'));
+  assert.ok(x25519Pkcs8('base64url').startsWith('MC4CAQAwBQYDK2VuBCIEI'));
+  for (const encoding of ['base64', 'base64url'] as const) {
+    const key = x25519Pkcs8(encoding);
+    assert.deepEqual(findSecrets(key), ['$']);
+    assert.deepEqual(findSecrets({ body: { note: key } }), ['$.body.note']);
+    assert.deepEqual(findSecrets({ publicKey: key.slice(0, 43) }), ['$.publicKey']);
+    assert.deepEqual(findSecrets({ sealed: [{ ciphertext: key }] }), ['$.sealed[0].ciphertext']);
+    // The 21 character prefix does not fit in a 16 character nonce, so only the 22 character tag can carry it.
+    assert.deepEqual(findSecrets({ sealed: [{ nonce: key.slice(0, 16), tag: key.slice(0, 22) }] }), ['$.sealed[0].tag']);
+    assert.deepEqual(findSecrets({ sealed: [{ ephemeral: { publicKey: key } }] }), ['$.sealed[0].ephemeral.publicKey']);
+  }
+});
+
+test('strict sealed shapes under nonce, tag, ciphertext and the ephemeral public key are exempt from the token patterns', () => {
+  // 16, 22 and 43 character values that happen to start like tokens, which random key material can do by chance.
+  const entry = { device: hex(8), ephemeral: { publicKey: `sk-${'A'.repeat(40)}` }, nonce: `rt_${'B'.repeat(13)}`, tag: `sk-${'C'.repeat(19)}`, ciphertext: `AAAA_sk-${'D'.repeat(60)}` };
+  assert.equal(entry.nonce.length, 16);
+  assert.equal(entry.tag.length, 22);
+  assert.deepEqual(findSecrets({ sealed: [entry] }), []);
+  for (let index = 0; index < 200; index += 1) assert.deepEqual(findSecrets({ sealed: [sealedShape()] }), [], `entry ${index}`);
+});
+
+test('a sealed field with the wrong length or under another key name is scanned like any other string', () => {
+  assert.deepEqual(findSecrets({ nonce: `rt_${'B'.repeat(14)}` }), ['$.nonce'], 'nonce of 17 characters');
+  assert.deepEqual(findSecrets({ nonce: `rt_${'B'.repeat(12)}` }), ['$.nonce'], 'nonce of 15 characters');
+  assert.deepEqual(findSecrets({ tag: `sk-${'C'.repeat(20)}` }), ['$.tag'], 'tag of 23 characters');
+  assert.deepEqual(findSecrets({ tag: `sk-${'C'.repeat(18)}` }), ['$.tag'], 'tag of 21 characters');
+  assert.deepEqual(findSecrets({ ciphertext: `sk-${'D'.repeat(18)}` }), ['$.ciphertext'], 'ciphertext of 21 characters');
+  assert.deepEqual(findSecrets({ ciphertext: `AAAA_sk-${'D'.repeat(700)}` }), ['$.ciphertext'], 'ciphertext over 700 characters');
+  assert.deepEqual(findSecrets({ nonces: `rt_${'B'.repeat(13)}` }), ['$.nonces']);
+  assert.deepEqual(findSecrets({ secretTag: `sk-${'C'.repeat(19)}` }), ['$.secretTag']);
+});
+
+test('a clear key or token placed under ciphertext is reported, whatever its length', () => {
+  assert.deepEqual(findSecrets({ sealed: [{ ciphertext: `sk-${hex(24)}` }] }), ['$.sealed[0].ciphertext']);
+  assert.deepEqual(findSecrets({ sealed: [{ ciphertext: `rt_${hex(24)}` }] }), ['$.sealed[0].ciphertext']);
+  assert.deepEqual(findSecrets({ sealed: [{ ciphertext: `rpt-${hex(24)}` }] }), ['$.sealed[0].ciphertext']);
+  assert.deepEqual(findSecrets({ sealed: [{ ciphertext: `adm_${hex(24)}` }] }), ['$.sealed[0].ciphertext']);
+  assert.deepEqual(findSecrets({ sealed: [{ ciphertext: `oc_${hex(24)}` }] }), ['$.sealed[0].ciphertext']);
+  assert.deepEqual(findSecrets({ sealed: [{ ciphertext: `sk_live_${hex(24)}` }] }), ['$.sealed[0].ciphertext']);
+  const jwt = `eyJ${randomBytes(9).toString('base64url')}.eyJ${randomBytes(12).toString('base64url')}.${randomBytes(24).toString('base64url')}`;
+  assert.deepEqual(findSecrets({ sealed: [{ ciphertext: jwt }] }), ['$.sealed[0].ciphertext']);
+  assert.throws(() => assertNoSecrets({ sealed: [{ ...sealedShape(), ciphertext: `sk-${hex(24)}` }] }, 'event'), SecretLeakError);
+});
+
+test('the existing Ed25519 private key cases still throw next to sealed entries', () => {
+  assert.deepEqual(findSecrets({ sealed: [sealedShape()], publicKey: pkcs8('base64url').slice(0, 43) }), ['$.publicKey']);
+  assert.deepEqual(findSecrets({ sealed: [{ ...sealedShape(), ciphertext: pkcs8('base64url') }] }), ['$.sealed[0].ciphertext']);
+});
