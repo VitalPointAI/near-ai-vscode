@@ -6,7 +6,7 @@
 // context, action or any other plan prose. This module never imports vscode.
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { MAX_EVENT_BYTES, canonicalBytes, canonicalize } from '../domain/team/canonical';
+import { CanonicalJsonError, MAX_EVENT_BYTES, canonicalBytes, canonicalize } from '../domain/team/canonical';
 import { buildGsdGraph } from '../domain/team/gsdImport';
 import type { GsdGraph, GsdMilestone, GsdPlan } from '../domain/team/gsdImport';
 import { decideTeamAction } from '../domain/team/permissions';
@@ -56,6 +56,8 @@ export type ImportResult =
 // ---- Cleaning ---------------------------------------------------------------------------------------------------------------------------
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+// The same pattern without the g flag, for a stateless test.
+const HAS_LONE_SURROGATE = new RegExp(LONE_SURROGATE.source);
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F\u2028\u2029]/g;
 
 interface Context { withheld: number; warnings: string[] }
@@ -105,7 +107,10 @@ function safeScope(context: Context, owner: string, values: readonly string[]): 
   const out: string[] = [];
   for (const raw of values) {
     const value = raw.trim();
-    if (!isScopePattern(value)) {
+    if (HAS_LONE_SURROGATE.test(value) || value.includes('\uFFFD')) {
+      // A path with a broken character names no real file, so it is dropped rather than repaired (WR-01).
+      warn(context, `${owner}: a file path was left out because it has a broken character.`);
+    } else if (!isScopePattern(value)) {
       warn(context, `${owner}: a file path was left out because it is not a plain relative path.`);
     } else if (findSecrets(value).length > 0) {
       context.withheld += 1;
@@ -287,8 +292,19 @@ export function graphToItems(graph: GsdGraph, options: { sourceCommit: string })
       return false;
     }
     if (draft.title === '') draft.title = draft.fallbackTitle;
-    const fitted = fitItemBody(toBody(draft));
-    const problem = validateBody('item.imported', fitted.body);
+    // One item that cannot be signed (a value the canonical form refuses) is left out with a warning; it never stops the whole import (WR-01).
+    let fitted: ReturnType<typeof fitItemBody>;
+    let problem: string | undefined;
+    try {
+      fitted = fitItemBody(toBody(draft));
+      problem = validateBody('item.imported', fitted.body);
+      if (problem === undefined) canonicalBytes(fitted.body);
+    } catch (error) {
+      if (!(error instanceof CanonicalJsonError)) throw error;
+      warn(context, `${truncate(collapse(draft.id), 80)} was left out because one of its fields cannot be saved.`);
+      skipped.add(draft.id);
+      return false;
+    }
     if (problem !== undefined) {
       warn(context, `${truncate(collapse(draft.id), 80)} was left out: ${problem}.`);
       skipped.add(draft.id);

@@ -414,6 +414,38 @@ test('every text is cleaned per field: control characters and whitespace, code-p
   for (const body of built.bodies) assert.doesNotThrow(() => canonicalize(body));
 });
 
+test('WR-01: a lone surrogate in any field never stops the import: a broken file path is dropped with a warning and the rest is kept', () => {
+  const built = graphToItems(syntheticGraph([syntheticPlan({
+    title: 'Title \uD800 half', truths: ['Truth \uDC00 half', 'A fine truth'], filesModified: ['src/\uD800.ts', 'src/ok.ts'], path: '.planning/phases/01-p/\uDBFF-PLAN.md',
+    tasks: [{ index: 1, title: 'Task \uDFFF', type: 'auto', files: ['\uDC01', 'src/task.ts'] }]
+  })]), { sourceCommit: COMMIT });
+  const plan = planBody(built.bodies);
+  assert.deepEqual(plan.scope, ['src/ok.ts']);
+  assert.deepEqual(plan.mustHaves, ['Truth \uFFFD half', 'A fine truth']);
+  assert.equal(plan.title, 'Title \uFFFD half');
+  assert.equal(plan.gsd?.file, undefined, 'a broken plan path is not kept as the file reference');
+  assert.deepEqual(planBody(built.bodies, 'task:1-01-1').scope, ['src/task.ts']);
+  assert.ok(built.warnings.filter((warning) => /broken character/.test(warning)).length >= 3, built.warnings.join(' | '));
+  for (const body of built.bodies) assert.doesNotThrow(() => canonicalBytes(body));
+});
+
+test('WR-01: a plan file whose frontmatter escapes half a surrogate pair is imported through git, with that entry dropped and every other item written', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    const a = fixture.clones.a as string;
+    cpSync(FIXTURE_PLANNING, path.join(a, '.planning'), { recursive: true });
+    edit(a, '.planning/phases/90-alpha/90-02-PLAN.md', (text) => replaceOnce(text, '  - src/fixture/beta.ts\n', '  - src/fixture/beta.ts\n  - "src/\\ud800.ts"\n')
+      .replace('    - "The beta slice builds on the alpha slice"\n', '    - "The beta slice builds on the alpha slice \\udc00"\n'));
+    commitAndPush(a, 'a broken escape');
+    const result = okResult(await importPlans({ log: seed.a.log, source: { projectRoot: a, remote: 'origin', branch: 'main' }, storageDir: path.join(fixture.storageDir('a'), 'import'), mode: 'command' }));
+    assert.equal(result.written, 13, 'every item of the fixture is on the board');
+    assert.ok(result.warnings.some((warning) => /plan:90-02: a file path was left out because it has a broken character/.test(warning)), result.warnings.join(' | '));
+    const plan = seed.a.log.state().items.get('plan:90-02');
+    assert.deepEqual(plan?.scope, ['src/fixture/beta.ts']);
+    assert.equal(plan?.mustHaves[0], 'The beta slice builds on the alpha slice \uFFFD');
+  });
+});
+
 test('every list is cut to its validator cap with a warning that names the item, and the same input cuts the same way', () => {
   const truths = Array.from({ length: 17 }, (_, index) => `Truth number ${index + 1}`);
   const input = syntheticGraph([syntheticPlan({ truths, filesModified: Array.from({ length: 70 }, (_, index) => `src/file${index}.ts`) })]);

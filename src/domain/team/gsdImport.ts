@@ -143,12 +143,16 @@ function scanQuoted(text: string, from: number): number {
   return -1;
 }
 
+// A double-quoted value can spell half of a surrogate pair as an escape ("\ud800"). That half cannot be signed (the canonical form refuses it), so it
+// becomes the replacement character here, before any field holds it (WR-01).
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 function unquote(span: string): string {
   const inner = span.slice(1, -1);
   if (span.startsWith('"')) {
     try {
       const parsed: unknown = JSON.parse(span);
-      if (typeof parsed === 'string') return parsed;
+      if (typeof parsed === 'string') return parsed.replace(LONE_SURROGATE, '\uFFFD');
     } catch {
       return inner;
     }
