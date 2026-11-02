@@ -186,6 +186,14 @@ const EVENT_A = 'evt-01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const LINE_SEPARATOR = String.fromCharCode(0x2028);
 const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029);
 
+// One sealed entry with the right byte lengths: a 32 byte ephemeral key, a 12 byte nonce, a 16 byte tag and 40 bytes of ciphertext.
+function sealedEntry(device: { fingerprint: string; publicKey: string }): Record<string, unknown> {
+  return {
+    device: device.fingerprint, ephemeral: { publicKey: device.publicKey }, nonce: Buffer.alloc(12, 7).toString('base64url'),
+    tag: Buffer.alloc(16, 8).toString('base64url'), ciphertext: Buffer.alloc(40, 9).toString('base64url')
+  };
+}
+
 function bodiesFor(device: { fingerprint: string; publicKey: string }): Record<string, Record<string, unknown>> {
   return {
     'team.created': { name: 'Core team', ownerId: OWNER_ID, ownerName: 'Ada', ownerEmailHashes: [HASH_A], ownerDevice: device, policy: defaultTeamPolicy(), near: { organizationId: 'org_1', workspaceId: 'ws:2' } },
@@ -198,6 +206,7 @@ function bodiesFor(device: { fingerprint: string; publicKey: string }): Record<s
     'member.availability': { availability: 'focus', workingHours: { tz: 'Europe/London', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:30' } },
     'member.skills': { memberId: OTHER_ID, skills: ['typescript', 'c++', 'node.js'] },
     'policy.changed': { changes: { peerMetricsVisible: true, safetyFactorBp: 13000 } },
+    'member.key-sealed': { memberId: OTHER_ID, keyId: 'key_0123456789abcdef', scheme: 'x25519-hkdf-sha256-aes-256-gcm-v1', sealed: [sealedEntry(device)] },
     'snapshot.written': { coversThrough: EVENT_A, lamport: 500, stateHash: HASH_A, path: 'snapshots/000000000500.json' }
   };
 }
@@ -482,4 +491,51 @@ test('isGitRefName agrees with git check-ref-format --branch (WR-09)', () => {
   for (const name of ['a//b', 'release.lock', 'trailing/']) {
     assert.equal(validatePolicy(defaultTeamPolicy({ integrationBranch: name })), `${INVALID}: policy.integrationBranch`, name);
   }
+});
+
+test('member.key-sealed accepts one to eight sealed entries and rejects every other shape by field path', async () => {
+  const { owner } = await context();
+  const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
+  const valid = bodiesFor(device)['member.key-sealed'] as Record<string, unknown>;
+  const entry = sealedEntry(device);
+  const other = { ...entry, device: `dev-${'1'.repeat(32)}` };
+  const withSealed = (sealed: unknown): Record<string, unknown> => ({ ...clone(valid), sealed });
+  assert.equal(validateBody('member.key-sealed', valid), undefined);
+  const eight = Array.from({ length: 8 }, (_unused, index) => ({ ...entry, device: `dev-${String(index).repeat(32)}` }));
+  assert.equal(validateBody('member.key-sealed', withSealed(eight)), undefined, 'eight entries');
+  assert.equal(validateBody('member.key-sealed', withSealed([])), `${INVALID}: body.sealed`, 'no entries');
+  assert.equal(validateBody('member.key-sealed', withSealed([...eight, other])), `${INVALID}: body.sealed`, 'nine entries');
+  assert.equal(validateBody('member.key-sealed', withSealed([entry, entry])), `${INVALID}: body.sealed`, 'the same device twice');
+  assert.equal(validateBody('member.key-sealed', withSealed({})), `${INVALID}: body.sealed`, 'not a list');
+  assert.equal(validateBody('member.key-sealed', { ...clone(valid), scheme: 'x25519-hkdf-sha256-aes-256-gcm-v2' }), `${INVALID}: body.scheme`);
+  assert.equal(validateBody('member.key-sealed', { ...clone(valid), keyId: 'has space' }), `${INVALID}: body.keyId`);
+  assert.equal(validateBody('member.key-sealed', { ...clone(valid), keyId: '' }), `${INVALID}: body.keyId`);
+
+  for (const key of ['device', 'ephemeral', 'nonce', 'tag', 'ciphertext']) {
+    const missing = { ...entry };
+    delete missing[key];
+    assert.equal(validateBody('member.key-sealed', withSealed([missing])), `${INVALID}: body.sealed[0].${key}`, `missing ${key}`);
+  }
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, surprise: 1 }])), `${INVALID}: body.sealed[0].surprise`);
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, device: 'dev-short' }])), `${INVALID}: body.sealed[0].device`);
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, ephemeral: { publicKey: 'short' } }])), `${INVALID}: body.sealed[0].ephemeral.publicKey`);
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, ephemeral: { publicKey: device.publicKey, extra: 1 } }])), `${INVALID}: body.sealed[0].ephemeral.extra`);
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, nonce: Buffer.alloc(11).toString('base64url') }])), `${INVALID}: body.sealed[0].nonce`);
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, tag: Buffer.alloc(15).toString('base64url') }])), `${INVALID}: body.sealed[0].tag`);
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, nonce: `${Buffer.alloc(12).toString('base64url')}=` }])), `${INVALID}: body.sealed[0].nonce`, 'padding is not strict base64url');
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, ciphertext: Buffer.alloc(16, 1).toString('base64url') }])), undefined, '16 bytes is the smallest ciphertext');
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, ciphertext: Buffer.alloc(15, 1).toString('base64url') }])), `${INVALID}: body.sealed[0].ciphertext`);
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, ciphertext: Buffer.alloc(525, 1).toString('base64url') }])), undefined, '525 bytes is the largest ciphertext');
+  assert.equal(validateBody('member.key-sealed', withSealed([{ ...entry, ciphertext: Buffer.alloc(526, 1).toString('base64url') }])), `${INVALID}: body.sealed[0].ciphertext`);
+});
+
+test('device.added may carry a seal key, and only as a one-key object holding 32 bytes', async () => {
+  const { owner } = await context();
+  const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
+  const added = { memberId: OTHER_ID, device };
+  assert.equal(validateBody('device.added', added), undefined, 'a device.added without a seal key is still valid');
+  assert.equal(validateBody('device.added', { ...added, sealKey: { publicKey: device.publicKey } }), undefined);
+  assert.equal(validateBody('device.added', { ...added, sealKey: { publicKey: 'short' } }), `${INVALID}: body.sealKey.publicKey`);
+  assert.equal(validateBody('device.added', { ...added, sealKey: { publicKey: device.publicKey, extra: 1 } }), `${INVALID}: body.sealKey.extra`);
+  assert.equal(validateBody('device.added', { ...added, sealKey: 'x' }), `${INVALID}: body.sealKey`);
 });

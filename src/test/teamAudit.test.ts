@@ -1,14 +1,14 @@
 // Roster audit mirror (D-26): team-roster is an accepted audit type, accepted roster events are mirrored once with member
 // attribution and no secrets, and a restart or a trimmed audit log never duplicates an entry.
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { SecretLeakError } from '../domain/team/secrets';
 import type { Role, TeamEvent } from '../domain/team/types';
-import { newEventId, newTeamId, signEvent } from '../team/identity';
+import { newEventId, newMemberId, newTeamId, signEvent } from '../team/identity';
 import { ROSTER_AUDIT_TYPES, fileMirrorMark, mirrorRosterEvents, rosterAuditId, toRosterAuditEvent } from '../team/auditMirror';
 import type { AuditSink, MirrorMark } from '../team/auditMirror';
 import { AuditStore } from '../services/auditStore';
@@ -155,7 +155,44 @@ test('policy.changed and snapshot.written events are not mirrored', async () => 
     assert.equal(await mirrorRosterEvents(store, mark, [...r.genesis.events, policy, snapshot], ownerRole(r)), 2);
     assert.deepEqual((await store.list({ type: 'team-roster' })).map((entry) => entry.metadata?.eventType), ['team.created', 'member.joined']);
     assert.equal(await mirrorRosterEvents(store, mark, [policy, snapshot], ownerRole(r)), 0);
-    assert.deepEqual(ROSTER_AUDIT_TYPES, ['team.created', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills']);
+    assert.deepEqual(ROSTER_AUDIT_TYPES, ['team.created', 'member.invited', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'member.key-sealed']);
+  } finally {
+    await dispose(r);
+  }
+});
+
+test('member.invited and member.key-sealed are mirrored as metadata only, with no hash, key or sealed field in either entry', async () => {
+  const r = await rig();
+  try {
+    const store = new AuditStore(r.workspace);
+    const mark = fileMirrorMark(r.storage);
+    const target = newMemberId();
+    const emailHashValue = createHash('sha256').update(`${r.teamId}:dana@example.invalid`).digest('hex');
+    const invitePublicKey = randomBytes(32).toString('base64url');
+    const keyId = `key_${randomBytes(8).toString('hex')}`;
+    const sealed = {
+      device: `dev-${randomBytes(16).toString('hex')}`, ephemeral: { publicKey: randomBytes(32).toString('base64url') }, nonce: randomBytes(12).toString('base64url'),
+      tag: randomBytes(16).toString('base64url'), ciphertext: randomBytes(40).toString('base64url')
+    };
+    const invited = signEvent(r.owner.identity, {
+      v: 1, id: newEventId(), teamId: r.teamId, type: 'member.invited', lamport: 3, at: '2026-01-01T00:00:06.000Z', author: r.owner.memberId,
+      device: r.owner.identity.fingerprint, prev: r.genesis.events[1].id,
+      body: { memberId: target, name: 'Dana', emailHashes: [emailHashValue], role: 'developer', allocationNanoUsd: 5_000_000_000, ttlSeconds: 604_800, invite: { publicKey: invitePublicKey } }
+    });
+    const keySealed = signEvent(r.owner.identity, {
+      v: 1, id: newEventId(), teamId: r.teamId, type: 'member.key-sealed', lamport: 4, at: '2026-01-01T00:00:07.000Z', author: r.owner.memberId,
+      device: r.owner.identity.fingerprint, prev: invited.id,
+      body: { memberId: target, keyId, scheme: 'x25519-hkdf-sha256-aes-256-gcm-v1', sealed: [sealed] }
+    });
+    assert.equal(await mirrorRosterEvents(store, mark, [...r.genesis.events, invited, keySealed], ownerRole(r)), 4);
+    const entries = (await store.list({ type: 'team-roster' })).filter((entry) => entry.metadata?.lamport === 3 || entry.metadata?.lamport === 4);
+    assert.equal(entries.length, 2);
+    assert.deepEqual(entries[0].metadata, { eventType: 'member.invited', eventId: invited.id, lamport: 3, memberId: r.owner.memberId, role: 'owner', subjectId: target });
+    assert.deepEqual(entries[1].metadata, { eventType: 'member.key-sealed', eventId: keySealed.id, lamport: 4, memberId: r.owner.memberId, role: 'owner', subjectId: target });
+    const text = JSON.stringify(entries);
+    for (const forbidden of [emailHashValue, invitePublicKey, keyId, sealed.device, sealed.ephemeral.publicKey, sealed.nonce, sealed.tag, sealed.ciphertext]) {
+      assert.equal(text.includes(forbidden), false, 'a hash, key or sealed field reached the audit entry');
+    }
   } finally {
     await dispose(r);
   }

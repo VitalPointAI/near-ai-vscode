@@ -81,7 +81,9 @@ const rows: Row[] = [
   { name: 'member.availability', kind: 'member.availability', build: () => ({ kind: 'member.availability' }), expect: [T, T, T, T, T] },
   { name: 'member.skills for self', kind: 'member.skills', build: (self) => ({ kind: 'member.skills', memberId: self }), expect: [T, T, T, T, T] },
   { name: 'member.skills for another member', kind: 'member.skills', build: () => ({ kind: 'member.skills', memberId: EXTRA }), expect: [T, T, F, F, F] },
-  { name: 'snapshot.write', kind: 'snapshot.write', build: () => ({ kind: 'snapshot.write' }), expect: [T, T, F, F, F] }
+  { name: 'snapshot.write', kind: 'snapshot.write', build: () => ({ kind: 'snapshot.write' }), expect: [T, T, F, F, F] },
+  { name: 'member.key-deliver for another member', kind: 'member.key-deliver', build: () => ({ kind: 'member.key-deliver', targetId: EXTRA }), expect: [T, T, F, F, F] },
+  { name: 'member.key-deliver for the owner', kind: 'member.key-deliver', build: () => ({ kind: 'member.key-deliver', targetId: IDS.owner }), expect: [F, F, F, F, F] }
 ];
 
 for (const row of rows) {
@@ -98,7 +100,7 @@ for (const row of rows) {
 
 test('the table covers every kind in the matrix and the matrix has five roles per kind', () => {
   const kinds = Object.keys(PERMISSION_MATRIX);
-  assert.equal(kinds.length, 27);
+  assert.equal(kinds.length, 28);
   for (const kind of kinds) {
     assert.deepEqual(Object.keys(PERMISSION_MATRIX[kind as TeamActionKind]).sort(), [...ROLES].sort(), kind);
     assert.ok(rows.some((row) => row.kind === kind), `no table row for ${kind}`);
@@ -208,7 +210,7 @@ const ENVELOPE = {
 };
 const DEVICE = { fingerprint: 'dev-0123456789abcdef0123456789abcdef', publicKey: 'A'.repeat(43) };
 
-test('actionForEvent maps the eight non-genesis Phase 60 event types and skips the genesis pair', () => {
+test('actionForEvent maps every non-genesis event type and skips the genesis pair', () => {
   const cases: Array<[ImplementedTeamEvent, TeamAction | undefined]> = [
     [{ ...ENVELOPE, type: 'team.created', body: { name: 'T', ownerId: IDS.owner, ownerName: 'O', ownerEmailHashes: [], ownerDevice: DEVICE, policy: defaultTeamPolicy() } }, undefined],
     [{ ...ENVELOPE, type: 'member.joined', body: { memberId: IDS.owner, name: 'O', emailHashes: [], role: 'owner', device: DEVICE } }, undefined],
@@ -219,7 +221,8 @@ test('actionForEvent maps the eight non-genesis Phase 60 event types and skips t
     [{ ...ENVELOPE, type: 'member.availability', body: { availability: 'focus' } }, { kind: 'member.availability' }],
     [{ ...ENVELOPE, type: 'member.skills', body: { memberId: EXTRA, skills: ['ts'] } }, { kind: 'member.skills', memberId: EXTRA }],
     [{ ...ENVELOPE, type: 'policy.changed', body: { changes: { teeOnly: true } } }, { kind: 'policy.change' }],
-    [{ ...ENVELOPE, type: 'snapshot.written', body: { coversThrough: 'evt-01', lamport: 2, stateHash: 'a'.repeat(64), path: 'snapshots/x.json' } }, { kind: 'snapshot.write' }]
+    [{ ...ENVELOPE, type: 'snapshot.written', body: { coversThrough: 'evt-01', lamport: 2, stateHash: 'a'.repeat(64), path: 'snapshots/x.json' } }, { kind: 'snapshot.write' }],
+    [{ ...ENVELOPE, type: 'member.key-sealed', body: { memberId: EXTRA, keyId: 'key_0123', scheme: 'x25519-hkdf-sha256-aes-256-gcm-v1', sealed: [] } }, { kind: 'member.key-deliver', targetId: EXTRA }]
   ];
   for (const [event, expected] of cases) {
     assert.deepEqual(actionForEvent(event), expected, event.type);
@@ -231,4 +234,19 @@ test('the same decision runs on the mapped action for a lead revoking the owner 
   const action = actionForEvent(event);
   assert.ok(action);
   assert.equal(decideTeamAction(view(), event.author, action).allowed, false);
+});
+
+test('only the owner and a lead deliver a key, never to the owner, and the owner denial has its own reason', () => {
+  for (const actor of [IDS.owner, IDS.lead]) {
+    assert.equal(decideTeamAction(view(), actor, { kind: 'member.key-deliver', targetId: IDS.developer }).allowed, true, actor);
+    assert.deepEqual(
+      decideTeamAction(view(), actor, { kind: 'member.key-deliver', targetId: IDS.owner }),
+      { allowed: false, reason: PERMISSION_REASONS.ownerKey },
+      actor
+    );
+  }
+  for (const role of ['developer', 'reviewer', 'observer'] as const) {
+    assert.equal(decideTeamAction(view(), IDS[role], { kind: 'member.key-deliver', targetId: EXTRA }).allowed, false, role);
+  }
+  assert.equal(PERMISSION_REASONS.ownerKey, "the owner's NEAR key is not delivered through the team log");
 });
