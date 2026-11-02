@@ -159,11 +159,15 @@ function plansByPhase(items: Items): Map<string, WorkItem[]> {
   return byPhase;
 }
 
-// A phase is complete when every non-cancelled plan under it is done. A phase with no live plan has nothing to prove it, so it is complete
-// only when it is itself stored done: an unplanned phase never releases the phases that wait on it.
+// A phase is complete when every non-cancelled plan under it is done. The 62-04 rule stays for a phase that was never planned: it has nothing to prove
+// it, so it is complete only when it is itself stored done, and it never releases the phases that wait on it. A phase that had plans and saw every one
+// of them cancelled has nothing left to do, so it counts as complete (IN-02): without this no event could ever release the phases that wait on it,
+// because a phase does not move through states. A cancelled plan dependency still keeps its own dependents waiting.
 function phaseComplete(phase: WorkItem, byPhase: ReadonlyMap<string, WorkItem[]>): boolean {
-  const live = (byPhase.get(phase.id) ?? []).filter((plan) => plan.state !== 'cancelled');
-  return live.length === 0 ? phase.state === 'done' : live.every((plan) => plan.state === 'done');
+  const plans = byPhase.get(phase.id) ?? [];
+  const live = plans.filter((plan) => plan.state !== 'cancelled');
+  if (live.length > 0) return live.every((plan) => plan.state === 'done');
+  return plans.length > 0 || phase.state === 'done';
 }
 
 function dependencyProblem(items: Items, byPhase: ReadonlyMap<string, WorkItem[]>, id: string): 'dependency-open' | 'dependency-missing' | undefined {

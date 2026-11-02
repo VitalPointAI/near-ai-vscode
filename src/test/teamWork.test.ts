@@ -168,6 +168,20 @@ test('phase-dependency-open comes from an open plan in a phase the item phase de
   assert.deepEqual(readiness(absent, 'plan:91-01'), { ready: false, reasons: ['dependency-missing'] }, 'a phase that is not on the board cannot be proven complete');
 });
 
+test('IN-02: a phase whose plans were all cancelled counts as complete for the phases that wait on it; a phase never planned still does not', () => {
+  const phase91 = item({ id: 'phase:91', kind: 'phase', parentId: 'milestone:v0.9.0', dependsOn: ['phase:90'] });
+  const allCancelled = board(MILESTONE, PHASE_90, phase91, readyPlan({ id: 'plan:90-01', state: 'cancelled' }), readyPlan({ id: 'plan:90-02', state: 'cancelled' }), readyPlan({ id: 'plan:91-01', parentId: 'phase:91' }));
+  assert.deepEqual(readiness(allCancelled, 'plan:91-01'), { ready: true, reasons: [] }, 'nothing is left to do in phase 90');
+  const phase92 = item({ id: 'phase:92', kind: 'phase', parentId: 'milestone:v0.9.0' });
+  const viaPlan = board(MILESTONE, PHASE_90, phase92, readyPlan({ id: 'plan:90-01', state: 'cancelled' }), readyPlan({ id: 'plan:92-01', parentId: 'phase:92', dependsOn: ['phase:90'] }));
+  assert.deepEqual(reasonsOf(viaPlan, 'plan:92-01'), [], 'a card that depends on the phase itself is released too');
+
+  const unplanned = board(MILESTONE, PHASE_90, phase91, readyPlan({ id: 'plan:91-01', parentId: 'phase:91' }));
+  assert.deepEqual(readiness(unplanned, 'plan:91-01'), { ready: false, reasons: ['phase-dependency-open'] }, 'a phase never planned holds the next one back (62-04)');
+  const storedDone = board(MILESTONE, { ...PHASE_90, state: 'done' }, phase91, readyPlan({ id: 'plan:91-01', parentId: 'phase:91' }));
+  assert.deepEqual(readiness(storedDone, 'plan:91-01'), { ready: true, reasons: [] }, 'unless the phase itself is stored done');
+});
+
 test('reasons combine, are sorted and carry no duplicates', () => {
   const stuck = readyPlan({
     id: 'plan:90-02', state: 'in-progress', hold: true, scope: [], dependsOn: ['plan:90-00', 'plan:90-09', 'plan:90-10'],
