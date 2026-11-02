@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: executing
-stopped_at: Completed 62-07-PLAN.md
-last_updated: "2026-11-02T19:44:59.292Z"
+stopped_at: Completed 62-08-PLAN.md
+last_updated: "2026-11-02T20:10:00.880Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 537d0b31be768626374727e0999ca80712f6cb52
+state_head: f450fde64416e39c9df897f1ea4ba0b49e4e66e7
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 40
-  completed_plans: 33
+  completed_plans: 34
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 62 (Work model, GSD import, Team Board (live, read and move)) — EXECUTING
-Plan: 8 of 14
+Plan: 9 of 14
 Status: Ready to execute
 Last activity: 2026-11-02 — Phase 62 execution started
 
@@ -87,6 +87,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P05 | 40 min | 3 tasks | 4 files |
 | Phase 62 P06 | 70min | 3 tasks | 5 files |
 | Phase 62 P07 | 22 min | 3 tasks | 11 files |
+| Phase 62 P08 | 45 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -155,6 +156,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-07: a visible board only changes what the scheduler reads (one timer); opening it syncs at once, closing it returns to the unfocused delay
 - [Phase 62]: 62-07: the automatic import is role-gated (owner, lead) before any git call, once a minute on a monotonic clock, one notice per window, failures one redacted line
 - [Phase 62]: 62-07: canWrite means a device key for a non-removed member; reachability and trust are the board's job through boardStatus
+- [Phase 62]: 62-08: the host plans a board move three times (known state for the prompt, current state after the prompts, fresh state inside log.append) and shows a card-state refusal after an offered move as the stale sentence naming the newest author
+- [Phase 62]: 62-08: nearAi.teamMode context key is set once after the first session starts and cleared on dispose; the board module loads only by dynamic import after a session starts
+- [Phase 62]: 62-08: page protocol host-to-page detail is {type:'detail', ...CardDetail}; a dismissed prompt answers refused with reason empty and the page clears the pending line silently
 
 ### Pending Todos
 
@@ -176,8 +180,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T19:44:59.008Z
-Stopped at: Completed 62-07-PLAN.md
+Last session: 2026-11-02T20:10:00.561Z
+Stopped at: Completed 62-08-PLAN.md
 Resume file: None
 
 ## Notes
