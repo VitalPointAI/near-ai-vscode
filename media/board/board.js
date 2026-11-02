@@ -371,8 +371,9 @@
   }
 
   // ---- main content ------------------------------------------------------------------------------------------------------------------------------
+  // The page-level empty, loading and error box. Its class is not 'state': that is the state chip on every card (WR-04).
   function stateView(cls, head, body, buttons, role) {
-    const box = el('div', 'state ' + cls);
+    const box = el('div', 'state-box ' + cls);
     if (role) box.setAttribute('role', role);
     if (head) box.appendChild(el(cls === 'loading' ? 'p' : 'h2', 'state-head', head));
     if (body) box.appendChild(el('p', 'state-body', body));

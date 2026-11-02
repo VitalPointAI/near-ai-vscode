@@ -276,7 +276,7 @@ test('the empty board names the next step for each role and offers one primary b
 test('loading, the slow message after 10 seconds, the error state and Try again', async () => {
   const h = start();
   assert.equal(text(h.$('.state-head')), 'Loading the Team Board...');
-  assert.equal(h.$('.state')!.getAttribute('role'), 'status');
+  assert.equal(h.$('.state-box')!.getAttribute('role'), 'status');
   h.advance(9000);
   assert.equal(text(h.$('.state-head')), 'Loading the Team Board...');
   h.advance(1500);
@@ -641,6 +641,21 @@ test('icon(name) draws an aria-hidden inline svg for every meaning in the table 
   const unknown = api(h).icon('no-such-icon');
   assert.equal(unknown.children.length, 0);
   assert.equal(unknown.getAttribute('aria-hidden'), 'true');
+});
+
+test('WR-04: the card state chip and the page state box have their own classes, so the chip lays out its icon beside its word', async () => {
+  // Every rule that reaches the chip (class "state") lays it out in a row; only the box (class "state-box") is a centred column.
+  const rules = [...BOARD_CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ selector: (m[1] ?? '').trim(), body: m[2] ?? '' }));
+  const reachesChip = rules.filter((rule) => rule.selector.split(',').some((part) => /\.state(?![\w-])/.test(part)));
+  assert.ok(reachesChip.length > 0);
+  assert.equal(reachesChip.some((rule) => /flex-direction:\s*column|text-align:\s*center/.test(rule.body)), false, reachesChip.map((rule) => rule.selector).join(' | '));
+  assert.ok(rules.some((rule) => /^\.state-box$/.test(rule.selector) && /flex-direction:\s*column/.test(rule.body)), 'the box is still a column');
+  const world = await standard();
+  const h = start();
+  h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
+  const chip = card(h, 'plan:90-01').querySelector('.card-top')!.firstElementChild!;
+  assert.equal(chip.className, 'state');
+  assert.equal(h.$$('.state-box').length, 0, 'no box while cards are shown');
 });
 
 test('board.css: only theme variables for colour, borders kept in high contrast and forced colours, no motion when reduced, and the narrow rules', () => {
