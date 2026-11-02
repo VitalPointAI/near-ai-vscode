@@ -134,10 +134,25 @@ export async function readPlanningSnapshot(projectRoot: string, ref: string, wan
   return { commit, treeHash, paths: entries.map((entry) => entry.path), files, oversize, truncated };
 }
 
-export async function remoteBranchHead(_projectRoot: string, _remote: string, _branch: string, _git: GitRunner = runGit): Promise<string | undefined> {
-  throw new Error('not implemented');
+// The commit the remote's integration branch points at right now, or undefined when the remote has no such branch.
+// A failure throws an Error carrying the redacted reason so the caller can report it (T-62-06).
+export async function remoteBranchHead(projectRoot: string, remote: string, branch: string, git: GitRunner = runGit): Promise<string | undefined> {
+  integrationRef(branch);
+  if (!isGitRefName(remote)) throw new Error('The team remote name is not a valid git remote name.');
+  const result = await git(['ls-remote', '--heads', remote, `refs/heads/${branch}`], { cwd: projectRoot, timeoutMs: FETCH_TIMEOUT_MS });
+  if (result.code !== 0) throw new Error(`Checking the team remote failed: ${failureDetail(result.stderr, result.code)}`);
+  for (const line of gitText(result).split('\n')) {
+    const [commit, name] = line.split('\t');
+    if (name === `refs/heads/${branch}` && commit !== undefined && commit !== '') return commit;
+  }
+  return undefined;
 }
 
-export async function isAncestor(_projectRoot: string, _older: string, _newer: string, _git: GitRunner = runGit): Promise<boolean | 'unknown'> {
-  throw new Error('not implemented');
+// Is `older` part of the history of `newer`? 'unknown' when git cannot say, for example when one commit is not in this repository.
+export async function isAncestor(projectRoot: string, older: string, newer: string, git: GitRunner = runGit): Promise<boolean | 'unknown'> {
+  if (!/^[0-9a-f]{7,64}$/i.test(older) || !/^[0-9a-f]{7,64}$/i.test(newer)) return 'unknown';
+  const result = await git(['merge-base', '--is-ancestor', older, newer], { cwd: projectRoot });
+  if (result.code === 0) return true;
+  if (result.code === 1) return false;
+  return 'unknown';
 }
