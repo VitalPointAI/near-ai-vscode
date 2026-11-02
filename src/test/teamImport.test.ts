@@ -414,6 +414,14 @@ test('every text is cleaned per field: control characters and whitespace, code-p
   for (const body of built.bodies) assert.doesNotThrow(() => canonicalize(body));
 });
 
+test('IN-01: imported titles, must-haves and file paths are written without bidi or zero-width characters', () => {
+  const built = graphToItems(syntheticGraph([syntheticPlan({ title: 'Ship \u202Efdp.exe\u202C', truths: ['Works\u200B fine\u2066'], filesModified: ['src/\u200Fok.ts'] })]), { sourceCommit: COMMIT });
+  const plan = planBody(built.bodies);
+  assert.equal(plan.title, 'Ship fdp.exe');
+  assert.deepEqual(plan.mustHaves, ['Works fine']);
+  assert.deepEqual(plan.scope, ['src/ok.ts']);
+});
+
 test('WR-01: a lone surrogate in any field never stops the import: a broken file path is dropped with a warning and the rest is kept', () => {
   const built = graphToItems(syntheticGraph([syntheticPlan({
     title: 'Title \uD800 half', truths: ['Truth \uDC00 half', 'A fine truth'], filesModified: ['src/\uD800.ts', 'src/ok.ts'], path: '.planning/phases/01-p/\uDBFF-PLAN.md',

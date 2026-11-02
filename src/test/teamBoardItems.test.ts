@@ -109,6 +109,17 @@ const newEvents = (rig: Rig, before: string[]): RemoteEvent[] => eventFiles(rig)
 
 const DRAFT = { kind: 'chore', title: 'Tidy settings page', description: 'Group the team settings.', scope: ['src/services/settings/**'], estimate: 48000 };
 
+test('IN-01: a title, description and file line typed with bidi or zero-width characters are written without them', async () => {
+  await withBoard('dev', async ({ rig, panel }) => {
+    const before = eventFiles(rig);
+    await panel.receive({ type: 'new-item', draft: { kind: 'bug', title: 'Fix \u202Egnp.exe\u202C upload\u200B', description: 'Steps\u2066 one\u2069\ntwo\u200F', scope: ['src/\u200Bapp/**'] } });
+    const body = (newEvents(rig, before)[0] as RemoteEvent).body;
+    assert.equal(body['title'], 'Fix gnp.exe upload');
+    assert.equal(body['description'], 'Steps one\ntwo');
+    assert.deepEqual(body['scope'], ['src/app/**']);
+  });
+});
+
 test('tracer: a developer adds a chore through the page and the host, the remote gains one item.created with the estimate, and the owner sees the developer as its creator', async () => {
   await withBoard('dev', async ({ rig, started, panel, ui }) => {
     const before = eventFiles(rig);

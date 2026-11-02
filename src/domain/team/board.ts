@@ -3,7 +3,7 @@
 // function on fresh state inside the append. Pure: no vscode, no I/O, no clock reads (nowMs is a parameter used for display text only).
 import {
   ALL_CARDS_LABEL, BOARD_LANE_LABEL, COLUMN_CAPTIONS, COLUMN_LABELS, HISTORY_LIMIT_TEXT, KIND_WORDS, MOVE_LABELS, NO_PLANS_TEXT, READ_ONLY_BANNERS, REFUSALS, SOMEONE, SOURCE_BOARD_TEXT,
-  SOURCE_IMPORT_TEXT, UNASSIGNED_LABEL, ageText, cardLabel, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences
+  SOURCE_IMPORT_TEXT, UNASSIGNED_LABEL, ageText, cardLabel, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences, stripFormatControls
 } from './boardText';
 import { MAX_HISTORY_PER_ITEM } from './itemHistory';
 import type { HistoryEntry } from './itemHistory';
@@ -487,7 +487,7 @@ export function buildCardDetail(state: TeamState, itemId: string, options: { vie
     })
   };
   if (item.estimate !== undefined) detail.estimateTokens = item.estimate.tokens;
-  if (item.description !== undefined) detail.description = item.description;
+  if (item.description !== undefined) detail.description = stripFormatControls(item.description);
   if (blocked !== undefined) detail.blocked = blocked;
   if (entries.length === MAX_HISTORY_PER_ITEM) detail.historyNote = HISTORY_LIMIT_TEXT;
   return detail;

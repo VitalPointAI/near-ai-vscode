@@ -83,11 +83,19 @@ export function staleRefusal(name: string): string {
 // ---- flattening ------------------------------------------------------------------------------------------------------------------------------
 
 const CONTROL_RUN = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g;
+// Invisible format characters that can reorder or hide text on screen ("Trojan Source"): bidi embeddings, overrides and isolates, the Arabic letter
+// mark, zero-width spaces and joiners, directional marks and the byte order mark (IN-01). They are removed from text shown and written by the board.
+const FORMAT_CONTROLS = /[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+
+/** The text without invisible format characters (IN-01). Everything else is kept, line breaks included. */
+export function stripFormatControls(text: string): string {
+  return text.replace(FORMAT_CONTROLS, '');
+}
 
 // One bounded line from teammate text: control characters (newlines and tabs included) become spaces, whitespace collapses, and anything longer
 // than `max` characters is cut there and ends in three dots. Counts code points so a cut never splits a surrogate pair.
 export function flattenName(text: string, max = 60): string {
-  const line = text.replace(CONTROL_RUN, ' ').replace(/\s+/g, ' ').trim();
+  const line = stripFormatControls(text).replace(CONTROL_RUN, ' ').replace(/\s+/g, ' ').trim();
   const points = Array.from(line);
   return points.length <= max ? line : `${points.slice(0, max).join('').trimEnd()}...`;
 }

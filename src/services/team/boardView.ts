@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { MOVE_KEYS, availableMoves, buildBoardModel, buildCardDetail, planMove } from '../../domain/team/board';
 import type { BoardModel, MoveKey } from '../../domain/team/board';
-import { REFUSALS, SOMEONE, flattenName, staleRefusal } from '../../domain/team/boardText';
+import { REFUSALS, SOMEONE, flattenName, staleRefusal, stripFormatControls } from '../../domain/team/boardText';
 import { decideTeamAction } from '../../domain/team/permissions';
 import { SecretLeakError, findSecrets } from '../../domain/team/secrets';
 import type { ItemChanges, ItemCreatedBody, TeamState } from '../../domain/team/types';
@@ -163,7 +163,7 @@ interface CleanFields { title?: string; description?: string; scope?: string[]; 
 
 // The text of one field the way it is stored: line breaks of any kind become line feeds and other control characters become spaces.
 function descriptionOf(raw: string): string {
-  return raw.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000B-\u001F\u007F\u2028\u2029]/g, ' ').trim();
+  return stripFormatControls(raw).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000B-\u001F\u007F\u2028\u2029]/g, ' ').trim();
 }
 
 /**
@@ -185,7 +185,7 @@ function cleanFields(input: CleanFields): { ok: true; fields: CleanFields } | { 
     fields.description = description;
   }
   if (input.scope !== undefined) {
-    const scope = input.scope.map((line) => line.trim()).filter((line) => line !== '');
+    const scope = input.scope.map((line) => stripFormatControls(line).trim()).filter((line) => line !== '');
     if (scope.length > SCOPE_LINES_MAX || !scope.every(isScopePattern)) return { ok: false, reason: FORM_TEXT.scope };
     fields.scope = scope;
   }

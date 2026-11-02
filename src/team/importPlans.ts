@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import { CanonicalJsonError, MAX_EVENT_BYTES, canonicalBytes, canonicalize } from '../domain/team/canonical';
 import { buildGsdGraph } from '../domain/team/gsdImport';
 import type { GsdGraph, GsdMilestone, GsdPlan } from '../domain/team/gsdImport';
+import { stripFormatControls } from '../domain/team/boardText';
 import { decideTeamAction } from '../domain/team/permissions';
 import { SecretLeakError, findSecrets } from '../domain/team/secrets';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
@@ -76,8 +77,9 @@ function newContext(): Context {
 }
 
 // Collapses every run of whitespace to one space, removes the remaining control characters, replaces lone surrogate halves and trims.
+// Invisible bidi and zero-width format characters are removed too (IN-01).
 function collapse(raw: string): string {
-  return raw.replace(LONE_SURROGATE, '�').replace(/\s+/g, ' ').replace(CONTROL_CHARACTERS, '').trim();
+  return stripFormatControls(raw.replace(LONE_SURROGATE, '�')).replace(/\s+/g, ' ').replace(CONTROL_CHARACTERS, '').trim();
 }
 
 // Cuts to at most `cap` UTF-16 units without ever splitting a surrogate pair (the validators count units, the canonical form refuses a lone half).
@@ -115,7 +117,7 @@ function uniquePush(list: string[], value: string): void {
 function safeScope(context: Context, owner: string, values: readonly string[]): string[] {
   const out: string[] = [];
   for (const raw of values) {
-    const value = raw.trim();
+    const value = stripFormatControls(raw).trim();
     if (HAS_LONE_SURROGATE.test(value) || value.includes('\uFFFD')) {
       // A path with a broken character names no real file, so it is dropped rather than repaired (WR-01).
       warn(context, `${owner}: a file path was left out because it has a broken character.`);

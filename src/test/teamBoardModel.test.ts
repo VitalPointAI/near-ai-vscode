@@ -6,7 +6,7 @@ import test from 'node:test';
 import { buildBoardModel, buildCardDetail, planMove } from '../domain/team/board';
 import type { BoardModel, BoardModelOptions, CardDetail } from '../domain/team/board';
 import * as boardText from '../domain/team/boardText';
-import { ageText, cardLabel, estimateSpoken, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences, notReadyText, staleRefusal } from '../domain/team/boardText';
+import { ageText, cardLabel, estimateSpoken, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences, notReadyText, staleRefusal, stripFormatControls } from '../domain/team/boardText';
 import { ItemHistory } from '../domain/team/itemHistory';
 import type { HistoryEntry } from '../domain/team/itemHistory';
 import { BOARD_COLUMNS } from '../domain/team/work';
@@ -466,6 +466,13 @@ test('estimate text, spoken size and age text follow the card-face formats', () 
   ]);
   assert.equal(ageText(Date.parse(since) - day, since), 'Under 1 hour', 'a clock behind the event never shows a negative age');
   assert.equal(ageText(Date.now(), 'not a date'), 'Under 1 hour');
+});
+
+test('IN-01: flattenName and stripFormatControls remove bidi overrides, isolates, marks and zero-width characters, and keep everything else', () => {
+  const hostile = 'Pay \u202Etxt.exe\u202C now\u200B\u2066x\u2069\u200F\uFEFF\u061C';
+  assert.equal(flattenName(hostile, 200), 'Pay txt.exe nowx');
+  assert.equal(stripFormatControls('line one\n\u202Aline two\u202C'), 'line one\nline two');
+  assert.equal(stripFormatControls('caf\u00E9 \u{1F600} \u0627\u0644'), 'caf\u00E9 \u{1F600} \u0627\u0644', 'letters, emoji and right-to-left letters stay');
 });
 
 test('flattenName makes one bounded line: control characters become spaces, whitespace collapses, long text ends in three dots', () => {
