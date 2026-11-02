@@ -486,7 +486,7 @@ function seedCredentials(secrets: MemorySecrets, canaries: ReturnType<typeof mak
 
 test('the canary scanners find a planted value in a git object, a file and every device key rendering', async () => {
   const canaries = makeCanaries();
-  assert.equal(new Set(canaries.labelled().map((needle) => needle.value)).size, 5, 'every canary is different');
+  assert.equal(new Set(canaries.labelled().map((needle) => needle.value)).size, 6, 'every canary is different');
   const secrets = new MemorySecrets();
   await createDeviceIdentity(secrets, 'team-0123456789abcdef0123456789abcdef');
   const stored = secrets.values.get(deviceKeySecretName('team-0123456789abcdef0123456789abcdef')) as string;

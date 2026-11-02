@@ -4,6 +4,7 @@
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { formatInviteCode } from '../../team/inviteCode';
 import { runGit } from '../../team/runGit';
 
 export interface Needle { label: string; value: string }
@@ -12,6 +13,8 @@ export interface Canaries {
   apiKey: string;
   reportingToken: string;
   refreshToken: string;
+  /** Shaped like a NEAR session access token (eyJ...), made at run time. */
+  accessToken: string;
   prompt: string;
   urlPassword: string;
   labelled(): Needle[];
@@ -26,6 +29,7 @@ export function makeCanaries(): Canaries {
     apiKey: token('sk-canary'),
     reportingToken: token('rpt-canary'),
     refreshToken: token('rt_canary'),
+    accessToken: token('eyJcanary'),
     prompt: token('CANARY-PROMPT-'),
     urlPassword: token('canarypw')
   };
@@ -35,6 +39,7 @@ export function makeCanaries(): Canaries {
       { label: 'access key', value: canaries.apiKey },
       { label: 'reporting token', value: canaries.reportingToken },
       { label: 'refresh token', value: canaries.refreshToken },
+      { label: 'access token', value: canaries.accessToken },
       { label: 'prompt', value: canaries.prompt },
       { label: 'remote password', value: canaries.urlPassword }
     ]
@@ -48,6 +53,16 @@ export function deviceKeyForms(storedSecret: string): string[] {
   const seed = der.subarray(der.length - 32);
   // base64 and base64url are the same text when the key happens to have no + or / in it, so repeats are dropped.
   return [...new Set([storedSecret, der.toString('base64url'), seed.toString('hex'), seed.toString('base64url')])];
+}
+
+// Every text an invite code could be written as: the 32 character code, the XXXX-XXXX grouping a person reads out, either letter case, and the
+// 20 raw bytes as hex, base64 and base64url. Take the forms before the code bytes are zero-filled; the returned strings are copies.
+export function inviteCodeForms(codeText: string, codeBytes: Buffer): string[] {
+  const grouped = formatInviteCode(codeText);
+  return [...new Set([
+    codeText, grouped, codeText.toLowerCase(), grouped.toLowerCase(),
+    codeBytes.toString('hex'), codeBytes.toString('base64'), codeBytes.toString('base64url')
+  ])];
 }
 
 function foundIn(haystack: Buffer, needles: Needle[]): string[] {
