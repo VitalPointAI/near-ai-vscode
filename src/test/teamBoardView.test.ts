@@ -5,10 +5,12 @@ import assert from 'node:assert/strict';
 import { renameSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { importPlans } from '../team/importPlans';
 import { openLog, remoteEventCount, rootOf, storageOf } from './helpers/teamFlowRig';
 import type { Participant, Rig } from './helpers/teamFlowRig';
-import { LiveTimers, until, withLiveTeam } from './helpers/teamLiveRig';
+import { LiveTimers, turn, until, withLiveTeam } from './helpers/teamLiveRig';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 import type { RecordedWebview, RecordedWebviewPanel } from './helpers/vscodeStub';
 
@@ -54,7 +56,7 @@ async function startSession(rig: Rig, who: 'owner' | Participant, overrides: Par
     pollSeconds: () => 15, focused: () => true, timers, nearBaseUrl: rig.fake.baseUrl, autoImport: false,
     ...overrides
   });
-  await until(() => timers.live.length === 1, 'the first poll to be armed');
+  if (overrides.timers === undefined) await until(() => timers.live.length === 1, 'the first poll to be armed');
   return { session, lines, timers };
 }
 
@@ -798,6 +800,63 @@ test('Import Plans to Team Board by a developer reports the reason in plain word
       assert.equal(remoteEventCount(rig), before, 'nothing was written');
     } finally {
       for (const subscription of context.subscriptions) subscription.dispose();
+    }
+  });
+});
+
+// ---- memory ----------------------------------------------------------------------------------------------------------------------------------
+
+// The board lives as long as the extension, and a window replaces its session after a join or a NEAR link (restartSession in teamCommands), so a
+// replaced session must not stay reachable from the board, a vscode listener or a pending poll timer, or a long-running window keeps every session it
+// ever had. This file once died at its 18th test under the 6 GB address-space cap; that was V8's wasm reservation (helpers/addressSpace.ts), not a
+// leak, and this test keeps it that way. The session polls on real (unref'd) timers here, so a poll timer left armed after dispose would hold it.
+const realTimers = {
+  now: (): number => performance.now(),
+  set: (callback: () => void, ms: number): unknown => setTimeout(callback, ms).unref(),
+  clear: (handle: unknown): void => { clearTimeout(handle as ReturnType<typeof setTimeout>); }
+};
+
+test('a replaced session is released while the board stays open: no board subscription, listener or poll timer keeps it', async () => {
+  setFlagsFromString('--expose-gc');
+  const collect = runInNewContext('gc') as () => void;
+  resetStub();
+  await withLiveTeam(async (rig) => {
+    await importFixture(rig);
+    let current: Session | undefined;
+    const lines: string[] = [];
+    const board = registerTeamBoard(createFakeContext(path.join(EXTENSION_ROOT, 'does-not-exist'), {}) as never, {
+      session: () => current, output: { appendLine: (line) => { lines.push(line); }, show: () => undefined }, timers: new LiveTimers()
+    });
+    board.openPanel();
+    const panel = stub.webviewPanels[stub.webviewPanels.length - 1] as RecordedWebviewPanel;
+    try {
+      // In its own function, so no variable of this test holds the first session once it is replaced.
+      const replaced = await (async (): Promise<WeakRef<Session>> => {
+        const first = await startSession(rig, 'owner', { timers: realTimers });
+        current = first.session;
+        board.controller.sessionChanged();
+        await panel.receive({ type: 'ready' });
+        await panel.receive({ type: 'move', itemId: READY_PLAN, target: 'hold' });
+        await panel.receive({ type: 'detail', itemId: READY_PLAN });
+        assert.equal(lastOf(panel, 'refused'), undefined);
+        return new WeakRef(first.session);
+      })();
+
+      // The window replaces it the way restartSession does: dispose the old one, start a fresh one, and the board follows.
+      replaced.deref()?.dispose();
+      current = undefined;
+      const second = await startSession(rig, 'owner', { timers: realTimers });
+      current = second.session;
+      board.controller.sessionChanged();
+      assert.equal(cardOf(states(panel).pop(), READY_PLAN)?.held, true, 'the board shows the new session');
+
+      await turn();
+      collect();
+      // Compared as a boolean: a failing strict assert prints its operands in full, and a live session is far too large to print.
+      assert.equal(replaced.deref() === undefined, true, 'the replaced session was released');
+    } finally {
+      board.controller.dispose();
+      current?.dispose();
     }
   });
 });
