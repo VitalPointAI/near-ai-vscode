@@ -92,10 +92,11 @@ only the final diff, because a PR's commits stay public on GitHub even after a s
 Findings are printed masked. Test fixtures with fake keys are listed in
 `.github/secret-scan-allow.txt` with the rules their fake keys match and a reason; any other kind
 of key in such a file is still reported. A single line can carry the marker
-`secret-scan: allow`. Both
-are visible in review: the scan lists every marked line that matches a rule (masked), and fails
-when a marked line was added by one commit and removed by a later one, since the PR's final diff
-would no longer show it.
+`secret-scan: allow`. Both are visible in review: the scan lists every marked line that matches
+a rule (masked), and fails when a line let through by the marker or by the allowlist was added
+by one commit and removed by a later one, since the PR's final diff would no longer show it. The
+scan reads every file as text, even one `.gitattributes` marks as binary, and also checks the
+PR's commit messages.
 
 ## 4. The agent review gate
 

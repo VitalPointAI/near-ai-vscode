@@ -8,19 +8,24 @@
 // merge, so a key added in one commit and removed in the next has still leaked.
 //
 // Known test fixtures with fake keys are listed in .github/secret-scan-allow.txt (a path, the
-// rules its fake keys match, and a reason); any other rule is still reported in that file. A single line can opt out with the marker "secret-scan: allow". Both
-// show up in review, so neither can hide a real key quietly: marked lines that match a rule are
-// listed (masked) in the output, and in a range scan a marked line that was added and removed
-// again before the end of the range fails, since the final diff reviewers read no longer shows
-// it. Matches are printed masked.
-import { readFileSync, existsSync } from 'node:fs';
-import { git, parseArgs } from './lib/gh.mjs';
+// rules its fake keys match, and a reason); any other rule is still reported in that file. A
+// single line can opt out with the marker "secret-scan: allow". Both show up in review, so
+// neither can hide a real key quietly: marked lines that match a rule are listed (masked) in the
+// output, and in a range scan a line let through by the marker or the allowlist that was added
+// and removed again before the end of the range fails, since the final diff reviewers read no
+// longer shows it. The range scan also reads commit messages, and diffs every file as text.
+// Matches are printed masked.
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { fail, git, parseArgs } from './lib/gh.mjs';
 import { ALLOW_MARKER, isAllowed, isSecretFileName, maskLine, matchRules, parseAllowlist, scanLine } from './lib/workflow.mjs';
 
 const ALLOWLIST = '.github/secret-scan-allow.txt';
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 const { options } = parseArgs(process.argv.slice(2), { string: ['range'] });
+if (options.range !== undefined && (options.range.includes('...') || options.range.split('..').length !== 2)) {
+  fail(`--range must be <from>..<to> (two dots), got "${options.range}"`);
+}
 const allow = parseAllowlist(existsSync(ALLOWLIST) ? readFileSync(ALLOWLIST, 'utf8') : '');
 const findings = [];
 const allowed = [];
@@ -33,7 +38,9 @@ function looksBinary(buffer) {
 const files = git(['ls-files', '-z']).split('\0').filter(Boolean);
 for (const file of files) {
   if (isSecretFileName(file) && !isAllowed(allow, file, 'secret-file-name')) findings.push({ where: file, rule: 'secret-file-name', text: '(file name)' });
-  if (!existsSync(file)) continue;
+  // Only regular files: a tracked symlink (possibly to a directory) or a submodule has no text
+  // of its own to scan here.
+  if (!existsSync(file) || !lstatSync(file).isFile()) continue;
   const buffer = readFileSync(file);
   if (buffer.length > MAX_FILE_BYTES || looksBinary(buffer)) continue;
   buffer.toString('utf8').split(/\r?\n/).forEach((line, index) => {
@@ -66,6 +73,14 @@ if (options.range) {
   const seen = new Set();
   for (const commit of commits) {
     commitCount += 1;
+    // Commit messages are public too.
+    for (const line of git(['log', '-1', '--format=%B', commit]).split(/\r?\n/)) {
+      for (const rule of scanLine(line)) {
+        const finding = { where: `${commit.slice(0, 7)} (commit message)`, rule, text: maskLine(line.trim()) };
+        const key = `${finding.where}\0${finding.rule}\0${finding.text}`;
+        if (!seen.has(key)) { seen.add(key); findings.push(finding); }
+      }
+    }
     const parents = git(['rev-list', '--parents', '-n', '1', commit]).trim().split(' ').slice(1);
     for (const parent of parents.length > 0 ? parents : [emptyTree]) {
       const changed = git(['diff-tree', '-r', '-z', '--no-commit-id', '--no-renames', '--name-only', '--diff-filter=ACMRT', parent, commit]).split('\0').filter(Boolean);
@@ -76,14 +91,22 @@ if (options.range) {
           if (!seen.has(key)) { seen.add(key); findings.push(finding); }
         };
         if (isSecretFileName(file) && !isAllowed(allow, file, 'secret-file-name')) report({ where, rule: 'secret-file-name', text: '(file name)' });
-        const diff = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=0', parent, commit, '--', `:(literal)${file}`]);
+        // --text: a .gitattributes entry (-diff, binary) or a NUL byte would otherwise turn the
+        // diff into "Binary files differ" and hide the added lines.
+        const diff = git(['diff', '--text', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=0', parent, commit, '--', `:(literal)${file}`]);
         let inHunk = false;
         for (const line of diff.split('\n')) {
           if (line.startsWith('@@')) { inHunk = true; continue; }
           if (!inHunk || !line.startsWith('+')) continue;
-          const added = line.slice(1);
-          for (const rule of scanLine(added)) if (!isAllowed(allow, file, rule)) report({ where, rule, text: maskLine(added.trim()) });
-          if (added.includes(ALLOW_MARKER) && matchRules(added).length > 0 && !linesAtEnd(file).has(added)) {
+          // The final file is split on CR?LF, so drop a CR here too, or a kept line looks removed.
+          const added = line.slice(1).replace(/\r$/, '');
+          const rules = matchRules(added);
+          const marked = added.includes(ALLOW_MARKER);
+          const suppressed = marked ? rules : rules.filter((rule) => isAllowed(allow, file, rule));
+          for (const rule of rules.filter((r) => !suppressed.includes(r))) report({ where, rule, text: maskLine(added.trim()) });
+          // A match let through by the marker or the allowlist is fine only if the line is still
+          // there at the end of the range, where reviewers can see it.
+          if (suppressed.length > 0 && !linesAtEnd(file).has(added)) {
             report({ where, rule: 'allowed-line-removed', text: maskLine(added.trim()) });
           }
         }
