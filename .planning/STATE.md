@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: executing
-stopped_at: Completed 62-11-PLAN.md
-last_updated: "2026-11-02T20:47:06.581Z"
+stopped_at: Completed 62-12-PLAN.md
+last_updated: "2026-11-02T21:30:06.345Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: dc892c063ed609d9631fafbd1b2126925231cc2a
+state_head: 13457b4329da579767ca7834cd9fe256ce1c51a6
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 40
-  completed_plans: 37
+  completed_plans: 38
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 62 (Work model, GSD import, Team Board (live, read and move)) — EXECUTING
-Plan: 12 of 14
+Plan: 13 of 14
 Status: Ready to execute
 Last activity: 2026-11-02 — Phase 62 execution started
 
@@ -91,6 +91,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P09 | 62 min | 3 tasks | 4 files |
 | Phase 62 P10 | 18 min | 2 tasks | 2 files |
 | Phase 62 P11 | 6 min | 2 tasks | 2 files |
+| Phase 62 P12 | 36 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -166,6 +167,8 @@ Recent decisions affecting current work:
 - [Phase 62]: Board client: Move to... shows only for owner and lead and is aria-disabled when offline, paused or removed; feature scripts own #menu and #item-form, board.js owns an empty aside#detail
 - [Phase 62]: 62-10: menu.js shows only refusals to requests it sent; menu closes when the card's moves change; Tab refocuses the opener and keeps its default
 - [Phase 62]: 62-11: every kanban cell accepts a board drag so a refused drop can give its reason; a drag still active at dragend counts as cancelled
+- [Phase 62]: 62-12: the boardDetail out-of-memory crash came from the fake DOM, not detail.js; fake DOM tree links are non-enumerable so a failing assertion on a node prints about 30 lines (fakeDom.test.ts guards it) — Node 24 assert inspects a failed comparison at depth 1000 and myers-diffs the lines (memory about 8 x L^2 bytes) even with a custom message; enumerable doc/parentNode/childNodes made one node print millions of lines
+- [Phase 62]: 62-12: Edit exists in the card detail only for a board item the viewer may edit; a blocked card shows the blocked notice and the host's 'It is blocked.' under Why this is not ready — UI-SPEC title block and Card Detail section 3; the page formats nothing it can take from the host's message
 
 ### Pending Todos
 
@@ -187,8 +190,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T20:47:06.191Z
-Stopped at: Completed 62-11-PLAN.md
+Last session: 2026-11-02T21:30:06.019Z
+Stopped at: Completed 62-12-PLAN.md
 Resume file: None
 
 ## Notes
