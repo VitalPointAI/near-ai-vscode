@@ -8,6 +8,7 @@ import type { BoardModel, BoardModelOptions, CardDetail } from '../domain/team/b
 import * as boardText from '../domain/team/boardText';
 import { ageText, cardLabel, estimateSpoken, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences, notReadyText, staleRefusal } from '../domain/team/boardText';
 import { ItemHistory } from '../domain/team/itemHistory';
+import type { HistoryEntry } from '../domain/team/itemHistory';
 import { BOARD_COLUMNS } from '../domain/team/work';
 import { CHORE_ID, boardWorld, importedBody, seedStandardBoard } from './helpers/teamBoardWorld';
 import type { BoardWorld } from './helpers/teamBoardWorld';
@@ -400,7 +401,7 @@ test('history is plain sentences, newest first: who did what, with the hold dire
   assert.deepEqual(chore.history.map((row) => row.text), ['Dana added this to the board.']);
 });
 
-test('history after a reopen cannot tell an older hold from a release, so it says the hold changed; an unknown author is Someone', async () => {
+test('the hold direction is worked out from the creation and from each ending (cancel, reopen, done), and from the current hold when the window is cut', async () => {
   const world = await fullWorld();
   const { lead } = world;
   world.accept(lead, 'item.updated', { id: 'plan:90-01', changes: { hold: true } });
@@ -411,8 +412,20 @@ test('history after a reopen cannot tell an older hold from a release, so it say
   world.accept(world.owner, 'item.updated', { id: 'plan:90-01', changes: { state: 'done' } });
   const detail = mustDetail(world, 'plan:90-01', world.owner.memberId);
   assert.deepEqual(detail.history.map((row) => row.text), [
-    'Import marked this done.'.replace('Import', 'Owner Test'), 'Lee released the hold.', 'Lee put this on hold.', 'Lee reopened this.', 'Lee cancelled this: on second thought.', 'Lee changed the hold.', 'Import added this to the board.'
+    'Owner Test marked this done.', 'Lee released the hold.', 'Lee put this on hold.', 'Lee reopened this.', 'Lee cancelled this: on second thought.', 'Lee put this on hold.', 'Import added this to the board.'
   ]);
+
+  // A window that starts mid-way (the log is not replayed from the first event) still places the newest hold from the card's own hold flag,
+  // and says "changed" for an older one that no ending or creation pins down.
+  const entry = (eventId: string, type: string, changed?: string[]): HistoryEntry => ({ eventId, type, author: lead.memberId, at: '2026-03-02T00:00:00.000Z', ...(changed === undefined ? {} : { changed }) });
+  const cut = [entry('e4', 'item.updated', ['hold']), entry('e3', 'item.updated', ['hold']), entry('e2', 'item.cancelled'), entry('e1', 'item.updated', ['hold'])];
+  const unheld = buildCardDetail(world.state, 'plan:90-02', { nowMs: AGE_NOW, history: cut });
+  assert.deepEqual(unheld?.history.map((row) => row.text), ['Lee released the hold.', 'Lee put this on hold.', 'Lee cancelled this.', 'Lee changed the hold.']);
+  assert.deepEqual(buildCardDetail(world.state, 'plan:90-02', { nowMs: AGE_NOW, history: [entry('e6', 'item.updated', ['hold'])] })?.history.map((row) => row.text), ['Lee released the hold.']);
+  world.accept(lead, 'item.updated', { id: 'plan:90-03', changes: { hold: true } });
+  const nowHeld = buildCardDetail(world.state, 'plan:90-03', { nowMs: AGE_NOW, history: [entry('e5', 'item.updated', ['hold'])] });
+  assert.deepEqual(nowHeld?.history.map((row) => row.text), ['Lee put this on hold.']);
+
   const stranger = buildCardDetail(world.state, 'plan:90-01', {
     nowMs: AGE_NOW, history: [{ eventId: 'evt-x', type: 'item.unblocked', author: 'mbr-0123456789abcdef', at: '2026-03-02T00:00:00.000Z' }]
   });
