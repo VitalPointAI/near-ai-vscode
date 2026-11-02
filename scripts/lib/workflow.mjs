@@ -20,26 +20,24 @@ export function releaseVersionFromBranch(branch) {
  * Reads a review file written by the agent review team.
  *
  * Expected shape (see docs/development-workflow.md):
- *   Verdict: PASS | FAIL
+ *   Verdict: PASS            (or FAIL)
  *   Head-SHA: <40-hex commit the team reviewed>
  *   - [BLOCKER] ... (open)    - [BLOCKER][RESOLVED] ... (closed)
- * Lines inside ``` fences are ignored, so quoted code cannot fake a verdict or a finding.
+ * Verdict and Head-SHA lines inside code fences are ignored, so quoted code cannot fake them.
+ * Severity tags count everywhere, fences included, and a fence that is never closed (or is
+ * closed by a different character or a shorter run) makes the structure ambiguous, which is
+ * reported in `problems` so the review fails closed.
  */
 export function parseReview(text) {
   const lines = String(text ?? '').split(/\r?\n/);
-  let inFence = false;
+  let fence;
   let verdict;
   let headSha;
+  const problems = [];
   const openBlockers = [];
   const counts = { blocker: 0, major: 0, minor: 0, nit: 0, resolved: 0 };
-  for (const raw of lines) {
+  for (const [index, raw] of lines.entries()) {
     const line = raw.trim();
-    if (/^(```|~~~)/.test(line)) { inFence = !inFence; continue; }
-    if (inFence) continue;
-    const verdictMatch = /^\**verdict\**\s*:\s*\**\s*(PASS|FAIL)\b/i.exec(line);
-    if (verdictMatch && verdict === undefined) verdict = verdictMatch[1].toUpperCase();
-    const shaMatch = /^\**head-sha\**\s*:\s*`?([0-9a-f]{40})`?/i.exec(line);
-    if (shaMatch && headSha === undefined) headSha = shaMatch[1].toLowerCase();
     for (const severity of ['BLOCKER', 'MAJOR', 'MINOR', 'NIT']) {
       const tag = new RegExp(`\\[${severity}\\]`, 'i');
       if (!tag.test(line)) continue;
@@ -48,13 +46,33 @@ export function parseReview(text) {
       counts[severity.toLowerCase()] += 1;
       if (severity === 'BLOCKER') openBlockers.push(line);
     }
+    const marker = fenceMarker(line);
+    if (fence) {
+      if (marker && marker.char === fence.char && marker.length >= fence.length && marker.info === '') fence = undefined;
+      continue;
+    }
+    if (marker) { fence = { ...marker, line: index + 1 }; continue; }
+    const verdictMatch = /^\**verdict\**\s*:\s*\**\s*(PASS|FAIL)\b/i.exec(line);
+    if (verdictMatch && verdict === undefined) verdict = verdictMatch[1].toUpperCase();
+    const shaMatch = /^\**head-sha\**\s*:\s*`?([0-9a-f]{40})`?/i.exec(line);
+    if (shaMatch && headSha === undefined) headSha = shaMatch[1].toLowerCase();
   }
-  return { verdict, headSha, openBlockers, counts };
+  if (fence) problems.push(`the code fence opened on line ${fence.line} is never closed, so the review's structure is ambiguous`);
+  return { verdict, headSha, openBlockers, counts, problems };
+}
+
+/** A CommonMark code fence line: three or more ` or ~, then an info string (no ` after backticks). */
+function fenceMarker(line) {
+  const match = /^(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match) return undefined;
+  const info = match[2].trim();
+  if (match[1][0] === '`' && info.includes('`')) return undefined;
+  return { char: match[1][0], length: match[1].length, info };
 }
 
 /** Decides the `agent-review` status for a parsed review and the PR's current head. */
 export function reviewDecision(review, currentHeadSha) {
-  const reasons = [];
+  const reasons = [...(review.problems ?? [])];
   if (!review.verdict) reasons.push('the review file has no "Verdict: PASS" or "Verdict: FAIL" line');
   else if (review.verdict !== 'PASS') reasons.push('the review verdict is FAIL');
   if (!review.headSha) reasons.push('the review file has no "Head-SHA:" line naming the commit reviewed');

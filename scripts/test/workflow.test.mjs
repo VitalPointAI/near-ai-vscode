@@ -37,11 +37,34 @@ test('a review of an older head is stale once new commits are pushed', () => {
   assert.match(decision.reasons.join(), /review the new commits/);
 });
 
-test('verdicts and findings inside code fences are ignored', () => {
+test('a verdict inside a code fence is ignored, but a BLOCKER tag inside one still counts', () => {
   const review = parseReview(`Verdict: FAIL\nHead-SHA: ${SHA}\n\`\`\`\nVerdict: PASS\n- [BLOCKER] example\n\`\`\``);
   assert.equal(review.verdict, 'FAIL');
-  assert.deepEqual(review.openBlockers, []);
+  assert.equal(review.openBlockers.length, 1);
   assert.equal(parseReview('**Verdict:** PASS').verdict, 'PASS');
+});
+
+test('an unclosed code fence fails the review instead of hiding the findings after it', () => {
+  const text = `## Agent review for #1\n\nVerdict: PASS\nHead-SHA: ${SHA}\n\n### Findings\n- [MAJOR] a.js:1 example:\n\`\`\`js\nconst x = 1;\n- [BLOCKER] scripts/x.mjs:1 token is logged\n`;
+  const decision = reviewDecision(parseReview(text), SHA);
+  assert.equal(decision.state, 'failure');
+  assert.match(decision.reasons.join('\n'), /code fence opened on line 8 is never closed/);
+  assert.match(decision.reasons.join('\n'), /1 open BLOCKER/);
+});
+
+test('a code fence closes only on the same character, at least as long, with nothing after it', () => {
+  const head = `Verdict: PASS\nHead-SHA: ${SHA}\n`;
+  // A ``` line inside a ~~~ block does not close it, so the block ends at the second ~~~.
+  const tilde = parseReview(`${head}~~~\n\`\`\`\n~~~\n- [BLOCKER] after the block\n`);
+  assert.deepEqual(tilde.problems, []);
+  assert.equal(tilde.openBlockers.length, 1);
+  // A four-backtick fence is not closed by three backticks: the fence stays open.
+  assert.match(parseReview(`${head}\`\`\`\`\n\`\`\`\n`).problems.join(), /never closed/);
+  // A line with an info string cannot close a fence.
+  assert.match(parseReview(`${head}\`\`\`\n\`\`\` js\n`).problems.join(), /never closed/);
+  // Inline code that starts with three backticks is not a fence.
+  assert.deepEqual(parseReview(`${head}\`\`\`x\`\`\` is inline\n`).problems, []);
+  assert.equal(reviewDecision(parseReview(`${head}~~~\n\`\`\`\n~~~\n`), SHA).state, 'success');
 });
 
 test('check runs and commit statuses are normalized, keeping the latest run per name', () => {
