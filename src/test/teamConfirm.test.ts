@@ -262,6 +262,10 @@ test('tracer: the owner confirms a developer, the key is created with the alloca
     assert.deepEqual(await installDeliveredKey(installFor(world, world.first)), { status: 'already-installed' });
 
     await assertKeyNowhere(world, stored?.secret ?? '');
+    // The scan is not vacuous: the same key written into a storage folder is found.
+    await fs.mkdir(world.first.globalStorageDir, { recursive: true });
+    await fs.writeFile(path.join(world.first.globalStorageDir, 'leak.txt'), stored?.secret ?? '', 'utf8');
+    await assert.rejects(assertKeyNowhere(world, stored?.secret ?? ''), /the key is not in/);
   });
 });
 

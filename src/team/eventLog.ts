@@ -8,6 +8,7 @@ import type { SnapshotFile } from '../domain/team/materialize';
 import { actionForEvent, decideTeamAction } from '../domain/team/permissions';
 import { assertNoSecrets, findSecrets } from '../domain/team/secrets';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
+import { parseEventFile } from '../domain/team/validate';
 import type {
   CommittedEvent, DeviceRef, GenesisAnchor, ImplementedEventBodies, ImplementedEventType, ImplementedTeamEvent, LogHead, MemberJoinedBody,
   NearLink, Rejection, Role, TeamCreatedBody, TeamEvent, TeamPolicy, TeamState, UnsignedTeamEvent
@@ -222,9 +223,15 @@ export class TeamLog {
     return result;
   }
 
-  // Red-step placeholder.
-  public async findEvent(_eventId: string): Promise<TeamEvent | undefined> {
-    throw new Error('not implemented');
+  // One event by id, read from the log itself and parsed with the same rules as every reader. Used for bodies the state does not keep, such as the
+  // sealed entries of a key delivery. The first entry with the id in log order is the one that was accepted; a later copy is a rejected duplicate.
+  public async findEvent(eventId: string): Promise<ImplementedTeamEvent | undefined> {
+    for (const entry of await this.transport.readAll()) {
+      if (entry.kind !== 'event') continue;
+      const parsed = parseEventFile(entry);
+      if (parsed.ok && parsed.event.id === eventId) return parsed.event;
+    }
+    return undefined;
   }
 
   // The outcome of the most recent snapshot attempt after a sync or an append, so a caller that only appended can still see it.
