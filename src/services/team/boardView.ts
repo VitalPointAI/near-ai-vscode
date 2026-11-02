@@ -1,14 +1,38 @@
-// Team Board host (skeleton for the tracer's RED step; the real host replaces every body below).
-import type * as vscode from 'vscode';
-import type { MoveKey } from '../../domain/team/board';
+// The Team Board in VS Code (D-15, D-16, AD-22): a sidebar view and one editor panel serve the same page from media/board under a nonce CSP, and one
+// controller turns log changes into model posts and page messages into permission-checked moves. It lives here, not in chat.ts. The page is
+// untrusted (Pitfall 9): every message passes parseBoardMessage, a move is planned again on the freshest state inside the append, and the role,
+// the permission and the state always come from the log, never from the page.
+import { randomBytes } from 'node:crypto';
+import * as vscode from 'vscode';
+import { MOVE_KEYS, buildBoardModel, planMove } from '../../domain/team/board';
+import type { BoardModel, MoveKey } from '../../domain/team/board';
+import { REFUSALS } from '../../domain/team/boardText';
+import { BOARD_ITEM_ID_PATTERN, GSD_ITEM_ID_PATTERN } from '../../domain/team/work';
+import { IMPORT_PLANS_COMMAND, OPEN_BOARD_COMMAND } from './teamCommands';
 import type { TeamOutput, TeamSession } from './teamSession';
 
 export const BOARD_VIEW_ID = 'nearAiTeamBoardView';
 export const BOARD_PANEL_TYPE = 'nearAiTeamBoard';
+// Load order of the client; plans 62-09 to 62-13 create the files.
 export const BOARD_SCRIPTS = ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js'] as const;
 export const BOARD_STYLES = ['board.css'] as const;
 
+const PANEL_TITLE = 'Team Board';
+const THROTTLE_MS = 250;
+const TITLE_MAX = 200;
+const DESCRIPTION_MAX = 2000;
+const SCOPE_LINES_MAX = 64;
+const SCOPE_LINE_MAX = 200;
+const ESTIMATE_MAX = 1_000_000_000_000;
+const PAUSED_TEXT = 'The board shows the last update and cannot be changed until team sync resumes.';
+
+/**
+ * Set by the extension-host tests to observe both directions of the page protocol. `request` is set by the controller: it posts
+ * { type: 'host-request', payload } to every visible surface, which the real board.js re-posts to the host (the chat sidebar's precedent).
+ */
 export const boardTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void; request?: (payload: unknown) => Promise<void> } = {};
+
+// ---- what the page may say -------------------------------------------------------------------------------------------------------------------
 
 export type BoardMessage =
   | { type: 'ready' } | { type: 'visible'; value: boolean } | { type: 'move'; itemId: string; target: MoveKey } | { type: 'detail'; itemId: string }
@@ -16,13 +40,110 @@ export type BoardMessage =
   | { type: 'new-item'; draft: { kind: 'bug' | 'chore' | 'spike'; title: string; description?: string; scope: string[]; estimate?: number } }
   | { type: 'edit-item'; itemId: string; changes: { title?: string; description?: string; scope?: string[]; estimate?: number } };
 
-export function parseBoardMessage(_value: unknown): BoardMessage | undefined {
-  return undefined;
+type Plain = Record<string, unknown>;
+
+function isPlain(value: unknown): value is Plain {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function boardHtml(_webview: { cspSource: string; asWebviewUri(uri: vscode.Uri): vscode.Uri }, _media: vscode.Uri, _nonce: string, _surface: 'view' | 'panel'): string {
-  return '';
+// Own enumerable keys only: a page cannot smuggle a field in through the prototype, and an own "__proto__" key is simply an unexpected key.
+function onlyKeys(value: Plain, required: readonly string[], optional: readonly string[] = []): boolean {
+  const keys = Object.keys(value);
+  return required.every((key) => keys.includes(key)) && keys.every((key) => required.includes(key) || optional.includes(key));
 }
+
+function isItemId(value: unknown): value is string {
+  return typeof value === 'string' && (GSD_ITEM_ID_PATTERN.test(value) || BOARD_ITEM_ID_PATTERN.test(value));
+}
+
+function isText(value: unknown, min: number, max: number): value is string {
+  return typeof value === 'string' && value.length >= min && value.length <= max;
+}
+
+function isScope(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= SCOPE_LINES_MAX && value.every((line) => isText(line, 1, SCOPE_LINE_MAX));
+}
+
+function isEstimate(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= ESTIMATE_MAX;
+}
+
+const DRAFT_KINDS = ['bug', 'chore', 'spike'] as const;
+
+function parseDraft(value: unknown): Extract<BoardMessage, { type: 'new-item' }>['draft'] | undefined {
+  if (!isPlain(value) || !onlyKeys(value, ['kind', 'title', 'scope'], ['description', 'estimate'])) return undefined;
+  const { kind, title, scope, description, estimate } = value;
+  if (!DRAFT_KINDS.includes(kind as typeof DRAFT_KINDS[number]) || !isText(title, 1, TITLE_MAX) || !isScope(scope)) return undefined;
+  if (description !== undefined && !isText(description, 0, DESCRIPTION_MAX)) return undefined;
+  if (estimate !== undefined && !isEstimate(estimate)) return undefined;
+  return {
+    kind: kind as typeof DRAFT_KINDS[number], title, scope: [...scope],
+    ...(description === undefined ? {} : { description: description as string }), ...(estimate === undefined ? {} : { estimate: estimate as number })
+  };
+}
+
+function parseChanges(value: unknown): Extract<BoardMessage, { type: 'edit-item' }>['changes'] | undefined {
+  if (!isPlain(value) || Object.keys(value).length === 0 || !onlyKeys(value, [], ['title', 'description', 'scope', 'estimate'])) return undefined;
+  const { title, description, scope, estimate } = value;
+  if (title !== undefined && !isText(title, 1, TITLE_MAX)) return undefined;
+  if (description !== undefined && !isText(description, 0, DESCRIPTION_MAX)) return undefined;
+  if (scope !== undefined && !isScope(scope)) return undefined;
+  if (estimate !== undefined && !isEstimate(estimate)) return undefined;
+  return {
+    ...(title === undefined ? {} : { title: title as string }), ...(description === undefined ? {} : { description: description as string }),
+    ...(scope === undefined ? {} : { scope: [...(scope as string[])] }), ...(estimate === undefined ? {} : { estimate: estimate as number })
+  };
+}
+
+const BARE_TYPES = ['ready', 'import-plans', 'open-board', 'retry', 'show-details'] as const;
+
+/** The one reader of page messages: exact keys, id patterns, move keys and length caps. Anything else is undefined and the host ignores it. */
+export function parseBoardMessage(value: unknown): BoardMessage | undefined {
+  if (!isPlain(value) || typeof value.type !== 'string') return undefined;
+  const type = value.type;
+  if ((BARE_TYPES as readonly string[]).includes(type)) return onlyKeys(value, ['type']) ? { type } as BoardMessage : undefined;
+  switch (type) {
+    case 'visible':
+      return onlyKeys(value, ['type', 'value']) && typeof value.value === 'boolean' ? { type, value: value.value } : undefined;
+    case 'move':
+      return onlyKeys(value, ['type', 'itemId', 'target']) && isItemId(value.itemId) && (MOVE_KEYS as readonly unknown[]).includes(value.target)
+        ? { type, itemId: value.itemId, target: value.target as MoveKey } : undefined;
+    case 'detail':
+      return onlyKeys(value, ['type', 'itemId']) && isItemId(value.itemId) ? { type, itemId: value.itemId } : undefined;
+    case 'new-item': {
+      const draft = onlyKeys(value, ['type', 'draft']) ? parseDraft(value.draft) : undefined;
+      return draft === undefined ? undefined : { type, draft };
+    }
+    case 'edit-item': {
+      const changes = onlyKeys(value, ['type', 'itemId', 'changes']) && isItemId(value.itemId) ? parseChanges(value.changes) : undefined;
+      return changes === undefined ? undefined : { type, itemId: value.itemId as string, changes };
+    }
+    default:
+      return undefined;
+  }
+}
+
+// ---- the page --------------------------------------------------------------------------------------------------------------------------------
+
+/**
+ * The page: a nonce CSP with no inline script or style, no remote address and no font source (icons are inline SVG), one script tag per client
+ * file in load order, and the root and live region the client draws into. `surface` tells the client whether it is the sidebar or the tab.
+ */
+export function boardHtml(webview: { cspSource: string; asWebviewUri(uri: vscode.Uri): vscode.Uri }, media: vscode.Uri, nonce: string, surface: 'view' | 'panel'): string {
+  const asset = (file: string): string => webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
+  const styles = BOARD_STYLES.map((file) => `<link rel="stylesheet" href="${asset(file)}">`).join('\n');
+  const scripts = BOARD_SCRIPTS.map((file) => `<script nonce="${nonce}" src="${asset(file)}"></script>`).join('\n');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+${styles}
+<title>${PANEL_TITLE}</title></head><body data-surface="${surface}">
+<div id="root"></div>
+<div id="live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+${scripts}
+</body></html>`;
+}
+
+// ---- surfaces and the controller -------------------------------------------------------------------------------------------------------------
 
 export interface BoardSurface {
   kind: 'view' | 'panel';
@@ -32,22 +153,283 @@ export interface BoardSurface {
   onDidDispose(listener: () => void): { dispose(): void };
 }
 
+/** Test seam: the clock and timer of the post throttle. The extension passes nothing. */
 export interface BoardTimers { now(): number; set(callback: () => void, ms: number): unknown; clear(handle: unknown): void }
 export interface BoardDeps { session: () => TeamSession | undefined; output: TeamOutput; timers?: BoardTimers; throttleMs?: number; nowMs?: () => number }
 
+interface SurfaceState {
+  surface: BoardSurface;
+  visible: boolean;
+  // The serialised state this surface was last sent, so an unchanged model is not sent again.
+  lastJson: string | undefined;
+  disposables: Array<{ dispose(): void }>;
+}
+
+const REAL_TIMERS: BoardTimers = {
+  now: () => Date.now(),
+  set: (callback, ms) => setTimeout(callback, ms),
+  clear: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>); }
+};
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class BoardController {
-  public constructor(_deps: BoardDeps) {}
-  public attach(_surface: BoardSurface): { dispose(): void } {
-    return { dispose: (): void => undefined };
+  private readonly deps: BoardDeps;
+  private readonly timers: BoardTimers;
+  private readonly throttleMs: number;
+  private readonly surfaces = new Set<SurfaceState>();
+  private subscribedTo: TeamSession | undefined;
+  private subscription: { dispose(): void } | undefined;
+  private timer: unknown;
+  private lastPostAt: number | undefined;
+  private combinedVisible: boolean | undefined;
+  private disposed = false;
+
+  public constructor(deps: BoardDeps) {
+    this.deps = deps;
+    this.timers = deps.timers ?? REAL_TIMERS;
+    this.throttleMs = deps.throttleMs ?? THROTTLE_MS;
+    boardTap.request = (payload) => this.request(payload);
   }
+
+  /** Starts serving a surface. It is sent nothing until its page says ready. */
+  public attach(surface: BoardSurface): { dispose(): void } {
+    const state: SurfaceState = { surface, visible: surface.isVisible(), lastJson: undefined, disposables: [] };
+    this.surfaces.add(state);
+    state.disposables.push(
+      surface.webview.onDidReceiveMessage((raw) => this.received(state, raw)),
+      surface.onDidChangeVisibility((visible) => { this.setVisible(state, visible); }),
+      surface.onDidDispose(() => { this.detach(state); })
+    );
+    this.ensureSubscribed();
+    this.applyVisibility();
+    return { dispose: () => { this.detach(state); } };
+  }
+
+  /** The window's session was replaced: follow the new one and bring every visible page up to date. */
   public sessionChanged(): void {
-    // Nothing yet.
+    this.combinedVisible = undefined;
+    this.ensureSubscribed();
+    this.applyVisibility();
+    for (const state of this.surfaces) state.lastJson = undefined;
+    this.flush();
   }
+
   public dispose(): void {
-    // Nothing yet.
+    this.disposed = true;
+    for (const state of [...this.surfaces]) this.detach(state);
+    this.subscription?.dispose();
+    this.subscription = undefined;
+    this.subscribedTo = undefined;
+    if (this.timer !== undefined) this.timers.clear(this.timer);
+    this.timer = undefined;
+    boardTap.request = undefined;
+  }
+
+  // ---- visibility ---------------------------------------------------------------------------------------------------------------------------
+
+  private setVisible(state: SurfaceState, visible: boolean): void {
+    state.visible = visible;
+    this.applyVisibility();
+    if (visible) this.flush(state);
+  }
+
+  // One combined value reaches the session: the board polls at the focused interval while any surface can be seen (Phase 60 D-19).
+  private applyVisibility(): void {
+    const any = [...this.surfaces].some((state) => state.visible);
+    if (any === this.combinedVisible) return;
+    this.combinedVisible = any;
+    this.deps.session()?.setBoardVisible(any);
+  }
+
+  private detach(state: SurfaceState): void {
+    if (!this.surfaces.delete(state)) return;
+    for (const disposable of state.disposables.splice(0)) disposable.dispose();
+    this.applyVisibility();
+  }
+
+  // ---- posting ------------------------------------------------------------------------------------------------------------------------------
+
+  private ensureSubscribed(): void {
+    const session = this.deps.session();
+    if (session === this.subscribedTo) return;
+    this.subscription?.dispose();
+    this.subscribedTo = session;
+    this.subscription = session?.onStateChange(() => { this.changed(); });
+  }
+
+  private changed(): void {
+    if (this.disposed || this.timer !== undefined || ![...this.surfaces].some((state) => state.visible)) return;
+    const wait = this.lastPostAt === undefined ? 0 : Math.max(0, this.throttleMs - (this.timers.now() - this.lastPostAt));
+    if (wait === 0) {
+      this.flush();
+      return;
+    }
+    this.timer = this.timers.set(() => { this.timer = undefined; this.flush(); }, wait);
+  }
+
+  private model(session: TeamSession): BoardModel {
+    const status = session.boardStatus();
+    const open = status.kind === 'live' || status.kind === 'syncing';
+    const readOnlyReason = status.kind === 'offline' ? REFUSALS.offline : status.kind === 'paused' ? PAUSED_TEXT : undefined;
+    const viewerId = session.memberId();
+    return buildBoardModel(session.state(), {
+      nowMs: (this.deps.nowMs ?? Date.now)(), status, canWrite: session.canWrite() && open,
+      ...(viewerId === undefined ? {} : { viewerId }), ...(readOnlyReason === undefined ? {} : { readOnlyReason })
+    });
+  }
+
+  // Sends the current model to every visible surface whose last send differs (or to `only`, when it is visible and differs).
+  private flush(only?: SurfaceState): void {
+    const session = this.deps.session();
+    if (session === undefined || this.disposed) return;
+    const targets = [...this.surfaces].filter((state) => state.visible && (only === undefined || state === only));
+    if (targets.length === 0) return;
+    try {
+      const message = { type: 'state', model: this.model(session) };
+      const json = JSON.stringify(message);
+      let posted = false;
+      for (const state of targets) {
+        if (state.lastJson === json) continue;
+        state.lastJson = json;
+        this.post(state, message);
+        posted = true;
+      }
+      if (posted) this.lastPostAt = this.timers.now();
+    } catch (error) {
+      this.deps.output.appendLine(`Team Board: the board could not be updated: ${describe(error)}`);
+    }
+  }
+
+  private post(state: SurfaceState, message: unknown): void {
+    boardTap.toView?.(message);
+    Promise.resolve(state.surface.webview.postMessage(message)).catch((error: unknown) => {
+      this.deps.output.appendLine(`Team Board: a message could not be sent to the board: ${describe(error)}`);
+    });
+  }
+
+  private async request(payload: unknown): Promise<void> {
+    for (const state of this.surfaces) if (state.visible) this.post(state, { type: 'host-request', payload });
+  }
+
+  // ---- what the page says -------------------------------------------------------------------------------------------------------------------
+
+  private async received(state: SurfaceState, raw: unknown): Promise<void> {
+    boardTap.fromView?.(raw);
+    const message = parseBoardMessage(raw);
+    if (message === undefined) return;
+    try {
+      await this.handle(state, message);
+    } catch (error) {
+      this.deps.output.appendLine(`Team Board: a request from the board failed: ${describe(error)}`);
+    }
+  }
+
+  private async handle(state: SurfaceState, message: BoardMessage): Promise<void> {
+    switch (message.type) {
+      case 'ready':
+        // A page that just loaded knows nothing: send the model whatever was sent before.
+        state.visible = state.surface.isVisible();
+        state.lastJson = undefined;
+        this.ensureSubscribed();
+        this.applyVisibility();
+        this.flush(state);
+        return;
+      case 'visible':
+        this.setVisible(state, message.value);
+        return;
+      case 'move':
+        await this.move(state, message.itemId, message.target);
+        return;
+      case 'import-plans':
+        // From the page the import always takes the current milestone, so no pick is shown (D-09).
+        await vscode.commands.executeCommand(IMPORT_PLANS_COMMAND, { milestone: 'current' });
+        return;
+      case 'open-board':
+        await vscode.commands.executeCommand(OPEN_BOARD_COMMAND);
+        return;
+      case 'retry':
+        this.deps.session()?.nudge();
+        return;
+      case 'show-details':
+        this.deps.output.show(true);
+        return;
+      default:
+        // new-item and edit-item are parsed here and handled by the form plan; detail follows in the next step.
+        return;
+    }
+  }
+
+  // The tracer's move: planned and appended on the freshest state. Prompts, stale answers and error mapping follow in the next step.
+  private async move(state: SurfaceState, itemId: string, target: MoveKey): Promise<void> {
+    const session = this.deps.session();
+    if (session === undefined) return;
+    const viewerId = session.memberId();
+    const planned = planMove(session.state(), viewerId, itemId, target);
+    if (!planned.ok) {
+      this.post(state, { type: 'refused', itemId, reason: planned.reason });
+      return;
+    }
+    await session.currentLog().append((fresh) => {
+      const again = planMove(fresh, viewerId, itemId, target);
+      return again.ok ? [again.intent] : { conflict: again.reason };
+    });
   }
 }
 
-export function registerTeamBoard(_context: vscode.ExtensionContext, deps: BoardDeps): { openPanel(): void; controller: BoardController } {
-  return { openPanel: (): void => undefined, controller: new BoardController(deps) };
+// ---- registration ----------------------------------------------------------------------------------------------------------------------------
+
+function viewSurface(view: vscode.WebviewView): BoardSurface {
+  return {
+    kind: 'view', webview: view.webview, isVisible: () => view.visible,
+    onDidChangeVisibility: (listener) => view.onDidChangeVisibility(() => { listener(view.visible); }),
+    onDidDispose: (listener) => view.onDidDispose(listener)
+  };
+}
+
+function panelSurface(panel: vscode.WebviewPanel): BoardSurface {
+  return {
+    kind: 'panel', webview: panel.webview, isVisible: () => panel.visible,
+    onDidChangeVisibility: (listener) => panel.onDidChangeViewState((event) => { listener(event.webviewPanel.visible); }),
+    onDidDispose: (listener) => panel.onDidDispose(listener)
+  };
+}
+
+const nonceOf = (): string => randomBytes(16).toString('base64');
+
+/**
+ * Registers the sidebar view provider and returns the controller and the way to open the one editor panel. Called once per extension lifetime,
+ * and only in a project that has a team (a solo project never loads this module).
+ */
+export function registerTeamBoard(context: vscode.ExtensionContext, deps: BoardDeps): { openPanel(): void; controller: BoardController } {
+  const controller = new BoardController(deps);
+  const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'board');
+  let panel: vscode.WebviewPanel | undefined;
+
+  // No retainContextWhenHidden: the page keeps its own state with getState and setState and asks for the model again when it is shown.
+  const provider: vscode.WebviewViewProvider = {
+    resolveWebviewView(view: vscode.WebviewView): void {
+      view.webview.options = { enableScripts: true, localResourceRoots: [media] };
+      view.webview.html = boardHtml(view.webview, media, nonceOf(), 'view');
+      controller.attach(viewSurface(view));
+    }
+  };
+
+  function openPanel(): void {
+    if (panel !== undefined) {
+      panel.reveal();
+      return;
+    }
+    const created = vscode.window.createWebviewPanel(BOARD_PANEL_TYPE, PANEL_TITLE, vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
+    panel = created;
+    created.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
+    created.webview.html = boardHtml(created.webview, media, nonceOf(), 'panel');
+    controller.attach(panelSurface(created));
+    created.onDidDispose(() => { if (panel === created) panel = undefined; });
+  }
+
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(BOARD_VIEW_ID, provider), controller);
+  return { openPanel, controller };
 }

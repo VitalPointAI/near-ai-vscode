@@ -26,7 +26,8 @@ type SessionDeps = Parameters<typeof TeamSession.start>[0];
 
 const EXTENSION_ROOT = path.resolve(__dirname, '..', '..');
 const MEDIA_BOARD = path.join(EXTENSION_ROOT, 'media', 'board');
-const READY_PLAN = 'plan:90-01';
+// The fixture's plan:90-01 has a summary, so it is Done; plan:90-02 is the one that is Ready.
+const READY_PLAN = 'plan:90-02';
 
 interface Started { session: Session; lines: string[]; timers: LiveTimers }
 

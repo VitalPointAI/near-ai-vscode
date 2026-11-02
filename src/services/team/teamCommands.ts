@@ -11,6 +11,8 @@ import type { TeamSession } from './teamSession';
 
 export const ENABLE_COMMAND = 'nearAi.team.enable';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
+export const OPEN_BOARD_COMMAND = 'nearAi.team.openBoard';
+export const IMPORT_PLANS_COMMAND = 'nearAi.team.importPlans';
 export const SOLO_TEXT = 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.';
 export const PUSH_ACTION = 'Push';
 export const VERIFY_ACTION = 'Verify Team Log';
