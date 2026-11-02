@@ -127,7 +127,7 @@ const missingRuntime = runtimeJavaScript
 if (missingRuntime.length > 0) fail(`compiled runtime JavaScript is missing: ${missingRuntime.join(', ')}`);
 
 const forbiddenPatterns = [
-  /^extension\/(?:\.codex|\.agents|\.planning)(?:\/|$)/,
+  /^extension\/(?:\.codex|\.agents|\.planning|\.github|\.claude)(?:\/|$)/,
   /^extension\/(?:src|test|scripts|node_modules)(?:\/|$)/,
   /^extension\/dist\/test(?:\/|$)/,
   /\.map$/,

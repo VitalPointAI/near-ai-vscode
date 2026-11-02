@@ -11,7 +11,7 @@
 //       and has no open [BLOCKER] finding. Anything else sets failure.
 //
 // See docs/development-workflow.md and .claude/commands/review-pr.md.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fail, gh, parseArgs, resolveRepo, viewPr } from './lib/gh.mjs';
@@ -30,7 +30,7 @@ function checkSummary(checks) {
 
 function gather(repo, number, out) {
   const pr = viewPr(repo, number);
-  const dir = out ?? path.join(tmpdir(), `agent-review-${repo.replace('/', '-')}-${number}`);
+  const dir = out ?? mkdtempSync(path.join(tmpdir(), `agent-review-${repo.replace('/', '-')}-${number}-`));
   mkdirSync(dir, { recursive: true });
   const checks = normalizeChecks(pr.statusCheckRollup);
   const { statusCheckRollup, ...rest } = pr;
@@ -81,9 +81,15 @@ function submit(repo, number, reviewPath, dryRun) {
     console.log(`\n[dry run] would set ${AGENT_REVIEW_CONTEXT}=${decision.state} on ${pr.headRefOid}: ${description}`);
     return;
   }
-  const commentFile = path.join(tmpdir(), `agent-review-comment-${process.pid}.md`);
-  writeFileSync(commentFile, body);
-  const commentUrl = gh(['pr', 'comment', String(number), '--repo', repo, '--body-file', commentFile]).trim().split(/\s+/).pop();
+  const commentDir = mkdtempSync(path.join(tmpdir(), 'agent-review-comment-'));
+  let commentUrl;
+  try {
+    const commentFile = path.join(commentDir, 'comment.md');
+    writeFileSync(commentFile, body, { mode: 0o600 });
+    commentUrl = gh(['pr', 'comment', String(number), '--repo', repo, '--body-file', commentFile]).trim().split(/\s+/).pop();
+  } finally {
+    rmSync(commentDir, { recursive: true, force: true });
+  }
   const args = ['api', '-X', 'POST', `repos/${repo}/statuses/${pr.headRefOid}`,
     '-f', `state=${decision.state}`, '-f', `context=${AGENT_REVIEW_CONTEXT}`, '-f', `description=${description}`];
   if (/^https:\/\//.test(commentUrl ?? '')) args.push('-f', `target_url=${commentUrl}`);

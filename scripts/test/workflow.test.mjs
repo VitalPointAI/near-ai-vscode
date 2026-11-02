@@ -6,6 +6,7 @@ import {
   BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName, latestReleaseVersion, mergeOutcomeProblem, releaseGate, releasePrProblems,
   isVersionBump, maskLine, normalizeChecks, parseAllowlist, parseReview, releaseVersionFromBranch, reviewDecision, scanLine
 } from '../lib/workflow.mjs';
+import { isNotFound } from '../lib/gh.mjs';
 
 const SHA = 'a'.repeat(40);
 const OTHER = 'b'.repeat(40);
@@ -309,4 +310,10 @@ test('the allowlist names, per path, only the rules its fake keys may match', ()
   assert.deepEqual([...allow].map(([path, rules]) => [path, [...rules]]), [['src/a.ts', ['github-token', 'openai-key']], ['test/b.pem', ['private-key']]]);
   assert.throws(() => parseAllowlist('src/a.ts   # no rules named\n'), /names no rules/);
   assert.throws(() => parseAllowlist('src/a.ts not-a-rule\n'), /unknown rule "not-a-rule"/);
+});
+
+test('only a 404 from GitHub means "does not exist"; other API errors are raised', () => {
+  assert.equal(isNotFound(new Error('gh api repos/o/r/git/ref/tags/v1.0.0 failed: gh: Not Found (HTTP 404)')), true);
+  assert.equal(isNotFound(new Error('gh api repos/o/r/git/ref/tags/v1.0.0 failed: gh: Bad credentials (HTTP 401)')), false);
+  assert.equal(isNotFound(new Error('gh api ... failed: error connecting to api.github.com')), false);
 });

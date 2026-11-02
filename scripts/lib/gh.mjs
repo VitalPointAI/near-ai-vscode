@@ -52,12 +52,22 @@ export function protectedContexts(repo, branch) {
   }
 }
 
-/** Review threads that are still unresolved on the PR. */
+/** Review threads that are still unresolved on the PR (every page of them). */
 export function unresolvedThreads(repo, number) {
   const [owner, name] = repo.split('/');
-  const query = 'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved path}}}}}';
-  const data = ghJson(['api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`]);
-  return (data?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []).filter((thread) => !thread.isResolved);
+  const query = 'query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{isResolved path}}}}}';
+  const threads = [];
+  let after;
+  for (;;) {
+    const args = ['api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`];
+    if (after) args.push('-f', `after=${after}`);
+    const page = ghJson(args)?.data?.repository?.pullRequest?.reviewThreads;
+    if (!page) throw new Error(`could not read the review threads of #${number}`);
+    threads.push(...(page.nodes ?? []));
+    if (!page.pageInfo?.hasNextPage) break;
+    after = page.pageInfo.endCursor;
+  }
+  return threads.filter((thread) => !thread.isResolved);
 }
 
 /** How many commits the head is behind the base branch on GitHub. */
@@ -138,7 +148,12 @@ export function branchHead(repo, branch) {
 /** The commit a tag points at, or undefined when the tag does not exist. */
 export function tagCommit(repo, tag) {
   let ref;
-  try { ref = ghJson(['api', `repos/${repo}/git/ref/tags/${tag}`]); } catch { return undefined; }
+  try {
+    ref = ghJson(['api', `repos/${repo}/git/ref/tags/${tag}`]);
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
   if (ref.object.type === 'commit') return ref.object.sha;
   return ghJson(['api', `repos/${repo}/git/tags/${ref.object.sha}`]).object.sha;
 }
