@@ -27,12 +27,12 @@ const NOTHING_MOVED = 'Nothing was moved.';
 export const NO_DEVICE_KEY_TEXT = 'This computer has no device key for this team, so it can read the team log but not write to it.';
 
 export const REFUSALS = Object.freeze({
-  claimed: `Claiming a plan arrives in a later update. ${NOTHING_MOVED}`,
-  'in-progress': `Starting work from the board arrives with claims in a later update. ${NOTHING_MOVED}`,
-  'in-review': `Review arrives in a later update. ${NOTHING_MOVED}`,
-  integrating: `Merging arrives in a later update. ${NOTHING_MOVED}`,
-  terminal: `A finished or cancelled card can only be reopened. Use Move to... and choose Reopen. ${NOTHING_MOVED}`,
-  notManager: `Only the team owner or a lead can move cards. ${NOTHING_MOVED}`,
+  claimed: 'Claiming a plan arrives in a later update. Nothing was moved.',
+  'in-progress': 'Starting work from the board arrives with claims in a later update. Nothing was moved.',
+  'in-review': 'Review arrives in a later update. Nothing was moved.',
+  integrating: 'Merging arrives in a later update. Nothing was moved.',
+  terminal: 'A finished or cancelled card can only be reopened. Use Move to... and choose Reopen. Nothing was moved.',
+  notManager: 'Only the team owner or a lead can move cards. Nothing was moved.',
   noDeviceKey: NO_DEVICE_KEY_TEXT,
   removed: 'You were removed from this team. You can still look at the board but not change it.',
   differentRow: 'This card stays in its own row. Drop it in another column of the same row.',
