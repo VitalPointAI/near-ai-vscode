@@ -56,9 +56,4 @@ export class ItemHistory {
   public forItem(itemId: string): HistoryEntry[] {
     return (this.byItem.get(itemId) ?? []).map((entry) => ({ ...entry, ...(entry.changed === undefined ? {} : { changed: [...entry.changed] }) }));
   }
-
-  // The board rebuilds history after a full re-read of the log.
-  public clear(): void {
-    this.byItem.clear();
-  }
 }
