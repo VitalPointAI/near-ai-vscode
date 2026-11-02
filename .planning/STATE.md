@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 61
 current_phase_name: Invitations, joining, removal, NEAR org and key integration
 status: executing
-stopped_at: Phase 61 context gathered
-last_updated: "2026-11-02T00:42:58.941Z"
+stopped_at: Completed 61-01-PLAN.md
+last_updated: "2026-11-02T00:53:52.344Z"
 last_activity: 2026-11-01
-last_activity_desc: Phase 60 complete, transitioned to Phase 61
-state_head: 40457b8829c65f98ef0da4de31bf0cada7a67b0f
+last_activity_desc: Phase 61 execution started
+state_head: 14c50d8252f6826fad5c611568145cc541d96393
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 26
-  completed_plans: 12
+  completed_plans: 13
   percent: 13
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 
 ## Current Position
 
-Phase: 61 (Invitations, joining, removal, NEAR org and key integration) — READY TO EXECUTE
-Plan: Not started
+Phase: 61 (Invitations, joining, removal, NEAR org and key integration) — EXECUTING
+Plan: 2 of 14
 Status: Ready to execute
-Last activity: 2026-11-01 — Phase 60 complete, transitioned to Phase 61
+Last activity: 2026-11-01 — Phase 61 execution started
 
 Progress: [█░░░░░░░░░] 13%
 
@@ -66,6 +66,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 60 P10 | 38 min | 2 tasks | 4 files |
 | Phase 60 P11 | 10 min | 3 tasks | 8 files |
 | Phase 60 P12 | 25min | 2 tasks | 5 files |
+| Phase 61 P01 | 50 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,7 @@ Recent decisions affecting current work:
 - [Phase 60]: 60-11: ENOENT and ENOTDIR both mean solo; Enable checks for an existing team before asking questions; Push offered only on a branch; commit-failed still starts the session
 - [Phase 60]: G-60-1: unchanged-focus window-state events are ignored; focus loss re-arms anchored to the last run; cadence re-reads focused() after each run (60-12)
 - [Phase 60]: 60-12 review: the scheduler uses a monotonic clock (performance.now) and caps a focus-loss re-arm at one full delay; post-run callback failures are reported and the next poll is still armed
+- [Phase 61]: 61-01: invite/join shapes confirmed as recorded (HKDF/PKCS#8 derived key, 300 s commit-time skew, D-15 confirmation); invitedEvent kept after join so used invitations stay distinguishable
 
 ### Pending Todos
 
@@ -116,9 +118,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-01T22:48:47.235Z
-Stopped at: Phase 61 context gathered
-Resume file: .planning/phases/61-invitations-joining-removal-near-org-and-key-integration/61-CONTEXT.md
+Last session: 2026-11-02T00:53:52.219Z
+Stopped at: Completed 61-01-PLAN.md
+Resume file: None
 
 ## Notes
 
