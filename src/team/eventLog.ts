@@ -198,6 +198,12 @@ export class TeamLog {
     return this.transport.state();
   }
 
+  // The member this log signs as, or undefined when this computer has no device key. Callers use it to ask the permission question before
+  // they do anything outside the log that the log would later refuse (removal caps a NEAR key first).
+  public signerMemberId(): string | undefined {
+    return this.signer?.memberId;
+  }
+
   public status(): TransportStatus {
     return this.transport.status();
   }
