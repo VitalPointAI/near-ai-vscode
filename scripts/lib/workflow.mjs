@@ -25,6 +25,9 @@ export function releaseVersionFromBranch(branch) {
  *   Verdict: PASS            (or FAIL; exactly one such line, nothing else on it)
  *   Head-SHA: <40-hex commit the team reviewed>   (exactly one)
  *   - [BLOCKER] ... (open)    - [BLOCKER][RESOLVED] ... (closed)
+ * Each line is first normalized the way GitHub shows it (normalizeReviewLine), so an escaped,
+ * spaced, fullwidth or zero-width-split [BLOCKER] still counts, and a tag written with lookalike
+ * letters from another script is reported in `problems`.
  * Verdict and Head-SHA lines inside code fences are ignored, so quoted code cannot fake them.
  * Severity tags count everywhere, fences included, and a fence that is never closed (or is
  * closed by a different character or a shorter run) makes the structure ambiguous, which is
@@ -39,14 +42,20 @@ export function parseReview(text) {
   const openBlockers = [];
   const counts = { blocker: 0, major: 0, minor: 0, nit: 0, resolved: 0 };
   for (const [index, raw] of lines.entries()) {
-    const line = raw.trim();
+    const line = normalizeReviewLine(raw).trim();
     // Every tag on the line counts: "[BLOCKER][RESOLVED] ... [BLOCKER] ..." has one open blocker.
-    for (const severity of ['BLOCKER', 'MAJOR', 'MINOR', 'NIT']) {
-      const resolved = line.match(new RegExp(`\\[${severity}\\]\\s*\\[RESOLVED\\]`, 'gi'))?.length ?? 0;
-      const open = (line.match(new RegExp(`\\[${severity}\\]`, 'gi'))?.length ?? 0) - resolved;
-      counts.resolved += resolved;
-      counts[severity.toLowerCase()] += open;
-      if (severity === 'BLOCKER') for (let i = 0; i < open; i += 1) openBlockers.push(line);
+    const tags = severityTags(line);
+    for (const [i, tag] of tags.entries()) {
+      if (tag.lookalike) {
+        problems.push(`line ${index + 1} ("${line.slice(0, 80)}") has a tag that looks like [${tag.lookalike}] but is not written in plain letters; write severity tags as plain ASCII`);
+      }
+      if (!SEVERITIES.includes(tag.word)) continue;
+      const next = tags[i + 1];
+      if (next?.word === 'RESOLVED' && /^[\s*_]*$/.test(line.slice(tag.end, next.start))) counts.resolved += 1;
+      else {
+        counts[tag.word.toLowerCase()] += 1;
+        if (tag.word === 'BLOCKER') openBlockers.push(line);
+      }
     }
     const marker = fenceMarker(line);
     if (fence) {
@@ -73,6 +82,54 @@ export function parseReview(text) {
   const verdict = verdicts.length === 1 ? verdicts[0] : undefined;
   const headSha = headShas.length === 1 ? headShas[0] : undefined;
   return { verdict, headSha, openBlockers, counts, problems, verdictLines: verdicts.length, headShaLines: headShas.length };
+}
+
+const SEVERITIES = ['BLOCKER', 'MAJOR', 'MINOR', 'NIT'];
+const TAG_WORDS = [...SEVERITIES, 'RESOLVED'];
+// Characters GitHub shows as nothing (zero-width, joiners, bidi controls, variation selectors).
+const INVISIBLE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/g;
+// Brackets that look like [ and ] (fullwidth ones are already mapped by NFKC).
+const OPEN_LIKE = /[\u2045\u2772\u27E6\u27EC\u2983\u2985\u298B\u298D\u298F\u3010\u3014\u3016\u3018\u301A]/g;
+const CLOSE_LIKE = /[\u2046\u2773\u27E7\u27ED\u2984\u2986\u298C\u298E\u2990\u3011\u3015\u3017\u3019\u301B]/g;
+// Cyrillic and Greek capitals and small letters that look like Latin ones.
+const CONFUSABLE = new Map(Object.entries({
+  А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', Х: 'X', У: 'Y', І: 'I', Ј: 'J', Ѕ: 'S',
+  а: 'a', е: 'e', о: 'o', р: 'p', с: 'c', х: 'x', у: 'y', і: 'i', ј: 'j', ѕ: 's', к: 'k', м: 'm', н: 'h', т: 't',
+  Α: 'A', Β: 'B', Ε: 'E', Ζ: 'Z', Η: 'H', Ι: 'I', Κ: 'K', Μ: 'M', Ν: 'N', Ο: 'O', Ρ: 'P', Τ: 'T', Υ: 'Y', Χ: 'X',
+  ο: 'o', ν: 'v', ι: 'i', κ: 'k', İ: 'I', ı: 'i'
+}));
+
+/**
+ * A review line as a reader sees it on GitHub: compatibility forms folded (NFKC turns fullwidth
+ * brackets and letters into ASCII), invisible characters removed, bracket entities and
+ * lookalike brackets turned into [ and ], and backslash escapes before brackets dropped.
+ */
+export function normalizeReviewLine(line) {
+  return String(line ?? '').normalize('NFKC').replace(INVISIBLE, '')
+    .replace(/&(?:#0*91|#x0*5b|lbrack|lsqb);/gi, '[').replace(/&(?:#0*93|#x0*5d|rbrack|rsqb);/gi, ']')
+    .replace(OPEN_LIKE, '[').replace(CLOSE_LIKE, ']')
+    .replace(/\\(?=[[\]])/g, '');
+}
+
+/**
+ * The bracketed tags on a normalized line, in order. `word` is the ASCII letters inside, upper
+ * case, so [ BLOCKER ], [**blocker**] and [BLOCKER] are all BLOCKER. `lookalike` names the tag a
+ * bracket imitates with letters from another script (fail closed: the review is refused).
+ */
+function severityTags(line) {
+  const tags = [];
+  for (const match of line.matchAll(/\[([^[\]]{0,40})\]/g)) {
+    const letters = match[1].replace(/[^\p{L}]/gu, '');
+    const word = /^[A-Za-z]*$/.test(letters) ? letters.toUpperCase() : '';
+    let lookalike;
+    if (!word && letters) {
+      const latin = [...letters].map((c) => CONFUSABLE.get(c) ?? c).join('').toUpperCase();
+      lookalike = TAG_WORDS.find((tag) => latin === tag
+        || (latin.length === tag.length && [...latin].filter((c, i) => c === tag[i]).length >= tag.length - (tag.length >= 7 ? 2 : 1)));
+    }
+    tags.push({ word, lookalike, start: match.index, end: match.index + match[0].length });
+  }
+  return tags;
 }
 
 /** A CommonMark code fence line: three or more ` or ~, then an info string (no ` after backticks). */

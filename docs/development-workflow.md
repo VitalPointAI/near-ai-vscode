@@ -141,10 +141,14 @@ The command (`.claude/commands/review-pr.md`) does the following:
 `agent-review` is **success** only when the file has exactly one verdict line and it reads
 `Verdict: PASS`, its one `Head-SHA` line names the PR's current head, and it has no open
 `[BLOCKER]` anywhere, code blocks included (a fixed one is written `[BLOCKER][RESOLVED]`).
-Otherwise it is **failure** and the comment lists why. Verdict and Head-SHA lines inside code
-fences are ignored, so quoted code cannot fake them, and a code fence left open fails the review
-rather than hiding what follows it. Use `--dry-run` to see the comment and the status without
-posting.
+Otherwise it is **failure** and the comment lists why. A tag counts however it is typed, as long
+as GitHub shows it as one: escaped (`\[BLOCKER\]`), with spaces inside the brackets, in
+fullwidth or other bracket characters, in bold, in any case, or with invisible characters
+inside. A tag spelled with lookalike letters from another alphabet fails the review.
+
+Verdict and Head-SHA lines inside code fences are ignored, so quoted code cannot fake them, and a
+code fence left open fails the review rather than hiding what follows it. Use `--dry-run` to see
+the comment and the status without posting.
 
 The format of the review file is shown in `.claude/commands/review-pr.md`.
 

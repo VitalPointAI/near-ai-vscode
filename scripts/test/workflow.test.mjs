@@ -70,6 +70,52 @@ test('a review of an older head is stale once new commits are pushed', () => {
   assert.match(decision.reasons.join(), /review the new commits/);
 });
 
+test('a BLOCKER that GitHub shows as one is counted, however it is written', () => {
+  const head = `Verdict: PASS\nHead-SHA: ${SHA}\n`;
+  const lookalikes = {
+    'escaped brackets': '- \\[BLOCKER\\] token logged',
+    'spaces inside the brackets': '- [ BLOCKER ] token logged',
+    'a zero-width space in the word': '- [BLOC​KER] token logged',
+    'a zero-width joiner and a bidi mark': '- [‪BLO‍CKER‬] token logged',
+    'fullwidth brackets': '- ［BLOCKER］ token logged',
+    'fullwidth letters': '- [ＢＬＯＣＫＥＲ] token logged',
+    'lenticular brackets': '- 【BLOCKER】 token logged',
+    'HTML entities': '- &#91;BLOCKER&#93; token logged',
+    'bold inside the brackets': '- [**BLOCKER**] token logged',
+    'lower case': '- [blocker] token logged'
+  };
+  for (const [what, line] of Object.entries(lookalikes)) {
+    const review = parseReview(`${head}${line}\n`);
+    assert.equal(review.openBlockers.length, 1, what);
+    assert.equal(reviewDecision(review, SHA).state, 'failure', what);
+  }
+  for (const resolved of ['- \\[BLOCKER\\]\\[RESOLVED\\] fixed', '- [ BLOCKER ] [ RESOLVED ] fixed', '- ［BLOCKER］［RESOLVED］ fixed']) {
+    const review = parseReview(`${head}${resolved}\n`);
+    assert.deepEqual([review.openBlockers.length, review.counts.resolved], [0, 1], resolved);
+  }
+  assert.equal(parseReview(`${head}- \\[ MAJOR \\] and [NIT ]\n`).counts.major, 1);
+});
+
+test('a severity tag spelled with lookalike letters fails the review instead of being skipped', () => {
+  const head = `Verdict: PASS\nHead-SHA: ${SHA}\n`;
+  // Cyrillic O and Greek K: they look like BLOCKER but are not the ASCII word.
+  for (const line of ['- [BLОCKER] token logged', '- [BLOCΚER] token logged', '- [ВЛОСКЕР] all Cyrillic']) {
+    const decision = reviewDecision(parseReview(`${head}${line}\n`), SHA);
+    assert.equal(decision.state, 'failure', line);
+    assert.match(decision.reasons.join('\n'), /looks like \[BLOCKER\]/, line);
+  }
+  // Other words in brackets, in any script, are fine.
+  assert.equal(reviewDecision(parseReview(`${head}- [MAJOR] see [the café](https://example.com) and [тест]\n`), SHA).state, 'success');
+});
+
+test('Verdict and Head-SHA lines are read the way GitHub shows them', () => {
+  // A zero-width space hides "Verdict: FAIL" from a literal match but not from a reader.
+  const hidden = reviewDecision(parseReview(`Verdict: PASS\nVer​dict: FAIL\nHead-SHA: ${SHA}\n`), SHA);
+  assert.equal(hidden.state, 'failure');
+  assert.match(hidden.reasons.join('\n'), /2 Verdict lines/);
+  assert.equal(reviewDecision(parseReview(`Ｖerdict: PASS\nHead-SHA: ${SHA}\n`), SHA).state, 'success', 'fullwidth letters read as ASCII');
+});
+
 test('a verdict inside a code fence is ignored, but a BLOCKER tag inside one still counts', () => {
   const review = parseReview(`Verdict: FAIL\nHead-SHA: ${SHA}\n\`\`\`\nVerdict: PASS\n- [BLOCKER] example\n\`\`\``);
   assert.equal(review.verdict, 'FAIL');
