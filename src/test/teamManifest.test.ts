@@ -20,6 +20,7 @@ interface Manifest {
   devDependencies?: Record<string, string>;
   contributes: {
     commands: Array<{ command: string; title: string; category?: string; icon?: string }>;
+    views: Record<string, Array<{ type?: string; id: string; name: string; when?: string; visibility?: string }>>;
     configuration: { properties: Record<string, { type?: string; default?: unknown; minimum?: number; maximum?: number; scope?: string; description?: string }> };
   };
 }
@@ -65,6 +66,27 @@ test('the command ids kept in memberCommands equal the copies in teamSession, wh
   assert.equal(memberModule.MANAGE_MEMBERS_COMMAND, sessionModule.MANAGE_MEMBERS_COMMAND);
 });
 
+test('package.json contributes Open Team Board and Import Plans to Team Board with plain titles and icons', () => {
+  const byId = new Map(manifest.contributes.commands.map((entry) => [entry.command, entry]));
+  assert.deepEqual([byId.get('nearAi.team.openBoard')?.title, byId.get('nearAi.team.openBoard')?.category, byId.get('nearAi.team.openBoard')?.icon], ['Open Team Board', 'NEAR AI', '$(project)']);
+  assert.deepEqual([byId.get('nearAi.team.importPlans')?.title, byId.get('nearAi.team.importPlans')?.category, byId.get('nearAi.team.importPlans')?.icon], ['Import Plans to Team Board', 'NEAR AI', '$(sync)']);
+  assert.equal(commandsModule.OPEN_BOARD_COMMAND, 'nearAi.team.openBoard');
+  assert.equal(commandsModule.IMPORT_PLANS_COMMAND, 'nearAi.team.importPlans');
+  assert.equal(commandsModule.OPEN_BOARD_COMMAND, barModule.OPEN_BOARD_COMMAND, 'the status bar click lands on the registered command');
+});
+
+test('the Team Board view sits in the NEAR AI container after the chat view and shows only while Team Mode is on', () => {
+  const views = manifest.contributes.views['nearAiSecondaryViewContainer'] ?? [];
+  const chat = views.findIndex((entry) => entry.id === 'nearAiChatView');
+  const board = views.findIndex((entry) => entry.id === 'nearAiTeamBoardView');
+  assert.ok(chat >= 0 && board > chat, 'the board view follows the chat view');
+  assert.deepEqual([views[board]?.type, views[board]?.name, views[board]?.when], ['webview', 'Team Board', 'nearAi.teamMode']);
+  assert.equal(views[chat]?.when, undefined, 'the chat view is not gated');
+  const boardModule = require('../services/team/boardView') as typeof import('../services/team/boardView');
+  assert.equal(boardModule.BOARD_VIEW_ID, 'nearAiTeamBoardView');
+  assert.equal(boardModule.BOARD_PANEL_TYPE, 'nearAiTeamBoard');
+});
+
 test('nearAi.team.pollSeconds is a number 5..3600, default 15, application scope, with a plain description', () => {
   const setting = manifest.contributes.configuration.properties['nearAi.team.pollSeconds'];
   assert.ok(setting !== undefined, 'the setting is contributed');
@@ -85,7 +107,8 @@ test('the command titles and descriptions contain no em-dash', () => {
 test('registerTeamMode registers every contributed nearAi.team command', async () => {
   const contributed = manifest.contributes.commands.map((entry) => entry.command).filter((id) => id.startsWith('nearAi.team.'));
   assert.deepEqual([...contributed].sort(), [
-    'nearAi.team.enable', 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.linkNearOrganization', 'nearAi.team.manageMembers', 'nearAi.team.signOutNear', 'nearAi.team.verifyLog'
+    'nearAi.team.enable', 'nearAi.team.importPlans', 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.linkNearOrganization', 'nearAi.team.manageMembers', 'nearAi.team.openBoard',
+    'nearAi.team.signOutNear', 'nearAi.team.verifyLog'
   ]);
   const context = createFakeContext(path.join(ROOT, 'does-not-exist'), {});
   const handle = commandsModule.registerTeamMode(context as never);

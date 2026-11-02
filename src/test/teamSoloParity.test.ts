@@ -13,7 +13,7 @@ const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 test.after(() => { uninstall(); });
-const { ENABLE_COMMAND, SOLO_TEXT, VERIFY_LOG_COMMAND, registerTeamMode } = commandsModule;
+const { ENABLE_COMMAND, IMPORT_PLANS_COMMAND, OPEN_BOARD_COMMAND, SOLO_TEXT, VERIFY_LOG_COMMAND, registerTeamMode } = commandsModule;
 
 const DIST_ROOT = path.resolve(__dirname, '..');
 const TEAM_DIRS = ['team', path.join('domain', 'team'), path.join('services', 'team')].map((dir) => path.join(DIST_ROOT, dir) + path.sep);
@@ -70,6 +70,12 @@ function resetStub(): void {
   stub.messageAnswers.length = 0;
   stub.inputRequests.length = 0;
   stub.commands.clear();
+  stub.webviewPanels.length = 0;
+  stub.viewProviders.length = 0;
+  stub.externalCommands.length = 0;
+  stub.quickPickAnswers.length = 0;
+  stub.quickPickRequests.length = 0;
+  stub.progress.length = 0;
   stub.setWorkspaceFolders([]);
 }
 
@@ -107,11 +113,48 @@ test('solo project: activation makes one fs.stat and no timers, channel, status 
     assert.deepEqual(loadedTeamModules(), [], 'no compiled team module was loaded');
     assert.equal(handle.session(), undefined);
     assert.deepEqual([...stub.commands.keys()].sort(), [
-      ENABLE_COMMAND, VERIFY_LOG_COMMAND, 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear'
-    ].sort(), 'the seven Team Mode commands are registered and nothing else');
+      ENABLE_COMMAND, VERIFY_LOG_COMMAND, OPEN_BOARD_COMMAND, IMPORT_PLANS_COMMAND, 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear'
+    ].sort(), 'the nine Team Mode commands are registered and nothing else');
+    assert.equal(stub.webviewPanels.length + stub.viewProviders.length, 0, 'no webview panel and no view provider');
+    assert.deepEqual(stub.externalCommands, [], 'no context key is set');
   } finally {
     timers.restore();
     fsCalls.restore();
+    project.cleanup();
+  }
+});
+
+test('Open Team Board and Import Plans to Team Board in a solo project only explain how to turn Team Mode on and load nothing', async () => {
+  resetStub();
+  const project = soloProject();
+  const timers = spyTimers();
+  try {
+    stub.setWorkspaceFolders([project.root]);
+    const context = createFakeContext(project.storage, {});
+    const handle = registerTeamMode(context as never);
+    assert.equal(await handle.ready, 'solo');
+    for (const id of [OPEN_BOARD_COMMAND, IMPORT_PLANS_COMMAND]) {
+      stub.notifications.length = 0;
+      await stub.commands.get(id)?.();
+      assert.deepEqual(stub.notifications, [{ level: 'info', message: SOLO_TEXT }], id);
+      assert.deepEqual(stub.notificationActions[stub.notificationActions.length - 1], [], 'the explanation has no buttons');
+    }
+    // Run from the page's argument as well: the same answer.
+    stub.notifications.length = 0;
+    await stub.commands.get(IMPORT_PLANS_COMMAND)?.({ milestone: 'current' });
+    assert.deepEqual(stub.notifications.map((entry) => entry.message), [SOLO_TEXT]);
+    timers.restore();
+    assert.deepEqual(timers.setTimeoutCalls, []);
+    assert.equal(timers.setIntervalCalls, 0);
+    assert.equal(stub.outputChannels.length + stub.statusBarItems.length, 0);
+    assert.equal(stub.webviewPanels.length + stub.viewProviders.length, 0, 'no webview panel and no view provider');
+    assert.equal(stub.progress.length, 0, 'no progress notification');
+    assert.equal(stub.quickPickRequests.length, 0, 'no question');
+    assert.deepEqual(stub.externalCommands, [], 'no context key');
+    assert.deepEqual(loadedTeamModules(), [], 'no compiled team module was loaded');
+    assert.equal(Object.keys(require.cache).some((file) => file.endsWith(path.join('services', 'team', 'boardView.js'))), false, 'the board module was not loaded');
+  } finally {
+    timers.restore();
     project.cleanup();
   }
 });

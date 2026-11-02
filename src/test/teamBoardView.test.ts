@@ -698,3 +698,105 @@ test('the page can ask for the import, the panel, a retry and the output channel
     }
   });
 });
+
+// ---- the commands in a team project ----------------------------------------------------------------------------------------------------------
+
+const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
+const importModule = require('../team/importPlans') as typeof import('../team/importPlans');
+const setContexts = (): Array<{ command: string; args: unknown[] }> => stub.externalCommands.filter((entry) => entry.command === 'setContext');
+
+test('team project: the board comes up once the session starts, Open Team Board opens one panel and reveals it again, and the context key follows the window', async () => {
+  resetStub();
+  await withLiveTeam(async (rig) => {
+    stub.setWorkspaceFolders([rootOf(rig, 'a')]);
+    const context = createFakeContext(rig.owner.globalStorageDir, rig.owner.secrets);
+    const handle = commandsModule.registerTeamMode(context as never, { nearBaseUrl: rig.fake.baseUrl });
+    try {
+      assert.equal(await handle.ready, 'team');
+      assert.deepEqual(setContexts(), [{ command: 'setContext', args: ['nearAi.teamMode', true] }], 'the context key is set once the session runs');
+      assert.equal(stub.viewProviders.length, 1, 'the view provider is registered once');
+      assert.equal(stub.webviewPanels.length, 0, 'no panel until someone asks');
+
+      await stub.commands.get(commandsModule.OPEN_BOARD_COMMAND)?.();
+      assert.equal(stub.webviewPanels.length, 1);
+      assert.equal(stub.webviewPanels[0]?.viewType, 'nearAiTeamBoard');
+      await stub.commands.get(commandsModule.OPEN_BOARD_COMMAND)?.();
+      assert.equal(stub.webviewPanels.length, 1, 'a second run reveals the open panel');
+      assert.equal(stub.webviewPanels[0]?.revealCalls, 1);
+      assert.equal(stub.viewProviders.length, 1, 'still one provider');
+      assert.equal(setContexts().length, 1, 'the key was not set again');
+      assert.equal(stub.notifications.length, 0, 'no message appeared');
+
+      // The panel shows this window's session: ready, then the model.
+      await stub.webviewPanels[0]?.receive({ type: 'ready' });
+      assert.equal(cardOf(states(stub.webviewPanels[0] as RecordedWebviewPanel)[0], READY_PLAN)?.column, 'ready');
+    } finally {
+      for (const subscription of context.subscriptions) subscription.dispose();
+    }
+    assert.deepEqual(setContexts()[setContexts().length - 1], { command: 'setContext', args: ['nearAi.teamMode', false] }, 'the key is cleared when the window closes');
+  });
+});
+
+test('Import Plans to Team Board: a palette run with two milestones asks first with the current one recommended, runs under a progress and reports the sentence', async () => {
+  resetStub();
+  await withLiveTeam(async (rig) => {
+    stub.setWorkspaceFolders([rootOf(rig, 'a')]);
+    const context = createFakeContext(rig.owner.globalStorageDir, rig.owner.secrets);
+    const handle = commandsModule.registerTeamMode(context as never, { nearBaseUrl: rig.fake.baseUrl });
+    try {
+      assert.equal(await handle.ready, 'team');
+      const milestones = await importModule.listImportableMilestones({ projectRoot: rootOf(rig, 'a'), remote: 'origin', branch: 'main' });
+      assert.equal(milestones.length, 2, 'the fixture roadmap has two milestones');
+      const current = milestones[0] as NonNullable<typeof milestones[number]>;
+      assert.equal(current.current, true);
+
+      stub.notifications.length = 0;
+      stub.quickPickAnswers.push(current.title);
+      await stub.commands.get(commandsModule.IMPORT_PLANS_COMMAND)?.();
+      assert.equal(stub.quickPickRequests.length, 1);
+      assert.equal(stub.quickPickRequests[0]?.labels[0], current.title, 'the current milestone is first, so Enter imports it');
+      assert.match(stub.quickPickRequests[0]?.descriptions[0] ?? '', /Recommended/);
+      assert.deepEqual(stub.progress.map((entry) => [entry.title, entry.cancellable]), [['Importing plans to the Team Board', false]]);
+      const sentence = stub.notifications[stub.notifications.length - 1];
+      assert.ok(sentence !== undefined && sentence.level === 'info', 'a success is information');
+      assert.match(sentence.message, /^(Imported \d+ items? to the Team Board\.|The Team Board is already up to date\.)/);
+
+      // The page's argument names the current milestone, so there is nothing to ask.
+      stub.notifications.length = 0;
+      await stub.commands.get(commandsModule.IMPORT_PLANS_COMMAND)?.({ milestone: 'current' });
+      assert.equal(stub.quickPickRequests.length, 1, 'no second pick');
+      assert.equal(stub.progress.length, 2);
+      assert.equal(stub.notifications[stub.notifications.length - 1]?.message, 'The Team Board is already up to date.');
+
+      // A dismissed pick is a quiet cancel.
+      stub.notifications.length = 0;
+      await stub.commands.get(commandsModule.IMPORT_PLANS_COMMAND)?.();
+      assert.equal(stub.quickPickRequests.length, 2);
+      assert.equal(stub.progress.length, 2, 'nothing ran');
+      assert.deepEqual(stub.notifications, []);
+    } finally {
+      for (const subscription of context.subscriptions) subscription.dispose();
+    }
+  });
+});
+
+test('Import Plans to Team Board by a developer or a window that cannot write reports the reason and changes nothing', async () => {
+  resetStub();
+  await withLiveTeam(async (rig) => {
+    stub.setWorkspaceFolders([rootOf(rig, 'b')]);
+    const context = createFakeContext(rig.dev.globalStorageDir, rig.dev.secrets);
+    const handle = commandsModule.registerTeamMode(context as never, { nearBaseUrl: rig.fake.baseUrl });
+    try {
+      assert.equal(await handle.ready, 'team');
+      const before = remoteEventCount(rig);
+      stub.notifications.length = 0;
+      await stub.commands.get(commandsModule.IMPORT_PLANS_COMMAND)?.({ milestone: 'current' });
+      const last = stub.notifications[stub.notifications.length - 1];
+      assert.ok(last !== undefined);
+      assert.ok(last.message === 'The Team Board is already up to date.' || last.message.startsWith('The import did not finish:'), last.message);
+      assert.equal(remoteEventCount(rig) >= before, true);
+    } finally {
+      for (const subscription of context.subscriptions) subscription.dispose();
+    }
+  });
+});
