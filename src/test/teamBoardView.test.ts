@@ -475,6 +475,8 @@ test('a card that changed while the prompt was open is reported as already chang
     }
     const refused = lastOf(panel, 'refused');
     assert.ok(String(refused?.reason).endsWith('already changed this card. The board now shows the latest. Nothing was moved.'), String(refused?.reason));
+    // The change was made with the viewer's own key (from another window), so the board does not name the viewer as the other person (IN-07).
+    assert.equal(refused?.reason, 'Someone already changed this card. The board now shows the latest. Nothing was moved.');
     assert.equal(started.session.state().items.get(READY_PLAN)?.blocked?.reason, 'blocked by someone else');
   });
 });

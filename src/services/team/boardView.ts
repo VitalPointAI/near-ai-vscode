@@ -612,9 +612,12 @@ export class BoardController {
   }
 
   // The words for a refusal the log gave on fresh state. A card-state refusal after the page was offered the move means someone got there first.
-  private staleOrPlain(session: TeamSession, itemId: string, reason: string, offered: boolean): string {
+  // The card's newest change is named only when it arrived after the move was asked for (`seenEventId` was the newest then) and someone other
+  // than the viewer made it; otherwise the sentence says Someone, which is never wrong (IN-07).
+  private staleOrPlain(session: TeamSession, itemId: string, reason: string, offered: boolean, seenEventId: string | undefined, viewerId: string | undefined): string {
     if (!offered || !CARD_STATE_REFUSALS.has(reason)) return reason;
-    const author = session.itemHistory(itemId)[0]?.author;
+    const newest = session.itemHistory(itemId)[0];
+    const author = newest === undefined || newest.eventId === seenEventId || newest.author === viewerId ? undefined : newest.author;
     const name = author === undefined ? '' : session.state().members.get(author)?.name ?? '';
     return staleRefusal(flattenName(name) === '' ? SOMEONE : name);
   }
@@ -643,6 +646,8 @@ export class BoardController {
       return;
     }
     const viewerId = session.memberId();
+    // The card's newest change this window knew of when the page asked: a later one is what a stale refusal names (IN-07).
+    const seenEventId = session.itemHistory(itemId)[0]?.eventId;
     // Plan once on what this window knows, to decide which prompt follows. A refusal is answered at once and nothing is asked.
     const known = session.state();
     const probe = planMove(known, viewerId, itemId, target, { reason: PROBE_REASON });
@@ -674,7 +679,7 @@ export class BoardController {
     const input = reason === undefined ? {} : { reason };
     const again = planMove(session.state(), viewerId, itemId, target, input);
     if (!again.ok) {
-      this.refuse(state, itemId, this.staleOrPlain(session, itemId, again.reason, true), target);
+      this.refuse(state, itemId, this.staleOrPlain(session, itemId, again.reason, true, seenEventId, viewerId), target);
       if (CARD_STATE_REFUSALS.has(again.reason)) this.catchUp(state);
       return;
     }
@@ -690,7 +695,7 @@ export class BoardController {
       });
       if (result.ok) return;
       if (builderRefusal !== undefined && result.reason === builderRefusal) {
-        this.refuse(state, itemId, this.staleOrPlain(session, itemId, builderRefusal, true), target);
+        this.refuse(state, itemId, this.staleOrPlain(session, itemId, builderRefusal, true, seenEventId, viewerId), target);
         this.catchUp(state);
         return;
       }
