@@ -39,6 +39,8 @@ const SSH_URL_USER = /^[a-z_][a-z0-9_-]{0,31}$/;
 const SCP_USER = /^[A-Za-z_][A-Za-z0-9._-]{0,63}$/;
 const SCP_HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])|\[[0-9A-Fa-f:.]+\])$/;
 const URL_SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//;
+// Git's own rule (transport.c, is_urlschemechar): URL-scheme characters followed by "::" name a remote helper, such as ext::, fd:: or hg::.
+const REMOTE_HELPER = /^[A-Za-z][A-Za-z0-9+.-]*::/;
 
 export type CleanedRepoUrl = { ok: true; url: string } | { ok: false; reason: string };
 
@@ -53,6 +55,8 @@ const STILL_SECRET = 'The remote address still looks like it holds a secret afte
 const UNSUPPORTED = 'The remote address is not an https, ssh or scp-style address, so it cannot be shared in an invite.';
 const NOT_UNDERSTOOD = 'The remote address could not be understood, so it cannot go into an invite.';
 const NO_ADDRESS = 'This project has no address for its team remote, so there is nothing to put in the invite.';
+const REMOTE_HELPER_TEXT = 'The remote address uses a git remote helper (a name followed by "::"), which can run a program on a teammate\'s computer, so it cannot go into an invite.';
+const DASH_HOST = 'The remote address names a host that starts with a dash, which git could pass on as an option, so it cannot go into an invite.';
 
 function cleanWebOrSshUrl(trimmed: string, scheme: string): CleanedRepoUrl {
   if (trimmed.includes('?') || trimmed.includes('#')) return refused(HAS_QUERY);
@@ -64,6 +68,8 @@ function cleanWebOrSshUrl(trimmed: string, scheme: string): CleanedRepoUrl {
     return refused(NOT_UNDERSTOOD);
   }
   if (parsed.hostname === '') return refused(NOT_UNDERSTOOD);
+  // T-61-64: ssh would read a host such as -oProxyCommand=... as an option.
+  if (parsed.hostname.startsWith('-')) return refused(DASH_HOST);
   if (parsed.search !== '' || parsed.hash !== '') return refused(HAS_QUERY);
   if (scheme === 'ssh') {
     // The user of an ssh address is a login name such as git, not a secret, so a plain one stays. A password never does.
@@ -80,9 +86,12 @@ function cleanScpUrl(trimmed: string): CleanedRepoUrl {
   if (colon < 0 || (slash >= 0 && slash < colon)) return refused(LOCAL_PATH);
   const head = trimmed.slice(0, colon);
   const repoPath = trimmed.slice(colon + 1);
+  // T-61-64: host::address is git's remote-helper form, never a host and a path.
+  if (repoPath.startsWith(':')) return refused(REMOTE_HELPER_TEXT);
   const at = head.lastIndexOf('@');
   const user = at >= 0 ? head.slice(0, at) : '';
   const host = head.slice(at + 1);
+  if (host.startsWith('-') || (at >= 0 && user.startsWith('-'))) return refused(DASH_HOST);
   // A single letter before the colon is a Windows drive, not a host.
   if (host.length < 2 || !SCP_HOST.test(host)) return refused(LOCAL_PATH);
   if (user !== '' && !SCP_USER.test(user)) return refused(HAS_CREDENTIALS);
@@ -99,6 +108,8 @@ export function cleanRepoUrl(url: string): CleanedRepoUrl {
   const trimmed = url.trim();
   if (trimmed === '') return refused(NO_ADDRESS);
   if (CONTROL_OR_SPACE.test(trimmed)) return refused(NOT_UNDERSTOOD);
+  // T-61-64: a remote-helper address can make git.clone run a program, so it is refused before any other reading of the text.
+  if (REMOTE_HELPER.test(trimmed)) return refused(REMOTE_HELPER_TEXT);
   let cleaned: CleanedRepoUrl;
   const scheme = URL_SCHEME.exec(trimmed)?.[1]?.toLowerCase();
   if (scheme === undefined) cleaned = cleanScpUrl(trimmed);

@@ -103,7 +103,7 @@ Extracted from the `<threat_model>` tables of 61-01 to 61-14 (T-61-SC appears in
 | T-61-62 | Information disclosure | live test token | medium | mitigate | Token only from the environment, never printed; key zeroed and revoked in finally; skips without NEAR_LIVE_TEAM=1 | closed |
 | T-61-63 | Tampering | regression in solo projects | medium | mitigate | teamSoloParity.test.ts unweakened; teamManifest.test.ts command registration; e2e handler check | closed |
 | T-61-SC | Tampering | npm/pip/cargo installs | high | mitigate | No package installs in any plan; dependency sets and package-lock.json identical to the merge base; enforced by teamManifest.test.ts | closed |
-| T-61-64 | Tampering | `cleanRepoUrl` scp-style branch passed to `git.clone` (61-13 threat flag) | low | mitigate | Found in audit: git remote-helper pseudo-URLs (`ext::sh`, `fd::3`, `hg::https://x/y`) and `ssh://-oProxyCommand=…/x` pass `cleanRepoUrl` unchanged. Neutralised by git defaults (ext transport not allowed; ssh hostname starting with `-` blocked), reachable only with `protocol.ext.allow`, an old git or an installed helper, a hostile team member and the user clicking Clone. Fix: reject `::` in the scp branch and ssh hosts starting with `-` in `src/team/inviteBundle.ts` | open — below high threshold (non-blocking) |
+| T-61-64 | Tampering | `cleanRepoUrl` scp-style branch passed to `git.clone` (61-13 threat flag) | low | mitigate | Found in audit: git remote-helper pseudo-URLs (`ext::sh`, `fd::3`, `hg::https://x/y`) and `ssh://-oProxyCommand=…/x` passed `cleanRepoUrl` unchanged. Fixed in code review fix pass (commit recorded in 61-REVIEW-FIX.md): `src/team/inviteBundle.ts` refuses any address matching git's remote-helper rule `^[A-Za-z][A-Za-z0-9+.-]*::` before any other reading, an scp path that starts with `:`, and an ssh/https host or scp host or user that starts with `-`; `parseInviteBundle` runs the same cleaning, so a hand-made bundle carrying such a URL is refused too. Test: teamInviteBundle.test.ts "T-61-64: cleanRepoUrl refuses git remote-helper addresses and ssh or scp hosts that start with a dash, and the parser refuses them in a bundle" | closed |
 
 *Status: open · closed · open — below high threshold (non-blocking)*
 *Severity: critical > high > medium > low — only open threats at or above workflow.security_block_on count toward threats_open*
@@ -132,7 +132,7 @@ Extracted from the `<threat_model>` tables of 61-01 to 61-14 (T-61-SC appears in
 - NEAR's `GET /organizations/{org}/members` returns no member emails, so removing a lead (or cancelling a lead invitation the invitee already accepted) always leaves a manual "remove them in the NEAR console" item. This is the fail-safe branch of T-61-48: no organization DELETE is sent without an email-hash match. The code removes the member automatically once NEAR returns member emails.
 
 **Advisories (non-blocking at ASVS L1):**
-- A1 (T-61-64, also T-61-27/T-61-29): harden `cleanRepoUrl` against git remote-helper syntax (`<helper>::<address>`) and ssh hosts starting with `-` before relying on it beyond git's defaults.
+- A1 (T-61-64, also T-61-27/T-61-29): resolved 2026-11-01 in the code review fix pass; `cleanRepoUrl` now refuses git remote-helper syntax (`<helper>::<address>`) and ssh or scp hosts starting with `-`.
 - A2 (T-61-55): `verifyAll` still performs a read-only fetch after removal; it writes nothing and is informational.
 - A3 (T-61-62): the opt-in live test cancels its disposable NEAR invitation only if the pending-list lookup succeeded; opt-in only, not run in this audit.
 
@@ -143,6 +143,7 @@ Extracted from the `<threat_model>` tables of 61-01 to 61-14 (T-61-SC appears in
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-11-01 | 65 (T-61-01..T-61-64 plus T-61-SC counted once) | 64 (53 mitigate, 10 accept or transfer, plus T-61-SC) | 1 (T-61-64, low, below block threshold; 0 blocking) | gsd-security-auditor (ASVS L1, block on high) |
+| 2026-11-01 | 65 | 65 (55 mitigate, 9 accept or transfer, plus T-61-SC) | 0 (0 blocking) | gsd-code-fixer: T-61-64 fixed and closed; T-61-32 moved from accept to mitigate after code review CR-01 (AR-61-05 corrected) |
 
 ---
 

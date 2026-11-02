@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BUNDLE_PREFIX, InviteBundleError, MAX_BUNDLE_BYTES, cleanRepoUrl, encodeInviteBundle, parseInviteBundle } from '../team/inviteBundle';
 import type { InviteBundle } from '../team/inviteBundle';
-import { parseInviteCode } from '../team/inviteCode';
+import { newMemberId, newTeamId } from '../team/identity';
+import { generateInviteCode, parseInviteCode } from '../team/inviteCode';
 import { makeCanaries } from './helpers/teamCanary';
 
 // 20 zero bytes shown as 32 Crockford characters. Not a secret: it is the all-zero value.
@@ -268,4 +269,29 @@ test('cleanRepoUrl refuses an address that still matches a secret detector after
       for (const secret of [canaries.apiKey, canaries.refreshToken, canaries.reportingToken]) assert.equal(result.reason.includes(secret), false);
     }
   }
+});
+
+// T-61-64: a repo URL from a bundle can reach VS Code's git.clone. Git reads `<transport>::<address>` as a remote helper (ext:: runs a
+// command when protocol.ext.allow is set, fd:: uses a file descriptor, hg:: and others run installed helpers), and an ssh host that starts
+// with a dash becomes an ssh option such as -oProxyCommand. None of these may go into an invite or come out of one.
+test('T-61-64: cleanRepoUrl refuses git remote-helper addresses and ssh or scp hosts that start with a dash, and the parser refuses them in a bundle', () => {
+  const hostile = [
+    'ext::sh -c touch% /tmp/pwned', 'ext::sh', 'fd::3', 'fd::3,4', 'hg::https://example.invalid/repo', 'testgit::/tmp/x', 'git-remote-x::anything',
+    'https::example.invalid/repo', 'EXT::sh', 'x.y+z::addr',
+    'ssh://-oProxyCommand=touch%20pwned/x', 'ssh://git@-oProxyCommand=x/repo.git', 'ssh://-host.example.invalid/repo.git', 'https://-host.example.invalid/repo.git',
+    '-oProxyCommand=x:repo', 'git@-host:repo.git'
+  ];
+  for (const url of hostile) {
+    const cleaned = cleanRepoUrl(url);
+    assert.equal(cleaned.ok, false, url);
+    if (!cleaned.ok) assert.equal(cleaned.reason.includes(url), false, 'the reason never repeats the address');
+  }
+  // Plain addresses, including an ssh URL with an IPv6 host in brackets (which has "::" inside the brackets), still work.
+  for (const url of ['https://example.invalid/org/repo.git', 'git@example.invalid:org/repo.git', 'ssh://git@example.invalid/org/repo.git', 'ssh://git@[::1]/org/repo.git']) {
+    const cleaned = cleanRepoUrl(url);
+    assert.equal(cleaned.ok, true, url);
+  }
+  // A bundle written by hand around a helper address is refused by the parser, which runs the same cleaning.
+  const forged = `near-ai-invite-v1.${Buffer.from(JSON.stringify({ v: 1, repo: 'ext::sh', team: newTeamId(), ref: 'refs/heads/near-ai/coordination', member: newMemberId(), code: generateInviteCode().text }), 'utf8').toString('base64url')}`;
+  assert.throws(() => parseInviteBundle(forged), InviteBundleError);
 });
