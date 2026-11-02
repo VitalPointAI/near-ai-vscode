@@ -58,6 +58,9 @@ export interface GitTransportOptions<S> {
   baseDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  // Milliseconds since the epoch. Used only to give a candidate event a commit time for the write-side invitation expiry check; it never
+  // orders anything (ordering comes from the log). Defaults to the current time; tests inject a fixed value.
+  now?: () => number;
   // Where the last trusted position is kept so a deleted mirror cannot hide a rewrite. Defaults to pin.json beside the mirror.
   pinFile?: string;
   // Run `git gc --auto` inside the mirror lock after this many successful operations (RESEARCH Pitfall 8).
@@ -195,6 +198,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
   private readonly baseDelayMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly random: () => number;
+  private readonly now: () => number;
   private readonly pinFile: string;
   private readonly gcEvery: number;
   private readonly listeners = new Set<(entries: CommittedEvent[]) => void>();
@@ -229,6 +233,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     this.baseDelayMs = baseDelayMs;
     this.sleep = options.sleep ?? defaultSleep;
     this.random = options.random ?? Math.random;
+    this.now = options.now ?? Date.now;
     this.pinFile = options.pinFile ?? path.join(path.dirname(options.mirrorDir), 'pin.json');
     this.gcEvery = gcEvery;
     this.current = options.materializer.initial();
@@ -631,6 +636,11 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     return texts;
   }
 
+  // The commit time a candidate would get, in seconds, so a write is refused for the same reason a reader would reject it later.
+  private candidateCommitTime(): number {
+    return Math.floor(this.now() / 1000);
+  }
+
   private normalise(build: AppendBuild): { events: TeamEvent[]; files: Array<{ path: string; text: string }> } | { conflict: string } {
     if (Array.isArray(build)) return { events: build, files: [] };
     if ('conflict' in build) return { conflict: build.conflict };
@@ -666,7 +676,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
       const failKind = attempt === 1 ? 'refused' : 'conflict';
       if ('conflict' in built) return { ok: false, kind: failKind, reason: built.conflict, attempts: attempt };
       if (built.events.length === 0) return { ok: false, kind: 'refused', reason: 'There were no events to write.', attempts: attempt };
-      const rejection = this.materializer.check(this.current, built.events);
+      const rejection = this.materializer.check(this.current, built.events, this.candidateCommitTime());
       if (rejection !== undefined) return { ok: false, kind: failKind, reason: rejection.reason, attempts: attempt };
       const files = built.events.map((event) => ({ path: eventPath(event), text: canonicalize(event) }));
       for (const extra of built.files) {
@@ -733,7 +743,7 @@ export class GitTransport<S> implements CoordinationTransport<S> {
     const built = this.normalise(await build(initial, head));
     if ('conflict' in built) return { ok: false, kind: 'conflict', reason: built.conflict, attempts: 1 };
     if (built.events.length === 0) return { ok: false, kind: 'refused', reason: 'There were no events to write.', attempts: 1 };
-    const rejection = this.materializer.check(initial, built.events);
+    const rejection = this.materializer.check(initial, built.events, this.candidateCommitTime());
     if (rejection !== undefined) return { ok: false, kind: 'refused', reason: rejection.reason, attempts: 1 };
     const files = built.events.map((event) => ({ path: eventPath(event), text: canonicalize(event) }));
     for (const extra of built.files) {

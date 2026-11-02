@@ -24,7 +24,6 @@ import type { TeamFixture, TestOwner } from './helpers/teamHarness';
 import { entryOf, genesisEntries, makeActor, signed } from './helpers/teamEvents';
 import type { TestActor } from './helpers/teamEvents';
 
-const R = TEAM_REJECTION_REASONS;
 const CROCKFORD = /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{32}$/;
 const fixedNow = (): Date => new Date('2026-02-03T04:05:06.000Z');
 
@@ -90,7 +89,7 @@ function x25519PublicKey(): string {
 // What a joiner's client builds from the synced state and the code, exactly as the Join command will.
 function joinBodyFor(state: TeamState, teamId: string, memberId: string, codeBytes: Buffer, identity: DeviceIdentity, sealKey: string): MemberJoinedBody | { conflict: string } {
   const member = state.members.get(memberId);
-  if (member === undefined || member.invite === undefined) return { conflict: R.notInvited };
+  if (member === undefined || member.invite === undefined) return { conflict: TEAM_REJECTION_REASONS.notInvited };
   const device = { fingerprint: identity.fingerprint, publicKey: identity.publicKey };
   const role: Role = expectedJoinRole(member.pendingRole ?? 'observer', state.team.policy);
   const sig = deriveInviteKey(codeBytes, teamId, memberId).sign(joinProofBytes(teamId, memberId, member.invite.eventId, device, sealKey));
@@ -256,7 +255,7 @@ test('a join with the code of another invitation fails the proof, and so does a 
   const one = invite(world);
   const two = invite(world, { emailHashes: [emailHash(world.teamId, 'eli@example.invalid')] });
   const device = await joiner(world, one);
-  rejectedWith(put(world, device, joinEvent(world, one, device, {}, two.code.bytes), INVITE_TIME + 60), R.inviteProof);
+  rejectedWith(put(world, device, joinEvent(world, one, device, {}, two.code.bytes), INVITE_TIME + 60), TEAM_REJECTION_REASONS.inviteProof);
 
   const first = await joiner(world, one);
   const second = await joiner(world, one);
@@ -268,9 +267,9 @@ test('a join with the code of another invitation fails the proof, and so does a 
     ...next(world), type: 'member.joined',
     body: { memberId: one.memberId, name: 'Dana Developer', emailHashes: [...(member?.emailHashes ?? [])], role: 'observer', device: { fingerprint: second.identity.fingerprint, publicKey: second.identity.publicKey }, invite: { sig: copied }, sealKey: { publicKey: sealKey } }
   });
-  rejectedWith(put(world, second, replay, INVITE_TIME + 60), R.inviteProof);
+  rejectedWith(put(world, second, replay, INVITE_TIME + 60), TEAM_REJECTION_REASONS.inviteProof);
   const { invite: _proof, ...bare } = replay.body;
-  rejectedWith(put(world, second, signed(second, { ...next(world), type: 'member.joined', body: bare }), INVITE_TIME + 60), R.inviteProof);
+  rejectedWith(put(world, second, signed(second, { ...next(world), type: 'member.joined', body: bare }), INVITE_TIME + 60), TEAM_REJECTION_REASONS.inviteProof);
 });
 
 test('a code is single use: a second join for the same member and a join for a cancelled invitation are refused', async () => {
@@ -279,21 +278,21 @@ test('a code is single use: a second join for the same member and a join for a c
   const first = await joiner(world, used);
   accepted(put(world, first, joinEvent(world, used, first), INVITE_TIME + 60));
   const second = await joiner(world, used);
-  rejectedWith(put(world, second, joinEvent(world, used, second), INVITE_TIME + 61), R.notInvited);
+  rejectedWith(put(world, second, joinEvent(world, used, second), INVITE_TIME + 61), TEAM_REJECTION_REASONS.notInvited);
 
   const cancelled = invite(world, { emailHashes: [emailHash(world.teamId, 'cal@example.invalid')] });
   accepted(put(world, world.owner, signed(world.owner, { ...next(world), type: 'member.removed', body: { memberId: cancelled.memberId } }), INVITE_TIME + 10));
   const late = await joiner(world, cancelled);
-  rejectedWith(put(world, late, joinEvent(world, cancelled, late), INVITE_TIME + 62), R.notInvited);
+  rejectedWith(put(world, late, joinEvent(world, cancelled, late), INVITE_TIME + 62), TEAM_REJECTION_REASONS.notInvited);
 });
 
 test('a join may not claim other email hashes, and the joined role follows the invited role and the confirmation policy', async () => {
   const world = await worldWith();
   const dev = invite(world);
   const who = await joiner(world, dev);
-  rejectedWith(put(world, who, joinEvent(world, dev, who, { emailHashes: [emailHash(world.teamId, 'someone@example.invalid')] }), INVITE_TIME + 5), R.inviteEmail);
-  rejectedWith(put(world, who, joinEvent(world, dev, who, { role: 'developer' }), INVITE_TIME + 5), R.inviteRole);
-  rejectedWith(put(world, who, joinEvent(world, dev, who, { role: 'lead' }), INVITE_TIME + 5), R.inviteRole);
+  rejectedWith(put(world, who, joinEvent(world, dev, who, { emailHashes: [emailHash(world.teamId, 'someone@example.invalid')] }), INVITE_TIME + 5), TEAM_REJECTION_REASONS.inviteEmail);
+  rejectedWith(put(world, who, joinEvent(world, dev, who, { role: 'developer' }), INVITE_TIME + 5), TEAM_REJECTION_REASONS.inviteRole);
+  rejectedWith(put(world, who, joinEvent(world, dev, who, { role: 'lead' }), INVITE_TIME + 5), TEAM_REJECTION_REASONS.inviteRole);
   accepted(put(world, who, joinEvent(world, dev, who), INVITE_TIME + 5));
   const joined = world.state.members.get(dev.memberId);
   assert.equal(joined?.role, 'observer', 'a developer invitation joins as observer under the default policy');
@@ -308,7 +307,7 @@ test('a join may not claim other email hashes, and the joined role follows the i
   accepted(put(world, world.owner, signed(world.owner, { ...next(world), type: 'policy.changed', body: { changes: { requireLeadConfirmation: false } } }), INVITE_TIME + 7));
   const direct = invite(world, { emailHashes: [emailHash(world.teamId, 'direct@example.invalid')] });
   const directly = await joiner(world, direct);
-  rejectedWith(put(world, directly, joinEvent(world, direct, directly, { role: 'observer' }), INVITE_TIME + 8), R.inviteRole);
+  rejectedWith(put(world, directly, joinEvent(world, direct, directly, { role: 'observer' }), INVITE_TIME + 8), TEAM_REJECTION_REASONS.inviteRole);
   accepted(put(world, directly, joinEvent(world, direct, directly), INVITE_TIME + 8));
   assert.equal(world.state.members.get(direct.memberId)?.role, 'developer', 'without confirmation the invited role is taken at once');
   assert.equal(world.state.members.get(direct.memberId)?.pendingRole, undefined);
@@ -329,7 +328,7 @@ test('the expiry rule is invite commit time plus ttl plus 300 seconds, and an un
   const late = await worldWith();
   const b = invite(late);
   const bJoiner = await joiner(late, b);
-  rejectedWith(put(late, bJoiner, joinEvent(late, b, bJoiner), INVITE_TIME + TTL + 301), R.inviteExpired);
+  rejectedWith(put(late, bJoiner, joinEvent(late, b, bJoiner), INVITE_TIME + TTL + 301), TEAM_REJECTION_REASONS.inviteExpired);
 
   const unknownJoin = await worldWith();
   const c = invite(unknownJoin);
@@ -346,13 +345,13 @@ test('invitation rules: one live invitation per email, only managers invite, ids
   const world = await worldWith();
   const ownerHash = emailHash(world.teamId, 'owner@example.invalid');
   const clash = signed(world.owner, { ...next(world), type: 'member.invited', body: inviteBodyFor(world.teamId, newMemberId(), generateInviteCode().bytes, { emailHashes: [ownerHash] }) });
-  rejectedWith(put(world, world.owner, clash, INVITE_TIME), R.alreadyInvited);
+  rejectedWith(put(world, world.owner, clash, INVITE_TIME), TEAM_REJECTION_REASONS.alreadyInvited);
 
   const pending = invite(world);
   const again = signed(world.owner, { ...next(world), type: 'member.invited', body: inviteBodyFor(world.teamId, newMemberId(), generateInviteCode().bytes) });
-  rejectedWith(put(world, world.owner, again, INVITE_TIME), R.alreadyInvited);
+  rejectedWith(put(world, world.owner, again, INVITE_TIME), TEAM_REJECTION_REASONS.alreadyInvited);
   const reused = signed(world.owner, { ...next(world), type: 'member.invited', body: inviteBodyFor(world.teamId, pending.memberId, generateInviteCode().bytes, { emailHashes: [emailHash(world.teamId, 'new@example.invalid')] }) });
-  rejectedWith(put(world, world.owner, reused, INVITE_TIME), R.memberTaken);
+  rejectedWith(put(world, world.owner, reused, INVITE_TIME), TEAM_REJECTION_REASONS.memberTaken);
 
   const device = await joiner(world, pending);
   const device2 = await makeActor(world.teamId);
@@ -362,7 +361,7 @@ test('invitation rules: one live invitation per email, only managers invite, ids
     signed(world.owner, { ...next(world), type: 'device.added', body: { memberId: pending.memberId, device: { fingerprint: device2.identity.fingerprint, publicKey: device2.identity.publicKey } } }),
     signed(world.owner, { ...next(world), type: 'device.revoked', body: { memberId: pending.memberId, fingerprint: device.identity.fingerprint } })
   ];
-  for (const change of changes) rejectedWith(put(world, world.owner, change, INVITE_TIME + 1), R.notJoined);
+  for (const change of changes) rejectedWith(put(world, world.owner, change, INVITE_TIME + 1), TEAM_REJECTION_REASONS.notJoined);
 
   // After the join and a confirmation, a developer exists and cannot invite.
   accepted(put(world, device, joinEvent(world, pending, device), INVITE_TIME + 2));
@@ -373,7 +372,7 @@ test('invitation rules: one live invitation per email, only managers invite, ids
   const byDeveloper = signed(device, { ...next(world), type: 'member.invited', body: inviteBodyFor(world.teamId, newMemberId(), generateInviteCode().bytes, { emailHashes: [emailHash(world.teamId, 'x@example.invalid')] }) });
   const verdict = put(world, device, byDeveloper, INVITE_TIME + 4);
   assert.equal(verdict.accepted, false);
-  if (!verdict.accepted) assert.equal(verdict.rejection.reason.startsWith(`${R.notPermitted}: `), true);
+  if (!verdict.accepted) assert.equal(verdict.rejection.reason.startsWith(`${TEAM_REJECTION_REASONS.notPermitted}: `), true);
 });
 
 test('cancelling an invitation keeps the email free for a new one and shows the invitation as cancelled, used or pending', async () => {
@@ -431,7 +430,7 @@ test('expiry is also checked on write: a stale join is refused with the read-sid
     await tooLate.log.sync();
     const refused = await tooLate.log.appendJoin(identity, (state) => joinBodyFor(state, teamId, memberId, code.bytes, identity, x25519PublicKey()));
     assert.equal(refused.ok, false);
-    if (!refused.ok) assert.equal(refused.reason, R.inviteExpired);
+    if (!refused.ok) assert.equal(refused.reason, TEAM_REJECTION_REASONS.inviteExpired);
     assert.equal(gitIn(fixture.remote, ['rev-parse', DEFAULT_COORDINATION_REF]), headBefore);
 
     const inTime = clientFor(fixture, 'b', anchor, undefined, () => (Math.floor(Date.now() / 1000) + 3600) * 1000);
@@ -460,7 +459,7 @@ test('re-issue is one batch: the old code stops working, the new one joins, and 
     const stale = await createDeviceIdentity(new MemorySecrets(), teamId);
     const refused = await b.log.appendJoin(stale, (state) => joinBodyFor(state, teamId, oldId, oldCode.bytes, stale, x25519PublicKey()));
     assert.equal(refused.ok, false);
-    if (!refused.ok) assert.equal(refused.reason, R.notInvited);
+    if (!refused.ok) assert.equal(refused.reason, TEAM_REJECTION_REASONS.notInvited);
     const fresh = await createDeviceIdentity(new MemorySecrets(), teamId);
     const joined = await b.log.appendJoin(fresh, (state) => joinBodyFor(state, teamId, newId, newCode.bytes, fresh, x25519PublicKey()));
     assert.equal(joined.ok, true, joined.ok ? '' : joined.reason);
@@ -488,7 +487,7 @@ test('two devices racing the same code produce exactly one accepted join, and th
     assert.equal(winners.length, 1);
     assert.equal(losers.length, 1);
     const loser = losers[0];
-    if (loser !== undefined && !loser.ok) assert.equal(loser.reason, R.notInvited);
+    if (loser !== undefined && !loser.ok) assert.equal(loser.reason, TEAM_REJECTION_REASONS.notInvited);
     await a.log.sync();
     const joinedEvents = [...a.log.state().seenEventIds].length;
     assert.equal(a.log.state().members.get(memberId)?.devices.length, 1);
