@@ -1,15 +1,18 @@
-// package.json contributions for Team Mode and their registration: both commands, the pollSeconds setting, and no new dependency.
+// package.json contributions for Team Mode and their registration: the seven commands, the pollSeconds setting, and no new dependency.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
 const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 const barModule = require('../services/team/teamStatusBar') as typeof import('../services/team/teamStatusBar');
+const memberModule = require('../services/team/memberCommands') as typeof import('../services/team/memberCommands');
 test.after(() => { uninstall(); });
 
 interface Manifest {
@@ -36,6 +39,32 @@ test('package.json contributes Enable Team Mode and Verify Team Log under the NE
   assert.equal(barModule.VERIFY_LOG_COMMAND, commandsModule.VERIFY_LOG_COMMAND, 'the status bar item points at the registered command');
 });
 
+test('package.json contributes the five membership commands under the NEAR AI category with plain titles', () => {
+  const byId = new Map(manifest.contributes.commands.map((entry) => [entry.command, entry]));
+  const expected: Array<[string, string]> = [
+    ['nearAi.team.invite', 'Invite to Team'],
+    ['nearAi.team.join', 'Join Team'],
+    ['nearAi.team.manageMembers', 'Manage Team Members'],
+    ['nearAi.team.linkNearOrganization', 'Link Team to NEAR Organization'],
+    ['nearAi.team.signOutNear', 'Sign Out of NEAR (Team)']
+  ];
+  for (const [id, title] of expected) {
+    const entry = byId.get(id);
+    assert.deepEqual([entry?.title, entry?.category], [title, 'NEAR AI'], id);
+    assert.ok((entry?.icon ?? '').startsWith('$('), `${id} has an icon`);
+  }
+  assert.equal(memberModule.INVITE_COMMAND, 'nearAi.team.invite');
+  assert.equal(memberModule.LINK_NEAR_COMMAND, 'nearAi.team.linkNearOrganization');
+  assert.equal(memberModule.SIGN_OUT_NEAR_COMMAND, 'nearAi.team.signOutNear');
+});
+
+test('the command ids kept in memberCommands equal the copies in teamSession, which solo activation never loads', () => {
+  // memberCommands keeps its own copies so a solo project never loads the session module; this pins them to the session's.
+  const sessionModule = require('../services/team/teamSession') as typeof import('../services/team/teamSession');
+  assert.equal(memberModule.JOIN_COMMAND, sessionModule.JOIN_COMMAND);
+  assert.equal(memberModule.MANAGE_MEMBERS_COMMAND, sessionModule.MANAGE_MEMBERS_COMMAND);
+});
+
 test('nearAi.team.pollSeconds is a number 5..3600, default 15, application scope, with a plain description', () => {
   const setting = manifest.contributes.configuration.properties['nearAi.team.pollSeconds'];
   assert.ok(setting !== undefined, 'the setting is contributed');
@@ -55,7 +84,9 @@ test('the command titles and descriptions contain no em-dash', () => {
 
 test('registerTeamMode registers every contributed nearAi.team command', async () => {
   const contributed = manifest.contributes.commands.map((entry) => entry.command).filter((id) => id.startsWith('nearAi.team.'));
-  assert.deepEqual([...contributed].sort(), ['nearAi.team.enable', 'nearAi.team.verifyLog']);
+  assert.deepEqual([...contributed].sort(), [
+    'nearAi.team.enable', 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.linkNearOrganization', 'nearAi.team.manageMembers', 'nearAi.team.signOutNear', 'nearAi.team.verifyLog'
+  ]);
   const context = createFakeContext(path.join(ROOT, 'does-not-exist'), {});
   const handle = commandsModule.registerTeamMode(context as never);
   await handle.ready;
@@ -63,6 +94,32 @@ test('registerTeamMode registers every contributed nearAi.team command', async (
   assert.deepEqual(contributed.filter((id) => !registered.has(id)), [], 'contributed commands without a handler');
   for (const subscription of context.subscriptions) subscription.dispose();
   assert.equal(stub.commands.size, 0, 'disposing the context unregisters the commands');
+});
+
+test('in a project without a team, every membership command except Join answers with how to turn Team Mode on and does nothing else', async () => {
+  const base = mkdtempSync(path.join(tmpdir(), 'near-ai-manifest-solo-'));
+  const root = path.join(base, 'project');
+  mkdirSync(path.join(root, '.planning', '.near-ai'), { recursive: true });
+  try {
+    stub.notifications.length = 0;
+    stub.inputRequests.length = 0;
+    stub.quickPickRequests.length = 0;
+    stub.setWorkspaceFolders([root]);
+    const context = createFakeContext(path.join(base, 'storage'), {});
+    const handle = commandsModule.registerTeamMode(context as never);
+    assert.equal(await handle.ready, 'solo');
+    for (const id of ['nearAi.team.invite', 'nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear']) {
+      stub.notifications.length = 0;
+      await (stub.commands.get(id) as () => Promise<void>)();
+      assert.deepEqual(stub.notifications.map((entry) => entry.message), [commandsModule.SOLO_TEXT], id);
+    }
+    assert.equal(stub.inputRequests.length + stub.quickPickRequests.length, 0, 'no question was asked');
+    assert.equal(handle.session(), undefined);
+    for (const subscription of context.subscriptions) subscription.dispose();
+  } finally {
+    stub.setWorkspaceFolders([]);
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('package.json dependencies and devDependencies equal those at the merge base with main', (t) => {

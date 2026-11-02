@@ -10,13 +10,29 @@ export interface VscodeStub {
   notifications: Array<{ level: 'info' | 'warn' | 'error'; message: string }>;
   // The action buttons of notifications[i], at the same index.
   notificationActions: string[][];
+  // The options object passed to the show*Message call that made notifications[i] (modal flag and detail text), or undefined when none was passed.
+  notificationOptions: Array<{ modal?: boolean; detail?: string } | undefined>;
   configUpdates: unknown[];
   commands: Map<string, (...args: unknown[]) => unknown>;
   // Answers handed to showInputBox and to the show*Message calls, in order. An empty queue answers undefined (dismissed).
   inputAnswers: Array<string | undefined>;
   // The options each showInputBox call received, in order.
-  inputRequests: Array<{ prompt?: string; title?: string; value?: string; placeHolder?: string }>;
+  inputRequests: Array<{ prompt?: string; title?: string; value?: string; placeHolder?: string; password?: boolean; validateInput?: (value: string) => string | undefined }>;
   messageAnswers: Array<string | undefined>;
+  // Answers handed to showQuickPick, in order: the label of the item to choose, or undefined to dismiss. A label no item has throws, so a test cannot
+  // silently pick the wrong thing. The chosen item object (or string) is returned to the caller.
+  quickPickAnswers: Array<string | undefined>;
+  // What each showQuickPick call offered, in order.
+  quickPickRequests: Array<{ title?: string; placeHolder?: string; labels: string[]; descriptions: string[]; details: string[] }>;
+  // Every text written with vscode.env.clipboard.writeText, in order.
+  clipboardWrites: string[];
+  // Commands executeCommand was asked to run that no registered handler owns (for example git.clone), in order.
+  externalCommands: Array<{ command: string; args: unknown[] }>;
+  // Every address passed to vscode.env.openExternal, in order.
+  openedExternal: string[];
+  // When set, decides the button each show*Message call returns (given its text, its buttons and its options) instead of the messageAnswers queue.
+  // Use it where which messages carry buttons is not the point of the test, so a message without buttons cannot use up an answer.
+  setMessageResponder(responder: ((text: string, actions: string[], options?: { modal?: boolean; detail?: string }) => string | undefined) | undefined): void;
   setConfig(key: string, value: unknown): void;
   // The folders the window reports; an empty list means no folder is open.
   setWorkspaceFolders(paths: string[]): void;
@@ -39,15 +55,46 @@ export function createVscodeStub(): VscodeStub {
   const inputRequests: VscodeStub['inputRequests'] = [];
   let workspaceFolders: Array<{ uri: { fsPath: string }; name: string; index: number }> | undefined;
   const messageAnswers: VscodeStub['messageAnswers'] = [];
+  const notificationOptions: VscodeStub['notificationOptions'] = [];
+  const quickPickAnswers: VscodeStub['quickPickAnswers'] = [];
+  const quickPickRequests: VscodeStub['quickPickRequests'] = [];
+  const clipboardWrites: string[] = [];
+  const externalCommands: VscodeStub['externalCommands'] = [];
+  const openedExternal: string[] = [];
+  let messageResponder: Parameters<VscodeStub['setMessageResponder']>[0];
   const config = new Map<string, unknown>();
   const windowListeners = new Set<(state: { focused: boolean; active: boolean }) => void>();
   const configListeners = new Set<ConfigListener>();
   const windowState = { focused: true, active: true };
 
-  const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...actions: string[]): Promise<string | undefined> => {
+  // showInformationMessage(text, ...actions) or showInformationMessage(text, { modal, detail }, ...actions), as in VS Code.
+  const message = (level: 'info' | 'warn' | 'error') => async (text: string, ...rest: Array<string | { modal?: boolean; detail?: string }>): Promise<string | undefined> => {
+    const first = rest[0];
+    const options = typeof first === 'object' && first !== null ? first : undefined;
+    const actions = rest.filter((item): item is string => typeof item === 'string');
     notifications.push({ level, message: text });
     notificationActions.push(actions);
+    notificationOptions.push(options === undefined ? undefined : { ...options });
+    if (messageResponder !== undefined) return messageResponder(text, actions, options);
     return messageAnswers.shift();
+  };
+
+  const showQuickPick = async (
+    items: unknown, options?: { title?: string; placeHolder?: string }
+  ): Promise<unknown> => {
+    const list = (await items) as Array<string | { label: string; description?: string; detail?: string }>;
+    const labelOf = (item: string | { label: string }): string => (typeof item === 'string' ? item : item.label);
+    quickPickRequests.push({
+      ...(options?.title === undefined ? {} : { title: options.title }), ...(options?.placeHolder === undefined ? {} : { placeHolder: options.placeHolder }),
+      labels: list.map(labelOf),
+      descriptions: list.map((item) => (typeof item === 'string' ? '' : item.description ?? '')),
+      details: list.map((item) => (typeof item === 'string' ? '' : item.detail ?? ''))
+    });
+    const answer = quickPickAnswers.shift();
+    if (answer === undefined) return undefined;
+    const chosen = list.find((item) => labelOf(item) === answer);
+    if (chosen === undefined) throw new Error(`The test chose "${answer}", which this quick pick did not offer: ${list.map(labelOf).join(' | ')}`);
+    return chosen;
   };
 
   const vscode = {
@@ -92,9 +139,16 @@ export function createVscodeStub(): VscodeStub {
       showInformationMessage: message('info'),
       showWarningMessage: message('warn'),
       showErrorMessage: message('error'),
-      showInputBox: async (options?: { prompt?: string; title?: string; value?: string; placeHolder?: string }): Promise<string | undefined> => {
+      showInputBox: async (options?: VscodeStub['inputRequests'][number]): Promise<string | undefined> => {
         inputRequests.push({ ...options });
         return inputAnswers.shift();
+      },
+      showQuickPick,
+      // The paste box of the browser sign-in. Tests replace the sign-in, so this only has to exist and be inert.
+      createInputBox: () => {
+        const none = (): { dispose(): void } => ({ dispose: (): void => undefined });
+        return { title: '', prompt: '', password: false, ignoreFocusOut: false, placeholder: '', value: '', validationMessage: undefined as string | undefined,
+          onDidChangeValue: none, onDidAccept: none, onDidHide: none, show: (): void => undefined, dispose: (): void => undefined };
       },
       withProgress: async <T>(_options: unknown, task: (progress: { report(value: unknown): void }) => PromiseLike<T>): Promise<T> => task({ report: (): void => undefined })
     },
@@ -121,12 +175,30 @@ export function createVscodeStub(): VscodeStub {
         commands.set(name, handler);
         return { dispose: (): void => { commands.delete(name); } };
       },
-      executeCommand: async (name: string, ...args: unknown[]): Promise<unknown> => commands.get(name)?.(...args)
+      executeCommand: async (name: string, ...args: unknown[]): Promise<unknown> => {
+        const own = commands.get(name);
+        if (own === undefined) {
+          externalCommands.push({ command: name, args });
+          return undefined;
+        }
+        return own(...args);
+      }
+    },
+    UIKind: { Desktop: 1, Web: 2 },
+    env: {
+      uiKind: 1,
+      clipboard: { writeText: async (text: string): Promise<void> => { clipboardWrites.push(text); } },
+      openExternal: async (target: unknown): Promise<boolean> => { openedExternal.push(String(target)); return true; },
+      asExternalUri: async (target: unknown): Promise<unknown> => target
     }
   };
 
   return {
-    vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
+    vscode, outputChannels, statusBarItems, notifications, notificationActions, notificationOptions, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
+    quickPickAnswers, quickPickRequests, clipboardWrites, externalCommands, openedExternal,
+    setMessageResponder(responder): void {
+      messageResponder = responder;
+    },
     setWorkspaceFolders(paths: string[]): void {
       workspaceFolders = paths.length === 0 ? undefined : paths.map((fsPath, index) => ({ uri: { fsPath }, name: fsPath.split('/').pop() ?? '', index }));
     },

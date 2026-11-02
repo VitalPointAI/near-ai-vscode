@@ -18,10 +18,13 @@ const { ENABLE_COMMAND, SOLO_TEXT, VERIFY_LOG_COMMAND, registerTeamMode } = comm
 const DIST_ROOT = path.resolve(__dirname, '..');
 const TEAM_DIRS = ['team', path.join('domain', 'team'), path.join('services', 'team')].map((dir) => path.join(DIST_ROOT, dir) + path.sep);
 const COMMANDS_FILE = path.join(DIST_ROOT, 'services', 'team', 'teamCommands.js');
+// The membership commands are registered at activation too. Like teamCommands.js this module imports only vscode and Node built-ins; its handlers
+// load the team core with dynamic imports, which the solo tests below prove never run.
+const MEMBER_COMMANDS_FILE = path.join(DIST_ROOT, 'services', 'team', 'memberCommands.js');
 
-// Every compiled team module in the module cache except the command module itself.
+// Every compiled team module in the module cache except the two command modules themselves.
 function loadedTeamModules(): string[] {
-  return Object.keys(require.cache).filter((file) => file !== COMMANDS_FILE && TEAM_DIRS.some((dir) => file.startsWith(dir)));
+  return Object.keys(require.cache).filter((file) => file !== COMMANDS_FILE && file !== MEMBER_COMMANDS_FILE && TEAM_DIRS.some((dir) => file.startsWith(dir)));
 }
 
 type TimerFn = (...args: unknown[]) => unknown;
@@ -103,7 +106,9 @@ test('solo project: activation makes one fs.stat and no timers, channel, status 
     assert.equal(existsSync(project.storage), false, 'no extension storage at all');
     assert.deepEqual(loadedTeamModules(), [], 'no compiled team module was loaded');
     assert.equal(handle.session(), undefined);
-    assert.deepEqual([...stub.commands.keys()].sort(), [ENABLE_COMMAND, VERIFY_LOG_COMMAND].sort(), 'both commands are registered and nothing else');
+    assert.deepEqual([...stub.commands.keys()].sort(), [
+      ENABLE_COMMAND, VERIFY_LOG_COMMAND, 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear'
+    ].sort(), 'the seven Team Mode commands are registered and nothing else');
   } finally {
     timers.restore();
     fsCalls.restore();
