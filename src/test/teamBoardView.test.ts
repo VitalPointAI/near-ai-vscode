@@ -733,6 +733,64 @@ test('the page can ask for the import, the panel, a retry and the output channel
   });
 });
 
+test('T-62-49: the page gets one item write, one import and one retry at a time, a cool-down between imports and retries, and a small write bucket', async () => {
+  await withBoard('owner', async ({ rig, started }) => {
+    const ran: string[] = [];
+    stub.commands.set('nearAi.team.importPlans', () => { ran.push('import'); });
+    let nudged = 0;
+    const originalNudge = started.session.nudge.bind(started.session);
+    started.session.nudge = (): void => { nudged += 1; originalNudge(); };
+    const clock = { value: 1_000_000 };
+    const board = registerTeamBoard(createFakeContext(EXTENSION_ROOT, {}) as never, {
+      session: () => started.session, output: { appendLine: () => undefined, show: () => undefined }, timers: new LiveTimers(), nowMs: () => clock.value,
+      requestLimits: { coolDownMs: 2_000, writeBurst: 2, writeRefillMs: 1_000 }
+    });
+    board.openPanel();
+    const page = stub.webviewPanels[stub.webviewPanels.length - 1] as RecordedWebviewPanel;
+    const notices = (): string[] => page.posted.filter((message) => (message as { type?: string }).type === 'notice').map((message) => String((message as { text?: unknown }).text));
+    const busy = 'The board is still saving your last change. Try again in a moment. Nothing was saved.';
+    try {
+      await page.receive({ type: 'ready' });
+      const draft = (title: string): unknown => ({ type: 'new-item', draft: { kind: 'chore', title, scope: [] } });
+
+      // Two at once: the second is refused while the first is saving, and only one item is written.
+      const before = remoteEventCount(rig);
+      const first = page.receive(draft('First'));
+      await page.receive(draft('Second'));
+      assert.deepEqual(lastOf(page, 'refused'), { type: 'refused', itemId: '', reason: busy });
+      await first;
+      assert.equal(remoteEventCount(rig), before + 1, 'one item was written');
+
+      // The bucket holds two writes: the first is spent, one more goes through, the next waits for the refill.
+      await page.receive(draft('Third'));
+      assert.equal(remoteEventCount(rig), before + 2);
+      await page.receive(draft('Fourth'));
+      assert.deepEqual(lastOf(page, 'refused'), { type: 'refused', itemId: '', reason: busy });
+      assert.equal(remoteEventCount(rig), before + 2, 'nothing more was written');
+      clock.value += 1_000;
+      await page.receive(draft('Fifth'));
+      assert.equal(remoteEventCount(rig), before + 3, 'one write came back after the refill');
+
+      // Import and retry: one start per cool-down, the extra one gets a plain notice.
+      await page.receive({ type: 'import-plans' });
+      await page.receive({ type: 'import-plans' });
+      await page.receive({ type: 'retry' });
+      await page.receive({ type: 'retry' });
+      assert.deepEqual(ran, ['import']);
+      assert.equal(nudged, 1);
+      assert.deepEqual(notices(), ['An import of the plans is already running or just ran. Try again in a moment.', 'The board is already checking for changes. Try again in a moment.']);
+      clock.value += 2_000;
+      await page.receive({ type: 'import-plans' });
+      await page.receive({ type: 'retry' });
+      assert.deepEqual(ran, ['import', 'import'], 'after the cool-down the import runs again');
+      assert.equal(nudged, 2);
+      assert.equal(notices().every((text) => !/\u2014|\u2013/.test(text)), true);
+    } finally {
+      board.controller.dispose();
+    }
+  });
+});
+
 // ---- the commands in a team project ----------------------------------------------------------------------------------------------------------
 
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');

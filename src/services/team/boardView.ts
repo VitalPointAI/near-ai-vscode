@@ -54,6 +54,13 @@ const FORM_TEXT = Object.freeze({
   missing: `This item is no longer on the board. ${NOTHING_SAVED}`,
   settled: `A finished or cancelled item cannot get a new estimate. ${NOTHING_SAVED}`
 });
+// T-62-49: what the page may ask the host to do, and how often. One import, one retry and one item write at a time; an import or retry is not started
+// again within the cool-down, and item writes draw on a small bucket that refills one every WRITE_REFILL_MS. Extras are refused in plain words.
+const BUSY_WRITE_TEXT = `The board is still saving your last change. Try again in a moment. ${NOTHING_SAVED}`;
+const BUSY_IMPORT_TEXT = 'An import of the plans is already running or just ran. Try again in a moment.';
+const BUSY_RETRY_TEXT = 'The board is already checking for changes. Try again in a moment.';
+export interface BoardRequestLimits { coolDownMs: number; writeBurst: number; writeRefillMs: number }
+const REQUEST_LIMITS: BoardRequestLimits = { coolDownMs: 2_000, writeBurst: 10, writeRefillMs: 500 };
 // The refused reply for a new item has no card to name, so it carries this empty id.
 const NO_ITEM_ID = '';
 // Stands in for a reason while a move is planned only to learn whether it is allowed and which prompt follows (the real reason is asked afterwards).
@@ -284,6 +291,8 @@ export interface BoardDeps {
   session: () => TeamSession | undefined; output: TeamOutput; timers?: BoardTimers; throttleMs?: number; nowMs?: () => number;
   /** True only under the extension-host tests (NEAR_AI_E2E=1): the page probe is offered. registerTeamBoard reads the variable. */
   testSeams?: boolean;
+  /** Test seam: the limits on page requests (T-62-49). The extension passes nothing. */
+  requestLimits?: BoardRequestLimits;
 }
 
 interface SurfaceState {
@@ -317,6 +326,11 @@ export class BoardController {
   private lastPostAt: number | undefined;
   private combinedVisible: boolean | undefined;
   private disposed = false;
+  // T-62-49: requests from the page that are running now, when an import or retry last started, and the item write bucket.
+  private readonly running = new Set<'import' | 'retry' | 'write'>();
+  private readonly lastStarted = new Map<'import' | 'retry', number>();
+  private writeTokens: number | undefined;
+  private writeTokensAt = 0;
 
   public constructor(deps: BoardDeps) {
     this.deps = deps;
@@ -489,24 +503,79 @@ export class BoardController {
         return;
       case 'import-plans':
         // From the page the import always takes the current milestone, so no pick is shown (D-09).
-        await vscode.commands.executeCommand(IMPORT_PLANS_COMMAND, { milestone: 'current' });
+        await this.limited(state, 'import', BUSY_IMPORT_TEXT, () => vscode.commands.executeCommand(IMPORT_PLANS_COMMAND, { milestone: 'current' }));
         return;
       case 'open-board':
         await vscode.commands.executeCommand(OPEN_BOARD_COMMAND);
         return;
       case 'retry':
-        this.deps.session()?.nudge();
+        await this.limited(state, 'retry', BUSY_RETRY_TEXT, () => { this.deps.session()?.nudge(); });
         return;
       case 'show-details':
         this.deps.output.show(true);
         return;
       case 'new-item':
-        await this.newItem(state, message.draft);
+      case 'edit-item': {
+        const askedAbout = message.type === 'new-item' ? NO_ITEM_ID : message.itemId;
+        if (this.running.has('write')) {
+          this.refuse(state, askedAbout, BUSY_WRITE_TEXT);
+          return;
+        }
+        this.running.add('write');
+        try {
+          if (message.type === 'new-item') await this.newItem(state, message.draft);
+          else await this.editItem(state, message.itemId, message.changes);
+        } finally {
+          this.running.delete('write');
+        }
         return;
-      case 'edit-item':
-        await this.editItem(state, message.itemId, message.changes);
-        return;
+      }
     }
+  }
+
+  // ---- how often the page may ask (T-62-49) ---------------------------------------------------------------------------------------------------
+
+  private limits(): BoardRequestLimits {
+    return this.deps.requestLimits ?? REQUEST_LIMITS;
+  }
+
+  private nowMs(): number {
+    return (this.deps.nowMs ?? Date.now)();
+  }
+
+  // Runs an import or a retry unless one is running or one started within the cool-down; otherwise the page gets a plain notice.
+  private async limited(state: SurfaceState, kind: 'import' | 'retry', busyText: string, run: () => unknown): Promise<void> {
+    const now = this.nowMs();
+    const last = this.lastStarted.get(kind);
+    if (this.running.has(kind) || (last !== undefined && now >= last && now - last < this.limits().coolDownMs)) {
+      this.post(state, { type: 'notice', text: busyText });
+      return;
+    }
+    this.running.add(kind);
+    this.lastStarted.set(kind, now);
+    try {
+      await run();
+    } finally {
+      this.running.delete(kind);
+    }
+  }
+
+  // Takes one item write from the bucket, or says there is none left right now.
+  private takeWriteToken(): boolean {
+    const { writeBurst, writeRefillMs } = this.limits();
+    const now = this.nowMs();
+    if (this.writeTokens === undefined) {
+      this.writeTokens = writeBurst;
+      this.writeTokensAt = now;
+    }
+    const refilled = now > this.writeTokensAt ? Math.floor((now - this.writeTokensAt) / writeRefillMs) : 0;
+    if (refilled > 0) {
+      this.writeTokens = Math.min(writeBurst, this.writeTokens + refilled);
+      this.writeTokensAt += refilled * writeRefillMs;
+    }
+    if (this.writeTokens < 1) return false;
+    this.writeTokens -= 1;
+    return true;
   }
 
   // ---- moves --------------------------------------------------------------------------------------------------------------------------
@@ -648,6 +717,10 @@ export class BoardController {
   private async writeItem(
     state: SurfaceState, session: TeamSession, ids: { savedId: string; askedAbout: string }, what: string, plan: (fresh: TeamState) => string | EventIntent[]
   ): Promise<void> {
+    if (!this.takeWriteToken()) {
+      this.refuse(state, ids.askedAbout, BUSY_WRITE_TEXT);
+      return;
+    }
     let builderRefusal: string | undefined;
     try {
       const result = await session.currentLog().append((fresh) => {
