@@ -7,13 +7,18 @@
 //     and `agent-review` only as a commit status set by the account this script runs as;
 //   - the branch is up to date with main and GitHub reports it mergeable;
 //   - no review conversation is unresolved.
-// For a release/x.y.z or hotfix/x.y.z PR it then waits for CI on the squash commit and tags it
-// v<x.y.z>, which starts the Release workflow (publishing still waits for the owner).
+// For a release/x.y.z or hotfix/x.y.z PR it first checks the head's package.json version, its
+// CHANGELOG section and that v<x.y.z> does not exist yet; after the merge it waits for CI on the
+// squash commit and tags it v<x.y.z>, which starts the Release workflow (publishing still waits
+// for the owner).
 //
 //   node scripts/merge-pr.mjs <pr> [--repo owner/name] [--dry-run] [--no-tag]
-import { behindBy, commitChecks, currentLogin, fail, gh, parseArgs, protectedContexts, resolveRepo, unresolvedThreads, viewPr, viewPrSettled } from './lib/gh.mjs';
+//
+// --no-tag merges a release or hotfix PR without tagging, for a hotfix that was already tagged
+// and released from its branch.
+import { behindBy, commitChecks, currentLogin, fail, fileAt, gh, ghJson, parseArgs, protectedContexts, resolveRepo, tagCommit, unresolvedThreads, viewPrSettled } from './lib/gh.mjs';
 import { tagRelease } from './lib/release.mjs';
-import { BRANCH_PATTERN, REQUIRED_CHECKS, evaluateCommit, releaseVersionFromBranch } from './lib/workflow.mjs';
+import { BRANCH_PATTERN, REQUIRED_CHECKS, evaluateCommit, mergeOutcomeProblem, releasePrProblems, releaseVersionFromBranch } from './lib/workflow.mjs';
 
 const usage = 'usage: merge-pr.mjs <pr> [--repo owner/name] [--dry-run] [--no-tag]';
 
@@ -46,6 +51,15 @@ async function main() {
   if (threads.length > 0) reasons.push(`${threads.length} review conversation(s) are unresolved`);
 
   const version = releaseVersionFromBranch(pr.headRefName);
+  if (version) {
+    reasons.push(...releasePrProblems({
+      version,
+      pkgVersion: JSON.parse(fileAt(repo, 'package.json', pr.headRefOid)).version,
+      changelog: fileAt(repo, 'CHANGELOG.md', pr.headRefOid),
+      existingTag: tagCommit(repo, `v${version}`),
+      noTag: Boolean(options['no-tag'])
+    }));
+  }
   if (reasons.length > 0) fail(`Refusing to merge #${number} (${pr.title}):\n- ${reasons.join('\n- ')}`);
 
   console.log(`All gates pass for #${number} at ${pr.headRefOid.slice(0, 7)}: ${required.join(', ')}.`);
@@ -54,9 +68,18 @@ async function main() {
   // --repo keeps gh from touching local branches (it skips local branch deletion and checkout),
   // so no worktree or local main is changed. --match-head-commit refuses if the head moved.
   gh(['pr', 'merge', String(number), '--repo', repo, '--squash', '--delete-branch', '--match-head-commit', pr.headRefOid, '--subject', `${pr.title} (#${pr.number})`]);
-  const merged = viewPr(repo, number);
-  const mergeSha = gh(['pr', 'view', String(number), '--repo', repo, '--json', 'mergeCommit', '--jq', '.mergeCommit.oid']).trim();
-  console.log(`Merged #${number} as ${mergeSha.slice(0, 7)} (${merged.state}). The branch was deleted.`);
+  let merged;
+  let mergeSha;
+  let problem;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 3_000));
+    merged = ghJson(['pr', 'view', String(number), '--repo', repo, '--json', 'state,mergeCommit']);
+    mergeSha = merged?.mergeCommit?.oid;
+    problem = mergeOutcomeProblem(merged?.state, mergeSha);
+    if (!problem) break;
+  }
+  if (problem) fail(`The merge of #${number} could not be confirmed: ${problem}. Nothing was tagged; check the PR on GitHub.`);
+  console.log(`Merged #${number} as ${mergeSha.slice(0, 7)}. The branch was deleted.`);
 
   if (version && !options['no-tag']) {
     console.log(`This is a release PR for ${version}.`);

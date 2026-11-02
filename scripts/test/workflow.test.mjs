@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName, releaseGate,
+  BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName, mergeOutcomeProblem, releaseGate, releasePrProblems,
   isVersionBump, maskLine, normalizeChecks, parseAllowlist, parseReview, releaseVersionFromBranch, reviewDecision, scanLine
 } from '../lib/workflow.mjs';
 
@@ -218,6 +218,23 @@ test('tagging needs a CI run that tested the commit itself, not only a pull requ
   assert.equal(gate(dispatched, { exactCommitCi: true }).ok, true);
   const notStarted = { checkRuns: [], workflowRuns: [], statuses: [] };
   assert.equal(gate(notStarted, { required: CI_CHECKS, exactCommitCi: true }).waiting, true, 'CI that has not started yet is waited for');
+});
+
+test('a release PR is checked before it merges, not only when it is tagged afterwards', () => {
+  const changelog = '# Changelog\n\n## 1.2.3\n\nFixes.\n';
+  assert.deepEqual(releasePrProblems({ version: '1.2.3', pkgVersion: '1.2.3', changelog }), []);
+  assert.match(releasePrProblems({ version: '1.2.3', pkgVersion: '1.2.2', changelog }).join(), /package\.json on the branch is 1\.2\.2/);
+  assert.match(releasePrProblems({ version: '1.2.3', pkgVersion: '1.2.3', changelog: '# Changelog\n' }).join(), /no "## 1\.2\.3" section/);
+  const tagged = { version: '1.2.3', pkgVersion: '1.2.3', changelog, existingTag: SHA };
+  assert.match(releasePrProblems(tagged).join(), /v1\.2\.3 already exists on aaaaaaa.*--no-tag/);
+  assert.deepEqual(releasePrProblems({ ...tagged, noTag: true }), [], 'a hotfix tagged from its branch merges with --no-tag');
+});
+
+test('the merge result must be MERGED with a full squash commit hash before anything is tagged', () => {
+  assert.equal(mergeOutcomeProblem('MERGED', SHA), undefined);
+  assert.match(mergeOutcomeProblem('OPEN', SHA), /OPEN/);
+  assert.match(mergeOutcomeProblem('MERGED', ''), /squash commit/);
+  assert.match(mergeOutcomeProblem('MERGED', 'null'), /squash commit/);
 });
 
 test('branch names follow the convention', () => {

@@ -279,6 +279,28 @@ export function releaseGate({ version, sha, onMain, hotfixHead }) {
   return { ok: false, reason: `${sha.slice(0, 7)} is neither on main nor the head of hotfix/${version}, so the Release workflow would refuse it` };
 }
 
+/**
+ * Reasons a release/x.y.z or hotfix/x.y.z PR must not merge yet, checked on its head before the
+ * merge so nothing is left half done afterwards. An existing v<version> tag refuses unless the
+ * merge is asked not to tag (a hotfix already released from its branch).
+ */
+export function releasePrProblems({ version, pkgVersion, changelog, existingTag, noTag = false }) {
+  const problems = [];
+  if (pkgVersion !== version) problems.push(`package.json on the branch is ${pkgVersion}, not ${version}; run: node scripts/prepare-release.mjs bump ${version}`);
+  if (!changelogSection(changelog, version)) problems.push(`CHANGELOG.md on the branch has no "## ${version}" section with text`);
+  if (existingTag && !noTag) {
+    problems.push(`v${version} already exists on ${existingTag.slice(0, 7)}; if this hotfix was already released from its branch, merge it with --no-tag, otherwise release as the next patch version`);
+  }
+  return problems;
+}
+
+/** Why the state GitHub reports after a merge cannot be trusted for tagging, or undefined. */
+export function mergeOutcomeProblem(state, mergeSha) {
+  if (state !== 'MERGED') return `GitHub reports the PR as ${state || 'unknown'} after the merge command`;
+  if (!/^[0-9a-f]{40}$/.test(mergeSha ?? '')) return `GitHub did not report the squash commit (got "${mergeSha ?? ''}")`;
+  return undefined;
+}
+
 /** The body of `## <version>` in CHANGELOG.md, without the heading, or undefined. */
 export function changelogSection(markdown, version) {
   const lines = String(markdown ?? '').split(/\r?\n/);
