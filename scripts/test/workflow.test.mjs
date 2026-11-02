@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName, mergeOutcomeProblem, releaseGate, releasePrProblems,
+  BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName, latestReleaseVersion, mergeOutcomeProblem, releaseGate, releasePrProblems,
   isVersionBump, maskLine, normalizeChecks, parseAllowlist, parseReview, releaseVersionFromBranch, reviewDecision, scanLine
 } from '../lib/workflow.mjs';
 
@@ -258,6 +258,12 @@ test('version bumps must go up', () => {
   assert.ok(!isVersionBump('0.4.11', '0.4.11'));
   assert.ok(!isVersionBump('0.4.11', '0.4.9'));
   assert.ok(!isVersionBump('0.4.11', 'v0.4.12'));
+});
+
+test('the last release is the highest v<x.y.z> tag listed by git ls-remote', () => {
+  const refs = [`${SHA}\trefs/tags/v0.4.9`, `${OTHER}\trefs/tags/v0.4.12`, `${SHA}\trefs/tags/v0.4.10`, `${SHA}\trefs/tags/v1.0.0-rc.1`, `${SHA}\trefs/tags/latest`, ''].join('\n');
+  assert.equal(latestReleaseVersion(refs), '0.4.12');
+  assert.equal(latestReleaseVersion(''), undefined);
 });
 
 test('long review comments are truncated to fit GitHub', () => {

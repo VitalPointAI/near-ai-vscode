@@ -6,17 +6,17 @@
 //   node scripts/prepare-release.mjs check          verifies the branch is ready for its PR
 //
 // `check` requires: the branch is release/<version> or hotfix/<version>, package.json and the
-// lockfile both say <version>, it is higher than the last v* tag, and CHANGELOG.md has a
+// lockfile both say <version>, it is higher than the last v* tag on origin, and CHANGELOG.md has a
 // "## <version>" section with text. The CHANGELOG prose is written by the agent, for users.
 import { readFileSync } from 'node:fs';
 import { fail, git, parseArgs, run } from './lib/gh.mjs';
-import { VERSION_PATTERN, changelogSection, isVersionBump, releaseVersionFromBranch } from './lib/workflow.mjs';
+import { VERSION_PATTERN, changelogSection, isVersionBump, latestReleaseVersion, releaseVersionFromBranch } from './lib/workflow.mjs';
 
 const usage = 'usage: prepare-release.mjs bump <x.y.z> | check';
 
+/** The last release, read from GitHub (origin), since local tags can be stale in a worktree. */
 function lastTagVersion() {
-  const tags = git(['tag', '--list', 'v*.*.*', '--sort=-v:refname']).split('\n').map((tag) => tag.trim().replace(/^v/, '')).filter((tag) => VERSION_PATTERN.test(tag));
-  return tags[0];
+  return latestReleaseVersion(git(['ls-remote', '--tags', '--refs', 'origin', 'refs/tags/v*']));
 }
 
 function check() {

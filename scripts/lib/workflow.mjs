@@ -322,6 +322,14 @@ export function isVersionBump(current, next) {
   return false;
 }
 
+/** The highest x.y.z among `v<x.y.z>` tags in `git ls-remote --tags` output, or undefined. */
+export function latestReleaseVersion(lsRemoteOutput) {
+  const versions = String(lsRemoteOutput ?? '').split('\n')
+    .map((line) => /\trefs\/tags\/v(\d+\.\d+\.\d+)$/.exec(line.trim())?.[1])
+    .filter(Boolean);
+  return versions.reduce((best, version) => (best === undefined || isVersionBump(best, version) ? version : best), undefined);
+}
+
 /**
  * Joins the review text and the footer (verdict, CI table, head marker) into one comment within
  * GitHub's 65536-character limit. Only the end of the review text is cut; the footer is always
