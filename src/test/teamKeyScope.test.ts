@@ -153,3 +153,21 @@ test('activeProvider: a team key profile is tagged team, another profile in a te
     assert.equal('keyScope' in (entries[0] as object), false);
   });
 });
+
+// WR-05: a provider cached while the project was solo must not keep running untagged after Team Mode is enabled in the same window.
+test('WR-05: enabling Team Mode in a running window tags the next personal-key run personal, without waiting for the cache to expire', async () => {
+  await withRig(async (rig) => {
+    await configureProfile(rig, 'profile-personal', PERSONAL_KEY);
+    await rig.store.select('profile-personal');
+    const solo = await activeProvider(rig.root, rig.auth);
+    assert.ok(solo !== undefined);
+    assert.equal('keyScope' in ((await oneRequest(solo.provider.client, PERSONAL_KEY))[0] as object), false, 'solo: no tag');
+
+    await markTeamProject(rig.root);
+    const team = await activeProvider(rig.root, rig.auth);
+    assert.ok(team !== undefined);
+    const entries = await oneRequest(team.provider.client, PERSONAL_KEY);
+    assert.equal(entries.length, 2);
+    assert.deepEqual(entries.map((entry) => entry.keyScope ?? 'none').sort(), ['none', 'personal'], 'the run after enabling is tagged personal');
+  });
+});

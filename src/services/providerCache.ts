@@ -53,11 +53,13 @@ export async function activeProvider(root: string, auth: AuthService, options: {
   const profile = await profiles.getActiveProfile();
   const selection = await profiles.getActiveSelection();
   if (!profile || !selection || profile.validation.status !== 'valid') return undefined;
-  const key = `${root}\u0000${profile.profileId}\u0000${profile.updatedAt}`;
+  // WR-05: the key scope is read on every call (one fs.stat) and is part of the cache key, so enabling or joining a team in a running window
+  // gets a provider that tags its runs, instead of one cached while the project was solo.
+  const keyScope = await keyScopeFor(root, profile.profileId);
+  const key = `${root}\u0000${profile.profileId}\u0000${profile.updatedAt}\u0000${keyScope ?? 'solo'}`;
   let entry = cache.get(key);
   if (!entry || now() - entry.loadedAt > CATALOG_TTL_MS) {
     const previous = entry;
-    const keyScope = previous?.provider === undefined ? await keyScopeFor(root, profile.profileId) : undefined;
     const provider = previous?.provider ?? await createNearAiProvider({ auth, profile, scope: profiles.getScope(selection.profileId), ...(keyScope === undefined ? {} : { keyScope }) });
     // A local runtime has no NEAR catalog, pricing, or billing; its models run on this machine.
     const fresh = provider.provider === 'local'
