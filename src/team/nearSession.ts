@@ -36,6 +36,8 @@ const REFRESH_PATH = '/users/me/access-tokens';
 /** NEAR access tokens last about an hour; renewing a little early avoids sending one that is about to lapse. */
 const ACCESS_TOKEN_MAX_AGE_MS = 50 * 60_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+/** How long a refused refresh waits for another window that is still writing its newer token. */
+const RECHECK_DELAY_MS = 300;
 const MAX_LABEL = 80;
 const REFRESH_TOKEN_SHAPE = /^rt_\S+$/;
 
@@ -46,6 +48,8 @@ export interface NearSessionOptions {
   baseUrl: string;
   fetch?: FetchLike;
   now?: () => number;
+  /** Waits between re-reads of the stored token after a refused refresh; tests pass a quick one. */
+  sleep?: (ms: number) => Promise<void>;
   /** The access token from the sign-in that created the session, so the first call needs no refresh. */
   initialAccessToken?: string;
 }
@@ -100,6 +104,7 @@ export class NearSession implements NearAuth {
   private readonly base: string;
   private readonly fetchImpl: FetchLike;
   private readonly now: () => number;
+  private readonly sleep: (ms: number) => Promise<void>;
   private cached: { token: string; obtainedAt: number } | undefined;
   private inFlight: Promise<string> | undefined;
 
@@ -110,6 +115,7 @@ export class NearSession implements NearAuth {
     this.base = options.baseUrl.replace(/\/+$/, '');
     this.fetchImpl = options.fetch ?? (fetch as unknown as FetchLike);
     this.now = options.now ?? Date.now;
+    this.sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
     if (options.initialAccessToken) this.cached = { token: options.initialAccessToken, obtainedAt: this.now() };
   }
 
@@ -171,7 +177,13 @@ export class NearSession implements NearAuth {
     let answer = await this.requestRefresh(used.refreshToken);
     if (answer === 'refused') {
       // Another window may have rotated the token while this one was waiting: use its newer one once.
-      const current = await this.readStored();
+      // The winner stores its new token only after NEAR answers it, so an unchanged value is read a
+      // second time after a short wait before the refusal is believed.
+      let current = await this.readStored();
+      if (current && current.refreshToken === used.refreshToken) {
+        await this.sleep(RECHECK_DELAY_MS);
+        current = await this.readStored();
+      }
       if (!current) {
         this.cached = undefined;
         throw new NearSessionError('signed-out', SIGNED_OUT_MESSAGE);

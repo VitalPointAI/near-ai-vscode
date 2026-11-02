@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NearOrgClient } from '../team/nearOrg';
-import { NEAR_SESSION_SECRET_PREFIX, NearSession, nearSessionSecretName, saveNearSession } from '../team/nearSession';
+import { NEAR_SESSION_SECRET_PREFIX, NearSession, NearSessionError, nearSessionSecretName, saveNearSession } from '../team/nearSession';
 import { FakeNear, startFakeNear } from './helpers/fakeNear';
 import { MemorySecrets } from './helpers/teamHarness';
 
@@ -63,4 +63,113 @@ test('tracer: a session is kept per team, refreshed through rotation and signed 
     assert.ok(fake.requests.some((request) => request.method === 'POST' && request.path === '/v1/auth/logout'));
     assert.ok(!fake.requests.some((request) => request.method === 'DELETE' && request.path === '/v1/users/me/tokens'));
   });
+});
+
+const never = async (): Promise<void> => undefined;
+const shortWait = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, Math.min(ms, 20)); });
+
+function storedRefresh(secrets: MemorySecrets, teamId: string): string {
+  return (JSON.parse(secrets.values.get(nearSessionSecretName(teamId)) ?? 'null') as { refreshToken: string }).refreshToken;
+}
+
+test('callers in one window share a single refresh', async () => {
+  await withFake(async ({ fake, secrets, lead }) => {
+    let clock = 0;
+    const session = await saveNearSession(secrets, 'team-a', lead, 'lead', { baseUrl: fake.baseUrl, now: () => clock });
+    clock += 55 * MINUTE;
+    const tokens = await Promise.all([session.accessToken(), session.accessToken(), session.accessToken()]);
+    assert.equal(new Set(tokens).size, 1);
+    assert.equal(fake.requests.filter((request) => request.path === '/v1/users/me/access-tokens').length, 1);
+  });
+});
+
+test('two windows refreshing at the same moment both end with a working session and the newest refresh token is kept', async () => {
+  await withFake(async ({ fake, secrets, lead }) => {
+    let clock = 0;
+    const options = { baseUrl: fake.baseUrl, now: () => clock, sleep: shortWait };
+    const windowA = await saveNearSession(secrets, 'team-a', lead, 'lead', options);
+    const windowB = new NearSession({ teamId: 'team-a', secrets, ...options, initialAccessToken: lead.accessToken });
+    clock += 55 * MINUTE;
+
+    const [tokenA, tokenB] = await Promise.all([windowA.accessToken(), windowB.accessToken()]);
+    assert.ok(tokenA && tokenB);
+
+    // Each window can still use NEAR: a token the other window's rotation replaced is refreshed on the 401.
+    for (const window of [windowA, windowB]) {
+      const client = new NearOrgClient({ baseUrl: fake.baseUrl, auth: window, sleep: never });
+      assert.deepEqual((await client.listOrganizations()).map((org) => org.id), ['org-1']);
+    }
+
+    // The stored refresh token is the newest one the fake issued: a third window opens from it.
+    const before = fake.requests.length;
+    const third = new NearSession({ teamId: 'team-a', secrets, ...options });
+    assert.ok(await third.accessToken());
+    const refreshes = fake.requests.slice(before).filter((request) => request.path === '/v1/users/me/access-tokens');
+    assert.deepEqual(refreshes.map((request) => request.status), [200]);
+    assert.notEqual(storedRefresh(secrets, 'team-a'), lead.refreshToken);
+  });
+});
+
+test('a refresh token NEAR refuses, with no other window having rotated it, says the sign-in expired and keeps the stored value', async () => {
+  await withFake(async ({ fake, secrets }) => {
+    let clock = 0;
+    const dead = { accessToken: 'fa-stale', refreshToken: 'rt_deadbeefdeadbeef' };
+    const session = await saveNearSession(secrets, 'team-a', dead, 'lead', { baseUrl: fake.baseUrl, now: () => clock, sleep: never });
+    clock += 55 * MINUTE;
+    await assert.rejects(session.accessToken(), (error: unknown) => {
+      assert.ok(error instanceof NearSessionError);
+      assert.equal(error.code, 'expired');
+      assert.equal(error.message, 'Your NEAR sign-in for this team expired. Sign in again.');
+      assert.ok(!`${error.message}${error.stack}`.includes('rt_deadbeefdeadbeef'));
+      return true;
+    });
+    assert.equal(storedRefresh(secrets, 'team-a'), 'rt_deadbeefdeadbeef', 'nothing is deleted on an expired refresh');
+    assert.equal(await session.refreshAfterUnauthorized(), undefined);
+    assert.deepEqual(await session.signedIn(), { label: 'lead' });
+  });
+});
+
+test('a NEAR outage while refreshing is unavailable, not expired, and the session is kept', async () => {
+  await withFake(async ({ fake, secrets, lead }) => {
+    let clock = 0;
+    const session = await saveNearSession(secrets, 'team-a', lead, 'lead', { baseUrl: fake.baseUrl, now: () => clock, sleep: never });
+    clock += 55 * MINUTE;
+    fake.fail({ method: 'POST', pathPrefix: '/v1/users/me/access-tokens', status: 500, times: 1, message: `boom ${lead.refreshToken}` });
+    await assert.rejects(session.accessToken(), (error: unknown) => {
+      assert.ok(error instanceof NearSessionError);
+      assert.equal(error.code, 'unavailable');
+      assert.ok(!`${error.message}${error.stack}`.includes(lead.refreshToken));
+      return true;
+    });
+    assert.equal(storedRefresh(secrets, 'team-a'), lead.refreshToken);
+    assert.ok(await session.accessToken(), 'the next try works');
+  });
+});
+
+test('a damaged or foreign stored value is treated as signed out and deleted', async () => {
+  await withFake(async ({ fake, secrets }) => {
+    const session = new NearSession({ teamId: 'team-a', secrets, baseUrl: fake.baseUrl, sleep: never });
+    for (const bad of ['not json', '{"v":2,"refreshToken":"rt_x1234567","label":"a"}', '{"v":1,"refreshToken":"abc","label":"a"}', `{"v":1,"refreshToken":"rt_x1234567","label":"${'a'.repeat(81)}"}`, '[]']) {
+      secrets.values.set(nearSessionSecretName('team-a'), bad);
+      assert.equal(await session.signedIn(), undefined, bad);
+      assert.equal(secrets.values.has(nearSessionSecretName('team-a')), false, 'the bad value is deleted');
+    }
+    await assert.rejects(session.accessToken(), (error: unknown) => error instanceof NearSessionError && error.code === 'signed-out');
+    assert.equal(fake.requests.length, 0);
+  });
+});
+
+test('sign out forgets the session even when NEAR cannot be reached', async () => {
+  await withFake(async ({ fake, secrets, lead }) => {
+    const session = await saveNearSession(secrets, 'team-a', lead, 'lead', { baseUrl: fake.baseUrl, sleep: never });
+    fake.fail({ method: 'POST', pathPrefix: '/v1/auth/logout', status: 'drop', times: 1 });
+    assert.deepEqual(await session.signOut(), { serverConfirmed: false });
+    assert.equal(secrets.values.has(nearSessionSecretName('team-a')), false);
+    assert.deepEqual(await session.signOut(), { serverConfirmed: true }, 'nothing left to end');
+    await assert.rejects(session.accessToken(), (error: unknown) => error instanceof NearSessionError && error.code === 'signed-out');
+  });
+});
+
+test('a session refuses a plain-HTTP address that is not this computer', () => {
+  assert.throws(() => new NearSession({ teamId: 'team-a', secrets: new MemorySecrets(), baseUrl: 'http://near.example.invalid/v1' }), RangeError);
 });
