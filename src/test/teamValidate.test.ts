@@ -98,9 +98,8 @@ test('unknown versions and types always get the update-the-app reason, even with
   const { event } = await context();
   const unsupported = 'unsupported event type for this version';
   assert.equal(rejection(entryFor({ ...event, v: 2 })).reason, unsupported);
-  assert.equal(rejection(entryFor({ ...event, type: 'item.created' })).reason, unsupported);
+  assert.equal(rejection(entryFor({ ...event, type: 'item.created' })).reason, unsupported, 'known to the union but not implemented yet');
   assert.equal(rejection(entryFor({ ...event, type: 'made.up' })).reason, unsupported);
-  assert.equal(rejection(entryFor({ ...event, type: 'member.invited' })).reason, unsupported, 'known to the union but not implemented in Phase 60');
   assert.equal(rejection(entryFor({ ...event, type: 7 })).reason, unsupported);
   assert.equal(rejection(entryFor({ ...event, v: 2, id: 'nonsense', lamport: 0, extra: true })).reason, unsupported);
   assert.equal(rejection(entryFor({ ...event, type: 'made.up', sig: 'x', author: 'y' })).reason, unsupported);
@@ -190,6 +189,7 @@ const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029);
 function bodiesFor(device: { fingerprint: string; publicKey: string }): Record<string, Record<string, unknown>> {
   return {
     'team.created': { name: 'Core team', ownerId: OWNER_ID, ownerName: 'Ada', ownerEmailHashes: [HASH_A], ownerDevice: device, policy: defaultTeamPolicy(), near: { organizationId: 'org_1', workspaceId: 'ws:2' } },
+    'member.invited': { memberId: OTHER_ID, name: 'Grace', emailHashes: [HASH_A], role: 'developer', allocationNanoUsd: 5_000_000_000, ttlSeconds: 604_800, invite: { publicKey: device.publicKey } },
     'member.joined': { memberId: OTHER_ID, name: 'Grace', emailHashes: [HASH_A, HASH_B], role: 'developer', device },
     'member.role-changed': { memberId: OTHER_ID, role: 'lead' },
     'member.removed': { memberId: OTHER_ID },
@@ -206,7 +206,7 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-test('valid bodies for all ten Phase 60 types pass, with and without optional fields', async () => {
+test('valid bodies for every implemented type pass, with and without optional fields', async () => {
   const { owner } = await context();
   const device = { fingerprint: owner.identity.fingerprint, publicKey: owner.identity.publicKey };
   const bodies = bodiesFor(device);
@@ -238,7 +238,8 @@ test('every body rejects extra keys, missing keys and wrong types by field name'
       delete missing[key];
       const optional = (type === 'team.created' && key === 'near') || (type === 'member.availability' && key === 'workingHours');
       if (!optional) assert.equal(validateBody(type, missing), `${INVALID}: body.${key}`, `${type} missing ${key}`);
-      const wrong = { ...clone(valid), [key]: key === 'lamport' ? 'x' : 12345 };
+      // A number can be a valid value for a numeric field, so those get a string instead.
+      const wrong = { ...clone(valid), [key]: ['lamport', 'allocationNanoUsd', 'ttlSeconds'].includes(key) ? 'x' : 12345 };
       assert.equal(validateBody(type, wrong), `${INVALID}: body.${key}`, `${type} wrong type ${key}`);
       const nulled = { ...clone(valid), [key]: null };
       assert.equal(validateBody(type, nulled), `${INVALID}: body.${key}`, `${type} null ${key}`);
