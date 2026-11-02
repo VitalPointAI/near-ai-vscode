@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: executing
-stopped_at: Completed 62-01-PLAN.md
-last_updated: "2026-11-02T18:05:59.955Z"
+stopped_at: Completed 62-02-PLAN.md
+last_updated: "2026-11-02T18:09:50.629Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: f534996be5e3ffd286dae6a9317b97bc89a18521
+state_head: ef0fd45c14bedfc8359565058121fad87f8fc076
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 40
-  completed_plans: 27
+  completed_plans: 28
   percent: 13
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-11-01)
 ## Current Position
 
 Phase: 62 (Work model, GSD import, Team Board (live, read and move)) — EXECUTING
-Plan: 2 of 14
+Plan: 3 of 14
 Status: Ready to execute
 Last activity: 2026-11-02 — Phase 62 execution started
 
@@ -81,6 +81,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P13 | 55 min | 3 tasks | 8 files |
 | Phase 61 P14 | 15 min | 3 tasks | 8 files |
 | Phase 62 P01 | 13 min | 3 tasks | 12 files |
+| Phase 62 P02 | 8 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -135,6 +136,7 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-14: the lifecycle, privacy canary and full gate passed with no production change; the coordination push between cap and revoke is proven by counting remote event files at each NEAR call
 - [Phase 61]: 61-14: TEAM-02 and TEAM-03 ticked; only the manual real-NEAR organization check and the live test run remain for the owner
 - [Phase 62]: Plan 62-01: item event bodies, stored WorkItem shape, item.move row and transition rules confirmed as recorded (confirm-recorded); parent kind is checked at the reference step (itemParent), mark done ends a hold
+- [Phase 62]: 62-02: the integration branch is fetched with --no-write-fetch-head into refs/near-ai/integration/<branch> and .planning is read from that ref by plumbing; symlinks under .planning are listed, never read
 
 ### Pending Todos
 
@@ -156,8 +158,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-02T18:05:59.678Z
-Stopped at: Completed 62-01-PLAN.md
+Last session: 2026-11-02T18:09:50.367Z
+Stopped at: Completed 62-02-PLAN.md
 Resume file: None
 
 ## Notes
