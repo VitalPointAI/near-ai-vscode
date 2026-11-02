@@ -47,7 +47,9 @@
     collapsedColumns: saved.collapsedColumns || {}, collapsedLanes: saved.collapsedLanes || {}, openGroups: saved.openGroups || {},
     selected: typeof saved.selected === 'string' ? saved.selected : '', milestone: typeof saved.milestone === 'string' ? saved.milestone : '', filtersOpen: saved.filtersOpen === true
   };
-  const persist = () => vscode.setState({ groupBy: ui.groupBy, filters: ui.filters, collapsedColumns: ui.collapsedColumns, collapsedLanes: ui.collapsedLanes, openGroups: ui.openGroups, selected: ui.selected, milestone: ui.milestone, filtersOpen: ui.filtersOpen });
+  // The item form's unsent draft (form.js) lives in the same stored state: the page may acquire the VS Code API only once, so the form borrows it here.
+  let formDraft = saved.draft && typeof saved.draft === 'object' ? saved.draft : undefined;
+  const persist = () => vscode.setState({ groupBy: ui.groupBy, filters: ui.filters, collapsedColumns: ui.collapsedColumns, collapsedLanes: ui.collapsedLanes, openGroups: ui.openGroups, selected: ui.selected, milestone: ui.milestone, filtersOpen: ui.filtersOpen, ...(formDraft ? { draft: formDraft } : {}) });
 
   // ---- runtime state (not persisted) ---------------------------------------------------------------------------------------------------------
   let model;
@@ -825,7 +827,9 @@
     openDetail(id, opener) { if (detailOpener) detailOpener(id, opener); },
     registerForm(open) { formOpener = open; },
     openForm(itemId) { if (formOpener) formOpener(itemId); },
-    drawer: () => detailEl
+    drawer: () => detailEl,
+    getDraft: () => (formDraft ? JSON.parse(JSON.stringify(formDraft)) : undefined),
+    setDraft(draft) { formDraft = draft && typeof draft === 'object' ? JSON.parse(JSON.stringify(draft)) : undefined; persist(); }
   };
   window.NearAiBoard = api;
 
