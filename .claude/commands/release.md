@@ -18,8 +18,9 @@ the owner's approval in GitHub; never try to publish from this session.
    git worktree add -b release/<x.y.z> .claude/worktrees/release-<x.y.z> origin/main
    ```
 
-   For a hotfix use `hotfix/<x.y.z>` (see "Hotfixes" in the workflow doc for when to branch
-   from the last tag instead). Do everything below inside that worktree.
+   For a hotfix use `hotfix/<x.y.z>` (see "A bad version reached users: hotfix" in the workflow
+   doc for when to branch from the last tag instead, and what that branch needs). Do everything
+   below inside that worktree.
 
 3. **Bump the version** (package.json and package-lock.json together):
 
@@ -55,4 +56,4 @@ the owner's approval in GitHub; never try to publish from this session.
 
 7. Wait for CI, then run `/review-pr <number>`, then `/merge-pr <number>`. The merge agent tags
    the squash commit `v<x.y.z>`, which starts the Release workflow. Tell the owner the Release
-   run URL so they can approve the `publish` job.
+   run URL so they can approve the `publish` job in the GitHub web UI ("Review deployments").

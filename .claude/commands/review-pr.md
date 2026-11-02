@@ -74,14 +74,16 @@ Head-SHA: <the 40-character head SHA from gather>
 - [MINOR] ...
 
 ### Dismissed
-- <finding> : <why it is not a problem>
+- <what was checked, without a severity tag> : <why it is not a problem>
 
 ### Reviewers
 code review, security review, docs/changelog review[, release review]; CI: <green | which jobs failed>
 ```
 
 A BLOCKER fixed by a later commit is written `- [BLOCKER][RESOLVED] ... (fixed in <sha>)`, and
-only counts as fixed when the review is re-run on the new head.
+only counts as fixed when the review is re-run on the new head. Severity tags count anywhere in
+the file, code blocks included, so a dismissed item must not keep its `[BLOCKER]` (or other)
+tag: describe it in plain words under "Dismissed".
 
 ## 4. Submit
 

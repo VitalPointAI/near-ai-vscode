@@ -28,7 +28,7 @@ Branch names:
 | `fix/<short-name>` | a bug fix |
 | `chore/<short-name>` | tooling, CI, dependencies, refactoring with no visible change |
 | `docs/<short-name>` | documentation only |
-| `release/<x.y.z>` | a release: version bump and CHANGELOG |
+| `release/<x.y.z>` | a release: version bump, CHANGELOG, and README or SECURITY.md updates |
 | `hotfix/<x.y.z>` | an urgent fix released on its own |
 
 Short names are lowercase words joined by hyphens, for example `fix/proxy-hint`.
@@ -56,7 +56,8 @@ type is `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `build`, `ci` or `pe
 says what changed for the user, in the present tense, for example
 `fix(chat): announce waiting approvals when the window is in the background`.
 
-PRs are squash-merged, so the PR title becomes the commit on `main`: write it in the same form.
+PRs are squash-merged, so the PR title (followed by ` (#<number>)`) becomes the commit on
+`main`: write it in the same form.
 
 ## Pull requests
 

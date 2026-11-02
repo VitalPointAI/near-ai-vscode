@@ -25,7 +25,7 @@ there; until it is applied, only the scripts enforce these rules. Branch names:
 | `fix/<short-name>` | a bug fix |
 | `chore/<short-name>` | tooling, CI, dependencies, refactoring with no visible change |
 | `docs/<short-name>` | documentation only |
-| `release/<x.y.z>` | a release: version bump, CHANGELOG, README |
+| `release/<x.y.z>` | a release: version bump, CHANGELOG, and README or SECURITY.md updates |
 | `hotfix/<x.y.z>` | an urgent fix released on its own |
 
 Each branch lives in its own worktree under `.claude/worktrees/<name>` (ignored by git), so
@@ -45,7 +45,8 @@ Merged branches are deleted on GitHub automatically.
 
 Open the PR early (as a draft if it is not ready) so CI runs on every push. Fill in the
 template: what and why, test evidence, the security and docs checkboxes, and a rollback note.
-The PR title is the squash commit's message on `main`, so write it as a conventional commit:
+The PR title, followed by ` (#<number>)`, is the subject of the squash commit on `main`, so
+write it as a conventional commit:
 `fix(chat): ...`, `feat(spend): ...`.
 
 A PR can merge only when all of these hold:
@@ -158,11 +159,17 @@ The merge agent runs `node scripts/merge-pr.mjs <number>` (first with `--dry-run
 - refuses unless the PR is open, not a draft, targets `main`, and its branch follows the naming
   rules;
 - refuses unless every required check (the six CI jobs, `agent-review`, and anything else branch
-  protection requires) is green on the current head, and no other check failed;
+  protection requires) is green on the current head, and no other check failed. The CI jobs
+  count only from the `CI` workflow, so a job of the same name elsewhere cannot stand in for
+  one, and `agent-review` counts only as a commit status set by the account the script runs as;
 - refuses if the branch is behind `main`, has conflicts, or has unresolved conversations;
+- for a `release/x.y.z` or `hotfix/x.y.z` PR, refuses unless the head's package.json is
+  `x.y.z`, CHANGELOG.md has its section, and `vx.y.z` does not exist yet (pass `--no-tag` for a
+  hotfix that was already tagged and released from its branch);
 - then runs `gh pr merge --squash --delete-branch --match-head-commit <sha>` with the PR title
-  as the subject. `--match-head-commit` stops the merge if someone pushed in the meantime, and
-  `--repo` keeps `gh` from touching local branches or worktrees.
+  and ` (#<number>)` as the subject. `--match-head-commit` stops the merge if someone pushed in
+  the meantime, and `--repo` keeps `gh` from touching local branches or worktrees. A release PR
+  is tagged only after GitHub confirms the merge and its squash commit.
 
 It never uses `--admin` and never changes branch protection. A refusal names each reason and
 the fix (for example `gh pr update-branch <number> --rebase`, then CI and a new review).
@@ -196,8 +203,18 @@ the fix (for example `gh pr update-branch <number> --rebase`, then CI and a new 
      cache, no install scripts) and runs `vsce publish --packagePath <the verified VSIX>` with
      the `VSCE_PAT` secret, which is stored only in that environment.
 
-The owner approves from the run page (Actions, Release, the run, "Review deployments") or with
-`gh run view <run-id>`. Rejecting it leaves the GitHub release in place and nothing published.
+The owner approves in the GitHub web UI: Actions, Release, the run, **Review deployments**,
+tick `marketplace`, **Approve and deploy**. `gh run view` only shows the run; it cannot approve
+it. Approving from a terminal needs the REST API:
+
+```bash
+repo=VitalPointAI/near-ai-vscode
+env_id="$(gh api "repos/$repo/environments/marketplace" --jq .id)"
+gh api -X POST "repos/$repo/actions/runs/<run-id>/pending_deployments" \
+  -F "environment_ids[]=$env_id" -f state=approved -f comment="Publish <x.y.z>"
+```
+
+Rejecting it leaves the GitHub release in place and nothing published.
 
 ## 7. Recovery
 
@@ -236,20 +253,35 @@ new patch version (for example 0.4.12 replaces a broken 0.4.11).
 bump the version and CHANGELOG with `scripts/prepare-release.mjs`, and go through PR, review and
 `/merge-pr`, which tags and starts the release.
 
-**Main has unreleased work that must not ship yet.** Branch from the last release tag instead:
+**Main has unreleased work that must not ship yet.** Branch from the last release tag instead.
+The tag starts the Release workflow of the tagged commit, so the hotfix branch must contain
+`.github/workflows/release.yml` and the `scripts/` it uses. Tags made before this workflow
+existed (v0.4.12 and earlier) do not; on such a branch, first bring them over from `main`
+(`git checkout origin/main -- .github/workflows scripts`, then commit). With `<last>` the last
+release (say 0.5.0) and `<next>` the next patch (0.5.1):
 
 ```bash
-git worktree add -b hotfix/0.4.13 .claude/worktrees/hotfix-0.4.13 v0.4.12
-# fix, bump to 0.4.13, write the CHANGELOG section, commit
-git push -u origin hotfix/0.4.13
-gh pr create --base main --title "fix: ... (0.4.13)"
+git worktree add -b hotfix/<next> .claude/worktrees/hotfix-<next> v<last>
+# fix, bump to <next>, write the CHANGELOG section, commit
+git push -u origin hotfix/<next>
+gh pr create --base main --title "fix: ... (<next>)"
 ```
 
-CI and `/review-pr` run on the PR as usual. When both are green, tag the hotfix head (the Release
-workflow accepts a tag on the head of `hotfix/<version>`):
+Run `/review-pr` on the PR as usual: the tag needs `agent-review` set by the owner's account on
+the exact head commit you release. The PR's CI tests the hotfix merged with `main` (and does not
+run at all while the PR has conflicts), so also run CI on the hotfix head itself and wait for it:
 
 ```bash
-node scripts/tag-release.mjs 0.4.13 --sha "$(git rev-parse HEAD)"
+gh workflow run ci.yml --ref hotfix/<next>
+gh run list --workflow ci.yml --branch hotfix/<next> --limit 1   # wait until it passes
+```
+
+Then tag the hotfix head. `tag-release.mjs` refuses unless the commit is the head of
+`hotfix/<next>`, a CI run on that commit passed, and the owner's `agent-review` on it is
+success; the Release workflow also accepts only the head of `hotfix/<version>`:
+
+```bash
+node scripts/tag-release.mjs <next> --sha "$(git rev-parse HEAD)"
 ```
 
 After the release, bring the fix into `main`: update the PR (`gh pr update-branch`), resolve any

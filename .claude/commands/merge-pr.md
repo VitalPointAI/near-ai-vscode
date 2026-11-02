@@ -43,8 +43,9 @@ Act as the merge agent for pull request **#$ARGUMENTS**.
 4. For a `release/x.y.z` or `hotfix/x.y.z` PR the script then waits for CI on the squash commit
    and tags it `vx.y.z`. The Release workflow builds the VSIX and the GitHub release. The
    Marketplace `publish` job then **waits for the owner's approval**: tell the owner the run URL
-   (`gh run list --workflow release.yml --limit 1`) and that they approve it under
-   "Review deployments". Never approve it yourself.
+   (`gh run list --workflow release.yml --limit 1`) and that they approve it in the GitHub web UI
+   under "Review deployments" on that run (`gh run view` cannot approve it). Never approve it
+   yourself.
 
 5. Afterwards remove the branch's local worktree if this session created it
    (`git worktree remove .claude/worktrees/<name>`), never one another session owns.
