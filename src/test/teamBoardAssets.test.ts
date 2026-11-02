@@ -58,6 +58,19 @@ test('T-62-46: form.js keeps every host secret pattern, so the stored draft leav
   }
 });
 
+test('IN-03: the form\'s limits and the duplicated command id match the one source they copy', () => {
+  const validate = require('../domain/team/validate') as typeof import('../domain/team/validate');
+  const form = text('form.js');
+  const constant = (name: string): number => Number((new RegExp(`const ${name} = (\\d+);`).exec(form) ?? [])[1]);
+  assert.equal(constant('TITLE_MAX'), validate.TITLE_MAX);
+  assert.equal(constant('DESCRIPTION_MAX'), validate.DESCRIPTION_MAX);
+  assert.equal(constant('FILES_MAX'), validate.MAX_SCOPE_ENTRIES);
+  assert.equal(constant('ESTIMATE_MAX'), validate.MAX_ESTIMATE_TOKENS);
+  const commands = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
+  const statusBar = require('../services/team/teamStatusBar') as typeof import('../services/team/teamStatusBar');
+  assert.equal(statusBar.OPEN_BOARD_COMMAND, commands.OPEN_BOARD_COMMAND);
+});
+
 test('every board script is one strict-mode IIFE', () => {
   for (const file of BOARD_SCRIPTS) {
     const code = text(file).split('\n').filter((line) => !/^\s*(\/\/.*)?$/.test(line));

@@ -10,7 +10,7 @@ import { REFUSALS, SOMEONE, flattenName, staleRefusal, stripFormatControls } fro
 import { decideTeamAction } from '../../domain/team/permissions';
 import { SecretLeakError, findSecrets } from '../../domain/team/secrets';
 import type { ItemChanges, ItemCreatedBody, TeamState } from '../../domain/team/types';
-import { REASON_MAX } from '../../domain/team/validate';
+import { DESCRIPTION_MAX, MAX_ESTIMATE_TOKENS, MAX_SCOPE_ENTRIES, REASON_MAX, TITLE_MAX } from '../../domain/team/validate';
 import { BOARD_ITEM_ID_PATTERN, GSD_ITEM_ID_PATTERN, isOwnDraft, isScopePattern } from '../../domain/team/work';
 import { NoDeviceKeyError } from '../../team/eventLog';
 import type { EventIntent } from '../../team/eventLog';
@@ -28,11 +28,10 @@ export const BOARD_STYLES = ['board.css'] as const;
 
 const PANEL_TITLE = 'Team Board';
 const THROTTLE_MS = 250;
-const TITLE_MAX = 200;
-const DESCRIPTION_MAX = 2000;
-const SCOPE_LINES_MAX = 64;
+// The signed limits come from the validator, so the page parser can never drop what the log would accept (IN-03).
+const SCOPE_LINES_MAX = MAX_SCOPE_ENTRIES;
 const SCOPE_LINE_MAX = 200;
-const ESTIMATE_MAX = 1_000_000_000_000;
+const ESTIMATE_MAX = MAX_ESTIMATE_TOKENS;
 const PAUSED_TEXT = 'The board shows the last update and cannot be changed until team sync resumes.';
 const NOT_READY_TEXT = 'The Team Board is not ready yet. Nothing was moved.';
 const NOT_SAVED_TEXT = 'The change could not be saved. Nothing was moved.';
