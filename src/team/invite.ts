@@ -6,13 +6,15 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { SecretLeakError, assertNoSecrets } from '../domain/team/secrets';
 import { INVITABLE_ROLES, ROLES } from '../domain/team/types';
-import type { Role, TeamFile } from '../domain/team/types';
+import type { Role, TeamFile, TeamState } from '../domain/team/types';
 import { MEMBER_ID_PATTERN, validateName } from '../domain/team/validate';
+import { CleanupChecklist } from './cleanupChecklist';
 import { NoDeviceKeyError } from './eventLog';
-import type { TeamLog } from './eventLog';
+import type { EventIntent, TeamLog } from './eventLog';
 import { emailHash, newMemberId } from './identity';
 import { encodeInviteBundle, cleanRepoUrl } from './inviteBundle';
 import { deriveInviteKey, generateInviteCode } from './inviteCode';
+import { scrubNearText } from './nearOrg';
 import type { NearOrgClient } from './nearOrg';
 import { REMOTE_NAME_PATTERN, runSerialised, teamStorageDir, writeFileAtomic } from './teamFile';
 import { gitText, redactGitMessage, runGit } from './runGit';
@@ -47,6 +49,8 @@ export interface InviteInput {
 export type InviteResult =
   | { ok: true; memberId: string; bundle: string; nearInvitation: 'sent' | 'already-member' | 'queued' | 'not-applicable'; notice?: string }
   | { ok: false; code: 'remote-url' | 'refused' | 'conflict' | 'offline'; message: string };
+
+export type ReissueInput = Omit<InviteInput, 'name' | 'email' | 'role' | 'allocationNanoUsd'> & { oldMemberId: string; email: string };
 
 export interface InviteDirectoryEntry { memberId: string; name: string; email: string; role: Role; invitedEvent: string }
 
@@ -139,23 +143,71 @@ function failureOf(result: Extract<AppendResult, { ok: false }>): InviteResult {
   }
 }
 
+function checkTtl(ttlSeconds: number): string | undefined {
+  return Number.isSafeInteger(ttlSeconds) && ttlSeconds >= MIN_TTL_SECONDS && ttlSeconds <= MAX_TTL_SECONDS ? undefined : 'The invitation lifetime must be between 1 hour and 30 days.';
+}
+
 function checkInput(input: InviteInput): string | undefined {
   if (validateName(input.name, 'name') !== undefined) return 'The name must be 1 to 80 characters with no line breaks.';
   if (!validEmail(input.email.trim())) return 'The email address is not valid. Use a full address such as name@example.com.';
   if (!(INVITABLE_ROLES as readonly string[]).includes(input.role)) return 'That role cannot be invited. Choose lead, developer, reviewer or observer.';
   if (!Number.isSafeInteger(input.allocationNanoUsd) || input.allocationNanoUsd < 0) return 'The allocation must be a whole number of nano-USD, zero or more.';
-  if (!Number.isSafeInteger(input.ttlSeconds) || input.ttlSeconds < MIN_TTL_SECONDS || input.ttlSeconds > MAX_TTL_SECONDS) return 'The invitation lifetime must be between 1 hour and 30 days.';
-  return undefined;
+  return checkTtl(input.ttlSeconds);
 }
 
-export async function inviteMember(input: InviteInput): Promise<InviteResult> {
-  const problem = checkInput(input);
-  if (problem !== undefined) return refuse(problem);
+// ---- NEAR at invite time (D-21, D-22) ------------------------------------------------------------------------------------------------
+
+type NearStep = { nearInvitation: 'sent' | 'already-member' | 'queued' | 'not-applicable'; notice?: string };
+
+const SESSION_NEEDED = 'The team invitation is ready, but no NEAR invitation was sent because you are not signed in to NEAR. It is on your cleanup list; sign in and retry.';
+const QUEUED = 'The team invitation is ready, but the NEAR organization invitation could not be sent. It is on your cleanup list so you can retry it.';
+
+function errorText(error: unknown): string {
+  return scrubNearText(error instanceof Error ? error.message : String(error));
+}
+
+// Only a lead is invited to the NEAR organization, as an admin (D-22). Everyone else gets a key from the lead's client and never touches NEAR
+// (D-21). Nothing here can stop the team invitation: it is already in the log, and a failure becomes a checklist item with Retry (D-18).
+async function inviteToNear(input: ReissueInput | InviteInput, ids: { memberId: string; name: string; email: string; role: Role; reissue: boolean }, storageDir: string): Promise<NearStep> {
+  const near = input.teamFile.near;
+  if (near === undefined || ids.role !== 'lead') return { nearInvitation: 'not-applicable' };
+  const checklist = new CleanupChecklist(storageDir);
+  const queue = async (status: 'pending' | 'failed', lastError?: string): Promise<NearStep> => {
+    const base = { memberId: ids.memberId, memberName: ids.name, step: 'send-invitation' as const, status };
+    try {
+      await checklist.add([lastError === undefined ? base : { ...base, lastError }]);
+    } catch (error) {
+      return { nearInvitation: 'queued', notice: `${QUEUED} The cleanup list could not be saved either: ${errorText(error)}` };
+    }
+    return { nearInvitation: 'queued', notice: status === 'pending' ? SESSION_NEEDED : QUEUED };
+  };
+  if (input.org === undefined) return queue('pending');
+  try {
+    // A re-issue keeps the NEAR invitation the first issue sent if it is still pending: NEAR refuses a second one for the same address anyway.
+    if (ids.reissue) {
+      const pending = await input.org.listInvitations(near.organizationId, 'pending');
+      if (pending.some((invitation) => invitation.email.toLowerCase() === ids.email.toLowerCase())) {
+        return { nearInvitation: 'sent', notice: 'The NEAR invitation sent earlier is still waiting to be accepted, so no second one was sent.' };
+      }
+    }
+    const outcome = await input.org.inviteByEmail(near.organizationId, ids.email, 'admin');
+    if (outcome.ok) return { nearInvitation: outcome.alreadyMember ? 'already-member' : 'sent' };
+    return queue('failed', outcome.reason);
+  } catch (error) {
+    return queue('failed', errorText(error));
+  }
+}
+
+// ---- issuing --------------------------------------------------------------------------------------------------------------------------
+
+interface IssuePlan { name: string; role: Exclude<Role, 'owner'>; allocationNanoUsd: number }
+
+// Decides, from the freshest state, what the new invitation is. A re-issue also names the invitation it replaces.
+type PlanOf = (state: TeamState) => ({ conflict: string } | (IssuePlan & { replaces?: string }));
+
+async function issue(input: InviteInput | ReissueInput, email: string, plan: PlanOf, reissue: boolean): Promise<InviteResult> {
   const git = input.git ?? runGit;
   const teamId = input.teamFile.teamId;
-  const name = input.name.trim();
-  const email = input.email.trim();
-
   const raw = await configuredRemoteUrl(input.projectRoot, input.teamFile.coordination.remote, git);
   const cleaned = cleanRepoUrl(raw);
   if (!cleaned.ok) return { ok: false, code: 'remote-url', message: cleaned.reason };
@@ -164,39 +216,78 @@ export async function inviteMember(input: InviteInput): Promise<InviteResult> {
   const code = generateInviteCode();
   try {
     const invitePublicKey = deriveInviteKey(code.bytes, teamId, memberId).publicKey;
+    let chosen: IssuePlan | undefined;
     let appended: AppendResult;
     try {
-      appended = await input.log.append(() => [{
-        type: 'member.invited',
-        body: {
-          memberId, name, emailHashes: [emailHash(teamId, email)], role: input.role, allocationNanoUsd: input.allocationNanoUsd,
-          ttlSeconds: input.ttlSeconds, invite: { publicKey: invitePublicKey }
-        }
-      }]);
+      // The builder runs again after every lost race, so the plan is always read from the state the event will sit on.
+      appended = await input.log.append((state) => {
+        const decided = plan(state);
+        if ('conflict' in decided) return decided;
+        chosen = { name: decided.name, role: decided.role, allocationNanoUsd: decided.allocationNanoUsd };
+        const invited: EventIntent = {
+          type: 'member.invited',
+          body: {
+            memberId, name: decided.name, emailHashes: [emailHash(teamId, email)], role: decided.role, allocationNanoUsd: decided.allocationNanoUsd,
+            ttlSeconds: input.ttlSeconds, invite: { publicKey: invitePublicKey }
+          }
+        };
+        return decided.replaces === undefined ? [invited] : [{ type: 'member.removed', body: { memberId: decided.replaces } }, invited];
+      });
     } catch (error) {
       if (error instanceof SecretLeakError || error instanceof NoDeviceKeyError) return refuse(error.message);
       throw error;
     }
     if (!appended.ok) return failureOf(appended);
     const invitedEvent = appended.events.find((event) => event.type === 'member.invited');
-    if (invitedEvent === undefined) return refuse('The invitation was saved but its event could not be found.');
+    if (invitedEvent === undefined || chosen === undefined) return refuse('The invitation was saved but its event could not be found.');
+    const { name, role } = chosen;
 
-    let notice: string | undefined;
+    const storageDir = teamStorageDir(input.globalStorageDir, teamId);
+    const notices: string[] = [];
     try {
-      await recordInvite(teamStorageDir(input.globalStorageDir, teamId), { memberId, name, email, role: input.role, invitedEvent: invitedEvent.id });
+      await recordInvite(storageDir, { memberId, name, email, role, invitedEvent: invitedEvent.id });
     } catch (error) {
       // The invitation is already in the log. Losing the display cache costs only the name and email shown beside it, so the bundle is still returned.
-      notice = `The invitation was sent, but this computer could not save it to the local invitation list: ${redactGitMessage(error instanceof Error ? error.message : String(error))}`;
+      notices.push(`The invitation was sent, but this computer could not save it to the local invitation list: ${redactGitMessage(error instanceof Error ? error.message : String(error))}`);
     }
     const bundle = encodeInviteBundle({
       v: 1, repo: cleaned.url, team: teamId, ref: input.teamFile.coordination.ref, member: memberId, code: code.text,
       ...(input.teamFile.near === undefined ? {} : { near: { organizationId: input.teamFile.near.organizationId, workspaceId: input.teamFile.near.workspaceId } })
     });
-    const result: InviteResult = { ok: true, memberId, bundle, nearInvitation: 'not-applicable' };
-    if (notice !== undefined) result.notice = notice;
+    const near = await inviteToNear(input, { memberId, name, email, role, reissue }, storageDir);
+    if (near.notice !== undefined) notices.push(near.notice);
+    const result: InviteResult = { ok: true, memberId, bundle, nearInvitation: near.nearInvitation };
+    if (notices.length > 0) result.notice = notices.join(' ');
     return result;
   } finally {
     // D-05: once the bundle is built the clear code is not needed again. The string copy in the bundle is the only one left.
     code.bytes.fill(0);
   }
+}
+
+export async function inviteMember(input: InviteInput): Promise<InviteResult> {
+  const problem = checkInput(input);
+  if (problem !== undefined) return refuse(problem);
+  const plan: IssuePlan = { name: input.name.trim(), role: input.role, allocationNanoUsd: input.allocationNanoUsd };
+  return issue(input, input.email.trim(), () => plan, false);
+}
+
+// D-10: a lost bundle, an expired invitation or a wrong lifetime is fixed by replacing the invitation. member.removed for the old id and
+// member.invited for a new id are one batch, so the old code stops working in the same commit that the new one starts. The person, role and
+// allocation carry over; the lifetime is the one given now.
+export async function reissueInvite(input: ReissueInput): Promise<InviteResult> {
+  if (!MEMBER_ID_PATTERN.test(input.oldMemberId)) return refuse('That invitation id is not valid.');
+  const email = input.email.trim();
+  if (!validEmail(email)) return refuse('The email address is not valid. Use a full address such as name@example.com.');
+  const ttl = checkTtl(input.ttlSeconds);
+  if (ttl !== undefined) return refuse(ttl);
+  const teamId = input.teamFile.teamId;
+  return issue(input, email, (state) => {
+    const old = state.members.get(input.oldMemberId);
+    if (old === undefined || old.status !== 'invited' || old.removedEvent !== undefined) return { conflict: 'That invitation is no longer pending, so it cannot be re-issued.' };
+    if (!old.emailHashes.includes(emailHash(teamId, email))) return { conflict: 'That email address is not the one this invitation was made for.' };
+    const role = old.pendingRole ?? 'observer';
+    if (role === 'owner') return { conflict: 'That invitation is not for a role that can be invited.' };
+    return { name: old.name, role, allocationNanoUsd: old.allocationNanoUsd ?? 0, replaces: old.id };
+  }, true);
 }

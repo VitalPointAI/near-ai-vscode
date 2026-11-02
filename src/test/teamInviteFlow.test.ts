@@ -21,6 +21,7 @@ import type { DeviceIdentity } from '../team/identity';
 import { INVITE_FILE, inviteMember, readInviteDirectory, recordInvite, reissueInvite } from '../team/invite';
 import type { InviteInput } from '../team/invite';
 import { BUNDLE_PREFIX, parseInviteBundle } from '../team/inviteBundle';
+import * as inviteCodeModule from '../team/inviteCode';
 import { deriveInviteKey, formatInviteCode, inviteKeyMatches, parseInviteCode } from '../team/inviteCode';
 import { CLEANUP_FILE, CleanupChecklist, REPO_ACCESS_TEXT, repoAccessText } from '../team/cleanupChecklist';
 import type { CleanupItem } from '../team/cleanupChecklist';
@@ -204,6 +205,36 @@ test('the clear-text code is in no file the invite wrote and in no object on the
     // The mirror the lead keeps next to the invite list is a git store too: scan every object in it.
     const mirror = execFileSync('git', ['-C', path.join(fixture.storageDir('a'), 'coordination.git'), 'cat-file', '--batch-all-objects', '--batch'], { maxBuffer: 64 * 1024 * 1024 });
     for (const needle of needles) assert.equal(mirror.includes(Buffer.from(needle, 'utf8')), false, 'the local mirror holds a rendering of the code');
+  });
+});
+
+test('the code bytes are zero-filled once the bundle is built, and also when the append fails', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    pointOriginAt(fixture, PUBLIC_URL);
+    const captured: Buffer[] = [];
+    const module = inviteCodeModule as unknown as { generateInviteCode: typeof inviteCodeModule.generateInviteCode };
+    const original = module.generateInviteCode;
+    module.generateInviteCode = () => {
+      const code = original();
+      captured.push(code.bytes);
+      return code;
+    };
+    try {
+      const result = await inviteMember(inputFor(fixture, seed));
+      assert.equal(result.ok, true);
+      assert.equal(captured.length, 1);
+      assert.ok(result.ok && parseInviteCode(parseInviteBundle(result.bundle).code) !== undefined, 'the bundle still holds a real code');
+      assert.deepEqual(captured[0], Buffer.alloc(20), 'the bytes were wiped after use');
+
+      // A refused invite (a log with no device key cannot sign) wipes them too.
+      const refused = await inviteMember(inputFor(fixture, seed, { log: new TeamLog({ anchor: seed.anchor, transport: seed.a.transport, now: fixedNow }) }));
+      assert.equal(refused.ok, false);
+      assert.equal(captured.length, 2);
+      assert.deepEqual(captured[1], Buffer.alloc(20));
+    } finally {
+      module.generateInviteCode = original;
+    }
   });
 });
 
