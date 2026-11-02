@@ -222,6 +222,11 @@ export class TeamLog {
     return result;
   }
 
+  // Red-step placeholder.
+  public async findEvent(_eventId: string): Promise<TeamEvent | undefined> {
+    throw new Error('not implemented');
+  }
+
   // The outcome of the most recent snapshot attempt after a sync or an append, so a caller that only appended can still see it.
   public lastSnapshot(): AppendResult | undefined {
     return this.lastSnapshotResult;
