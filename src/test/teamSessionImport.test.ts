@@ -70,7 +70,7 @@ function newWorld(): World {
         gate.reached();
         await gate.blocked;
       }
-    } else if (args[0] === 'fetch' && mode.coordination === 'fail') {
+    } else if (args.includes('fetch') && mode.coordination === 'fail') {
       return { code: 128, stdout: Buffer.alloc(0), stderr: `fatal: unable to access '${url}/': could not resolve host\n` };
     }
     return runGit(args, options);
