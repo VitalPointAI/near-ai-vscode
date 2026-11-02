@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.4.11
+
+Agent runs in code-server (VS Code in a browser) could stop or stall without
+any sign in the chat. This release makes those interruptions visible and
+recoverable.
+
+- **A run cut off by code-server or a reload can be resumed.** When a
+  code-server tab stays disconnected (Chrome pauses background tabs) while
+  another code-server tab connects, code-server closes the window's extension
+  host about 5 minutes later. Every run in that window died, and the window
+  came back empty: one run had made 79 requests and never finished. A reload
+  or a crash has the same effect. Runs now save their state after every step
+  and record when they start and end, in the extension's own storage on this
+  computer (IDs, times, and tool names only). When the chat opens again, the
+  conversation is reopened and says "This run was cut off (the window or
+  code-server closed it) at" the time, with **Resume** and **Dismiss**.
+  Resume continues from the last saved step and tells the agent which steps
+  had started but were never recorded, so it checks whether they already
+  happened instead of doing them twice. Nothing resumes until you click.
+- **Waiting approvals and questions are noticed in a background tab.** The
+  "waiting for your approval" notice only appeared when the chat was hidden,
+  and a background browser tab still counts as showing the chat, so nothing
+  told you. The notice now also appears when the VS Code window (or its
+  browser tab) is not focused, and when you come back to the window while a
+  prompt is still waiting and was not announced yet. It never appears twice
+  for the same prompt, and the waiting badge stays.
+- **Advice for code-server and remote windows: proxy support.** VS Code's
+  proxy support (`http.proxySupport`, on by default) asks the window which
+  proxy to use for every new network connection. A browser tab that the
+  browser has paused cannot answer, so every new connection waited: one run
+  made no requests for 26 minutes and carried on the moment its tab was shown
+  again. When VS Code runs in a browser or a remote window, proxy support is
+  on, and no proxy is set (no `http.proxy` setting and no `HTTP_PROXY` or
+  `HTTPS_PROXY` variable), the extension now explains this once and offers
+  **Turn off proxy support**, which sets `http.proxySupport` to `"off"` in
+  your user settings, and only when you click it. **Not now** asks again in
+  two weeks; **Don't ask again** never asks.
+- **Tip for code-server users:** if you don't use a proxy, set
+  `"http.proxySupport": "off"` in your user settings. Keep the code-server tab
+  open during long runs: code-server's 5-minute cap on a disconnected window
+  can still stop runs, and Resume then picks them up.
+
 ## 0.4.10
 
 - **Usage reporting no longer looks broken while NEAR AI Cloud is missing its
