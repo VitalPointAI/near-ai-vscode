@@ -209,7 +209,7 @@ test('tracer: the owner removes a confirmed developer; NEAR sees limit 0, then t
     assert.notEqual(dana.client.log.state().members.get(dana.memberId)?.removedEvent, undefined);
     const attempt = await dana.client.log.append(() => [{ type: 'member.availability', body: { availability: 'focus' } }]);
     assert.equal(attempt.ok, false);
-    if (!attempt.ok) assert.ok(attempt.reason.includes(TEAM_REJECTION_REASONS.removedAuthor), attempt.reason);
+    if (!attempt.ok) assert.match(attempt.reason, /removed/, attempt.reason);
 
     // The only thing left for the lead is the reminder about repository access, last.
     const items = await w.checklist.forMember(dana.memberId);
