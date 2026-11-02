@@ -133,3 +133,11 @@ export async function readPlanningSnapshot(projectRoot: string, ref: string, wan
   }
   return { commit, treeHash, paths: entries.map((entry) => entry.path), files, oversize, truncated };
 }
+
+export async function remoteBranchHead(_projectRoot: string, _remote: string, _branch: string, _git: GitRunner = runGit): Promise<string | undefined> {
+  throw new Error('not implemented');
+}
+
+export async function isAncestor(_projectRoot: string, _older: string, _newer: string, _git: GitRunner = runGit): Promise<boolean | 'unknown'> {
+  throw new Error('not implemented');
+}

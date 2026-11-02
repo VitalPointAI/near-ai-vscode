@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import test from 'node:test';
 import { createTeamFixture, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
-import { fetchIntegrationBranch, integrationRef, readPlanningSnapshot } from '../team/integrationSource';
+import { MAX_PLANNING_FILE_BYTES, fetchIntegrationBranch, integrationRef, isAncestor, readPlanningSnapshot, remoteBranchHead } from '../team/integrationSource';
 
 const PLAN_ONE = '.planning/phases/90-alpha/90-01-PLAN.md';
 const SUMMARY_ONE = '.planning/phases/90-alpha/90-01-SUMMARY.md';
@@ -84,4 +84,124 @@ test('the integration branch is read from a private ref and an unpushed local dr
 test('the private ref name is built from the integration branch name', () => {
   assert.equal(integrationRef('main'), 'refs/near-ai/integration/main');
   assert.equal(integrationRef('release/1.0'), 'refs/near-ai/integration/release/1.0');
+});
+
+async function readPrivate(clone: string, wanted: (file: string) => boolean = wantedPlanning) {
+  const fetched = await fetchIntegrationBranch(clone, 'origin', 'main');
+  assert.equal(fetched.ok, true);
+  if (!fetched.ok) throw new Error('fetch failed');
+  return readPlanningSnapshot(clone, fetched.ref, wanted);
+}
+
+test('the remote head moves with every push but the .planning tree hash moves only when .planning changes', async () => {
+  const { fixture, a, b, pushedCommit } = await pushedPlans();
+  try {
+    assert.equal(await remoteBranchHead(b, 'origin', 'main'), pushedCommit);
+    const first = await readPrivate(b);
+
+    put(a, 'README.md', '# Changed outside .planning\n');
+    const readmeCommit = commitAll(a, 'readme only');
+    gitIn(a, ['push', '-q', 'origin', 'main']);
+    assert.equal(await remoteBranchHead(b, 'origin', 'main'), readmeCommit);
+    const second = await readPrivate(b);
+    assert.equal(second.commit, readmeCommit);
+    assert.equal(second.treeHash, first.treeHash);
+
+    put(a, PLAN_TWO, 'a new pushed plan\n');
+    commitAll(a, 'new plan');
+    gitIn(a, ['push', '-q', 'origin', 'main']);
+    const third = await readPrivate(b);
+    assert.notEqual(third.treeHash, first.treeHash);
+    assert.ok(third.paths.includes(PLAN_TWO));
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('remoteBranchHead is undefined for a branch the remote does not have and explains a failure without the credentials', async () => {
+  const { fixture, b } = await pushedPlans();
+  try {
+    assert.equal(await remoteBranchHead(b, 'origin', 'no-such-branch'), undefined);
+    gitIn(b, ['remote', 'set-url', 'origin', 'https://user:canary-secret-62@127.0.0.1:9/repo.git']);
+    await assert.rejects(remoteBranchHead(b, 'origin', 'main'), (error: Error) => error.message.length > 0 && !error.message.includes('canary-secret-62'));
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('isAncestor answers yes, no, and unknown for a commit that does not exist locally', async () => {
+  const { fixture, a, pushedCommit } = await pushedPlans();
+  try {
+    put(a, 'README.md', 'second\n');
+    const second = commitAll(a, 'second');
+    assert.equal(await isAncestor(a, pushedCommit, second), true);
+    assert.equal(await isAncestor(a, second, pushedCommit), false);
+    assert.equal(await isAncestor(a, '0123456789abcdef0123456789abcdef01234567', second), 'unknown');
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('a plan file over the size cap is listed as oversize and never read, and files the caller does not want are listed but not read', async () => {
+  const { fixture, a, b } = await pushedPlans();
+  try {
+    put(a, '.planning/phases/90-alpha/90-03-PLAN.md', 'x'.repeat(300 * 1024));
+    commitAll(a, 'big plan');
+    gitIn(a, ['push', '-q', 'origin', 'main']);
+    assert.ok(300 * 1024 > MAX_PLANNING_FILE_BYTES);
+    const snapshot = await readPrivate(b, (file) => file.endsWith('-PLAN.md'));
+    assert.deepEqual(snapshot.oversize, ['.planning/phases/90-alpha/90-03-PLAN.md']);
+    assert.equal(snapshot.files.has('.planning/phases/90-alpha/90-03-PLAN.md'), false);
+    assert.ok(snapshot.files.has(PLAN_ONE));
+    assert.ok(snapshot.paths.includes(SUMMARY_ONE));
+    assert.equal(snapshot.files.has(SUMMARY_ONE), false);
+    assert.equal(snapshot.truncated, false);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('a missing integration branch is reported as missing and an unreachable remote as offline without leaking credentials', async () => {
+  const { fixture, b } = await pushedPlans();
+  try {
+    const missing = await fetchIntegrationBranch(b, 'origin', 'no-such-branch');
+    assert.equal(missing.ok, false);
+    if (!missing.ok) {
+      assert.equal(missing.kind, 'missing');
+      assert.match(missing.reason, /no-such-branch was not found on the team remote/);
+    }
+    gitIn(b, ['remote', 'set-url', 'origin', 'https://user:canary-secret-62@127.0.0.1:9/repo.git']);
+    const offline = await fetchIntegrationBranch(b, 'origin', 'main');
+    assert.equal(offline.ok, false);
+    if (!offline.ok) {
+      assert.equal(offline.kind, 'offline');
+      assert.ok(offline.reason.length > 0);
+      assert.equal(offline.reason.includes('canary-secret-62'), false);
+    }
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('a branch name git would refuse never reaches git', async () => {
+  assert.throws(() => integrationRef('../evil'));
+  assert.throws(() => integrationRef('has space'));
+  assert.throws(() => integrationRef('-dash'));
+  await assert.rejects(fetchIntegrationBranch('/nonexistent-project', 'origin', '../evil'));
+});
+
+test('a .planning path with a space or a newline is listed exactly and nothing is created on disk for it', async () => {
+  const { fixture, a, b } = await pushedPlans();
+  try {
+    const odd = '.planning/phases/90-alpha/odd name\nsecond-PLAN.md';
+    put(a, odd, 'odd plan\n');
+    commitAll(a, 'odd path');
+    gitIn(a, ['push', '-q', 'origin', 'main']);
+    const snapshot = await readPrivate(b);
+    assert.ok(snapshot.paths.includes(odd));
+    assert.equal(snapshot.files.get(odd), 'odd plan\n');
+    assert.equal(existsSync(path.join(b, '.planning')), false);
+  } finally {
+    await fixture.cleanup();
+  }
 });
