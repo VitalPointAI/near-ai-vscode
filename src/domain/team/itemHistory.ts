@@ -7,14 +7,58 @@ export const MAX_HISTORY_PER_ITEM = 50;
 
 export interface HistoryEntry { eventId: string; type: string; author: string; at: string; reason?: string; changed?: string[] }
 
-export class ItemHistory {
-  public record(_entries: readonly CommittedEvent[]): void {
-    // not built yet
-  }
-
-  public forItem(_itemId: string): HistoryEntry[] {
-    return [];
+function entryFor(event: ImplementedTeamEvent): { itemId: string; entry: HistoryEntry } | undefined {
+  const entry: HistoryEntry = { eventId: event.id, type: event.type, author: event.author, at: event.at };
+  switch (event.type) {
+    case 'item.imported':
+    case 'item.created':
+    case 'item.unblocked':
+    case 'item.reopened':
+      return { itemId: event.body.id, entry };
+    case 'item.blocked':
+    case 'item.cancelled':
+      entry.reason = event.body.reason;
+      return { itemId: event.body.id, entry };
+    case 'item.updated':
+      entry.changed = Object.keys(event.body.changes).sort();
+      return { itemId: event.body.id, entry };
+    case 'item.estimated':
+      entry.changed = ['estimate'];
+      return { itemId: event.body.id, entry };
+    default:
+      return undefined;
   }
 }
 
-export type ItemEvent = Extract<ImplementedTeamEvent, { type: `item.${string}` }>;
+export class ItemHistory {
+  // Newest first. Only plain entries are kept: nothing here points into the state, so the state can be replaced or discarded freely.
+  private readonly byItem = new Map<string, HistoryEntry[]>();
+
+  // Feed committed entries in log order. Only entries a reader accepted count, and only item events: a rejected or foreign entry says nothing
+  // about a card. An event that is already in an item's list is skipped, so showing the same entries twice adds nothing.
+  public record(entries: readonly CommittedEvent[]): void {
+    for (const committed of entries) {
+      const verdict = committed.verdict;
+      if (verdict === undefined || !verdict.accepted || verdict.event === undefined) continue;
+      // An accepted event is always one of the implemented types (the reader refuses the rest), so the narrowing only tells the compiler so.
+      if (!verdict.event.type.startsWith('item.')) continue;
+      const found = entryFor(verdict.event as ImplementedTeamEvent);
+      if (found === undefined) continue;
+      const list = this.byItem.get(found.itemId) ?? [];
+      if (list.some((existing) => existing.eventId === found.entry.eventId)) continue;
+      list.unshift(found.entry);
+      if (list.length > MAX_HISTORY_PER_ITEM) list.length = MAX_HISTORY_PER_ITEM;
+      this.byItem.set(found.itemId, list);
+    }
+  }
+
+  // A copy, newest first, so a caller cannot change what is kept.
+  public forItem(itemId: string): HistoryEntry[] {
+    return (this.byItem.get(itemId) ?? []).map((entry) => ({ ...entry, ...(entry.changed === undefined ? {} : { changed: [...entry.changed] }) }));
+  }
+
+  // The board rebuilds history after a full re-read of the log.
+  public clear(): void {
+    this.byItem.clear();
+  }
+}

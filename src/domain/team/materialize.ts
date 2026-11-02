@@ -7,9 +7,9 @@ import { expectedJoinRole, inviteExpired, joinProofBytes, sealCapableFingerprint
 import { actionForEvent, decideTeamAction } from './permissions';
 import { DEFAULT_WIP_LIMIT, applyPolicyChanges, defaultTeamPolicy, validatePolicy } from './policy';
 import { AVAILABILITIES, ROLES, TEAM_REJECTION_REASONS } from './types';
-import { transitionProblem } from './work';
-import type { Availability, CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, ItemEstimate, ItemGsdRef, JsonObject, Materializer, Member, MemberInvite, Rejection, Role, SnapshotRef, TeamEvent, TeamPolicy, TeamState, WorkItem, WorkingHours } from './types';
-import { EMAIL_HASH_PATTERN, EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, SNAPSHOT_PATH_PATTERN, invalid, isRecord, parseEventFile } from './validate';
+import { BOARD_ITEM_ID_PATTERN, GSD_ITEM_ID_PATTERN, itemKindOf, transitionProblem } from './work';
+import type { Availability, CommittedEvent, DeviceKey, DeviceRef, EntryVerdict, GenesisAnchor, ImplementedTeamEvent, ItemEstimate, ItemGsdRef, ItemKind, ItemState, JsonObject, Materializer, Member, MemberInvite, Rejection, Role, SnapshotRef, TeamEvent, TeamPolicy, TeamState, WorkItem, WorkingHours } from './types';
+import { AT_PATTERN, EMAIL_HASH_PATTERN, EVENT_ID_PATTERN, FINGERPRINT_PATTERN, MEMBER_ID_PATTERN, REASON_MAX, SNAPSHOT_PATH_PATTERN, TITLE_MAX, invalid, isRecord, parseEventFile, validateDependencies, validateDescription, validateEstimate, validateGsdRef, validateItemTags, validateMustHaves, validateRequirements, validateScope, validateSource, validateText } from './validate';
 
 export const MAX_LAMPORT_JUMP = 1000;
 const R = TEAM_REJECTION_REASONS;
@@ -659,6 +659,114 @@ function emptyList(value: unknown, path: string): void {
   if (!Array.isArray(value) || value.length !== 0) bad(path);
 }
 
+// ---- Stored work items ---------------------------------------------------------------------------------------------------------------
+// A snapshot item is held to the rules the event validators enforce when the item is written, so a hostile snapshot cannot hold an item
+// no log could produce: exact keys, the same limits, kind and id that agree, an origin that fits the id, and a parent that exists. claimId
+// and ringFenceNanoUsd are not accepted yet: nothing in this phase stores them, and claims must be empty (a later phase widens both together).
+const ITEM_KINDS: readonly ItemKind[] = ['milestone', 'phase', 'plan', 'task', 'chore', 'bug', 'spike', 'review'];
+const ITEM_STATES: readonly ItemState[] = ['backlog', 'ready', 'claimed', 'in-progress', 'in-review', 'integrating', 'done', 'cancelled'];
+const BOARD_KINDS: readonly ItemKind[] = ['bug', 'chore', 'spike'];
+const PARENT_KIND_OF: Readonly<Record<string, ItemKind>> = { phase: 'milestone', plan: 'phase', task: 'plan' };
+const ITEM_REQUIRED = ['id', 'kind', 'title', 'dependsOn', 'scope', 'requirements', 'mustHaves', 'state', 'tags', 'origin', 'stateSince'];
+const ITEM_OPTIONAL = ['parentId', 'gsd', 'estimate', 'blocked', 'createdBy', 'description', 'hold', 'summary', 'active', 'source'];
+
+// A field validator answers with a problem text or nothing; a snapshot only needs to know there was one, and where.
+function sound(problem: string | undefined, path: string): void {
+  if (problem !== undefined) bad(path);
+}
+
+function literalTrue(value: unknown, path: string): true {
+  return value === true ? true : bad(path);
+}
+
+function copyStoredEstimate(value: unknown, path: string): ItemEstimate {
+  sound(validateEstimate(value, path), path);
+  return copyEstimate(value as ItemEstimate);
+}
+
+function copyStoredGsd(value: unknown, path: string): ItemGsdRef {
+  sound(validateGsdRef(value, path), path);
+  return copyGsd(value as ItemGsdRef);
+}
+
+function parseBlocked(value: unknown, path: string): NonNullable<WorkItem['blocked']> {
+  const raw = plainRecord(value, path, ['reason', 'by', 'since']);
+  sound(validateText(raw.reason, `${path}.reason`, REASON_MAX), `${path}.reason`);
+  return { reason: raw.reason as string, by: patterned(raw.by, `${path}.by`, MEMBER_ID_PATTERN), since: patterned(raw.since, `${path}.since`, AT_PATTERN) };
+}
+
+function parseWorkItem(value: unknown, path: string): WorkItem {
+  const raw = plainRecord(value, path, ITEM_REQUIRED, ITEM_OPTIONAL);
+  const id = typeof raw.id === 'string' && (GSD_ITEM_ID_PATTERN.test(raw.id) || BOARD_ITEM_ID_PATTERN.test(raw.id)) ? raw.id : bad(`${path}.id`);
+  const origin = choice(raw.origin, `${path}.origin`, ['import', 'board'] as const);
+  const kind = choice<ItemKind>(raw.kind, `${path}.kind`, ITEM_KINDS);
+  const imported = origin === 'import';
+  if (imported ? itemKindOf(id) !== kind : !BOARD_ITEM_ID_PATTERN.test(id) || !BOARD_KINDS.includes(kind)) bad(`${path}.kind`);
+  // Only an imported item has a place in the graph, a GSD reference and a dependency list; only a board item has an author and a description.
+  const present = (key: string): boolean => raw[key] !== undefined;
+  const only = (key: string, allowed: boolean): void => {
+    if (present(key) && !allowed) bad(`${path}.${key}`);
+  };
+  only('createdBy', !imported);
+  only('description', !imported);
+  only('parentId', imported && PARENT_KIND_OF[kind] !== undefined);
+  only('gsd', imported);
+  only('summary', imported && kind === 'plan');
+  only('active', imported && kind === 'milestone');
+  only('source', imported && kind === 'milestone');
+  if (!imported && !present('createdBy')) bad(`${path}.createdBy`);
+  if (imported && PARENT_KIND_OF[kind] !== undefined && !present('parentId')) bad(`${path}.parentId`);
+  sound(validateText(raw.title, `${path}.title`, TITLE_MAX), `${path}.title`);
+  sound(validateDependencies(raw.dependsOn, `${path}.dependsOn`), `${path}.dependsOn`);
+  if (!imported && (raw.dependsOn as unknown[]).length > 0) bad(`${path}.dependsOn`);
+  sound(validateScope(raw.scope, `${path}.scope`), `${path}.scope`);
+  sound(validateRequirements(raw.requirements, `${path}.requirements`), `${path}.requirements`);
+  sound(validateMustHaves(raw.mustHaves, `${path}.mustHaves`), `${path}.mustHaves`);
+  sound(validateItemTags(raw.tags, `${path}.tags`), `${path}.tags`);
+  const item: WorkItem = {
+    id, kind, title: raw.title as string, dependsOn: [...(raw.dependsOn as string[])], scope: [...(raw.scope as string[])], requirements: [...(raw.requirements as string[])],
+    mustHaves: [...(raw.mustHaves as string[])], state: choice<ItemState>(raw.state, `${path}.state`, ITEM_STATES), tags: [...(raw.tags as string[])], origin,
+    stateSince: patterned(raw.stateSince, `${path}.stateSince`, AT_PATTERN)
+  };
+  if (present('parentId')) item.parentId = patterned(raw.parentId, `${path}.parentId`, GSD_ITEM_ID_PATTERN);
+  if (present('gsd')) item.gsd = copyStoredGsd(raw.gsd, `${path}.gsd`);
+  if (present('estimate')) item.estimate = copyStoredEstimate(raw.estimate, `${path}.estimate`);
+  if (present('blocked')) item.blocked = parseBlocked(raw.blocked, `${path}.blocked`);
+  if (present('createdBy')) item.createdBy = patterned(raw.createdBy, `${path}.createdBy`, MEMBER_ID_PATTERN);
+  if (present('description')) {
+    sound(validateDescription(raw.description, `${path}.description`), `${path}.description`);
+    item.description = raw.description as string;
+  }
+  if (present('hold')) item.hold = literalTrue(raw.hold, `${path}.hold`);
+  if (present('summary')) item.summary = literalTrue(raw.summary, `${path}.summary`);
+  if (present('active')) item.active = literalTrue(raw.active, `${path}.active`);
+  if (present('source')) {
+    sound(validateSource(raw.source, `${path}.source`), `${path}.source`);
+    item.source = raw.source as string;
+  }
+  return item;
+}
+
+function parseItemPair(value: unknown, path: string): [string, WorkItem] {
+  if (!Array.isArray(value) || value.length !== 2) return bad(path);
+  const item = parseWorkItem(value[1], `${path}[1]`);
+  if (value[0] !== item.id) bad(`${path}[0]`);
+  return [item.id, item];
+}
+
+function parseItems(value: unknown): Map<string, WorkItem> {
+  const parsed = new Map<string, WorkItem>();
+  for (const [id, item] of items(value, 'items', parseItemPair)) {
+    if (parsed.has(id)) bad('items');
+    parsed.set(id, item);
+  }
+  // The log only ever creates an item under a parent that is already on the board and one kind above it.
+  for (const item of parsed.values()) {
+    if (item.parentId !== undefined && parsed.get(item.parentId)?.kind !== PARENT_KIND_OF[item.kind]) bad(`items.${item.id}.parentId`);
+  }
+  return parsed;
+}
+
 function parseDeviceKey(value: unknown, path: string): DeviceKey {
   const raw = plainRecord(value, path, ['fingerprint', 'publicKey', 'addedBy', 'addedEvent'], ['revokedEvent', 'revokedBy', 'sealKey']);
   const publicKey = shortText(raw.publicKey, `${path}.publicKey`);
@@ -787,8 +895,8 @@ export function deserialiseState(value: JsonObject, anchor: GenesisAnchor): Team
     state.members.set(member.id, member);
   }
   for (const [fingerprint, memberId] of items(root.deviceIndex, 'deviceIndex', parsePair)) state.deviceIndex.set(fingerprint, memberId);
-  // Later phases fill these; a Phase 60 snapshot must carry them empty and at their defaults.
-  emptyList(root.items, 'items');
+  // Work items are read strictly. Later phases fill the others; until then a snapshot must carry them empty and at their defaults.
+  state.items = parseItems(root.items);
   emptyList(root.claims, 'claims');
   emptyList(root.leases, 'leases');
   emptyList(root.allocations, 'allocations');

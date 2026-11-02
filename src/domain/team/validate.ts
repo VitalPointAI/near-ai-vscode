@@ -231,9 +231,9 @@ function validateLamportField(value: unknown, path: string): string | undefined 
 }
 
 // ---- Work item fields (D-04, D-10 to D-14) -------------------------------------------------------------------------------------------
-const TITLE_MAX = 200;
+export const TITLE_MAX = 200;
 const DESCRIPTION_MAX = 2000;
-const REASON_MAX = 200;
+export const REASON_MAX = 200;
 const MUST_HAVE_MAX = 600;
 const MAX_SCOPE_ENTRIES = 64;
 const MAX_REQUIREMENTS = 32;
@@ -255,11 +255,11 @@ const BOARD_KINDS: readonly string[] = ['bug', 'chore', 'spike'];
 // Kinds that carry a parent. A milestone has none; the parent kind each of these needs is checked by transitionProblem.
 const PARENT_KINDS: Readonly<Record<string, ItemKind>> = { phase: 'milestone', plan: 'phase', task: 'plan' };
 
-function validateText(value: unknown, path: string, max: number): string | undefined {
+export function validateText(value: unknown, path: string, max: number): string | undefined {
   return typeof value === 'string' && value.trim().length >= 1 && value.length <= max && !CONTROL_CHARACTERS.test(value) ? undefined : invalid(path);
 }
 
-function validateDescription(value: unknown, path: string): string | undefined {
+export function validateDescription(value: unknown, path: string): string | undefined {
   return typeof value === 'string' && value.length <= DESCRIPTION_MAX && !DESCRIPTION_CONTROL_CHARACTERS.test(value) ? undefined : invalid(path);
 }
 
@@ -268,38 +268,38 @@ function validateItemList(value: unknown, path: string, max: number, entry: (ite
   return value.every((item: unknown) => typeof item === 'string' && entry(item)) ? undefined : invalid(path);
 }
 
-function validateScope(value: unknown, path: string): string | undefined {
+export function validateScope(value: unknown, path: string): string | undefined {
   return validateItemList(value, path, MAX_SCOPE_ENTRIES, isScopePattern);
 }
 
-function validateRequirements(value: unknown, path: string): string | undefined {
+export function validateRequirements(value: unknown, path: string): string | undefined {
   return validateItemList(value, path, MAX_REQUIREMENTS, (item) => REQUIREMENT_PATTERN.test(item));
 }
 
-function validateMustHaves(value: unknown, path: string): string | undefined {
+export function validateMustHaves(value: unknown, path: string): string | undefined {
   return validateItemList(value, path, MAX_MUST_HAVES, (item) => item.trim().length >= 1 && item.length <= MUST_HAVE_MAX && !CONTROL_CHARACTERS.test(item));
 }
 
 // Dependencies name plans or phases, never tasks, milestones or board items.
-function validateDependencies(value: unknown, path: string): string | undefined {
+export function validateDependencies(value: unknown, path: string): string | undefined {
   return validateItemList(value, path, MAX_DEPENDENCIES, (item) => {
     const kind = itemKindOf(item);
     return kind === 'plan' || kind === 'phase';
   });
 }
 
-function validateItemTags(value: unknown, path: string): string | undefined {
+export function validateItemTags(value: unknown, path: string): string | undefined {
   return validateItemList(value, path, MAX_TAGS, (item) => ITEM_TAG_PATTERN.test(item));
 }
 
-function validateEstimate(value: unknown, path: string): string | undefined {
+export function validateEstimate(value: unknown, path: string): string | undefined {
   if (!isRecord(value)) return invalid(path);
   return checkKeys(value, path, ['tokens'], ['confidence'])
     ?? (isSafeIntegerInRange(value.tokens, 1, MAX_ESTIMATE_TOKENS) ? undefined : invalid(child(path, 'tokens')))
     ?? (has(value, 'confidence') ? validateChoice(value.confidence, CONFIDENCES, child(path, 'confidence')) : undefined);
 }
 
-function validateGsdRef(value: unknown, path: string): string | undefined {
+export function validateGsdRef(value: unknown, path: string): string | undefined {
   if (!isRecord(value)) return invalid(path);
   return checkKeys(value, path, ['phase'], ['plan', 'wave', 'file'])
     ?? validateId(value.phase, GSD_PHASE_PATTERN, child(path, 'phase'))
@@ -328,7 +328,7 @@ function validateBoolean(value: unknown, path: string): string | undefined {
   return typeof value === 'boolean' ? undefined : invalid(path);
 }
 
-function validateSource(value: unknown, path: string): string | undefined {
+export function validateSource(value: unknown, path: string): string | undefined {
   return matches(value, COMMIT_PATTERN) ? undefined : invalid(path);
 }
 
