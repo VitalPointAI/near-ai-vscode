@@ -19,8 +19,19 @@ the owner's approval in GitHub; never try to publish from this session.
    ```
 
    For a hotfix use `hotfix/<x.y.z>` (see "A bad version reached users: hotfix" in the workflow
-   doc for when to branch from the last tag instead, and what that branch needs). Do everything
-   below inside that worktree.
+   doc for when to branch from the last tag instead). A hotfix branched from an older tag must
+   first bring over the release workflow and the gates from main, in its own commit, because CI
+   and the Release workflow run the copies on the branch:
+
+   ```bash
+   git checkout origin/main -- .github scripts .vscodeignore
+   git commit -m "chore(release): bring the release workflow and gates from main"
+   ```
+
+   `.github` carries the workflows and the secret-scan allowlist for the fake keys already in
+   old test fixtures, `scripts` the scripts the workflows run, and `.vscodeignore` keeps
+   `.github/` and `.claude/` out of the VSIX. Without any one of them CI or the Release workflow
+   fails. Do everything below inside that worktree.
 
 3. **Bump the version** (package.json and package-lock.json together):
 

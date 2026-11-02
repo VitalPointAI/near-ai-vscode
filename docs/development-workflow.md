@@ -262,18 +262,35 @@ bump the version and CHANGELOG with `scripts/prepare-release.mjs`, and go throug
 `/merge-pr`, which tags and starts the release.
 
 **Main has unreleased work that must not ship yet.** Branch from the last release tag instead.
-The tag starts the Release workflow of the tagged commit, so the hotfix branch must contain
-`.github/workflows/release.yml` and the `scripts/` it uses. Tags made before this workflow
-existed (v0.4.12 and earlier) do not; on such a branch, first bring them over from `main`
-(`git checkout origin/main -- .github/workflows scripts`, then commit). With `<last>` the last
-release (say 0.5.0) and `<next>` the next patch (0.5.1):
+With `<last>` the last release (say 0.5.0) and `<next>` the next patch (0.5.1):
 
 ```bash
+git fetch origin
 git worktree add -b hotfix/<next> .claude/worktrees/hotfix-<next> v<last>
+cd .claude/worktrees/hotfix-<next>
+git checkout origin/main -- .github scripts .vscodeignore
+git diff --cached --stat     # check what came over, see below
+git commit -m "chore(release): bring the release workflow and gates from main"
 # fix, bump to <next>, write the CHANGELOG section, commit
 git push -u origin hotfix/<next>
 gh pr create --base main --title "fix: ... (<next>)"
 ```
+
+The `git checkout origin/main -- ...` step matters because CI and the Release workflow run the
+files on the branch, not the ones on `main`, and an older tag may predate them (v0.4.12 and
+earlier do). All three paths are needed:
+
+- `.github` brings `workflows/ci.yml` and `workflows/release.yml`, and also
+  `secret-scan-allow.txt`: the old tag already contains test fixtures with fake keys, and
+  without the allowlist the `secret-scan` job fails on every run.
+- `scripts` brings the scripts those workflows run (`secret-scan.mjs`, `lib/workflow.mjs`,
+  `verify-release-content.mjs` and the rest).
+- `.vscodeignore` keeps `.github/` and `.claude/` out of the VSIX. An older one does not, so
+  `release-content` in CI and the `build` job of the Release workflow refuse the package.
+
+Check the staged diff before committing: it should only add or update workflow and gate files.
+If `main` changed a script the old code still relies on (for example the vendoring or SBOM
+scripts), restore that file from the tag with `git checkout v<last> -- scripts/<file>`.
 
 Run `/review-pr` on the PR as usual: the tag needs `agent-review` set by the owner's account on
 the exact head commit you release. The PR's CI tests the hotfix merged with `main` (and does not
