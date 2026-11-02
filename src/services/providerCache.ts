@@ -1,8 +1,12 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { TEAM_PROFILE_PREFIX } from '../domain/auth';
 import type { OrganizationProfile, ResolvedProvider } from '../domain/auth';
 import { AuthService } from './auth';
 import type { ModelInfo } from './nearAiClient';
 import { ProfileStore } from './profileStore';
 import { createNearAiProvider } from './providerFactory';
+import type { KeyScope } from './spendLedger';
 
 export interface ActiveProvider {
   profile: OrganizationProfile;
@@ -15,6 +19,24 @@ export interface ActiveProvider {
 const CATALOG_TTL_MS = 10 * 60_000;
 /** After a failed refresh, the last good catalog is served and the refresh is tried again this much later. */
 const CATALOG_RETRY_AFTER_FAILURE_MS = 60_000;
+const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
+
+/**
+ * Team Mode (D-14): a team key profile is the team's key; any other profile in a project that has team.json is a personal key used in a team
+ * project; a project without team.json is solo and gets no tag at all. ENOENT and ENOTDIR mean there is no team.json.
+ */
+async function keyScopeFor(root: string, profileId: string): Promise<KeyScope | undefined> {
+  if (profileId.startsWith(TEAM_PROFILE_PREFIX)) return 'team';
+  try {
+    await fs.stat(path.join(root, ...TEAM_FILE_PARTS));
+    return 'personal';
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+    throw error;
+  }
+}
+
 const cache = new Map<string, { provider: ResolvedProvider; models: Promise<ModelInfo[]>; loadedAt: number; last?: ModelInfo[] }>();
 
 /**
@@ -35,7 +57,8 @@ export async function activeProvider(root: string, auth: AuthService, options: {
   let entry = cache.get(key);
   if (!entry || now() - entry.loadedAt > CATALOG_TTL_MS) {
     const previous = entry;
-    const provider = previous?.provider ?? await createNearAiProvider({ auth, profile, scope: profiles.getScope(selection.profileId) });
+    const keyScope = previous?.provider === undefined ? await keyScopeFor(root, profile.profileId) : undefined;
+    const provider = previous?.provider ?? await createNearAiProvider({ auth, profile, scope: profiles.getScope(selection.profileId), ...(keyScope === undefined ? {} : { keyScope }) });
     // A local runtime has no NEAR catalog, pricing, or billing; its models run on this machine.
     const fresh = provider.provider === 'local'
       ? provider.client.listLocalModels()

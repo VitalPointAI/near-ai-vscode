@@ -108,7 +108,7 @@ export function dayStart(now: number, boundary: DayBoundary = 'local'): number {
   return boundary === 'utc' ? Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) : new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
-type EntryRecord = { t: 'e'; id: string; v: number; w?: string; at?: number; end?: number; rid?: string; model?: string; path?: string; kind?: SpendKind; run?: string; conv?: string; proj?: string; agent?: string; st?: SpendStatus; in?: number; cin?: number; out?: number; est?: number };
+type EntryRecord = { t: 'e'; id: string; v: number; w?: string; at?: number; end?: number; rid?: string; model?: string; path?: string; kind?: SpendKind; run?: string; conv?: string; proj?: string; agent?: string; ks?: KeyScope; st?: SpendStatus; in?: number; cin?: number; out?: number; est?: number };
 type ActualRecord = { t: 'a'; rid: string; nano: number; how: 'billing' | 'zero'; at: number };
 type LedgerRecord = EntryRecord | ActualRecord;
 
@@ -163,7 +163,7 @@ export class SpendLedger {
   /** Records a billable response; returns its entry id for `finish`. */
   public start(input: SpendStart): string {
     const id = `${this.now().toString(36)}-${randomBytes(6).toString('hex')}`;
-    this.write({ t: 'e', id, v: 1, w: this.writer, at: this.now(), ...(input.status && input.status !== 'open' ? { end: this.now() } : {}), rid: input.requestId, model: input.model, path: input.path, kind: input.kind, run: input.runId, conv: input.conversationId, proj: input.projectId, agent: input.agentId, st: input.status ?? 'open', in: input.inputTokens, cin: input.cachedInputTokens, out: input.outputTokens, est: Math.max(0, Math.round(input.estimateNanoUsd)) });
+    this.write({ t: 'e', id, v: 1, w: this.writer, at: this.now(), ...(input.status && input.status !== 'open' ? { end: this.now() } : {}), rid: input.requestId, model: input.model, path: input.path, kind: input.kind, run: input.runId, conv: input.conversationId, proj: input.projectId, agent: input.agentId, ks: input.keyScope, st: input.status ?? 'open', in: input.inputTokens, cin: input.cachedInputTokens, out: input.outputTokens, est: Math.max(0, Math.round(input.estimateNanoUsd)) });
     return id;
   }
 
@@ -317,6 +317,7 @@ export class SpendLedger {
     if (record.conv) next.conversationId = record.conv;
     if (record.proj) next.projectId = record.proj;
     if (record.agent) next.agentId = record.agent;
+    if (record.ks) next.keyScope = record.ks;
     if (record.st) next.status = record.st;
     if (record.in !== undefined) next.inputTokens = record.in;
     if (record.cin !== undefined) next.cachedInputTokens = record.cin;
@@ -387,7 +388,8 @@ function parseRecord(line: string): LedgerRecord | undefined {
   const status = ['open', 'completed', 'partial', 'aborted'].includes(String(record.st)) ? record.st as SpendStatus : undefined;
   const kinds: SpendKind[] = ['main', 'sub-agent', 'safety', 'summary', 'attachment', 'transcription', 'image', 'generation', 'participant', 'eval'];
   const kind = kinds.includes(record.kind as SpendKind) ? record.kind as SpendKind : undefined;
-  return stripUndefined({ t: 'e' as const, id: record.id, v: record.v, w: str('w'), at: num('at'), end: num('end'), rid: str('rid'), model: str('model'), path: str('path'), kind, run: str('run'), conv: str('conv'), proj: str('proj'), agent: str('agent'), st: status, in: num('in'), cin: num('cin'), out: num('out'), est: num('est') });
+  const keyScope: KeyScope | undefined = record.ks === 'team' ? 'team' : record.ks === 'personal' ? 'personal' : undefined;
+  return stripUndefined({ t: 'e' as const, id: record.id, v: record.v, w: str('w'), at: num('at'), end: num('end'), rid: str('rid'), model: str('model'), path: str('path'), kind, run: str('run'), conv: str('conv'), proj: str('proj'), agent: str('agent'), ks: keyScope, st: status, in: num('in'), cin: num('cin'), out: num('out'), est: num('est') });
 }
 
 function stripUndefined<T extends object>(value: T): T {

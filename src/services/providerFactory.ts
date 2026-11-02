@@ -21,7 +21,7 @@ async function clientsFor(options: CreateNearAiProviderOptions): Promise<{ clien
   if (!apiKey && profile.provider !== 'local') throw new Error('The selected profile has no configured credential.');
   // Every billable response of a NEAR AI Cloud key goes to that key's spend ledger; a local runtime bills nothing.
   const spend = profile.provider === 'local' ? undefined : spendAccountFor(profile.baseUrl, apiKey);
-  const client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn, ...(spend ? { spend, spendTag: { projectId: scope.projectId } } : {}) });
+  const client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn, ...(spend ? { spend, spendTag: { projectId: scope.projectId, ...(options.keyScope === undefined ? {} : { keyScope: options.keyScope }) } } : {}) });
   if (profile.provider !== 'hybrid' || !profile.localBaseUrl) return { client };
   const localApiKey = await auth.getScopedApiKeyFor(localKeyScope(scope), profile.localBaseUrl) ?? '';
   return { client, localClient: new NearAiClient({ baseUrl: profile.localBaseUrl, apiKey: localApiKey, fetchFn }) };

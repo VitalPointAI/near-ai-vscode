@@ -14,7 +14,9 @@ import { teamMaterializer } from '../../domain/team/materialize';
 import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
 import type { GenesisAnchor, Role, TeamEvent, TeamFile, TeamState } from '../../domain/team/types';
 import { AuditStore } from '../auditStore';
+import { AuthService } from '../auth';
 import type { SecretStorageLike } from '../auth';
+import { ProfileStore } from '../profileStore';
 import type { FetchLike } from '../reportingSignIn';
 import { ROSTER_AUDIT_TYPES, fileMirrorMark, mirrorRosterEvents, projectMarkScope } from '../../team/auditMirror';
 import type { AuditSink } from '../../team/auditMirror';
@@ -29,6 +31,7 @@ import type { GitRunner } from '../../team/runGit';
 import { DEFAULT_POLL_SECONDS, SyncScheduler } from '../../team/syncScheduler';
 import type { SchedulerTimers } from '../../team/syncScheduler';
 import { NearSession } from '../../team/nearSession';
+import { readInstalledKey, teamProfileId } from '../../team/teamKeyProfile';
 import { checkTrustPin, runSerialised, teamStorageDir, writeFileAtomic } from '../../team/teamFile';
 import type { TransportStatus } from '../../team/transport';
 import { PAUSED_REFUSED_TEXT, createTeamStatusBar, displayText, safeReason, statusText } from './teamStatusBar';
@@ -42,6 +45,8 @@ export const JOIN_COMMAND = 'nearAi.team.join';
 export const MANAGE_MEMBERS_COMMAND = 'nearAi.team.manageMembers';
 export const NOTIFIED_FILE = 'notified.json';
 export const JOIN_ACTION = 'Join Team';
+export const PERSONAL_KEY_WARNING = 'This team project is using your personal NEAR key, so the spend cap your lead set does not apply. Runs are marked as personal-key runs.';
+export const USE_TEAM_KEY_ACTION = 'Use team key';
 // After a key install failed, the same key is not tried again for this long, so a wrong organization does not hold up every poll.
 const INSTALL_RETRY_MS = 5 * 60_000;
 const VERIFY_PROGRESS_TITLE = 'Verifying the team log';
@@ -175,6 +180,7 @@ export class TeamSession {
   // What this storage folder has already told the user (ids only), loaded on first use and written back after each addition.
   private notified: Set<string> | undefined;
   private removed = false;
+  private personalKeyWarned = false;
   private installFailed: { event: string; retryAt: number } | undefined;
 
   private constructor(deps: TeamSessionDeps, storage: string, identity: DeviceIdentity | undefined) {
@@ -527,7 +533,10 @@ export class TeamSession {
         extras.removed = true;
         return extras;
       }
-      if (me !== undefined) await this.installKey(me);
+      if (me !== undefined) {
+        await this.installKey(me);
+        await this.warnPersonalKey();
+      }
       if (me !== undefined && me.removedEvent === undefined && this.signing && (me.role === 'owner' || me.role === 'lead')) {
         const items = memberAttention(state, this.teamFile.near !== undefined);
         extras.pending = items.filter((item) => item.kind === 'confirm').length;
@@ -586,6 +595,20 @@ export class TeamSession {
     } else {
       this.installFailed = undefined;
     }
+  }
+
+  // D-14: a member whose team key is installed but who has another profile selected is spending outside the lead's cap. Said once per session,
+  // with the way back. Nothing is said when no team key was ever installed here (the owner, or a member still waiting for theirs).
+  private async warnPersonalKey(): Promise<void> {
+    if (this.personalKeyWarned || this.identity === undefined) return;
+    if ((await readInstalledKey(this.deps.globalStorageDir, this.teamFile.teamId))?.keyId === undefined) return;
+    const store = new ProfileStore(this.deps.projectRoot, new AuthService(this.deps.secrets));
+    const selected = (await store.getActiveSelection())?.profileId;
+    const teamProfile = teamProfileId(this.teamFile.teamId);
+    if (selected === undefined || selected === teamProfile) return;
+    this.personalKeyWarned = true;
+    this.line('This project is using a personal NEAR key, not the team key.');
+    this.offer('warn', PERSONAL_KEY_WARNING, [{ label: USE_TEAM_KEY_ACTION, run: async () => { await store.select(teamProfile); } }]);
   }
 
   // A message with no buttons, shown without waiting.
