@@ -16,7 +16,7 @@ const MAX_STEPS = 12;
 /** Markers untouched for this long (ended, or cut off and never resumed) are removed when the folder is read. */
 const KEEP_MS = 30 * 24 * 60 * 60_000;
 
-export type RunEnd = 'completed' | 'cancelled' | 'failed' | 'max-turns' | 'resumed' | 'dismissed';
+export type RunEnd = 'completed' | 'cancelled' | 'failed' | 'max-turns' | 'stuck' | 'resumed' | 'dismissed';
 
 export interface RunMarker {
   version: 1;
@@ -173,7 +173,7 @@ export function parseRunMarker(value: unknown, conversationId: string): RunMarke
   const raw = value as Record<string, unknown>;
   const time = (field: unknown) => typeof field === 'string' && !Number.isNaN(Date.parse(field));
   if (raw.version !== 1 || raw.conversationId !== conversationId || typeof raw.runId !== 'string' || !RUN_ID.test(raw.runId) || typeof raw.pid !== 'number' || !time(raw.startedAt) || !time(raw.activeAt)) return undefined;
-  const outcomes = new Set(['completed', 'cancelled', 'failed', 'max-turns', 'resumed', 'dismissed']);
+  const outcomes = new Set(['completed', 'cancelled', 'failed', 'max-turns', 'stuck', 'resumed', 'dismissed']);
   return {
     version: 1,
     conversationId,

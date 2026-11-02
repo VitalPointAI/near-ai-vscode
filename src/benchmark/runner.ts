@@ -143,7 +143,7 @@ async function runOne(options: ComparisonOptions, model: string, benchmark: Benc
         }
       }));
       if (result.outcome === 'cancelled' && !timedOut && !budgetReason) return stopReason ? { kind: 'stopped', reason: stopReason } : { kind: 'cancelled' };
-      outcome = timedOut ? 'timed-out' : budgetReason ? 'over-budget' : result.outcome === 'max-turns' ? 'max-turns' : 'completed';
+      outcome = timedOut ? 'timed-out' : budgetReason ? 'over-budget' : result.outcome === 'max-turns' || result.outcome === 'stuck' ? 'max-turns' : 'completed';
       if (budgetReason) misses = [budgetReason];
     } catch (error) {
       const cause = error instanceof AgentRunError ? error.cause : error;

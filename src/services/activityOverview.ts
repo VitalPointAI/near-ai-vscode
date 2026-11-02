@@ -96,7 +96,7 @@ export interface HistoryRow {
   durationMs?: number;
   costText?: string;
   costUsd?: number;
-  outcome: SessionOutcome | 'max-turns';
+  outcome: SessionOutcome | 'max-turns' | 'stuck';
 }
 
 export interface HistoryPage { rows: HistoryRow[]; page: number; pages: number; total: number }
@@ -190,7 +190,7 @@ export function historyPage(sessions: ActivitySessionSummary[], page: number, sp
       agents: session.stats?.agents ?? 1,
       durationMs: Math.max(0, ended - time(session.startedAt)),
       ...(usd !== undefined ? { costUsd: usd, costText: `${usd > 0 && usd < 0.0001 ? '<$0.0001' : `$${usd.toFixed(usd < 1 ? 4 : 2)}`}${usd > 0 && pending ? ' (pending)' : ''}` } : {}),
-      outcome: session.runOutcome === 'max-turns' ? 'max-turns' : session.runOutcome ?? session.outcome
+      outcome: session.runOutcome === 'max-turns' || session.runOutcome === 'stuck' ? session.runOutcome : session.runOutcome ?? session.outcome
     };
   });
   return { rows, page: current, pages, total: sorted.length };

@@ -164,7 +164,7 @@ export function closeInterruptedRuns(workspaceRoot: string): Promise<number> {
   if (!done) { done = new ActivityStore(key).closeInterrupted().catch(() => 0); interrupted.set(key, done); }
   return done;
 }
-const RUN_OUTCOMES: RunOutcomeLabel[] = ['completed', 'max-turns', 'cancelled', 'failed'];
+const RUN_OUTCOMES: RunOutcomeLabel[] = ['completed', 'max-turns', 'stuck', 'cancelled', 'failed'];
 function runFields(input: { runId?: unknown; conversationId?: unknown; title?: unknown; endedAt?: unknown; runOutcome?: unknown; stats?: unknown }): Partial<ActivitySessionSummary> {
   const fields: Partial<ActivitySessionSummary> = {};
   if (typeof input.runId === 'string' && RUN_ID.test(input.runId)) fields.runId = input.runId;

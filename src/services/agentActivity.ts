@@ -27,7 +27,7 @@ export interface ActivityEntry {
   callId?: string;
 }
 
-export type AgentStatus = 'running' | 'completed' | 'max-turns' | 'cancelled' | 'failed';
+export type AgentStatus = 'running' | 'completed' | 'max-turns' | 'stuck' | 'cancelled' | 'failed';
 
 /** What a running agent is doing right now. */
 export type AgentPhase = 'starting' | 'thinking' | 'generating' | 'tool' | 'waiting-you' | 'cooling-down' | 'paused';
@@ -208,7 +208,7 @@ export class ActivityFeed {
     stat.coolUntil = undefined;
     stat.tool = undefined;
     this.closeText(agentId);
-    this.add({ runId: stat.runId, agentId, agent: stat.agent, kind: 'agent-end', title: `${stat.agent} ${status === 'max-turns' ? 'reached its turn limit' : status}`, text: summary });
+    this.add({ runId: stat.runId, agentId, agent: stat.agent, kind: 'agent-end', title: `${stat.agent} ${status === 'max-turns' ? 'reached its turn limit' : status === 'stuck' ? 'was stopped because it was not making progress' : status}`, text: summary });
   }
 
   public prompt(agentId: string, text: string): void { this.withAgent(agentId, (base) => { this.closeText(agentId); this.add({ ...base, kind: 'prompt', title: 'Prompt', text }); }); }

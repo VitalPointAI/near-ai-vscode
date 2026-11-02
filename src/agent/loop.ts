@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
@@ -43,7 +44,14 @@ export type AgentEvent =
   | { type: 'permission'; tool: string; decision: 'auto-allowed' | 'denied' }
   | ({ type: 'security'; tool: string } & SecurityEvent);
 
-export type RunOutcome = 'completed' | 'max-turns' | 'cancelled';
+/** `stuck`: stopped because it was not making progress (repeating an action with the same result, or replies that kept running past the output limit). */
+export type RunOutcome = 'completed' | 'max-turns' | 'stuck' | 'cancelled';
+
+/** Why a run stopped before the model finished, for an honest message to the user. */
+export type RunStop =
+  | { kind: 'turn-limit'; turns: number }
+  | { kind: 'loop'; action: string; count: number }
+  | { kind: 'output-limit' };
 
 /**
  * Messages the user sends while a run is going (steering). The run takes them before every model
@@ -81,8 +89,12 @@ export interface AgentRunOptions {
   stallRetries?: number;
   /** Output tokens one reply may use (the client's default when unset). */
   maxOutputTokens?: number;
-  /** Repetitions of the same action, within the last 20 calls, before the agent is nudged and then stopped (default 8 and 14; 0 turns it off). */
-  loopGuard?: { nudgeAt: number; stopAt: number };
+  /**
+   * Repetitions of the same action with the same result, within the last 20 calls, before the
+   * agent is nudged, then warned more strongly, then stopped (default 8, 11 and 14; a nudgeAt
+   * of 0 turns it off; warnAt defaults to halfway between the two).
+   */
+  loopGuard?: { nudgeAt: number; warnAt?: number; stopAt: number };
   /** Shared with sub-agents so "allow for this run" covers the whole run. */
   grants?: RunGrants;
   /** The `auto` mode's private safety model, for commands the rules cannot decide (shared with sub-agents). */
@@ -102,7 +114,7 @@ export interface AgentRunOptions {
   emit(event: AgentEvent): void;
 }
 
-export interface RunResult { outcome: RunOutcome; messages: AgentMessage[]; usage: UsageMetadata[] }
+export interface RunResult { outcome: RunOutcome; messages: AgentMessage[]; usage: UsageMetadata[]; stop?: RunStop }
 
 /** A run that failed for a reason retrying cannot fix; carries the transcript so the work is not lost. */
 /** Lookups from one turn that run at the same time. */
@@ -211,10 +223,7 @@ export class AgentRun {
         // A reply cut off at the output cap is not an answer: ask for a shorter continuation.
         if (reply.finishReason === 'length') {
           this.truncations += 1;
-          if (this.truncations >= 4) {
-            this.options.emit({ type: 'text', text: '\n\n_Stopped this agent: its replies kept running past the output limit._' });
-            return { outcome: 'max-turns', messages: transcript, usage };
-          }
+          if (this.truncations >= 4) return { outcome: 'stuck', messages: transcript, usage, stop: { kind: 'output-limit' } };
           if (assistant.tool_calls?.length) { transcript.pop(); transcript.push({ role: 'assistant', content: assistant.content ?? '' }); }
           transcript.push({ role: 'user', content: '<output-limit>Your last reply hit the output limit and was cut off, so any tool call in it was not run. Continue more concisely: keep reasoning short, and write long files in several smaller parts.</output-limit>' });
           continue;
@@ -230,16 +239,20 @@ export class AgentRun {
           transcript.push(...more);
           continue;
         }
-        transcript.push(...await this.executeCalls(assistant.tool_calls, signal));
-        const loop = this.checkLoop(assistant.tool_calls);
-        if (loop === 'stop') {
-          transcript.push({ role: 'user', content: `<loop-guard>Stopped: you repeated the same action (${this.lastLoopKey}) ${this.loopCount} times without finishing. Report what was blocking you instead of continuing.</loop-guard>` });
-          this.options.emit({ type: 'text', text: `\n\n_Stopped this agent: it repeated the same action (${this.lastLoopKey}) ${this.loopCount} times without making progress._` });
-          return { outcome: 'max-turns', messages: transcript, usage };
+        const results = await this.executeCalls(assistant.tool_calls, signal);
+        transcript.push(...results);
+        const loop = this.checkLoop(assistant.tool_calls, results);
+        if (loop) {
+          const { action, count, excerpt } = loop;
+          if (loop.level === 'stop') {
+            transcript.push({ role: 'user', content: `<loop-guard>Stopped: you ran the same action (${action}) ${count} times and its result did not change. Report what was blocking you instead of continuing.</loop-guard>` });
+            return { outcome: 'stuck', messages: transcript, usage, stop: { kind: 'loop', action, count } };
+          }
+          if (loop.level === 'nudge') transcript.push({ role: 'user', content: `<loop-guard>You have repeated the same action (${action}) ${count} times in your recent steps, and its result did not change. Stop repeating it: if something is blocking you, report what it is and what you tried, then finish with what you have.</loop-guard>` });
+          else transcript.push({ role: 'user', content: `<loop-guard>Warning: you have now run ${action} ${count} times and got the same result every time${excerpt ? ` (it starts: "${excerpt}")` : ''}. Running it again will not give a different answer. Change your approach now: run a different command, read the error in that result and fix its cause, or finish and report what is blocking you. If you keep repeating it, this run will be stopped.</loop-guard>` });
         }
-        if (loop === 'nudge') transcript.push({ role: 'user', content: `<loop-guard>You have repeated the same action (${this.lastLoopKey}) ${this.loopCount} times in your recent steps. Stop repeating it: if something is blocking you, report what it is and what you tried, then finish with what you have.</loop-guard>` });
       }
-      return { outcome: 'max-turns', messages: transcript, usage };
+      return { outcome: 'max-turns', messages: transcript, usage, stop: { kind: 'turn-limit', turns: maxTurns } };
     } catch (error) {
       if (signal.aborted) return { outcome: 'cancelled', messages: transcript, usage };
       throw new AgentRunError(error, transcript);
@@ -367,34 +380,40 @@ export class AgentRun {
 
 Note: this test existed before the task and is weaker now (${describeWeakened(found, this.options.context.root)}). Unless the user asked for it, restore what was removed and fix the code instead.` : '';
   }
-  private readonly recent: string[] = [];
-  private nudged = false;
-  private lastLoopKey = '';
-  private loopCount = 0;
+  /** The last 20 calls as (action, result) pairs; a changed result drops that action's earlier entries. */
+  private readonly recent: Array<{ key: string; result: string }> = [];
+  /** How far the loop guard has gone for the current repetition: nothing yet, nudged, warned. */
+  private loopStage: 0 | 1 | 2 = 0;
 
-  /** What a call acts on, coarsely: the file for file tools, the program and first argument for Bash. */
-  private static loopKey(call: ToolCall): string {
-    let args: Record<string, unknown> = {};
-    try { args = JSON.parse(call.function.arguments || '{}') as Record<string, unknown>; } catch { /* malformed arguments are their own key */ }
-    const file = args.file_path ?? args.path;
-    if (typeof file === 'string') return `${call.function.name} ${file}${typeof args.offset === 'number' ? `@${args.offset}` : ''}`;
-    if (typeof args.command === 'string') return `${call.function.name} ${args.command.trim().split(/\s+/).slice(0, 2).join(' ')}`;
-    return `${call.function.name} ${call.function.arguments.slice(0, 80)}`;
-  }
-
-  /** Watches for an agent stuck repeating the same action: nudges it once, then stops it. */
-  private checkLoop(calls: ToolCall[]): 'nudge' | 'stop' | undefined {
+  /**
+   * Watches for an agent stuck repeating an action that keeps giving the same result: nudges it,
+   * then warns it more strongly, and stops it only if it still repeats after the warning. A call
+   * whose result differs from the last time starts that action's count again, so a command run
+   * again after a fix (or a test run that now fails differently) is never counted as a loop.
+   */
+  private checkLoop(calls: ToolCall[], results: AgentMessage[]): { level: 'nudge' | 'warn' | 'stop'; action: string; count: number; excerpt: string } | undefined {
     const guard = this.options.loopGuard ?? { nudgeAt: 8, stopAt: 14 };
     if (!guard.nudgeAt) return undefined;
-    for (const call of calls) this.recent.push(AgentRun.loopKey(call));
+    const warnAt = guard.warnAt ?? Math.round((guard.nudgeAt + guard.stopAt) / 2);
+    calls.forEach((call, index) => {
+      const key = loopActionKey(call);
+      const result = resultSignature(String(results.find((message) => message.role === 'tool' && message.tool_call_id === call.id)?.content ?? results[index]?.content ?? ''));
+      for (let at = this.recent.length - 1; at >= 0; at -= 1) if (this.recent[at].key === key && this.recent[at].result !== result) this.recent.splice(at, 1);
+      this.recent.push({ key, result });
+    });
     this.recent.splice(0, Math.max(0, this.recent.length - 20));
     const counts = new Map<string, number>();
-    for (const key of this.recent) counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const entry of this.recent) counts.set(entry.key, (counts.get(entry.key) ?? 0) + 1);
     const [key, count] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? ['', 0];
-    this.lastLoopKey = key;
-    this.loopCount = count;
-    if (count >= guard.stopAt) return 'stop';
-    if (count >= guard.nudgeAt && !this.nudged) { this.nudged = true; return 'nudge'; }
+    // Below the first threshold the agent has moved on (or never looped): a later loop starts over.
+    if (count < guard.nudgeAt) { this.loopStage = 0; return undefined; }
+    const index = calls.findIndex((call) => loopActionKey(call) === key);
+    const output = index >= 0 ? String(results.find((message) => message.role === 'tool' && message.tool_call_id === calls[index].id)?.content ?? '') : '';
+    const found = { action: actionLabel(key), count, excerpt: output.replace(/\s+/g, ' ').trim().slice(0, 160).replace(/"/g, "'") };
+    if (this.loopStage === 0) { this.loopStage = 1; return { level: 'nudge', ...found }; }
+    // The stronger warning always comes before a stop, even if several repeats arrived in one turn.
+    if (this.loopStage === 1 && (count >= warnAt || count >= guard.stopAt)) { this.loopStage = 2; return { level: 'warn', ...found }; }
+    if (this.loopStage === 2 && count >= guard.stopAt) return { level: 'stop', ...found };
     return undefined;
   }
 
@@ -512,4 +531,48 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     this.options.emit({ type: 'tool-end', callId, ok, output: bounded.length > UI_OUTPUT_CHARS ? `${bounded.slice(0, UI_OUTPUT_CHARS)}\n…` : bounded });
     return bounded;
   }
+}
+
+const LEADING_CD = /^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/;
+const LEADING_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s;&|]*)\s+/;
+
+/**
+ * A shell command as the loop guard compares it: leading `cd <dir> &&` (or `;`) steps and
+ * `NAME=value` assignments removed, whitespace collapsed, and the rest kept whole, so
+ * `cd repo && npm test` and `cd repo && git status` are different actions.
+ */
+export function normalizeShellCommand(command: string): string {
+  let rest = command.trim();
+  for (let previous = ''; previous !== rest;) {
+    previous = rest;
+    rest = rest.replace(LEADING_CD, '').replace(LEADING_ASSIGNMENT, '').trimStart();
+  }
+  return (rest || command.trim()).replace(/\s+/g, ' ');
+}
+
+/** What a call acts on: the file (and offset) for file tools, the whole normalised command for Bash, the arguments otherwise. */
+export function loopActionKey(call: ToolCall): string {
+  let args: Record<string, unknown> = {};
+  try { args = JSON.parse(call.function.arguments || '{}') as Record<string, unknown>; } catch { /* malformed arguments are their own key */ }
+  const file = args.file_path ?? args.path;
+  if (typeof file === 'string') return `${call.function.name} ${file}${typeof args.offset === 'number' ? `@${args.offset}` : ''}`;
+  if (typeof args.command === 'string') return `${call.function.name} ${normalizeShellCommand(args.command)}`;
+  return `${call.function.name} ${call.function.arguments.slice(0, 200)}`;
+}
+
+/** An action as the user and the model are shown it: short enough to read in one line. */
+function actionLabel(key: string): string {
+  return key.length > 100 ? `${key.slice(0, 99).trimEnd()}…` : key;
+}
+
+/**
+ * A tool result as the loop guard compares it: a hash of the output with the parts that change
+ * on every run (timestamps, clock times, durations) masked, so only a real change counts.
+ */
+export function resultSignature(output: string): string {
+  const stable = output
+    .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, '<time>')
+    .replace(/\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b/g, '<time>')
+    .replace(/\b\d+(?:\.\d+)?\s?(?:ms|s|secs?|seconds?|mins?|minutes?)\b/gi, '<duration>');
+  return createHash('sha256').update(stable).digest('hex').slice(0, 16);
 }

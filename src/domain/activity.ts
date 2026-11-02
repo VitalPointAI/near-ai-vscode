@@ -109,7 +109,7 @@ export interface ActivitySessionSummary {
   stats?: SessionStats;
 }
 
-export type RunOutcomeLabel = 'completed' | 'max-turns' | 'cancelled' | 'failed';
+export type RunOutcomeLabel = 'completed' | 'max-turns' | 'stuck' | 'cancelled' | 'failed';
 
 /** Counters an agent adds to its run's session. Every field is summed, never replaced. */
 export interface SessionCounters {

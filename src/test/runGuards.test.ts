@@ -32,14 +32,77 @@ async function runScript(next: (turn: number, messages: AgentMessage[]) => ToolC
   }
 }
 
-test('an agent repeating the same action is nudged once, then stopped', async () => {
+test('an agent repeating the same action with the same result is nudged, then warned, then stopped as stuck', async () => {
+  // 0.4.12: the first Write creates the file and every later one replaces it with the same
+  // result, so the count starts at the second call: nudge at 8, warning at 11, stop at 14 repeats.
   const { result, turns, transcripts, texts } = await runScript((turn) => [call(`w${turn}`, 'Write', { file_path: '.planning/probe.cjs', content: `// attempt ${turn}` })]);
-  assert.equal(result.outcome, 'max-turns');
-  assert.equal(turns, 14, 'stopped at the 14th repetition, not the 60-turn limit');
-  const nudges = transcripts.at(-1)!.filter((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>You have repeated'));
+  assert.equal(result.outcome, 'stuck');
+  assert.deepEqual(result.stop, { kind: 'loop', action: 'Write .planning/probe.cjs', count: 14 });
+  assert.equal(turns, 15, 'stopped at the 14th repetition of the same result, not the 60-turn limit');
+  const guard = (start: string) => transcripts.at(-1)!.filter((message) => message.role === 'user' && String(message.content).startsWith(start));
+  const nudges = guard('<loop-guard>You have repeated');
   assert.equal(nudges.length, 1, 'nudged once, at the 8th repetition');
-  assert.match(String(nudges[0].content), /Write \.planning\/probe\.cjs.*8 times/);
-  assert.match(texts.join(''), /Stopped this agent: it repeated the same action \(Write \.planning\/probe\.cjs\) 14 times/);
+  assert.match(String(nudges[0].content), /Write \.planning\/probe\.cjs.*8 times.*result did not change/);
+  const warnings = guard('<loop-guard>Warning:');
+  assert.equal(warnings.length, 1, 'warned once, at the 11th repetition');
+  assert.match(String(warnings[0].content), /Write \.planning\/probe\.cjs 11 times and got the same result every time \(it starts: "Replaced \.planning\/probe\.cjs \(1 lines\)\."\)\. .*Change your approach now: run a different command, read the error in that result and fix its cause, or finish and report/);
+  assert.match(String(result.messages.at(-1)?.content), /^<loop-guard>Stopped: you ran the same action \(Write \.planning\/probe\.cjs\) 14 times and its result did not change/);
+  assert.doesNotMatch(texts.join(''), /Stopped/, 'the run reports the stop through its outcome; the chat words it');
+});
+
+test('the owner\'s case: many different `cd <worktree> && ...` commands with different output are never a loop', async () => {
+  // As the model wrote them: the same `cd <worktree> &&` prefix on every command (a real
+  // directory here, so the commands run), different commands, different output.
+  const worktree = tmpdir();
+  const commands = ['npm test', 'git status', 'npx tsc --noEmit', 'git diff --stat', 'ls src'];
+  const { result, turns, transcripts } = await runScript((turn) => {
+    if (turn >= 24) return 'Nothing is blocking: the facade typechecks.';
+    return [call(`b${turn}`, 'Bash', { command: `cd ${worktree} && echo "${commands[turn % commands.length]} run ${turn}"` })];
+  });
+  assert.equal(result.outcome, 'completed');
+  assert.equal(turns, 25);
+  assert.equal(transcripts.at(-1)!.some((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>')), false, 'never nudged');
+});
+
+test('the same command whose output keeps changing is not a loop', async () => {
+  const { result, turns, transcripts } = await runScript((turn) => (turn < 24 ? [call(`b${turn}`, 'Bash', { command: 'cd . && echo run >> runs.log && wc -l < runs.log' })] : 'done'));
+  assert.equal(result.outcome, 'completed');
+  assert.equal(turns, 25);
+  assert.equal(transcripts.at(-1)!.some((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>')), false);
+});
+
+test('a genuine loop (same command, same output) is nudged, warned, then stopped; changing approach after the nudge lets it finish', async () => {
+  const stuck = await runScript((turn) => [call(`b${turn}`, 'Bash', { command: `cd . &&  FORCE_COLOR=0 cat missing-${'file'}.txt` })]);
+  assert.equal(stuck.result.outcome, 'stuck');
+  assert.deepEqual(stuck.result.stop, { kind: 'loop', action: 'Bash cat missing-file.txt', count: 14 });
+  assert.equal(stuck.turns, 14);
+  const last = stuck.transcripts.at(-1)!;
+  assert.equal(last.filter((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>You have repeated the same action (Bash cat missing-file.txt) 8 times')).length, 1);
+  const warning = last.find((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>Warning:'));
+  assert.match(String(warning?.content), /run Bash cat missing-file\.txt 11 times and got the same result every time \(it starts: "cat: missing-file\.txt: No such file or directory/);
+
+  // The agent reads the nudge and does something else: no warning, no stop.
+  const recovered = await runScript((turn, messages) => {
+    const nudged = messages.some((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>'));
+    if (!nudged) return [call(`b${turn}`, 'Bash', { command: 'cat missing.txt' })];
+    return turn < 16 ? [call(`r${turn}`, 'Bash', { command: `echo fixed-${turn}` })] : 'Created the file and moved on.';
+  });
+  assert.equal(recovered.result.outcome, 'completed');
+  assert.equal(recovered.transcripts.at(-1)!.filter((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>')).length, 1, 'one nudge, then it recovered on its own');
+});
+
+test('loop keys: leading cd and variable assignments are removed and the whole command is kept; results ignore timestamps and durations', async () => {
+  const { loopActionKey, normalizeShellCommand, resultSignature } = await import('../agent/loop');
+  assert.equal(normalizeShellCommand('cd /a/b && npm test'), 'npm test');
+  assert.equal(normalizeShellCommand('cd "/a b" ; cd sub &&  CI=1 NODE_ENV=test   npm run test -- --grep x'), 'npm run test -- --grep x');
+  assert.equal(normalizeShellCommand('cd /a/b'), 'cd /a/b', 'a bare cd stays itself');
+  assert.notEqual(normalizeShellCommand('cd X && npm test'), normalizeShellCommand('cd X && git status'));
+  assert.equal(loopActionKey(call('1', 'Bash', { command: 'cd /w && git status' })), 'Bash git status');
+  const owner = 'cd /home/aaron/projects/codequity/near-ai-vscode/.claude/worktrees/cyber-harness && ';
+  assert.notEqual(loopActionKey(call('3', 'Bash', { command: `${owner}npm test` })), loopActionKey(call('4', 'Bash', { command: `${owner}git status` })), 'the owner\'s commands are different actions');
+  assert.equal(loopActionKey(call('2', 'Read', { file_path: 'a.ts', offset: 40 })), 'Read a.ts@40');
+  assert.equal(resultSignature('ok 12 tests in 3.4s at 2026-11-02T10:00:01Z (10:00:01)'), resultSignature('ok 12 tests in 5.1s at 2026-11-02T10:07:44Z (10:07:44)'));
+  assert.notEqual(resultSignature('ok 12 tests'), resultSignature('ok 13 tests'));
 });
 
 test('varied work, and reading one file in chunks, are not treated as a loop', async () => {
@@ -120,9 +183,13 @@ test('each reply is capped, a cut-off reply asks for a shorter continuation and 
   const { result, turns, transcripts, texts } = await runScriptWithFinish((turn) => (turn === 0 ? { calls: [call('w1', 'Write', { file_path: 'half.md', content: 'trunc' })], finish: 'length' } : turn < 6 ? { text: 'and so on and so on', finish: 'length' } : { text: 'done', finish: 'stop' }));
   assert.match(String(transcripts[1].at(-1)?.content), /^<output-limit>Your last reply hit the output limit and was cut off/);
   assert.ok(!transcripts[1].some((message) => message.role === 'tool'), 'the cut-off tool call was not run');
-  assert.equal(result.outcome, 'max-turns');
+  // 0.4.12: a stop for not making progress has its own outcome, and the chat words it (see stopNotice).
+  assert.equal(result.outcome, 'stuck');
+  assert.deepEqual(result.stop, { kind: 'output-limit' });
   assert.equal(turns, 4, 'stopped at the fourth cut-off reply');
-  assert.match(texts.join(''), /replies kept running past the output limit/);
+  const { stopNotice } = await import('../services/agentSession');
+  assert.equal(stopNotice(result), 'Stopped: the agent\'s replies kept running past the output limit.');
+  void texts;
 });
 
 async function runScriptWithFinish(next: (turn: number) => { calls?: ToolCall[]; text?: string; finish: string }) {
@@ -168,4 +235,37 @@ test('the token limit applies only to turns without a known price; priced turns 
   const unpriced = await runWith(false);
   assert.equal(unpriced.turns, 3, 'without prices, the token limit stops it');
   assert.ok(unpriced.posted.some((message) => message.type === 'notice' && /tokens on models without published prices/.test(String(message.text))));
+});
+
+test('a sub-agent stopped for repeating itself tells its lead it did not finish, and the stop sentences are honest', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-stuck-child-'));
+  const home = await mkdtemp(path.join(tmpdir(), 'near-ai-stuck-child-gsd-'));
+  await mkdir(path.join(home, 'gsd-core'), { recursive: true });
+  const gsd: GsdContext = { home, skills: [], agents: [{ name: 'gsd-worker', description: 'Works', tools: ['Read'], body: 'You are the worker.', file: path.join(home, 'agents', 'gsd-worker.md') }], shellEnv: {} };
+  let report = '';
+  let childTurns = 0;
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const usage = { verificationStatus: 'unknown' as const, latencyMs: 1 };
+      if (String(messages[0].content).startsWith('You are the worker.')) { childTurns += 1; yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call(`r${childTurns}`, 'Read', { file_path: 'missing.txt' })] }, finishReason: 'tool_calls', usage }; return; }
+      const done = messages.some((message) => message.role === 'tool');
+      if (done) report = String(messages.at(-1)?.content);
+      yield { type: 'done', message: done ? { role: 'assistant', content: 'The worker got stuck.' } : { role: 'assistant', content: null, tool_calls: [call('a1', 'Agent', { subagent_type: 'gsd-worker', prompt: 'read it' })] }, finishReason: 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
+  try {
+    await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
+  } finally {
+    conversation.dispose();
+  }
+  assert.equal(childTurns, 14);
+  assert.match(report, /gsd-worker did not finish\. Stopped: the agent kept repeating Read missing\.txt with the same result\./);
+
+  const { stopNotice } = await import('../services/agentSession');
+  assert.equal(stopNotice({ outcome: 'max-turns', stop: { kind: 'turn-limit', turns: 400 } }), 'Stopped after reaching the turn limit (400 turns).');
+  assert.equal(stopNotice({ outcome: 'stuck', stop: { kind: 'loop', action: 'Bash npm test', count: 14 } }), 'Stopped: the agent kept repeating Bash npm test with the same result.');
+  assert.equal(stopNotice({ outcome: 'completed' }), undefined);
+  assert.equal(stopNotice({ outcome: 'cancelled' }), undefined);
 });

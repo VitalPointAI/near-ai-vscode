@@ -336,8 +336,10 @@ export class AgentConversation {
       const changed = checkpoints.changedFiles.map((file) => displayPath(this.root, file));
       if (result.outcome === 'cancelled') this.post({ type: 'assistant-cancelled' });
       else {
-        if (result.outcome === 'max-turns') this.post({ type: 'assistant-delta', text: '\n\n_Stopped after reaching the turn limit. Send a message to continue._' });
         this.post({ type: 'assistant-done', usage, runId, ...(account ? { spend: spendLine(account.window('run', { runId })) } : {}) });
+        // A run stopped before the model finished says why, and offers Continue (nothing continues without the click).
+        const stopped = stopNotice(result);
+        if (stopped) this.post({ type: 'run-stopped', reason: result.stop?.kind ?? 'turn-limit', text: stopped, continuable: true });
         const evidence = result.usage.at(-1)?.evidence;
         if (evidence && !request.local && request.privacy.startsWith('Private')) {
           this.verifiable.set(runId, { model: request.model, evidence, client: request.client });
@@ -628,7 +630,7 @@ export class AgentConversation {
             await this.persistAgent(request, agent.id);
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
-            await this.recordReputation(request.reputation, label, result.outcome === 'completed' ? 1 : result.outcome === 'max-turns' ? 0 : -1, agent.id);
+            await this.recordReputation(request.reputation, label, result.outcome === 'completed' ? 1 : result.outcome === 'max-turns' || result.outcome === 'stuck' ? 0 : -1, agent.id);
             void record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} ${result.outcome}.`, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCostUsd: total.estimatedCostUsd, durationMs: Date.now() - started });
             shell.dispose();
             worktreeState = worktree ? await finishAgentWorktree(worktree).catch(() => 'kept' as const) : undefined;
@@ -637,7 +639,9 @@ export class AgentConversation {
             if (todo) this.moveTask(todo, done ? 'completed' : 'pending');
             const note = this.taskNote(todo, done);
             if (result.outcome === 'cancelled') return `${label} was stopped before it finished.${isolated}${note}`;
-            return `${typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`}${isolated}${note}`;
+            // A sub-agent stopped short says so, so the lead does not take a partial report as finished work.
+            const short = stopNotice(result);
+            return `${typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`}${short ? `\n\n${label} did not finish. ${short}` : ''}${isolated}${note}`;
           } catch (error) {
             if (todo) this.moveTask(todo, 'pending');
             this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
@@ -1017,4 +1021,15 @@ function sumUsage(turns: UsageMetadata[]): UsageMetadata {
   add('outputTokens');
   add('estimatedCostUsd');
   return total;
+}
+
+/** The sentence for a run that stopped before the model finished, or undefined when it finished (or was cancelled). */
+export function stopNotice(result: Pick<RunResult, 'outcome' | 'stop'>): string | undefined {
+  if (result.outcome === 'stuck') {
+    if (result.stop?.kind === 'loop') return `Stopped: the agent kept repeating ${result.stop.action} with the same result.`;
+    if (result.stop?.kind === 'output-limit') return 'Stopped: the agent\'s replies kept running past the output limit.';
+    return 'Stopped: the agent was not making progress.';
+  }
+  if (result.outcome === 'max-turns') return result.stop?.kind === 'turn-limit' ? `Stopped after reaching the turn limit (${result.stop.turns} turns).` : 'Stopped after reaching the turn limit.';
+  return undefined;
 }
