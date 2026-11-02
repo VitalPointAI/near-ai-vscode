@@ -8,6 +8,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { Role, TeamFile } from '../../domain/team/types';
+import type { CleanupChecklist, CleanupItem, CleanupStep } from '../../team/cleanupChecklist';
 import type { NearOrgClient } from '../../team/nearOrg';
 import type { NearSession } from '../../team/nearSession';
 import type { FetchLike, SessionTokens } from '../reportingSignIn';
@@ -29,6 +30,16 @@ const SIGN_IN_ACTION = 'Sign in';
 const WITHOUT_NEAR_ACTION = 'Invite without NEAR';
 const REPLACE_LINK_ACTION = 'Replace link';
 const RESET_ACTION = 'Remove unfinished keys';
+const CONTINUE_WITHOUT_NEAR_ACTION = 'Continue without NEAR';
+const REMOVE_ACTION = 'Remove';
+const READ_ONLY_TEXT = 'Only the owner or a lead can change the team. You can see everyone here, but not change anything.';
+const STEP_TEXT: Record<CleanupStep, string> = {
+  'send-invitation': 'Send the NEAR invitation', 'cancel-invitation': 'Cancel the NEAR invitation', 'deliver-key': 'Send the team key',
+  'rotate-key': 'Replace the team key', 'zero-limit': 'Set the key limit to 0', 'revoke-key': 'Revoke the key',
+  'remove-org-member': 'Remove from the NEAR organization', 'repo-access': 'Remove repository access'
+};
+const MEMBER_ACTIONS = ['confirm', 'deliver-key', 'rotate-key', 'remove'] as const;
+type MemberAction = (typeof MEMBER_ACTIONS)[number];
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 const NANO_PER_CENT = 10_000_000;
 const MAX_EMAIL_LENGTH = 254;
@@ -402,6 +413,28 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     return signedIn === undefined ? 'cancelled' : signedIn.org;
   }
 
+  // The four lifetimes of D-08, seven days first so Enter picks the recommended one. Returns seconds.
+  async function askLifetime(): Promise<number | undefined> {
+    const { INVITE_TTL_CHOICES, DEFAULT_INVITE_TTL_SECONDS } = await import('../../domain/team/invite');
+    const lifetimes = [...INVITE_TTL_CHOICES].sort((left, right) => (left === DEFAULT_INVITE_TTL_SECONDS ? -1 : right === DEFAULT_INVITE_TTL_SECONDS ? 1 : left - right))
+      .map((ttlSeconds) => ({ label: ttlSeconds === 86_400 ? '24 hours' : `${ttlSeconds / 86_400} days`, description: ttlSeconds === DEFAULT_INVITE_TTL_SECONDS ? 'Recommended' : '', ttlSeconds }));
+    return (await pick(lifetimes, { title: 'Invite to Team', placeHolder: 'How long the invite works before it expires' }))?.ttlSeconds;
+  }
+
+  // D-05: the bundle is shown once, in a modal with Copy. It is written to the clipboard only when the lead chooses Copy, and never logged.
+  async function presentBundle(shownName: string, bundle: string): Promise<void> {
+    const copied = await vscode.window.showInformationMessage(
+      `Invite ready for ${shownName}. Send them this invite; it works once and is not shown again.`,
+      { modal: true, detail: bundle }, COPY_ACTION
+    );
+    if (copied === COPY_ACTION) {
+      await vscode.env.clipboard.writeText(bundle);
+      deps.announce('info', `Invite for ${shownName} copied. Send it to them in a private message.`);
+    } else {
+      deps.announce('info', `The invite for ${shownName} was not copied. You can issue it again from "NEAR AI: Manage Team Members".`);
+    }
+  }
+
   async function invite(): Promise<void> {
     const found = await requireTeam();
     if (found === undefined) return;
@@ -438,10 +471,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       deps.report('error', 'That amount is not dollars and cents, so no invite was made. Enter a number such as 5 or 12.50.');
       return;
     }
-    const { INVITE_TTL_CHOICES, DEFAULT_INVITE_TTL_SECONDS } = await import('../../domain/team/invite');
-    const lifetimes = [...INVITE_TTL_CHOICES].sort((left, right) => (left === DEFAULT_INVITE_TTL_SECONDS ? -1 : right === DEFAULT_INVITE_TTL_SECONDS ? 1 : left - right))
-      .map((ttlSeconds) => ({ label: ttlSeconds === 86_400 ? '24 hours' : `${ttlSeconds / 86_400} days`, description: ttlSeconds === DEFAULT_INVITE_TTL_SECONDS ? 'Recommended' : '', ttlSeconds }));
-    const lifetime = await pick(lifetimes, { title: 'Invite to Team', placeHolder: 'How long the invite works before it expires' });
+    const lifetime = await askLifetime();
     if (lifetime === undefined) return;
 
     // D-03: a team with no NEAR organization is offered the link once per invite, and Skip is said out loud.
@@ -488,22 +518,13 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
 
     const result = await (await import('../../team/invite')).inviteMember({
       projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamFile, log: session.currentLog(),
-      name, email, role: roleChoice.role, allocationNanoUsd, ttlSeconds: lifetime.ttlSeconds, ...(org === undefined ? {} : { org })
+      name, email, role: roleChoice.role, allocationNanoUsd, ttlSeconds: lifetime, ...(org === undefined ? {} : { org })
     });
     if (!result.ok) {
       deps.report('error', await safe(result.message));
       return;
     }
-    const copied = await vscode.window.showInformationMessage(
-      `Invite ready for ${shownName}. Send them this invite; it works once and is not shown again.`,
-      { modal: true, detail: result.bundle }, COPY_ACTION
-    );
-    if (copied === COPY_ACTION) {
-      await vscode.env.clipboard.writeText(result.bundle);
-      deps.announce('info', `Invite for ${shownName} copied. Send it to them in a private message.`);
-    } else {
-      deps.announce('info', `The invite for ${shownName} was not copied. You can issue it again from "NEAR AI: Manage Team Members".`);
-    }
+    await presentBundle(shownName, result.bundle);
     if (result.nearInvitation === 'sent') deps.report('info', `${shownName} was also invited to your NEAR organization as an admin. They accept it when they join.`);
     else if (result.nearInvitation === 'already-member') deps.report('info', `${shownName} is already in your NEAR organization.`);
     if (result.notice !== undefined) deps.report('info', await safe(result.notice));
@@ -612,16 +633,344 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     deps.report('info', 'The unfinished keys were removed from this computer. Ask your lead to re-issue your invitation from "NEAR AI: Manage Team Members", then run "NEAR AI: Join Team" again with the new invite.');
   }
 
-  // ---- Manage Team Members (Task 3) -------------------------------------------------------------------------------------------------
+  // ---- Manage Team Members (D-11, D-16, D-17, D-18, D-25, D-27) ---------------------------------------------------------------------
 
-  async function placeholder(): Promise<void> {
-    await requireTeam();
+  interface ManageContext { projectRoot: string; session: TeamSession; teamFile: TeamFile; checklist: CleanupChecklist; canManage: boolean }
+
+  // The NEAR client an action needs. A linked team that is not signed in is asked to sign in first; `canContinue` also offers to carry on without
+  // NEAR, leaving the NEAR step on the cleanup list. undefined means the person backed out.
+  async function orgForAction(teamFile: TeamFile, text: string, canContinue: boolean): Promise<{ org?: NearOrgClient } | undefined> {
+    if (teamFile.near === undefined) return {};
+    const kept = await keptSession(teamFile.teamId);
+    if (kept !== undefined) return { org: kept.org };
+    const choice = await vscode.window.showInformationMessage(text, { modal: true }, SIGN_IN_ACTION, ...(canContinue ? [CONTINUE_WITHOUT_NEAR_ACTION] : []));
+    if (choice === undefined) return undefined;
+    if (choice === CONTINUE_WITHOUT_NEAR_ACTION) return {};
+    const signedIn = await signInAndKeep(teamFile.teamId);
+    return signedIn === undefined ? undefined : { org: signedIn.org };
+  }
+
+  function allocationOf(ctx: ManageContext, memberId: string): string {
+    return formatNanoUsd(ctx.session.state().members.get(memberId)?.allocationNanoUsd ?? 0);
+  }
+
+  async function stillToDo(name: string, items: CleanupItem[]): Promise<void> {
+    const { repoAccessText } = await import('../../team/cleanupChecklist');
+    const ordered = [...items.filter((item) => item.step !== 'repo-access'), ...items.filter((item) => item.step === 'repo-access')];
+    if (ordered.length === 0) return;
+    deps.output.appendLine(`Still to do for ${name}:`);
+    for (const item of ordered) {
+      deps.output.appendLine(item.step === 'repo-access'
+        ? `- ${repoAccessText(name)}`
+        : `- ${STEP_TEXT[item.step]} (${item.status}${item.lastError === undefined ? '' : `: ${await safe(item.lastError)}`})`);
+    }
+  }
+
+  async function runMemberAction(ctx: ManageContext, memberId: string, action: MemberAction): Promise<void> {
+    const { teamFile, checklist } = ctx;
+    const member = ctx.session.state().members.get(memberId);
+    if (member === undefined) {
+      deps.report('info', 'That person is not in this team any more. Nothing was changed.');
+      return;
+    }
+    const name = await display(member.name);
+    const team = await display(teamFile.name);
+    const log = ctx.session.currentLog();
+    const keys = await import('../../team/keyDelivery');
+    switch (action) {
+      case 'confirm': {
+        const chosen = await orgForAction(teamFile, `Confirming ${name} also sends their NEAR key, which needs your NEAR sign-in. Sign in now, or confirm now and send the key later from this list.`, true);
+        if (chosen === undefined) return;
+        const result = await keys.confirmMember({ log, teamFile, memberId, checklist, ...(chosen.org === undefined ? {} : { org: chosen.org }) });
+        if (!result.ok) {
+          deps.report(result.code === 'not-pending' ? 'info' : 'error', await safe(result.message));
+          return;
+        }
+        deps.output.appendLine(await safe(result.message));
+        const role = ctx.session.state().members.get(memberId)?.role ?? member.role;
+        const is = `${name} is now ${article(role)}.`;
+        if (teamFile.near === undefined) deps.announce('info', `${is} ${(await import('../../team/join')).NO_ORG_NOTICE}`);
+        else if (result.key === 'delivered') deps.announce('info', `${is} Their team key has a spend cap of ${allocationOf(ctx, memberId)} set by you.`);
+        else deps.announce('warn', `${is} ${await safe(result.message)} Use Send key in "NEAR AI: Manage Team Members" when you are ready.`);
+        return;
+      }
+      case 'deliver-key':
+      case 'rotate-key': {
+        const { signInToSendKeyText } = keys;
+        const chosen = await orgForAction(teamFile, `${signInToSendKeyText(name)} This step uses your NEAR sign-in.`, false);
+        if (chosen?.org === undefined) {
+          deps.announce('info', signInToSendKeyText(name));
+          return;
+        }
+        const input = { log, teamFile, memberId, org: chosen.org, checklist };
+        const result = action === 'deliver-key' ? await keys.deliverMemberKey(input) : await keys.rotateMemberKey(input);
+        if (!result.ok) {
+          deps.report('warn', await safe(result.message));
+          return;
+        }
+        const cap = allocationOf(ctx, memberId);
+        deps.report('info', action === 'deliver-key'
+          ? `Sent ${name}'s team key. It has a spend cap of ${cap} set by you.`
+          : `Replaced ${name}'s team key. The new key's spend cap is what was left of the old one, set by you.`);
+        if (result.notice !== undefined) deps.report('info', await safe(result.notice));
+        return;
+      }
+      case 'remove': {
+        const detail = teamFile.near === undefined
+          ? `${name} loses access to the team log. Remove their access to the git repository yourself afterwards.`
+          : `${name}'s NEAR key is set to a limit of 0 first, then the team log removes them, then the key is revoked. Remove their access to the git repository yourself afterwards.`;
+        const confirmed = await vscode.window.showWarningMessage(`Remove ${name} from ${team}?`, { modal: true, detail }, REMOVE_ACTION);
+        if (confirmed !== REMOVE_ACTION) return;
+        const chosen = await orgForAction(teamFile, `Removing ${name} also ends their NEAR key, which needs your NEAR sign-in. Sign in now, or remove them now and finish the NEAR steps later from this list.`, true);
+        if (chosen === undefined) return;
+        await finishRemoval(ctx, memberId, name, chosen.org);
+        return;
+      }
+    }
+  }
+
+  // Removing a joined member and cancelling an invitation are the same flow; the result is shown as written (it carries the warning and the manual step).
+  async function finishRemoval(ctx: ManageContext, memberId: string, name: string, org: NearOrgClient | undefined): Promise<void> {
+    const { removeMember } = await import('../../team/remove');
+    const result = await removeMember({ log: ctx.session.currentLog(), teamFile: ctx.teamFile, memberId, checklist: ctx.checklist, ...(org === undefined ? {} : { org }) });
+    if (!result.ok) {
+      deps.report('error', await safe(result.message));
+      return;
+    }
+    deps.report(result.keyStillSpends ? 'warn' : 'info', await safe(result.message));
+    await stillToDo(name, result.checklist);
+    ctx.session.nudge();
+  }
+
+  async function cancelInvitation(ctx: ManageContext, memberId: string): Promise<void> {
+    const member = ctx.session.state().members.get(memberId);
+    if (member === undefined) return;
+    const name = await display(member.name);
+    // Only a lead's invitation went to NEAR, so only that cancel needs the sign-in.
+    const needsNear = (member.pendingRole ?? member.role) === 'lead';
+    const chosen = needsNear ? await orgForAction(ctx.teamFile, `Cancelling ${name}'s invitation also cancels it at NEAR, which needs your NEAR sign-in. Sign in now, or cancel now and finish that step later from this list.`, true) : {};
+    if (chosen === undefined) return;
+    await finishRemoval(ctx, memberId, name, chosen.org);
+  }
+
+  async function reissue(ctx: ManageContext, memberId: string): Promise<void> {
+    const member = ctx.session.state().members.get(memberId);
+    if (member === undefined) return;
+    const name = await display(member.name);
+    const { readInviteDirectory, reissueInvite } = await import('../../team/invite');
+    const entry = (await readInviteDirectory(ctx.session.storageDir())).find((candidate) => candidate.memberId === memberId);
+    if (entry === undefined) {
+      deps.report('info', `The email address for ${name}'s invitation is only known on the computer that sent the invitation, so it cannot be issued again from here. Cancel it and invite them again.`);
+      return;
+    }
+    const ttlSeconds = await askLifetime();
+    if (ttlSeconds === undefined) return;
+    let org: NearOrgClient | undefined;
+    if (ctx.teamFile.near !== undefined && (member.pendingRole ?? member.role) === 'lead') {
+      const chosen = await orgForLeadInvite(ctx.teamFile.teamId, name);
+      if (chosen === 'cancelled') return;
+      org = chosen;
+    }
+    const result = await reissueInvite({
+      projectRoot: ctx.projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamFile: ctx.teamFile, log: ctx.session.currentLog(),
+      oldMemberId: memberId, email: entry.email, ttlSeconds, ...(org === undefined ? {} : { org })
+    });
+    if (!result.ok) {
+      deps.report('error', await safe(result.message));
+      return;
+    }
+    await presentBundle(name, result.bundle);
+    if (result.notice !== undefined) deps.report('info', await safe(result.notice));
+    ctx.session.nudge();
+  }
+
+  async function retryItem(ctx: ManageContext, item: CleanupItem): Promise<void> {
+    const name = await display(item.memberName);
+    const what = `${STEP_TEXT[item.step]} for ${name}`;
+    if (item.step === 'deliver-key' || item.step === 'rotate-key') {
+      await runMemberAction(ctx, item.memberId, item.step === 'deliver-key' ? 'deliver-key' : 'rotate-key');
+      return;
+    }
+    const chosen = await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false);
+    if (item.step === 'send-invitation') {
+      const { readInviteDirectory } = await import('../../team/invite');
+      const entry = (await readInviteDirectory(ctx.session.storageDir())).find((candidate) => candidate.memberId === item.memberId);
+      if (entry === undefined) {
+        deps.report('info', `The email address for ${name} is only known on the computer that sent the invitation. Send the NEAR invitation from that computer, or from the NEAR console.`);
+        return;
+      }
+      if (chosen?.org === undefined || ctx.teamFile.near === undefined) {
+        deps.report('info', ctx.teamFile.near === undefined ? 'This team has no NEAR organization linked, so there is no NEAR invitation to send.' : `${what} needs your NEAR sign-in. Nothing was changed.`);
+        return;
+      }
+      try {
+        const outcome = await chosen.org.inviteByEmail(ctx.teamFile.near.organizationId, entry.email, 'admin');
+        if (outcome.ok) {
+          await ctx.checklist.update(item.id, { status: 'done', attempted: true });
+          deps.report('info', `${name} was invited to your NEAR organization as an admin. They accept it when they join.`);
+        } else {
+          await ctx.checklist.update(item.id, { status: 'failed', lastError: outcome.reason, attempted: true });
+          deps.report('warn', `The NEAR invitation for ${name} was not sent: ${await safe(outcome.reason)}`);
+        }
+      } catch (error) {
+        const reason = await describeNear(error);
+        await ctx.checklist.update(item.id, { status: 'failed', lastError: reason, attempted: true });
+        deps.report('warn', `The NEAR invitation for ${name} was not sent: ${reason}`);
+      }
+      return;
+    }
+    if (chosen === undefined) return;
+    const { retryCleanupItem } = await import('../../team/remove');
+    const updated = await retryCleanupItem({ item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist, ...(chosen.org === undefined ? {} : { org: chosen.org }) });
+    if (updated.status === 'done') deps.report('info', `Done: ${what}.`);
+    else deps.report('warn', `${what} is not finished yet: ${await safe(updated.lastError ?? 'try again in a moment')}`);
+  }
+
+  type Row = vscode.QuickPickItem & {
+    row: { kind: 'near' } | { kind: 'member'; id: string; attention: string | undefined } | { kind: 'invitation'; id: string; status: string } | { kind: 'cleanup'; item: CleanupItem };
+  };
+
+  async function buildRows(ctx: ManageContext): Promise<Row[]> {
+    const { invitationStatus, memberAttention } = await import('../../domain/team/invite');
+    const state = ctx.session.state();
+    const linked = ctx.teamFile.near !== undefined;
+    const rows: Row[] = [];
+    const kept = linked ? await keptSession(ctx.teamFile.teamId) : undefined;
+    if (!linked) rows.push({ label: (await import('../../team/join')).NO_ORG_NOTICE, row: { kind: 'near' } });
+    else rows.push({ label: kept === undefined ? 'NEAR: not signed in' : `NEAR: signed in as ${await display(kept.label)}`, row: { kind: 'near' } });
+
+    const attention = new Map(memberAttention(state, linked).map((item) => [item.memberId, item.kind]));
+    const suffix: Record<string, string> = { confirm: ', waiting for confirmation', 'deliver-key': ', key pending', 'rotate-key': ', key needs rotation' };
+    for (const member of state.members.values()) {
+      if (member.status === 'invited' || member.removedEvent !== undefined) continue;
+      const kind = attention.get(member.id);
+      rows.push({
+        label: `${await display(member.name)}, ${member.pendingRole ?? member.role}${kind === undefined ? '' : suffix[kind] ?? ''}`,
+        ...(member.allocationNanoUsd === undefined ? {} : { description: `Allocation ${formatNanoUsd(member.allocationNanoUsd)}` }),
+        row: { kind: 'member', id: member.id, attention: kind }
+      });
+    }
+    const now = Math.floor(Date.now() / 1000);
+    for (const member of state.members.values()) {
+      const status = invitationStatus(member, now);
+      if (status === undefined) continue;
+      rows.push({ label: `Invitation for ${await display(member.name)}, ${member.pendingRole ?? member.role}, ${status}`, row: { kind: 'invitation', id: member.id, status } });
+    }
+    let items: CleanupItem[] = [];
+    try {
+      items = (await ctx.checklist.list()).filter((item) => item.status !== 'done');
+    } catch (error) {
+      deps.report('warn', `The NEAR cleanup list could not be read: ${await describe(error)}`);
+    }
+    const { repoAccessText } = await import('../../team/cleanupChecklist');
+    for (const item of items) {
+      const name = await display(item.memberName);
+      rows.push(item.step === 'repo-access'
+        ? { label: `Repository access for ${name}`, detail: repoAccessText(name), row: { kind: 'cleanup', item } }
+        : { label: `NEAR cleanup: ${STEP_TEXT[item.step]} for ${name}`, description: `${item.status}${item.lastError === undefined ? '' : `: ${await safe(item.lastError)}`}`, row: { kind: 'cleanup', item } });
+    }
+    return rows;
+  }
+
+  async function actOnRow(ctx: ManageContext, picked: Row): Promise<void> {
+    const { decideTeamAction } = await import('../../domain/team/permissions');
+    const myId = ctx.session.memberId() as string;
+    const state = ctx.session.state();
+    const allowed = (action: Parameters<typeof decideTeamAction>[2]): boolean => decideTeamAction(state, myId, action).allowed;
+    const row = picked.row;
+    type Choice = vscode.QuickPickItem & { run(): Promise<void> };
+    const choices: Choice[] = [];
+    const add = (label: string, description: string, run: () => Promise<void>): void => { choices.push({ label, description, run }); };
+
+    if (row.kind === 'near') {
+      if (ctx.teamFile.near === undefined) {
+        await linkFlow(ctx.projectRoot, true);
+      } else {
+        const kept = await keptSession(ctx.teamFile.teamId);
+        if (kept === undefined) {
+          const signedIn = await signInAndKeep(ctx.teamFile.teamId);
+          if (signedIn !== undefined) deps.report('info', `Signed in to NEAR as ${await display(signedIn.label)}.`);
+        } else {
+          deps.announce('info', `You are signed in to NEAR as ${await display(kept.label)}. Run "NEAR AI: Sign Out of NEAR (Team)" to sign out.`);
+        }
+      }
+      return;
+    }
+    if (row.kind === 'member') {
+      const member = state.members.get(row.id);
+      if (member === undefined) return;
+      if (row.attention === 'confirm' && allowed({ kind: 'member.change-role', targetId: row.id, role: member.pendingRole ?? member.role })) add('Confirm', `Make them ${article(member.pendingRole ?? member.role)}`, () => runMemberAction(ctx, row.id, 'confirm'));
+      if (row.attention === 'deliver-key' && allowed({ kind: 'member.key-deliver', targetId: row.id })) add('Send key', 'Create their team key and send it to their computer', () => runMemberAction(ctx, row.id, 'deliver-key'));
+      if (row.attention === 'rotate-key' && allowed({ kind: 'member.key-deliver', targetId: row.id })) add('Rotate key', 'Replace their team key for their current devices', () => runMemberAction(ctx, row.id, 'rotate-key'));
+      if (row.id !== myId && allowed({ kind: 'member.remove', targetId: row.id })) add('Remove', 'Take them off the team', () => runMemberAction(ctx, row.id, 'remove'));
+    } else if (row.kind === 'invitation') {
+      if (row.status === 'pending' || row.status === 'expired') {
+        if (allowed({ kind: 'member.remove', targetId: row.id })) add('Cancel', 'Cancel this invitation so its code stops working', () => cancelInvitation(ctx, row.id));
+        if (allowed({ kind: 'member.invite' })) add('Re-issue', 'Replace it with a new invite', () => reissue(ctx, row.id));
+      }
+    } else if (row.item.step === 'repo-access') {
+      const item = row.item;
+      add('Mark done', 'You removed their repository access', async () => {
+        const { repoAccessText } = await import('../../team/cleanupChecklist');
+        await ctx.checklist.update(item.id, { status: 'done' });
+        deps.report('info', `Marked done: ${repoAccessText(await display(item.memberName))}`);
+      });
+    } else {
+      const item = row.item;
+      add('Retry', 'Try this step again', () => retryItem(ctx, item));
+    }
+
+    if (choices.length === 0) {
+      deps.announce('info', row.kind === 'invitation' ? `This invitation is ${row.status}, so there is nothing to do with it.` : 'There is nothing to do for this item right now.');
+      return;
+    }
+    const chosen = await pick(choices, { title: 'Manage Team Members', placeHolder: picked.label });
+    if (chosen !== undefined) await chosen.run();
+  }
+
+  async function manage(argument?: unknown): Promise<void> {
+    const found = await requireTeam();
+    if (found === undefined) return;
+    const { projectRoot, session } = found;
+    const { readTeamFile } = await import('../../team/teamFile');
+    const { CleanupChecklist } = await import('../../team/cleanupChecklist');
+    const { decideTeamAction } = await import('../../domain/team/permissions');
+    const teamFile = await readTeamFile(projectRoot);
+    if (teamFile === undefined) {
+      deps.announce('info', deps.soloText);
+      return;
+    }
+    const myId = session.memberId();
+    const canManage = myId !== undefined && decideTeamAction(session.state(), myId, { kind: 'member.invite' }).allowed;
+    const ctx: ManageContext = { projectRoot, session, teamFile, checklist: new CleanupChecklist(session.storageDir()), canManage };
+
+    // The notification buttons of 61-12 pass {memberId, action}; anything else opens the list.
+    const request = typeof argument === 'object' && argument !== null ? argument as { memberId?: unknown; action?: unknown } : undefined;
+    if (request !== undefined && typeof request.memberId === 'string' && (MEMBER_ACTIONS as readonly unknown[]).includes(request.action)) {
+      if (!canManage) {
+        await requireManager(session, 'change the team');
+        return;
+      }
+      await runMemberAction(ctx, request.memberId, request.action as MemberAction);
+      session.nudge();
+      return;
+    }
+
+    const rows = await buildRows(ctx);
+    const picked = await pick(rows, { title: `Manage Team Members${canManage ? '' : ' (read only)'}`, placeHolder: 'Everyone on the team, invitations and NEAR steps still to finish' });
+    if (picked === undefined) return;
+    if (!canManage) {
+      deps.announce('info', READ_ONLY_TEXT);
+      return;
+    }
+    await actOnRow(ctx, picked);
+    session.nudge();
   }
 
   return [
     vscode.commands.registerCommand(INVITE_COMMAND, guarded('Invite to Team', invite)),
     vscode.commands.registerCommand(JOIN_COMMAND, guarded('Join Team', join)),
-    vscode.commands.registerCommand(MANAGE_MEMBERS_COMMAND, guarded('Manage Team Members', placeholder)),
+    vscode.commands.registerCommand(MANAGE_MEMBERS_COMMAND, guarded('Manage Team Members', manage)),
     vscode.commands.registerCommand(LINK_NEAR_COMMAND, guarded('Link Team to NEAR Organization', linkCommand)),
     vscode.commands.registerCommand(SIGN_OUT_NEAR_COMMAND, guarded('Sign Out of NEAR (Team)', signOutCommand))
   ];

@@ -203,7 +203,7 @@ async function inviteBundle(t: Team, person: { name: string; email: string; role
   const before = stub.clipboardWrites.length;
   await t.run(INVITE_COMMAND);
   stub.setMessageResponder(undefined);
-  assert.equal(stub.clipboardWrites.length, before + 1, 'the bundle was copied');
+  assert.equal(stub.clipboardWrites.length, before + 1, `the bundle was copied (${stub.notifications.map((entry) => entry.message).join(' | ')})`);
   return stub.clipboardWrites[before] as string;
 }
 
@@ -642,6 +642,8 @@ async function joinMember(t: Team, person: { name: string; email: string; role: 
   stub.inputAnswers.push(bundle, person.displayName);
   await j.run(JOIN_COMMAND);
   await closeWindow(j);
+  // The lead's window is the one in front again.
+  stub.setWorkspaceFolders([t.root]);
   await t.handle.session()?.sync();
   clearUi();
   return { memberId: parseInviteBundle(bundle).member, bundle, secrets: j.secrets };
