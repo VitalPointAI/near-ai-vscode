@@ -5,7 +5,8 @@ import { ProfileStore } from './profileStore';
 import { CLEAR_REPORTING_TOKEN_COMMAND, movePastedReportingTokens, REPORTING_TOKEN_HOW_TO, ReportingTokenHint, reportingTokenHint, ReportingTokenState, SET_REPORTING_TOKEN_COMMAND, USE_NEAR_TOTAL_SETTING } from './reportingToken';
 import { configureSpend, resetNearUsage, shownSpendAccount, SpendAccount, spendAccountFor } from './spendAccount';
 import { CONSOLE_URL, tokenTestMessage } from './spendInsight';
-import { firstSession, loginUrl, parseCallback, PASTE_CALLBACK, reportingTokenName, SessionTokens, setUpReportingToken, SignInError, SignInProvider, startLoopbackSignIn } from './reportingSignIn';
+import { browserSignIn, REPORTING_SIGN_IN_COPY } from './nearSignIn';
+import { reportingTokenName, setUpReportingToken, SignInError, SignInProvider } from './reportingSignIn';
 import type { DayBoundary } from './spendLedger';
 import { readSettings } from './settings';
 
@@ -111,51 +112,6 @@ async function pasteReportingToken(context: vscode.ExtensionContext): Promise<vo
     : 'Usage reporting token saved. Turn on nearAi.spend.useNearUsageTotal to show NEAR AI Cloud\'s own total.');
 }
 
-/** The session from NEAR's sign-in in the browser: sent back to a one-time local listener, or pasted. */
-async function browserSignIn(baseUrl: string, provider: SignInProvider, signal: AbortSignal): Promise<SessionTokens | undefined> {
-  try {
-    const loopback = await startLoopbackSignIn({ signal, external: async (local) => (await vscode.env.asExternalUri(vscode.Uri.parse(local))).toString(true) });
-    if (!await vscode.env.openExternal(vscode.Uri.parse(loginUrl(baseUrl, provider, loopback.callback)))) { loopback.close(); return undefined; }
-    // A browser-based VS Code (code-server) may be open on another machine, where the forwarded
-    // localhost callback isn't this one, so the address can be pasted while the listener waits.
-    if (vscode.env.uiKind !== vscode.UIKind.Web) return await loopback.tokens;
-    return await firstSession(loopback, pasteSignInAddress(loopback.callback, 'If the browser then shows a page that can\'t be reached, copy that page\'s whole address and paste it here.'));
-  } catch (error) {
-    if (!(error instanceof SignInError) || error.code !== 'remote') throw error;
-  }
-  // The forwarded callback isn't on loopback, which NEAR refuses: NEAR sends the session to a page
-  // that won't load, and its address (whose fragment holds the session) is pasted here.
-  if (!await vscode.env.openExternal(vscode.Uri.parse(loginUrl(baseUrl, provider, PASTE_CALLBACK)))) return undefined;
-  const paste = pasteSignInAddress(PASTE_CALLBACK, 'After signing in, the browser shows a page that can\'t be reached. Copy that page\'s whole address and paste it here.');
-  try {
-    const pasted = await paste.value;
-    return pasted ? parseCallback(pasted) : undefined;
-  } finally {
-    paste.dismiss();
-  }
-}
-
-/** A box for the address the browser ends on after signing in; `value` is undefined if it is dismissed. */
-function pasteSignInAddress(callback: string, prompt: string): { value: Promise<string | undefined>; dismiss(): void } {
-  const box = vscode.window.createInputBox();
-  box.title = 'Finish signing in to NEAR AI Cloud';
-  box.prompt = `${prompt} It holds a one-time sign-in that is signed out as soon as the token is made.`;
-  box.password = true;
-  box.ignoreFocusOut = true;
-  box.placeholder = `${callback}#token=…`;
-  const value = new Promise<string | undefined>((resolve) => {
-    box.onDidChangeValue((text) => { box.validationMessage = text.trim() ? checkPasted(text) : undefined; });
-    box.onDidAccept(() => { if (!checkPasted(box.value)) resolve(box.value); else box.validationMessage = checkPasted(box.value); });
-    box.onDidHide(() => resolve(undefined));
-  });
-  box.show();
-  return { value, dismiss: () => box.dispose() };
-}
-
-function checkPasted(value: string): string | undefined {
-  try { parseCallback(value); return undefined; } catch (error) { return (error as Error).message; }
-}
-
 /**
  * Signs in to NEAR AI Cloud in the browser and creates a usage reporting token for the
  * organization of the project's API key (no expiry, so it stays current until revoked), revokes
@@ -175,7 +131,7 @@ export async function signInForReportingToken(context: vscode.ExtensionContext, 
       progress.report({ message: 'Checking which organization this API key belongs to…' });
       const { organizationId } = await new NearAiClient({ baseUrl: key.baseUrl, apiKey: key.apiKey }).checkApiKey(abort.signal);
       progress.report({ message: 'Sign in to NEAR AI Cloud in your browser…' });
-      const session = await browserSignIn(key.baseUrl, provider, abort.signal);
+      const session = await browserSignIn(key.baseUrl, provider, abort.signal, REPORTING_SIGN_IN_COPY);
       if (!session) return undefined;
       progress.report({ message: 'Creating a read-only usage token…' });
       const previous = context.globalState.get<{ id: string; organizationId: string }>(REPORTING_TOKEN_ID_KEY);
