@@ -277,9 +277,9 @@
     const canAdd = ['owner', 'lead', 'developer'].indexOf(v.role) >= 0;
     const explain = v.readOnlyReason || '';
     importBtn.hidden = !(v.canImport || (down && (v.role === 'owner' || v.role === 'lead')));
-    attr(importBtn, 'aria-disabled', v.canImport ? null : 'true'); attr(importBtn, 'title', v.canImport ? null : explain);
+    attr(importBtn, 'aria-disabled', v.canImport && !down ? null : 'true'); attr(importBtn, 'title', v.canImport && !down ? null : explain);
     newBtn.hidden = !(v.canCreate || (down && canAdd));
-    attr(newBtn, 'aria-disabled', v.canCreate ? null : 'true'); attr(newBtn, 'title', v.canCreate ? null : explain);
+    attr(newBtn, 'aria-disabled', v.canCreate && !down ? null : 'true'); attr(newBtn, 'title', v.canCreate && !down ? null : explain);
     // summary line and milestone picker
     const all = cardsInMilestone();
     const ready = all.filter((c) => c.column === 'ready').length;
@@ -420,7 +420,7 @@
   function updateCard(c, li) {
     const p = parts.get(c.id);
     const down = isDown();
-    const mvVisible = c.moves.length > 0 && (down || model.viewer.canWrite);
+    const mvVisible = c.moves.length > 0 && (model.viewer.role === 'owner' || model.viewer.role === 'lead') && (down || model.viewer.canWrite);
     const sig = JSON.stringify([c, ui.selected === c.id, pending[c.id], refusals[c.id], mvVisible, down, model.viewer.readOnlyReason]);
     if (sigs.get(c.id) === sig) return;
     sigs.set(c.id, sig);
