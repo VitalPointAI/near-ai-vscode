@@ -2,11 +2,12 @@
 // committed-entry wrappers, genesis batches and a seeded PRNG. No key material is ever written to disk.
 // The file has no .test suffix on purpose so the test glob does not run it as a suite.
 import { canonicalBytes, canonicalize, eventPath, snapshotPath } from '../../domain/team/canonical';
-import { applyEntry, createState, reduce, snapshotBody, stateHash } from '../../domain/team/materialize';
+import { applyEntry, checkCandidate, createState, reduce, snapshotBody, stateHash } from '../../domain/team/materialize';
 import type { SnapshotBody, SnapshotFile } from '../../domain/team/materialize';
 import { DEFAULT_WIP_LIMIT } from '../../domain/team/policy';
 import { TEAM_REJECTION_REASONS } from '../../domain/team/types';
-import type { CommittedEvent, GenesisAnchor, ImplementedEventBodies, ImplementedEventType, Role, TeamEvent, TeamEventBodyMap, TeamPolicy, TeamState } from '../../domain/team/types';
+import type { CommittedEvent, GenesisAnchor, ImplementedEventBodies, ImplementedEventType, Role, TeamEvent, TeamEventBodyMap, TeamPolicy, TeamState, WorkItem } from '../../domain/team/types';
+import { isCard } from '../../domain/team/work';
 import { createDeviceIdentity, newEventId, newTeamId, signEvent } from '../../team/identity';
 import type { DeviceIdentity } from '../../team/identity';
 import { MemorySecrets, createOwner, testGenesis } from './teamHarness';
@@ -109,10 +110,18 @@ const POLICY_CHANGES: Array<Partial<TeamPolicy>> = [
   { dispatchMode: 'auto' }, { dispatchMode: 'suggest' }, { teeOnly: true }, { teeOnly: false }, { offerTimeoutMinutes: 45 }, { peerMetricsVisible: true }, { sharedPaths: ['package.json', 'CHANGELOG.md'] }
 ];
 
+export interface ScenarioOptions {
+  // Mix work item events into the valid events. Off by default: a seed's roster-only log is a pinned sequence and must not move.
+  items?: boolean;
+}
+
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const ITEM_SCOPES = [['src/a/**'], ['src/b/**', 'docs/**'], ['package.json']];
+
 // A seeded log of about `length` entries: valid events from two owner devices mixed with forged ones. The first valid snapshot.written is
 // placed before any forgery. The snapshot hash no longer covers state.rejected (WR-07), so the placement is kept only to leave the seeded scenarios as they were.
 // Every entry is also run through a live state, which both chooses the next valid Lamport and asserts each entry gets the planned verdict.
-export async function buildScenario(seed: number, length: number): Promise<Scenario> {
+export async function buildScenario(seed: number, length: number, options: ScenarioOptions = {}): Promise<Scenario> {
   const random = mulberry32(seed);
   const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
   const teamId = newTeamId();
@@ -143,7 +152,61 @@ export async function buildScenario(seed: number, length: number): Promise<Scena
     forged.push({ eventId, reason });
   };
   const signer = (): TestActor => (secondAdded && !secondRevoked && random() < 0.5 ? { ...second } : owner);
+  // Work item events are drawn only when the option is on, so a roster-only seed draws exactly the numbers it always did. The candidate is
+  // checked on a copy of the live state first: an event the rules would refuse at this position is simply not written (nothing is forged).
+  const boardId = (): string => `item:${Array.from({ length: 26 }, () => CROCKFORD[Math.floor(random() * 32)]).join('')}`;
+  const itemIntent = (): { type: ImplementedEventType; body: unknown } => {
+    const all = [...live.items.values()];
+    const of = (kind: string): WorkItem[] => all.filter((entry) => entry.kind === kind);
+    const cards = all.filter(isCard);
+    const milestone = of('milestone')[0];
+    const common = { dependsOn: [] as string[], scope: [] as string[], requirements: [] as string[], mustHaves: [] as string[], tags: [] as string[], state: 'backlog' as const };
+    if (milestone === undefined) return { type: 'item.imported', body: { ...common, id: 'milestone:v1.0.0', kind: 'milestone', title: 'Version 1.0.0' } };
+    const roll = random();
+    const phases = of('phase');
+    const plans = of('plan');
+    const target = (entries: WorkItem[]): string => (entries.length === 0 ? 'plan:99-99' : (pick(entries) as WorkItem).id);
+    if (roll < 0.12 || phases.length === 0) {
+      const number = phases.length + 1;
+      const previous = phases.length > 0 && random() < 0.4 ? [(pick(phases) as WorkItem).id] : [];
+      return { type: 'item.imported', body: { ...common, id: `phase:${number}`, kind: 'phase', title: `Phase ${number}`, parentId: milestone.id, dependsOn: previous } };
+    }
+    if (roll < 0.35) {
+      const phase = pick(phases);
+      const number = plans.filter((entry) => entry.parentId === phase.id).length + 1;
+      const label = `${phase.id.slice(6)}-${String(number).padStart(2, '0')}`;
+      const dependsOn = plans.length > 0 && random() < 0.35 ? [(pick(plans) as WorkItem).id] : [];
+      const body: Record<string, unknown> = { ...common, id: `plan:${label}`, kind: 'plan', title: `Plan ${label}`, parentId: phase.id, dependsOn, state: random() < 0.15 ? 'done' : 'backlog' };
+      if (random() < 0.85) body.scope = pick(ITEM_SCOPES);
+      if (random() < 0.85) body.estimate = { tokens: 1000 * (1 + Math.floor(random() * 90)) };
+      return { type: 'item.imported', body };
+    }
+    if (roll < 0.43) {
+      const plan = pick(plans.length === 0 ? [{ id: 'plan:99-99' } as WorkItem] : plans);
+      return { type: 'item.imported', body: { ...common, id: `task:${plan.id.slice(5)}-${1 + Math.floor(random() * 9)}`, kind: 'task', title: 'A task', parentId: plan.id } };
+    }
+    if (roll < 0.56) {
+      const body: Record<string, unknown> = { id: boardId(), kind: pick(['bug', 'chore', 'spike'] as const), title: `Board item ${Math.floor(random() * 1000)}`, scope: pick(ITEM_SCOPES), requirements: [], mustHaves: [] };
+      if (random() < 0.7) body.estimate = { tokens: 500 * (1 + Math.floor(random() * 40)) };
+      return { type: 'item.created', body };
+    }
+    if (roll < 0.64) return { type: 'item.blocked', body: { id: target(cards), reason: 'waiting on an answer' } };
+    if (roll < 0.70) return { type: 'item.unblocked', body: { id: target(cards.filter((entry) => entry.blocked !== undefined)) } };
+    if (roll < 0.78) return { type: 'item.updated', body: { id: target([...cards, ...phases]), changes: { hold: random() < 0.6 } } };
+    if (roll < 0.86) return { type: 'item.updated', body: { id: target(cards), changes: { state: 'done' } } };
+    if (roll < 0.90) return { type: 'item.estimated', body: { id: target(cards.filter((entry) => entry.origin === 'board')), estimate: { tokens: 700 * (1 + Math.floor(random() * 30)) } } };
+    if (roll < 0.95) return { type: 'item.cancelled', body: { id: target(cards), reason: 'not needed any more' } };
+    return { type: 'item.reopened', body: { id: target(cards.filter((entry) => entry.state === 'done' || entry.state === 'cancelled')) } };
+  };
+  const addItem = (): boolean => {
+    const intent = itemIntent();
+    const event = signed(signer(), { ...at(), type: intent.type, body: intent.body as never });
+    if (checkCandidate(live, [event]) !== undefined) return false;
+    accepted(event);
+    return true;
+  };
   const addValid = (): void => {
+    if (options.items === true && random() < 0.6 && addItem()) return;
     const roll = random();
     if (!secondAdded) {
       secondAdded = true;

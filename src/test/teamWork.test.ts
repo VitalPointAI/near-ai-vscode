@@ -5,8 +5,9 @@ import assert from 'node:assert/strict';
 import * as path from 'node:path';
 import test from 'node:test';
 import { defaultTeamPolicy } from '../domain/team/policy';
-import { teamMaterializer } from '../domain/team/materialize';
-import type { GenesisAnchor, ItemState, TeamFile, TeamState, WorkItem } from '../domain/team/types';
+import { applyEntry, cloneState, reduce, stateHash, teamMaterializer } from '../domain/team/materialize';
+import { ItemHistory, MAX_HISTORY_PER_ITEM } from '../domain/team/itemHistory';
+import type { CommittedEvent, GenesisAnchor, ImplementedEventBodies, ImplementedEventType, ItemState, TeamFile, TeamState, WorkItem } from '../domain/team/types';
 import { BOARD_COLUMNS, countReady, effectiveColumn, isCard, progressOf, readiness } from '../domain/team/work';
 import type { NotReadyReason } from '../domain/team/work';
 import { TeamLog, buildGenesisEvents } from '../team/eventLog';
@@ -14,6 +15,7 @@ import type { EventIntent, TeamSigner } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF, GitTransport } from '../team/gitTransport';
 import { emailHash, newTeamId } from '../team/identity';
 import { canonicalTeamFile } from '../team/teamFile';
+import { buildScenario, entryOf, genesisEntries, makeActor, mulberry32, signed } from './helpers/teamEvents';
 import { createOwner, createTeamFixture } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
 
@@ -268,4 +270,139 @@ test('progress cannot overflow on very large estimates', () => {
   const huge = 1_000_000_000_000;
   const entries = Array.from({ length: 200 }, (_, index) => readyPlan({ id: `plan:90-${String(index + 1).padStart(2, '0')}`, estimate: { tokens: huge }, ...(index < 100 ? { state: 'done' as ItemState } : {}) }));
   assert.deepEqual(progressOf(board(MILESTONE, PHASE_90, ...entries), 'phase:90'), { percent: 50, done: 100, total: 200 });
+});
+
+// ---- item history (A9, D-18) -------------------------------------------------------------------------------------------------------------
+
+interface HistoryWorld { state: TeamState; entries: CommittedEvent[]; send<T extends ImplementedEventType>(type: T, body: ImplementedEventBodies[T], second?: number): CommittedEvent }
+
+async function historyWorld(): Promise<HistoryWorld> {
+  const teamId = newTeamId();
+  const owner = await makeActor(teamId);
+  const { entries: genesis, anchor } = genesisEntries(owner, teamId);
+  const state = reduce(genesis, anchor);
+  const entries: CommittedEvent[] = [...genesis.map((entry) => ({ ...entry, verdict: { accepted: true as const } }))];
+  let tick = 0;
+  const send = <T extends ImplementedEventType>(type: T, body: ImplementedEventBodies[T], second?: number): CommittedEvent => {
+    tick += 1;
+    const event = signed(owner, { teamId, type, body, lamport: state.highLamport + 1, prev: state.head.eventId, at: `2026-03-01T10:${String(Math.floor((second ?? tick) / 60)).padStart(2, '0')}:${String((second ?? tick) % 60).padStart(2, '0')}.000Z` });
+    const entry = entryOf(event);
+    entry.verdict = applyEntry(state, entry);
+    entries.push(entry);
+    return entry;
+  };
+  return { state, entries, send };
+}
+
+const PLAN_BODY = (id: string, parentId: string): ImplementedEventBodies['item.imported'] => ({
+  id, kind: 'plan', title: id, state: 'backlog', dependsOn: [], scope: ['src/**'], requirements: [], mustHaves: [], tags: [], parentId, estimate: { tokens: 1000 }
+});
+
+test('history keeps accepted item events newest first with reason or changed keys, and ignores everything else', async () => {
+  const world = await historyWorld();
+  world.send('item.imported', { id: 'milestone:v1.0.0', kind: 'milestone', title: 'M', state: 'backlog', dependsOn: [], scope: [], requirements: [], mustHaves: [], tags: [] });
+  world.send('item.imported', { id: 'phase:1', kind: 'phase', title: 'P', state: 'backlog', dependsOn: [], scope: [], requirements: [], mustHaves: [], tags: [], parentId: 'milestone:v1.0.0' });
+  const imported = world.send('item.imported', PLAN_BODY('plan:1-01', 'phase:1'));
+  const blocked = world.send('item.blocked', { id: 'plan:1-01', reason: 'waiting for review' });
+  world.send('item.unblocked', { id: 'plan:1-01' });
+  const updated = world.send('item.updated', { id: 'plan:1-01', changes: { title: 'Renamed', tags: ['x'] } });
+  world.send('member.availability', { availability: 'focus' });
+  const forged = world.send('item.blocked', { id: 'plan:1-99', reason: 'no such item' });
+  assert.equal(forged.verdict?.accepted, false);
+  const cancelled = world.send('item.cancelled', { id: 'plan:1-01', reason: 'dropped' });
+
+  const history = new ItemHistory();
+  history.record(world.entries);
+  const entries = history.forItem('plan:1-01');
+  assert.deepEqual(entries.map((entry) => entry.type), ['item.cancelled', 'item.updated', 'item.unblocked', 'item.blocked', 'item.imported']);
+  assert.equal(entries[0]?.eventId, (JSON.parse(cancelled.text) as { id: string }).id);
+  assert.equal(entries[0]?.reason, 'dropped');
+  assert.equal(entries[3]?.reason, 'waiting for review');
+  assert.deepEqual(entries[1]?.changed, ['tags', 'title']);
+  assert.equal(entries[1]?.reason, undefined);
+  assert.equal(entries[1]?.at, (JSON.parse(updated.text) as { at: string }).at);
+  assert.equal(entries[3]?.author, (JSON.parse(blocked.text) as { author: string }).author);
+  assert.equal(entries[4]?.eventId, (JSON.parse(imported.text) as { id: string }).id);
+  assert.deepEqual(history.forItem('plan:1-99'), [], 'a rejected event leaves no history for an item that does not exist');
+  assert.deepEqual(history.forItem('phase:1').map((entry) => entry.type), ['item.imported']);
+  assert.deepEqual(history.forItem('nothing'), []);
+});
+
+test('history holds at most 50 entries per item, keeps the newest, and recording the same entries again adds nothing', async () => {
+  const world = await historyWorld();
+  world.send('item.imported', { id: 'milestone:v1.0.0', kind: 'milestone', title: 'M', state: 'backlog', dependsOn: [], scope: [], requirements: [], mustHaves: [], tags: [] });
+  world.send('item.imported', { id: 'phase:1', kind: 'phase', title: 'P', state: 'backlog', dependsOn: [], scope: [], requirements: [], mustHaves: [], tags: [], parentId: 'milestone:v1.0.0' });
+  world.send('item.imported', PLAN_BODY('plan:1-01', 'phase:1'));
+  const sent: string[] = [];
+  for (let index = 0; index < 120; index += 1) {
+    const entry = world.send('item.updated', { id: 'plan:1-01', changes: { title: `Title ${index}` } });
+    sent.push((JSON.parse(entry.text) as { id: string }).id);
+  }
+  const history = new ItemHistory();
+  history.record(world.entries);
+  history.record(world.entries);
+  const entries = history.forItem('plan:1-01');
+  assert.equal(MAX_HISTORY_PER_ITEM, 50);
+  assert.equal(entries.length, 50);
+  assert.deepEqual(entries.map((entry) => entry.eventId), sent.slice(70).reverse());
+  entries.pop();
+  assert.equal(history.forItem('plan:1-01').length, 50, 'the returned list is a copy');
+});
+
+test('history is not part of the state: it holds plain entries, never the state or its items', async () => {
+  const world = await historyWorld();
+  world.send('item.imported', { id: 'milestone:v1.0.0', kind: 'milestone', title: 'M', state: 'backlog', dependsOn: [], scope: [], requirements: [], mustHaves: [], tags: [] });
+  const before = stateHash(world.state);
+  const history = new ItemHistory();
+  history.record(world.entries);
+  assert.equal(stateHash(world.state), before);
+  assert.ok(!('history' in world.state));
+  const entry = history.forItem('milestone:v1.0.0')[0];
+  assert.deepEqual(Object.keys(entry as object).sort(), ['at', 'author', 'eventId', 'type']);
+});
+
+// ---- determinism with item events (D-11) -------------------------------------------------------------------------------------------------
+
+test('roster-only seeded scenarios keep their pinned event sequence now that item events exist', async () => {
+  const { createHash } = await import('node:crypto');
+  const sequenceOf = async (seed: number): Promise<string> => {
+    const scenario = await buildScenario(seed, 60);
+    return createHash('sha256').update(scenario.entries.map((entry) => { try { return (JSON.parse(entry.text) as { type: string }).type; } catch { return entry.kind; } }).join(',')).digest('hex').slice(0, 16);
+  };
+  assert.equal(await sequenceOf(1001), '4ca013cf0ba0efbf');
+  assert.equal(await sequenceOf(9920), '72e409e2ea21a256');
+});
+
+test('over 20 seeded logs that mix roster and item events, any commit batching gives the same state hash and the same readiness for every item', async () => {
+  let readyTotal = 0;
+  const seen = new Set<string>();
+  for (let index = 0; index < 20; index += 1) {
+    const seed = 2003 + index * 977;
+    const scenario = await buildScenario(seed, 70, { items: true });
+    const full = reduce(scenario.entries, scenario.anchor);
+    assert.ok(full.items.size > 0, `seed ${seed}: the log carries items`);
+    for (const entry of scenario.valid) {
+      try { const type = (JSON.parse(entry.text) as { type: string }).type; if (type.startsWith('item.')) seen.add(type); } catch { /* snapshot placeholder files are not events */ }
+    }
+    const fullHash = stateHash(full);
+    const expected = new Map([...full.items.keys()].map((id) => [id, readiness(full.items, id)]));
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const random = mulberry32(seed * 31 + attempt);
+      let live = reduce([], scenario.anchor);
+      for (let position = 0; position < scenario.entries.length;) {
+        const size = 1 + Math.floor(random() * (attempt === 0 ? 1 : 12));
+        for (const entry of scenario.entries.slice(position, position + size)) applyEntry(live, entry);
+        position += size;
+        live = cloneState(live);
+      }
+      assert.equal(stateHash(live), fullHash, `seed ${seed} batching ${attempt}: state hash`);
+      for (const [id, value] of expected) assert.deepEqual(readiness(live.items, id), value, `seed ${seed} batching ${attempt}: ${id}`);
+      assert.equal(countReady(live.items), countReady(full.items), `seed ${seed} batching ${attempt}: ready count`);
+    }
+    readyTotal += countReady(full.items);
+    const validOnly = reduce(scenario.valid, scenario.anchor);
+    assert.equal(stateHash(validOnly), fullHash, `seed ${seed}: forged entries leave no trace in the hashed state`);
+  }
+  assert.ok(readyTotal > 0, 'at least one log reaches a ready card');
+  for (const type of ['item.imported', 'item.created', 'item.blocked', 'item.updated']) assert.ok(seen.has(type), `the scenarios exercise ${type}`);
 });
