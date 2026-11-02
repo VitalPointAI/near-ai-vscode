@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import { buildBoardModel } from '../domain/team/board';
+import { REFUSALS } from '../domain/team/boardText';
 import type { BoardCard, BoardModel } from '../domain/team/board';
 import { boardWorld, seedStandardBoard } from './helpers/teamBoardWorld';
 import type { BoardWorld } from './helpers/teamBoardWorld';
@@ -25,13 +26,13 @@ async function standard(): Promise<BoardWorld> {
   return world;
 }
 
-function start(options: { width?: number; reducedMotion?: boolean } = {}): BoardHarness {
+function start(options: { width?: number; reducedMotion?: boolean; menu?: boolean } = {}): BoardHarness {
   const h = createBoardHarness({ width: options.width ?? 800, ...(options.reducedMotion === undefined ? {} : { reducedMotion: options.reducedMotion }) });
-  h.load(['board.js', 'drag.js']);
+  h.load(options.menu === true ? ['board.js', 'menu.js', 'drag.js'] : ['board.js', 'drag.js']);
   return h;
 }
 
-async function ownerBoard(options: { width?: number; reducedMotion?: boolean } = {}): Promise<{ h: BoardHarness; model: BoardModel; world: BoardWorld }> {
+async function ownerBoard(options: { width?: number; reducedMotion?: boolean; menu?: boolean } = {}): Promise<{ h: BoardHarness; model: BoardModel; world: BoardWorld }> {
   const world = await standard();
   const model = modelOf(world, world.owner.memberId);
   const h = start(options);
@@ -117,4 +118,326 @@ test('drag.js has no markup sink and no em or en dash in it, and uses the board 
   assert.doesNotMatch(DRAG_JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   assert.doesNotMatch(DRAG_JS, /[—–]/);
   assert.match(DRAG_JS, /application\/x-near-ai-card/);
+});
+
+// ---- Task 2: snap back with reasons, other rows, cancel, foreign drops, the list and motion ---------------------------------------------------
+
+const refusalLine = (h: BoardHarness, id: string): string => text(card(h, id).querySelector('.refusal-line'));
+const caption = (c: FakeNode): FakeNode | null => c.querySelector('.drop-caption');
+const NOT_MOVED = 'Nothing was moved.';
+const radio = (h: BoardHarness, label: string): FakeNode => h.$$('[role="radio"]').find((r) => text(r) === label)!;
+const cantMove = (h: BoardHarness): string[] => h.announcements.filter((a) => a.startsWith("Can't move"));
+
+test('a drop on a claim or integration column posts nothing, leaves the card where it is, shows the reason on the card and announces it', async () => {
+  const { h, model } = await ownerBoard();
+  const ready = cardOf(model, 'plan:90-01');
+  const expected: Array<[string, string, string]> = [
+    ['claimed', 'Claimed', 'Claiming a plan arrives in a later update. Nothing was moved.'],
+    ['in-progress', 'In progress', 'Starting work from the board arrives with claims in a later update. Nothing was moved.'],
+    ['in-review', 'In review', 'Review arrives in a later update. Nothing was moved.'],
+    ['integrating', 'Integrating', 'Merging arrives in a later update. Nothing was moved.']
+  ];
+  for (const [column, label, sentence] of expected) {
+    assert.equal(ready.refusals[column as 'claimed'], sentence, 'the model carries the sentence the card shows');
+    const dt = lift(h, 'plan:90-01');
+    const accepted = over(h, cell(h, column), dt);
+    assert.ok(accepted.defaultPrevented, 'a refused cell still accepts the drop so the reason can be given');
+    drop(h, cell(h, column), dt);
+    h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt });
+    assert.deepEqual(moves(h), [], 'nothing is posted');
+    assert.ok(cell(h, 'ready').contains(card(h, 'plan:90-01')), 'the card never leaves its cell');
+    assert.equal(refusalLine(h, 'plan:90-01'), sentence);
+    assert.equal(card(h, 'plan:90-01').getAttribute('aria-busy'), null);
+    h.advance(150);
+    assert.equal(h.announcements[h.announcements.length - 1], `Can't move plan 90-01 to ${label}. ${sentence}`);
+    assert.deepEqual(marked(h, 'drop-ok'), []);
+    assert.deepEqual(marked(h, 'drop-no'), []);
+  }
+});
+
+test('hovering a refused cell shows the caption inside it, and the caption goes on leave and on drop', async () => {
+  const { h } = await ownerBoard();
+  const dt = lift(h, 'plan:90-01');
+  const claimed = cell(h, 'claimed');
+  h.fire(claimed, 'dragenter', { dataTransfer: dt });
+  over(h, claimed, dt);
+  const cap = caption(claimed);
+  assert.ok(cap, 'the caption is inside the cell');
+  assert.equal(text(cap), "Can't drop here: Claiming a plan arrives in a later update. Nothing was moved.");
+  assert.equal(cap!.getAttribute('role'), 'presentation');
+  assert.equal(h.$$('.drop-caption').length, 1);
+  over(h, claimed, dt);
+  assert.equal(h.$$('.drop-caption').length, 1, 'the caption is not added twice');
+  h.fire(claimed, 'dragleave', { dataTransfer: dt });
+  assert.equal(caption(claimed), null, 'removed when the pointer leaves');
+  assert.deepEqual(marked(h, 'drop-no'), []);
+
+  over(h, claimed, dt);
+  assert.ok(caption(claimed));
+  over(h, cell(h, 'backlog'), dt);
+  assert.equal(caption(claimed), null, 'moving to an offered cell takes the caption away');
+  over(h, cell(h, 'in-review'), dt);
+  assert.ok(caption(cell(h, 'in-review')));
+  drop(h, cell(h, 'in-review'), dt);
+  assert.equal(h.$$('.drop-caption').length, 0, 'removed on drop');
+});
+
+test('a not-ready backlog card gets the model sentence on the Ready cell, and a done card gets the reopen sentence', async () => {
+  const world = await standard();
+  const beta = modelOf(world, world.owner.memberId);
+  const h = start();
+  h.deliver({ type: 'state', model: beta });
+  assert.equal(card(h, 'plan:90-02').draggable, true);
+  const sentence = cardOf(beta, 'plan:90-02').refusals.ready!;
+  assert.match(sentence, /not ready yet/);
+  const dt = lift(h, 'plan:90-02');
+  drop(h, cell(h, 'ready'), dt);
+  assert.deepEqual(moves(h), []);
+  assert.equal(refusalLine(h, 'plan:90-02'), sentence);
+  assert.ok(cell(h, 'backlog').contains(card(h, 'plan:90-02')));
+
+  world.accept(world.owner, 'item.updated', { id: 'plan:90-01', changes: { state: 'done' } });
+  const done = modelOf(world, world.owner.memberId);
+  h.deliver({ type: 'state', model: done });
+  assert.ok(cell(h, 'done').contains(card(h, 'plan:90-01')));
+  assert.equal(card(h, 'plan:90-01').draggable, true, 'a done card can be reopened, so it is draggable');
+  const dt2 = lift(h, 'plan:90-01');
+  assert.deepEqual(marked(h, 'drop-ok'), ['backlog'], 'only Backlog is offered for a done card');
+  drop(h, cell(h, 'ready'), dt2);
+  assert.deepEqual(moves(h), []);
+  assert.equal(refusalLine(h, 'plan:90-01'), REFUSALS.terminal);
+  const dt3 = lift(h, 'plan:90-01');
+  drop(h, cell(h, 'backlog'), dt3);
+  assert.deepEqual(moves(h), [{ type: 'move', itemId: 'plan:90-01', target: 'reopen' }]);
+  assert.equal(text(card(h, 'plan:90-01').querySelector('.pending-line')), 'Moving to Backlog...');
+});
+
+test('a drop in another row is refused with the row sentence; a drop on the card\'s own column does and says nothing', async () => {
+  const { h } = await ownerBoard();
+  radio(h, 'Phase').click();
+  const lane = card(h, 'plan:90-01').closest('.cell')!.getAttribute('data-lane')!;
+  assert.equal(lane, 'phase:90');
+  const dt = lift(h, 'plan:90-01');
+  assert.deepEqual(h.$$('.cell').filter((c) => classes(c).includes('drop-ok')).map((c) => c.getAttribute('data-lane')), [lane, lane, lane], 'only cells of its own row are offered');
+  assert.deepEqual(h.$$('.lane').filter((l) => classes(l).includes('drag-active')).map((l) => l.getAttribute('data-lane')), [lane]);
+  assert.deepEqual(h.$$('.column').filter((c) => classes(c).includes('drag-active')).map((c) => c.getAttribute('data-column')), ['backlog', 'done', 'cancelled']);
+  const other = cell(h, 'backlog', 'board');
+  over(h, other, dt);
+  assert.equal(text(caption(other)), `Can't drop here: ${REFUSALS.differentRow}`);
+  drop(h, other, dt);
+  assert.deepEqual(moves(h), []);
+  assert.equal(refusalLine(h, 'plan:90-01'), 'This card stays in its own row. Drop it in another column of the same row.');
+  h.advance(150);
+  assert.equal(h.announcements[h.announcements.length - 1], `Can't move plan 90-01 to Backlog. ${REFUSALS.differentRow}`);
+  assert.equal(h.$$('.drop-caption').length, 0);
+  assert.deepEqual(marked(h, 'drop-ok'), []);
+
+  card(h, 'plan:90-01').querySelector('.dismiss')!.click();
+  assert.equal(h.$$('.refusal-line').length, 0, 'the person dismissed the message');
+  const before = h.announcements.length;
+  const dt2 = lift(h, 'plan:90-01');
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: Object.assign(dt2, { dropEffect: 'move' }) });
+  const own = cell(h, 'ready', lane);
+  const dt3 = lift(h, 'plan:90-01');
+  over(h, own, dt3);
+  assert.equal(caption(own), null, 'no caption on its own column');
+  drop(h, own, dt3);
+  h.advance(150);
+  assert.deepEqual(moves(h), []);
+  assert.equal(h.announcements.length, before, 'nothing is announced');
+  assert.equal(h.$$('.refusal-line').length, 0, 'and no refusal line appears');
+  assert.equal(card(h, 'plan:90-01').getAttribute('aria-busy'), null);
+});
+
+test('Escape during a drag, or a drag that ends with no drop, clears the highlights and announces the cancel once', async () => {
+  const { h } = await ownerBoard();
+  let dt = lift(h, 'plan:90-01');
+  assert.deepEqual(marked(h, 'drop-ok'), ['backlog', 'done', 'cancelled']);
+  over(h, cell(h, 'claimed'), dt);
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt });
+  assert.deepEqual(marked(h, 'drop-ok'), []);
+  assert.equal(h.$$('.drop-caption').length, 0);
+  assert.equal(classes(card(h, 'plan:90-01')).includes('dragging'), false);
+  h.advance(150);
+  assert.deepEqual(h.announcements, ['Move cancelled. The card is still in Ready.']);
+  assert.deepEqual(moves(h), []);
+
+  dt = lift(h, 'plan:90-01');
+  const esc = h.fire(h.document, 'keydown', { key: 'Escape' });
+  assert.equal(esc.defaultPrevented, false);
+  assert.deepEqual(marked(h, 'drop-ok'), []);
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt });
+  h.advance(150);
+  assert.equal(h.announcements.filter((a) => a.startsWith('Move cancelled')).length, 2, 'one announcement per cancelled drag, none doubled by dragend');
+
+  const quiet = h.announcements.length;
+  h.fire(h.document, 'keydown', { key: 'Escape' });
+  h.advance(150);
+  assert.equal(h.announcements.length, quiet, 'Escape with no drag does nothing');
+});
+
+test('a drag that is dropped on an offered cell does not announce a cancel when it ends', async () => {
+  const { h } = await ownerBoard();
+  const dt = lift(h, 'plan:90-01');
+  drop(h, cell(h, 'backlog'), dt);
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt });
+  h.advance(150);
+  assert.deepEqual(h.announcements.filter((a) => /cancelled/i.test(a)), []);
+  assert.equal(moves(h).length, 1);
+});
+
+test('drops that do not carry the board type are ignored', async () => {
+  const { h } = await ownerBoard();
+  const foreign = h.dataTransfer();
+  foreign.setData('text/plain', 'plan:90-01');
+  const before = h.announcements.length;
+  assert.equal(over(h, cell(h, 'backlog'), foreign).defaultPrevented, false, 'a foreign drag is not accepted');
+  drop(h, cell(h, 'backlog'), foreign);
+  drop(h, cell(h, 'claimed'), foreign);
+  h.advance(150);
+  assert.deepEqual(moves(h), []);
+  assert.equal(h.announcements.length, before);
+  assert.equal(h.$$('.refusal-line').length, 0);
+
+  // Even in the middle of a real drag, a drop that is only text does nothing.
+  const dt = lift(h, 'plan:90-01');
+  const files = h.dataTransfer();
+  files.setData('Files', '');
+  assert.equal(drop(h, cell(h, 'backlog'), foreign).defaultPrevented, false);
+  assert.equal(drop(h, cell(h, 'claimed'), files).defaultPrevented, false);
+  assert.deepEqual(moves(h), []);
+  assert.equal(h.$$('.refusal-line').length, 0);
+  assert.deepEqual(marked(h, 'drop-ok'), ['backlog', 'done', 'cancelled'], 'the real drag is untouched');
+  assert.ok(over(h, cell(h, 'backlog'), dt).defaultPrevented);
+});
+
+test('at 400 px nothing is draggable and drag events do nothing', async () => {
+  const { h } = await ownerBoard({ width: 400 });
+  assert.equal(h.$$('.card').filter((c) => c.draggable).length, 0);
+  const dt = h.dataTransfer();
+  const start = h.fire(card(h, 'plan:90-01'), 'dragstart', { dataTransfer: dt });
+  assert.equal(dt.types.length, 0, 'no data is set');
+  assert.equal(classes(card(h, 'plan:90-01')).includes('dragging'), false);
+  assert.equal(start.defaultPrevented, false);
+  h.fire(h.$('#board')!, 'drop', { dataTransfer: dt });
+  assert.deepEqual(moves(h), []);
+});
+
+test('a drop sent by drag.js that the host refuses shows the reason once on that card, and the menu does not draw it again', async () => {
+  const { h } = await ownerBoard({ menu: true });
+  const dt = lift(h, 'plan:90-01');
+  drop(h, cell(h, 'backlog'), dt);
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: Object.assign(dt, { dropEffect: 'move' }) });
+  assert.equal(moves(h).length, 1);
+  const stale = 'Dana already changed this card. The board now shows the latest. Nothing was moved.';
+  h.deliver({ type: 'refused', itemId: 'plan:90-01', reason: stale });
+  h.advance(150);
+  assert.equal(refusalLine(h, 'plan:90-01'), stale);
+  assert.equal(card(h, 'plan:90-01').getAttribute('aria-busy'), null);
+  assert.deepEqual(cantMove(h), [`Can't move plan 90-01 to Backlog. ${stale}`], 'announced once');
+  assert.equal(h.$$('.refusal-line').length, 1, 'and not drawn on any other card');
+  h.deliver({ type: 'refused', itemId: 'plan:90-01', reason: stale });
+  h.advance(150);
+  assert.equal(cantMove(h).length, 1, 'a second reply for the same request is not announced again');
+});
+
+test('a refusal for a request the menu sent is left to the menu, and a dismissed drop prompt clears the pending line silently', async () => {
+  const { h } = await ownerBoard({ menu: true });
+  card(h, 'plan:90-01').querySelector('.card-main')!.focus();
+  h.press(card(h, 'plan:90-01').querySelector('.card-main')!, 'm');
+  const hold = h.$$('#menu [role="menuitem"]').find((i) => text(i) === 'Backlog (put on hold)')!;
+  hold.focus();
+  h.press(hold, 'Enter');
+  assert.equal(moves(h).length, 1);
+  const reason = 'The team remote could not be reached, so nothing was changed. Try again when you are back online.';
+  h.deliver({ type: 'refused', itemId: 'plan:90-01', reason });
+  h.advance(150);
+  assert.deepEqual(cantMove(h), [`Can't move plan 90-01 to Backlog. ${reason}`], 'one announcement, from the menu');
+
+  const dt = lift(h, 'plan:90-02');
+  drop(h, cell(h, 'done'), dt);
+  assert.equal(text(card(h, 'plan:90-02').querySelector('.pending-line')), 'Moving to Done...');
+  h.deliver({ type: 'refused', itemId: 'plan:90-02', reason: '' });
+  h.advance(150);
+  assert.equal(card(h, 'plan:90-02').getAttribute('aria-busy'), null);
+  assert.equal(h.$$('.refusal-line').filter((r) => card(h, 'plan:90-02').contains(r)).length, 0);
+  assert.equal(cantMove(h).length, 1);
+});
+
+// Motion: FLIP with a transform set through the style object; skipped under reduced motion.
+function stubRect(node: FakeNode, rect: { left: number; top: number }): void {
+  node.getBoundingClientRect = () => ({ x: rect.left, y: rect.top, left: rect.left, top: rect.top, right: rect.left + 200, bottom: rect.top + 60, width: 200, height: 60 });
+}
+function watchTransform(node: FakeNode): string[] {
+  const seen: string[] = [];
+  const original = node.style.setProperty;
+  node.style.setProperty = (name: string, value: string): void => { if (name === 'transform') seen.push(value); original(name, value); };
+  return seen;
+}
+async function holdState(world: BoardWorld): Promise<BoardModel> {
+  world.accept(world.owner, 'item.updated', { id: 'plan:90-01', changes: { hold: true } });
+  return modelOf(world, world.owner.memberId);
+}
+
+test('after a confirmed drop the card relocates with a 150 ms transform transition that is cleared afterwards', async () => {
+  const { h, world } = await ownerBoard({ reducedMotion: false });
+  const li = card(h, 'plan:90-01');
+  const where = { left: 100, top: 40 };
+  stubRect(li, where);
+  const seen = watchTransform(li);
+  const dt = lift(h, 'plan:90-01');
+  drop(h, cell(h, 'backlog'), dt);
+  h.fire(li, 'dragend', { dataTransfer: Object.assign(dt, { dropEffect: 'move' }) });
+  assert.deepEqual(seen, [], 'nothing moves until the host confirms');
+  where.left = 300;
+  where.top = 40;
+  h.deliver({ type: 'state', model: await holdState(world) });
+  assert.ok(cell(h, 'backlog').contains(card(h, 'plan:90-01')), 'the card is now in Backlog');
+  assert.equal(seen[0], 'translate(-200px, 0px)', 'it starts where it was');
+  assert.match(li.style.getPropertyValue('transition'), /150ms/);
+  assert.equal(li.style.getPropertyValue('transform'), 'translate(0px, 0px)', 'and slides to its place');
+  h.advance(200);
+  assert.equal(li.style.getPropertyValue('transform'), '', 'the transform is cleared after 150 ms');
+  assert.equal(li.style.getPropertyValue('transition'), '');
+  h.advance(3100);
+  assert.equal(classes(li).includes('changed'), false);
+});
+
+test('under reduced motion no transform is ever set, and the changed outline for a teammate move stays', async () => {
+  const { h, world } = await ownerBoard({ reducedMotion: true });
+  const li = card(h, 'plan:90-01');
+  const where = { left: 100, top: 40 };
+  stubRect(li, where);
+  const seen = watchTransform(li);
+  const other = card(h, 'plan:90-02');
+  stubRect(other, { left: 100, top: 200 });
+  const dt = lift(h, 'plan:90-01');
+  drop(h, cell(h, 'backlog'), dt);
+  h.fire(li, 'dragend', { dataTransfer: Object.assign(dt, { dropEffect: 'move' }) });
+  where.left = 300;
+  h.deliver({ type: 'state', model: await holdState(world) });
+  assert.ok(cell(h, 'backlog').contains(card(h, 'plan:90-01')));
+  h.advance(500);
+  assert.deepEqual(seen, []);
+  assert.equal(li.style.getPropertyValue('transform'), '');
+
+  // A move made by someone else is outlined for 3 seconds whatever the motion setting.
+  const w2 = await standard();
+  const m1 = modelOf(w2, w2.owner.memberId);
+  const h3 = start({ reducedMotion: true });
+  h3.deliver({ type: 'state', model: m1 });
+  w2.accept(w2.owner, 'item.updated', { id: 'plan:90-01', changes: { hold: true } });
+  h3.deliver({ type: 'state', model: modelOf(w2, w2.owner.memberId) });
+  assert.ok(classes(card(h3, 'plan:90-01')).includes('changed'));
+  assert.equal(watchTransform(card(h3, 'plan:90-01')).length, 0);
+  h3.advance(3100);
+  assert.equal(classes(card(h3, 'plan:90-01')).includes('changed'), false);
+});
+
+test('drag.js reads the reduced motion setting, names the row sentence, and keeps every string free of em and en dashes', () => {
+  assert.match(DRAG_JS, /prefers-reduced-motion/);
+  assert.match(DRAG_JS, /This card stays in its own row/);
+  assert.doesNotMatch(DRAG_JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+  assert.doesNotMatch(DRAG_JS, /[\u2013\u2014]/);
+  assert.doesNotMatch(DRAG_JS, /\.setAttribute\(\s*'style'|\.style\.cssText|\.style\.[a-z]+\s*=/, 'motion goes through style.setProperty only');
 });
