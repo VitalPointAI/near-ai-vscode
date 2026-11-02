@@ -182,7 +182,10 @@ test('a blocked card shows who blocked it and why, with the time, right under th
   assert.match(text(first), /Blocked by Lee: waiting for the API key/);
   assert.ok(first.querySelector('time'), 'with its time');
   assert.equal(first.querySelector('time')!.getAttribute('datetime'), detailOf(world, 'plan:90-01').blocked!.since);
-  assert.equal(hasSection(h, 'Why this is not ready'), false, 'a ready card has no such section');
+  // Blocking puts the card in Backlog, so the host also lists "It is blocked." under Why this is not ready (UI-SPEC Card Detail 3), after the notice.
+  const reasons = sectionOf(h, 'Why this is not ready').querySelectorAll('li').map((li) => text(li));
+  assert.deepEqual(reasons, detailOf(world, 'plan:90-01').notReady);
+  assert.ok(reasons.includes('It is blocked.'));
 });
 
 test('a backlog card says in plain words why it is not ready', async () => {
@@ -193,6 +196,11 @@ test('a backlog card says in plain words why it is not ready', async () => {
   openBy(h, 'plan:90-04', messageOf(world, 'plan:90-04'));
   assert.deepEqual(sectionOf(h, 'Why this is not ready').querySelectorAll('li').map((li) => text(li)), expected);
   assert.ok(headings(h).indexOf('Why this is not ready') < headings(h).indexOf('Facts'), 'it comes before the facts');
+
+  h.press(h.focused(), 'Escape');
+  openBy(h, 'plan:90-01', messageOf(world, 'plan:90-01'));
+  assert.equal(api(h).cardData('plan:90-01').column, 'ready');
+  assert.equal(hasSection(h, 'Why this is not ready'), false, 'a ready card has no such section');
 });
 
 test('facts are a definition list; a board item shows its description and Edit, an imported item shows the project plans note instead', async () => {
@@ -234,6 +242,9 @@ test('requirement buttons apply the requirement filter and leave the detail open
   filter.click();
   assert.equal((h.state as any).filters.requirement, 'FIX-01');
   assert.equal(isOpen(h), true, 'nothing else closes');
+  // Plan 90-01 carries only BOARD-01, so the FIX-01 filter hides its card. Clear the filter, as Clear filters does, so its selection can be seen below.
+  assert.equal(h.$('.card[data-id="plan:90-01"]') === null, true, 'the filter reached the board');
+  api(h).setFilter('requirement', '');
 
   const deps = sectionOf(h, 'Dependencies');
   const rows = deps.querySelectorAll('li');
@@ -297,7 +308,8 @@ test('Move to... in the detail opens the same menu as the card and is absent whe
   move.click();
   const menu = h.$('#menu')!;
   assert.equal(menu.hidden, false);
-  assert.deepEqual(menu.querySelectorAll('[role="menuitem"]').map((i) => text(i)), api(h).cardData('plan:90-01').moves.map((m: any) => m.label));
+  // The model lives in the page's vm realm; copy its labels into a plain array here, since deepEqual compares the arrays' prototypes too.
+  assert.deepEqual(menu.querySelectorAll('[role="menuitem"]').map((i) => text(i)), [...api(h).cardData('plan:90-01').moves.map((m: any) => m.label)]);
   h.press(h.focused(), 'Escape');
   assert.equal(h.$('#menu')!.hidden, true, 'the first Escape closes only the menu');
   assert.equal(isOpen(h), true);
@@ -339,6 +351,7 @@ test('a change to the open card asks the host again; a card that leaves the boar
   gone.cards = gone.cards.filter((c) => c.id !== 'plan:90-01');
   h.deliver({ type: 'state', model: gone });
   assert.equal(isOpen(h), false);
+  h.advance(200); // announce() writes the live region 100 ms later
   assert.ok(h.announcements.some((a) => /no longer on the board/.test(a)));
 });
 
@@ -368,7 +381,7 @@ test('hostile text is drawn as text and long must-haves wrap in full', async () 
   const { h } = await drawn(800, 'owner', world);
   const message = messageOf(world, 'plan:90-04');
   message.title = '<img src=x onerror=alert(1)> $(trash) <b>bold</b>';
-  message.mustHaves = ['<script>alert(1)</script>' + 'z'.repeat(576)];
+  message.mustHaves = ['<script>alert(1)</script>' + 'z'.repeat(575)]; // 25 characters of markup plus 575: exactly the 600 character limit
   message.history = [{ at: '2026-03-02T10:00:00.000Z', text: '<i>Dana</i> blocked this: <a href="x">reason</a>.' }];
   message.blocked = { reason: '<u>why</u>', byName: '<b>Dana</b>', since: '2026-03-02T10:00:00.000Z' };
   openBy(h, 'plan:90-04', message);
