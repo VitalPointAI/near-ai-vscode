@@ -37,23 +37,40 @@ for (const file of files) {
   });
 }
 
-// 2. Lines added by each commit in the range (catches keys added and later removed).
+// 2. Lines added by each commit in the range (catches keys added and later removed). Each commit
+// is compared with each of its parents (so lines added in a merge commit count), with rename
+// detection off (a renamed or copied file counts as added), file names read NUL-separated (so
+// spaces and other characters are safe), and each file's diff read on its own, after its first
+// hunk header, so no added line can be mistaken for a file header.
 let commitCount = 0;
 if (options.range) {
-  const [from] = options.range.split('..');
-  const range = /^0+$/.test(from) || from === '' ? options.range.split('..')[1] : options.range;
-  const log = git(['log', '-p', '--no-color', '--unified=0', '--diff-filter=AM', '--format=@@commit %H', range]);
-  let commit = '';
-  let file = '';
-  for (const line of log.split('\n')) {
-    if (line.startsWith('@@commit ')) { commit = line.slice(9, 16); commitCount += 1; continue; }
-    if (line.startsWith('+++ ')) {
-      file = line.replace(/^\+\+\+ (b\/)?/, '');
-      if (file !== '/dev/null' && isSecretFileName(file) && !allow.has(file)) findings.push({ where: `${commit} ${file}`, rule: 'secret-file-name', text: '(file name)' });
-      continue;
+  const [from, to] = options.range.split('..');
+  const revisions = /^0+$/.test(from) || from === '' ? [to] : [options.range];
+  const commits = git(['rev-list', '--reverse', ...revisions, '--']).split('\n').filter(Boolean);
+  const emptyTree = git(['hash-object', '-t', 'tree', '--stdin'], { input: '' }).trim();
+  const seen = new Set();
+  for (const commit of commits) {
+    commitCount += 1;
+    const parents = git(['rev-list', '--parents', '-n', '1', commit]).trim().split(' ').slice(1);
+    for (const parent of parents.length > 0 ? parents : [emptyTree]) {
+      const changed = git(['diff-tree', '-r', '-z', '--no-commit-id', '--no-renames', '--name-only', '--diff-filter=ACMRT', parent, commit]).split('\0').filter(Boolean);
+      for (const file of changed) {
+        const where = `${commit.slice(0, 7)} ${file}`;
+        const report = (finding) => {
+          const key = `${finding.where}\0${finding.rule}\0${finding.text}`;
+          if (!seen.has(key)) { seen.add(key); findings.push(finding); }
+        };
+        if (isSecretFileName(file) && !allow.has(file)) report({ where, rule: 'secret-file-name', text: '(file name)' });
+        if (allow.has(file)) continue;
+        const diff = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=0', parent, commit, '--', `:(literal)${file}`]);
+        let inHunk = false;
+        for (const line of diff.split('\n')) {
+          if (line.startsWith('@@')) { inHunk = true; continue; }
+          if (!inHunk || !line.startsWith('+')) continue;
+          for (const rule of scanLine(line.slice(1))) report({ where, rule, text: maskLine(line.slice(1).trim()) });
+        }
+      }
     }
-    if (!line.startsWith('+') || allow.has(file)) continue;
-    for (const rule of scanLine(line.slice(1))) findings.push({ where: `${commit} ${file}`, rule, text: maskLine(line.slice(1).trim()) });
   }
 }
 
