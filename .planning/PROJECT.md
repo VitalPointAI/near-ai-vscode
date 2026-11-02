@@ -10,6 +10,7 @@ Developers who want to plan and implement complex projects from VS Code with str
 
 ## Product principles
 
+- No developer knowledge required (owner, 2026-11-02, prime concern): people build together without knowing git. Branches, worktrees, pull requests, rebases, merges, tags and releases are done by agents behind plain actions ("Start this task", "Send for review", "Fix what the reviewer found", "Ship it", "Undo that release"), and reported in plain words. Git terms appear only in an optional details view, never as a required step or decision. Every phase from 63 on (claims and workspaces, dispatch, integration and review, budgets, release readiness) is designed against this, and user-facing text from Phases 60 to 62 (Enable, Invite/Join, the Push offer, repository-access reminders, import notices) is reviewed for git jargon.
 - Private by default: keep project context inside the selected NEAR AI inference path and make verification status visible.
 - User control: expose model, routing, budget, agent, tool, and approval controls without requiring config-file archaeology.
 - Conversational transparency: default to clear, fairly verbose progress reporting so developers can see what the system is doing, why it is doing it, what is waiting, and how to intervene.
