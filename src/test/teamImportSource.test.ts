@@ -5,7 +5,8 @@ import * as path from 'node:path';
 import test from 'node:test';
 import { createTeamFixture, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
-import { MAX_PLANNING_FILE_BYTES, fetchIntegrationBranch, integrationRef, isAncestor, readPlanningSnapshot, remoteBranchHead } from '../team/integrationSource';
+import { MAX_PLANNING_FILE_BYTES, PlanningTooLargeError, fetchIntegrationBranch, integrationRef, isAncestor, readPlanningSnapshot, remoteBranchHead } from '../team/integrationSource';
+import { runGit } from '../team/runGit';
 
 const PLAN_ONE = '.planning/phases/90-alpha/90-01-PLAN.md';
 const SUMMARY_ONE = '.planning/phases/90-alpha/90-01-SUMMARY.md';
@@ -156,6 +157,48 @@ test('a plan file over the size cap is listed as oversize and never read, and fi
     assert.ok(snapshot.paths.includes(SUMMARY_ONE));
     assert.equal(snapshot.files.has(SUMMARY_ONE), false);
     assert.equal(snapshot.truncated, false);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('CR-02: only the roadmap, the state file and plan and summary files count against the path cap, so other planning files never push plans out', async () => {
+  const { fixture, a, b } = await pushedPlans();
+  try {
+    for (let index = 0; index < 40; index += 1) {
+      put(a, `.planning/codebase/map-${index}.md`, 'map\n');
+      put(a, `.planning/phases/90-alpha/90-${String(index).padStart(2, '0')}-CONTEXT.md`, 'context\n');
+    }
+    commitAll(a, 'many other planning files');
+    gitIn(a, ['push', '-q', 'origin', 'main']);
+    const fetched = await fetchIntegrationBranch(b, 'origin', 'main');
+    assert.equal(fetched.ok, true);
+    if (!fetched.ok) return;
+    const snapshot = await readPlanningSnapshot(b, fetched.ref, wantedPlanning, runGit, { maxPaths: PUSHED.length });
+    assert.deepEqual([...snapshot.paths].sort(), [...PUSHED].sort(), 'only the source files are listed');
+    assert.equal(snapshot.listingComplete, true);
+    assert.equal(snapshot.truncated, false);
+    const capped = await readPlanningSnapshot(b, fetched.ref, wantedPlanning, runGit, { maxPaths: PUSHED.length - 1 });
+    assert.equal(capped.listingComplete, false, 'one source file over the cap is an incomplete listing');
+    assert.equal(capped.truncated, true);
+    await assert.rejects(readPlanningSnapshot(b, fetched.ref, wantedPlanning, runGit, { maxListingBytes: 512 }), PlanningTooLargeError);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('T-62-47: runGit stops git once it writes more than maxStdoutBytes and keeps only that many bytes', async () => {
+  const { fixture, a } = await pushedPlans();
+  try {
+    put(a, 'big.txt', 'y'.repeat(2 * 1024 * 1024));
+    const blob = gitIn(a, ['hash-object', '-w', 'big.txt']);
+    const capped = await runGit(['cat-file', 'blob', blob], { cwd: a, maxStdoutBytes: 64 * 1024 });
+    assert.equal(capped.overflowed, true);
+    assert.equal(capped.stdout.length <= 64 * 1024, true, `kept ${capped.stdout.length} bytes`);
+    assert.notEqual(capped.code, 0);
+    const whole = await runGit(['cat-file', 'blob', blob], { cwd: a });
+    assert.equal(whole.overflowed, undefined);
+    assert.equal(whole.stdout.length, 2 * 1024 * 1024);
   } finally {
     await fixture.cleanup();
   }

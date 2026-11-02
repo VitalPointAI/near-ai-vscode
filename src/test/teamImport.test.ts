@@ -256,6 +256,78 @@ test('a pushed roadmap change updates what changed, never moves a card, cancels 
   });
 });
 
+// ---- CR-02: an incomplete read is additive only ---------------------------------------------------------------------------------------------------
+
+const plainItem = (state: TeamState, id: string): string => canonicalize(state.items.get(id) ?? null);
+
+test('CR-02: a read cut at the path cap cancels nothing and changes nothing, adds only new plans, and a complete read afterwards applies the changes', async () => {
+  await withImportedFixture(async (s) => {
+    const before = new Map(FIXTURE_IDS.map((id) => [id, plainItem(s.seed.a.log.state(), id)]));
+    // Phase 91.1 leaves the roadmap and 90-02 is renamed: a complete read would cancel three items and update one.
+    edit(s.a, '.planning/ROADMAP.md', (text) => {
+      let next = replaceOnce(text, 'Second slice (FIX-02)', 'Second slice renamed (FIX-02)');
+      next = replaceOnce(next, '- [ ] **Phase 91.1: Beta fix (INSERTED)** - An inserted decimal phase\n', '');
+      return next.replace(/#### Phase 91\.1:[\s\S]*?(?=### Phase 92)/, '');
+    });
+    put(s.a, '.planning/phases/90-alpha/90-00-PLAN.md', '---\nphase: 90\nplan: 00\nfiles_modified:\n  - src/fixture/early.ts\n---\n\n# Plan 90-00: Early slice\n');
+    commitAndPush(s.a, 'roadmap change');
+    const commitsBefore = coordinationCommits(s.fixture);
+
+    // Listed in order: ROADMAP, STATE, the archived 01-01 plan, 90-00, 90-01, its SUMMARY; 90-02 and 91.1-01 fall past a cap of 6.
+    const cut = okResult(await importPlans({ log: s.seed.a.log, source: s.source, storageDir: s.storageDir, mode: 'command', limits: { maxPaths: 6 } }));
+    assert.ok(cut.warnings.some((warning) => /too many files to read completely, so only new items were added/.test(warning)), cut.warnings.join(' | '));
+    const written = newestEvents(s.fixture.remote).map((event) => `${event.type} ${String(event.body.id)}`);
+    assert.equal(coordinationCommits(s.fixture), commitsBefore + 1);
+    assert.deepEqual(written, ['item.imported plan:90-00', 'item.updated milestone:v0.9.0'], 'only the new plan (and the source it came from) is written');
+    const after = s.seed.a.log.state();
+    for (const id of FIXTURE_IDS.filter((entry) => !entry.startsWith('milestone:'))) assert.equal(plainItem(after, id) === before.get(id), true, `${id} is exactly as it was`);
+    assert.equal(after.items.get('plan:90-00')?.scope[0], 'src/fixture/early.ts');
+
+    const full = okResult(await importAgain(s));
+    assert.ok(full.written > 0);
+    const items = s.seed.a.log.state().items;
+    for (const id of ['phase:91.1', 'plan:91.1-01', 'task:91.1-01-1']) assert.equal(items.get(id)?.state, 'cancelled', `${id} is cancelled once the whole folder is read`);
+    assert.equal(items.get('plan:90-02')?.title, 'Second slice renamed');
+  });
+});
+
+test('CR-02: a plan too large to read keeps its scope, must-haves and tasks while the rest of the import still updates', async () => {
+  await withImportedFixture(async (s) => {
+    const kept = ['plan:90-02', 'task:90-02-1', 'task:90-02-2'].map((id) => [id, plainItem(s.seed.a.log.state(), id)] as const);
+    edit(s.a, '.planning/phases/90-alpha/90-02-PLAN.md', (text) => `${text}\n${'padding line that makes the plan too large to read\n'.repeat(6000)}`);
+    edit(s.a, '.planning/ROADMAP.md', (text) => replaceOnce(text, 'Repair the beta slice', 'Repair the beta slice again'));
+    commitAndPush(s.a, 'huge plan and a rename');
+
+    const result = okResult(await importAgain(s));
+    assert.ok(result.warnings.some((warning) => warning.includes('90-02-PLAN.md is too large to read')), result.warnings.join(' | '));
+    const events = newestEvents(s.fixture.remote).map((event) => `${event.type} ${String(event.body.id)}`);
+    assert.deepEqual(events, ['item.updated plan:91.1-01', 'item.updated milestone:v0.9.0'], 'only the readable change is written');
+    const state = s.seed.a.log.state();
+    for (const [id, text] of kept) assert.equal(plainItem(state, id) === text, true, `${id} is exactly as it was`);
+    assert.equal(state.items.get('plan:91.1-01')?.title, 'Repair the beta slice again');
+    assert.equal(okResult(await importAgain(s)).written, 0, 'a repeat writes nothing');
+  });
+});
+
+test('CR-02 / T-62-47: a .planning listing over the byte cap is refused before anything is read or written, and git is stopped at the cap', async () => {
+  await withImportedFixture(async (s) => {
+    for (let index = 0; index < 80; index += 1) put(s.a, `.planning/phases/90-alpha/notes-${String(index).padStart(3, '0')}-${'n'.repeat(60)}.md`, `note ${index}\n`);
+    commitAndPush(s.a, 'many notes');
+    const commitsBefore = coordinationCommits(s.fixture);
+    const listings: Array<number | undefined> = [];
+    const watching: GitRunner = (args, options) => { if (args[0] === 'ls-tree') listings.push(options?.maxStdoutBytes); return runGit(args, options); };
+    const result = await importPlans({ log: s.seed.a.log, source: s.source, storageDir: s.storageDir, mode: 'command', git: watching, limits: { maxListingBytes: 2048 } });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.message, /planning folder is too large to read/);
+      assert.equal(result.written, 0);
+      assert.equal(importResultText(result), 'The import did not finish: The planning folder is too large to read. Nothing was changed.');
+    }
+    assert.deepEqual(listings, [2048], 'the listing was read with the byte cap');
+    assert.equal(coordinationCommits(s.fixture), commitsBefore, 'nothing was written');
+  });
+});
+
 test('a plan a person cancelled stays cancelled when it is still in the roadmap, and the result counts it so a lead can reopen it', async () => {
   await withImportedFixture(async (s) => {
     const cancelled = await s.seed.a.log.append(() => [{ type: 'item.cancelled', body: { id: 'plan:90-02', reason: 'not needed any more' } }]);

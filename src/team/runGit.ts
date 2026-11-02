@@ -2,12 +2,14 @@
 import { spawn } from 'node:child_process';
 import { redactSecrets } from '../domain/redaction';
 
-export interface GitResult { code: number; stdout: Buffer; stderr: string }
-export interface GitOptions { cwd?: string; env?: Record<string, string>; input?: string | Buffer; timeoutMs?: number }
+/** `overflowed` is true when git wrote more than `maxStdoutBytes`: git was stopped and `stdout` holds only the first bytes, so it is incomplete. */
+export interface GitResult { code: number; stdout: Buffer; stderr: string; overflowed?: boolean }
+export interface GitOptions { cwd?: string; env?: Record<string, string>; input?: string | Buffer; timeoutMs?: number; maxStdoutBytes?: number }
 export type GitRunner = (args: string[], options?: GitOptions) => Promise<GitResult>;
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const TIMED_OUT_CODE = 124;
+const OUTPUT_LIMIT_CODE = 125;
 
 // Coordination commits never carry a member's name or email (D-04). Attribution lives in the signed event.
 export const NEUTRAL_IDENTITY_ENV: Readonly<Record<string, string>> = {
@@ -69,7 +71,25 @@ export const runGit: GitRunner = (args, options = {}) => new Promise<GitResult>(
       resolve({ code: TIMED_OUT_CODE, stdout: Buffer.concat(out), stderr: `git timed out after ${timeoutMs} ms` });
     });
   }, timeoutMs);
-  child.stdout?.on('data', (chunk: Buffer) => out.push(chunk));
+  // With maxStdoutBytes, git is stopped as soon as it writes more, so a huge answer is never held in memory (T-62-47).
+  const maxOut = options.maxStdoutBytes;
+  let outBytes = 0;
+  child.stdout?.on('data', (chunk: Buffer) => {
+    if (settled) return;
+    if (maxOut !== undefined && outBytes + chunk.length > maxOut) {
+      out.push(chunk.subarray(0, Math.max(0, maxOut - outBytes)));
+      outBytes = maxOut;
+      killTree(child.pid, ownGroup, () => child.kill('SIGKILL'));
+      finish(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        resolve({ code: OUTPUT_LIMIT_CODE, stdout: Buffer.concat(out), stderr: `git wrote more than ${maxOut} bytes and was stopped`, overflowed: true });
+      });
+      return;
+    }
+    outBytes += chunk.length;
+    out.push(chunk);
+  });
   child.stderr?.on('data', (chunk: Buffer) => err.push(chunk));
   child.on('error', (error: NodeJS.ErrnoException) => {
     finish(() => reject(error.code === 'ENOENT' ? new GitNotFoundError() : error));

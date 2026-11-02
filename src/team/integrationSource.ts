@@ -9,6 +9,27 @@ export const INTEGRATION_REF_PREFIX = 'refs/near-ai/integration/';
 export const MAX_PLANNING_FILE_BYTES = 256 * 1024;
 const MAX_PLANNING_PATHS = 2000;
 const MAX_PLANNING_TOTAL_BYTES = 8 * 1024 * 1024;
+// The tree listing is read with a byte cap, so a branch with a huge .planning folder is refused without holding the whole listing (T-62-47).
+const MAX_LISTING_BYTES = 4 * 1024 * 1024;
+// Only these parts of .planning are listed at all, and only the files isPlanningSourcePath accepts are counted against the path cap (CR-02).
+const SOURCE_PATHSPECS = ['.planning/ROADMAP.md', '.planning/STATE.md', '.planning/phases', '.planning/milestones'];
+const SOURCE_FILE = /^\.planning\/(?:phases|milestones)\/[\s\S]+-(?:PLAN|SUMMARY)\.md$/;
+
+/** The files the importer reads or looks for: the roadmap, the state file, and plan and summary files under phases or milestones. */
+export function isPlanningSourcePath(file: string): boolean {
+  return file === '.planning/ROADMAP.md' || file === '.planning/STATE.md' || SOURCE_FILE.test(file);
+}
+
+/** The listing of .planning was over the byte cap, so nothing was read and the caller must change nothing. */
+export class PlanningTooLargeError extends Error {
+  public constructor() {
+    super('The planning folder is too large to read');
+    this.name = 'PlanningTooLargeError';
+  }
+}
+
+/** Test seams for the read caps. The extension passes nothing. */
+export interface PlanningLimits { maxPaths?: number; maxListingBytes?: number }
 const FETCH_TIMEOUT_MS = 60_000;
 const BULK_TIMEOUT_MS = 120_000;
 const PLANNING_DIRECTORY = '.planning';
@@ -18,10 +39,14 @@ export type FetchOutcome = { ok: true; ref: string; commit: string } | { ok: fal
 export interface PlanningSnapshot {
   commit: string;
   treeHash: string | undefined;
+  /** The source files (isPlanningSourcePath) at that commit, at most 2000. */
   paths: string[];
   files: Map<string, string>;
   oversize: string[];
+  /** Something wanted was not read: the path cap or the 8 MB total was reached. */
   truncated: boolean;
+  /** False when there were more source files than the path cap, so `paths` is not the whole picture and nothing may be inferred from a missing path. */
+  listingComplete: boolean;
 }
 
 export function integrationRef(branch: string): string {
@@ -93,18 +118,30 @@ async function blobTexts(projectRoot: string, blobs: string[], git: GitRunner): 
   return texts;
 }
 
-// Reads .planning at one commit of the given ref. Every blob is size-checked before it is read (256 KB each), and the read
-// stops at 2000 listed paths or 8 MB of wanted text, with truncated set (T-62-07).
-export async function readPlanningSnapshot(projectRoot: string, ref: string, wanted: (path: string) => boolean, git: GitRunner = runGit): Promise<PlanningSnapshot> {
+// The commit the ref points at and the tree hash of .planning there, read without listing a single file.
+export async function planningTreeHash(projectRoot: string, ref: string, git: GitRunner = runGit): Promise<{ commit: string; treeHash: string | undefined }> {
   const commit = gitText(mustSucceed(await git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: projectRoot }), 'Resolving the integration branch'));
   const tree = await git(['rev-parse', '--verify', '--quiet', `${commit}:${PLANNING_DIRECTORY}`], { cwd: projectRoot });
-  const treeHash = tree.code === 0 && gitText(tree) !== '' ? gitText(tree) : undefined;
-  if (treeHash === undefined) return { commit, treeHash, paths: [], files: new Map(), oversize: [], truncated: false };
+  return { commit, treeHash: tree.code === 0 && gitText(tree) !== '' ? gitText(tree) : undefined };
+}
 
-  const listed = mustSucceed(await git(['ls-tree', '-r', '-z', '--full-tree', commit, '--', PLANNING_DIRECTORY], { cwd: projectRoot, timeoutMs: BULK_TIMEOUT_MS }), 'Listing planning files');
-  const all = parseTree(listed.stdout);
-  let truncated = all.length > MAX_PLANNING_PATHS;
-  const entries = all.slice(0, MAX_PLANNING_PATHS);
+// Reads .planning at one commit of the given ref. Only the roadmap, the state file and plan and summary files under phases and milestones are
+// listed and counted (CR-02), the listing itself is byte-capped (a bigger one throws PlanningTooLargeError, T-62-47), every blob is size-checked
+// before it is read (256 KB each), and the read stops at 2000 source paths or 8 MB of wanted text, with truncated set (T-62-07).
+export async function readPlanningSnapshot(
+  projectRoot: string, ref: string, wanted: (path: string) => boolean, git: GitRunner = runGit, limits: PlanningLimits = {}
+): Promise<PlanningSnapshot> {
+  const { commit, treeHash } = await planningTreeHash(projectRoot, ref, git);
+  if (treeHash === undefined) return { commit, treeHash, paths: [], files: new Map(), oversize: [], truncated: false, listingComplete: true };
+
+  const maxPaths = limits.maxPaths ?? MAX_PLANNING_PATHS;
+  const listing = await git(['ls-tree', '-r', '-z', '--full-tree', commit, '--', ...SOURCE_PATHSPECS], { cwd: projectRoot, timeoutMs: BULK_TIMEOUT_MS, maxStdoutBytes: limits.maxListingBytes ?? MAX_LISTING_BYTES });
+  if (listing.overflowed === true) throw new PlanningTooLargeError();
+  const listed = mustSucceed(listing, 'Listing planning files');
+  const sources = parseTree(listed.stdout).filter((entry) => isPlanningSourcePath(entry.path));
+  const listingComplete = sources.length <= maxPaths;
+  let truncated = !listingComplete;
+  const entries = sources.slice(0, maxPaths);
   const candidates = entries.filter((entry) => entry.readable && wanted(entry.path));
   const sizes = await blobSizes(projectRoot, [...new Set(candidates.map((entry) => entry.blob))], git);
 
@@ -131,7 +168,7 @@ export async function readPlanningSnapshot(projectRoot: string, ref: string, wan
     const text = texts.get(entry.blob);
     if (text !== undefined) files.set(entry.path, text);
   }
-  return { commit, treeHash, paths: entries.map((entry) => entry.path), files, oversize, truncated };
+  return { commit, treeHash, paths: entries.map((entry) => entry.path), files, oversize, truncated, listingComplete };
 }
 
 // The commit the remote's integration branch points at right now, or undefined when the remote has no such branch.

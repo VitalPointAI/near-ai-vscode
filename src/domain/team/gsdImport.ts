@@ -6,6 +6,8 @@ export interface GsdTask { index: number; title: string; type: string; files: st
 export interface GsdPlan {
   phase: string; plan: string; path: string; title: string; wave?: number; dependsOn: string[]; filesModified: string[]; requirements: string[];
   truths: string[]; estimateTokens?: number; confidence?: 'low' | 'medium' | 'high'; gapClosure: boolean; hasSummary: boolean; tasks: GsdTask[];
+  /** The plan file is listed but its text was not read (too large, or past the read caps), so its fields and tasks are unknown, not empty (CR-02). */
+  unread?: true;
 }
 export interface GsdPhase { number: string; title: string; dependsOn: string[]; requirements: string[] }
 export interface GsdMilestone { key: string; title: string; current: boolean }
@@ -741,6 +743,7 @@ export function buildGsdGraph(source: GsdSource, options: { milestone?: string }
       hasSummary: summaries.has(key),
       tasks: text === undefined ? [] : parsePlanTasks(text),
     };
+    if (text === undefined) plan.unread = true;
     const wave = fields?.wave ?? entry?.wave;
     if (wave !== undefined) plan.wave = wave;
     if (fields?.estimateTokens !== undefined) plan.estimateTokens = fields.estimateTokens;

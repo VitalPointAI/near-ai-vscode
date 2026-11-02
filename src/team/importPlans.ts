@@ -20,7 +20,8 @@ import {
 import { GSD_ITEM_ID_PATTERN, isScopePattern } from '../domain/team/work';
 import { NO_DEVICE_KEY_MESSAGE, NoDeviceKeyError } from './eventLog';
 import type { EventIntent, TeamLog } from './eventLog';
-import { fetchIntegrationBranch, isAncestor, readPlanningSnapshot } from './integrationSource';
+import { PlanningTooLargeError, fetchIntegrationBranch, isAncestor, planningTreeHash, readPlanningSnapshot } from './integrationSource';
+import type { PlanningLimits } from './integrationSource';
 import { redactGitMessage, runGit } from './runGit';
 import type { GitRunner } from './runGit';
 import { runSerialised, writeFileAtomic } from './teamFile';
@@ -266,8 +267,10 @@ function planEstimate(plan: GsdPlan): { tokens: number; confidence?: 'low' | 'me
 // The graph as item.imported bodies in the one deterministic order that puts a parent before its children: the milestone, the phases by number,
 // the plans by (phase, plan) and the tasks by (plan, index). Each body is cleaned, fitted and checked with the read side's own validator; one
 // that still fails (a malformed id, which only a hostile file name can cause) is a warning and is skipped together with its children.
-export function graphToItems(graph: GsdGraph, options: { sourceCommit: string }): { bodies: ItemImportedBody[]; withheld: number; warnings: string[] } {
+export function graphToItems(graph: GsdGraph, options: { sourceCommit: string }): { bodies: ItemImportedBody[]; withheld: number; warnings: string[]; unread: Set<string> } {
   const context = newContext();
+  // Plans whose text was not read: their bodies are skeletons, so diffImport must not change or cancel what the log already holds for them (CR-02).
+  const unread = new Set<string>();
   for (const warning of graph.warnings) warn(context, warning);
   const bodies: ItemImportedBody[] = [];
   const taken = new Set<string>();
@@ -312,7 +315,7 @@ export function graphToItems(graph: GsdGraph, options: { sourceCommit: string })
     state: 'backlog', dependsOn: [], scope: [], requirements: [], mustHaves: [], tags: [], source: options.sourceCommit
   };
   if (graph.milestone.current) milestoneDraft.active = true;
-  if (!accept(milestoneDraft)) return { bodies, withheld: context.withheld, warnings: context.warnings };
+  if (!accept(milestoneDraft)) return { bodies, withheld: context.withheld, warnings: context.warnings, unread };
 
   for (const phase of graph.phases) {
     const id = `phase:${phase.number}`;
@@ -339,6 +342,7 @@ export function graphToItems(graph: GsdGraph, options: { sourceCommit: string })
     const estimate = planEstimate(plan);
     if (estimate !== undefined) draft.estimate = estimate;
     if (plan.hasSummary) draft.summary = true;
+    if (plan.unread === true) unread.add(id);
     accept(draft);
   }
 
@@ -358,7 +362,7 @@ export function graphToItems(graph: GsdGraph, options: { sourceCommit: string })
       accept(draft);
     }
   }
-  return { bodies, withheld: context.withheld, warnings: context.warnings };
+  return { bodies, withheld: context.withheld, warnings: context.warnings, unread };
 }
 
 // ---- Diff against the log ---------------------------------------------------------------------------------------------------------------
@@ -419,11 +423,16 @@ function belongsTo(items: ReadonlyMap<string, WorkItem>, item: WorkItem, milesto
 // The intents that bring the log in line with the bodies, or an empty list when it already is. Order: new and changed items parents first, the
 // previous active milestone switched off, vanished items cancelled (D-05: only items of this milestone, only unfinished ones, nothing deleted),
 // and last the milestone's source commit, recorded only when something else changes so a head move that changes nothing under .planning writes nothing.
+// A read that was not complete is additive only (CR-02): with `additiveOnly` (the file listing was cut) only new items are written, nothing is changed
+// or cancelled; the items in `unread` (plans whose text was not read) and their tasks are never changed or cancelled.
 export function diffImport(
-  state: Pick<TeamState, 'items'>, bodies: readonly ItemImportedBody[], options: { milestoneId: string; current: boolean; sourceCommit: string }
+  state: Pick<TeamState, 'items'>, bodies: readonly ItemImportedBody[],
+  options: { milestoneId: string; current: boolean; sourceCommit: string; additiveOnly?: boolean; unread?: ReadonlySet<string> }
 ): EventIntent[] {
   const intents: EventIntent[] = [];
   const ids = new Set<string>();
+  const additiveOnly = options.additiveOnly === true;
+  const unread = options.unread ?? new Set<string>();
   for (const body of bodies) {
     ids.add(body.id);
     const stored = state.items.get(body.id);
@@ -431,16 +440,18 @@ export function diffImport(
       intents.push({ type: 'item.imported', body });
       continue;
     }
+    if (additiveOnly || unread.has(body.id) || (body.parentId !== undefined && unread.has(body.parentId))) continue;
     const changes = changesFor(stored, body);
     if (Object.keys(changes).length > 0) intents.push({ type: 'item.updated', body: { id: body.id, changes } });
   }
-  if (options.current) {
+  if (options.current && !additiveOnly) {
     const others = [...state.items.values()].filter((item) => item.kind === 'milestone' && item.origin === 'import' && item.active === true && item.id !== options.milestoneId);
     others.sort((a, b) => naturalCompare(a.id, b.id));
     for (const item of others) intents.push({ type: 'item.updated', body: { id: item.id, changes: { active: false } } });
   }
-  const vanished = [...state.items.values()].filter((item) => (
-    item.origin === 'import' && item.kind !== 'milestone' && !ids.has(item.id) && item.state !== 'done' && item.state !== 'cancelled' && belongsTo(state.items, item, options.milestoneId)
+  const vanished = additiveOnly ? [] : [...state.items.values()].filter((item) => (
+    item.origin === 'import' && item.kind !== 'milestone' && !ids.has(item.id) && item.state !== 'done' && item.state !== 'cancelled'
+    && !(item.parentId !== undefined && unread.has(item.parentId)) && belongsTo(state.items, item, options.milestoneId)
   ));
   vanished.sort((a, b) => (KIND_RANK[a.kind] ?? 9) - (KIND_RANK[b.kind] ?? 9) || naturalCompare(a.id, b.id));
   for (const item of vanished) intents.push({ type: 'item.cancelled', body: { id: item.id, reason: NOT_IN_ROADMAP } });
@@ -505,6 +516,8 @@ async function resolveRef(source: ImportSource, git: GitRunner): Promise<{ ok: t
 // unchanged .planning tree is skipped without reading any plan file; mode command always compares.
 export async function importPlans(input: {
   log: TeamLog; source: ImportSource; storageDir: string; milestone?: string; mode: 'auto' | 'command'; git?: GitRunner;
+  /** Test seam for the read caps. */
+  limits?: PlanningLimits;
 }): Promise<ImportResult> {
   const { log, source, storageDir, mode } = input;
   const git = input.git ?? runGit;
@@ -522,7 +535,7 @@ export async function importPlans(input: {
     const resolved = await resolveRef(source, git);
     if (!resolved.ok) return fail(resolved.message);
     const requested = input.milestone ?? '';
-    const probe = await readPlanningSnapshot(source.projectRoot, resolved.ref, () => false, git);
+    const probe = await planningTreeHash(source.projectRoot, resolved.ref, git);
     if (mode === 'auto') {
       const saved = await readImportState(storageDir);
       if (saved !== undefined && probe.treeHash !== undefined && saved.treeHash === probe.treeHash && saved.milestone === requested) {
@@ -530,17 +543,19 @@ export async function importPlans(input: {
       }
     }
 
-    const snapshot = await readPlanningSnapshot(source.projectRoot, resolved.ref, wantedPlanning, git);
+    const snapshot = await readPlanningSnapshot(source.projectRoot, resolved.ref, wantedPlanning, git, input.limits);
     if (snapshot.treeHash === undefined) return fail('The integration branch has no .planning folder.');
     const graph = buildGsdGraph({ paths: snapshot.paths, files: snapshot.files }, input.milestone === undefined ? {} : { milestone: input.milestone });
     if ('error' in graph) return fail(graph.error);
     const built = graphToItems(graph, { sourceCommit: snapshot.commit });
     const warnings = [...built.warnings];
-    if (snapshot.truncated) warnings.push('The planning folder was too large to read completely.');
+    const additiveOnly = !snapshot.listingComplete;
+    if (additiveOnly) warnings.push('The planning folder has too many files to read completely, so only new items were added. Nothing was changed or cancelled.');
+    else if (snapshot.truncated) warnings.push('The planning folder was too large to read completely. Plans that were not read were left as they are.');
     for (const name of snapshot.oversize) warnings.push(`${truncate(collapse(name), 120)} is too large to read and was skipped.`);
     const milestoneId = `milestone:${graph.milestone.key}`;
     if (built.bodies[0]?.id !== milestoneId) return fail('The milestone name cannot be used as an item id.');
-    const options = { milestoneId, current: graph.milestone.current, sourceCommit: snapshot.commit };
+    const options = { milestoneId, current: graph.milestone.current, sourceCommit: snapshot.commit, additiveOnly, unread: built.unread };
     const base = { milestone: graph.milestone.key, withheld: built.withheld, reopenNeeded: 0, warnings };
 
     for (let round = 0; round < MAX_ROUNDS; round += 1) {
@@ -575,6 +590,7 @@ export async function importPlans(input: {
   } catch (error) {
     if (error instanceof NoDeviceKeyError) return fail(NO_DEVICE_KEY_MESSAGE);
     if (error instanceof SecretLeakError) return fail('A plan field looks like a secret, so nothing more was written');
+    if (error instanceof PlanningTooLargeError) return fail(error.message);
     return fail(error instanceof Error ? error.message : String(error));
   }
 }
@@ -609,7 +625,14 @@ export function importResultText(result: ImportResult): string {
 export async function listImportableMilestones(source: ImportSource, git: GitRunner = runGit): Promise<GsdMilestone[]> {
   const resolved = await resolveRef(source, git);
   if (!resolved.ok) return [];
-  const snapshot = await readPlanningSnapshot(source.projectRoot, resolved.ref, (file) => /^\.planning\/(ROADMAP|STATE)\.md$/.test(file), git);
+  let snapshot;
+  try {
+    snapshot = await readPlanningSnapshot(source.projectRoot, resolved.ref, (file) => /^\.planning\/(ROADMAP|STATE)\.md$/.test(file), git);
+  } catch (error) {
+    // Too large to list: offer no pick, and the import itself says why.
+    if (error instanceof PlanningTooLargeError) return [];
+    throw error;
+  }
   const files = { paths: snapshot.paths, files: snapshot.files };
   const graph = buildGsdGraph(files);
   if ('error' in graph) return [];
