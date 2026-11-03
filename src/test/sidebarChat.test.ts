@@ -163,6 +163,16 @@ test('markdown does not show a prose line with a pipe as a table header while a 
   assert.equal(render('use a | b', true), '<p>use a | b</p>');
   // A delimiter row with more cells than its header is not a header of its own.
   assert.equal(render('| a | b |\n|---|---|-', true), '<p>| a | b |<br>|---|---|-</p>');
+  // Prose whose pipe sits in a code span, leaves an empty cell, or that ends like a sentence does
+  // not flash up as a table when the next line starts with a dash.
+  for (const doc of ['Run `cat x | grep y` to filter:\n- item one', 'a || b is logical or\n- next', 'Pick a | b here.\n---\nNext part', 'Use x | y as follows:\n--- and more']) {
+    for (const frame of frames(doc)) assert.doesNotMatch(frame.html, /table-wrap/, JSON.stringify(frame.text));
+  }
+  assert.equal(render('Run `cat x | grep y` to filter:\n-', true), render('Run `cat x | grep y` to filter:\n-'));
+  assert.equal(render('Pick a | b here.\n---', true), '<p>Pick a | b here.</p><hr>');
+  // A row that reads like a header still streams as a table, and the finished reply is strict.
+  assert.match(render('Total: 5 | 6\n---', true), /^<div class="table-wrap"/);
+  assert.equal(render('Total: 5 | 6\n---'), '<p>Total: 5 | 6</p><hr>');
 });
 
 test('markdown keeps list items and headings with pipes as they are, next to tables', () => {

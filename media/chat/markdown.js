@@ -94,11 +94,23 @@
     return left && right ? 'center' : right ? 'right' : left ? 'left' : '';
   }
 
+  // A line without a leading pipe only passes for a table header while it streams if it reads like
+  // one: two or more cells split by pipes outside code spans, none of them empty, and, until the
+  // delimiter row shows a pipe of its own, no cell that ends like a sentence. So prose such as
+  // "Run `a | b` to filter:", "a || b is or" or "Pick a | b here." stays prose.
+  function looksLikeHeader(line, next) {
+    if (startsWithPipe(line)) return true;
+    const cells = splitRow(line);
+    if (cells.length < 2 || cells.some((cell) => !cell)) return false;
+    return next.includes('|') || !cells.some((cell) => /[.,:;!?]$/.test(cell));
+  }
+
   // While a reply streams, its delimiter row may not have arrived yet. A trailing row that starts
-  // with a pipe shows as a table header straight away. Any row with a pipe that is followed by the
-  // start of a delimiter row (`-`, `|--`, `:--`) also shows as a table, instead of flashing up as a
-  // paragraph and a rule. A prose line with a pipe on its own stays prose until a dash arrives,
-  // so text like "use a | b" never turns into a table. The final render applies the strict rules.
+  // with a pipe shows as a table header straight away. A row that looks like a table header and is
+  // followed by the start of a delimiter row (`-`, `|--`, `:--`) also shows as a table, instead of
+  // flashing up as a paragraph and a rule. A prose line with a pipe on its own stays prose until a
+  // dash arrives, so text like "use a | b" never turns into a table. The final render applies the
+  // strict rules.
   function pendingTableEnd(lines, index) {
     const line = lines[index];
     if (!isRow(line)) return 0;
@@ -107,7 +119,7 @@
     if (index !== lines.length - 2) return 0;
     const next = lines[index + 1];
     if (!/^[\s|:-]*$/.test(next) || /^\s*-\s+$/.test(next)) return 0;
-    if (!startsWithPipe(line) && !next.includes('-')) return 0;
+    if (!startsWithPipe(line) && (!next.includes('-') || !looksLikeHeader(line, next))) return 0;
     return splitRow(next).length <= splitRow(line).length ? 2 : 0;
   }
 
