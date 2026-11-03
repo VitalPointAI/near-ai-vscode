@@ -145,16 +145,34 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       await api.sidebar.request({ type: 'send', text: 'wide reply', model: 'fake-coder' });
       await observer.next('toView', (message) => message.type === 'assistant-done', before);
       const problems: string[] = [];
-      const record = (name: string, target: number, report: LayoutReport) => {
-        console.log(`  ${name} at ${report.width}px (asked ${target}px): page ${report.scrollWidth}/${report.clientWidth}, body ${report.bodyScrollWidth}/${report.bodyClientWidth}`);
+      // Overflow at any width a page reaches fails at once; a retry never hides it.
+      const checked = new Set<string>();
+      const checkOverflow = (name: string, report: LayoutReport) => {
+        const key = `${name}@${report.width}`;
+        if (checked.has(key)) return;
+        checked.add(key);
         if (report.scrollWidth > report.clientWidth + 1 || report.bodyScrollWidth > report.bodyClientWidth + 1) problems.push(`${name} at ${report.width}px scrolls sideways: page ${report.scrollWidth} in ${report.clientWidth}, body ${report.bodyScrollWidth} in ${report.bodyClientWidth}`);
         for (const offender of report.offenders) problems.push(`${name} at ${report.width}px: ${offender}`);
         for (const scroller of report.scrollers) problems.push(`${name} at ${report.width}px: ${scroller}`);
-        if (Math.abs(report.width - target) > 40) problems.push(`${name}: could not size the panel to ${target}px (it is ${report.width}px)`);
+      };
+      // VS Code sometimes applies a resize late or not at all. Each width gets up to 4 tries, every try
+      // set up afresh after a pause and logged, so CI shows any flakiness; only 4 misses fail the test.
+      const measure = async (name: string, target: number, size: () => Promise<LayoutReport>, reset: () => Promise<void>, trace?: () => string) => {
+        let report = await size();
+        checkOverflow(name, report);
+        for (let attempt = 2; attempt <= 4 && Math.abs(report.width - target) > 40; attempt += 1) {
+          console.log(`  retrying ${name} at ${target}px, attempt ${attempt} (it was ${report.width}px${trace ? `; ${trace()}` : ''})`);
+          await reset();
+          await pause(2_000);
+          report = await size();
+          checkOverflow(name, report);
+        }
+        console.log(`  ${name} at ${report.width}px (asked ${target}px): page ${report.scrollWidth}/${report.clientWidth}, body ${report.bodyScrollWidth}/${report.bodyClientWidth}`);
+        if (Math.abs(report.width - target) > 40) problems.push(`${name}: could not size the panel to ${target}px in 4 tries (it is ${report.width}px${trace ? `; ${trace()}` : ''})`);
       };
       // The sidebar: VS Code's own resize commands, a step at a time, until the chat is as close as they get.
       await vscode.commands.executeCommand('nearAiChatView.focus');
-      for (const target of SIDEBAR_WIDTHS) record('chat', target, await sizeSidebar(target));
+      for (const target of SIDEBAR_WIDTHS) await measure('chat', target, () => sizeSidebar(target), chatBesideEditor, () => `steps: ${sidebarTrace.join(', ')}`);
       // Narrow again, so the editor area has room for the widest editor check.
       await sizeSidebar(220);
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
@@ -173,11 +191,16 @@ function projectTests(): Array<[string, () => Promise<void>]> {
           await waitForProbe(name);
           samples.set(name, sampleData(name, seen));
           await editorAreaOnly();
-          const { room, editor } = await editorRoom(name);
+          let { room, editor } = await editorRoom(name);
+          for (let attempt = 2; attempt <= 4 && room < Math.max(...EDITOR_WIDTHS); attempt += 1) {
+            console.log(`  retrying ${name}: measuring the editor area, attempt ${attempt} (editor area ${editor}px, page at most ${room}px)`);
+            await pause(2_000);
+            ({ room, editor } = await editorRoom(name));
+          }
           console.log(`  ${name}: editor area ${editor}px, a page can be up to ${room}px beside a second group`);
           assert.ok(room >= Math.max(...EDITOR_WIDTHS), `the editor area holds a ${Math.max(...EDITOR_WIDTHS)}px page beside a second group (editor area ${editor}px, page at most ${room}px)`);
           for (const width of WIDER_EDITOR_WIDTHS.filter((width) => width > room)) unmeasured.push(`${name} at ${width}px (the window holds ${room}px)`);
-          for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) record(name, target, await sizeEditor(name, target, editor));
+          for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) await measure(name, target, () => sizeEditor(name, target, editor), oneGroup);
           await vscode.commands.executeCommand('workbench.action.closeAllEditors');
           await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
         }
@@ -283,16 +306,14 @@ async function waitForProbe(name: string): Promise<void> {
 }
 
 /**
- * The widest a page can get in the first of two editor groups: the first group is asked for nearly
- * all of the editor area, so the second shrinks to its real minimum. Also returns the editor area's
- * width, so a failure says how big the window was.
+ * How wide the editor area is, and the widest the page can be beside a second group at its minimum.
+ * Alone in one group, the page is exactly as wide as the editor area.
  */
 async function editorRoom(name: string): Promise<{ room: number; editor: number }> {
-  await splitEditor(0.5);
-  const half = await settled(name);
-  await splitEditor(0.99);
-  const most = await settled(name);
-  return { room: most.width, editor: half.width * 2 };
+  await oneGroup();
+  const editor = (await settled(name)).width;
+  const most = await sizeEditor(name, editor, editor);
+  return { room: most.width, editor };
 }
 
 /** Gives the editor area the whole window (no sidebars or panel) for the editor page checks. */
@@ -300,56 +321,99 @@ async function editorAreaOnly(): Promise<void> {
   for (const command of ['workbench.action.closeSidebar', 'workbench.action.closeAuxiliaryBar', 'workbench.action.closePanel']) await vscode.commands.executeCommand(command);
 }
 
-/** Splits the editor area in two and sizes the first group (holding the page) to the target width. */
+async function oneGroup(): Promise<void> {
+  await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+  await pause(500);
+}
+
+/** Waits (up to `ms`) until the page's width passes `test`, then until it settles. */
+async function widthWhen(name: string, test: (width: number) => boolean, ms = 5_000): Promise<LayoutReport> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline && !test((await probe(name)).width)) await pause(200);
+  return settled(name);
+}
+
+/**
+ * Splits the editor area in two and sizes the page's group to the target width, measuring each try.
+ * VS Code applies new group sizes only when the layout changes shape (so it goes back to one group
+ * first), sometimes a little late (so a try that changed nothing is made again), and the page's group
+ * can come out on either side (so the sizes follow the side the measurement shows it on).
+ */
 async function sizeEditor(name: string, target: number, editor: number): Promise<LayoutReport> {
-  let fraction = target / editor;
-  await splitEditor(fraction);
+  let fraction = Math.min(0.99, target / editor);
+  let pageFirst = true;
   let report = await settled(name);
-  for (let attempt = 0; attempt < 8 && Math.abs(report.width - target) > 4; attempt += 1) {
-    // A page as wide as the whole editor area means the split did not take yet: ask again as it was.
-    if (report.width < editor - 10) fraction = Math.min(0.99, Math.max(0.02, fraction * target / report.width));
-    await splitEditor(fraction);
-    report = await settled(name);
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    // Each change is waited for until the page shows it, so a late resize is not measured as the old one.
+    await oneGroup();
+    await widthWhen(name, (width) => width >= editor - 10);
+    await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: pageFirst ? [{ size: fraction }, { size: 1 - fraction }] : [{ size: 1 - fraction }, { size: fraction }] });
+    report = await widthWhen(name, (width) => width < editor - 10);
+    if (Math.abs(report.width - target) <= 4 || (fraction >= 0.99 && report.width < editor - 10 && report.width > editor / 2)) return report;
+    // As wide as the whole area: the split did not take yet, so the same split is asked for again.
+    if (report.width >= editor - 10) continue;
+    // Closer to the other group's share: the page came out on the other side.
+    if (Math.abs(report.width - (1 - fraction) * editor) < Math.abs(report.width - fraction * editor)) { pageFirst = !pageFirst; continue; }
+    fraction = Math.min(0.99, Math.max(0.02, fraction * target / report.width));
   }
   return report;
 }
 
-// VS Code applies new group sizes only when the layout changes shape, so it goes back to one group first.
-async function splitEditor(fraction: number): Promise<void> {
-  await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
-  await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{ size: fraction }, { size: 1 - fraction }] });
-  // The page hears about its new size a little after the layout changes.
-  await pause(400);
+/**
+ * One 60px step of the secondary sidebar (where the chat lives). VS Code's "view size" commands act
+ * on whichever part has focus, and a webview's focus does not count, so they were unreliable here.
+ * The editor-width commands name the editor area itself: with the primary sidebar and panel closed,
+ * the only thing beside the editor area is the secondary sidebar, so it takes or gives the 60px.
+ * (Mixing in the "view size" commands as a fallback made late steps land twice.)
+ */
+async function sidebarStep(grow: boolean, before: number): Promise<LayoutReport> {
+  await vscode.commands.executeCommand(grow ? 'workbench.action.decreaseViewWidth' : 'workbench.action.increaseViewWidth');
+  return changed(before);
 }
 
-/**
- * Steps the sidebar's width with VS Code's resize commands until the chat is closest to the target.
- * They resize the part that has focus, and a webview's focus does not count, so the Explorer (in
- * the same sidebar) takes focus for each step and the chat is shown again to measure.
- */
-async function sidebarStep(command: string): Promise<LayoutReport> {
-  await vscode.commands.executeCommand('workbench.action.chat.open');
-  await pause(500);
-  await vscode.commands.executeCommand(command);
-  await vscode.commands.executeCommand('nearAiChatView.focus');
+/** Waits (up to 6 seconds) for the chat's width to move from `before`, then for it to settle, so a slow resize is never taken for a step that did nothing. */
+async function changed(before: number): Promise<LayoutReport> {
+  const deadline = Date.now() + 6_000;
+  while (Date.now() < deadline && (await probe('chat')).width === before) await pause(200);
   return settled('chat');
 }
 
+/** Only the editor area and the chat's sidebar on screen, the chat showing. */
+async function chatBesideEditor(): Promise<void> {
+  for (const command of ['workbench.action.closeSidebar', 'workbench.action.closePanel', 'nearAiChatView.focus']) await vscode.commands.executeCommand(command);
+  await pause(500);
+}
+
+/**
+ * Steps the chat toward the target, 60px at a time, up to 12 steps. Before accepting a width it
+ * measures again after a pause, so a late resize is seen; only three steps in a row that change
+ * nothing mean the sidebar is at its limit.
+ */
+let sidebarTrace: string[] = [];
+
 async function sizeSidebar(target: number): Promise<LayoutReport> {
+  await chatBesideEditor();
   let report = await settled('chat');
-  let unchanged = 0;
-  for (let attempt = 0; attempt < 30 && report.width !== target; attempt += 1) {
-    const command = report.width > target ? 'workbench.action.decreaseViewSize' : 'workbench.action.increaseViewSize';
-    const next = await sidebarStep(command);
-    // A step can be lost while VS Code's own chat view is still taking focus, so only a few steps
-    // in a row with no change mean the sidebar is at its limit.
-    if (next.width === report.width) { unchanged += 1; if (unchanged >= 3) return report; await pause(500); continue; }
-    unchanged = 0;
-    if (Math.abs(next.width - target) >= Math.abs(report.width - target)) {
-      // One step past the target and no closer: step back and stop.
-      return sidebarStep(command === 'workbench.action.decreaseViewSize' ? 'workbench.action.increaseViewSize' : 'workbench.action.decreaseViewSize');
+  sidebarTrace = [`start ${report.width}`];
+  let stuck = 0;
+  for (let step = 0; step < 16 && stuck < 4; step += 1) {
+    if (Math.abs(report.width - target) <= 30) {
+      await pause(1_000);
+      const again = await settled('chat');
+      if (again.width === report.width) return again;
+      sidebarTrace.push(`moved to ${again.width} while waiting`);
+      report = again;
+      continue;
     }
-    report = next;
+    const before = report.width;
+    report = await sidebarStep(report.width < target, before);
+    sidebarTrace.push(`${report.width < before ? 'narrower' : report.width > before ? 'wider' : 'no change'} ${report.width}`);
+    if (report.width !== before) { stuck = 0; continue; }
+    // Nothing moved: set the layout up again (focus may have gone elsewhere) before trying again.
+    stuck += 1;
+    await chatBesideEditor();
+    await pause(1_000);
+    report = await settled('chat');
   }
   return report;
 }
