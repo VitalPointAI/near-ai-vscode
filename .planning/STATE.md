@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-19-PLAN.md
-last_updated: "2026-11-03T22:46:58.582Z"
+stopped_at: Completed 61-20-PLAN.md
+last_updated: "2026-11-03T23:04:15.532Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: edbecb2590c1c63683a99d3fd05519c9b91a2905
+state_head: 43f61b808ba3e35b92aa42d7081f0692b2506803
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 59
-  completed_plans: 46
+  completed_plans: 47
   percent: 13
 ---
 
@@ -100,6 +100,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P18 | 11 min | 3 tasks | 5 files |
 | Phase 61 P24 | 35min | 3 tasks | 12 files |
 | Phase 61 P19 | 19min | 3 tasks | 11 files |
+| Phase 61 P20 | 12min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -200,6 +201,9 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-19: Enable checks the online home before any question; a local folder or a password in the address gets one modal with Turn on anyway or Not now, and Turn on anyway ends without a share button
 - [Phase 61]: 61-19: Share Team Setup (nearAi.team.share, owner or lead) shares only team.json after one confirmation via shareFlow.ensureTeamSetupShared; Enable's Share with my team runs it; consent survives Try again except a new first upload
 - [Phase 61]: 61-19: every teamCommands prompt goes through teamPrompts; scripted answers only with NEAR_AI_E2E exactly 1 and promptTap.script set; teamPrompts.js is the one extra module at solo activation
+- [Phase 61]: 61-20: Invite checks the online address locally before the organization choice, so an unreachable project is said before anything is asked; the org choice then comes first and one Share and continue confirmation covers the link
+- [Phase 61]: 61-20: Join not-ready reasons each get one plain sentence (Get a fresh copy for local changes, unshared work and other version; no button for not shared; Try again for offline); the invite address is used only for a download the person chooses
+- [Phase 61]: 61-20: every membership prompt goes through teamPrompts; Link now inside Invite offers no share of its own (linkFlow offerShare false)
 
 ### Pending Todos
 
@@ -221,8 +225,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T22:46:58.319Z
-Stopped at: Completed 61-19-PLAN.md
+Last session: 2026-11-03T23:04:15.271Z
+Stopped at: Completed 61-20-PLAN.md
 Resume file: None
 
 ## Notes
