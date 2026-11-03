@@ -13,6 +13,12 @@ body { margin: 0; font-family: var(--vscode-font-family); font-size: var(--vscod
 .hint, .error { overflow-wrap: anywhere; }
 /* Positioned, so a visually hidden header inside a table stays inside its box, not past the page edge. */
 .table-wrap { position: relative; max-width: 100%; overflow-x: auto; }
+/* Safety net for every data table, whatever the font or the length of a name: text in cells and
+   headers wraps (inside long names too), so a table always shrinks to its box; only short numbers
+   stay on one line. Hiding columns and turning rows into cards (below) do the real condensing. */
+.table-wrap > table { width: 100%; }
+.table-wrap th, .table-wrap td { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.table-wrap td.num { white-space: nowrap; }
 
 /* Responsive tables. Pages mark each column's cells (and its header) with how much it matters:
    - .col-tertiary hides at 900px and narrower, .col-secondary at 600px and narrower;

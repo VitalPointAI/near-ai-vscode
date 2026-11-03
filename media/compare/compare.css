@@ -25,9 +25,9 @@ tbody tr:last-child td { border-bottom: none; }
 .runs { color: var(--muted); font-size: 0.8em; }
 .bad { color: var(--bad); }
 .warn { color: var(--warn); }
-.wrap, .misses { white-space: normal; min-width: 12em; max-width: 36em; }
+.wrap, .misses { max-width: 36em; }
 tr.dim td { opacity: 0.8; }
-.model-cell { white-space: normal; min-width: 14em; }
+.model-cell { white-space: normal; }
 .model-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .mark { margin: 3px 0 0; font-size: 0.85em; color: var(--muted); }
 .mark.stale { color: var(--warn); }
@@ -37,8 +37,10 @@ tr.dim td { opacity: 0.8; }
 .badge.privacy.local { color: var(--vscode-textLink-foreground); border-color: currentColor; }
 .badge.privacy.forwarded, .badge.privacy.unknown { color: var(--warn); border-color: currentColor; }
 .badge.held { color: var(--vscode-textLink-foreground); border-color: currentColor; }
-.role { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: min(22em, 100%); white-space: normal; }
-.role select { min-width: 0; max-width: 100%; }
+/* The role picker takes its cell's width, with Apply under it, rather than the width of its longest
+   role name, so it never widens the table. */
+.role { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 7em; max-width: min(22em, 100%); white-space: normal; }
+.role select { width: 100%; min-width: 0; max-width: 100%; }
 .role .warning { flex-basis: 100%; font-size: 0.85em; }
 select, input[type="search"] { font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--border)); border-radius: 2px; padding: 3px 6px; }
 select { color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); border-color: var(--vscode-dropdown-border, var(--border)); }
@@ -76,26 +78,9 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
   .col-tertiary { display: none !important; }
   .when-medium { display: block; }
 }
-@media (max-width: 1300px) {
-  .model-cell { min-width: 10em; }
-}
-/* The role picker is as wide as its longest role name; on a smaller panel it takes the cell's
-   width instead, with Apply under it, so it never widens the table. */
-@media (max-width: 900px) {
-  .role { flex-direction: column; align-items: stretch; min-width: 8em; }
-  .role select { width: 100%; }
-}
-@media (max-width: 600px) {
-  th { white-space: normal; }
-  .model-cell { min-width: 7em; }
-  .wrap, .misses { min-width: 5em; }
-  .role { min-width: 6em; }
-  td.controls { white-space: normal; }
-  .model-cell code { overflow-wrap: anywhere; }
-}
 @media (max-width: 520px) { body { padding: 0 12px 32px; } th, td { padding: 4px 6px; } }
 @media (max-width: 420px) {
-  .model-cell, .wrap, .misses { min-width: 0; max-width: none; }
+  .wrap, .misses { max-width: none; }
   .role { max-width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }

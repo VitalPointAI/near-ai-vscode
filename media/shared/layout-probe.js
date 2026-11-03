@@ -13,6 +13,16 @@
     }
     return false;
   };
+  // On request, sets the page's text in a wider stand-in font (monospace, 10% larger), once, so a
+  // layout that only overflows with another machine's wider fonts shows up here too.
+  window.addEventListener('message', (event) => {
+    if (!event.data || event.data.type !== 'layout-stress' || document.documentElement.dataset.layoutStress) return;
+    const root = document.documentElement;
+    root.dataset.layoutStress = 'true';
+    const size = parseFloat(getComputedStyle(root).getPropertyValue('--vscode-font-size')) || 13;
+    root.style.setProperty('--vscode-font-family', 'monospace');
+    root.style.setProperty('--vscode-font-size', Math.round(size * 1.1) + 'px');
+  });
   window.nearAiLayoutProbe = function () {
     const doc = document.documentElement;
     const width = window.innerWidth;

@@ -37,7 +37,7 @@ th { font-weight: 600; font-size: 0.85em; color: var(--muted); background: var(-
 tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; }
 .bad { color: var(--bad); font-weight: 600; }
-#history td:nth-child(2) { white-space: normal; min-width: 14em; max-width: 40em; }
+#history td:nth-child(2) { max-width: 40em; }
 .title-link { text-align: left; white-space: normal; }
 .badge { margin-left: 6px; padding: 0 6px; border-radius: 8px; font-size: 0.8em; border: 1px solid currentColor; color: var(--muted); }
 .badge-tee { color: var(--vscode-testing-iconPassed, #3fb950); }
@@ -48,8 +48,6 @@ tbody tr:last-child td { border-bottom: none; }
 .phase-cooling-down td:nth-child(3) { color: var(--warn); }
 .phase-paused td:nth-child(3) { color: var(--muted); font-style: italic; }
 .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-/* Names wrap inside their cell rather than widening the table. */
-#now td:nth-child(1), #now td:nth-child(2), #models td:nth-child(1) { white-space: normal; overflow-wrap: anywhere; min-width: 8em; }
 tr.focused td { background: var(--vscode-editor-selectionHighlightBackground, rgba(128, 128, 255, 0.15)); }
 tr.focused td:first-child { box-shadow: inset 3px 0 0 var(--vscode-focusBorder); }
 tr:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
@@ -80,17 +78,12 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
 .figure-source { font-size: 0.8em; color: var(--muted); }
 .figure-source[data-source="partial"], .figure-source[data-source="estimated"] { color: var(--warn); }
 .credits { grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); }
-@media (max-width: 600px) {
-  #history td:nth-child(2) { min-width: 6em; }
-  #now td:nth-child(1), #now td:nth-child(2), #models td:nth-child(1) { min-width: 0; max-width: none; }
-  th { white-space: normal; }
-}
 @media (max-width: 520px) {
   body { padding: 0 12px 32px; }
   th, td { padding: 4px 6px; }
 }
 @media (max-width: 420px) {
-  #history td:nth-child(2), #now td:nth-child(1), #now td:nth-child(2), #models td:nth-child(1) { min-width: 0; max-width: none; }
+  #history td:nth-child(2) { max-width: none; }
   .segmented { display: flex; }
   .segmented button { flex: 1 1 auto; }
 }
