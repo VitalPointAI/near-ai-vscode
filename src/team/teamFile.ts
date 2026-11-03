@@ -250,9 +250,9 @@ const NEAR_PIN_FILE = 'near-pin.json';
 
 interface NearPin { version: 1; teamId: string; organizationId: string; workspaceId: string }
 
-export const NEAR_PIN_MISMATCH = "This project's team.json names a different NEAR organization or workspace than this computer linked before, so no NEAR key was changed there. Check with your team which link is right; a lead can confirm it with \"NEAR AI: Link Team to NEAR Organization\".";
-const NEAR_PIN_GONE = "This project's team.json no longer names the NEAR organization this computer linked before, so no NEAR key was changed. Check with your team why the link was removed; a lead can link it again with \"NEAR AI: Link Team to NEAR Organization\".";
-const NEAR_PIN_DAMAGED = 'The saved NEAR link for this team cannot be read, so no NEAR key was changed. A lead can link the team again with "NEAR AI: Link Team to NEAR Organization".';
+export const NEAR_PIN_MISMATCH = "This project's team.json names a different organization or workspace than this computer linked before, so no team key was changed there. Check with your team which link is right; a lead can confirm it with \"NEAR AI: Link Your Organization\".";
+const NEAR_PIN_GONE = "This project's team.json no longer names the organization this computer linked before, so no team key was changed. Check with your team why the link was removed; a lead can link it again with \"NEAR AI: Link Your Organization\".";
+const NEAR_PIN_DAMAGED = 'The saved organization link for this team cannot be read, so no team key was changed. A lead can link the team again with "NEAR AI: Link Your Organization".';
 
 /** A team.json `near` that does not match the link this computer pinned. Also a TrustPinError, so every pin catch handles it. */
 export class NearPinError extends TrustPinError {

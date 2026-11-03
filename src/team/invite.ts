@@ -162,8 +162,8 @@ function checkInput(input: InviteInput): string | undefined {
 
 type NearStep = { nearInvitation: 'sent' | 'already-member' | 'queued' | 'not-applicable'; notice?: string };
 
-const SESSION_NEEDED = 'The team invitation is ready, but no NEAR invitation was sent because you are not signed in to NEAR. It is on your cleanup list; sign in and retry.';
-const QUEUED = 'The team invitation is ready, but the NEAR organization invitation could not be sent. It is on your cleanup list so you can retry it.';
+const SESSION_NEEDED = 'The team invitation is ready, but no invitation to your organization was sent because you are not signed in to NEAR AI. It is on your cleanup list; sign in and retry.';
+const QUEUED = 'The team invitation is ready, but the invitation to your organization could not be sent. It is on your cleanup list so you can retry it.';
 
 function errorText(error: unknown): string {
   return scrubNearText(error instanceof Error ? error.message : String(error));
@@ -191,7 +191,7 @@ async function inviteToNear(input: ReissueInput | InviteInput, near: NearLink | 
     if (ids.reissue) {
       const pending = await input.org.listInvitations(near.organizationId, 'pending');
       if (pending.some((invitation) => invitation.email.toLowerCase() === ids.email.toLowerCase())) {
-        return { nearInvitation: 'sent', notice: 'The NEAR invitation sent earlier is still waiting to be accepted, so no second one was sent.' };
+        return { nearInvitation: 'sent', notice: 'The invitation to your organization sent earlier is still waiting to be accepted, so no second one was sent.' };
       }
     }
     const outcome = await input.org.inviteByEmail(near.organizationId, ids.email, 'admin');
@@ -315,8 +315,8 @@ export async function reissueInvite(input: ReissueInput): Promise<InviteResult> 
 
 // ---- the unsent NEAR invitation of a lead (CR-02) -------------------------------------------------------------------------------------
 
-const REPLACED_TEXT = 'This invitation was replaced by a new one, so its NEAR invitation is not sent.';
-export const REMOVED_INVITEE_TEXT = 'This person was removed from the team, so their NEAR invitation is not sent.';
+const REPLACED_TEXT = 'This invitation was replaced by a new one, so its invitation to your organization is not sent.';
+export const REMOVED_INVITEE_TEXT = 'This person was removed from the team, so their invitation to your organization is not sent.';
 
 /**
  * Closes every open send-invitation item for one member id, saying why, so a Retry can never send it. Used when the person is removed and when
@@ -350,10 +350,10 @@ export interface InvitationRetryInput {
 // Why an invitation must no longer be sent, read from the current log; undefined when the person is still an invited lead on the same invite.
 function staleReason(state: TeamState, memberId: string, invitedEvent: string | undefined): string | undefined {
   const member = state.members.get(memberId);
-  if (member === undefined) return 'This person is not on the team list, so their NEAR invitation is not sent.';
-  if (member.removedEvent !== undefined) return member.status === 'invited' ? 'This invitation was cancelled or replaced, so its NEAR invitation is not sent.' : REMOVED_INVITEE_TEXT;
-  if (member.status !== 'invited') return 'This person already joined the team, so this NEAR invitation is not sent again. If they should be in the NEAR organization, invite them from the NEAR console.';
-  if ((member.pendingRole ?? member.role) !== 'lead') return 'This invitation is not for a lead any more, so no NEAR invitation is sent.';
+  if (member === undefined) return 'This person is not on the team list, so their invitation to your organization is not sent.';
+  if (member.removedEvent !== undefined) return member.status === 'invited' ? 'This invitation was cancelled or replaced, so its invitation to your organization is not sent.' : REMOVED_INVITEE_TEXT;
+  if (member.status !== 'invited') return "This person already joined the team, so this invitation to your organization is not sent again. If they should be in your organization, invite them from your organization's settings on the NEAR AI website.";
+  if ((member.pendingRole ?? member.role) !== 'lead') return 'This invitation is not for a lead any more, so no invitation to your organization is sent.';
   if (invitedEvent !== undefined && member.invitedEvent !== invitedEvent) return REPLACED_TEXT;
   return undefined;
 }
@@ -365,8 +365,8 @@ function staleReason(state: TeamState, memberId: string, invitedEvent: string | 
  */
 export async function retryNearInvitation(input: InvitationRetryInput): Promise<InvitationRetryOutcome> {
   const item = (await input.checklist.list()).find((candidate) => candidate.id === input.item.id) ?? input.item;
-  if (item.step !== 'send-invitation') return { outcome: 'failed', reason: 'This item is not a NEAR invitation.' };
-  if (item.status === 'done') return { outcome: 'closed', reason: item.lastError ?? 'This NEAR invitation was already finished.' };
+  if (item.step !== 'send-invitation') return { outcome: 'failed', reason: 'This item is not an invitation to your organization.' };
+  if (item.status === 'done') return { outcome: 'closed', reason: item.lastError ?? 'This invitation to your organization was already finished.' };
   const close = async (reason: string): Promise<InvitationRetryOutcome> => {
     await input.checklist.update(item.id, { status: 'done', lastError: reason });
     return { outcome: 'closed', reason };
@@ -384,9 +384,9 @@ export async function retryNearInvitation(input: InvitationRetryInput): Promise<
     if (error instanceof NearPinError) return { outcome: 'not-linked', reason: error.message };
     throw error;
   }
-  if (near === undefined) return { outcome: 'not-linked', reason: 'This team has no NEAR organization linked, so there is no NEAR invitation to send.' };
+  if (near === undefined) return { outcome: 'not-linked', reason: 'This team has no organization linked, so there is no invitation to your organization to send.' };
   if (item.organizationId !== undefined && item.organizationId !== near.organizationId) {
-    return close('The team is now linked to a different NEAR organization than when this invitation was made, so it is not sent. Invite them again if they should join the new one.');
+    return close('The team is now linked to a different organization than when this invitation was made, so it is not sent. Invite them again if they should join the new one.');
   }
 
   const org = await input.org();

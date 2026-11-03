@@ -12,7 +12,7 @@ import { TEAM_FILE_REL, TeamFileError, TrustPinError, checkTrustPin, pinNearLink
 
 const LOCAL_TIMEOUT_MS = 30_000;
 
-export const LINK_COMMIT_MESSAGE = 'chore(team): link NEAR organization';
+export const LINK_COMMIT_MESSAGE = 'chore(team): link the team organization';
 
 export type LinkResult =
   | { ok: true; status: 'linked' | 'unchanged'; teamFile: TeamFile; branch?: string; commit?: string }
@@ -62,7 +62,7 @@ export async function linkNearOrganization(input: { projectRoot: string; globalS
     return { ok: true, status: 'unchanged', teamFile: existing };
   }
   if (existing.near !== undefined && input.replace !== true) {
-    return fail('different-link', 'This team is already linked to a different NEAR organization or workspace. Nothing was changed. Replace the link only if your team agrees.');
+    return fail('different-link', 'This team is already linked to a different organization or workspace. Nothing was changed. Replace the link only if your team agrees.');
   }
 
   const linked: TeamFile = { ...existing, near: { organizationId: input.near.organizationId, workspaceId: input.near.workspaceId } };
@@ -78,7 +78,7 @@ export async function linkNearOrganization(input: { projectRoot: string; globalS
   }
 
   const committed = await commitTeamFileOnly(input.projectRoot, LINK_COMMIT_MESSAGE, git);
-  if (!committed.ok) return fail('commit-failed', `The NEAR link was saved in ${TEAM_FILE_REL}, but ${committed.message}`);
+  if (!committed.ok) return fail('commit-failed', `The organization link was saved in ${TEAM_FILE_REL}, but ${committed.message}`);
   const result: LinkResult = { ok: true, status: 'linked', teamFile: linked, commit: committed.commit };
   if (committed.branch !== undefined) result.branch = committed.branch;
   return result;

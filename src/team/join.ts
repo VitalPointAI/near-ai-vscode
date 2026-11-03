@@ -43,11 +43,11 @@ function sameNear(left: NearLink, right: NearLink): boolean {
 
 // WR-03: the bundle is plain base64url JSON with no MAC, so anyone who handles it can change its link. team.json is the only source of the
 // link; a bundle link that team.json does not have is refused, never used.
-const BUNDLE_LINK_NOT_IN_PROJECT = 'This invite names a NEAR organization, but this project has no NEAR link yet. Ask your lead to share the NEAR link with the team (or get the latest version of the project if they already did), then run "NEAR AI: Join Team" again. Nothing was changed.';
+const BUNDLE_LINK_NOT_IN_PROJECT = 'This invite names an organization, but this project has no organization link yet. Ask your lead to share the organization link with the team (or get the latest version of the project if they already did), then run "NEAR AI: Join Team" again. Nothing was changed.';
 const JOIN_UNREACHABLE = 'The team could not be reached, so your join did not start. Check your internet connection and try again.';
 const JOIN_PAUSED = 'Something unexpected changed in the shared team record, so joining is paused to protect the team. Ask your lead.';
 const JOIN_REFUSED = 'The shared team record failed a safety check, so this computer cannot join it. Ask your lead.';
-const DIFFERENT_LINK = 'This invite names a different NEAR organization than this project does. Ask your lead to check the link and send a new invite.';
+const DIFFERENT_LINK = 'This invite names a different organization than this project does. Ask your lead to check the link and send a new invite.';
 
 // D-07 and D-26: nothing is kept between this call and the next. After a clone the invitee pastes the bundle again, so the answer here depends on
 // the folder that is open right now and on the bundle in this call only. Nothing in a refusal repeats the pasted text.
@@ -196,7 +196,7 @@ function failureOf(log: TeamLog, memberId: string, kind: string, reason: string)
 
 type NearStep = { nearInvitation: NonNullable<Extract<JoinResult, { ok: true }>['nearInvitation']>; notice?: string };
 
-const NO_MATCHING_INVITATION = 'NEAR AI found no invitation for the NEAR login you used. Sign in with the email address you were invited with, or ask the lead to invite your NEAR address.';
+const NO_MATCHING_INVITATION = 'NEAR AI found no invitation to your organization for the NEAR AI account you signed in with. Sign in with the email address you were invited with, or ask the lead to invite your NEAR AI email address.';
 
 function bearer(tokens: SessionTokens): NearAuth {
   return { accessToken: async () => tokens.accessToken, refreshAfterUnauthorized: async () => undefined };
@@ -221,18 +221,18 @@ function tokenFromLink(text: string): string {
 }
 
 async function acceptAsLead(input: JoinInput, near: NearLink, teamId: string): Promise<NearStep> {
-  if (input.signIn === undefined) return { nearInvitation: 'skipped', notice: 'You were not signed in to NEAR, so the organization invitation was not accepted. Sign in to NEAR for this team to accept it.' };
+  if (input.signIn === undefined) return { nearInvitation: 'skipped', notice: 'You were not signed in to NEAR AI, so the invitation to your organization was not accepted. Sign in to NEAR AI for this team to accept it.' };
   const baseUrl = input.nearBaseUrl ?? DEFAULT_BASE_URL;
   let tokens: SessionTokens | undefined;
   try {
     tokens = await input.signIn();
   } catch (error) {
     if (error instanceof SignInError && error.code === 'cancelled') {
-      return { nearInvitation: 'skipped', notice: 'The NEAR sign-in was cancelled, so the organization invitation was not accepted. Sign in to NEAR for this team to accept it.' };
+      return { nearInvitation: 'skipped', notice: 'The NEAR AI sign-in was cancelled, so the invitation to your organization was not accepted. Sign in to NEAR AI for this team to accept it.' };
     }
-    return { nearInvitation: 'failed', notice: `NEAR sign-in did not finish, so the organization invitation was not accepted: ${scrubNearText(error instanceof Error ? error.message : String(error))}` };
+    return { nearInvitation: 'failed', notice: `NEAR AI sign-in did not finish, so the invitation to your organization was not accepted: ${scrubNearText(error instanceof Error ? error.message : String(error))}` };
   }
-  if (tokens === undefined) return { nearInvitation: 'skipped', notice: 'You were not signed in to NEAR, so the organization invitation was not accepted. Sign in to NEAR for this team to accept it.' };
+  if (tokens === undefined) return { nearInvitation: 'skipped', notice: 'You were not signed in to NEAR AI, so the invitation to your organization was not accepted. Sign in to NEAR AI for this team to accept it.' };
 
   try {
     const options = { baseUrl, ...(input.fetch === undefined ? {} : { fetch: input.fetch }) };
@@ -257,11 +257,11 @@ async function acceptAsLead(input: JoinInput, near: NearLink, teamId: string): P
     if (token === '') {
       return listProblem === undefined
         ? { nearInvitation: 'not-found', notice: NO_MATCHING_INVITATION }
-        : { nearInvitation: 'failed', notice: `NEAR AI could not list your invitations: ${listProblem} You are on the team; try accepting the organization invitation again later.` };
+        : { nearInvitation: 'failed', notice: `NEAR AI could not list your invitations: ${listProblem} You are on the team; try accepting the invitation to your organization again later.` };
     }
     return { nearInvitation: await org.acceptInvitationToken(token) };
   } catch (error) {
-    return { nearInvitation: 'failed', notice: `The NEAR organization invitation could not be accepted: ${scrubNearText(error instanceof Error ? error.message : String(error), [tokens.accessToken, tokens.refreshToken])} You are on the team; try accepting it again from Manage Team Members.` };
+    return { nearInvitation: 'failed', notice: `The invitation to your organization could not be accepted: ${scrubNearText(error instanceof Error ? error.message : String(error), [tokens.accessToken, tokens.refreshToken])} You are on the team; try accepting it again from Manage Team Members.` };
   }
 }
 
@@ -294,7 +294,7 @@ async function installPastedKey(input: JoinInput, teamId: string): Promise<{ key
 
 // ---- joining ----------------------------------------------------------------------------------------------------------------------------------
 
-const AWAITING_LEAD = 'The lead sends your team key from their NEAR AI window once you are confirmed. You do not sign in to NEAR.';
+const AWAITING_LEAD = 'The lead sends your team key from their NEAR AI window once you are confirmed. You do not sign in to NEAR AI.';
 
 export async function joinTeam(input: JoinInput): Promise<JoinResult> {
   const { teamFile, bundle, secrets } = input;
