@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-20-PLAN.md
-last_updated: "2026-11-03T23:04:15.532Z"
+stopped_at: Completed 61-21-PLAN.md
+last_updated: "2026-11-03T23:20:39.195Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 43f61b808ba3e35b92aa42d7081f0692b2506803
+state_head: 27edb934563d52c3433fd3c51d6506f61fcc5392
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 59
-  completed_plans: 47
+  completed_plans: 48
   percent: 13
 ---
 
@@ -101,6 +101,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P24 | 35min | 3 tasks | 12 files |
 | Phase 61 P19 | 19min | 3 tasks | 11 files |
 | Phase 61 P20 | 12min | 2 tasks | 4 files |
+| Phase 61 P21 | 11min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -204,6 +205,10 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-20: Invite checks the online address locally before the organization choice, so an unreachable project is said before anything is asked; the org choice then comes first and one Share and continue confirmation covers the link
 - [Phase 61]: 61-20: Join not-ready reasons each get one plain sentence (Get a fresh copy for local changes, unshared work and other version; no button for not shared; Try again for offline); the invite address is used only for a download the person chooses
 - [Phase 61]: 61-20: every membership prompt goes through teamPrompts; Link now inside Invite offers no share of its own (linkFlow offerShare false)
+- [Phase 61]: 61-21: the sidebar Team section host follows the running session (handle.onDidChange, session onStateChange re-followed after restart, its own actions, visibility); a team project still starting is waited for once, a failed start shows the team as unreachable with Check the team
+- [Phase 61]: 61-21: the teamSetupShared check runs only for an owner or a lead, at most once a minute on a monotonic clock while the sidebar is shown, and at once after Share, Invite, Link, Turn on and Join
+- [Phase 61]: 61-21: only {type:'team-action', action} with a known id runs anything, through TEAM_ACTION_COMMANDS; one action at a time; teamSectionTap.probe only with NEAR_AI_E2E exactly 1
+- [Phase 61]: 61-21: the manager status adds how many people wait in Members (managerStatus waiting count)
 
 ### Pending Todos
 
@@ -225,8 +230,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T23:04:15.271Z
-Stopped at: Completed 61-20-PLAN.md
+Last session: 2026-11-03T23:20:38.891Z
+Stopped at: Completed 61-21-PLAN.md
 Resume file: None
 
 ## Notes
