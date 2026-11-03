@@ -13,10 +13,10 @@ async function main(): Promise<void> {
     const workspace = await mkdtemp(path.join(tmpdir(), `near-ai-e2e-${scenario}-`));
     if (scenario === 'project') await mkdir(path.join(workspace, '.planning', '.near-ai'), { recursive: true });
     const userData = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-'));
-    // Opens the window at 1900x1000 (VS Code's first window takes the last window's size), so the
+    // A maximized window (VS Code's own setting; the test window ignores saved window sizes), so the
     // width checks can size a page to 600px beside a second editor group. CI gives xvfb a 1920x1080 screen.
-    await mkdir(path.join(userData, 'User', 'globalStorage'), { recursive: true });
-    await writeFile(path.join(userData, 'User', 'globalStorage', 'storage.json'), JSON.stringify({ windowsState: { lastActiveWindow: { uiState: { mode: 1, x: 0, y: 0, width: 1900, height: 1000 } }, openedWindows: [] } }));
+    await mkdir(path.join(userData, 'User'), { recursive: true });
+    await writeFile(path.join(userData, 'User', 'settings.json'), JSON.stringify({ 'window.newWindowDimensions': 'maximized' }));
     await runTests({
       version,
       extensionDevelopmentPath,
