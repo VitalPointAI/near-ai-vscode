@@ -4,6 +4,7 @@ import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { AuthService } from './auth';
 import { ChatWebviewMessage } from './chatBridge';
 import { attachChatToView } from './chat';
+import type { TeamSectionHost } from './team/teamSectionHost';
 
 /** The NEAR AI sidebar: a compact chat in the style of VS Code's own chat panels. */
 export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
@@ -12,8 +13,15 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
   private pending: unknown[] = [];
   /** Set only by the extension-host tests (NEAR_AI_E2E=1) to observe both directions of the view's messages. */
   public tap?: { toView(message: unknown): void; fromView(message: unknown): void };
+  /** The sidebar Team section (G-61-5): attached to the view each time it is resolved. */
+  private teamSection?: TeamSectionHost;
 
   public constructor(private readonly context: vscode.ExtensionContext, private readonly auth: AuthService) {}
+
+  /** Hands the Team section host to the sidebar; set once at activation, before the view provider is registered. */
+  public setTeamSection(host: TeamSectionHost): void {
+    this.teamSection = host;
+  }
 
   public async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
     this.view = webviewView;
@@ -27,6 +35,10 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
       webviewView.webview.onDidReceiveMessage((message: unknown) => tap.fromView(message));
     }
     await attachChatToView(this.context, this.auth, webviewView, sidebarHtml(webviewView.webview, media));
+    if (this.teamSection) {
+      const attached = this.teamSection.attach(webviewView.webview, webviewView.onDidChangeVisibility, () => webviewView.visible);
+      webviewView.onDidDispose(() => { attached.dispose(); });
+    }
     for (const message of this.pending.splice(0)) void webviewView.webview.postMessage(message);
   }
 
@@ -79,6 +91,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
   <button id="new-conversation" class="icon-button" type="button" aria-label="New conversation" title="New conversation: starts alongside the ones still running"></button>
 </nav>
 <div id="needs-you" role="status" hidden></div>
+<section id="team" role="region" aria-label="Team" hidden></section>
 <main id="transcript" aria-label="Conversation" aria-live="off">
   <section id="welcome">
     <h2>Private AI for this project</h2>
@@ -116,6 +129,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 <script nonce="${nonce}" src="${asset('pending.js')}"></script>
 <script nonce="${nonce}" src="${asset('composer.js')}"></script>
 <script nonce="${nonce}" src="${asset('chat.js')}"></script>
+<script nonce="${nonce}" src="${asset('team.js')}"></script>
 </body>
 </html>`;
 }

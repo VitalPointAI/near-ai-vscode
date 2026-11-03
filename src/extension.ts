@@ -14,6 +14,7 @@ import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerTeamMode } from './services/team/teamCommands';
 import type { TeamModeHandle } from './services/team/teamCommands';
+import { createTeamSectionHost } from './services/team/teamSectionHost';
 import { registerMcpConnections } from './services/mcpView';
 import { openTools } from './services/toolsPage';
 import { registerModelComparison } from './services/modelComparisonPanel';
@@ -67,6 +68,10 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerSpendTracking(context, auth);
   // Turning on Team Mode where NEAR AI is not connected yet runs the same key setup as the chat's Set up button, then carries on (G-61-1).
   const team = registerTeamMode(context, { connectNearAi: () => configureApiKey(auth, sidebar) });
+  // The Team section of the sidebar (G-61-5): every team step is a button there, chosen by this person's state and kept current from the session.
+  const teamSection = createTeamSectionHost({ team, firstFolder: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, executeCommand: (command) => vscode.commands.executeCommand(command) });
+  sidebar.setTeamSection(teamSection);
+  context.subscriptions.push(teamSection);
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
   registerModelComparison(context, auth);
