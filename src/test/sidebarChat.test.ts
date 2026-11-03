@@ -258,12 +258,23 @@ test('chat tables are Tab stops only while they are wider than their box', () =>
   assert.equal(narrow.getAttribute('tabindex'), '0');
 });
 
-test('chat view loads the table helper and styles tables with theme colours only', () => {
+test('chat view renders streaming text as partial and the finished reply strictly, loads the table helper and styles tables with theme colours only', () => {
   const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const panel = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'panelView.ts'), 'utf8');
   // Streaming frames render with the lenient rules and rebuild tables through the helper.
   const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  assert.match(script, /markdown\.parse\(text, \{ partial: partial === true \}\)/);
   assert.match(script, /requestAnimationFrame\(\(\) => flushAssistant\(true\)\)/);
+  assert.match(script, /function flushAssistant\(partial\) \{[^}]*renderMarkdown\(current\.body, current\.text, partial === true\);/);
+  // closeSegment and finishAssistant render the final text with the strict rules.
+  assert.equal([...script.matchAll(/flushAssistant\(\);/g)].length, 2);
+  assert.match(script, /function finishAssistant\(meta\) \{[^}]*\n {4}flushAssistant\(\);/);
+  assert.match(script, /function closeSegment\(\) \{[^}]*\n {4}flushAssistant\(\);/);
+  // Only streaming frames pass true; no other call renders a reply with the lenient rules.
+  assert.deepEqual([...new Set([...script.matchAll(/flushAssistant\(([^)]*)\)[;)]/g)].map((match) => match[1]))].sort(), ['', 'true']);
+  // A saved reply replayed from the transcript is rendered strictly too.
+  const renders = [...script.matchAll(/renderMarkdown\(([^)]*)\);/g)].map((match) => match[1]);
+  assert.deepEqual(renders, ['current.body, current.text, partial === true', "body, turn.text || ''"]);
   assert.match(script, /tables\.capture\(target, document\.activeElement\)[\s\S]*target\.replaceChildren\(\)[\s\S]*tables\.restore\(target, saved\)/);
   assert.ok(panel.indexOf("asset('tables.js')") > 0 && panel.indexOf("asset('tables.js')") < panel.indexOf("asset('chat.js')"), 'tables.js loads before chat.js');
   const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.css'), 'utf8');
