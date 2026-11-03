@@ -11,6 +11,7 @@ import { CleanupChecklist, repoAccessText } from '../team/cleanupChecklist';
 import { createDeviceIdentity, deviceKeySecretName, newMemberId, sealKeySecretName } from '../team/identity';
 import { parseInviteBundle } from '../team/inviteBundle';
 import { INVITE_FILE } from '../team/invite';
+import { NO_ORG_NOTICE } from '../team/join';
 import { nearSessionSecretName } from '../team/nearSession';
 import { LINK_COMMIT_MESSAGE } from '../team/nearLink';
 import { TEAM_FILE_REL, readTeamFile, teamStorageDir } from '../team/teamFile';
@@ -34,7 +35,6 @@ const EM_DASH = '—';
 const WITHOUT_NEAR = 'Invite without NEAR';
 const WITHOUT_KEY_NOW = 'Continue without NEAR';
 const PUBLIC_URL = 'https://example.invalid/team.git';
-const NO_ORG_NOTICE = 'No NEAR organization linked: spend is not capped at the provider.';
 
 function resetStub(): void {
   stub.outputChannels.length = 0;

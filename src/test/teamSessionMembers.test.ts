@@ -314,7 +314,7 @@ test('the NEAR line of the tooltip names the signed-in account, or says no organ
   });
   await inWorld({ near: false }, async (w) => {
     await startSession(w, 'owner');
-    assert.match(lastBar().tooltip, /No NEAR organization linked: spend is not capped at the provider\./);
+    assert.match(lastBar().tooltip, new RegExp(NO_ORG_NOTICE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   });
 });
 

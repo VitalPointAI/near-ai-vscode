@@ -492,6 +492,11 @@ test('a team with no NEAR organization checks a pasted key with check_api_key on
   });
 });
 
+test('the notice for a team without a linked organization says in plain words that everyone uses their own key and spending is not capped', () => {
+  assert.equal(NO_ORG_NOTICE, 'No organization linked, so everyone uses their own key and spending is not capped.');
+  assert.equal(/NEAR/.test(NO_ORG_NOTICE), false, 'the paying account is "your organization", not a NEAR one');
+});
+
 test('a rejected pasted key or none at all leaves the join done and says so plainly; a NEAR-linked team never asks for a key', async () => {
   await withNearFake(async (fake) => {
     await withFixture(['a', 'b', 'c', 'd'], async (fixture) => {
