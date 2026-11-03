@@ -229,10 +229,18 @@ const PANELS: Array<[string, string]> = [
 const samples = new Map<string, Message[]>();
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function probe(name: string): Promise<LayoutReport> {
+async function probe(name: string): Promise<LayoutReport> {
   const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
   const { probeLayout } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
-  return probeLayout(name);
+  // The chat shares the secondary sidebar with VS Code's own chat view, which the resize steps
+  // bring up; if the NEAR AI chat is not on screen when asked, it is shown again and asked once more.
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await probeLayout(name, 5_000); } catch (error) {
+      if (attempt >= 2) throw error;
+      if (name === 'chat') await vscode.commands.executeCommand('nearAiChatView.focus');
+      await pause(1_000);
+    }
+  }
 }
 
 /** Measures once the panel has stopped changing size (a resize reaches the page a little later). */
@@ -312,10 +320,14 @@ async function sidebarStep(command: string): Promise<LayoutReport> {
 
 async function sizeSidebar(target: number): Promise<LayoutReport> {
   let report = await settled('chat');
+  let unchanged = 0;
   for (let attempt = 0; attempt < 30 && report.width !== target; attempt += 1) {
     const command = report.width > target ? 'workbench.action.decreaseViewSize' : 'workbench.action.increaseViewSize';
     const next = await sidebarStep(command);
-    if (next.width === report.width) return report;
+    // A step can be lost while VS Code's own chat view is still taking focus, so only a few steps
+    // in a row with no change mean the sidebar is at its limit.
+    if (next.width === report.width) { unchanged += 1; if (unchanged >= 3) return report; await pause(500); continue; }
+    unchanged = 0;
     if (Math.abs(next.width - target) >= Math.abs(report.width - target)) {
       // One step past the target and no closer: step back and stop.
       return sidebarStep(command === 'workbench.action.decreaseViewSize' ? 'workbench.action.increaseViewSize' : 'workbench.action.decreaseViewSize');
