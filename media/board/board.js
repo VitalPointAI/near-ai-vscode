@@ -10,17 +10,20 @@
   const CELL_CAP = 30;
   const LATER = ['claimed', 'in-progress', 'in-review', 'integrating'];
   const GROUPS_OPEN = ['backlog', 'ready'];
+  // The four columns later updates fill start folded in the kanban (UI review warning 5); a person who opens one keeps it open.
   const GROUP_BY = ['member', 'phase', 'milestone', 'none'];
   const GROUP_LABELS = { member: 'Member', phase: 'Phase', milestone: 'Milestone', none: 'None' };
-  const COLUMN_ICONS = { backlog: 'circle-outline', ready: 'play-circle', claimed: 'person', 'in-progress': 'sync', 'in-review': 'eye', integrating: 'git-merge', done: 'pass', cancelled: 'circle-slash' };
+  const COLUMN_ICONS = { backlog: 'circle-outline', ready: 'play-circle', claimed: 'person', 'in-progress': 'sync', 'in-review': 'eye', integrating: 'check-all', done: 'pass', cancelled: 'circle-slash' };
   const T = {
-    title: 'Team Board', loading: 'Loading the Team Board...', slow: 'This is taking longer than usual. The team remote may be slow.', tryAgain: 'Try again', showDetails: 'Show details',
+    title: 'Team Board', loading: 'Loading the Team Board...', slow: 'This is taking longer than usual. The connection to your team may be slow.', tryAgain: 'Try again', showDetails: 'Show details',
     errorHead: 'The Team Board could not be loaded', emptyHead: 'No work on the board yet', emptyOwner: 'Import your plans from the project roadmap, or add an item yourself.',
-    emptyDev: 'A lead has not imported the plans yet. You can add a bug, chore or spike yourself.', emptyView: 'A lead has not imported the plans yet. Cards show up here when they do.',
+    emptyDev: 'A lead has not imported the plans yet. You can add a bug, chore or experiment yourself.', emptyView: 'A lead has not imported the plans yet. Cards show up here when they do.',
     noCards: 'No cards here.', noMatch: 'No cards match these filters', clearBody: 'Clear the filters to see every card.', mineBody: 'Nothing is yours yet. Cards you create or claim show up here.',
     clear: 'Clear filters', importPlans: 'Import plans', newItem: 'New item', openBoard: 'Open Team Board', moveTo: 'Move to...', dismiss: 'Dismiss message', filters: 'Filters',
-    paused: 'The team log changed in a way the board cannot trust, so the board is paused. Run "NEAR AI: Verify Team Log" to find out why.',
-    notTrusted: 'The team log did not pass its checks, so the board is paused. Run "NEAR AI: Verify Team Log" to find out why.',
+    paused: 'Something unexpected changed in the shared team record, so the board is paused to protect your work. Choose "Check the team" to see what happened, or ask your lead.',
+    notTrusted: 'The shared team record failed a safety check, so the board is paused. Choose "Check the team" to see what happened, or ask your lead.',
+    checkTeam: 'Check the team', doneInPlans: 'Looks finished, please confirm',
+    laterNote: 'Claimed, In progress, In review and Shipping are folded for now. They fill in when those steps arrive in a later update.',
     removed: 'You were removed from this team. You can still look at the board but not change it.',
     hintMove: 'Press Enter to open details. Press M to move this card.', hintOpen: 'Press Enter to open details.'
   };
@@ -29,7 +32,7 @@
     return {
       'circle-outline': [o(8, 8, 5.5)], 'play-circle': [o(8, 8, 5.5), 'M6.5 5.5L10.5 8L6.5 10.5Z'], person: [o(8, 5, 2.5), 'M3 13.5C3 10.5 5 9 8 9C11 9 13 10.5 13 13.5'],
       sync: ['M12.5 6A5 5 0 0 0 4 5', 'M3.5 10A5 5 0 0 0 12 11', 'M12.5 2.5V6H9', 'M3.5 13.5V10H7'], eye: ['M1.5 8C3.5 4.5 12.5 4.5 14.5 8C12.5 11.5 3.5 11.5 1.5 8Z', o(8, 8, 1.8)],
-      'git-merge': [o(4, 3.5, 1.5), o(4, 12.5, 1.5), o(12, 8, 1.5), 'M4 5V11', 'M4 8H10.5'], pass: [o(8, 8, 5.5), 'M5.5 8L7.5 10L10.5 6.5'], 'circle-slash': [o(8, 8, 5.5), 'M4.2 11.8L11.8 4.2'],
+      'check-all': ['M1.5 8.5L4.5 11.5L10.5 4.5', 'M7.5 11.5L13.5 4.5'], pass: [o(8, 8, 5.5), 'M5.5 8L7.5 10L10.5 6.5'], 'circle-slash': [o(8, 8, 5.5), 'M4.2 11.8L11.8 4.2'],
       lock: ['M3.5 7.5H12.5V13.5H3.5Z', 'M5.5 7.5V5.5a2.5 2.5 0 0 1 5 0V7.5'], 'debug-pause': ['M5.5 3.5V12.5', 'M10.5 3.5V12.5'], info: [o(8, 8, 5.5), 'M8 7.5V11', 'M8 5.2V5.3'],
       link: ['M6.5 9.5L9.5 6.5', 'M7 5L8 4a2.5 2.5 0 0 1 3.5 3.5L10.5 8.5', 'M9 11L8 12a2.5 2.5 0 0 1-3.5-3.5L5.5 7.5'], clock: [o(8, 8, 5.5), 'M8 4.5V8L10.5 9.5'],
       'arrow-swap': ['M2.5 5.5H12.5', 'M10 3L12.5 5.5L10 8', 'M13.5 10.5H3.5', 'M6 8L3.5 10.5L6 13'], 'chevron-right': ['M6 3.5L10.5 8L6 12.5'], 'chevron-down': ['M3.5 6L8 10.5L12.5 6'],
@@ -156,11 +159,12 @@
   const hintOpen = el('span', '', T.hintOpen); hintOpen.id = 'hint-open';
   hints.append(hintMove, hintOpen);
   const views = { kanban: el('div', 'board-scroll'), list: el('div', 'groups') };
+  const laterNote = el('p', 'later-note', T.laterNote);
   const heads = el('div', 'colheads');
   const lanesEl = el('div', 'lanes');
   views.kanban.setAttribute('role', 'region'); views.kanban.setAttribute('aria-label', 'Team Board columns');
   heads.setAttribute('role', 'toolbar'); heads.setAttribute('aria-label', 'Columns');
-  views.kanban.append(heads, lanesEl);
+  views.kanban.append(laterNote, heads, lanesEl);
 
   // Toolbar controls are built once and updated in place, so typing in the requirement box never loses focus.
   const titleRow = el('div', 'row title-row');
@@ -240,6 +244,7 @@
     attr(bar.box, 'aria-valuenow', pct);
     attr(bar.box, 'aria-label', label);
   }
+  function columnCollapsed(key) { return key in ui.collapsedColumns ? !!ui.collapsedColumns[key] : LATER.indexOf(key) >= 0; }
   function setGroupBy(key) { ui.groupBy = key; persist(); render(); }
   function clearFilters() {
     ui.filters = { mine: false, ready: false, blocked: false, requirement: '', phase: '' };
@@ -335,7 +340,8 @@
     if (model) {
       const s = model.status;
       if (s.kind === 'offline') out.push({ key: 'offline', role: 'status', icon: 'warning', text: 'You are offline. The board shows the last update at ' + clock(s.lastUpdated) + '. Cards cannot be moved or added until the connection returns.', actions: [retry] });
-      else if (s.kind === 'paused') out.push({ key: 'paused', role: 'alert', icon: 'warning', text: /did not pass|not trusted/i.test(s.text || '') ? T.notTrusted : T.paused });
+      // A team record that does not belong to this team failed the trust check; anything else that paused the board changed unexpectedly.
+      else if (s.kind === 'paused') out.push({ key: 'paused', role: 'alert', icon: 'warning', text: /does not belong|did not pass|not trusted/i.test(s.text || '') ? T.notTrusted : T.paused, actions: [[T.checkTeam, () => post({ type: 'check-team' })]] });
       else if (s.kind === 'removed') out.push({ key: 'removed', role: 'status', icon: 'info', text: T.removed });
       else if (model.viewer.readOnlyReason) out.push({ key: 'readonly', role: 'status', icon: 'info', text: model.viewer.readOnlyReason });
     }
@@ -437,7 +443,7 @@
     const meta = el('span', 'card-meta');
     if (c.blocked) meta.appendChild(badge('lock', 'Blocked', 'badge-blocked'));
     if (c.held) meta.appendChild(badge('debug-pause', 'On hold', 'badge-hold'));
-    if (c.doneInGsd) meta.appendChild(badge('info', 'Done in GSD, confirm', 'badge-info'));
+    if (c.doneInGsd) meta.appendChild(badge('info', T.doneInPlans, 'badge-info'));
     if (c.column === 'cancelled') meta.appendChild(badge('circle-slash', 'Cancelled', 'badge-cancelled'));
     if (c.dependencyCount > 0) meta.appendChild(iconText('meta-item', 'link', plural(c.dependencyCount, 'dependency', 'dependencies')));
     meta.appendChild(el('span', 'meta-item', c.estimateText));
@@ -447,8 +453,9 @@
     top.append(iconText('state', COLUMN_ICONS[c.column] || 'circle-outline', c.stateLabel), el('span', 'did', c.displayId));
     const titleNode = el('span', 'card-title', c.title);
     titleNode.setAttribute('title', c.title);
-    p.main.replaceChildren(top, titleNode, meta);
-    attr(p.main, 'aria-label', c.a11yLabel);
+    // J-02: a card added on the board that cannot leave Backlog says why on its face, in normal text, not only in the detail.
+    p.main.replaceChildren(...[top, titleNode, meta].concat(c.backlogRule ? [iconText('card-rule', 'info', c.backlogRule)] : []));
+    attr(p.main, 'aria-label', c.backlogRule ? c.a11yLabel + ' ' + c.backlogRule : c.a11yLabel);
     attr(p.main, 'aria-describedby', c.moves.length > 0 ? 'hint-move' : 'hint-open');
     attr(p.main, 'aria-current', ui.selected === c.id ? 'true' : null);
     li.className = 'card' + (ui.selected === c.id ? ' selected' : '') + (c.column === 'cancelled' ? ' cancelled' : '') + (c.column === 'done' ? ' done' : '') + (pending[c.id] ? ' pending' : '') + (c.blocked ? ' is-blocked' : '');
@@ -485,6 +492,7 @@
     const cols = model.columns;
     if (colFocus >= cols.length) colFocus = 0;
     place(heads, cols.map((c, i) => headEl(c, shown.filter((x) => x.column === c.key).length, i)));
+    laterNote.hidden = !LATER.some((key) => cols.some((c) => c.key === key) && columnCollapsed(key));
     const sel = milestoneId();
     const lanes = (model.lanes[ui.groupBy] || []).filter((l) => {
       if (ui.groupBy === 'phase' && l.milestoneId && sel !== 'all' && l.milestoneId !== sel) return false;
@@ -506,13 +514,13 @@
     if (!h) {
       const box = el('div', 'column'); box.setAttribute('data-column', c.key);
       const b = el('button', 'col-btn'); b.setAttribute('type', 'button');
-      b.addEventListener('click', () => { ui.collapsedColumns[c.key] = !ui.collapsedColumns[c.key]; persist(); render(); });
+      b.addEventListener('click', () => { ui.collapsedColumns[c.key] = !columnCollapsed(c.key); persist(); render(); });
       b.addEventListener('focus', () => { colFocus = headNodes().indexOf(b); });
       box.append(b, el('span', 'caption'));
       h = { box, b };
       headEls.set(c.key, h);
     }
-    const collapsed = !!ui.collapsedColumns[c.key];
+    const collapsed = columnCollapsed(c.key);
     h.box.className = 'column' + (collapsed ? ' collapsed' : '');
     h.b.replaceChildren(icon(collapsed ? 'chevron-right' : 'chevron-down'), icon(COLUMN_ICONS[c.key]), el('span', 'col-name', c.label), el('span', 'col-count', String(count)));
     attr(h.b, 'aria-expanded', collapsed ? 'false' : 'true');
@@ -570,7 +578,7 @@
     return l.el;
   }
   function cellEl(lane, col, cards, usedCells) {
-    const collapsedCol = !!ui.collapsedColumns[col.key];
+    const collapsedCol = columnCollapsed(col.key);
     const kind = collapsedCol ? 'x' : cards.length === 0 ? 'e' : 'f';
     const key = ui.groupBy + '|' + lane.key + '|' + col.key + '|' + kind;
     usedCells.add(key);

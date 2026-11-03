@@ -2,7 +2,7 @@
 // The menu, the drop targets and the write path all ask planMove, so the board offers only what the log would accept, and the host re-runs the same
 // function on fresh state inside the append. Pure: no vscode, no I/O, no clock reads (nowMs is a parameter used for display text only).
 import {
-  ALL_CARDS_LABEL, BOARD_LANE_LABEL, COLUMN_CAPTIONS, COLUMN_LABELS, HISTORY_LIMIT_TEXT, KIND_WORDS, MOVE_LABELS, NO_PLANS_TEXT, READ_ONLY_BANNERS, REFUSALS, SOMEONE, SOURCE_BOARD_TEXT,
+  ALL_CARDS_LABEL, BACKLOG_RULE_CARD_TEXT, BOARD_LANE_LABEL, COLUMN_CAPTIONS, COLUMN_LABELS, HISTORY_LIMIT_TEXT, KIND_WORDS, MOVE_LABELS, NO_PLANS_TEXT, READ_ONLY_BANNERS, REFUSALS, SOMEONE, SOURCE_BOARD_TEXT,
   SOURCE_IMPORT_TEXT, UNASSIGNED_LABEL, ageText, cardLabel, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences, stripFormatControls
 } from './boardText';
 import { MAX_HISTORY_PER_ITEM } from './itemHistory';
@@ -39,6 +39,8 @@ export interface BoardCard {
   lane: { member: string; phase: string; milestone: string }; phaseId?: string; milestoneId?: string; requirements: string[]; mine: boolean;
   blocked?: { reason: string; byName: string; since: string }; held: boolean; doneInGsd: boolean; dependencyCount: number; estimateText: string; ageText: string;
   createdByName?: string; moves: CardMove[]; refusals: Partial<Record<BoardColumn, string>>; a11yLabel: string;
+  /** The Backlog rule on the card face (J-02): set only for a card added on the board that sits in Backlog without its parts or its size. */
+  backlogRule?: string;
 }
 export interface BoardModel {
   status: BoardStatus; viewer: BoardViewer; columns: BoardColumnInfo[]; milestones: BoardMilestone[]; selectedMilestone: string; phases: BoardPhase[]; requirements: string[];
@@ -283,6 +285,10 @@ function cardOf(state: TeamState, options: BoardModelOptions, gate: string | und
   if (milestoneId !== undefined) card.milestoneId = milestoneId;
   if (blocked !== undefined) card.blocked = blocked;
   if (item.origin === 'board' && item.createdBy !== undefined) card.createdByName = memberName(state, item.createdBy);
+  if (item.origin === 'board' && column === 'backlog') {
+    const { reasons } = readiness(state.items, item.id);
+    if (reasons.includes('no-scope') || reasons.includes('no-estimate')) card.backlogRule = BACKLOG_RULE_CARD_TEXT;
+  }
   return card;
 }
 

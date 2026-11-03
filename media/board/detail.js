@@ -8,11 +8,13 @@
   const drawer = board.drawer();
   const FILES_SHOWN = 8;
   const HISTORY_SHOWN = 50;
-  const COLUMN_ICONS = { backlog: 'circle-outline', ready: 'play-circle', claimed: 'person', 'in-progress': 'sync', 'in-review': 'eye', integrating: 'git-merge', done: 'pass', cancelled: 'circle-slash' };
+  const COLUMN_ICONS = { backlog: 'circle-outline', ready: 'play-circle', claimed: 'person', 'in-progress': 'sync', 'in-review': 'eye', integrating: 'check-all', done: 'pass', cancelled: 'circle-slash' };
   const T = {
     close: 'Close details', back: 'Back to list', moveTo: 'Move to...', edit: 'Edit', gone: 'That card is no longer on the board.', loading: 'Loading details...',
-    imported: 'This comes from the project plans. Change the plan files and the board updates.', noTasks: 'This plan has no tasks listed.',
-    noHistory: 'No changes recorded since this window opened.', historyCap: 'Showing the latest 50 changes.'
+    imported: 'This comes from the project plans. Change the plan and the board follows.', noTasks: 'This plan has no tasks listed.',
+    noHistory: 'No changes recorded since this window opened.', historyCap: 'Showing the latest 50 changes.', doneInPlans: 'Looks finished, please confirm',
+    // UI review J-17: plain names for the plan facts.
+    wave: 'Order within the phase', kind: 'Type', source: 'Where it came from', mustHaves: 'What must be true when it is done', files: 'Parts of the project'
   };
 
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
@@ -89,7 +91,7 @@
     const out = [];
     if (blocked) out.push(badge('lock', 'Blocked', 'badge-blocked'));
     if (held) out.push(badge('debug-pause', 'On hold', 'badge-hold'));
-    if (doneInGsd) out.push(badge('info', 'Done in GSD, confirm', 'badge-info'));
+    if (doneInGsd) out.push(badge('info', T.doneInPlans, 'badge-info'));
     if (column === 'cancelled') out.push(badge('circle-slash', 'Cancelled', 'badge-cancelled'));
     badges.replaceChildren(...out);
     badges.hidden = out.length === 0;
@@ -150,12 +152,12 @@
         const rows = body.querySelectorAll('.files li');
         const first = rows[FILES_SHOWN];
         if (first) { first.setAttribute('tabindex', '-1'); first.focus(); }
-        board.announce('Showing all ' + plural(files.length, 'file', 'files') + '.');
+        board.announce('Showing all ' + plural(files.length, 'part', 'parts') + ' of the project.');
       });
       more.setAttribute('data-focus', 'files-more');
       nodes.push(more);
     }
-    return section('Files', ...nodes);
+    return section(T.files, ...nodes);
   }
 
   function renderBody() {
@@ -175,15 +177,15 @@
     const fact = (label, value) => { if (value !== undefined && value !== '') rows.push(el('dt', '', label), el('dd', '', String(value))); };
     fact('Phase', facts.phase);
     fact('Milestone', facts.milestone);
-    fact('Wave', facts.wave);
-    fact('Kind', d.kindLabel);
+    fact(T.wave, facts.wave);
+    fact(T.kind, d.kindLabel);
     fact('Created by', facts.createdBy);
     fact('Estimate', facts.estimate);
     fact('In this state for', facts.age);
-    fact('Source', facts.source);
+    fact(T.source, facts.source);
     out.push(section('Facts', list('dl', rows)));
     if (d.description) out.push(section('Description', ...d.description.split(/\n+/).filter(Boolean).map((line) => el('p', '', line))));
-    if (d.mustHaves.length > 0) out.push(section('Must-haves', list('ul', d.mustHaves.map((t) => el('li', '', t)))));
+    if (d.mustHaves.length > 0) out.push(section(T.mustHaves, list('ul', d.mustHaves.map((t) => el('li', '', t)))));
     if (d.requirements.length > 0) {
       out.push(section('Requirements', list('ul', d.requirements.map((id) => {
         const b = button('link', id, () => board.setFilter('requirement', id));

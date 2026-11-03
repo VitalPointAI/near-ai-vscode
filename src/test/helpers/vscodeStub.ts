@@ -48,6 +48,9 @@ export interface VscodeStub {
   // Answers handed to showQuickPick, in order: the label of the item to choose, or undefined to dismiss. A label no item has throws, so a test cannot
   // silently pick the wrong thing. The chosen item object (or string) is returned to the caller.
   quickPickAnswers: Array<string | undefined>;
+  // Answers handed to showOpenDialog, in order: the paths picked, or undefined to dismiss. Each call's options are kept in openDialogRequests.
+  openDialogAnswers: Array<string[] | undefined>;
+  openDialogRequests: Array<Record<string, unknown>>;
   // What each showQuickPick call offered, in order.
   quickPickRequests: Array<{ title?: string; placeHolder?: string; labels: string[]; descriptions: string[]; details: string[] }>;
   // Every text written with vscode.env.clipboard.writeText, in order.
@@ -88,6 +91,8 @@ export function createVscodeStub(): VscodeStub {
   const messageAnswers: VscodeStub['messageAnswers'] = [];
   const notificationOptions: VscodeStub['notificationOptions'] = [];
   const quickPickAnswers: VscodeStub['quickPickAnswers'] = [];
+  const openDialogAnswers: VscodeStub['openDialogAnswers'] = [];
+  const openDialogRequests: VscodeStub['openDialogRequests'] = [];
   const quickPickRequests: VscodeStub['quickPickRequests'] = [];
   const clipboardWrites: string[] = [];
   const externalCommands: VscodeStub['externalCommands'] = [];
@@ -283,6 +288,11 @@ export function createVscodeStub(): VscodeStub {
         return inputAnswers.shift();
       },
       showQuickPick,
+      showOpenDialog: async (options: Record<string, unknown>): Promise<Array<{ fsPath: string }> | undefined> => {
+        openDialogRequests.push(options);
+        const answer = openDialogAnswers.shift();
+        return answer === undefined ? undefined : answer.map((fsPath) => ({ scheme: 'file', fsPath }));
+      },
       // The paste box of the browser sign-in. Tests replace the sign-in, so this only has to exist and be inert.
       createInputBox: () => {
         const none = (): { dispose(): void } => ({ dispose: (): void => undefined });
@@ -358,7 +368,7 @@ export function createVscodeStub(): VscodeStub {
 
   return {
     vscode, webviewPanels, viewProviders, createWebviewView, outputChannels, statusBarItems, notifications, notificationActions, notificationOptions, configUpdates, commands, inputAnswers, inputRequests, messageAnswers,
-    quickPickAnswers, quickPickRequests, clipboardWrites, externalCommands, openedExternal, progress,
+    quickPickAnswers, quickPickRequests, openDialogAnswers, openDialogRequests, clipboardWrites, externalCommands, openedExternal, progress,
     setProgressCancel(when): void {
       progressCancel = when;
     },

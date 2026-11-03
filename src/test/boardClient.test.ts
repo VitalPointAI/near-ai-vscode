@@ -262,7 +262,7 @@ test('the empty board names the next step for each role and offers one primary b
   const world = await boardWorld();
   const cases: Array<[string, string, string | undefined]> = [
     [world.owner.memberId, 'Import your plans from the project roadmap, or add an item yourself.', 'Import plans'],
-    [world.dev.memberId, 'A lead has not imported the plans yet. You can add a bug, chore or spike yourself.', 'New item'],
+    [world.dev.memberId, 'A lead has not imported the plans yet. You can add a bug, chore or experiment yourself.', 'New item'],
     [world.observer.memberId, 'A lead has not imported the plans yet. Cards show up here when they do.', undefined]
   ];
   for (const [viewer, body, primary] of cases) {
@@ -287,7 +287,7 @@ test('loading, the slow message after 10 seconds, the error state and Try again'
   h.advance(9000);
   assert.equal(text(h.$('.state-head')), 'Loading the Team Board...');
   h.advance(1500);
-  assert.equal(text(h.$('.state-head')), 'This is taking longer than usual. The team remote may be slow.');
+  assert.equal(text(h.$('.state-head')), 'This is taking longer than usual. The connection to your team may be slow.');
   buttonNamed(h, 'Try again')!.click();
   assert.deepEqual(h.posts.at(-1), { type: 'retry' });
 
@@ -317,8 +317,16 @@ test('offline, paused, removed and read-only models show the right banner and ta
   const paused = start();
   paused.deliver({ type: 'state', model: { ...live, status: { kind: 'paused', text: 'Paused' } } });
   assert.equal(paused.$('.banner-paused')!.getAttribute('role'), 'alert');
-  assert.match(text(paused.$('.banner-paused')), /^The team log changed in a way the board cannot trust, so the board is paused\. Run "NEAR AI: Verify Team Log" to find out why\.$/);
+  assert.equal(text(paused.$('.banner-paused .banner-text')), 'Something unexpected changed in the shared team record, so the board is paused to protect your work. Choose "Check the team" to see what happened, or ask your lead.');
   assert.equal(text(paused.$('.status-chip')), 'Paused');
+  // UI review warning 2: the paused banner offers the check itself, so nobody has to find a command.
+  const check = Array.from(paused.$('.banner-paused')!.querySelectorAll('button')).find((b) => text(b) === 'Check the team');
+  assert.ok(check, 'the paused banner has a Check the team button');
+  check.click();
+  assert.deepEqual(paused.posts.at(-1), { type: 'check-team' });
+  const untrusted = start();
+  untrusted.deliver({ type: 'state', model: { ...live, status: { kind: 'paused', text: "Paused: This coordination log does not belong to this project's team" } } });
+  assert.equal(text(untrusted.$('.banner-paused .banner-text')), 'The shared team record failed a safety check, so the board is paused. Choose "Check the team" to see what happened, or ask your lead.');
 
   const removed = start();
   removed.deliver({ type: 'state', model: { ...live, status: { kind: 'removed', text: 'Removed' } } });
@@ -378,8 +386,21 @@ test('all eight columns and groups always show, with the captions of the columns
   const h = start();
   h.deliver({ type: 'state', model });
   const captions = h.$$('.column').map((c) => text(c.querySelector('.caption')));
-  assert.deepEqual(captions, ['Waiting, on hold or not ready.', 'Ready to be claimed.', 'Claiming arrives in a later update.', 'Starting work arrives with claims.', 'Review arrives in a later update.', 'Merging arrives in a later update.', '', '']);
+  assert.deepEqual(captions, ['Waiting, on hold or not ready.', 'Ready to be claimed.', 'Claiming arrives in a later update.', 'Starting work arrives with claims.', 'Review arrives in a later update.', 'Adding finished work to the project arrives in a later update.', '', '']);
+  // UI review warning 5: the four columns later updates fill start folded, with one plain note that says why; Done and Cancelled start open.
+  const later = ['claimed', 'in-progress', 'in-review', 'integrating'];
+  assert.deepEqual(h.$$('.column').filter((c) => c.className.includes('collapsed')).map((c) => c.getAttribute('data-column')), later);
+  assert.deepEqual(later.map((key) => h.$(`.column[data-column="${key}"] .col-btn`)!.getAttribute('aria-expanded')), ['false', 'false', 'false', 'false']);
+  assert.equal(text(h.$('.later-note')), 'Claimed, In progress, In review and Shipping are folded for now. They fill in when those steps arrive in a later update.');
+  assert.equal(h.$('.later-note')!.hidden, false);
+  assert.equal(text(h.$('.cell[data-column="claimed"][data-lane="unassigned"]')), '0 cards, column collapsed');
+  assert.equal(h.$('.column[data-column="integrating"] svg path')!.getAttribute('d'), 'M6 3.5L10.5 8L6 12.5', 'a folded column shows the closed chevron');
+  assert.deepEqual(Array.from(h.$('.column[data-column="integrating"] .col-btn')!.querySelectorAll('svg')[1]!.querySelectorAll('path')).map((p) => p.getAttribute('d')), ['M1.5 8.5L4.5 11.5L10.5 4.5', 'M7.5 11.5L13.5 4.5'], 'Shipping has the check-all icon, not a git icon');
+  h.$('.column[data-column="claimed"] .col-btn')!.click();
+  assert.equal(h.$('.column[data-column="claimed"] .col-btn')!.getAttribute('aria-expanded'), 'true', 'a folded column opens on request');
   assert.equal(text(h.$('.cell[data-column="claimed"][data-lane="unassigned"]')), 'No cards');
+  for (const key of later.slice(1)) h.$(`.column[data-column="${key}"] .col-btn`)!.click();
+  assert.equal(h.$('.later-note')!.hidden, true, 'the note goes once none of the four is folded');
   h.$('.column[data-column="cancelled"] .col-btn')!.click();
   assert.equal(h.$('.column[data-column="cancelled"] .col-btn')!.getAttribute('aria-expanded'), 'false');
   assert.ok(h.$('.column[data-column="cancelled"]')!.className.includes('collapsed'));
@@ -637,7 +658,7 @@ test('NearAiBoard exposes the whole API; refusals and pending lines render, anno
 
 test('icon(name) draws an aria-hidden inline svg for every meaning in the table and an empty svg for an unknown name', async () => {
   const { h } = await drawn();
-  const names = ['circle-outline', 'play-circle', 'person', 'sync', 'eye', 'git-merge', 'pass', 'circle-slash', 'lock', 'debug-pause', 'info', 'link', 'clock', 'arrow-swap', 'chevron-right', 'chevron-down', 'error', 'warning', 'filter', 'add', 'link-external', 'close', 'arrow-left', 'organization'];
+  const names = ['circle-outline', 'play-circle', 'person', 'sync', 'eye', 'check-all', 'pass', 'circle-slash', 'lock', 'debug-pause', 'info', 'link', 'clock', 'arrow-swap', 'chevron-right', 'chevron-down', 'error', 'warning', 'filter', 'add', 'link-external', 'close', 'arrow-left', 'organization'];
   for (const name of names) {
     const svg = api(h).icon(name);
     assert.equal(svg.localName, 'svg', name);
@@ -684,4 +705,19 @@ test('board.css: only theme variables for colour, borders kept in high contrast 
     assert.ok(BOARD_CSS.includes(selector), `${selector} is styled`);
   }
   assert.doesNotMatch(BOARD_CSS, /[—–]/);
+});
+
+test('J-02: the card face says the Backlog rule in normal text and the accessible name ends with it; other cards have no rule', async () => {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const h = start();
+  h.deliver({ type: 'state', model });
+  const rule = 'Stays in Backlog until it says which parts of the project it covers and roughly how big it is.';
+  const chore = model.cards.find((c) => c.id === CHORE_ID)!;
+  assert.equal(text(main(h, CHORE_ID).querySelector('.card-rule')), rule);
+  assert.equal(main(h, CHORE_ID).querySelector('.card-rule')!.className, 'card-rule');
+  assert.equal(main(h, CHORE_ID).getAttribute('aria-label'), `${chore.a11yLabel} ${rule}`);
+  const plan = model.cards.find((c) => c.id === 'plan:90-01')!;
+  assert.equal(main(h, 'plan:90-01').querySelector('.card-rule'), null);
+  assert.equal(main(h, 'plan:90-01').getAttribute('aria-label'), plan.a11yLabel);
 });

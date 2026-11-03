@@ -12,15 +12,17 @@
   const FILE_MAX = 200;
   const ESTIMATE_MAX = 1000000000000;
   const COUNTER_FROM = 200;
-  const KINDS = [['bug', 'Bug'], ['chore', 'Chore'], ['spike', 'Spike']];
+  // The stored kind stays 'spike'; people see it as Experiment (UI review: spike is developer slang).
+  const KINDS = [['bug', 'Bug'], ['chore', 'Chore'], ['spike', 'Experiment']];
   const T = {
-    newTitle: 'New item', editTitle: 'Edit item', type: 'Type', title: 'Title', description: 'Description (optional)', files: 'Files this touches (optional)',
-    filesHint: 'One pattern per line, for example src/services/**', estimate: 'Estimate in tokens (optional)', estimateHint: 'A rough size is fine. Typical plans are 50,000 to 100,000.',
-    readiness: 'Without files and an estimate this item stays in Backlog.', add: 'Add item', adding: 'Adding...', save: 'Save changes', saving: 'Saving...', close: 'Close form',
+    newTitle: 'New item', editTitle: 'Edit item', type: 'Type', title: 'Title', description: 'Description (optional)', files: 'Parts of the project this covers (optional)',
+    filesHint: 'Add a folder or file name on each line, for example "settings". Leave empty if you are not sure.', chooseFolders: 'Choose folders...', estimate: 'Estimate in tokens (optional)', estimateHint: 'A rough size is fine. Typical plans are 50,000 to 100,000.',
+    readiness: 'This item stays in Backlog until you say which parts of the project it covers and roughly how big it is.', add: 'Add item', adding: 'Adding...', save: 'Save changes', saving: 'Saving...', close: 'Close form',
     discard: 'Discard this item?', discardYes: 'Discard changes', keep: 'Keep editing', loading: 'Loading details...', newItem: 'New item',
+    noFolders: 'No folders were chosen inside this project.', foldersKnown: 'Those parts of the project are already listed.',
     cannotEdit: 'This item cannot be edited.', noChanges: 'No changes to save.', gone: 'That item is no longer on the board.',
     titleEmpty: 'Enter a title.', titleLong: 'The title must be 200 characters or fewer.', descriptionLong: 'The description must be 2000 characters or fewer.',
-    files_: 'Use one pattern per line, relative to the project folder, for example src/services/**.', estimate_: 'Enter a whole number of tokens, 1 or more.'
+    files_: 'One of these lines is not a folder or file name in this project. Remove it and try again.', filesMany: 'List 64 parts of the project or fewer.', estimate_: 'Enter a whole number of tokens, 1 or more.'
   };
 
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
@@ -40,7 +42,7 @@
     switch (name) {
       case 'title': return v.title.trim() === '' ? T.titleEmpty : v.title.trim().length > TITLE_MAX ? T.titleLong : '';
       case 'description': return v.description.length > DESCRIPTION_MAX ? T.descriptionLong : '';
-      case 'files': { const l = lines(v.files); return l.length > FILES_MAX || !l.every(isPattern) ? T.files_ : ''; }
+      case 'files': { const l = lines(v.files); return l.length > FILES_MAX ? T.filesMany : !l.every(isPattern) ? T.files_ : ''; }
       case 'estimate': {
         // An estimate can be changed but not taken away again.
         if (v.estimate.trim() === '') return f && f.mode === 'edit' && f.initial.estimate !== '' ? T.estimate_ : '';
@@ -145,7 +147,12 @@
     files.setAttribute('rows', '3');
     files.value = values.files;
     nodes.files = files;
-    wraps.push(field('item-files', T.files, files, T.filesHint).wrap);
+    const filesField = field('item-files', T.files, files, T.filesHint);
+    // J-01: nobody has to type a path. The host opens the folder picker and answers with project-relative folders, which are added as lines.
+    const filesActions = el('div', 'files-actions');
+    filesActions.appendChild(button('secondary choose-folders', T.chooseFolders, () => { if (f && !f.busy) board.post({ type: 'choose-folders' }); }));
+    filesField.wrap.appendChild(filesActions);
+    wraps.push(filesField.wrap);
 
     const estimate = el('input');
     estimate.setAttribute('type', 'number');
@@ -155,7 +162,9 @@
     nodes.estimate = estimate;
     wraps.push(field('item-estimate', T.estimate, estimate, T.estimateHint).wrap);
 
-    const readiness = el('p', 'hint', T.readiness);
+    const readiness = el('p', 'readiness', T.readiness);
+    readiness.id = 'item-readiness';
+    readiness.setAttribute('role', 'note');
     const submit = el('button', '', mode === 'new' ? T.add : T.save);
     submit.setAttribute('type', 'submit');
     const closeBtn = button('secondary', T.close, () => requestClose());
@@ -357,6 +366,19 @@
     const code = m.itemId.slice(-4).toUpperCase();
     board.announce((done && done.mode === 'new' ? 'Added ' : 'Saved changes to ') + sent.kind + ' ' + code + ': ' + sent.title + '.');
     afterSave(m.itemId);
+  });
+
+  // The folders the person picked, already relative to the project and checked by the host. Lines already there are not added twice.
+  board.onMessage('folders-chosen', (m) => {
+    if (!f || f.busy || !Array.isArray(m.paths)) return;
+    const have = lines(f.nodes.files.value);
+    const added = m.paths.filter((p) => typeof p === 'string' && isPattern(p) && have.indexOf(p) < 0);
+    if (added.length === 0) { board.announce(m.paths.length === 0 ? T.noFolders : T.foldersKnown); return; }
+    f.nodes.files.value = have.concat(added).join('\n');
+    validate('files');
+    draftNow();
+    board.announce(added.length === 1 ? 'Added 1 part of the project.' : 'Added ' + added.length + ' parts of the project.');
+    f.nodes.files.focus();
   });
 
   board.onMessage('refused', (m) => {

@@ -262,7 +262,8 @@ test('parseBoardMessage accepts exactly the contract and returns the fields it c
   assert.deepEqual(parseBoardMessage({ type: 'move', itemId: READY_PLAN, target: 'hold' }), { type: 'move', itemId: READY_PLAN, target: 'hold' });
   assert.deepEqual(parseBoardMessage({ type: 'move', itemId: BOARD_ITEM, target: 'unblock' }), { type: 'move', itemId: BOARD_ITEM, target: 'unblock' });
   assert.deepEqual(parseBoardMessage({ type: 'detail', itemId: 'phase:90' }), { type: 'detail', itemId: 'phase:90' });
-  for (const type of ['import-plans', 'open-board', 'retry', 'show-details'] as const) assert.deepEqual(parseBoardMessage({ type }), { type });
+  for (const type of ['import-plans', 'open-board', 'retry', 'show-details', 'check-team', 'choose-folders'] as const) assert.deepEqual(parseBoardMessage({ type }), { type });
+  assert.equal(parseBoardMessage({ type: 'choose-folders', paths: ['/etc'] }), undefined, 'the page cannot hand the host paths');
   assert.deepEqual(
     parseBoardMessage({ type: 'new-item', draft: { kind: 'bug', title: 'Fix it', scope: ['src/a/**'], estimate: 48000, description: 'Why' } }),
     { type: 'new-item', draft: { kind: 'bug', title: 'Fix it', scope: ['src/a/**'], estimate: 48000, description: 'Why' } }
@@ -329,7 +330,7 @@ test('block asks for the reason in a native box with the UI-SPEC words, validate
     const request = stub.inputRequests[0];
     assert.equal(request?.title, 'Block 90-02');
     assert.equal(request?.prompt, 'Why is this blocked? The team will see your answer.');
-    assert.equal(request?.placeHolder, 'For example: waiting for the API key');
+    assert.equal(request?.placeHolder, 'For example: waiting for a teammate\'s answer, or for the API key');
     assert.equal((request as { ignoreFocusOut?: boolean } | undefined)?.ignoreFocusOut, true);
     assert.equal(request?.validateInput?.(''), 'Enter a reason, up to 200 characters.');
     assert.equal(request?.validateInput?.('   '), 'Enter a reason, up to 200 characters.');
@@ -372,7 +373,7 @@ test('mark done always asks with a modal, and Not yet writes nothing', async () 
     assert.equal(stub.notifications[0]?.message, 'Mark 90-02 as done?');
     assert.deepEqual(stub.notificationActions[0], ['Mark done', 'Not yet']);
     assert.equal(stub.notificationOptions[0]?.modal, true);
-    assert.equal(stub.notificationOptions[0]?.detail, 'Use this when the work is finished and merged. The whole team will see it as done, and plans that wait for it can become ready. You can reopen it later.');
+    assert.equal(stub.notificationOptions[0]?.detail, 'Use this when the work is finished and added to the project. The whole team will see it as done, and plans that wait for it can become ready. You can reopen it later.');
     assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: READY_PLAN, reason: '' });
     assert.equal(remoteEventCount(rig), before);
 
@@ -490,7 +491,7 @@ test('an append that fails offline gives the offline sentence, and the failure i
     } finally {
       renameSync(away, rig.fixture.remote);
     }
-    assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: READY_PLAN, reason: 'The team remote could not be reached, so nothing was changed. Try again when you are back online.' });
+    assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: READY_PLAN, reason: 'The team could not be reached, so nothing was changed. Check your internet connection and try again.' });
     assert.ok(started.lines.some((line) => line.startsWith('Team Board:')), 'the failure is in the output channel');
     assert.equal(started.lines.some((line) => line.includes('Alpha') || line.includes('90-02')), false, 'and carries no card text');
   });
@@ -502,7 +503,7 @@ test('a secret caught on write maps to the secret sentence and a lost device key
     const { NoDeviceKeyError } = require('../team/eventLog') as typeof import('../team/eventLog');
     for (const [thrown, expected] of [
       [new SecretLeakError('leak', ['body.reason']), 'This text looks like a password or key, so it was not saved. Remove it and try again.'],
-      [new NoDeviceKeyError(), 'This computer has no device key for this team, so it can read the team log but not write to it.']
+      [new NoDeviceKeyError(), 'This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.']
     ] as const) {
       const session = new Proxy(started.session, {
         get(target, property) {
@@ -574,7 +575,7 @@ test('a developer cannot move a card and is told so before any prompt; a window 
     try {
       await panel.receive({ type: 'ready' });
       await panel.receive({ type: 'move', itemId: READY_PLAN, target: 'hold' });
-      assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: READY_PLAN, reason: 'This computer has no device key for this team, so it can read the team log but not write to it.' });
+      assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: READY_PLAN, reason: 'This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.' });
       assert.equal(stub.inputRequests.length + stub.notifications.length, 0);
     } finally {
       board.controller.dispose();
@@ -958,5 +959,33 @@ test('a replaced session is released while the board stays open: no board subscr
       board.controller.dispose();
       current?.dispose();
     }
+  });
+});
+
+test('UI review warning 2: Check the team on the paused banner runs the Check Team Record command, once per cool-down', async () => {
+  await withBoard('owner', async ({ panel }) => {
+    const ran: string[] = [];
+    stub.commands.set('nearAi.team.verifyLog', () => { ran.push('check'); });
+    await panel.receive({ type: 'check-team' });
+    await panel.receive({ type: 'check-team' });
+    assert.deepEqual(ran, ['check']);
+    assert.deepEqual(lastOf(panel, 'notice'), { type: 'notice', text: 'The team is already being checked. Try again in a moment.' });
+  });
+});
+
+test('J-01: Choose folders... opens the folder picker in the project and answers with project-relative paths only', async () => {
+  await withBoard('owner', async ({ rig, panel }) => {
+    const root = rootOf(rig, 'a');
+    stub.setWorkspaceFolders([root]);
+    stub.openDialogRequests.length = 0;
+    stub.openDialogAnswers.length = 0;
+    stub.openDialogAnswers.push([path.join(root, 'src', 'settings'), path.join(root, 'docs'), root, path.join(path.dirname(root), 'elsewhere'), path.join(root, 'docs')]);
+    await panel.receive({ type: 'choose-folders' });
+    const asked = stub.openDialogRequests[0] as { canSelectFolders?: boolean; canSelectMany?: boolean; defaultUri?: { fsPath: string }; title?: string; openLabel?: string };
+    assert.deepEqual([asked.canSelectFolders, asked.canSelectMany, asked.defaultUri?.fsPath, asked.title, asked.openLabel], [true, true, root, 'Choose the parts of the project this item covers', 'Add to the item']);
+    assert.deepEqual(lastOf(panel, 'folders-chosen'), { type: 'folders-chosen', paths: ['src/settings', 'docs'] }, 'the project itself, a folder outside it and a repeat are left out');
+    const before = panel.posted.length;
+    await panel.receive({ type: 'choose-folders' });
+    assert.equal(panel.posted.length, before, 'a dismissed picker sends nothing');
   });
 });

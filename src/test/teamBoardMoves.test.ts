@@ -76,7 +76,7 @@ const VIEWERS: Viewer[] = [
   { name: 'developer', id: (w) => w.dev.memberId, moves: false, refusal: 'Only the team owner or a lead can move cards. Nothing was moved.' },
   { name: 'reviewer', id: (w) => w.reviewer.memberId, moves: false, refusal: 'Only the team owner or a lead can move cards. Nothing was moved.' },
   { name: 'observer', id: (w) => w.observer.memberId, moves: false, refusal: 'Only the team owner or a lead can move cards. Nothing was moved.' },
-  { name: 'nobody (no device key)', id: () => undefined, moves: false, refusal: 'This computer has no device key for this team, so it can read the team log but not write to it.' }
+  { name: 'nobody (no device key)', id: () => undefined, moves: false, refusal: 'This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.' }
 ];
 
 // ---- every move, state and viewer ------------------------------------------------------------------------------------------------------------
@@ -191,7 +191,7 @@ const CLAIM_SENTENCES: Array<[BoardColumn, string]> = [
   ['claimed', 'Claiming a plan arrives in a later update. Nothing was moved.'],
   ['in-progress', 'Starting work from the board arrives with claims in a later update. Nothing was moved.'],
   ['in-review', 'Review arrives in a later update. Nothing was moved.'],
-  ['integrating', 'Merging arrives in a later update. Nothing was moved.']
+  ['integrating', 'Adding finished work to the project arrives in a later update. Nothing was moved.']
 ];
 const REOPEN_SENTENCE = 'A finished or cancelled card can only be reopened. Use Move to... and choose Reopen. Nothing was moved.';
 
@@ -211,7 +211,7 @@ const DROPS: Array<{ name: string; id: string; drops: Array<[BoardColumn, Drop]>
   },
   {
     name: 'a plan with no estimate and no files', id: 'plan:91-07',
-    drops: [['backlog', OK()], ['ready', NO('This plan is not ready yet: it has no estimate, it lists no files. Nothing was moved.')], ...claimDrops(), ['done', OK('done')], ['cancelled', OK('cancel')]]
+    drops: [['backlog', OK()], ['ready', NO('This plan is not ready yet: it has no estimate, it does not say which parts of the project it covers. Nothing was moved.')], ...claimDrops(), ['done', OK('done')], ['cancelled', OK('cancel')]]
   },
   { name: 'a held plan', id: 'plan:91-02', drops: [['backlog', OK()], ['ready', OK('release')], ...claimDrops(), ['done', OK('done')], ['cancelled', OK('cancel')]] },
   {
@@ -235,7 +235,7 @@ const DROPS: Array<{ name: string; id: string; drops: Array<[BoardColumn, Drop]>
   },
   {
     name: 'a board item with no estimate and no files', id: CHORE_ID,
-    drops: [['ready', NO('This item is not ready yet: it has no estimate, it lists no files. Nothing was moved.')], ['backlog', OK()], ...claimDrops(), ['done', OK('done')], ['cancelled', OK('cancel')]]
+    drops: [['ready', NO('This item is not ready yet: it has no estimate, it does not say which parts of the project it covers. Nothing was moved.')], ['backlog', OK()], ...claimDrops(), ['done', OK('done')], ['cancelled', OK('cancel')]]
   }
 ];
 

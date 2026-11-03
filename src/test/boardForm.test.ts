@@ -89,11 +89,11 @@ test('New item opens form#item-form in the drawer with every field, the hints an
   assert.equal(f.parentNode, h.$('#detail'), 'the form lives in the shared drawer');
   assert.equal(h.$('#detail')!.hidden, false);
   assert.equal(text(f.querySelector('h2')), 'New item');
-  assert.deepEqual(Array.from(f.querySelectorAll('label')).map((l) => text(l)), ['Type', 'Title', 'Description (optional)', 'Files this touches (optional)', 'Estimate in tokens (optional)']);
+  assert.deepEqual(Array.from(f.querySelectorAll('label')).map((l) => text(l)), ['Type', 'Title', 'Description (optional)', 'Parts of the project this covers (optional)', 'Estimate in tokens (optional)']);
   assert.deepEqual(Array.from(f.querySelectorAll('label')).map((l) => l.getAttribute('for')), ['item-type', 'item-title', 'item-description', 'item-files', 'item-estimate']);
   const type = input(h, 'type');
   assert.equal(type.localName, 'select');
-  assert.deepEqual(Array.from(type.querySelectorAll('option')).map((o) => text(o)), ['Bug', 'Chore', 'Spike']);
+  assert.deepEqual(Array.from(type.querySelectorAll('option')).map((o) => text(o)), ['Bug', 'Chore', 'Experiment']);
   assert.equal(type.value, 'chore', 'Chore is the default');
   assert.equal(h.focused(), type, 'focus starts on Type');
   const estimate = input(h, 'estimate');
@@ -101,9 +101,34 @@ test('New item opens form#item-form in the drawer with every field, the hints an
   assert.equal(estimate.getAttribute('min'), '1000');
   assert.equal(estimate.getAttribute('step'), '1000');
   const hints = Array.from(f.querySelectorAll('.hint')).map((n) => text(n));
-  assert.deepEqual(hints, ['One pattern per line, for example src/services/**', 'A rough size is fine. Typical plans are 50,000 to 100,000.', 'Without files and an estimate this item stays in Backlog.']);
-  assert.deepEqual(Array.from(f.querySelectorAll('button')).map((b) => text(b)), ['Add item', 'Close form']);
+  assert.deepEqual(hints, ['Add a folder or file name on each line, for example "settings". Leave empty if you are not sure.', 'A rough size is fine. Typical plans are 50,000 to 100,000.']);
+  // J-02: the Backlog rule is its own note in normal text, not a faint hint.
+  const rule = f.querySelector('.readiness')!;
+  assert.equal(text(rule), 'This item stays in Backlog until you say which parts of the project it covers and roughly how big it is.');
+  assert.equal(rule.getAttribute('role'), 'note');
+  assert.equal(rule.className, 'readiness');
+  assert.deepEqual(Array.from(f.querySelectorAll('button')).map((b) => text(b)), ['Choose folders...', 'Add item', 'Close form']);
   assert.equal(buttonNamed(h, 'Add item')!.getAttribute('type'), 'submit');
+});
+
+test('J-01: Choose folders... asks the host for the picker and adds the folders it returns as lines, once each, with plain announcements', async () => {
+  const { h } = await drawn();
+  openNew(h);
+  const files = input(h, 'files');
+  h.setValue(files, 'settings');
+  h.click(buttonNamed(h, 'Choose folders...')!);
+  assert.deepEqual(posts(h, 'choose-folders'), [{ type: 'choose-folders' }]);
+  h.deliver({ type: 'folders-chosen', paths: ['src/settings', 'docs', '../outside', 'settings'] });
+  assert.equal(files.value, 'settings\nsrc/settings\ndocs', 'new folders are added under what was typed, a path outside the project and a repeat are not');
+  assert.equal(said(h), 'Added 2 parts of the project.');
+  assert.equal(h.focused(), files);
+  assert.equal(errorOf(h, 'files'), '');
+  h.deliver({ type: 'folders-chosen', paths: ['docs'] });
+  assert.equal(files.value, 'settings\nsrc/settings\ndocs');
+  assert.equal(said(h), 'Those parts of the project are already listed.');
+  h.deliver({ type: 'folders-chosen', paths: [] });
+  assert.equal(said(h), 'No folders were chosen inside this project.');
+  assert.equal(files.value, 'settings\nsrc/settings\ndocs');
 });
 
 // ---- validation -----------------------------------------------------------------------------------------------------------------------------
@@ -141,7 +166,7 @@ test('each rule has its own message, on blur and on submit, and several problems
     h.setValue(files, `src/ok/**\n${bad}`);
     files.focus();
     files.blur();
-    assert.equal(errorOf(h, 'files'), 'Use one pattern per line, relative to the project folder, for example src/services/**.', bad);
+    assert.equal(errorOf(h, 'files'), 'One of these lines is not a folder or file name in this project. Remove it and try again.', bad);
     assert.equal(files.getAttribute('aria-describedby'), 'item-files-error item-files-hint', 'the hint stays described too');
   }
   files.focus();
@@ -152,7 +177,7 @@ test('each rule has its own message, on blur and on submit, and several problems
   files.focus();
   h.setValue(files, Array.from({ length: 65 }, (_, i) => `src/d${i}`).join('\n'));
   files.blur();
-  assert.equal(errorOf(h, 'files') === '', false, 'more than 64 lines is refused');
+  assert.equal(errorOf(h, 'files'), 'List 64 parts of the project or fewer.', 'more than 64 lines is refused with its own sentence');
 
   const estimate = input(h, 'estimate');
   for (const bad of ['12.5', '0', '-5', '1e3', 'abc']) {
@@ -409,7 +434,7 @@ test('Edit asks the host for the detail, pre-fills the form, shows the type as t
   assert.equal(text(h.$('#item-type')), 'Chore');
   assert.equal(input(h, 'title').value, 'Tidy settings page');
   assert.equal(h.focused(), input(h, 'title'));
-  assert.deepEqual(Array.from(f.querySelectorAll('button')).map((b) => text(b)), ['Save changes', 'Close form']);
+  assert.deepEqual(Array.from(f.querySelectorAll('button')).map((b) => text(b)), ['Choose folders...', 'Save changes', 'Close form']);
 
   fill(h, { title: 'Tidy the settings page', estimate: '52000' });
   h.click(buttonNamed(h, 'Save changes')!);

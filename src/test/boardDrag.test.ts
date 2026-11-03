@@ -163,7 +163,7 @@ test('a drop on a claim or integration column posts nothing, leaves the card whe
     ['claimed', 'Claimed', 'Claiming a plan arrives in a later update. Nothing was moved.'],
     ['in-progress', 'In progress', 'Starting work from the board arrives with claims in a later update. Nothing was moved.'],
     ['in-review', 'In review', 'Review arrives in a later update. Nothing was moved.'],
-    ['integrating', 'Integrating', 'Merging arrives in a later update. Nothing was moved.']
+    ['integrating', 'Shipping', 'Adding finished work to the project arrives in a later update. Nothing was moved.']
   ];
   for (const [column, label, sentence] of expected) {
     assert.equal(ready.refusals[column as 'claimed'], sentence, 'the model carries the sentence the card shows');
@@ -377,7 +377,7 @@ test('a refusal for a request the menu sent is left to the menu, and a dismissed
   hold.focus();
   h.press(hold, 'Enter');
   assert.equal(moves(h).length, 1);
-  const reason = 'The team remote could not be reached, so nothing was changed. Try again when you are back online.';
+  const reason = 'The team could not be reached, so nothing was changed. Check your internet connection and try again.';
   h.deliver({ type: 'refused', itemId: 'plan:90-01', reason });
   h.advance(150);
   assert.deepEqual(cantMove(h), [`Can't move plan 90-01 to Backlog. ${reason}`], 'one announcement, from the menu');

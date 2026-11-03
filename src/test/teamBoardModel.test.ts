@@ -35,10 +35,10 @@ test('tracer: a model from real events, a hold planned with planMove and applied
   const before = modelFor(world, world.owner.memberId);
 
   assert.deepEqual(before.columns.map((column) => column.key), [...BOARD_COLUMNS]);
-  assert.deepEqual(before.columns.map((column) => column.label), ['Backlog', 'Ready', 'Claimed', 'In progress', 'In review', 'Integrating', 'Done', 'Cancelled']);
+  assert.deepEqual(before.columns.map((column) => column.label), ['Backlog', 'Ready', 'Claimed', 'In progress', 'In review', 'Shipping', 'Done', 'Cancelled']);
   assert.deepEqual(before.columns.map((column) => column.caption), [
     'Waiting, on hold or not ready.', 'Ready to be claimed.', 'Claiming arrives in a later update.', 'Starting work arrives with claims.',
-    'Review arrives in a later update.', 'Merging arrives in a later update.', undefined, undefined
+    'Review arrives in a later update.', 'Adding finished work to the project arrives in a later update.', undefined, undefined
   ]);
   assert.deepEqual(before.cards.map((entry) => [entry.id, entry.column]), [['plan:90-02', 'backlog'], [CHORE_ID, 'backlog'], ['plan:90-01', 'ready']]);
   assert.equal(before.selectedMilestone, 'milestone:v0.9.0');
@@ -49,7 +49,7 @@ test('tracer: a model from real events, a hold planned with planMove and applied
     claimed: 'Claiming a plan arrives in a later update. Nothing was moved.',
     'in-progress': 'Starting work from the board arrives with claims in a later update. Nothing was moved.',
     'in-review': 'Review arrives in a later update. Nothing was moved.',
-    integrating: 'Merging arrives in a later update. Nothing was moved.'
+    integrating: 'Adding finished work to the project arrives in a later update. Nothing was moved.'
   });
 
   const plan = planMove(world.state, world.owner.memberId, 'plan:90-01', 'hold');
@@ -219,7 +219,7 @@ test('the card face: display ids, estimate and age text, flags, dependency count
   const gamma = card(model, 'plan:90-03');
   assert.equal(gamma.doneInGsd, true);
   assert.equal(gamma.estimateText, 'No estimate');
-  assert.equal(gamma.a11yLabel, 'Plan 90-03, Gamma slice. State: Backlog. Blocked: no. Done in GSD, waiting for confirmation. No dependencies. No estimate. In this state for 3 days.');
+  assert.equal(gamma.a11yLabel, 'Plan 90-03, Gamma slice. State: Backlog. Blocked: no. The project plans say this is finished. Waiting for someone to confirm. No dependencies. No estimate. In this state for 3 days.');
 
   const chore = card(model, CHORE_ID);
   assert.equal(chore.displayId, 'Chore 7F3K');
@@ -292,7 +292,7 @@ test('viewer facts: what each role may do and the banner that says why not', asy
     });
   }
   assert.deepEqual(viewerOf(undefined), {
-    name: '', canWrite: false, canImport: false, canCreate: false, readOnlyReason: 'This computer has no device key for this team, so it can read the team log but not write to it.'
+    name: '', canWrite: false, canImport: false, canCreate: false, readOnlyReason: 'This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.'
   });
   assert.deepEqual(viewerOf(world.owner.memberId, { canWrite: false, readOnlyReason: 'You are offline.' }), {
     name: 'Owner Test', role: 'owner', canWrite: false, canImport: false, canCreate: false, readOnlyReason: 'You are offline.'
@@ -347,7 +347,7 @@ test('card detail for a plan: must-haves, requirements, dependencies with their 
   assert.deepEqual(beta.tasks, { done: 0, total: 0, summary: '', items: [] });
 
   const gamma = mustDetail(world, 'plan:90-03', world.owner.memberId);
-  assert.deepEqual(gamma.notReady, ['It has no estimate.', 'It lists no files.']);
+  assert.deepEqual(gamma.notReady, ['It has no estimate.', 'It does not say which parts of the project it covers.']);
   assert.equal(gamma.doneInGsd, true);
   assert.equal(gamma.facts.estimate, 'No estimate');
 });
@@ -485,7 +485,7 @@ test('flattenName makes one bounded line: control characters become spaces, whit
 });
 
 test('the not-ready wording joins the reasons in a fixed order and counts what it waits for', () => {
-  assert.equal(notReadyText(['no-scope', 'no-estimate'], 0), 'it has no estimate, it lists no files');
+  assert.equal(notReadyText(['no-scope', 'no-estimate'], 0), 'it has no estimate, it does not say which parts of the project it covers');
   assert.equal(notReadyText(['dependency-open'], 1), 'it waits for 1 unfinished plan');
   assert.equal(notReadyText(['dependency-open'], 3), 'it waits for 3 unfinished plans');
   assert.deepEqual(notReadySentences(['phase-held', 'held', 'blocked', 'dependency-missing', 'dependency-open', 'phase-dependency-open'], 2), [
@@ -521,4 +521,19 @@ test('no authored string and no string in a model or detail contains an em-dash 
   }
   assert.ok(seen.length > 300, `a thorough sweep (${seen.length} strings)`);
   for (const text of seen) assert.doesNotMatch(text, dashes, text);
+});
+
+test('J-02: a card added on the board says the Backlog rule on its face until it has its parts and its size; imported plans never do', async () => {
+  const world = await boardWorld();
+  seedStandardBoard(world);
+  const rule = 'Stays in Backlog until it says which parts of the project it covers and roughly how big it is.';
+  assert.equal(boardText.BACKLOG_RULE_CARD_TEXT, rule);
+  assert.equal(card(modelFor(world, world.owner.memberId), CHORE_ID).backlogRule, rule, 'no parts and no size');
+  assert.equal(card(modelFor(world, world.owner.memberId), 'plan:90-02').backlogRule, undefined, 'an imported plan waiting in Backlog has no rule on its face');
+  world.accept(world.dev, 'item.updated', { id: CHORE_ID, changes: { scope: ['settings'] } });
+  assert.equal(card(modelFor(world, world.owner.memberId), CHORE_ID).backlogRule, rule, 'parts but still no size');
+  world.accept(world.dev, 'item.estimated', { id: CHORE_ID, estimate: { tokens: 20000 } });
+  const ready = card(modelFor(world, world.owner.memberId), CHORE_ID);
+  assert.equal(ready.column, 'ready');
+  assert.equal(ready.backlogRule, undefined, 'parts and size: the rule goes and the card is Ready');
 });

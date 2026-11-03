@@ -102,7 +102,10 @@ test('tracer: Enter on a plan asks the host once, shows the title while waiting,
   assert.equal(detailPosts(h).length, 1, 'the answer does not trigger another request');
   assert.equal(text(drawer(h).querySelector('h2')), 'Alpha slice');
   assert.equal(h.focused(), drawer(h).querySelector('h2'), 'the answer keeps focus on the heading');
-  assert.deepEqual(headings(h), ['Facts', 'Must-haves', 'Requirements', 'Files', 'Tasks', 'History']);
+  assert.deepEqual(headings(h), ['Facts', 'What must be true when it is done', 'Requirements', 'Parts of the project', 'Tasks', 'History']);
+  const planFacts = sectionOf(h, 'Facts');
+  const planLabels = Array.from(planFacts.querySelectorAll('dt')).map((dt) => text(dt));
+  assert.deepEqual(planLabels.filter((label) => ['Order within the phase', 'Type', 'Where it came from'].includes(label)), ['Order within the phase', 'Type', 'Where it came from'], 'J-17: plain fact names, in order');
 
   const tasks = Array.from(drawer(h).querySelectorAll('section')).find((s) => text(s.querySelector('h3')) === 'Tasks')!;
   assert.match(text(tasks), /0 of 2 tasks done/);
@@ -213,7 +216,9 @@ test('facts are a definition list; a board item shows its description and Edit, 
   assert.ok(facts.querySelector('dl'), 'facts are a dl');
   const pairs = Array.from(facts.querySelectorAll('dt')).map((dt, index) => [text(dt), text(facts.querySelectorAll('dd')[index])]);
   assert.deepEqual(pairs.find(([label]) => label === 'Created by'), ['Created by', 'Dana']);
-  assert.deepEqual(pairs.find(([label]) => label === 'Source'), ['Source', 'Added on the board']);
+  assert.deepEqual(pairs.find(([label]) => label === 'Where it came from'), ['Where it came from', 'Added on the board']);
+  assert.deepEqual(pairs.find(([label]) => label === 'Type'), ['Type', 'Chore'], 'J-17: Kind reads Type');
+  assert.equal(pairs.some(([label]) => ['Kind', 'Source', 'Wave'].includes(label as string)), false, 'no internal fact names');
   assert.match(text(sectionOf(h, 'Description')), /Clean up the sidebar spacing\./);
   const edit = buttonNamed(drawer(h), 'Edit')!;
   assert.ok(edit, 'the author may edit their own draft');
@@ -223,7 +228,7 @@ test('facts are a definition list; a board item shows its description and Edit, 
 
   h.press(h.focused(), 'Escape');
   openBy(h, 'plan:90-01', messageOf(world, 'plan:90-01', 'dev'));
-  assert.match(text(drawer(h)), /This comes from the project plans\. Change the plan files and the board updates\./);
+  assert.match(text(drawer(h)), /This comes from the project plans\. Change the plan and the board follows\./);
   assert.equal(buttonNamed(drawer(h), 'Edit'), undefined, 'imported items are not edited here');
   assert.equal(hasSection(h, 'Description'), false);
 
@@ -272,13 +277,13 @@ test('files show the first 8 then Show all N; the task list and history say so w
   const world = await fullWorld();
   const { h } = await drawn(800, 'owner', world);
   openBy(h, 'plan:90-04', messageOf(world, 'plan:90-04'));
-  const files = sectionOf(h, 'Files');
+  const files = sectionOf(h, 'Parts of the project');
   assert.equal(files.querySelectorAll('li').length, 8);
   const more = buttonNamed(files, 'Show all 12')!;
   assert.ok(more);
   more.click();
-  assert.equal(sectionOf(h, 'Files').querySelectorAll('li').length, 12);
-  assert.equal(buttonNamed(sectionOf(h, 'Files'), 'Show all 12'), undefined);
+  assert.equal(sectionOf(h, 'Parts of the project').querySelectorAll('li').length, 12);
+  assert.equal(buttonNamed(sectionOf(h, 'Parts of the project'), 'Show all 12'), undefined);
   assert.match(text(sectionOf(h, 'Tasks')), /This plan has no tasks listed\./);
 
   const bare = { ...messageOf(world, 'plan:90-04'), history: [] as unknown[] };
@@ -386,7 +391,7 @@ test('hostile text is drawn as text and long must-haves wrap in full', async () 
   message.blocked = { reason: '<u>why</u>', byName: '<b>Dana</b>', since: '2026-03-02T10:00:00.000Z' };
   openBy(h, 'plan:90-04', message);
   assert.equal(text(drawer(h).querySelector('h2')), '<img src=x onerror=alert(1)> $(trash) <b>bold</b>');
-  assert.equal(text(sectionOf(h, 'Must-haves').querySelector('li')).length, 600);
+  assert.equal(text(sectionOf(h, 'What must be true when it is done').querySelector('li')).length, 600);
   assert.equal(drawer(h).querySelectorAll('img, b, i, a, u, script').length, 0, 'no element was created from the text');
   assert.match(text(drawer(h)), /Blocked by <b>Dana<\/b>: <u>why<\/u>/);
 });

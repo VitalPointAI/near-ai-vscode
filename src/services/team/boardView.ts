@@ -3,6 +3,7 @@
 // untrusted (Pitfall 9): every message passes parseBoardMessage, a move is planned again on the freshest state inside the append, and the role,
 // the permission and the state always come from the log, never from the page.
 import { randomBytes } from 'node:crypto';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { MOVE_KEYS, availableMoves, buildBoardModel, buildCardDetail, planMove } from '../../domain/team/board';
 import type { BoardModel, MoveKey } from '../../domain/team/board';
@@ -16,7 +17,7 @@ import { NoDeviceKeyError } from '../../team/eventLog';
 import type { EventIntent } from '../../team/eventLog';
 import { ulid } from '../../team/identity';
 import type { AppendResult } from '../../team/transport';
-import { IMPORT_PLANS_COMMAND, OPEN_BOARD_COMMAND } from './teamCommands';
+import { IMPORT_PLANS_COMMAND, OPEN_BOARD_COMMAND, VERIFY_LOG_COMMAND } from './teamCommands';
 import type { TeamOutput, TeamSession } from './teamSession';
 import { safeReason } from './teamStatusBar';
 
@@ -35,21 +36,24 @@ const ESTIMATE_MAX = MAX_ESTIMATE_TOKENS;
 const PAUSED_TEXT = 'The board shows the last update and cannot be changed until team sync resumes.';
 const NOT_READY_TEXT = 'The Team Board is not ready yet. Nothing was moved.';
 const NOT_SAVED_TEXT = 'The change could not be saved. Nothing was moved.';
-const LOG_DECLINED_TEXT = 'The team log did not accept this change. Nothing was moved.';
+const LOG_DECLINED_TEXT = 'The shared team record did not accept this change. Nothing was moved.';
+// A write that lost too many races with teammates; the raw reason goes to the output channel only (UI review warning 6).
+const BUSY_SAVE_TEXT = 'The team was busy saving other changes. Try again in a moment.';
 // The board form (D-14). Every sentence says what happened to the item and ends "Nothing was saved." The page validates with the same words first.
 const NOTHING_SAVED = 'Nothing was saved.';
 const FORM_TEXT = Object.freeze({
   notSaved: `The item could not be saved. ${NOTHING_SAVED}`,
-  declined: `The team log did not accept this item. ${NOTHING_SAVED}`,
+  declined: `The shared team record did not accept this item. ${NOTHING_SAVED}`,
   titleRequired: `Enter a title. ${NOTHING_SAVED}`,
   titleLong: `The title must be 200 characters or fewer. ${NOTHING_SAVED}`,
   descriptionLong: `The description must be 2000 characters or fewer. ${NOTHING_SAVED}`,
-  scope: `Use one pattern per line, relative to the project folder, for example src/services/**. ${NOTHING_SAVED}`,
+  scope: `One of these lines is not a folder or file name in this project. Remove it and try again. ${NOTHING_SAVED}`,
+  scopeMany: `List 64 parts of the project or fewer. ${NOTHING_SAVED}`,
   estimate: `Enter a whole number of tokens, 1 or more. ${NOTHING_SAVED}`,
   addDenied: `Only the owner, leads and developers can add items. ${NOTHING_SAVED}`,
   editDenied: `Only the owner, leads and developers can edit items. ${NOTHING_SAVED}`,
   editOwn: `You can edit only the items you added. ${NOTHING_SAVED}`,
-  imported: `Items from the project plans change only when the plan files change. ${NOTHING_SAVED}`,
+  imported: `Items from the project plans change only when the plans change. ${NOTHING_SAVED}`,
   missing: `This item is no longer on the board. ${NOTHING_SAVED}`,
   settled: `A finished or cancelled item cannot get a new estimate. ${NOTHING_SAVED}`
 });
@@ -58,19 +62,23 @@ const FORM_TEXT = Object.freeze({
 const BUSY_WRITE_TEXT = `The board is still saving your last change. Try again in a moment. ${NOTHING_SAVED}`;
 const BUSY_IMPORT_TEXT = 'An import of the plans is already running or just ran. Try again in a moment.';
 const BUSY_RETRY_TEXT = 'The board is already checking for changes. Try again in a moment.';
+const BUSY_CHECK_TEXT = 'The team is already being checked. Try again in a moment.';
+// J-01: the folder picker of the New item form.
+const FOLDER_PICK_TITLE = 'Choose the parts of the project this item covers';
+const FOLDER_PICK_LABEL = 'Add to the item';
 export interface BoardRequestLimits { coolDownMs: number; writeBurst: number; writeRefillMs: number }
 const REQUEST_LIMITS: BoardRequestLimits = { coolDownMs: 2_000, writeBurst: 10, writeRefillMs: 500 };
 // The refused reply for a new item has no card to name, so it carries this empty id.
 const NO_ITEM_ID = '';
 // Stands in for a reason while a move is planned only to learn whether it is allowed and which prompt follows (the real reason is asked afterwards).
 const PROBE_REASON = 'placeholder';
-const DONE_DETAIL = 'Use this when the work is finished and merged. The whole team will see it as done, and plans that wait for it can become ready. You can reopen it later.';
+const DONE_DETAIL = 'Use this when the work is finished and added to the project. The whole team will see it as done, and plans that wait for it can become ready. You can reopen it later.';
 const MARK_DONE = 'Mark done';
 const NOT_YET = 'Not yet';
 const CANCEL_ITEM = 'Cancel this item';
 const KEEP_ITEM = 'Keep item';
 const REASON_PROMPTS = Object.freeze({
-  block: { prompt: 'Why is this blocked? The team will see your answer.', placeHolder: 'For example: waiting for the API key' },
+  block: { prompt: 'Why is this blocked? The team will see your answer.', placeHolder: 'For example: waiting for a teammate\'s answer, or for the API key' },
   cancel: { prompt: 'Why is this being cancelled? The team will see your answer.', placeHolder: 'For example: replaced by another plan' }
 });
 // Refusals that describe the card's state. When the page was offered the move and the log now says no, someone changed the card first.
@@ -97,7 +105,7 @@ export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key'; ite
 
 export type BoardMessage =
   | { type: 'ready' } | { type: 'visible'; value: boolean } | { type: 'move'; itemId: string; target: MoveKey } | { type: 'detail'; itemId: string }
-  | { type: 'import-plans' } | { type: 'open-board' } | { type: 'retry' } | { type: 'show-details' }
+  | { type: 'import-plans' } | { type: 'open-board' } | { type: 'retry' } | { type: 'show-details' } | { type: 'check-team' } | { type: 'choose-folders' }
   | { type: 'new-item'; draft: { kind: 'bug' | 'chore' | 'spike'; title: string; description?: string; scope: string[]; estimate?: number } }
   | { type: 'edit-item'; itemId: string; changes: { title?: string; description?: string; scope?: string[]; estimate?: number } };
 
@@ -186,7 +194,8 @@ function cleanFields(input: CleanFields): { ok: true; fields: CleanFields } | { 
   }
   if (input.scope !== undefined) {
     const scope = input.scope.map((line) => stripFormatControls(line).trim()).filter((line) => line !== '');
-    if (scope.length > SCOPE_LINES_MAX || !scope.every(isScopePattern)) return { ok: false, reason: FORM_TEXT.scope };
+    if (scope.length > SCOPE_LINES_MAX) return { ok: false, reason: FORM_TEXT.scopeMany };
+    if (!scope.every(isScopePattern)) return { ok: false, reason: FORM_TEXT.scope };
     fields.scope = scope;
   }
   if (input.estimate !== undefined) {
@@ -227,7 +236,7 @@ function estimateRefusalTarget(raw: unknown): string | undefined {
   return undefined;
 }
 
-const BARE_TYPES = ['ready', 'import-plans', 'open-board', 'retry', 'show-details'] as const;
+const BARE_TYPES = ['ready', 'import-plans', 'open-board', 'retry', 'show-details', 'check-team', 'choose-folders'] as const;
 
 /** The one reader of page messages: exact keys, id patterns, move keys and length caps. Anything else is undefined and the host ignores it. */
 export function parseBoardMessage(value: unknown): BoardMessage | undefined {
@@ -327,8 +336,8 @@ export class BoardController {
   private combinedVisible: boolean | undefined;
   private disposed = false;
   // T-62-49: requests from the page that are running now, when an import or retry last started, and the item write bucket.
-  private readonly running = new Set<'import' | 'retry' | 'write'>();
-  private readonly lastStarted = new Map<'import' | 'retry', number>();
+  private readonly running = new Set<'import' | 'retry' | 'check' | 'folders' | 'write'>();
+  private readonly lastStarted = new Map<'import' | 'retry' | 'check', number>();
   private writeTokens: number | undefined;
   private writeTokensAt = 0;
 
@@ -516,6 +525,19 @@ export class BoardController {
       case 'show-details':
         this.deps.output.show(true);
         return;
+      case 'check-team':
+        // The paused banner's "Check the team" (UI review warning 2): the same check the status bar click and the command run.
+        await this.limited(state, 'check', BUSY_CHECK_TEXT, () => vscode.commands.executeCommand(VERIFY_LOG_COMMAND));
+        return;
+      case 'choose-folders':
+        if (this.running.has('folders')) return;
+        this.running.add('folders');
+        try {
+          await this.chooseFolders(state);
+        } finally {
+          this.running.delete('folders');
+        }
+        return;
       case 'new-item':
       case 'edit-item': {
         const askedAbout = message.type === 'new-item' ? NO_ITEM_ID : message.itemId;
@@ -546,7 +568,7 @@ export class BoardController {
   }
 
   // Runs an import or a retry unless one is running or one started within the cool-down; otherwise the page gets a plain notice.
-  private async limited(state: SurfaceState, kind: 'import' | 'retry', busyText: string, run: () => unknown): Promise<void> {
+  private async limited(state: SurfaceState, kind: 'import' | 'retry' | 'check', busyText: string, run: () => unknown): Promise<void> {
     const now = this.nowMs();
     const last = this.lastStarted.get(kind);
     if (this.running.has(kind) || (last !== undefined && now >= last && now - last < this.limits().coolDownMs)) {
@@ -629,7 +651,7 @@ export class BoardController {
       case 'paused':
         return REFUSALS.offline;
       case 'busy':
-        return `${safeReason(result.reason)} ${words.nothing}`;
+        return `${BUSY_SAVE_TEXT} ${words.nothing}`;
       case 'refused':
       case 'conflict':
         return words.declined;
@@ -837,6 +859,28 @@ export class BoardController {
       if (fields.estimate !== undefined) intents.push({ type: 'item.estimated', body: { id: itemId, estimate: { tokens: fields.estimate } } });
       return intents;
     });
+  }
+
+  // J-01: the native folder picker, opened in the project. Only folders and files inside the project come back, as relative paths with forward slashes
+  // that pass the same scope rule the host applies on save; the project folder itself and anything outside it are left out. Nothing is written here.
+  private async chooseFolders(state: SurfaceState): Promise<void> {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (root === undefined) {
+      this.post(state, { type: 'folders-chosen', paths: [] });
+      return;
+    }
+    const picked = await vscode.window.showOpenDialog({
+      canSelectFolders: true, canSelectFiles: true, canSelectMany: true, defaultUri: root, title: FOLDER_PICK_TITLE, openLabel: FOLDER_PICK_LABEL
+    });
+    if (picked === undefined) return;
+    const paths: string[] = [];
+    for (const uri of picked) {
+      const relative = path.relative(root.fsPath, uri.fsPath).split(path.sep).join('/');
+      if (relative === '' || path.isAbsolute(relative) || !isScopePattern(relative) || paths.includes(relative)) continue;
+      paths.push(relative);
+      if (paths.length >= SCOPE_LINES_MAX) break;
+    }
+    this.post(state, { type: 'folders-chosen', paths });
   }
 
   // After a stale answer the page must show the latest, not wait for the throttle.

@@ -180,9 +180,9 @@ const commitCount = (rig: Rig): number => Number(gitIn(rig.fixture.remote, ['rev
 
 const ADD_DENIED = 'Only the owner, leads and developers can add items. Nothing was saved.';
 const EDIT_OWN = 'You can edit only the items you added. Nothing was saved.';
-const IMPORTED = 'Items from the project plans change only when the plan files change. Nothing was saved.';
+const IMPORTED = 'Items from the project plans change only when the plans change. Nothing was saved.';
 const SECRET = 'This text looks like a password or key, so it was not saved. Remove it and try again.';
-const SCOPE_TEXT = 'Use one pattern per line, relative to the project folder, for example src/services/**. Nothing was saved.';
+const SCOPE_TEXT = 'One of these lines is not a folder or file name in this project. Remove it and try again. Nothing was saved.';
 const ESTIMATE_TEXT = 'Enter a whole number of tokens, 1 or more. Nothing was saved.';
 
 async function addAs(ctx: BoardCtx, draft: Record<string, unknown> = DRAFT): Promise<string> {
