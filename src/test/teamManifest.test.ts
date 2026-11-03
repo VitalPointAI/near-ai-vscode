@@ -46,8 +46,8 @@ test('package.json contributes the five membership commands under the NEAR AI ca
     ['nearAi.team.invite', 'Invite to Team'],
     ['nearAi.team.join', 'Join Team'],
     ['nearAi.team.manageMembers', 'Manage Team Members'],
-    ['nearAi.team.linkNearOrganization', 'Link Team to NEAR Organization'],
-    ['nearAi.team.signOutNear', 'Sign Out of NEAR (Team)']
+    ['nearAi.team.linkNearOrganization', 'Link Your Organization'],
+    ['nearAi.team.signOutNear', 'Sign Out of NEAR AI for This Team']
   ];
   for (const [id, title] of expected) {
     const entry = byId.get(id);
