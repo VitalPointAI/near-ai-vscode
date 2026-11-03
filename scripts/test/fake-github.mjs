@@ -5,12 +5,14 @@ import { CI_CHECKS } from '../lib/workflow.mjs';
 
 export const REPO = 'VitalPointAI/near-ai-vscode';
 export const OWNER = 'ALuhning';
+/** The reviewer identity the gate trusts: distinct from the owner, so review is not self-certification. */
+export const REVIEWER = 'near-ai-reviewer';
 
 const notFound = (args) => new Error(`gh ${args.join(' ')} failed: gh: Not Found (HTTP 404)`);
 const lines = (values) => values.map((value) => JSON.stringify(value)).join('\n');
 
 /** Check runs, workflow run and agent-review status of a commit whose CI and review passed. */
-export function greenCommit({ suiteId = 1, runId = 11, event = 'pull_request', reviewer = OWNER, review = true } = {}) {
+export function greenCommit({ suiteId = 1, runId = 11, event = 'pull_request', reviewer = REVIEWER, review = true } = {}) {
   return {
     checkRuns: CI_CHECKS.map((name, i) => ({ id: runId * 100 + i, name, status: 'completed', conclusion: 'success', startedAt: '2026-01-01T00:00:00Z', app: 'github-actions', suiteId })),
     workflowRuns: [{ id: runId, name: 'CI', path: '.github/workflows/ci.yml', event, status: 'completed', conclusion: 'success', suiteId }],
@@ -31,12 +33,16 @@ export function fakeGitHub(state) {
   const world = {
     login: OWNER, prs: {}, commits: {}, files: {}, tags: {}, branches: {}, behind: {}, mainContains: new Set(), threads: [], ...state
   };
-  const runner = (command, args) => {
+  // `gh api user` answers with whoever the token belongs to, so the review's own trust check can be
+  // exercised: the reviewer token is REVIEWER, and gh's own login (OWNER) is what it must not be.
+  const runner = (command, args, options = {}) => {
     calls.push([command, ...args]);
+    const tokenOwner = options?.env?.GH_TOKEN === 'reviewer-token' ? REVIEWER : options?.env?.GH_TOKEN ? 'Em-kale' : OWNER;
     const line = args.join(' ');
     if (command !== 'gh') throw new Error(`unexpected command ${command} ${line}`);
     if (world.failOn?.test(line)) throw new Error(`gh ${line} failed: gh: Server Error (HTTP 500)`);
     const [verb, sub] = args;
+    if (verb === 'api' && sub === 'user') return tokenOwner;
     if (verb === 'pr' && sub === 'view') {
       const pr = world.prs[args[2]];
       if (!pr) throw notFound(args);

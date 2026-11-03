@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { currentLogin, gh, prFiles, viewPr } from './gh.mjs';
+import { gh, prFiles, viewPr } from './gh.mjs';
 import { AGENT_REVIEW_ACCOUNT, AGENT_REVIEW_CONTEXT, CI_CHECKS, evaluateChecks, fitComment, normalizeChecks, parseReview, reviewDecision } from './workflow.mjs';
 
 function checkSummary(checks) {
@@ -39,11 +39,31 @@ export function gatherReview(repo, number, out, { log = console.log } = {}) {
   return dir;
 }
 
+/**
+ * The token the review process posts with. It belongs to the reviewer identity, not the author, so
+ * the `agent-review` status is independent of whoever wrote or merged the change (B of the gate
+ * hardening). Without it, submit refuses: signing as the author would defeat the gate.
+ */
+export const REVIEW_TOKEN_ENV = 'NEAR_AI_REVIEW_TOKEN';
+
+function reviewEnv() {
+  const token = process.env[REVIEW_TOKEN_ENV]?.trim();
+  if (!token) throw new Error(`${REVIEW_TOKEN_ENV} is not set. The agent review must post as the reviewer identity, not as the author; see docs/development-workflow.md ("The agent review gate").`);
+  return { ...process.env, GH_TOKEN: token };
+}
+
+/** The login the review token belongs to, so the gate's account is checked against the token, not gh's own. */
+function reviewLogin() {
+  const login = gh(['api', 'user', '--jq', '.login'], { env: reviewEnv() }).trim();
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(login)) throw new Error(`could not read the reviewer account (got ${login})`);
+  return login;
+}
+
 function setStatus(repo, sha, state, description, targetUrl) {
   const args = ['api', '-X', 'POST', `repos/${repo}/statuses/${sha}`,
     '-f', `state=${state}`, '-f', `context=${AGENT_REVIEW_CONTEXT}`, '-f', `description=${description.slice(0, 140)}`];
   if (/^https:\/\//.test(targetUrl ?? '')) args.push('-f', `target_url=${targetUrl}`);
-  gh(args);
+  gh(args, { env: reviewEnv() });
 }
 
 /**
@@ -83,17 +103,17 @@ export function submitReview(repo, number, text, { dryRun = false, log = console
     ? `PASS: ${counts.major} major, ${counts.minor} minor, ${counts.nit} nit, ${counts.resolved} resolved`
     : `FAIL: ${decision.reasons[0]}`;
 
-  // Only the owner's status counts at merge and release (AGENT_REVIEW_ACCOUNT), so a status from
-  // any other account would only confuse; refuse before posting anything.
-  const login = currentLogin();
+  // Only the reviewer identity's status counts at merge and release (AGENT_REVIEW_ACCOUNT). The
+  // token is checked, not gh's own account, so the author running this cannot certify their work.
+  const login = dryRun && !process.env[REVIEW_TOKEN_ENV]?.trim() ? `(no ${REVIEW_TOKEN_ENV})` : reviewLogin();
   const trusted = login.toLowerCase() === AGENT_REVIEW_ACCOUNT.toLowerCase();
   if (dryRun) {
-    if (!trusted) log(`[dry run] note: gh runs as ${login}, but only ${AGENT_REVIEW_ACCOUNT}'s ${AGENT_REVIEW_CONTEXT} counts; a real submit would refuse.`);
+    if (!trusted) log(`[dry run] note: the review token belongs to ${login}, but only ${AGENT_REVIEW_ACCOUNT}'s ${AGENT_REVIEW_CONTEXT} counts; a real submit would refuse.`);
     log(body);
     log(`\n[dry run] would set ${AGENT_REVIEW_CONTEXT}=${decision.state} on ${pr.headRefOid}: ${description.slice(0, 140)}`);
     return { state: decision.state, reasons: decision.reasons };
   }
-  if (!trusted) throw new Error(`gh runs as ${login}, but the merge and release gates trust ${AGENT_REVIEW_CONTEXT} only from ${AGENT_REVIEW_ACCOUNT}; nothing was posted`);
+  if (!trusted) throw new Error(`the review token belongs to ${login}, but the merge and release gates trust ${AGENT_REVIEW_CONTEXT} only from ${AGENT_REVIEW_ACCOUNT}; nothing was posted`);
 
   setStatus(repo, pr.headRefOid, 'pending', 'Posting the agent review');
   const commentDir = mkdtempSync(path.join(tmpdir(), 'agent-review-comment-'));
@@ -101,7 +121,7 @@ export function submitReview(repo, number, text, { dryRun = false, log = console
   try {
     const commentFile = path.join(commentDir, 'comment.md');
     writeFileSync(commentFile, body, { mode: 0o600 });
-    commentUrl = gh(['pr', 'comment', String(number), '--repo', repo, '--body-file', commentFile]).trim().split(/\s+/).pop();
+    commentUrl = gh(['pr', 'comment', String(number), '--repo', repo, '--body-file', commentFile], { env: reviewEnv() }).trim().split(/\s+/).pop();
   } catch (error) {
     throw new Error(`the review comment could not be posted, so ${AGENT_REVIEW_CONTEXT} is left pending on ${pr.headRefOid.slice(0, 7)} (the merge gate refuses it); submit again. ${error instanceof Error ? error.message : error}`);
   } finally {

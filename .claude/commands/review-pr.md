@@ -89,6 +89,11 @@ tag: describe it in plain words under "Dismissed".
 
 ## 4. Submit
 
+The review posts as the **reviewer identity**, not as the author, so the status is an
+independent check. `NEAR_AI_REVIEW_TOKEN` must hold that identity's token (see
+`docs/development-workflow.md`, "The reviewer identity"). Without it `submit` refuses, which is
+correct: signing as the author would defeat the gate.
+
 ```bash
 node scripts/agent-review.mjs submit $ARGUMENTS --review "$SCRATCH/pr-$ARGUMENTS/review.md"
 ```
@@ -96,5 +101,8 @@ node scripts/agent-review.mjs submit $ARGUMENTS --review "$SCRATCH/pr-$ARGUMENTS
 This posts the file as a PR comment and sets the `agent-review` status on the head commit:
 success only for `Verdict: PASS`, a matching `Head-SHA`, and no open `[BLOCKER]`. Any push to
 the branch afterwards needs a new review (the status is tied to the commit).
+
+**Never merge.** After a PASS, report and stop: the owner approves the PR and presses Merge.
+Branch protection requires that approval, and an agent must not supply it.
 
 Report back: the verdict, the comment URL, the counts per severity, and the blockers if any.

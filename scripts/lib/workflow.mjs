@@ -6,12 +6,18 @@ export const CI_CHECKS = Object.freeze(['lint', 'test', 'e2e', 'release-content'
 /** Commit status set by scripts/agent-review.mjs after the agent review team has run. */
 export const AGENT_REVIEW_CONTEXT = 'agent-review';
 /**
- * The only GitHub account whose `agent-review` status the merge and release gates trust: the
- * repository owner, whose account the review agents run as. Fixed here rather than taken from
- * whoever runs a script, so another admin running merge-pr cannot have their own status
- * accepted. Changing it is a change to the gates and goes through review like one.
+ * The only GitHub account whose `agent-review` status the merge and release gates trust.
+ *
+ * It must NOT be the account that authors and merges changes, or the review is self-certification:
+ * the author posts their own PASS and the merge gate accepts it. The reviewer runs as a separate
+ * machine user (HARDENING below) whose token only the review process can use, so the review is an
+ * independent step and merging is the owner's own act.
+ *
+ * Fixed here rather than taken from whoever runs a script, so another admin running merge-pr cannot
+ * have their own status accepted. Changing it is a change to the gates and goes through review.
  */
-export const AGENT_REVIEW_ACCOUNT = 'ALuhning';
+export const AGENT_REVIEW_ACCOUNT = 'near-ai-reviewer';
+
 export const REQUIRED_CHECKS = Object.freeze([...CI_CHECKS, AGENT_REVIEW_CONTEXT]);
 /** Where the CI_CHECKS must come from: jobs of this workflow file, run by GitHub Actions. */
 export const CI_WORKFLOW = Object.freeze({ name: 'CI', path: '.github/workflows/ci.yml', app: 'github-actions' });

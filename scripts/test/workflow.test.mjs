@@ -218,12 +218,14 @@ test('every required check must be green, and any other failed check blocks too'
 // ---- The merge and release gate over one commit's checks ----------------------------------------
 
 const OWNER = 'ALuhning';
+const REVIEWER = 'near-ai-reviewer';
 const CI_SUITE = 101;
 const ciWorkflowRun = { id: 1, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', status: 'completed', conclusion: 'success', suiteId: CI_SUITE };
 const ciRun = (name, extra = {}) => ({ id: name.length, name, status: 'completed', conclusion: 'success', startedAt: '2026-01-01T00:00:00Z', app: 'github-actions', suiteId: CI_SUITE, ...extra });
-const ownerReview = (state = 'success', extra = {}) => ({ id: 1, context: 'agent-review', state, createdAt: '2026-01-01T01:00:00Z', creator: OWNER, ...extra });
-const greenCommit = () => ({ checkRuns: CI_CHECKS.map((name) => ciRun(name)), workflowRuns: [ciWorkflowRun], statuses: [ownerReview()] });
-const gate = (commit, options = {}) => evaluateCommit(commit, { reviewer: OWNER, ...options });
+/** The review status comes from the reviewer identity, never the author's own account. */
+const reviewStatus = (state = 'success', extra = {}) => ({ id: 1, context: 'agent-review', state, createdAt: '2026-01-01T01:00:00Z', creator: REVIEWER, ...extra });
+const greenCommit = () => ({ checkRuns: CI_CHECKS.map((name) => ciRun(name)), workflowRuns: [ciWorkflowRun], statuses: [reviewStatus()] });
+const gate = (commit, options = {}) => evaluateCommit(commit, { reviewer: REVIEWER, ...options });
 
 test('the gate passes green CI jobs from the CI workflow and the owner\'s agent-review status', () => {
   assert.deepEqual(gate(greenCommit()), { ok: true, problems: [], waiting: false });
@@ -233,16 +235,16 @@ test('the gate passes green CI jobs from the CI workflow and the owner\'s agent-
 test('agent-review counts only as a commit status set by the expected account', () => {
   const asCheckRun = { ...greenCommit(), checkRuns: [...greenCommit().checkRuns, ciRun('agent-review', { suiteId: 202 })], statuses: [] };
   assert.match(gate(asCheckRun).problems.join('\n'), /check run named "agent-review"/);
-  const checkRunOverFailure = { ...asCheckRun, statuses: [ownerReview('failure')] };
+  const checkRunOverFailure = { ...asCheckRun, statuses: [reviewStatus('failure')] };
   assert.equal(gate(checkRunOverFailure).ok, false);
   assert.match(gate(checkRunOverFailure).problems.join('\n'), /"agent-review" is failure/);
-  const byOther = { ...greenCommit(), statuses: [ownerReview('success', { creator: 'someone-else' })] };
+  const byOther = { ...greenCommit(), statuses: [reviewStatus('success', { creator: 'someone-else' })] };
   assert.match(gate(byOther).problems.join('\n'), /set by someone-else/);
-  assert.match(gate(byOther).problems.join('\n'), /has not been set on this commit by ALuhning/);
-  const otherAfterOwner = { ...greenCommit(), statuses: [ownerReview('success'), ownerReview('success', { id: 2, creator: 'github-actions[bot]' })] };
+  assert.match(gate(byOther).problems.join('\n'), /has not been set on this commit by near-ai-reviewer/);
+  const otherAfterOwner = { ...greenCommit(), statuses: [reviewStatus('success'), reviewStatus('success', { id: 2, creator: 'github-actions[bot]' })] };
   assert.equal(gate(otherAfterOwner).ok, false, 'a status from another account refuses even beside the owner\'s');
   assert.match(gate(greenCommit(), { reviewer: undefined }).problems.join('\n'), /account allowed to set "agent-review" is unknown/);
-  const newerFailure = { ...greenCommit(), statuses: [ownerReview('success'), ownerReview('failure', { id: 2, createdAt: '2026-01-01T02:00:00Z' })] };
+  const newerFailure = { ...greenCommit(), statuses: [reviewStatus('success'), reviewStatus('failure', { id: 2, createdAt: '2026-01-01T02:00:00Z' })] };
   assert.match(gate(newerFailure).problems.join('\n'), /"agent-review" is failure/);
 });
 
@@ -262,7 +264,7 @@ test('a duplicate-named job from outside the CI workflow cannot mask a failing C
   workflowNamedCi.workflowRuns.push({ id: 3, name: 'CI', path: '.github/workflows/fake.yml', event: 'pull_request', suiteId: 505 });
   workflowNamedCi.checkRuns.push(ciRun('e2e', { suiteId: 505 }));
   assert.equal(gate(workflowNamedCi).ok, false, 'a second workflow named CI in another file does not count');
-  const asStatus = { ...greenCommit(), statuses: [ownerReview(), { id: 9, context: 'audit', state: 'success', creator: OWNER }] };
+  const asStatus = { ...greenCommit(), statuses: [reviewStatus(), { id: 9, context: 'audit', state: 'success', creator: OWNER }] };
   assert.match(gate(asStatus).problems.join('\n'), /commit status named "audit"/);
 });
 

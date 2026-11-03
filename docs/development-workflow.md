@@ -107,22 +107,27 @@ creates a new head commit without that status, so new commits always need a new 
 
 **Agents act as the owner's admin account.** The agents run `gh` as the owner, who is an
 admin of the repository and the organization. GitHub therefore lets an agent session do
-everything the owner can: set the `agent-review` status, approve the `marketplace` deployment
-(the owner is its only reviewer) and change branch protection or rulesets. Today these are
-enforced by policy for agent sessions, not by GitHub: the agents are told never to set
-`agent-review` except through `/review-pr`, never to approve a deployment and never to change
-settings, and the scripts never do. The planned hardening is a separate, non-admin bot identity
-for the agents (a machine user or a fine-grained token) that is not an environment reviewer,
-with only that identity's `agent-review` trusted.
+everything the owner can: approve the `marketplace` deployment (the owner is its only reviewer),
+change branch protection or rulesets, and merge a PR itself. These are enforced by policy for
+agent sessions, not by GitHub: the agents are told never to approve a deployment, never to change
+settings and never to merge outside `merge-pr.mjs`, and the scripts never do.
+
+**The review posts as its own identity.** `agent-review` must come from a *separate*
+account, because an author certifying their own work is not a review. `AGENT_REVIEW_ACCOUNT` is
+`near-ai-reviewer`, a machine user with write access to this repository and no other role, and
+`agent-review.mjs submit` reads its token from `NEAR_AI_REVIEW_TOKEN` and refuses to post when
+the token belongs to any other account. See "Repository settings" for creating it. The author
+therefore finishes a PR and **the owner presses Merge**: the reviewer's PASS is an input to that
+decision, not a substitute for it.
 
 A commit status is not a strong signature: GitHub accepts an `agent-review` status from any
 account or workflow with write access, and branch protection cannot require a particular
-account. `merge-pr.mjs` and `tag-release.mjs` therefore count only the status set by the
-owner's account, which is fixed in the scripts (`AGENT_REVIEW_ACCOUNT` in
-`scripts/lib/workflow.mjs`), not taken from whoever runs them: another admin running
-`merge-pr.mjs` still needs the owner's `agent-review`, and their own does not count. They refuse
-when another account set one or when a check run uses that name. `agent-review.mjs submit`
-refuses to post unless `gh` runs as that account. Changing `AGENT_REVIEW_ACCOUNT` changes the
+account. `merge-pr.mjs` and `tag-release.mjs` therefore count only the status set by the reviewer
+identity, which is fixed in the scripts (`AGENT_REVIEW_ACCOUNT` in `scripts/lib/workflow.mjs`),
+not taken from whoever runs them: another admin running `merge-pr.mjs` still needs the
+reviewer's `agent-review`, and the author's own status does not count. They refuse when another
+account set one or when a check run uses that name. `agent-review.mjs submit` refuses to post
+unless the token in `NEAR_AI_REVIEW_TOKEN` belongs to that identity. Changing `AGENT_REVIEW_ACCOUNT` changes the
 gate, so it goes through review like any gate change. Merges outside `merge-pr.mjs` rely on trust
 in everyone with write access, until the review result comes from a GitHub App or check run that
 only the review process can write.
@@ -390,9 +395,11 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
 `gh api repos/VitalPointAI/near-ai-vscode/branches/main/protection` and
 `gh api repos/VitalPointAI/near-ai-vscode/rulesets` before relying on it.
 
-- `main` protection: a PR is required (no approvals, since the owner cannot approve their own
-  PRs; the `agent-review` status stands in for one), required checks `lint`, `test`, `e2e`,
-  `release-content`, `audit` and `secret-scan` from GitHub Actions, plus `agent-review`;
+- `main` protection: a PR is required and **the owner approves it** (`required_approving_review_count: 1`).
+  The reviewer identity supplies `agent-review`, and the owner's approval is the act of merging;
+  the two are separate so an agent can prepare, review and hand over but never merge. Required
+  checks `lint`, `test`, `e2e`, `release-content`, `audit` and `secret-scan` from GitHub Actions,
+  plus `agent-review`;
   branches must be up to date; admins included; linear history; no force pushes or deletion;
   conversations must be resolved.
 - Merging: squash only, branches deleted after merge. The squash commit's subject is the PR
@@ -417,7 +424,7 @@ gh api -X PUT "repos/$repo/branches/main/protection" --input - <<'JSON'
    {"context": "audit", "app_id": 15368}, {"context": "secret-scan", "app_id": 15368},
    {"context": "agent-review"}]},
  "enforce_admins": true,
- "required_pull_request_reviews": {"required_approving_review_count": 0},
+ "required_pull_request_reviews": {"required_approving_review_count": 1},
  "restrictions": null,
  "required_linear_history": true,
  "allow_force_pushes": false,
@@ -477,3 +484,65 @@ gh secret set VSCE_PAT --env marketplace --repo VitalPointAI/near-ai-vscode
 ```
 
 which prompts for the value, so it never lands in shell history or a file.
+
+### The reviewer identity
+
+`agent-review` must come from an account that does not author or merge the change, or it is
+self-certification. One-time setup, by the owner:
+
+1. **Create the machine user.** A separate GitHub account named `near-ai-reviewer`, with 2FA
+   enabled and an email you control. Give it **write** access to this repository (a collaborator
+   with the `write` role), and no organization role, no repository admin, and no access to any
+   other repository. It must not be a reviewer of the `marketplace` environment.
+2. **Create a fine-grained personal access token** signed in as `near-ai-reviewer`, scoped to
+   this repository only, with **Contents: read** and **Commit statuses: write**. Nothing else:
+   with those two permissions the token can read the PR and post the review status, and cannot
+   merge, push, or change settings.
+3. **Store the token** where the review process reads it, as `NEAR_AI_REVIEW_TOKEN`:
+
+   ```bash
+   # a shell profile, or a secret manager that exports it
+   export NEAR_AI_REVIEW_TOKEN='github_pat_...'
+   ```
+
+   The author's own `gh` login stays as it is; the review simply posts as the reviewer.
+4. **Raise the PR approval requirement** to one, so merging is the owner's own act:
+
+   ```bash
+   repo=VitalPointAI/near-ai-vscode
+   gh api -X PUT "repos/$repo/branches/main/protection" --input - <<'JSON'
+   {"required_pull_request_reviews": {"required_approving_review_count": 1, "dismiss_stale_reviews": true},
+    "enforce_admins": true,
+    "required_status_checks": {"strict": true, "checks": [
+      {"context": "lint", "app_id": 15368}, {"context": "test", "app_id": 15368},
+      {"context": "e2e", "app_id": 15368}, {"context": "release-content", "app_id": 15368},
+      {"context": "audit", "app_id": 15368}, {"context": "secret-scan", "app_id": 15368},
+      {"context": "agent-review"}]},
+    "restrictions": null,
+    "allow_force_pushes": false,
+    "allow_deletions": false,
+    "required_linear_history": true,
+    "required_conversation_resolution": true}
+   JSON
+   ```
+
+   `enforce_admins: true` is what stops an agent running as the owner from merging anyway: even
+   the owner's own account needs the approval.
+
+**Until step 1 is done**, `agent-review.mjs submit` refuses (no token), so no PR can pass the
+gate, and `merge-pr.mjs` will refuse every PR. That is intentional: a gate that trusts the
+author is worse than a gate that blocks.
+
+### Verifying the gate
+
+```bash
+# the review must be refused without a reviewer token
+node scripts/agent-review.mjs submit <pr> --review <file>   # fails: NEAR_AI_REVIEW_TOKEN is not set
+
+# and accepted with one
+NEAR_AI_REVIEW_TOKEN=... node scripts/agent-review.mjs submit <pr> --review <file>
+
+# the merged status must be the reviewer's, not the author's
+gh api repos/VitalPointAI/near-ai-vscode/commits/<sha>/statuses \
+  --jq '.[] | select(.context=="agent-review") | "\(.state) by \(.creator.login)"'
+```

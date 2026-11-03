@@ -11,8 +11,11 @@ import { evaluateCommit } from '../lib/workflow.mjs';
 import { OWNER, REPO, fakeGitHub, greenCommit, openPr } from './fake-github.mjs';
 
 const HEAD = '1'.repeat(40);
+/** The review posts as the reviewer identity, through its own token. */
+const reviewerToken = () => { process.env.NEAR_AI_REVIEW_TOKEN = 'reviewer-token'; };
+const noToken = () => { delete process.env.NEAR_AI_REVIEW_TOKEN; };
 const quiet = { log: () => {} };
-afterEach(() => setRunner());
+afterEach(() => { setRunner(); noToken(); });
 
 function install(state) {
   const fake = fakeGitHub({ prs: { 7: openPr(7, 'fix/thing', HEAD) }, commits: { [HEAD]: greenCommit() }, ...state });
@@ -28,6 +31,7 @@ const PASS = `Verdict: PASS\nHead-SHA: ${HEAD}\n- [MINOR] wording\n`;
 const BLOCKED = `Verdict: PASS\nHead-SHA: ${HEAD}\n- [BLOCKER] token logged\n`;
 
 test('submit sets agent-review to pending, then posts the comment, then sets the result', () => {
+  reviewerToken();
   const fake = install({});
   const result = submitReview(REPO, '7', PASS, quiet);
   assert.equal(result.state, 'success');
@@ -37,6 +41,7 @@ test('submit sets agent-review to pending, then posts the comment, then sets the
 });
 
 test('a failed comment leaves agent-review pending, never an older success', () => {
+  reviewerToken();
   // The commit already carries the owner's success from an earlier review; the re-review found a
   // blocker but its comment fails to post.
   const fake = install({ commentFails: true });
@@ -48,14 +53,18 @@ test('a failed comment leaves agent-review pending, never an older success', () 
 });
 
 test('a status that cannot be set stops the submit before anything is posted', () => {
+  reviewerToken();
   const fake = install({ statusFails: (state) => state === 'pending' });
   assert.throws(() => submitReview(REPO, '7', PASS, quiet), /HTTP 502/);
   assert.deepEqual(posts(fake).filter((p) => p === 'comment'), []);
 });
 
-test('submit refuses, posting nothing, when gh runs as another account', () => {
+test('submit refuses, posting nothing, when the token is not the reviewer', () => {
+  // A fake whose token belongs to someone else: the gate trusts only AGENT_REVIEW_ACCOUNT.
+  reviewerToken();
+  process.env.NEAR_AI_REVIEW_TOKEN = 'someone-elses-token';
   const fake = install({ login: 'Em-kale' });
-  assert.throws(() => submitReview(REPO, '7', PASS, quiet), /gh runs as Em-kale.*only from ALuhning; nothing was posted/);
+  assert.throws(() => submitReview(REPO, '7', PASS, quiet), /the review token belongs to Em-kale.*only from near-ai-reviewer; nothing was posted/);
   assert.deepEqual(posts(fake), []);
   const logs = [];
   assert.equal(submitReview(REPO, '7', PASS, { log: (m) => logs.push(m), dryRun: true }).state, 'success');
@@ -64,6 +73,7 @@ test('submit refuses, posting nothing, when gh runs as another account', () => {
 });
 
 test('gather lists every changed file through the paginated API', () => {
+  reviewerToken();
   const files = Array.from({ length: 130 }, (_, i) => ({ path: `src/f${i}.ts` }));
   const fake = fakeGitHub({ prs: { 7: openPr(7, 'fix/thing', HEAD, { files }) } });
   // gh pr view returns only the first 100 files; the files endpoint returns all of them.
