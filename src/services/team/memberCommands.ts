@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { Role, TeamFile } from '../../domain/team/types';
 import type { CleanupChecklist, CleanupItem, CleanupStep } from '../../team/cleanupChecklist';
+import type { CatchUpReason } from '../../team/joinCatchUp';
 import type { NearOrgClient } from '../../team/nearOrg';
 import type { NearSession } from '../../team/nearSession';
 import type { FetchLike, SessionTokens } from '../reportingSignIn';
@@ -677,6 +678,29 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
 
   const article = (role: string): string => (role === 'observer' ? 'an observer' : `a ${role}`);
 
+  // The open copy is this team's project but was not brought up to date, so nothing in it changed. The person reads one sentence with the way
+  // forward; the technical reason goes to the channel only (T-61-87). The invite's address is used only for the download the person chooses
+  // (T-61-86). Returns true when the person chose Try again.
+  async function notReady(prepared: { reason: CatchUpReason; repoUrl: string; detail?: string }): Promise<boolean> {
+    deps.output.appendLine(`Bringing the project up to date did not finish (${prepared.reason})${prepared.detail === undefined ? '.' : `: ${await safe(prepared.detail)}`}`);
+    switch (prepared.reason) {
+      case 'local-changes':
+      case 'unshared-work':
+      case 'other-version': {
+        const text = prepared.reason === 'other-version' ? JOIN_TEXT.otherVersion : JOIN_TEXT.localChanges;
+        if (await teamPrompts.message('warn', text, undefined, JOIN_TEXT.freshCopy) === JOIN_TEXT.freshCopy) {
+          await vscode.commands.executeCommand('git.clone', prepared.repoUrl);
+        }
+        return false;
+      }
+      case 'not-shared':
+        await teamPrompts.message('warn', JOIN_TEXT.notShared, undefined);
+        return false;
+      case 'offline':
+        return await teamPrompts.message('warn', JOIN_TEXT.offline, undefined, JOIN_TEXT.tryAgain) === JOIN_TEXT.tryAgain;
+    }
+  }
+
   async function join(): Promise<void> {
     const projectRoot = deps.firstFolder();
     const pasted = await ask({
@@ -685,25 +709,28 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     });
     if (pasted === undefined || pasted === '') return;
     const { prepareJoin, joinTeam } = await import('../../team/join');
-    const prepared = await prepareJoin({ projectRoot, bundleText: pasted });
+    // G-61-4: a copy of the same project that is behind is brought up to date here, under one progress that says so. The pasted text is held
+    // only in this call: Try again prepares again with it, and nothing is kept once the command ends (D-26).
+    type Preparation = Awaited<ReturnType<typeof prepareJoin>>;
+    let prepared: Preparation;
+    for (;;) {
+      prepared = await withSteps(JOIN_TEXT.title, false, (step) => prepareJoin({
+        projectRoot, bundleText: pasted, onStep: (code) => { if (code === 'update') step(JOIN_TEXT.updateStep); }
+      }));
+      if (prepared.kind !== 'not-ready') break;
+      if (!await notReady(prepared)) return;
+    }
     if (prepared.kind === 'refused') {
       deps.report('error', await safe(prepared.message));
       return;
     }
     if (prepared.kind === 'clone-needed') {
-      // Nothing is kept: after the clone the person runs Join again and pastes the invite in the new window.
-      const choice = await teamPrompts.message(
-        'info', 'This invite is for a project that is not open. Choose Get the project to download it, then run NEAR AI: Join Team in the new window and paste the invite again.', undefined, CLONE_ACTION
-      );
+      // A different project, or none is open. Nothing is kept: after the download the person opens it, chooses Join a team and pastes again.
+      const choice = await teamPrompts.message('info', JOIN_TEXT.cloneNeeded, undefined, CLONE_ACTION);
       if (choice === CLONE_ACTION) await vscode.commands.executeCommand('git.clone', prepared.repoUrl);
       return;
     }
-    if (prepared.kind === 'not-ready') {
-      // The open copy is this team's project but could not be brought up to date safely. Plan 61-20 gives each reason its own sentence.
-      if (prepared.detail !== undefined) deps.output.appendLine(`Bringing the project up to date did not finish (${prepared.reason}): ${await safe(prepared.detail)}`);
-      deps.report('error', 'Your copy of this project could not be brought up to date by itself, so nothing in it was changed. Ask your lead for help, then run NEAR AI: Join Team again.');
-      return;
-    }
+    if (prepared.updated === true) deps.report('info', JOIN_TEXT.updated);
     if (projectRoot === undefined) return;
     const { teamFile, bundle, near } = prepared;
     const teamName = await display(teamFile.name);

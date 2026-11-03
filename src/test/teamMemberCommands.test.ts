@@ -414,8 +414,9 @@ test('Join with no project open offers Get the project, runs git.clone with the 
     await j.run(JOIN_COMMAND);
 
     assert.equal(stub.inputRequests[0]?.password, true, 'the pasted invite is masked');
+    // 61-20 (owner, 2026-11-03): the sentence points at the Join a team button in the sidebar instead of the palette command.
     assert.deepEqual(stub.notifications.map((entry) => entry.message), [
-      'This invite is for a project that is not open. Choose Get the project to download it, then run NEAR AI: Join Team in the new window and paste the invite again.'
+      'This invite is for a project that is not open here. Choose Get the project to download it, open it, then choose Join a team in the NEAR AI sidebar and paste the invite again.'
     ]);
     assert.deepEqual(stub.notificationActions[0], ['Get the project']);
     assert.deepEqual(stub.externalCommands, [{ command: 'git.clone', args: [PUBLIC_URL] }]);

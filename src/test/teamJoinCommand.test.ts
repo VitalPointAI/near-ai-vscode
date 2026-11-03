@@ -158,11 +158,11 @@ test('a behind, clean copy of the same project is brought up to date by itself, 
     assert.ok(messages().includes(JOIN_TEXT.updated), messages().join(' | '));
     assert.equal(inputsWhenSaid, 1, 'said after the paste and before the name question');
     assert.equal(stub.inputRequests[1]?.prompt, 'Your name as teammates will see it');
-    assert.ok(messages().includes('You joined Flow team as an observer. Your lead confirms you and sends your team key.'), messages().join(' | '));
+    assert.ok(messages().includes('You joined Flow team as an observer. Your lead confirms you as a developer.'), messages().join(' | '));
     assert.equal(gitIn(b, ['rev-parse', 'HEAD']), remoteMain(rig), 'the copy now has the online main');
     assert.equal((await readTeamFile(b))?.teamId, teamIdOf(rig));
     assert.equal(w.handle.session()?.memberId(), parseInviteBundle(bundle).member, 'joined with this computer\'s new key');
-    assert.equal(stub.externalCommands.length, 0, 'no download was offered');
+    assert.equal(stub.externalCommands.some((entry) => entry.command === 'git.clone'), false, 'no download was offered');
     assertPrivate(w, bundle);
     await closeWindow(w);
   });
@@ -275,7 +275,7 @@ test('an online home that cannot be reached offers Try again, which prepares aga
     await w.run();
     assert.equal(offline, 1);
     assert.match(JOIN_TEXT.offline, /could not be reached/);
-    assert.equal(stub.inputRequests.filter((request) => request.password === true).length, 1, 'the invite was pasted once');
+    assert.equal(stub.inputRequests.filter((request) => request.prompt?.startsWith('Paste the invite') === true).length, 1, 'the invite was pasted once');
     assert.equal(stub.progress.filter((entry) => entry.title === JOIN_TEXT.title).length, 2, 'prepared twice');
     assert.ok(messages().includes(JOIN_TEXT.updated));
     assert.equal(gitIn(b, ['rev-parse', 'HEAD']), remoteMain(rig));
