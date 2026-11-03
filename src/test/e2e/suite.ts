@@ -150,11 +150,13 @@ function projectTests(): Array<[string, () => Promise<void>]> {
         if (report.scrollWidth > report.clientWidth + 1 || report.bodyScrollWidth > report.bodyClientWidth + 1) problems.push(`${name} at ${report.width}px scrolls sideways: page ${report.scrollWidth} in ${report.clientWidth}, body ${report.bodyScrollWidth} in ${report.bodyClientWidth}`);
         for (const offender of report.offenders) problems.push(`${name} at ${report.width}px: ${offender}`);
         for (const scroller of report.scrollers) problems.push(`${name} at ${report.width}px: ${scroller}`);
-        if (report.width > target + 40) problems.push(`${name}: could not make the panel narrower than ${report.width}px (asked ${target}px)`);
+        if (Math.abs(report.width - target) > 40) problems.push(`${name}: could not size the panel to ${target}px (it is ${report.width}px)`);
       };
       // The sidebar: VS Code's own resize commands, a step at a time, until the chat is as close as they get.
       await vscode.commands.executeCommand('nearAiChatView.focus');
       for (const target of SIDEBAR_WIDTHS) record('chat', target, await sizeSidebar(target));
+      // Narrow again, so the editor area has room for the widest editor check.
+      await sizeSidebar(220);
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       // Editor panels: the page in the first of two editor groups, sized by the groups' proportions.
       // Pages with little to show in a fresh project get wide sample data, as their hosts would send it.
