@@ -14,8 +14,26 @@ export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 export const OPEN_BOARD_COMMAND = 'nearAi.team.openBoard';
 export const IMPORT_PLANS_COMMAND = 'nearAi.team.importPlans';
 export const SOLO_TEXT = 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.';
-export const PUSH_ACTION = 'Push';
-export const VERIFY_ACTION = 'Verify Team Log';
+// J-10: the person shares Team Mode with their team; the extension does the push. Git words stay in the output channel.
+export const PUSH_ACTION = 'Share with my team';
+export const VERIFY_ACTION = 'Check the team';
+export const SHOW_DETAILS_ACTION = 'Show details';
+export const TRY_AGAIN_ACTION = 'Try again';
+export const SHARED_TEXT = 'Shared with your team.';
+export const SHARE_FAILED_TEXT = 'Team Mode could not be shared with your team yet. Check your internet connection, then choose Try again. Nothing was lost.';
+const NOT_SHARED_TEXT = 'This project is not shared online yet, so a team cannot use it. Team Mode works through the place your project is hosted, such as GitHub. Ask whoever set up the project to put it online, or choose Show details for the steps.';
+// The plain sentence a person sees when Enable stops, by failure code. The technical message (git, remote, branch) goes to the output channel and
+// Show details opens it. A code that is not listed shows its own message, which has no developer words in it.
+const ENABLE_PLAIN_TEXT: Readonly<Record<string, string>> = Object.freeze({
+  'git-missing': 'Team Mode needs Git, the free tool it uses to share the project, and Git is not working on this computer. Install Git, then try again. Choose Show details for more.',
+  'not-a-repo': NOT_SHARED_TEXT, 'no-commit': NOT_SHARED_TEXT, 'no-remote': NOT_SHARED_TEXT,
+  'remote-unreachable': 'The place this project is hosted could not be reached, so nothing was changed. Check your internet connection and try again.',
+  'exists-remotely': 'This project already has a team. Ask the team lead for an invite, then run "NEAR AI: Join Team".',
+  'push-failed': 'The team could not be created online, so nothing was kept on this computer. Check your internet connection and try again. Choose Show details for more.',
+  'push-unconfirmed': 'The team may have been created, but this computer could not confirm it. Choose Show details for what to check before you try again.',
+  'commit-failed': 'Team Mode is on, but saving it in this project did not finish. Choose Show details for the one step that is left.'
+});
+const SETTINGS_TEXT = 'The sharing settings of this project could not be used, so nothing was changed. Choose Show details for more.';
 export const JOIN_ACTION = 'Join Team';
 const OUTPUT_CHANNEL_NAME = 'NEAR AI Team';
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
@@ -26,7 +44,7 @@ const IMPORT_PICK_PLACEHOLDER = 'Which milestone do you want to import?';
 const RECOMMENDED = 'Recommended';
 const TEAM_MODE_CONTEXT_KEY = 'nearAi.teamMode';
 const MILESTONE_ARGUMENT_MAX = 100;
-const EMAIL_PROMPT = 'Your email is stored only as a salted hash in the team log.';
+const EMAIL_PROMPT = 'Your email is kept only as a scrambled code (a salted hash) in the team record, never as plain text.';
 
 export type TeamModeState = 'solo' | 'team' | 'error';
 // What registerTeamMode keeps of the board, which is loaded only once a session runs (a solo project never loads it).
@@ -157,6 +175,29 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     announce(level, message);
   }
 
+  // A message with buttons: the choice, or undefined when it is dismissed or cannot be shown (the failure goes to the channel).
+  async function choose(level: Level, message: string, ...actions: string[]): Promise<string | undefined> {
+    try {
+      return await (level === 'info' ? vscode.window.showInformationMessage(message, ...actions)
+        : level === 'warn' ? vscode.window.showWarningMessage(message, ...actions)
+          : vscode.window.showErrorMessage(message, ...actions));
+    } catch (error) {
+      output.appendLine(`A Team Mode message could not be shown: ${await describe(error)}`);
+      return undefined;
+    }
+  }
+
+  // Enable stopped: the technical reason is kept in the channel, the person gets plain words and Show details (J-10).
+  async function enableStopped(level: Level, code: string, message: string): Promise<void> {
+    output.appendLine(message);
+    const plain = ENABLE_PLAIN_TEXT[code] ?? (code === 'invalid-input' && /remote|branch/i.test(message) ? SETTINGS_TEXT : message);
+    if (plain === message) {
+      announce(level, plain);
+      return;
+    }
+    if (await choose(level, plain, SHOW_DETAILS_ACTION) === SHOW_DETAILS_ACTION) output.show(true);
+  }
+
   const slot = createSessionSlot<TeamSession>(async () => {
     const projectRoot = projectRootForSlot;
     if (projectRoot === undefined) return { state: 'solo' };
@@ -259,7 +300,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     const enableModule = await import('../../team/enable');
     const checked = await enableModule.checkEnablePreconditions(projectRoot);
     if (!checked.ok) {
-      report('error', checked.message);
+      await enableStopped('error', checked.code, checked.message);
       return;
     }
     // D-22: an existing team is reported before any question is asked.
@@ -300,24 +341,39 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     if (!result.ok) {
       // The team exists on the remote even when only the local commit failed, so the session starts for it.
       if (result.code === 'commit-failed') await startSession(projectRoot);
-      report(result.code === 'commit-failed' ? 'warn' : result.code === 'exists-locally' ? 'info' : 'error', result.message);
+      await enableStopped(result.code === 'commit-failed' ? 'warn' : result.code === 'exists-locally' ? 'info' : 'error', result.code, result.message);
       return;
     }
 
     await startSession(projectRoot);
-    const where = result.branch === undefined
-      ? 'team.json is committed.'
-      : `team.json is committed on ${result.branch}. Push it when you are ready so teammates can see the team.`;
-    const message = `Team Mode is on for ${result.teamFile.name}. ${where}`;
+    const message = result.branch === undefined
+      ? `Team Mode is on for ${result.teamFile.name}.`
+      : `Team Mode is on for ${result.teamFile.name}. Share it so teammates can see the team.`;
     output.appendLine(message);
+    output.appendLine(result.branch === undefined ? 'team.json is committed.' : `team.json is committed on ${result.branch}. Sharing pushes ${result.branch} to ${result.remote}.`);
     const actions = result.branch === undefined ? [VERIFY_ACTION] : [PUSH_ACTION, VERIFY_ACTION];
     const choice = await vscode.window.showInformationMessage(message, ...actions);
     if (choice === PUSH_ACTION && result.branch !== undefined) {
-      const pushed = await enableModule.pushCodeBranch(projectRoot, result.remote, result.branch);
-      if (pushed.ok) report('info', `Pushed ${result.branch} to ${result.remote}.`);
-      else report('error', pushed.message);
+      await share(projectRoot, result.remote, result.branch);
     } else if (choice === VERIFY_ACTION) {
       await verifyLog();
+    }
+  }
+
+  // J-10: Share with my team pushes the code branch that holds team.json. A failure keeps its git reason in the channel and offers Try again.
+  async function share(projectRoot: string, remote: string, branch: string): Promise<void> {
+    const { pushCodeBranch } = await import('../../team/enable');
+    for (;;) {
+      const pushed = await pushCodeBranch(projectRoot, remote, branch);
+      if (pushed.ok) {
+        output.appendLine(`Pushed ${branch} to ${remote}.`);
+        report('info', SHARED_TEXT);
+        return;
+      }
+      output.appendLine(await describe(pushed.message));
+      const next = await choose('error', SHARE_FAILED_TEXT, TRY_AGAIN_ACTION, SHOW_DETAILS_ACTION);
+      if (next === SHOW_DETAILS_ACTION) output.show(true);
+      if (next !== TRY_AGAIN_ACTION) return;
     }
   }
 
@@ -370,6 +426,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       { location: vscode.ProgressLocation.Notification, title: IMPORT_PROGRESS_TITLE, cancellable: false },
       () => running.importPlans({ mode: 'command', ...(milestone === undefined ? {} : { milestone }) })
     );
+    if (!result.ok && result.detail !== undefined) output.appendLine(`Import details: ${result.detail}`);
     report(result.ok ? 'info' : 'error', importResultText(result));
   }
 
@@ -386,7 +443,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
 
   context.subscriptions.push(
     vscode.commands.registerCommand(ENABLE_COMMAND, guarded('Enable Team Mode', enable)),
-    vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Verify Team Log', verifyLog)),
+    vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Check Team Record', verifyLog)),
     vscode.commands.registerCommand(OPEN_BOARD_COMMAND, guarded('Open Team Board', openBoard)),
     vscode.commands.registerCommand(IMPORT_PLANS_COMMAND, guarded('Import Plans to Team Board', importPlansCommand)),
     ...registerMemberCommands({

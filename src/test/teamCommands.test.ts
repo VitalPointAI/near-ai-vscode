@@ -19,7 +19,7 @@ const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 test.after(() => { uninstall(); });
-const { ENABLE_COMMAND, PUSH_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, createSessionSlot, registerTeamMode } = commandsModule;
+const { ENABLE_COMMAND, PUSH_ACTION, SHARED_TEXT, SHARE_FAILED_TEXT, SHOW_DETAILS_ACTION, TRY_AGAIN_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, createSessionSlot, registerTeamMode } = commandsModule;
 
 const EM_DASH = '—';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
@@ -97,16 +97,16 @@ function uiText(): string {
   return JSON.stringify({ lines: outputLines(), notifications: stub.notifications, bars: stub.statusBarItems.map((item) => [item.text, item.tooltip]) });
 }
 
-test('Enable asks for team name, owner name and email with defaults, creates team.json, starts the session and offers Push and Verify Team Log', async () => {
+test('Enable asks for team name, owner name and email with defaults, creates team.json, starts the session and offers Share with my team and Check the team', async () => {
   await withProject(async (p) => {
     const mainBefore = remoteMain(p.fixture);
     await p.enable(['Command team', 'Lead Owner', 'lead@example.invalid']);
 
-    assert.deepEqual(stub.inputRequests.map((request) => request.prompt?.split('.')[0]), ['Team name', 'Your name as teammates will see it', 'Your email is stored only as a salted hash in the team log']);
+    assert.deepEqual(stub.inputRequests.map((request) => request.prompt?.split('.')[0]), ['Team name', 'Your name as teammates will see it', 'Your email is kept only as a scrambled code (a salted hash) in the team record, never as plain text']);
     assert.equal(stub.inputRequests[0]?.value, 'a', 'the team name defaults to the folder name');
     assert.equal(stub.inputRequests[1]?.value, 'Team Test', 'the owner name defaults to git user.name');
     assert.equal(stub.inputRequests[2]?.value, 'team-test@example.invalid', 'the email defaults to git user.email');
-    assert.equal(stub.inputRequests[2]?.prompt, 'Your email is stored only as a salted hash in the team log.');
+    assert.equal(stub.inputRequests[2]?.prompt, 'Your email is kept only as a scrambled code (a salted hash) in the team record, never as plain text.');
 
     const teamFile = await readTeamFile(p.root);
     assert.ok(teamFile !== undefined, 'team.json was written');
@@ -121,27 +121,32 @@ test('Enable asks for team name, owner name and email with defaults, creates tea
     const done = stub.notifications[doneIndex];
     assert.ok(done !== undefined, 'the confirmation is shown');
     assert.equal(done.level, 'info');
+    assert.deepEqual([PUSH_ACTION, VERIFY_ACTION], ['Share with my team', 'Check the team']);
     assert.deepEqual(stub.notificationActions[doneIndex], [PUSH_ACTION, VERIFY_ACTION]);
-    assert.ok(done.message.includes('team.json is committed on main'));
+    // J-10: plain words in the notification; the git detail is in the channel only.
+    assert.equal(done.message, 'Team Mode is on for Command team. Share it so teammates can see the team.');
+    assert.ok(outputLines().includes('team.json is committed on main. Sharing pushes main to origin.'));
     assert.equal(remoteMain(p.fixture), mainBefore, 'the code branch was not pushed because Push was not clicked');
     assert.deepEqual(stub.configUpdates, [], 'settings were never written');
     assert.ok(remoteHasCoordination(p.fixture), 'the coordination branch exists on the remote');
   });
 });
 
-test('choosing Push pushes the current branch and reports it', async () => {
+test('choosing Share with my team pushes the current branch and says so in plain words', async () => {
   await withProject(async (p) => {
     const mainBefore = remoteMain(p.fixture);
-    await p.enable(['Push team', 'Lead Owner', ''], [PUSH_ACTION]);
+    await p.enable(['Share team', 'Lead Owner', ''], [PUSH_ACTION]);
     const head = gitIn(p.root, ['rev-parse', 'HEAD']);
     assert.notEqual(head, mainBefore);
     assert.equal(remoteMain(p.fixture), head, 'the remote main now equals the clone HEAD');
-    assert.ok(messages().includes('Pushed main to origin.'));
-    assert.ok(outputLines().includes('Pushed main to origin.'));
+    assert.equal(SHARED_TEXT, 'Shared with your team.');
+    assert.ok(messages().includes(SHARED_TEXT));
+    assert.equal(messages().some((message) => /push|branch|origin/i.test(message)), false, 'no git words in what is shown');
+    assert.ok(outputLines().includes('Pushed main to origin.'), 'the channel keeps the git detail');
   });
 });
 
-test('a failing Push reports the redacted reason as an error', async () => {
+test('a failing share shows plain words with Try again and Show details, and keeps the redacted git reason in the channel', async () => {
   await withProject(async (p) => {
     // The bare remote refuses non-fast-forward updates, so a diverged main makes the push fail.
     const other = path.join(p.fixture.root, 'other');
@@ -152,33 +157,35 @@ test('a failing Push reports the redacted reason as an error', async () => {
     gitIn(other, ['add', 'other.txt']);
     gitIn(other, ['commit', '-q', '-m', 'other work']);
     gitIn(other, ['push', '-q', 'origin', 'main']);
-    await p.enable(['Failing push', 'Lead Owner', ''], [PUSH_ACTION]);
-    const failure = stub.notifications.find((entry) => entry.level === 'error');
-    assert.ok(failure !== undefined, 'the failed push is shown as an error');
-    assert.ok(failure.message.startsWith('Pushing main to origin failed'));
-    assert.ok(outputLines().includes(failure.message), 'and kept in the channel');
+    await p.enable(['Failing push', 'Lead Owner', ''], [PUSH_ACTION, TRY_AGAIN_ACTION]);
+    const failures = stub.notifications.filter((entry) => entry.level === 'error');
+    assert.equal(SHARE_FAILED_TEXT, 'Team Mode could not be shared with your team yet. Check your internet connection, then choose Try again. Nothing was lost.');
+    assert.deepEqual(failures.map((entry) => entry.message), [SHARE_FAILED_TEXT, SHARE_FAILED_TEXT], 'Try again tried once more and said so again');
+    const index = stub.notifications.findIndex((entry) => entry.level === 'error');
+    assert.deepEqual(stub.notificationActions[index], [TRY_AGAIN_ACTION, SHOW_DETAILS_ACTION]);
+    assert.equal(outputLines().filter((line) => line.startsWith('Pushing main to origin failed')).length, 2, 'the redacted git reason is in the channel for each try');
   });
 });
 
-test('choosing Verify Team Log writes the report to the NEAR AI Team channel', async () => {
+test('choosing Check the team writes the report to the NEAR AI Team channel', async () => {
   await withProject(async (p) => {
     await p.enable(['Verify team', 'Lead Owner', ''], [VERIFY_ACTION]);
     const lines = outputLines();
-    assert.ok(lines.some((line) => line.startsWith('Verify Team Log: Verify team')), 'the report header is in the channel');
+    assert.ok(lines.some((line) => line.startsWith('Check Team Record: Verify team')), 'the report header is in the channel');
     assert.ok(lines.includes('Events: 2 (2 accepted, 0 rejected)'));
     assert.ok(lines.some((line) => line.includes('Lead Owner, owner')));
-    assert.ok(messages().some((message) => message.startsWith('Team log verified: 2 events, 1 member, 0 rejected')));
+    assert.ok(messages().some((message) => message.startsWith('The team record passed its check: 2 events, 1 member, 0 rejected')));
     assert.ok(stub.outputChannels.every((channel) => channel.name === 'NEAR AI Team'));
   });
 });
 
-test('the Verify Team Log command works from the palette once a team exists', async () => {
+test('the Check Team Record command works from the palette once a team exists', async () => {
   await withProject(async (p) => {
     await p.enable(['Palette team', 'Lead Owner', '']);
     stub.notifications.length = 0;
     await p.verify();
-    assert.ok(outputLines().some((line) => line.startsWith('Verify Team Log: Palette team')));
-    assert.ok(messages().some((message) => message.startsWith('Team log verified')));
+    assert.ok(outputLines().some((line) => line.startsWith('Check Team Record: Palette team')));
+    assert.ok(messages().some((message) => message.startsWith('The team record passed its check')));
   });
 });
 
@@ -242,29 +249,31 @@ test('with no folder open Enable asks the user to open the project folder', asyn
   }, { folderOpen: false });
 });
 
-test('a failing commit-msg hook shows a warning with the plain message and the same text in the channel', async () => {
+test('a failing commit-msg hook shows a plain warning with Show details and keeps the exact step in the channel', async () => {
   await withProject(async (p) => {
     writeFileSync(path.join(p.root, '.git', 'hooks', 'commit-msg'), '#!/bin/sh\necho "hook rejected this commit message" >&2\nexit 1\n', { encoding: 'utf8', mode: 0o755 });
     await p.enable(['Hook team', 'Lead Owner', '']);
     const warning = stub.notifications.find((entry) => entry.level === 'warn');
     assert.ok(warning !== undefined, 'a warning is shown');
-    assert.ok(warning.message.includes('hook rejected this commit message'));
-    assert.ok(warning.message.includes(`git add -f ${TEAM_FILE_REL}`), 'the exact command to finish is given');
-    assert.ok(outputLines().includes(warning.message), 'the channel has the same text');
+    assert.equal(warning.message, 'Team Mode is on, but saving it in this project did not finish. Choose Show details for the one step that is left.');
+    assert.deepEqual(stub.notificationActions[stub.notifications.indexOf(warning)], [SHOW_DETAILS_ACTION]);
+    const detail = outputLines().find((line) => line.includes('hook rejected this commit message'));
+    assert.ok(detail !== undefined, 'the channel has the git reason');
+    assert.ok(detail.includes(`git add -f ${TEAM_FILE_REL}`), 'and the exact command to finish');
     assert.equal(stub.notifications.some((entry) => entry.message.startsWith('Team Mode is on for')), false, 'no success message');
     assert.equal(p.handle.session()?.teamFile.name, 'Hook team', 'the team exists, so its session still runs');
   });
 });
 
-test('an unreachable remote shows an error, writes it to the channel and creates nothing', async () => {
+test('an unreachable remote shows a plain error, writes the git reason to the channel and creates nothing', async () => {
   await withProject(async (p) => {
     gitIn(p.root, ['remote', 'set-url', 'origin', path.join(p.fixture.root, 'no-such-remote.git')]);
     const before = [...p.secrets.values.keys()].sort();
     await p.enable(['Unreachable team', 'Lead Owner', '']);
     const error = stub.notifications.find((entry) => entry.level === 'error');
     assert.ok(error !== undefined);
-    assert.ok(error.message.includes('could not be reached'));
-    assert.ok(outputLines().includes(error.message));
+    assert.equal(error.message, 'The place this project is hosted could not be reached, so nothing was changed. Check your internet connection and try again.');
+    assert.ok(outputLines().some((line) => line.startsWith('The remote "origin" could not be reached, so nothing was changed:')), 'the channel keeps the git reason');
     assert.deepEqual([...p.secrets.values.keys()].sort(), before, 'no device key');
     assert.equal(await teamJsonExists(p.root), false);
   });

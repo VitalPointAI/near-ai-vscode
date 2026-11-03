@@ -271,12 +271,12 @@ test('verifyLog prints the full report to the channel, shows a summary and Show 
     stub.messageAnswers.push('Show details');
     const report = await started.session.verifyLog();
     assert.ok(report !== undefined);
-    assert.deepEqual(started.progress, ['Verifying the team log']);
+    assert.deepEqual(started.progress, ['Checking the team record']);
 
     const fingerprint = rig.owner.identity.fingerprint;
     const joinedId = rig.genesis.events[1].id;
     for (const expected of [
-      `Verify Team Log: ${TEAM_NAME} (${rig.teamFile.teamId})`,
+      `Check Team Record: ${TEAM_NAME} (${rig.teamFile.teamId})`,
       'Status: ok',
       'Events: 2 (2 accepted, 0 rejected)',
       `Head: lamport 2, event ${joinedId}`,
@@ -285,7 +285,7 @@ test('verifyLog prints the full report to the channel, shows a summary and Show 
       'Snapshots: 0',
       'Rejected events: 0'
     ]) assert.ok(started.lines.includes(expected), `report has: ${expected}`);
-    assert.deepEqual(stub.notifications.at(-1), { level: 'info', message: 'Team log verified: 2 events, 1 member, 0 rejected' });
+    assert.deepEqual(stub.notifications.at(-1), { level: 'info', message: 'The team record passed its check: 2 events, 1 member, 0 rejected' });
     await until(() => started.shows.count >= 2, 'Show details to open the channel');
     assertPlainCopy(started.lines);
   });
@@ -307,7 +307,7 @@ test('a raw-pushed event with a broken signature is printed once, listed by veri
     assert.equal(report?.rejected.length, 1);
     assert.ok(started.lines.includes('Rejected events: 1'));
     assert.ok(started.lines.includes(`  ${line}`), 'listed under Rejected events with its reason');
-    assert.deepEqual(stub.notifications.at(-1), { level: 'warn', message: 'Team log checked, with problems: 3 events, 1 member, 1 rejected.' });
+    assert.deepEqual(stub.notifications.at(-1), { level: 'warn', message: 'The team record was checked and has problems: 3 events, 1 member, 1 rejected.' });
     assert.equal((await auditRows(rig.projectRoot)).length, 2);
     assertPlainCopy(started.lines);
   });
@@ -334,8 +334,8 @@ test('a verify that cannot run is reported to the channel and to the user', asyn
     const failing = (): never => { throw new Error('the replay failed'); };
     (started.session as unknown as { log: { verifyAll: () => Promise<never> } }).log.verifyAll = async () => failing();
     assert.equal(await started.session.verifyLog(), undefined);
-    assert.ok(started.lines.includes('Verify Team Log failed: the replay failed'));
-    assert.equal(stub.notifications.at(-1)?.level, 'warn');
+    assert.ok(started.lines.includes('Check Team Record failed: the replay failed'));
+    assert.deepEqual(stub.notifications.at(-1), { level: 'warn', message: 'The team check could not finish. Choose Show details to see why.' }, 'plain words; the reason is in the channel');
   });
 });
 
@@ -386,10 +386,11 @@ test('an unreachable remote pauses with a redacted reason, backs off to 10 minut
     assert.deepEqual(rig.timers.delays(), [15_000, 30_000, 60_000, 120_000, 240_000, 480_000, 600_000, 600_000]);
     assert.equal(lastItem().text, `$(warning) ${PAUSED_UNREACHABLE_TEXT}`);
     assert.equal(lastItem().command, 'nearAi.team.verifyLog');
-    assert.equal(PAUSED_UNREACHABLE_TEXT, 'Team sync paused: remote unreachable');
-    assert.ok(lastItem().tooltip.startsWith('The team remote could not be reached'));
+    assert.equal(PAUSED_UNREACHABLE_TEXT, 'Team sync paused: offline');
+    assert.ok(lastItem().tooltip.startsWith('The team could not be reached. '), 'a fixed sentence, never the raw git reason');
+    assert.ok(started.lines.some((line) => line.startsWith(`${PAUSED_UNREACHABLE_TEXT}. `) && line.length > PAUSED_UNREACHABLE_TEXT.length + 2), 'the raw reason is in the channel');
     assert.ok(lastItem().tooltip.includes('right away when this window gets focus'));
-    assert.ok(lastItem().tooltip.endsWith('Click to run Verify Team Log.'));
+    assert.ok(lastItem().tooltip.endsWith('Click to check the team.'));
     for (const text of everyShownText(started.lines)) {
       assert.equal(text.includes(canaries.urlPassword), false, `password not in: ${text}`);
       assert.equal(text.includes(userName), false, `user name not in: ${text}`);
@@ -418,8 +419,8 @@ test('a rewritten coordination branch shows the log rewritten state with the D-3
     rewriteRemote(rig);
     assert.equal(await started.session.sync(), false);
     assert.equal(lastItem().text, `$(warning) ${PAUSED_REWRITTEN_TEXT}`);
-    assert.equal(PAUSED_REWRITTEN_TEXT, 'Team sync paused: log rewritten');
-    assert.equal(lastItem().tooltip, `${TEAM_REJECTION_REASONS.logRewritten}. Click to run Verify Team Log.`);
+    assert.equal(PAUSED_REWRITTEN_TEXT, 'Team sync paused: record changed');
+    assert.equal(lastItem().tooltip, 'Something unexpected changed in the shared team record, so team sync is paused to protect your work. Click to check the team.');
     assert.ok(started.lines.some((line) => line.startsWith(`${PAUSED_REWRITTEN_TEXT}.`) && line.includes(TEAM_REJECTION_REASONS.logRewritten)));
     assertPlainCopy(started.lines);
   });
@@ -683,12 +684,14 @@ test('a coordination log that does not match the genesis anchor shows a paused n
     const wrongAnchor: TeamFile = { ...rig.teamFile, genesis: { ...rig.teamFile.genesis, eventId: newEventId() } };
     const started = await startSession(rig, { teamFile: wrongAnchor, globalStorageDir: rig.fixture.storageDir('wrong-team') });
     assert.equal(lastItem().text, `$(error) ${barModule.PAUSED_REFUSED_TEXT}`);
-    assert.equal(lastItem().text, '$(error) Team log not trusted');
+    assert.equal(lastItem().text, '$(error) Team record not trusted');
     assert.equal(lastItem().command, 'nearAi.team.verifyLog');
     assert.equal(lastItem().tooltip.includes('Team sync is working'), false);
-    assert.ok(lastItem().tooltip.includes(TEAM_REJECTION_REASONS.logRefused));
+    assert.equal(lastItem().tooltip, 'The shared team record failed a safety check, so the board is paused and new team activity is ignored. Click to check the team.');
+    assert.equal(lastItem().tooltip.includes(TEAM_REJECTION_REASONS.logRefused), false, 'the internal reason stays out of the tooltip');
+    assert.ok(started.lines.some((line) => line.includes(TEAM_REJECTION_REASONS.logRefused)), 'and is in the channel');
     assert.equal(await started.session.sync(), false, 'a refused log is not a healthy sync, so the scheduler backs off');
-    assert.equal(stub.notifications.filter((entry) => entry.level === 'warn' && entry.message.includes('Team log not trusted')).length, 1, 'one warning, not one per poll');
+    assert.deepEqual(stub.notifications.filter((entry) => entry.level === 'warn' && entry.message.includes('Team record not trusted')).map((entry) => entry.message), ["Team record not trusted: it does not belong to this project's team, so new team activity is ignored. Click the team status to check the team, or ask your lead."], 'one plain warning, not one per poll');
     assert.equal(started.lines.some((line) => line === `Team sync is running for ${TEAM_NAME}.`), false);
     assertPlainCopy(started.lines);
   });

@@ -1,6 +1,6 @@
 // TeamSession: the composition root of a running team (D-16, D-19, D-25, D-26). It checks the trust pin, builds the git transport and
 // TeamLog, polls through SyncScheduler, shows the status bar, mirrors accepted roster events into the project audit log, and writes
-// everything a user may need to see (rejected events, failures, the Verify Team Log report) to the NEAR AI Team output channel.
+// everything a user may need to see (rejected events, failures, the Check Team Record report) to the NEAR AI Team output channel.
 // Nothing here swallows a failure: errors are redacted and written to the channel, and a failed sync also shows in the status bar.
 // Only src/services/team may import vscode; the logic lives in src/team and src/domain/team.
 import * as fs from 'node:fs/promises';
@@ -47,16 +47,19 @@ import type { TeamStatusBar, TeamStatusExtras } from './teamStatusBar';
 export const TEAM_OUTPUT_CHANNEL = 'NEAR AI Team';
 export const SHOW_DETAILS_ACTION = 'Show details';
 export const UPDATE_EXTENSION_TEXT = 'Some events need a newer version of NEAR AI. Update the extension to read them.';
-export const READ_ONLY_TEXT = 'This computer has no device key for this team, so it can read the team log but not write to it.';
+export const READ_ONLY_TEXT = 'This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.';
 export const JOIN_COMMAND = 'nearAi.team.join';
 export const MANAGE_MEMBERS_COMMAND = 'nearAi.team.manageMembers';
 export const NOTIFIED_FILE = 'notified.json';
 export const JOIN_ACTION = 'Join Team';
 export const PERSONAL_KEY_WARNING = 'This team project is using your personal NEAR key, so the spend cap your lead set does not apply. Runs are marked as personal-key runs.';
 export const USE_TEAM_KEY_ACTION = 'Use team key';
+// The WR-02 notice's button. The command id is copied, like JOIN_COMMAND, so this module never loads the command module; teamManifest.test.ts pins it.
+export const IMPORT_NOW_ACTION = 'Import now';
+export const IMPORT_PLANS_COMMAND = 'nearAi.team.importPlans';
 // After a key install failed, the same key is not tried again for this long, so a wrong organization does not hold up every poll.
 const INSTALL_RETRY_MS = 5 * 60_000;
-const VERIFY_PROGRESS_TITLE = 'Verifying the team log';
+const VERIFY_PROGRESS_TITLE = 'Checking the team record';
 const AUDIT_FILE_PARTS = ['.planning', '.near-ai', 'audit.json'];
 // The integration branch is asked about at most this often (monotonic milliseconds), and only in an owner's or lead's window (D-03).
 const AUTO_IMPORT_INTERVAL_MS = 60_000;
@@ -106,10 +109,10 @@ function statusLabel(status: TransportStatus): string {
   return status.reason === undefined ? status.state : `${status.state} (${safeReason(status.reason)})`;
 }
 
-// The Verify Team Log report (D-25) as output lines. Nothing in it is a secret: ids, names, roles and public fingerprints only.
+// The Check Team Record report (D-25) as output lines. Nothing in it is a secret: ids, names, roles and public fingerprints only.
 export function formatVerifyReport(report: VerifyReport, teamFile: TeamFile): string[] {
   const lines: string[] = [
-    `Verify Team Log: ${safeReason(teamFile.name)} (${teamFile.teamId})`,
+    `Check Team Record: ${safeReason(teamFile.name)} (${teamFile.teamId})`,
     `Status: ${statusLabel(report.status)}`
   ];
   if (report.refused !== undefined) lines.push(`Log refused: ${safeReason(report.refused)}`);
@@ -376,9 +379,9 @@ export class TeamSession {
       const task = (): Promise<VerifyReport> => this.log.verifyAll();
       report = this.deps.withProgress === undefined ? await task() : await this.deps.withProgress(VERIFY_PROGRESS_TITLE, task);
     } catch (error) {
-      this.line(`Verify Team Log failed: ${describeError(error)}`);
+      this.line(`Check Team Record failed: ${describeError(error)}`);
       this.deps.output.show(true);
-      this.announce('warn', `Verify Team Log could not finish: ${describeError(error)}`);
+      this.announce('warn', 'The team check could not finish. Choose Show details to see why.');
       return undefined;
     }
     for (const reportLine of formatVerifyReport(report, this.teamFile)) this.deps.output.appendLine(reportLine);
@@ -386,13 +389,13 @@ export class TeamSession {
     const counts = `${plural(report.events, 'event')}, ${plural(report.members.length, 'member')}, ${report.rejected.length} rejected`;
     const problems = report.refused !== undefined || report.rejected.length > 0 || report.unsupported > 0;
     if (!problems) {
-      this.announce('info', `Team log verified: ${counts}`);
+      this.announce('info', `The team record passed its check: ${counts}`);
     } else {
       const extras = [
-        report.refused === undefined ? '' : ` The log was refused: ${safeReason(report.refused)}.`,
+        report.refused === undefined ? '' : ' The record failed its safety check. Choose Show details to see why.',
         report.unsupported > 0 ? ` ${UPDATE_EXTENSION_TEXT}` : ''
       ].join('');
-      this.announce('warn', `Team log checked, with problems: ${counts}.${extras}`);
+      this.announce('warn', `The team record was checked and has problems: ${counts}.${extras}`);
     }
     return report;
   }
@@ -446,14 +449,16 @@ export class TeamSession {
       }
       const result = await this.importPlans({ mode: 'auto' });
       if (!result.ok) {
-        this.reportIssue('auto-import', `The roadmap on the integration branch was not imported: ${result.message}`);
+        this.reportIssue('auto-import', `The roadmap on the integration branch was not imported: ${result.message}${result.detail === undefined ? '' : ` (${result.detail})`}`);
         return result.written > 0;
       }
       this.clearIssue('auto-import');
       this.lastCheckedHead = head;
       if (result.skipped === 'needs-command') {
-        // Told once per head that moved: the lead decides with the Import command (WR-02).
-        this.say('info', importResultText(result));
+        // Told once per head that moved: the lead decides, with Import now on the notice or the Import command (WR-02).
+        const run = this.deps.runCommand;
+        if (run === undefined) this.say('info', importResultText(result));
+        else this.offer('info', importResultText(result), [{ label: IMPORT_NOW_ACTION, run: () => run(IMPORT_PLANS_COMMAND) }]);
         return false;
       }
       if (result.written > 0 && !this.importAnnounced) {
@@ -533,7 +538,8 @@ export class TeamSession {
       status = { state: 'paused', reason: TEAM_REJECTION_REASONS.logRefused };
       if (!this.refusalAnnounced) {
         this.refusalAnnounced = true;
-        this.announce('warn', `${PAUSED_REFUSED_TEXT}: ${TEAM_REJECTION_REASONS.logRefused}. Team events from this remote are ignored.`);
+        this.line(`${PAUSED_REFUSED_TEXT}: ${TEAM_REJECTION_REASONS.logRefused}. Team events from this remote are ignored.`);
+        this.announce('warn', `${PAUSED_REFUSED_TEXT}: it does not belong to this project's team, so new team activity is ignored. Click the team status to check the team, or ask your lead.`);
       }
     }
     // The reactions run after the sync steps above and only on a log that was read and is trusted; they never throw out of here.

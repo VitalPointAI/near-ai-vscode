@@ -9,10 +9,10 @@ import { removedText } from '../../team/removedClient';
 import { BRANCH_MISSING_REASON } from '../../team/transport';
 import type { TransportStatus } from '../../team/transport';
 
-export const PAUSED_UNREACHABLE_TEXT = 'Team sync paused: remote unreachable';
-export const PAUSED_REWRITTEN_TEXT = 'Team sync paused: log rewritten';
-export const PAUSED_MISSING_TEXT = 'Team sync paused: log missing on remote';
-export const PAUSED_REFUSED_TEXT = 'Team log not trusted';
+export const PAUSED_UNREACHABLE_TEXT = 'Team sync paused: offline';
+export const PAUSED_REWRITTEN_TEXT = 'Team sync paused: record changed';
+export const PAUSED_MISSING_TEXT = 'Team sync paused: team record missing';
+export const PAUSED_REFUSED_TEXT = 'Team record not trusted';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 
 const MAX_REASON_LENGTH = 400;
@@ -35,8 +35,12 @@ export function displayText(text: string, maxLength: number = MAX_DISPLAY_LENGTH
 
 export const REMOVED_TEXT = 'Team: removed';
 export const OPEN_BOARD_COMMAND = 'nearAi.team.openBoard';
-const VERIFY_SENTENCE = 'Click to run Verify Team Log.';
+const VERIFY_SENTENCE = 'Click to check the team.';
 const OPEN_BOARD_SENTENCE = 'Click to open the Team Board.';
+export const UNREACHABLE_TOOLTIP = 'The team could not be reached. NEAR AI keeps trying, up to every 10 minutes, and right away when this window gets focus. The board shows the last update and cannot be changed until the connection returns.';
+export const REWRITTEN_TOOLTIP = 'Something unexpected changed in the shared team record, so team sync is paused to protect your work.';
+export const MISSING_TOOLTIP = 'The shared team record could not be found where the team keeps it. NEAR AI keeps the last good copy and checks again.';
+export const REFUSED_TOOLTIP = 'The shared team record failed a safety check, so the board is paused and new team activity is ignored.';
 
 // ready undefined means the log has no cards yet, so no count is shown.
 export interface TeamStatusExtras { pending?: number; removed?: boolean; nearLabel?: string; nearLinked?: boolean; ready?: number }
@@ -63,7 +67,7 @@ function plural(count: number, one: string, many: string): string {
   return count === 1 ? one : many;
 }
 
-// A paused or untrusted state: icon, plain words, tooltip, label with the action, and the Verify Team Log click target.
+// A paused or untrusted state: icon, plain words, tooltip, label with the action, and the Check Team Record click target.
 function paused(plain: string, icon: 'warning' | 'error', tooltip: string): StatusView {
   return { text: `$(${icon}) ${plain}`, plain, tooltip, accessibilityLabel: `${plain}. ${VERIFY_SENTENCE}`, command: VERIFY_LOG_COMMAND, tier: icon };
 }
@@ -98,21 +102,18 @@ export function statusText(status: TransportStatus, teamName: string, extras: Te
       command: OPEN_BOARD_COMMAND, tier: 'none'
     };
   }
+  // UI review warning 6: each known reason gets a fixed plain sentence. The raw reason (it can name git, a remote or a branch) is written only to the
+  // NEAR AI Team output channel by the session, never to the tooltip.
   if (status.reason === TEAM_REJECTION_REASONS.logRewritten) {
-    return paused(PAUSED_REWRITTEN_TEXT, 'warning', `${TEAM_REJECTION_REASONS.logRewritten}. ${VERIFY_SENTENCE}`);
+    return paused(PAUSED_REWRITTEN_TEXT, 'warning', `${REWRITTEN_TOOLTIP} ${VERIFY_SENTENCE}`);
   }
   if (status.reason === BRANCH_MISSING_REASON) {
-    return paused(PAUSED_MISSING_TEXT, 'warning', `${BRANCH_MISSING_REASON} ${VERIFY_SENTENCE}`);
+    return paused(PAUSED_MISSING_TEXT, 'warning', `${MISSING_TOOLTIP} ${VERIFY_SENTENCE}`);
   }
   if (status.reason === TEAM_REJECTION_REASONS.logRefused) {
-    return paused(PAUSED_REFUSED_TEXT, 'error', `The team log did not pass its checks, so the board is paused. ${TEAM_REJECTION_REASONS.logRefused}. Team events are being ignored. ${VERIFY_SENTENCE}`);
+    return paused(PAUSED_REFUSED_TEXT, 'error', `${REFUSED_TOOLTIP} ${VERIFY_SENTENCE}`);
   }
-  const reason = status.reason === undefined ? '' : safeReason(status.reason).replace(/\.+$/, '');
-  const lead = reason === '' ? 'The team remote could not be reached.' : `The team remote could not be reached: ${reason}.`;
-  return paused(
-    PAUSED_UNREACHABLE_TEXT, 'warning',
-    `${lead} NEAR AI keeps retrying, up to every 10 minutes, and right away when this window gets focus. The board shows the last update and cannot be changed until the connection returns. ${VERIFY_SENTENCE}`
-  );
+  return paused(PAUSED_UNREACHABLE_TEXT, 'warning', `${UNREACHABLE_TOOLTIP} ${VERIFY_SENTENCE}`);
 }
 
 export interface TeamStatusBar {

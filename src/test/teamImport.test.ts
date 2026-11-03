@@ -599,7 +599,7 @@ test('WR-02: an automatic import with more changes than the ceiling writes nothi
     assert.equal(auto.pending, 614);
     assert.ok(614 > AUTO_IMPORT_MAX_CHANGES);
     assert.equal(coordinationCommits(fixture), before, 'nothing was written');
-    assert.equal(importResultText(auto), 'The roadmap has 614 changes for the Team Board. An automatic import makes at most 300, so nothing was changed. Run "NEAR AI: Import Plans to Team Board" to bring them in.');
+    assert.equal(importResultText(auto), 'The roadmap has 614 changes for the Team Board. An automatic import makes at most 300, so nothing was changed. Choose Import now, or run "NEAR AI: Import Plans to Team Board", to bring them in.');
     const command = okResult(await importPlans({ log: seed.a.log, source, storageDir, mode: 'command' }));
     assert.equal(command.written, 614);
   });
@@ -783,7 +783,7 @@ test('importResultText says what happened in plain words', () => {
   assert.equal(importResultText({ ...base, written: 1 }), 'Imported 1 item to the Team Board.');
   assert.equal(importResultText({ ...base, written: 0, upToDate: true }), 'The Team Board is already up to date.');
   assert.equal(importResultText({ ...base, written: 3, reopenNeeded: 2 }), 'Imported 3 items to the Team Board. 2 plans are back in the roadmap but cancelled on the board; reopen them if they should continue.');
-  assert.equal(importResultText({ ok: false, message: 'The team remote could not be reached.', written: 0 }), 'The import did not finish: The team remote could not be reached. Nothing was changed.');
+  assert.equal(importResultText({ ok: false, message: 'The team could not be reached. Check your internet connection and try again', written: 0 }), 'The import did not finish: The team could not be reached. Check your internet connection and try again. Nothing was changed.');
   assert.equal(importResultText({ ok: false, message: 'Disk full', written: 250 }), 'The import did not finish: Disk full. 250 items were written; run the import again to finish.');
   assert.equal(importResultText({ ok: false, message: 'Disk full', written: 1 }), 'The import did not finish: Disk full. 1 item was written; run the import again to finish.');
   const leaked = importResultText({ ok: false, message: 'fetch of https://user:hunter2@example.invalid/x.git failed', written: 0 });
@@ -834,5 +834,22 @@ test('this repository\'s own .planning at HEAD imports into a correct graph, and
     assert.ok(items.get('plan:61-02')?.mustHaves.includes(WITHHELD_TEXT), 'the bearer token must-have of 61-02 is withheld');
     assert.ok((result.withheld ?? 0) >= 1);
     assert.equal(okResult(await importPlans({ log: seed.a.log, source, storageDir, mode: 'command' })).written, 0, 'a re-import writes 0 events');
+  });
+});
+
+test('J-07 and J-08: an import with no shared copy, an unreachable team or no plans says so in plain words and keeps the git reason in detail', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    const a = fixture.clones.a as string;
+    const storageDir = path.join(fixture.storageDir('a'), 'import');
+    const missing = await importPlans({ log: seed.a.log, source: { projectRoot: a, remote: 'origin', branch: 'no-such-branch' }, storageDir, mode: 'command' });
+    assert.deepEqual(missing, { ok: false, message: "The team's shared copy of the project could not be found", written: 0, detail: 'The integration branch was not found on the team remote' });
+    assert.equal(importResultText(missing), "The import did not finish: The team's shared copy of the project could not be found. Nothing was changed.");
+    const none = await importPlans({ log: seed.a.log, source: { projectRoot: a }, storageDir, mode: 'command' });
+    assert.deepEqual(none, { ok: false, message: "The team's shared copy of the project could not be found", written: 0, detail: 'There is no integration branch to import from.' });
+    gitIn(a, ['push', '-q', 'origin', 'main']);
+    const empty = await importPlans({ log: seed.a.log, source: { projectRoot: a, remote: 'origin', branch: 'main' }, storageDir, mode: 'command' });
+    assert.deepEqual(empty, { ok: false, message: 'This project has no plans to import yet. Plan your first phase, then import again.', written: 0 });
+    for (const result of [missing, none, empty]) assert.equal(/branch|remote|\.planning/i.test(importResultText(result)), false, importResultText(result));
   });
 });

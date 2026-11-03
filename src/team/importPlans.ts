@@ -61,7 +61,11 @@ export type ImportResult =
     /** With skipped 'needs-command': how many changes the automatic import left for the Import command. */
     pending?: number;
   }
-  | { ok: false; message: string; written: number };
+  /** `message` is in plain words for the person; `detail`, when there is one, is the technical reason for the output channel only (J-07). */
+  | { ok: false; message: string; written: number; detail?: string };
+
+const SHARED_COPY_MISSING = "The team's shared copy of the project could not be found";
+const TEAM_UNREACHABLE = 'The team could not be reached. Check your internet connection and try again';
 
 // ---- Cleaning ---------------------------------------------------------------------------------------------------------------------------
 
@@ -538,12 +542,15 @@ function safeMessage(message: string): string {
   return truncate(collapse(redactGitMessage(message)), MAX_MESSAGE_CHARS);
 }
 
-async function resolveRef(source: ImportSource, git: GitRunner): Promise<{ ok: true; ref: string } | { ok: false; message: string }> {
+async function resolveRef(source: ImportSource, git: GitRunner): Promise<{ ok: true; ref: string } | { ok: false; message: string; detail: string }> {
   if (source.ref !== undefined) return { ok: true, ref: source.ref };
-  if (source.remote === undefined || source.branch === undefined) return { ok: false, message: 'There is no integration branch to import from.' };
+  // J-07: the person sees plain words; the git detail goes to the output channel through `detail`.
+  if (source.remote === undefined || source.branch === undefined) return { ok: false, message: SHARED_COPY_MISSING, detail: 'There is no integration branch to import from.' };
   const fetched = await fetchIntegrationBranch(source.projectRoot, source.remote, source.branch, git);
   if (!fetched.ok) {
-    return { ok: false, message: fetched.kind === 'offline' ? `The team remote could not be reached (${safeMessage(fetched.reason)})` : 'The integration branch was not found on the team remote' };
+    return fetched.kind === 'offline'
+      ? { ok: false, message: TEAM_UNREACHABLE, detail: `The team remote could not be reached (${safeMessage(fetched.reason)})` }
+      : { ok: false, message: SHARED_COPY_MISSING, detail: 'The integration branch was not found on the team remote' };
   }
   return { ok: true, ref: fetched.ref };
 }
@@ -559,18 +566,18 @@ export async function importPlans(input: {
   const { log, source, storageDir, mode } = input;
   const git = input.git ?? runGit;
   let written = 0;
-  const fail = (message: string): ImportResult => ({ ok: false, message: safeMessage(message), written });
+  const fail = (message: string, detail?: string): ImportResult => ({ ok: false, message: safeMessage(message), written, ...(detail === undefined ? {} : { detail: safeMessage(detail) }) });
   try {
     const memberId = log.signerMemberId();
     if (memberId === undefined) return fail(NO_DEVICE_KEY_MESSAGE);
     const synced = await log.sync();
-    if (synced.status.state !== 'ok') return fail(synced.status.reason ?? 'The team log could not be read.');
+    if (synced.status.state !== 'ok') return fail(TEAM_UNREACHABLE, synced.status.reason ?? 'The team log could not be read.');
     if (!decideTeamAction(log.state(), memberId, { kind: 'item.create', ownDraft: false }).allowed) {
       return fail(`${R.notPermitted}: only the team owner and leads can import plans`);
     }
 
     const resolved = await resolveRef(source, git);
-    if (!resolved.ok) return fail(resolved.message);
+    if (!resolved.ok) return fail(resolved.message, resolved.detail);
     const requested = input.milestone ?? '';
     const probe = await planningTreeHash(source.projectRoot, resolved.ref, git);
     if (mode === 'auto') {
@@ -581,7 +588,7 @@ export async function importPlans(input: {
     }
 
     const snapshot = await readPlanningSnapshot(source.projectRoot, resolved.ref, wantedPlanning, git, input.limits);
-    if (snapshot.treeHash === undefined) return fail('The integration branch has no .planning folder.');
+    if (snapshot.treeHash === undefined) return fail('This project has no plans to import yet. Plan your first phase, then import again.');
     const graph = buildGsdGraph({ paths: snapshot.paths, files: snapshot.files }, input.milestone === undefined ? {} : { milestone: input.milestone });
     if ('error' in graph) return fail(graph.error);
     const built = graphToItems(graph, { sourceCommit: snapshot.commit });
@@ -654,7 +661,7 @@ export function importResultText(result: ImportResult): string {
     return `The import did not finish: ${reason}. ${noun} written; run the import again to finish.`;
   }
   if (result.skipped === 'needs-command') {
-    return `The roadmap has ${result.pending ?? 0} changes for the Team Board. An automatic import makes at most ${AUTO_IMPORT_MAX_CHANGES}, so nothing was changed. Run "NEAR AI: Import Plans to Team Board" to bring them in.`;
+    return `The roadmap has ${result.pending ?? 0} changes for the Team Board. An automatic import makes at most ${AUTO_IMPORT_MAX_CHANGES}, so nothing was changed. Choose Import now, or run "NEAR AI: Import Plans to Team Board", to bring them in.`;
   }
   let text = result.written === 0 ? 'The Team Board is already up to date.' : `Imported ${result.written === 1 ? '1 item' : `${result.written} items`} to the Team Board.`;
   if (result.reopenNeeded > 0) {

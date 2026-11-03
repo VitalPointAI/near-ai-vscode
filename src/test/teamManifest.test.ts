@@ -29,12 +29,12 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as Manifest;
 const EM_DASH = '—';
 
-test('package.json contributes Enable Team Mode and Verify Team Log under the NEAR AI category', () => {
+test('package.json contributes Enable Team Mode and Check Team Record (the verifyLog id) under the NEAR AI category', () => {
   const byId = new Map(manifest.contributes.commands.map((entry) => [entry.command, entry]));
   const enable = byId.get('nearAi.team.enable');
   const verify = byId.get('nearAi.team.verifyLog');
   assert.deepEqual([enable?.title, enable?.category], ['Enable Team Mode', 'NEAR AI']);
-  assert.deepEqual([verify?.title, verify?.category], ['Verify Team Log', 'NEAR AI']);
+  assert.deepEqual([verify?.title, verify?.category], ['Check Team Record', 'NEAR AI']);
   assert.equal(commandsModule.ENABLE_COMMAND, 'nearAi.team.enable');
   assert.equal(commandsModule.VERIFY_LOG_COMMAND, 'nearAi.team.verifyLog');
   assert.equal(barModule.VERIFY_LOG_COMMAND, commandsModule.VERIFY_LOG_COMMAND, 'the status bar item points at the registered command');
@@ -64,6 +64,8 @@ test('the command ids kept in memberCommands equal the copies in teamSession, wh
   const sessionModule = require('../services/team/teamSession') as typeof import('../services/team/teamSession');
   assert.equal(memberModule.JOIN_COMMAND, sessionModule.JOIN_COMMAND);
   assert.equal(memberModule.MANAGE_MEMBERS_COMMAND, sessionModule.MANAGE_MEMBERS_COMMAND);
+  // The Import now button of the WR-02 notice runs the registered Import command.
+  assert.equal(sessionModule.IMPORT_PLANS_COMMAND, commandsModule.IMPORT_PLANS_COMMAND);
 });
 
 test('package.json contributes Open Team Board and Import Plans to Team Board with plain titles and icons', () => {

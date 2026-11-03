@@ -259,26 +259,31 @@ test('paused, not trusted and removed states: icon, plain form, tooltip ending, 
   const unreachable = statusText({ state: 'offline', reason: 'could not resolve host' }, 'Alpha');
   assert.equal(unreachable.text, `$(warning) ${PAUSED_UNREACHABLE_TEXT}`);
   assert.equal(unreachable.plain, PAUSED_UNREACHABLE_TEXT);
-  assert.ok(unreachable.tooltip.endsWith(' The board shows the last update and cannot be changed until the connection returns. Click to run Verify Team Log.'));
-  assert.equal(unreachable.accessibilityLabel, `${PAUSED_UNREACHABLE_TEXT}. Click to run Verify Team Log.`);
+  // UI review warning 6 and J-11: fixed plain sentences; the raw reason (here 'could not resolve host') never reaches the tooltip.
+  assert.equal(PAUSED_UNREACHABLE_TEXT, 'Team sync paused: offline');
+  assert.equal(unreachable.tooltip, 'The team could not be reached. NEAR AI keeps trying, up to every 10 minutes, and right away when this window gets focus. The board shows the last update and cannot be changed until the connection returns. Click to check the team.');
+  assert.equal(unreachable.tooltip.includes('could not resolve host'), false);
+  assert.equal(unreachable.accessibilityLabel, `${PAUSED_UNREACHABLE_TEXT}. Click to check the team.`);
   assert.equal(unreachable.tier, 'warning');
   assert.equal(unreachable.command, VERIFY_LOG);
 
   const rewritten = statusText({ state: 'paused', reason: TEAM_REJECTION_REASONS.logRewritten }, 'Alpha');
   assert.equal(rewritten.text, `$(warning) ${PAUSED_REWRITTEN_TEXT}`);
-  assert.ok(rewritten.tooltip.endsWith('Click to run Verify Team Log.'));
+  assert.equal(PAUSED_REWRITTEN_TEXT, 'Team sync paused: record changed');
+  assert.equal(rewritten.tooltip, 'Something unexpected changed in the shared team record, so team sync is paused to protect your work. Click to check the team.');
   assert.equal(rewritten.tier, 'warning');
   assert.equal(rewritten.command, VERIFY_LOG);
 
   const missing = statusText({ state: 'paused', reason: BRANCH_MISSING_REASON }, 'Alpha');
   assert.equal(missing.text, `$(warning) ${PAUSED_MISSING_TEXT}`);
-  assert.ok(missing.tooltip.endsWith('Click to run Verify Team Log.'));
+  assert.equal(PAUSED_MISSING_TEXT, 'Team sync paused: team record missing');
+  assert.equal(missing.tooltip, 'The shared team record could not be found where the team keeps it. NEAR AI keeps the last good copy and checks again. Click to check the team.');
   assert.equal(missing.tier, 'warning');
 
   const refused = statusText({ state: 'paused', reason: TEAM_REJECTION_REASONS.logRefused }, 'Alpha');
   assert.equal(refused.text, `$(error) ${PAUSED_REFUSED_TEXT}`);
-  assert.ok(refused.tooltip.startsWith('The team log did not pass its checks, so the board is paused.'));
-  assert.ok(refused.tooltip.endsWith('Click to run Verify Team Log.'));
+  assert.equal(PAUSED_REFUSED_TEXT, 'Team record not trusted');
+  assert.equal(refused.tooltip, 'The shared team record failed a safety check, so the board is paused and new team activity is ignored. Click to check the team.');
   assert.equal(refused.tier, 'error');
   assert.equal(refused.command, VERIFY_LOG);
 

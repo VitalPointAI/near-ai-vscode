@@ -175,7 +175,10 @@ function pushManyPlans(rig: Rig): string {
 
 test('WR-02: an automatic import with more changes than the ceiling writes nothing, tells the lead once in plain words, and the Import command brings them in', async () => {
   await inRig(async (rig, world) => {
-    const owner = await startSession(rig, world, 'owner');
+    // The notice carries Import now, which runs the Import command (WR-02 follow-up, plain-language pass).
+    const ran: Array<{ id: string; args: unknown }> = [];
+    stub.setMessageResponder((_text, actions) => (actions.includes('Import now') ? 'Import now' : undefined));
+    const owner = await startSession(rig, world, 'owner', { runCommand: async (id: string, args?: unknown) => { ran.push({ id, args }); } });
     try {
       assert.equal(owner.session.state().items.size, 13);
       pushManyPlans(rig);
@@ -184,8 +187,12 @@ test('WR-02: an automatic import with more changes than the ceiling writes nothi
       assert.equal(world.calls.integrationFetch, 2, 'the new head was read');
       assert.equal(owner.session.state().items.size, 13, 'nothing was written');
       const told = noticesOf('The roadmap has');
-      assert.deepEqual(told, ['The roadmap has 358 changes for the Team Board. An automatic import makes at most 300, so nothing was changed. Run "NEAR AI: Import Plans to Team Board" to bring them in.']);
+      assert.deepEqual(told, ['The roadmap has 358 changes for the Team Board. An automatic import makes at most 300, so nothing was changed. Choose Import now, or run "NEAR AI: Import Plans to Team Board", to bring them in.']);
       assert.equal(/\u2014|\u2013/.test(told[0] ?? ''), false, 'no dash characters');
+      const index = stub.notifications.findIndex((entry) => entry.message === told[0]);
+      assert.deepEqual(stub.notificationActions[index], ['Import now']);
+      await until(() => ran.length === 1, 'Import now to run the command');
+      assert.deepEqual(ran, [{ id: 'nearAi.team.importPlans', args: undefined }]);
 
       world.clock.value = 2 * MINUTE;
       await owner.session.sync();
@@ -196,6 +203,7 @@ test('WR-02: an automatic import with more changes than the ceiling writes nothi
       assert.equal(result.ok && result.written, 358, 'the command writes them');
       assert.equal(owner.session.state().items.size, 13 + 357);
     } finally {
+      stub.setMessageResponder(undefined);
       owner.session.dispose();
     }
   });

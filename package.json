@@ -210,7 +210,7 @@
       },
       {
         "command": "nearAi.team.verifyLog",
-        "title": "Verify Team Log",
+        "title": "Check Team Record",
         "category": "NEAR AI",
         "icon": "$(verified)"
       },
