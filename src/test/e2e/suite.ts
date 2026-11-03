@@ -166,21 +166,30 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       const seen: Message[] = [];
       activityTap.toView = (message) => seen.push(message as Message);
       comparisonTap.toView = (message) => seen.push(message as Message);
-      for (const [name, command] of PANELS) {
-        await vscode.commands.executeCommand(command);
-        await waitForProbe(name);
-        samples.set(name, sampleData(name, seen));
-        await editorAreaOnly();
-        const { room, editor } = await editorRoom(name);
-        console.log(`  ${name}: editor area ${editor}px, a page can be up to ${room}px beside a second group`);
-        assert.ok(room >= Math.max(...EDITOR_WIDTHS), `the editor area holds a ${Math.max(...EDITOR_WIDTHS)}px page beside a second group (editor area ${editor}px, page at most ${room}px)`);
-        for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) record(name, target, await sizeEditor(name, target));
+      const unmeasured: string[] = [];
+      try {
+        for (const [name, command] of PANELS) {
+          await vscode.commands.executeCommand(command);
+          await waitForProbe(name);
+          samples.set(name, sampleData(name, seen));
+          await editorAreaOnly();
+          const { room, editor } = await editorRoom(name);
+          console.log(`  ${name}: editor area ${editor}px, a page can be up to ${room}px beside a second group`);
+          assert.ok(room >= Math.max(...EDITOR_WIDTHS), `the editor area holds a ${Math.max(...EDITOR_WIDTHS)}px page beside a second group (editor area ${editor}px, page at most ${room}px)`);
+          for (const width of WIDER_EDITOR_WIDTHS.filter((width) => width > room)) unmeasured.push(`${name} at ${width}px (the window holds ${room}px)`);
+          for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) record(name, target, await sizeEditor(name, target));
+          await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+          await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+        }
+      } finally {
+        // Back to the usual layout for the tests after this one, whatever happened above.
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
         await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+        await vscode.commands.executeCommand('workbench.view.explorer');
+        await vscode.commands.executeCommand('nearAiChatView.focus');
       }
-      // Back to the usual layout for the tests after this one.
-      await vscode.commands.executeCommand('workbench.view.explorer');
-      await vscode.commands.executeCommand('nearAiChatView.focus');
+      if (unmeasured.length) console.warn(`  !! NOT MEASURED, the window is too small: ${unmeasured.join('; ')}`);
+      console.log(`  Widths measured: chat ${SIDEBAR_WIDTHS.join(', ')}px; pages ${[...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS].join(', ')}px${unmeasured.length ? ` except ${unmeasured.length} too wide for this window` : ''}; text set in a wider stand-in font.`);
       assert.deepEqual(problems, []);
     }],
     ['a file write asks for approval, applies on approval, and Revert removes it', async () => {
@@ -247,12 +256,18 @@ async function probe(name: string): Promise<LayoutReport> {
 async function settled(name: string): Promise<LayoutReport> {
   const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
   const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
+  // A wider font than VS Code's (monospace, 10% larger), so a run here also catches a layout that
+  // only overflows with another machine's fonts.
+  await postToPage(name, { type: 'layout-stress' });
   for (const message of samples.get(name) ?? []) await postToPage(name, message);
   let last = await probe(name);
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  let steady = 0;
+  for (let attempt = 0; attempt < 16; attempt += 1) {
     await pause(250);
     const next = await probe(name);
-    if (next.width === last.width && next.scrollWidth === last.scrollWidth) return next;
+    // Three readings in a row that agree: the page has finished resizing.
+    steady = next.width === last.width && next.scrollWidth === last.scrollWidth ? steady + 1 : 0;
+    if (steady >= 2) return next;
     last = next;
   }
   return last;
@@ -303,6 +318,8 @@ async function sizeEditor(name: string, target: number): Promise<LayoutReport> {
 async function splitEditor(fraction: number): Promise<void> {
   await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
   await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{ size: fraction }, { size: 1 - fraction }] });
+  // The page hears about its new size a little after the layout changes.
+  await pause(400);
 }
 
 /**

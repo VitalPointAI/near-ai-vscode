@@ -25,10 +25,17 @@ test('the shared stylesheet stops sideways page scroll and defines the responsiv
   assert.match(base, /@media \(max-width: 600px\) \{[\s\S]*table\.stack-medium[\s\S]*content: attr\(data-label\)/);
   assert.match(base, /\.table-wrap \{ position: relative;/, 'hidden headers stay inside their table box');
   assert.match(base, /\.hint, \.error \{ overflow-wrap: anywhere; \}/);
+  // Whatever the font or name length, table text wraps so a table shrinks to its box; numbers stay whole.
+  assert.match(base, /\.table-wrap > table \{ width: 100%; \}/);
+  assert.match(base, /\.table-wrap th, \.table-wrap td \{ min-width: 0; white-space: normal; overflow-wrap: anywhere; \}/);
+  assert.match(base, /\.table-wrap td\.num \{ white-space: nowrap; \}/);
   assert.doesNotMatch(base, RAW_HEX, 'colours come from the theme');
 });
 
 test('grids never ask for more width than the panel has', () => {
+  // No table cell insists on a fixed minimum width (names wrap instead).
+  assert.doesNotMatch(css('activity/activity.css'), /(#history|#now|#models) td[^{]*\{[^}]*min-width: \d/);
+  assert.doesNotMatch(css('compare/compare.css'), /\.(model-cell|wrap|misses)[^{]*\{[^}]*min-width: \d/);
   for (const file of ['activity/activity.css', 'compare/compare.css', 'teams/teams.css', 'onboarding/onboarding.css', 'tools/tools.css', 'mcp/mcp.css']) {
     const sheet = css(file);
     assert.doesNotMatch(sheet, /minmax\(\d+px/, `${file}: a grid column minimum is guarded with min(…, 100%)`);
@@ -51,8 +58,8 @@ test('each page has narrow-width rules', () => {
   assert.match(css('activity/activity.css'), /\.segmented \{ display: inline-flex; flex-wrap: wrap;/);
   assert.match(css('compare/compare.css'), /fieldset \{ min-width: 0;/);
   assert.match(css('compare/compare.css'), /@media \(max-width: 1300px\) \{\s*\.col-tertiary \{ display: none !important; \}\s*\.when-medium \{ display: block; \}/, 'the 14-column leaderboard drops its least important columns below 1300px');
-  assert.match(css('compare/compare.css'), /\.role select \{ min-width: 0; max-width: 100%; \}/);
-  assert.match(css('compare/compare.css'), /@media \(max-width: 900px\) \{\s*\.role \{ flex-direction: column;[^}]*\}\s*\.role select \{ width: 100%; \}/, 'the role picker takes the cell width on smaller panels');
+  assert.match(css('compare/compare.css'), /\.role select \{ width: 100%; min-width: 0; max-width: 100%; \}/, 'the role picker takes the cell width, not its longest role name');
+  assert.match(css('compare/compare.css'), /\.role \{ display: flex; flex-direction: column;/, 'Apply sits under the role picker');
   assert.match(css('mcp/mcp.css'), /@media \(max-width: 420px\)/);
   assert.match(css('mcp/mcp.css'), /\.server-head \{ display: flex; flex-wrap: wrap;/);
   assert.match(css('teams/teams.css'), /#crumbs \{ display: flex; flex-wrap: wrap;/);
