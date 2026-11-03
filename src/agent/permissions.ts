@@ -3,8 +3,9 @@ import { classifyCommand, CommandContext } from './commandSafety';
 import { NETWORK_COMMAND } from './untrusted';
 import type { CommandSafetyCheck } from './safetyModel';
 
-/** `reason` on an ask says why it was not run automatically; the approval card shows it. */
-export type PermissionDecision = { decision: 'allow' } | { decision: 'ask'; reason?: string } | { decision: 'deny'; reason: string };
+/** `reason` on an allow names the grant that let it run (the engagement grant names its
+ * engagement); `reason` on an ask says why it was not run automatically and the card shows it. */
+export type PermissionDecision = { decision: 'allow'; reason?: string } | { decision: 'ask'; reason?: string } | { decision: 'deny'; reason: string };
 
 /** What the `auto` mode needs to judge a shell command. */
 export interface AutoApprovalContext extends CommandContext {
@@ -64,16 +65,46 @@ export class RunGrants {
   public readonly allowRules = new Set<string>();
   /** Set once the run reads outside content; some actions then always ask. */
   public tainted = false;
+  /**
+   * The engagement-wide grant for intrusive cyber steps (D-04): granted once for a run, and each
+   * step must still name that engagement and an in-scope target. Undefined for every other run, so
+   * no existing decision changes.
+   */
+  public intrusiveEngagement?: { engagementId: string; inScope(target: string): boolean };
+
+  /** Grants intrusive steps for one engagement for the rest of this run (D-04). */
+  public grantIntrusive(engagementId: string, inScope: (target: string) => boolean): void {
+    this.intrusiveEngagement = { engagementId, inScope };
+  }
 }
 
+/** Which engagement, and which target, a cyber step claims the grant for. */
+export interface IntrusiveStep { engagementId: string; target: string }
+
 /**
+ * The decision for an intrusive step under the engagement grant, or undefined when no grant is set
+ * or the step does not claim one (so the caller falls through to the ordinary order). An in-scope
+ * step of the granted engagement is allowed; anything else is DENIED, not asked, so a model cannot
+ * widen its own scope by asking again (T-25-36).
+ */
+export function intrusiveGrantDecision(grants: RunGrants, step: IntrusiveStep | undefined): PermissionDecision | undefined {
+  const grant = grants.intrusiveEngagement;
+  if (!grant || !step) return undefined;
+  if (step.engagementId !== grant.engagementId) return undefined;
+  if (!grant.inScope(step.target)) return { decision: 'deny', reason: `${step.target} is outside the resolved scope of engagement ${grant.engagementId}.` };
+  return { decision: 'allow', reason: `Allowed under the intrusive grant for engagement ${grant.engagementId}.` };
+}/**
  * Decides whether a tool call runs, asks first, or is refused. Reads, searches, and task lists
  * always run. File writes follow the action policy. Shell commands consult the deny list, the
  * per-run grants, the allow list (simple commands only), then the action policy. In `auto` mode
  * the command classifier then decides; this synchronous form asks for commands it cannot decide
  * (decidePermissionAsync asks the safety model about those).
+ *
+ * The optional `intrusive` step is the one additive input for cyber work (D-04): it is consulted
+ * only when the run holds an engagement grant, only after the deny list, and never changes a
+ * decision for a run without one.
  */
-export function decidePermission(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: CommandContext): PermissionDecision {
+export function decidePermission(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: CommandContext, intrusive?: IntrusiveStep): PermissionDecision {
   if (policy.emergencyStop) return { decision: 'deny', reason: 'Emergency stop is on.' };
   if (capability === 'read' || capability === 'plan') return { decision: 'allow' };
   if (capability === 'workspaceWrite') {
@@ -85,6 +116,10 @@ export function decidePermission(capability: ActionCapability, command: string |
     const unquoted = normalizeCommand((command ?? '').replace(/["'\\]/g, ''));
     const denied = rules.denyCommands.find((pattern) => pattern && unquoted.includes(normalizeCommand(pattern)));
     if (denied) return { decision: 'deny', reason: `"${denied}" is on your deny list (nearAi.agent.denyCommands).` };
+    // The engagement grant sits between the deny list and the per-command grants: an intrusive
+    // step of the granted engagement runs without a card, an out-of-scope one is refused.
+    const intrusion = intrusiveGrantDecision(grants, intrusive);
+    if (intrusion) return intrusion;
     if (grants.commands.has((command ?? '').trim())) return { decision: 'allow' };
     const allowList = [...rules.allowCommands, ...grants.allowRules];
     if (isAutoAllowed(command ?? '', allowList)) return { decision: 'allow' };
@@ -106,8 +141,8 @@ export function decidePermission(capability: ActionCapability, command: string |
  * steered both the agent and the check) or no private model is available; then it asks. Every
  * other mode decides exactly as decidePermission does.
  */
-export async function decidePermissionAsync(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: AutoApprovalContext): Promise<PermissionDecision> {
-  const decided = decidePermission(capability, command, policy, rules, grants, auto);
+export async function decidePermissionAsync(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: AutoApprovalContext, intrusive?: IntrusiveStep): Promise<PermissionDecision> {
+  const decided = decidePermission(capability, command, policy, rules, grants, auto, intrusive);
   if (policy.mode !== 'auto' || capability !== 'shell' || decided.decision !== 'ask' || !auto) return decided;
   const classified = classifyCommand(command ?? '', withAllowList(auto, [...rules.allowCommands, ...grants.allowRules]));
   if (classified.verdict !== 'unknown') return decided;
