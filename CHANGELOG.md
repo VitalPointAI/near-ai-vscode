@@ -1,16 +1,26 @@
 # Changelog
 
-## Unreleased
+## 0.4.13
+
+Replies in the chat are easier to read. Tables, quotes and crossed-out text
+now show the way the model wrote them, and links in replies open the right
+page.
 
 - **Tables in replies now show as real tables** with headers and lined-up
-  columns. Wide tables scroll sideways inside the message, and keep their
+  columns. Before, a table showed up as lines of text full of dividers and
+  dashes. Wide tables scroll sideways inside the message, and keep their
   place while the reply is still arriving. To scroll one with the keyboard,
-  press Tab until the table is selected, then use the arrow keys.
+  press Tab until the table is selected, then use the arrow keys. Screen
+  readers name each table by its column headings.
 - **Quoted text stays together as one quote**, and crossed-out text shows
-  crossed out.
+  crossed out. Before, each line of a longer quote showed as a separate
+  quote, and crossed-out text showed with its marks around it.
 - **Links in replies open the right page** even when the address has
   characters like underscores, tildes or asterisks in it. Before, some of
   these links went to a broken address.
+- **Reporting a security problem is now private.** The security notes
+  explain how to send a report that only the maintainers can see, from the
+  Security tab of the project's GitHub page.
 
 ## 0.4.12
 

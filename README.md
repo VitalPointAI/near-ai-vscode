@@ -107,8 +107,9 @@ as a row in the chat.
 
 ### Chat that fits in your editor
 
-- Streaming answers with formatted code, plus **Copy** and **Insert at cursor**
-  on every code block.
+- Streaming answers with formatted code and tables, plus **Copy** and
+  **Insert at cursor** on every code block. Wide tables scroll sideways inside
+  the message.
 - Pick any model NEAR AI offers, or one from a local runtime such as Ollama or
   LM Studio, from the input box, with pricing and privacy shown.
 - **Several conversations at once**, as in Claude Code. Start a new one with
