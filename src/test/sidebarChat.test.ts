@@ -257,6 +257,7 @@ const tables = require(path.join(__dirname, '..', '..', 'media', 'chat', 'tables
   restore(target: unknown, saved: unknown): FakeWrap[];
   syncTabStop(wrap: FakeWrap, active?: unknown): void;
   focusLeft(event: { target: unknown; relatedTarget: unknown }): void;
+  watchSizes(Observer: unknown, activeElement: () => unknown): { observe(wraps: unknown[]): void; release(wraps: unknown[]): void; reset(): void };
 };
 
 test('chat tables keep their sideways scroll and focus when a streaming reply re-renders', () => {
@@ -324,6 +325,54 @@ test('chat tables stop being a Tab stop when focus leaves a box that does not ov
   // Focus leaving anything outside a table is ignored.
   tables.focusLeft({ target: { closest: () => null }, relatedTarget: null });
   tables.focusLeft({ target: null, relatedTarget: null });
+});
+
+test('chat tables stop being watched for size changes once their reply is gone or the chat is cleared', () => {
+  // A stand-in for ResizeObserver that records what it watches.
+  class FakeObserver {
+    static last: FakeObserver;
+    watched = new Set<unknown>();
+    constructor(public callback: (entries: { target: unknown }[]) => void) { FakeObserver.last = this; }
+    observe(node: unknown) { this.watched.add(node); }
+    unobserve(node: unknown) { this.watched.delete(node); }
+    disconnect() { this.watched.clear(); }
+  }
+  const box = (overflow: boolean) => {
+    const wrap = Object.assign(new FakeWrap(overflow ? 900 : 200), { isConnected: true, firstElementChild: { table: true } });
+    return wrap;
+  };
+  const sizes = tables.watchSizes(FakeObserver, () => null);
+  const observer = FakeObserver.last;
+  const [first, second] = [box(true), box(false)];
+  sizes.observe([first, second]);
+  assert.deepEqual([...observer.watched], [first, first.firstElementChild, second, second.firstElementChild]);
+  // A size change sets the Tab stop of a box that is still on the page.
+  observer.callback([{ target: first }]);
+  assert.equal(first.getAttribute('tabindex'), '0');
+  // A box that has left the page is let go instead.
+  second.isConnected = false;
+  observer.callback([{ target: second }]);
+  assert.equal(observer.watched.has(second), false);
+  // A reply rebuilt or removed lets go of its boxes.
+  sizes.release([first]);
+  assert.deepEqual([...observer.watched], [second.firstElementChild]);
+  // Clearing the conversation lets go of every box at once.
+  sizes.observe([first]);
+  sizes.reset();
+  assert.equal(observer.watched.size, 0);
+  // Without ResizeObserver nothing is watched and nothing fails.
+  const none = tables.watchSizes(undefined, () => null);
+  none.observe([first]);
+  none.release([first]);
+  none.reset();
+  // The chat view lets go of tables when a reply is removed or the conversation is cleared.
+  const { readFileSync } = require('node:fs') as typeof import('node:fs');
+  const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  const reset = script.slice(script.indexOf('function resetConversation() {'), script.indexOf('\n  }\n', script.indexOf('function resetConversation() {')));
+  assert.match(reset, /tableSizes\.reset\(\);\n {4}transcript\.replaceChildren\(welcome\);/);
+  assert.doesNotMatch(script, /current\.node\.remove\(\)/);
+  assert.equal([...script.matchAll(/removeTurn\(current\.node\)/g)].length, 3);
+  assert.match(script, /tableSizes\.release\(saved\.wraps\);\n {4}target\.replaceChildren\(\);/);
 });
 
 test('chat tables are Tab stops only while they are wider than their box', () => {

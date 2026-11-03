@@ -72,7 +72,32 @@
     syncTabStop(wrap, null);
   }
 
-  const api = { capture, restore, syncTabStop, focusLeft };
+  /**
+   * Watches table boxes and their tables for size changes, so a box becomes a Tab stop when it gets
+   * wider than the chat and stops being one when the chat is widened again. A box that has left
+   * the page is let go on its next size change, and `reset` lets go of every box at once when the
+   * conversation is cleared, so removed replies can be freed. Without ResizeObserver it does nothing.
+   */
+  function watchSizes(Observer, activeElement) {
+    if (typeof Observer !== 'function') return { observe() {}, release() {}, reset() {} };
+    const observer = new Observer((entries) => entries.forEach((entry) => {
+      const node = entry.target;
+      if (!node.isConnected) { observer.unobserve(node); return; }
+      const wrap = node.closest(WRAP);
+      if (wrap) syncTabStop(wrap, activeElement());
+    }));
+    const each = (wraps, act) => Array.from(wraps).forEach((wrap) => {
+      act(wrap);
+      if (wrap.firstElementChild) act(wrap.firstElementChild);
+    });
+    return {
+      observe(wraps) { each(wraps, (node) => observer.observe(node)); },
+      release(wraps) { each(wraps, (node) => observer.unobserve(node)); },
+      reset() { observer.disconnect(); }
+    };
+  }
+
+  const api = { capture, restore, syncTabStop, focusLeft, watchSizes };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.nearTables = api;
 })(typeof window === 'undefined' ? globalThis : window);
