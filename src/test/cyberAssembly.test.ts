@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import test from 'node:test';
 import type { DisclaimerAcceptance, Engagement, ResolvedScope } from '../domain/cyber';
 import { scopeFingerprint } from '../domain/cyberLegal';
-import { RunGrants } from '../agent/permissions';
+import { decidePermission, DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { ShellSession } from '../agent/shell';
 import { cyberAssembly, cyberStorePath, modesFor, panelCyberRunStarter, panelModel, panelTools, RATE_PER_MINUTE, type CompletionClient } from '../services/cyberAssembly';
@@ -252,4 +252,37 @@ test('a disabled engagement keeps its disabled tier instead of falling back to t
   // The tier used to default to tempFolder, so a disabled engagement ran payloads on the machine.
   const modes = modesFor('defensive', ['passive']);
   assert.deepEqual(modes, ['passive']);
+});
+
+test('an intrusive engagement carries its grant, so an exploit step is not refused', async () => {
+  const { root, toolContext } = await context();
+  const grants = new RunGrants();
+  const assembly = cyberAssembly(
+    { globalStorageUri: { fsPath: root }, extension: { packageJSON: { version: '0.4.10' } } },
+    { client: stepClient, model: 'test-model', toolContext, tools: () => [], stopped: () => false }
+  );
+  try {
+    // The starter binds the engagement's grant; apply the same rule here and prove a step passes.
+    grants.grantIntrusive('eng-1', (target) => target === 'https://example.test/');
+    const allowed = decidePermission('shell', 'CyberExploitTool', { mode: 'approve-risky', emergencyStop: false }, DEFAULT_RULES, grants, undefined, { engagementId: 'eng-1', target: 'https://example.test/' });
+    assert.equal(allowed.decision, 'allow', 'a granted, in-scope step runs without a card');
+    const outside = decidePermission('shell', 'CyberExploitTool', { mode: 'approve-risky', emergencyStop: false }, DEFAULT_RULES, grants, undefined, { engagementId: 'eng-1', target: 'https://evil.test/' });
+    assert.equal(outside.decision, 'deny', 'the grant does not cover a target outside the scope');
+  } finally {
+    assembly.toolContext.shell.dispose();
+  }
+});
+
+test('with no approval card, an ask is refused rather than silently allowed', async () => {
+  const { root, toolContext } = await context();
+  const assembly = cyberAssembly(
+    { globalStorageUri: { fsPath: root }, extension: { packageJSON: { version: '0.4.10' } } },
+    { client: stepClient, model: 'test-model', toolContext, tools: () => [] }
+  );
+  try {
+    const answer = await assembly.requestApproval({ id: 's1', role: 'operator', action: 'probe', target: 'https://example.test/', tool: 'CyberExploitTool', args: [], sandbox: 'none', expectedResult: 'x', safetyFlags: { maxDurationMs: 1_000, rateLimit: 0, denyList: [] } });
+    assert.equal(answer.decision, 'deny', 'no card means no silent allow');
+  } finally {
+    assembly.toolContext.shell.dispose();
+  }
 });

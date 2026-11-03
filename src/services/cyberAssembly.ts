@@ -177,7 +177,9 @@ export function cyberAssemblyCore(options: {
     toolContext: options.toolContext,
     currentAcceptance: options.currentAcceptance,
     // Without a chat open there is still one gate: the caller's seam, or an explicit allow.
-    requestApproval: options.requestApproval ?? (async () => ({ decision: 'allow' as const })),
+    // No seam means no card, so an ask is refused rather than silently allowed. A caller that can
+    // run intrusive steps always supplies the real card.
+    requestApproval: options.requestApproval ?? (async (step) => ({ decision: 'deny' as const, reason: `No approval card is available to authorise ${step.tool}.` })),
     tools: options.tools
   };
 }
@@ -345,6 +347,11 @@ export function panelCyberRunStarter(
       ? 'disabled'
       : engagementTier ?? (options.sandboxTier ? await options.sandboxTier() : 'tempFolder');
     const grants = new RunGrants();
+    // An intrusive engagement was granted when the user accepted its disclaimer; the grant is
+    // scope-checked per step, so it is re-bound here to this engagement's own scope.
+    if (request.engagement.allowedModes.includes('intrusive')) {
+      grants.grantIntrusive(request.engagement.id, (target) => scopeIncludes(request.engagement.resolvedScope, target));
+    }
     const collected: Finding[] = [];
     const security = options.security?.();
     const model = request.model ?? options.model ?? '';
