@@ -5,7 +5,7 @@ import { parseChatWebviewMessage } from '../services/chatBridge';
 
 interface Block { type: 'html' | 'code'; html?: string; lang?: string; code?: string }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const markdown = require(path.join(__dirname, '..', '..', 'media', 'chat', 'markdown.js')) as { parse(text: string, options?: { partial?: boolean }): Block[]; inline(text: string): string };
+const markdown = require(path.join(__dirname, '..', '..', 'media', 'chat', 'markdown.js')) as { parse(text: string, options?: { partial?: boolean }): Block[]; inline(text: string): string; tableLabel(header: string[]): string };
 
 class FakeMarkdownString { constructor(public value = '') {} }
 
@@ -43,7 +43,7 @@ test('markdown renders lists, emphasis, and headings', () => {
 });
 
 const render = (text: string, partial = false) => markdown.parse(text, { partial }).map((block) => block.html).join('');
-const WRAP = '<div class="table-wrap" role="region" aria-label="Table" tabindex="0">';
+const WRAP = '<div class="table-wrap" role="region" aria-label="Table: Chat handoff (planned), Panel-driven (shipped)">';
 
 test('markdown renders the owner\'s pipe table as a scrollable, labelled table', () => {
   const html = render([
@@ -132,18 +132,146 @@ test('markdown renders strikethrough and leaves code spans alone', () => {
   assert.equal(markdown.inline('~~gone~~ and `~~kept~~` and ~~<s>~~'), '<del>gone</del> and <code>~~kept~~</code> and <del>&lt;s&gt;</del>');
 });
 
-test('chat view renders streaming text as partial and the finished reply strictly, and tables scroll in their own box', () => {
+// Every prefix of a streamed reply, rendered the way the view renders it while text arrives.
+const frames = (doc: string) => Array.from({ length: doc.length }, (_unused, cut) => ({ text: doc.slice(0, cut + 1), html: render(doc.slice(0, cut + 1), true) }));
+const stripAttrs = (html: string) => html.replace(/ role="region" aria-label="[^"]*"| scope="(col|row)"/g, '');
+
+test('markdown streams a table without leading pipes as a table once its delimiter row starts, never as a rule', () => {
+  const doc = 'Name | Count\n--- | ---\nA | 1';
+  for (const frame of frames(doc)) {
+    assert.doesNotMatch(frame.html, /<hr>/, JSON.stringify(frame.text));
+    if (frame.text.includes('\n-')) assert.ok(frame.html.startsWith('<div class="table-wrap"'), `${JSON.stringify(frame.text)}: ${frame.html}`);
+  }
+  assert.equal(stripAttrs(render('Name | Count\n-', true)), '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Count</th></tr></thead></table></div>');
+  assert.equal(render(doc, true), render(doc));
+  // A header with leading pipes and a delimiter row without them never drops back to a paragraph.
+  const mixed = '| a | b |\n--- | ---\n| 1 | 2 |';
+  // A lone "|" renders nothing yet; from the first cell on, every frame is a table.
+  assert.equal(render('|', true), '');
+  for (const frame of frames(mixed).slice(2)) assert.ok(frame.html.startsWith('<div class="table-wrap"'), `${JSON.stringify(frame.text)}: ${frame.html}`);
+  // Prose with a pipe followed by a list item is not taken for a table.
+  assert.equal(render('a | b\n- ', true), '<p>a | b</p><ul><li></li></ul>');
+  // Once the stream ends, a lone rule under prose is a rule again.
+  assert.equal(render('a | b\n---'), '<p>a | b</p><hr>');
+});
+
+test('markdown does not show a prose line with a pipe as a table header while a reply streams', () => {
+  for (const frame of frames('Use x | y as follows:\n| a | b |\n|---|---|').filter((item) => item.text.includes('\n'))) {
+    assert.match(frame.html, /^<p>Use x \| y as follows:<\/p>/, JSON.stringify(frame.text));
+  }
+  assert.equal(render('Use x | y as follows:\n|', true), '<p>Use x | y as follows:</p>');
+  assert.equal(render('use a | b', true), '<p>use a | b</p>');
+  // A delimiter row with more cells than its header is not a header of its own.
+  assert.equal(render('| a | b |\n|---|---|-', true), '<p>| a | b |<br>|---|---|-</p>');
+});
+
+test('markdown keeps list items and headings with pipes as they are, next to tables', () => {
+  assert.equal(render('- a | b\n|---|---|\n| 1 | 2 |'), '<ul><li>a | b</li></ul><p>|---|---|<br>| 1 | 2 |</p>');
+  assert.equal(render('# Title | Sub\n|---|---|'), '<h3>Title | Sub</h3><p>|---|---|</p>');
+  assert.equal(render('1. step | x\n|---|---|'), '<ol><li>step | x</li></ol><p>|---|---|</p>');
+  assert.equal(render('* | a |\n|---|'), '<ul><li>| a |</li></ul><p>|---|</p>');
+  const table = '<div class="table-wrap" role="region" aria-label="Table: a, b"><table><thead><tr><th scope="col">a</th><th scope="col">b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table></div>';
+  assert.equal(render('| a | b |\n|---|---|\n| 1 | 2 |\n- list | x'), `${table}<ul><li>list | x</li></ul>`);
+  assert.equal(render('| a | b |\n|---|---|\n| 1 | 2 |\n## H | x'), `${table}<h4>H | x</h4>`);
+  assert.equal(render('| a | b |\n|---|---|\n| 1 | 2 |\n3. step | x'), `${table}<ol><li>step | x</li></ol>`);
+  // Streaming never takes a heading or list item for a provisional table header either.
+  assert.equal(render('## H | x\n|', true), '<h4>H | x</h4>');
+  assert.equal(render('- a | b\n|--', true), '<ul><li>a | b</li></ul><p>|--</p>');
+});
+
+test('markdown keeps link URLs intact and strikes through only text the tildes hug', () => {
+  assert.equal(markdown.inline('[x](https://a.com/~~b~~)'), '<a href="https://a.com/~~b~~" title="https://a.com/~~b~~">x</a>');
+  assert.equal(markdown.inline('[x](https://a.com/**b**/_c_/__d__)'), '<a href="https://a.com/**b**/_c_/__d__" title="https://a.com/**b**/_c_/__d__">x</a>');
+  assert.equal(markdown.inline('[**bold** ~~old~~](https://a.com/~~b~~) and ~~gone~~'), '<a href="https://a.com/~~b~~" title="https://a.com/~~b~~"><strong>bold</strong> <del>old</del></a> and <del>gone</del>');
+  assert.equal(markdown.inline('cost is ~~5 and ~~10'), 'cost is ~~5 and ~~10');
+  assert.equal(markdown.inline('~~ spaced ~~ and ~~~x~~~'), '~~ spaced ~~ and ~~~x~~~');
+  assert.equal(markdown.inline('~~a~~ ~~b c~~'), '<del>a</del> <del>b c</del>');
+  // A code span inside a URL never puts markup into the link's attributes.
+  assert.equal(markdown.inline('[x](https://e.com/`a`)'), '[x](https://e.com/<code>a</code>)');
+  // Placeholder characters in the model's text cannot pull in another span.
+  assert.equal(markdown.inline('\u00000\u0000 `x` \u00010\u0001'), '�0� <code>x</code> �0�');
+});
+
+test('markdown gives every table region its own label', () => {
+  const html = render('| Name | `Count` | [Docs](https://near.ai) | Extra |\n|---|---|---|---|\n\n| a | b |\n|---|---|\n\n| a | b |\n|---|---|\n\n| |\n|---|');
+  assert.deepEqual([...html.matchAll(/aria-label="([^"]*)"/g)].map((match) => match[1]), ['Table: Name, Count, Docs, …', 'Table: a, b', 'Table: a, b (2)', 'Table']);
+  assert.doesNotMatch(html, /tabindex/);
+  assert.equal(markdown.tableLabel(['<b>"x"</b>']), 'Table: <b>"x"</b>');
+  assert.match(render('| <b>"x"</b> |\n|---|'), /aria-label="Table: &lt;b&gt;&quot;x&quot;&lt;\/b&gt;"/);
+  assert.equal(markdown.tableLabel(['x'.repeat(200)]).length, 'Table: '.length + 80);
+});
+
+// A stand-in for the table boxes in the chat DOM: just the parts tables.js touches.
+class FakeWrap {
+  scrollLeft = 0;
+  focused = false;
+  attrs = new Map<string, string>();
+  constructor(public scrollWidth: number, public clientWidth = 300) {}
+  getAttribute(name: string) { return this.attrs.get(name) ?? null; }
+  hasAttribute(name: string) { return this.attrs.has(name); }
+  setAttribute(name: string, value: string) { this.attrs.set(name, value); }
+  removeAttribute(name: string) { this.attrs.delete(name); }
+  contains(node: unknown) { return node === this; }
+  focus() { this.focused = true; }
+}
+const fakeBody = (wraps: FakeWrap[]) => ({ querySelectorAll: () => wraps });
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const tables = require(path.join(__dirname, '..', '..', 'media', 'chat', 'tables.js')) as {
+  capture(target: unknown, active: unknown): { scroll: number[]; focused: number };
+  restore(target: unknown, saved: unknown): FakeWrap[];
+  syncTabStop(wrap: FakeWrap, active?: unknown): void;
+};
+
+test('chat tables keep their sideways scroll and focus when a streaming reply re-renders', () => {
+  const before = [new FakeWrap(900), new FakeWrap(200)];
+  before[0].scrollLeft = 240;
+  const saved = tables.capture(fakeBody(before), before[0]);
+  assert.deepEqual({ scroll: saved.scroll, focused: saved.focused }, { scroll: [240, 0], focused: 0 });
+  // The next frame rebuilds both tables; the wide one gets its scroll and focus back.
+  const after = [new FakeWrap(950), new FakeWrap(200)];
+  tables.restore(fakeBody(after), saved);
+  assert.equal(after[0].scrollLeft, 240);
+  assert.equal(after[0].focused, true);
+  assert.equal(after[1].focused, false);
+  // Focus on something else on the page is left alone.
+  const elsewhere = tables.capture(fakeBody(after), { other: true });
+  assert.equal(elsewhere.focused, -1);
+  const third = [new FakeWrap(950)];
+  tables.restore(fakeBody(third), elsewhere);
+  assert.equal(third[0].focused, false);
+});
+
+test('chat tables are Tab stops only while they are wider than their box', () => {
+  const wide = new FakeWrap(900);
+  const narrow = new FakeWrap(280);
+  tables.restore(fakeBody([wide, narrow]), undefined);
+  assert.equal(wide.getAttribute('tabindex'), '0');
+  assert.equal(narrow.hasAttribute('tabindex'), false);
+  // Widening the chat takes the Tab stop away, unless the table has focus right now.
+  wide.clientWidth = 1000;
+  tables.syncTabStop(wide, wide);
+  assert.equal(wide.getAttribute('tabindex'), '0');
+  tables.syncTabStop(wide, undefined);
+  assert.equal(wide.hasAttribute('tabindex'), false);
+  narrow.clientWidth = 100;
+  tables.syncTabStop(narrow, undefined);
+  assert.equal(narrow.getAttribute('tabindex'), '0');
+});
+
+test('chat view loads the table helper and styles tables with theme colours only', () => {
   const { readFileSync } = require('node:fs') as typeof import('node:fs');
+  const panel = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'panelView.ts'), 'utf8');
+  // Streaming frames render with the lenient rules and rebuild tables through the helper.
   const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
-  assert.match(script, /markdown\.parse\(text, \{ partial: partial === true \}\)/);
   assert.match(script, /requestAnimationFrame\(\(\) => flushAssistant\(true\)\)/);
-  // closeSegment and finishAssistant render the final text with the strict rules.
-  assert.equal([...script.matchAll(/flushAssistant\(\);/g)].length, 2);
+  assert.match(script, /tables\.capture\(target, document\.activeElement\)[\s\S]*target\.replaceChildren\(\)[\s\S]*tables\.restore\(target, saved\)/);
+  assert.ok(panel.indexOf("asset('tables.js')") > 0 && panel.indexOf("asset('tables.js')") < panel.indexOf("asset('chat.js')"), 'tables.js loads before chat.js');
   const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.css'), 'utf8');
   assert.match(css, /\.turn \.table-wrap \{[^}]*overflow-x: auto/);
   assert.match(css, /\.turn td\.align-right \{ text-align: right;/);
+  assert.match(css, /\.turn td code[^{]*\{ overflow-wrap: anywhere; \}/);
   const tableRules = css.split('\n').filter((line) => /\.turn (\.table-wrap|table|th|td|thead|tbody|tr)/.test(line)).join('\n');
-  assert.doesNotMatch(tableRules, /#[0-9a-f]{3,8}\b|rgb\(/i);
+  assert.doesNotMatch(tableRules, /#[0-9a-f]{3,8}\b|rgb\(|style=/i);
 });
 
 test('sidebar html loads only nonce scripts and theme-relative assets', () => {

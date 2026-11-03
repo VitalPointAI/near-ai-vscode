@@ -5,6 +5,7 @@
 
   const vscode = acquireVsCodeApi();
   const markdown = window.nearMarkdown;
+  const tables = window.nearTables;
   const $ = (id) => document.getElementById(id);
   const transcript = $('transcript');
   const welcome = $('welcome');
@@ -261,9 +262,21 @@
     if (!m.replay && (m.state === 'returned' || m.state === 'blocked') && m.text && !input.value.trim()) { input.value = m.text; autosize(); updateSendState(); }
   }
 
+  // A table box becomes a Tab stop when it gets wider than the chat, and stops being one when the
+  // chat is widened again.
+  const tableSizes = typeof ResizeObserver === 'function'
+    ? new ResizeObserver((entries) => entries.forEach((entry) => {
+      const wrap = entry.target.closest('.table-wrap');
+      if (wrap) tables.syncTabStop(wrap, document.activeElement);
+    }))
+    : undefined;
+
   // Assistant text is re-rendered from the full buffer so partial Markdown settles as it streams.
-  // `partial` is true while more text is still on its way.
+  // `partial` is true while more text is still on its way. Each table keeps its sideways scroll
+  // and keyboard focus across the rebuild.
   function renderMarkdown(target, text, partial) {
+    const saved = tables.capture(target, document.activeElement);
+    if (tableSizes) saved.wraps.forEach((wrap) => { tableSizes.unobserve(wrap); if (wrap.firstElementChild) tableSizes.unobserve(wrap.firstElementChild); });
     target.replaceChildren();
     for (const block of markdown.parse(text, { partial: partial === true })) {
       if (block.type === 'html') {
@@ -287,6 +300,9 @@
       pre.append(el('code', '', block.code));
       wrapper.append(header, pre);
       target.append(wrapper);
+    }
+    for (const wrap of tables.restore(target, saved)) {
+      if (tableSizes) { tableSizes.observe(wrap); if (wrap.firstElementChild) tableSizes.observe(wrap.firstElementChild); }
     }
   }
 

@@ -83,6 +83,8 @@ button { font: inherit; color: inherit; }
 .turn thead th { font-weight: 600; background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBarSectionHeader-background)); }
 .turn tbody th { font-weight: 600; }
 .turn tbody tr:nth-child(even) { background: var(--vscode-list-hoverBackground, transparent); }
+/* A long path or link with no spaces wraps inside its cell instead of squeezing the other columns. */
+.turn th code, .turn td code, .turn th a, .turn td a { overflow-wrap: anywhere; }
 .turn th.align-left, .turn td.align-left { text-align: left; }
 .turn th.align-center, .turn td.align-center { text-align: center; }
 .turn th.align-right, .turn td.align-right { text-align: right; font-variant-numeric: tabular-nums; }

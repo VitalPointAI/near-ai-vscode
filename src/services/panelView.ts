@@ -113,6 +113,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 </footer>
 <div id="live" class="visually-hidden" aria-live="polite"></div>
 <script nonce="${nonce}" src="${asset('markdown.js')}"></script>
+<script nonce="${nonce}" src="${asset('tables.js')}"></script>
 <script nonce="${nonce}" src="${asset('pending.js')}"></script>
 <script nonce="${nonce}" src="${asset('composer.js')}"></script>
 <script nonce="${nonce}" src="${asset('chat.js')}"></script>
