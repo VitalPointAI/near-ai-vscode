@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-18-PLAN.md
-last_updated: "2026-11-03T22:09:22.379Z"
+stopped_at: Completed 61-24-PLAN.md
+last_updated: "2026-11-03T22:23:35.621Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 0541f9346071e771d9698d5ce055946061336807
+state_head: 6c7a7d4e4a378d47c79e56404349ae9eba9780aa
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 59
-  completed_plans: 44
+  completed_plans: 45
   percent: 13
 ---
 
@@ -98,6 +98,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P16 | 12 min | 3 tasks | 3 files |
 | Phase 61 P17 | 8 min | 3 tasks | 9 files |
 | Phase 61 P18 | 11 min | 3 tasks | 5 files |
+| Phase 61 P24 | 35min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -191,6 +192,9 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-18: Join in an existing copy of the same project catches it up (fetch by remote name, merge --ff-only) only after every check passes; refusals are local-changes, unshared-work, other-version, not-shared or offline
 - [Phase 61]: 61-18: an untracked or ignored team.json counts as local-changes, since a fast-forward would overwrite an ignored file silently
 - [Phase 61]: 61-18: an invite naming a link team.json lacks triggers the same catch-up once; an unpublished link keeps the existing refusal
+- [Phase 61]: 61-24: Link Your Organization explains linking only when the team has no organization link; a linked team goes straight to the pickers
+- [Phase 61]: 61-24: 'Invite without NEAR' became 'Invite without signing in' (linked team, not signed in); Not now from the Link command says Nothing was changed plus NO_ORG_NOTICE
+- [Phase 61]: 61-24: people-facing files are found by convention and a naming scan reads every Team Mode literal and command title (src/test/helpers/plainWords.ts)
 
 ### Pending Todos
 
@@ -212,8 +216,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T22:09:22.114Z
-Stopped at: Completed 61-18-PLAN.md
+Last session: 2026-11-03T22:23:35.371Z
+Stopped at: Completed 61-24-PLAN.md
 Resume file: None
 
 ## Notes
