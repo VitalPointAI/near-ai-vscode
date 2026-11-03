@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-17-PLAN.md
-last_updated: "2026-11-03T21:53:46.557Z"
+stopped_at: Completed 61-18-PLAN.md
+last_updated: "2026-11-03T22:09:22.379Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: fb80e7b6dade1916ae253d0bbfdba601af3fd292
+state_head: 0541f9346071e771d9698d5ce055946061336807
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 59
-  completed_plans: 43
+  completed_plans: 44
   percent: 13
 ---
 
@@ -97,6 +97,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P15 | 30min | 3 tasks | 13 files |
 | Phase 61 P16 | 12 min | 3 tasks | 3 files |
 | Phase 61 P17 | 8 min | 3 tasks | 9 files |
+| Phase 61 P18 | 11 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -187,6 +188,9 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-17: while the team setup is not shared or not reachable, a manager gets Share instead of Invite someone
 - [Phase 61]: 61-17: sidebar modules post through window.nearChat (chat.js's frozen post); team.js never calls acquireVsCodeApi or setState
 - [Phase 61]: 61-17: setup steps turn-on and share are required, invite and link optional (plain data for SETUP-01)
+- [Phase 61]: 61-18: Join in an existing copy of the same project catches it up (fetch by remote name, merge --ff-only) only after every check passes; refusals are local-changes, unshared-work, other-version, not-shared or offline
+- [Phase 61]: 61-18: an untracked or ignored team.json counts as local-changes, since a fast-forward would overwrite an ignored file silently
+- [Phase 61]: 61-18: an invite naming a link team.json lacks triggers the same catch-up once; an unpublished link keeps the existing refusal
 
 ### Pending Todos
 
@@ -208,8 +212,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T21:53:46.319Z
-Stopped at: Completed 61-17-PLAN.md
+Last session: 2026-11-03T22:09:22.114Z
+Stopped at: Completed 61-18-PLAN.md
 Resume file: None
 
 ## Notes
