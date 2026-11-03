@@ -2,13 +2,17 @@
 
 ## Unreleased
 
-- **After you connect NEAR AI, the extension suggests what to do next**,
-  starting with setting up your project team. You can also set a spending
-  limit, turn on web search, or go straight to the chat. Steps you have done
-  are marked done. To see these steps again, run **NEAR AI: Project Setup…**
-  or use Project setup on the Tools tab. Until the project has a team, the
-  empty chat shows a small card to set one up, which you can hide with
-  **Not now**.
+- **After you connect NEAR AI, the extension suggests what to do next.**
+  If the project has no team yet, it starts with setting up your project
+  team. You can also set a spending limit, turn on web search, or go
+  straight to the chat. Steps you have done are marked done. If the project
+  already has a team, you get a short message with a way to review it. To
+  see these steps again, run **NEAR AI: Project Setup…** or use Project
+  setup on the Tools tab.
+- **The empty chat shows a small card while the project has no team**, with
+  a button to set one up. **Not now** hides the card for this project only.
+- **The NEAR AI welcome page has a new step, Choose your team**, right after
+  connecting NEAR AI, with a button to set up your project team.
 
 ## 0.4.13
 

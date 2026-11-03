@@ -32,8 +32,9 @@ exactly what is allowed to leave your machine.
 **NEAR AI: Set Up Project Team** asks which kind of project you have and sets
 up a team and workflow for it. Your files stay in your workspace, and work is
 sent only to the model you pick. After you connect NEAR AI, the extension
-suggests this as your next step. **NEAR AI: Project Setup…** shows every setup
-step again: your project team, a spending limit and web search.
+suggests this as your next step when the project has no team yet.
+**NEAR AI: Project Setup** shows every setup step again: your project team, a
+spending limit and web search.
 
 ## Why choose NEAR AI
 
@@ -416,7 +417,10 @@ copy of Open-GSD to a project that doesn't already have one.
    [cloud.near.ai](https://cloud.near.ai/)), a **local runtime** (Ollama, LM
    Studio, vLLM, or any OpenAI-compatible server), or **both**, picking a cloud
    or local model for each chat.
-4. Open the **NEAR AI** view in the secondary side bar and start chatting, or
+4. Once you are connected, the extension suggests what to do next. If the
+   project has no team yet, it starts with setting up your project team. You
+   can skip straight to the chat.
+5. Open the **NEAR AI** view in the secondary side bar and start chatting, or
    type `/new-project` to plan something new.
 
 ## Security and privacy

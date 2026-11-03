@@ -30,6 +30,9 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
     for (const message of this.pending.splice(0)) void webviewView.webview.postMessage(message);
   }
 
+  /** Whether the chat is on screen now. */
+  public get visible(): boolean { return this.view?.visible ?? false; }
+
   /** Starts a new conversation alongside the open ones, as the view's "New Chat" title action. */
   public async newChat(): Promise<void> {
     await this.post({ type: 'reset' });

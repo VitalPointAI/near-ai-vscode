@@ -33,11 +33,13 @@ class FakeNode {
   public prepend(...nodes: FakeNode[]): void { for (const node of nodes) node.parent = this; this.children.unshift(...nodes); }
   public remove(): void { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); this.parent = undefined; }
   public get attached(): boolean { let node: FakeNode | undefined = this; while (node?.parent) node = node.parent; return node === this.doc.body; }
+  public contains(node: FakeNode | undefined): boolean { for (let at = node; at; at = at.parent) if (at === this) return true; return false; }
   public find(predicate: (node: FakeNode) => boolean): FakeNode | undefined { for (const child of this.children) { if (predicate(child)) return child; const found = child.find(predicate); if (found) return found; } return undefined; }
   public all(predicate: (node: FakeNode) => boolean): FakeNode[] { return this.children.flatMap((child) => [...(predicate(child) ? [child] : []), ...child.all(predicate)]); }
 }
 class FakeDocument {
   public readonly body: FakeNode = new FakeNode('body', this);
+  public activeElement?: FakeNode;
   public createElement(tag: string): FakeNode { return new FakeNode(tag, this); }
   public getElementById(id: string): FakeNode | undefined { return this.body.find((node) => node.id === id); }
 }
@@ -102,6 +104,20 @@ test('the card disappears when the host says the project has a team', () => {
   assert.equal(setup.renderSetupNudge(doc, welcome, false, () => undefined), undefined);
 });
 
+test('when the card goes away under the keyboard focus, focus moves to the message box', () => {
+  const { doc, welcome } = emptyChat();
+  let focused = 0;
+  const card = setup.renderSetupNudge(doc, welcome, true, () => undefined)!;
+  // Not focused inside: nothing moves.
+  setup.renderSetupNudge(doc, welcome, false, () => undefined, () => { focused += 1; });
+  assert.equal(focused, 0);
+  const again = setup.renderSetupNudge(doc, welcome, true, () => undefined)!;
+  assert.notEqual(again, card);
+  doc.activeElement = again.all((node) => node.tagName === 'button')[0];
+  setup.renderSetupNudge(doc, welcome, false, () => undefined, () => { focused += 1; });
+  assert.equal(focused, 1);
+});
+
 test('the chat loads the card helper before chat.js, draws it in the welcome section, and styles it with theme colours', () => {
   const panel = readFileSync(path.join(ROOT, 'src', 'services', 'panelView.ts'), 'utf8');
   assert.ok(panel.indexOf("<script nonce=\"${nonce}\" src=\"${asset('setup.js')}\"></script>") > 0);
@@ -133,7 +149,7 @@ class MemorySecrets implements SecretStorageLike {
 }
 
 const executed: unknown[][] = [];
-const watchers: Array<{ pattern: { base: { fsPath: string }; pattern: string }; created: Array<() => void>; disposed: boolean }> = [];
+const watchers: Array<{ pattern: { base: { fsPath: string }; pattern: string }; created: Array<() => void>; deleted: Array<() => void>; disposed: boolean }> = [];
 const vscodeStub = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   QuickPickItemKind: { Separator: -1 },
@@ -145,9 +161,9 @@ const vscodeStub = {
     getConfiguration: () => ({ get: <T>(_key: string, fallback?: T) => fallback, has: () => false, inspect: () => undefined, update: async () => undefined }),
     onDidChangeConfiguration: () => ({ dispose() {} }),
     createFileSystemWatcher: (pattern: { base: { fsPath: string }; pattern: string }) => {
-      const watcher = { pattern, created: [] as Array<() => void>, disposed: false };
+      const watcher = { pattern, created: [] as Array<() => void>, deleted: [] as Array<() => void>, disposed: false };
       watchers.push(watcher);
-      return { onDidCreate: (listener: () => void) => { watcher.created.push(listener); return { dispose() {} }; }, onDidDelete: () => ({ dispose() {} }), dispose: () => { watcher.disposed = true; } };
+      return { onDidCreate: (listener: () => void) => { watcher.created.push(listener); return { dispose() {} }; }, onDidDelete: (listener: () => void) => { watcher.deleted.push(listener); return { dispose() {} }; }, dispose: () => { watcher.disposed = true; } };
     }
   },
   window: {
@@ -194,18 +210,26 @@ test('the host shows the card for a working profile without a team, hides it on 
     // A team saved by Team Studio: the watcher sees the file and the card goes away.
     const [watcher] = watchers;
     assert.equal(watcher.pattern.base.fsPath, root);
-    assert.equal(watcher.pattern.pattern, '{.planning/.near-ai/team.md,.planning/.near-ai/project.json}');
+    assert.equal(watcher.pattern.pattern, '{.planning,.planning/.near-ai,.planning/.near-ai/team.md,.planning/.near-ai/project.json}');
     await mkdir(path.join(root, '.planning', '.near-ai'), { recursive: true });
     await writeFile(path.join(root, '.planning', '.near-ai', 'team.md'), '# Team\n');
     posted.length = 0;
     watcher.created.forEach((listener) => listener());
     for (let wait = 0; wait < 50 && nudge() === undefined; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(nudge(), false);
-    // Without a team again, "Not now" hides it for this project, and a refresh keeps it hidden.
+    // The team file deleted: the watcher reports it, and the card comes back without a refresh.
+    // (Deleting the whole .planning folder also takes the profile with it, so the card stays hidden then.)
     const { rm } = await import('node:fs/promises');
     await rm(path.join(root, '.planning', '.near-ai', 'team.md'));
+    posted.length = 0;
+    watcher.deleted.forEach((listener) => listener());
+    for (let wait = 0; wait < 50 && nudge() === undefined; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(nudge(), true);
+    // A project type alone (project.json) is not a team: the card stays.
+    await writeFile(path.join(root, '.planning', '.near-ai', 'project.json'), '{}\n');
     await receive!({ type: 'refresh-status' });
     assert.equal(nudge(), true);
+    // "Not now" hides it for this project, and a refresh keeps it hidden.
     await receive!({ type: 'setup-nudge', action: 'later' });
     assert.equal(state.get(SETUP_NUDGE_DISMISSED_KEY), true);
     assert.equal(nudge(), false);

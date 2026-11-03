@@ -13,12 +13,18 @@
 
   /**
    * Shows the card at the top of `container` (the empty chat's welcome section) when `show` is
-   * true, and removes it otherwise. `post` sends the choice to the host. Returns the card or undefined.
+   * true, and removes it otherwise. `post` sends the choice to the host; `afterDismiss` puts focus
+   * back in the message box when the card goes away under it. Returns the card or undefined.
    */
   function renderSetupNudge(doc, container, show, post, afterDismiss) {
     const existing = doc.getElementById('setup-nudge');
     if (!show) {
-      if (existing) existing.remove();
+      if (existing) {
+        // Focus on one of its buttons moves to the message box instead of being lost.
+        const hadFocus = Boolean(doc.activeElement) && existing.contains(doc.activeElement);
+        existing.remove();
+        if (hadFocus && afterDismiss) afterDismiss();
+      }
       return undefined;
     }
     if (existing) return existing;

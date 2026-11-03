@@ -3,17 +3,27 @@ import * as path from 'node:path';
 
 // The one-time setup steps offered after NEAR AI is connected, and again from "NEAR AI: Project
 // Setup…". Pure: no VS Code import, so the order and wording are tested in plain Node. The host
-// (setupMenu.ts) supplies what it knows through SetupContext and runs the chosen step's command.
+// (setupMenu.ts) builds a SetupContext, collects the registered facts, and runs the chosen step.
+//
+// Extension points (Team Mode plans `repository`, where the project is kept, and `invite-people`,
+// who else works on it, between `project-team` and `spending-limit`):
+// - registerSetupStep(step, 'project-team') puts a step into SETUP_STEPS, the one registry the
+//   menu is built from, so the menu code does not change;
+// - registerSetupFacts(name, provider) adds a fact to every SetupContext (ctx.facts[name]) for
+//   the steps that need it, so the context grows without changing its shape.
 
-/** What a step can ask about the project and the user's settings. */
+/** What a step can ask about the project, the user's settings, and registered facts. */
 export interface SetupContext {
   /** The project folder. */
   root: string;
   /** A `nearAi.*` setting's current value (the key without `nearAi.`). */
   setting(key: string): unknown;
-  /** Whether web search has a provider and its key or address. */
-  webSearchReady(): boolean | Promise<boolean>;
+  /** Facts added with registerSetupFacts, by name (for example `webSearchReady`). Missing when its provider failed. */
+  facts: Record<string, unknown>;
 }
+
+/** Works out one fact from the base context (no facts yet). */
+export type SetupFactProvider = (ctx: Omit<SetupContext, 'facts'>) => unknown;
 
 export interface SetupStep {
   id: string;
@@ -31,19 +41,21 @@ export interface SetupStep {
   isAvailable?(ctx: SetupContext): boolean | Promise<boolean>;
 }
 
-/** Where a project's team and project type are kept; either one means the project has a team. */
-export function projectTeamFiles(root: string): string[] {
-  const folder = path.join(root, '.planning', '.near-ai');
-  return [path.join(folder, 'team.md'), path.join(folder, 'project.json')];
+/** The project team file, as TeamLibrary.projectTeamFile names it (that module is not loaded here). */
+export function projectTeamFile(root: string): string {
+  return path.join(root, '.planning', '.near-ai', 'team.md');
 }
 
-/** True once the project has a team (team.md) or a project type (project.json). */
+/** True once the project has a team: team.md exists. project.json alone (a project type) is not a team. */
 export async function projectHasTeam(root: string): Promise<boolean> {
-  for (const file of projectTeamFiles(root)) {
-    if (await access(file).then(() => true, () => false)) return true;
-  }
-  return false;
+  return access(projectTeamFile(root)).then(() => true, () => false);
 }
+
+/**
+ * The paths whose creation or deletion can change whether the project has a team, relative to the
+ * project folder: the team file and the folders above it (deleting a folder reports only the folder).
+ */
+export const PROJECT_TEAM_WATCH_PATHS = ['.planning', '.planning/.near-ai', '.planning/.near-ai/team.md', '.planning/.near-ai/project.json'] as const;
 
 export const PROJECT_TEAM_STEP: SetupStep = {
   id: 'project-team',
@@ -69,17 +81,38 @@ export const WEB_SEARCH_STEP: SetupStep = {
   detail: 'Let agents look things up on the web when they need current facts.',
   icon: 'globe',
   command: 'nearAi.setUpWebSearch',
-  isDone: (ctx) => ctx.webSearchReady()
+  isDone: (ctx) => ctx.facts.webSearchReady === true
 };
 
 /**
- * The setup steps, in the order they are suggested.
- *
- * Extension point: a later feature adds its step here, or with `withSetupStep(SETUP_STEPS, step,
- * 'project-team')`, and the menu needs no change. Team Mode plans `repository` (where the project
- * is kept) and `invite-people` (who else works on it) between `project-team` and `spending-limit`.
+ * The registry: the setup steps, in the order they are suggested. The menu reads it each time it
+ * opens. Add steps with registerSetupStep, not by editing the menu.
  */
-export const SETUP_STEPS: readonly SetupStep[] = [PROJECT_TEAM_STEP, SPENDING_LIMIT_STEP, WEB_SEARCH_STEP];
+export const SETUP_STEPS: SetupStep[] = [PROJECT_TEAM_STEP, SPENDING_LIMIT_STEP, WEB_SEARCH_STEP];
+
+/** Puts `step` into SETUP_STEPS right after `after` (at the end when not given or not found). Dispose to take it out. */
+export function registerSetupStep(step: SetupStep, after?: string): { dispose(): void } {
+  const next = withSetupStep(SETUP_STEPS, step, after ?? '');
+  SETUP_STEPS.splice(0, SETUP_STEPS.length, ...next);
+  return { dispose: () => { const index = SETUP_STEPS.indexOf(step); if (index !== -1) SETUP_STEPS.splice(index, 1); } };
+}
+
+const FACT_PROVIDERS = new Map<string, SetupFactProvider>();
+
+/** Adds `ctx.facts[name]` to every SetupContext the menu builds. Registering a name again replaces it. */
+export function registerSetupFacts(name: string, provider: SetupFactProvider): { dispose(): void } {
+  FACT_PROVIDERS.set(name, provider);
+  return { dispose: () => { if (FACT_PROVIDERS.get(name) === provider) FACT_PROVIDERS.delete(name); } };
+}
+
+/** The full context: the base plus every registered fact. A provider that fails leaves its fact out. */
+export async function collectSetupContext(base: Omit<SetupContext, 'facts'>): Promise<SetupContext> {
+  const facts: Record<string, unknown> = {};
+  for (const [name, provider] of FACT_PROVIDERS) {
+    try { facts[name] = await provider(base); } catch { /* left out */ }
+  }
+  return { ...base, facts };
+}
 
 /** The last choice in the menu, always shown: close setup and go to the chat. */
 export const START_CHATTING = {
@@ -137,4 +170,22 @@ export const SETUP_NUDGE_DISMISSED_KEY = 'nearAi.setupNudge.dismissed';
 /** The chat's "no team yet" card shows while the project has a working profile, no team, and was not dismissed. */
 export function shouldShowSetupNudge(facts: { workingProfile: boolean; hasTeam: boolean; dismissed: boolean }): boolean {
   return facts.workingProfile && !facts.hasTeam && !facts.dismissed;
+}
+
+/**
+ * Posts the result of the latest `refresh()` only: an older computation that finishes after a
+ * newer one started, or after `set()`, is dropped. Keeps the chat's card from coming back after
+ * "Not now" when a status refresh was still being worked out.
+ */
+export function latestOnly<T>(compute: () => Promise<T>, post: (value: T) => void): { refresh(): Promise<void>; set(value: T): void } {
+  let sequence = 0;
+  return {
+    async refresh() {
+      const mine = ++sequence;
+      let value: T;
+      try { value = await compute(); } catch { return; }
+      if (mine === sequence) post(value);
+    },
+    set(value) { sequence += 1; post(value); }
+  };
 }

@@ -94,7 +94,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   );
 
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options));
-  registerProjectSetup(context);
+  registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
@@ -202,7 +202,7 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
     if (profile.validation.status === 'valid') {
       await sidebar.refresh();
       // What to do next: set up the project team first (or review it), then the other setup steps.
-      await offerNextStep(context, profile.displayName);
+      await offerNextStep({ secrets: context.secrets, chatVisible: () => sidebar.visible }, profile.displayName);
       return;
     }
     const retry = await vscode.window.showErrorMessage(`Setup couldn't connect: ${profile.validation.error ?? 'validation failed'}`, 'Try again', ...(usesCloud ? ['Open NEAR AI Cloud'] : []));
