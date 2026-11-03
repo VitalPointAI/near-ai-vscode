@@ -123,15 +123,22 @@
     return splitRow(next).length <= splitRow(line).length ? 2 : 0;
   }
 
+  // The text a cell shows, without its markup: the rendered cell with its tags taken off. Only
+  // Markdown that renders (emphasis pairs, code spans, links) loses its markers, so `user_id`
+  // or `C:\\path` keeps every character. Model text is escaped first, so every tag is our own.
+  function plainText(cell) {
+    return inline(cell).replace(/<[^>]*>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  }
+
   // A plain-text name for a table region, from its header cells, so screen reader users can tell
   // tables apart: "Table: Name, Count, Note".
   function tableLabel(header) {
-    const names = header
-      .map((cell) => cell.replace(/\[([^\]\n]*)\]\([^)\n]*\)/g, '$1').replace(/[`*_~\\]/g, '').replace(/\s+/g, ' ').trim())
-      .filter(Boolean);
+    const names = header.map((cell) => plainText(cell).replace(/\s+/g, ' ').trim()).filter(Boolean);
     if (!names.length) return 'Table';
-    const text = names.slice(0, 3).join(', ') + (names.length > 3 ? ', …' : '');
-    return `Table: ${text.length > 80 ? text.slice(0, 79).trimEnd() + '…' : text}`;
+    // Counted in characters, not UTF-16 units, so an emoji is never cut in half.
+    const text = Array.from(names.slice(0, 3).join(', ') + (names.length > 3 ? ', …' : ''));
+    return `Table: ${text.length > 80 ? text.slice(0, 79).join('').trimEnd() + '…' : text.join('')}`;
   }
 
   function renderTable(header, aligns, rows, label) {

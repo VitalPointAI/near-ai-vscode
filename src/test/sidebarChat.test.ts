@@ -211,6 +211,21 @@ test('markdown gives every table region its own label', () => {
   assert.equal(markdown.tableLabel(['x'.repeat(200)]).length, 'Table: '.length + 80);
 });
 
+test('markdown table labels match the header text people see', () => {
+  const label = (text: string) => (render(text).match(/aria-label="([^"]*)"/) || [])[1];
+  // Literal underscores, stars, tildes and backslashes stay; only Markdown that renders loses its markers.
+  assert.equal(label('| user_id | created_at | file_path |\n|---|---|---|'), 'Table: user_id, created_at, file_path');
+  assert.equal(markdown.tableLabel(['a * b', 'x ~ y', 'C:\\path']), 'Table: a * b, x ~ y, C:\\path');
+  assert.equal(markdown.tableLabel(['**Bold**', '_em_', '~~old~~']), 'Table: Bold, em, old');
+  assert.equal(markdown.tableLabel(['a &amp; b', '`x_y`']), 'Table: a &amp; b, x_y');
+  // Placeholder characters show as the replacement character, as they do in the cell.
+  assert.equal(markdown.tableLabel(['a\u0001b', 'c\u0000']), 'Table: a\ufffdb, c\ufffd');
+  // A long label is cut by characters, so an emoji is never split in half.
+  const cut = markdown.tableLabel(['x'.repeat(78) + '\u{1F600}'.repeat(3)]);
+  assert.equal(cut, `Table: ${'x'.repeat(78)}\u{1F600}…`);
+  assert.doesNotMatch(cut, /[\ud800-\udbff](?![\udc00-\udfff])/);
+});
+
 // A stand-in for the table boxes in the chat DOM: just the parts tables.js touches.
 class FakeWrap {
   scrollLeft = 0;
