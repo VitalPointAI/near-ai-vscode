@@ -394,11 +394,29 @@ export interface BoardHarness {
   pendingTimers(): number;
 }
 
-const BOARD_DIR = path.resolve(__dirname, '../../../media/board');
+const SCRIPT_DIRS = Object.freeze({ board: path.resolve(__dirname, '../../../media/board'), chat: path.resolve(__dirname, '../../../media/chat') });
 
-export function createBoardHarness(options: { width?: number; reducedMotion?: boolean; state?: unknown; surface?: 'view' | 'panel' } = {}): BoardHarness {
+export interface HarnessOptions {
+  width?: number; reducedMotion?: boolean; state?: unknown; surface?: 'view' | 'panel';
+  /** Where load() reads scripts from: media/board (the default) or media/chat (the sidebar). */
+  scripts?: 'board' | 'chat';
+  /** Starts the body with the sidebar's empty, hidden Team section (section#team, a region named Team) before #root. */
+  teamSection?: boolean;
+  /** Installs chat.js's window.nearChat = { post } so a sidebar module can post without loading chat.js; posts land in posts. */
+  nearChat?: boolean;
+}
+
+export function createBoardHarness(options: HarnessOptions = {}): BoardHarness {
   const document = new FakeDocument();
   document.body.setAttribute('data-surface', options.surface ?? 'panel');
+  if (options.teamSection === true) {
+    const team = document.createElement('section');
+    team.id = 'team';
+    team.setAttribute('role', 'region');
+    team.setAttribute('aria-label', 'Team');
+    team.hidden = true;
+    document.body.append(team);
+  }
   const root = document.createElement('div');
   root.id = 'root';
   const liveNode = document.createElement('div');
@@ -406,6 +424,7 @@ export function createBoardHarness(options: { width?: number; reducedMotion?: bo
   liveNode.className = 'sr-only';
   liveNode.setAttribute('role', 'status');
   document.body.append(root, liveNode);
+  const scriptDir = SCRIPT_DIRS[options.scripts ?? 'board'];
   const announcements: string[] = [];
   liveNode.onText = (text) => { if (text !== '') announcements.push(text); };
 
@@ -454,6 +473,7 @@ export function createBoardHarness(options: { width?: number; reducedMotion?: bo
     getState: () => (harness.state === undefined ? undefined : inRealm(JSON.stringify(harness.state))),
     setState: (next: unknown) => { harness.state = plain(next); return next; }
   });
+  if (options.nearChat === true) win.nearChat = Object.freeze({ post: (message: unknown) => { posts.push(plain(message)); } });
 
   const api: BoardHarness = {
     document, window: win, root, posts, announcements,
@@ -461,7 +481,7 @@ export function createBoardHarness(options: { width?: number; reducedMotion?: bo
     set state(value: unknown) { harness.state = value; },
     load(files: string[]): void {
       for (const file of files) {
-        const filename = path.join(BOARD_DIR, file);
+        const filename = path.join(scriptDir, file);
         vm.runInContext(readFileSync(filename, 'utf8'), context, { filename, timeout: 2000 });
       }
     },
