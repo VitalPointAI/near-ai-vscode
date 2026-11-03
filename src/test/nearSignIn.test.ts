@@ -70,7 +70,7 @@ test('the team flow says the sign-in is kept for this team until sign out', asyn
   const box = await pasteBoxFor(signIn.TEAM_SIGN_IN_COPY);
   assert.equal(box.title, 'Finish signing in to NEAR AI Cloud');
   assert.ok(box.prompt.startsWith('After signing in, the browser shows a page that can\'t be reached.'));
-  assert.ok(box.prompt.endsWith('NEAR AI keeps this sign-in for this team\'s invitations and member keys until you run "NEAR AI: Sign Out of NEAR (Team)".'));
+  assert.ok(box.prompt.endsWith('NEAR AI keeps this sign-in for this team\'s invitations and member keys until you run "NEAR AI: Sign Out of NEAR AI for This Team".'));
   assert.ok(!box.prompt.includes('signed out as soon as the token is made'));
 });
 

@@ -290,7 +290,7 @@ test('status text: the pending count, the removed state, the NEAR tooltip lines,
   assert.equal(statusText(ok, 'Alpha').text, '$(organization) Team: Alpha');
   assert.equal(statusText(ok, 'Alpha').tooltip.startsWith('Team sync is working. Click to open the Team Board.'), true);
   assert.equal(statusText(ok, 'Alpha').command, 'nearAi.team.openBoard');
-  assert.match(statusText(ok, 'Alpha', { nearLabel: 'lead@example.invalid' }).tooltip, /NEAR: signed in as lead@example\.invalid/);
+  assert.match(statusText(ok, 'Alpha', { nearLabel: 'lead@example.invalid' }).tooltip, /NEAR AI sign-in: lead@example\.invalid/);
   assert.match(statusText(ok, 'Alpha', { nearLinked: false }).tooltip, new RegExp(NO_ORG_NOTICE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.equal(statusText(ok, 'Alpha', { nearLinked: true }).tooltip.includes('NEAR'), false, 'a linked team with no sign-in on this computer says nothing about NEAR');
   const removed = statusText(ok, 'Alpha', { removed: true });
@@ -310,7 +310,7 @@ test('the NEAR line of the tooltip names the signed-in account, or says no organ
   await inWorld({}, async (w) => {
     await saveNearSession(w.owner.secrets, w.teamId, { accessToken: 'at_test', refreshToken: 'rt_test' }, 'lead@example.invalid', { baseUrl: w.fake.baseUrl });
     await startSession(w, 'owner');
-    assert.match(lastBar().tooltip, /NEAR: signed in as lead@example\.invalid/);
+    assert.match(lastBar().tooltip, /NEAR AI sign-in: lead@example\.invalid/);
   });
   await inWorld({ near: false }, async (w) => {
     await startSession(w, 'owner');
@@ -325,7 +325,7 @@ test('a confirmed member with no key yet is announced once with Send key, in a t
     assert.equal(confirmed.ok, true, confirmed.ok ? '' : confirmed.reason);
     stub.messageAnswers.push('Send key');
     const owner = await startSession(w, 'owner');
-    assert.deepEqual(infoMessages(), ['Dana Developer is confirmed and still needs a NEAR key']);
+    assert.deepEqual(infoMessages(), ['Dana Developer is confirmed and still needs an AI key']);
     assert.deepEqual(stub.notificationActions[0], ['Send key']);
     await until(() => owner.commands.length > 0, 'the Send key command');
     assert.deepEqual(owner.commands, [{ id: MANAGE_MEMBERS_COMMAND, args: { memberId: dana.memberId, action: 'deliver-key' } }]);
@@ -477,7 +477,7 @@ test('a window that has its device key is not offered Join', async () => {
 
 // ---- a team project on a personal key (Task 3, D-14) ------------------------------------------------------------------------------------
 
-const PERSONAL_WARNING = 'This team project is using your personal NEAR key, so the spend cap your lead set does not apply. Runs are marked as personal-key runs.';
+const PERSONAL_WARNING = 'This team project is using your personal AI key, so the spend cap your lead set does not apply. Runs are marked as personal-key runs.';
 
 async function switchToPersonal(w: World, person: Person): Promise<void> {
   const projectRoot = w.fixture.clones[person.clone] as string;
@@ -515,6 +515,6 @@ test('a window with no installed team key, and the owner window, get no personal
     const own = await startSession(w, dana);
     await own.session.sync();
     await startSession(w, 'owner');
-    assert.deepEqual(warnMessages().filter((message) => message.includes('personal NEAR key')), []);
+    assert.deepEqual(warnMessages().filter((message) => message.includes('personal AI key')), []);
   });
 });

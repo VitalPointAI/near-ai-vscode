@@ -32,8 +32,8 @@ const { ENABLE_COMMAND, registerTeamMode } = commandsModule;
 const { INVITE_COMMAND, JOIN_COMMAND, LINK_NEAR_COMMAND, MANAGE_MEMBERS_COMMAND, SIGN_OUT_NEAR_COMMAND, parseUsdToNanoUsd } = memberModule;
 
 const EM_DASH = '—';
-const WITHOUT_NEAR = 'Invite without NEAR';
-const WITHOUT_KEY_NOW = 'Continue without NEAR';
+const WITHOUT_NEAR = 'Invite without signing in';
+const WITHOUT_KEY_NOW = 'Continue without signing in';
 const PUBLIC_URL = 'https://example.invalid/team.git';
 
 function resetStub(): void {
@@ -459,7 +459,7 @@ test('Join as a lead invitee signs in to NEAR once and reports the organization 
     stub.inputAnswers.push(bundleText, 'Lee L');
     await j.run(JOIN_COMMAND);
     assert.equal(t.signIns.count, before + 1, 'the lead invitee signed in once');
-    assert.ok(stub.notifications.some((entry) => entry.message.includes('NEAR organization')), stub.notifications.map((entry) => entry.message).join(' | '));
+    assert.ok(stub.notifications.some((entry) => entry.message === 'You joined your organization, the account that pays for your team\'s AI.'), stub.notifications.map((entry) => entry.message).join(' | '));
     assert.equal(everythingShown().includes(t.signIns.tokens?.refreshToken as string), false, 'no token is shown');
     await closeWindow(j);
   }, { near: true });
@@ -524,7 +524,7 @@ test('Link signs in, lists only organizations the lead owns or administers, comm
     assert.ok(outputLines().includes('team.json is committed on main. Sharing pushes it.'), 'the git detail is in the channel only');
     assert.equal(t.handle.session()?.teamFile.near?.workspaceId, 'ws-2', 'the session was restarted on the new team.json');
     // UI review issue 1: reading the lists can be stopped; the write cannot.
-    assert.equal(progressNamed('Reading your NEAR organizations')?.cancellable, true);
+    assert.equal(progressNamed('Reading your organizations')?.cancellable, true);
     assert.deepEqual(progressNamed('Linking Invite team to Team Org'), { title: 'Linking Invite team to Team Org', cancellable: false, messages: ['Saving the link in this project'] });
     assert.equal(everythingShown().includes(t.signIns.tokens?.refreshToken as string), false);
   }, { near: true });
@@ -596,7 +596,7 @@ test('Sign out deletes only this team\'s NEAR session, and with none says there 
     assert.equal(t.secrets.values.has(nearSessionSecretName(teamId)), false);
     assert.equal(t.secrets.values.has(nearSessionSecretName('team-other')), true, 'another team keeps its session');
     assert.ok(t.secrets.values.has(deviceKeySecretName(teamId)), 'the device key is untouched');
-    assert.deepEqual(stub.notifications.map((entry) => entry.message), ['Signed out of NEAR for Invite team.']);
+    assert.deepEqual(stub.notifications.map((entry) => entry.message), ['Signed out of NEAR AI for Invite team.']);
     clearUi();
     await t.run(SIGN_OUT_NEAR_COMMAND);
     assert.equal(stub.notifications.length, 1);
@@ -643,7 +643,7 @@ test('inviting in a linked team whose NEAR link is not shared yet warns that a t
     await t.run(LINK_NEAR_COMMAND);
     clearUi();
     await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
-    const warning = stub.notifications.findIndex((entry) => entry.level === 'warn' && entry.message === 'The NEAR link is not shared with your team yet, so a teammate who gets the project now will not see it. Share it before they join.');
+    const warning = stub.notifications.findIndex((entry) => entry.level === 'warn' && entry.message === 'The organization link is not shared with your team yet, so a teammate who gets the project now will not see it. Share it before they join.');
     assert.ok(warning >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
     assert.deepEqual(stub.notificationActions[warning], ['Share with my team']);
     clearUi();
@@ -698,7 +698,7 @@ test('Manage Team Members lists the NEAR line first, then members with their sta
     clearUi();
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.deepEqual(lastList(), [
-      'NEAR: signed in as lead',
+      'NEAR AI sign-in: lead',
       'Lead Owner, owner',
       'Dana D, developer, waiting for confirmation',
       'Invitation for Dana D, developer, used',
@@ -779,7 +779,7 @@ test('Remove asks for confirmation, caps and revokes the key, and lists what is 
     assert.ok(shownMessages().some((message) => message.startsWith('Dana D was removed from Invite team.') && message.includes('capped at 0 and revoked')), shownMessages().join(' | '));
     // UI review issue 1: each removal step is shown while it runs; the removal can be stopped only where that is safe.
     assert.deepEqual(progressNamed('Removing Dana D from Invite team'), {
-      title: 'Removing Dana D from Invite team', cancellable: true, messages: ['Setting the NEAR key limit to 0', 'Saving the removal to the team record', 'Revoking the NEAR key']
+      title: 'Removing Dana D from Invite team', cancellable: true, messages: ['Setting the AI key limit to 0', 'Saving the removal to the team record', 'Revoking the AI key']
     });
     const lines = outputLines();
     const todo = lines.slice(lines.indexOf('Still to do for Dana D:') + 1).filter((line) => line.startsWith('- '));
@@ -799,7 +799,7 @@ test('UI review issue 1: stopping a removal after the log write leaves the key c
     const keyId = t.handle.session()?.state().members.get(id)?.nearApiKeyId as string;
 
     // The person clicks Cancel while the key is being capped: the cap and the log removal still finish together, then the revoke waits.
-    stub.setProgressCancel((_title, message) => message === 'Setting the NEAR key limit to 0');
+    stub.setProgressCancel((_title, message) => message === 'Setting the AI key limit to 0');
     stub.quickPickAnswers.push('Dana D, developer', 'Remove');
     stub.setMessageResponder((_text, actions) => (actions.includes('Remove') ? 'Remove' : undefined));
     await t.run(MANAGE_MEMBERS_COMMAND);
@@ -925,11 +925,11 @@ test('Retry sends a NEAR invitation left on the cleanup list after asking the le
     clearUi();
 
     await t.run(MANAGE_MEMBERS_COMMAND);
-    assert.ok(lastList().includes('NEAR cleanup: Send the NEAR invitation for Lee'), lastList().join(' | '));
+    assert.ok(lastList().includes('Still to finish: Send the invitation to your organization for Lee'), lastList().join(' | '));
     assert.ok(lastList().includes('Project access for Lee'));
     clearUi();
 
-    stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Lee', 'Retry');
+    stub.quickPickAnswers.push('Still to finish: Send the invitation to your organization for Lee', 'Retry');
     stub.setMessageResponder((_text, actions) => (actions.includes('Sign in') ? 'Sign in' : undefined));
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.deepEqual(manageActions(), ['Retry']);
@@ -938,7 +938,7 @@ test('Retry sends a NEAR invitation left on the cleanup list after asking the le
     clearUi();
 
     // CR-02: someone the team list does not have is never invited; the item is closed instead.
-    stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Zed', 'Retry');
+    stub.quickPickAnswers.push('Still to finish: Send the invitation to your organization for Zed', 'Retry');
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.ok(shownMessages().some((message) => message.includes('item was closed')), shownMessages().join(' | '));
     assert.equal((await cleanup.list()).find((item) => item.memberName === 'Zed')?.status, 'done');
@@ -956,7 +956,7 @@ test('Retry sends a NEAR invitation left on the cleanup list after asking the le
     const invites = JSON.parse(await fs.readFile(invitesFile, 'utf8')) as { version: number; invites: Array<{ memberId: string }> };
     await fs.writeFile(invitesFile, JSON.stringify({ ...invites, invites: invites.invites.filter((entry) => entry.memberId !== umaId) }), 'utf8');
     clearUi();
-    stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Uma', 'Retry');
+    stub.quickPickAnswers.push('Still to finish: Send the invitation to your organization for Uma', 'Retry');
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.ok(shownMessages().some((message) => message.includes('only known on the computer that sent the invitation')), shownMessages().join(' | '));
     assert.equal(t.fake?.emailedToken('uma@example.invalid'), undefined);
@@ -1006,7 +1006,7 @@ test('CR-02: Retry of a NEAR invitation for a removed lead closes the item witho
     // A stale item still on the list (another window saved it) is closed by Retry: no sign-in, no NEAR invitation.
     await cleanup.add([{ memberId: lee.memberId, memberName: 'Lee', step: 'send-invitation', status: 'failed' }]);
     const signIns = t.signIns.count;
-    stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Lee', 'Retry');
+    stub.quickPickAnswers.push('Still to finish: Send the invitation to your organization for Lee', 'Retry');
     stub.setMessageResponder((_text, actions) => (actions.includes('Sign in') ? 'Sign in' : undefined));
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.equal(t.fake?.emailedToken('lee@example.invalid'), undefined, 'the removed person was not invited to the NEAR organization');

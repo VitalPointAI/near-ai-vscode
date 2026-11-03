@@ -239,7 +239,7 @@ test('status text with cards: ready and pending counts, singular and plural form
   assert.equal(statusText(OK, 'Alpha', { ready: 0 }).text, '$(organization) Team: 0 ready');
   assert.equal(statusText(OK, 'Alpha', { ready: 0 }).tooltip, 'Alpha: No plans are ready to start. Click to open the Team Board.');
   assert.equal(statusText(OK, 'Alpha', { ready: 0 }).accessibilityLabel, 'Team Board. No plans ready. Open the Team Board.');
-  assert.equal(statusText(OK, 'Alpha', { ready: 3, nearLabel: 'lead@example.invalid' }).tooltip.endsWith(' NEAR: signed in as lead@example.invalid.'), true, 'the NEAR line follows');
+  assert.equal(statusText(OK, 'Alpha', { ready: 3, nearLabel: 'lead@example.invalid' }).tooltip.endsWith(' NEAR AI sign-in: lead@example.invalid.'), true, 'the NEAR line follows');
 });
 
 test('status text without cards keeps only the team name and the pending suffix, and always has the icon, tooltip, label and open-board target', () => {
