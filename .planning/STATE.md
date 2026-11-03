@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-15-PLAN.md
-last_updated: "2026-11-03T21:27:32.381Z"
+stopped_at: Completed 61-16-PLAN.md
+last_updated: "2026-11-03T21:42:38.398Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: a774b5f946c51def546165200bdcccbc4e78a459
+state_head: 1bebe1b48b72cbe8683d11de189c95d27f312697
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 59
-  completed_plans: 41
+  completed_plans: 42
   percent: 13
 ---
 
@@ -95,6 +95,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P13 | 105 min | 3 tasks | 6 files |
 | Phase 62 P14 | 70min | 3 tasks | 9 files |
 | Phase 61 P15 | 30min | 3 tasks | 13 files |
+| Phase 61 P16 | 12 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -178,6 +179,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-14: BOARD-01/02/03 ticked; the 2 s relay half of BOARD-02 stays with Phase 67; owner-only manual checks (themes, reflow, screen reader, density, two real windows) remain
 - [Phase 61]: 61-15: a member's key is called AI key and a link-wide key team key; every manual step says your organization's settings on the NEAR AI website
 - [Phase 61]: 61-15: pin texts already name the command title NEAR AI: Link Your Organization; the command and adapter text are renamed in 61-24
+- [Phase 61]: 61-16: an http or https address with a user part, or ssh with a password, is not-shareable with cleanRepoUrl's credentials sentence, stricter than the invite's credential stripping (cleanRepoUrl unchanged)
+- [Phase 61]: 61-16: the setup-only share commit reuses the local team.json blob or serialiseTeamFile bytes, never canonical JSON, so the lead's merge or rebase cannot conflict
+- [Phase 61]: 61-16: shareTeamSetup re-plans every attempt; a first upload of the whole branch runs only with the consented first-upload plan, otherwise it returns changed
 
 ### Pending Todos
 
@@ -199,8 +203,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T21:27:32.160Z
-Stopped at: Completed 61-15-PLAN.md
+Last session: 2026-11-03T21:42:38.167Z
+Stopped at: Completed 61-16-PLAN.md
 Resume file: None
 
 ## Notes
