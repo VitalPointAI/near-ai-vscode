@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 13
+open_count: 12
 waived_count: 0
-fixed_count: 0
+fixed_count: 1
 total_count: 13
-last_updated: 2026-11-03T22:09:39.300Z
+last_updated: 2026-11-03T23:02:54.367Z
 ---
 
 # Broken Windows Ledger
@@ -27,7 +27,7 @@ last_updated: 2026-11-03T22:09:39.300Z
 | 10 | 06 | unrun-verify | .planning/phases/06-team-studio-and-multimodal-agent-skills/06-07-PLAN.md |  | Full npm run package gate was not run; requested lint and focused tests passed. | open |  | 2026-10-26T04:42:04.856Z |  |
 | 11 | 06 | unrun-verify | .planning/phases/06-team-studio-and-multimodal-agent-skills/06-08-PLAN.md |  | Full npm run package verification was not run; requested lint, compile, and focused multimodal/chat suites passed. | open |  | 2026-10-26T04:53:31.061Z |  |
 | 12 | 62 | stub | src/services/team/boardView.ts | 25 | BOARD_SCRIPTS and BOARD_STYLES name media/board files that plans 62-09 to 62-13 create; until then the board page loads empty | open |  | 2026-11-02T20:08:58.850Z |  |
-| 13 | 61 | stub | src/services/team/memberCommands.ts | 646 | Join: one interim sentence for every not-ready catch-up reason; 61-20 gives each reason its own sentence and button | open |  | 2026-11-03T22:09:39.300Z |  |
+| 13 | 61 | stub | src/services/team/memberCommands.ts | 646 | Join: one interim sentence for every not-ready catch-up reason; 61-20 gives each reason its own sentence and button | fixed |  | 2026-11-03T22:09:39.300Z | 2026-11-03T23:02:54.367Z |
 
 ````json
 [
@@ -194,10 +194,10 @@ last_updated: 2026-11-03T22:09:39.300Z
     "file": "src/services/team/memberCommands.ts",
     "line": 646,
     "description": "Join: one interim sentence for every not-ready catch-up reason; 61-20 gives each reason its own sentence and button",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-11-03T22:09:39.300Z",
-    "resolved_at": null,
+    "resolved_at": "2026-11-03T23:02:54.367Z",
     "milestone": "v0.6.0"
   }
 ]
