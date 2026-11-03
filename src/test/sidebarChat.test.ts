@@ -54,6 +54,24 @@ test('sidebar html loads only nonce scripts and theme-relative assets', () => {
   assert.ok(commands.some((command) => command.command === 'gsd-new-project'));
 });
 
+test('the sidebar has the Team section between the attention line and the conversation, and loads team.js after chat.js with the same nonce', () => {
+  const { sidebarHtml } = withVscodeStub(() => require('../services/panelView') as typeof import('../services/panelView'));
+  const html = sidebarHtml({ cspSource: 'vscode-webview://test', asWebviewUri: (uri) => uri }, { path: '/ext/media/chat' } as never);
+  const section = /<section id="team"([^>]*)><\/section>/.exec(html);
+  assert.ok(section, 'an empty Team section is in the page');
+  assert.match(section[1] ?? '', /\saria-label="Team"/);
+  assert.match(section[1] ?? '', /\shidden\b/, 'hidden until the host sends a model');
+  const needsYou = html.indexOf('<div id="needs-you"');
+  const team = html.indexOf('<section id="team"');
+  const transcript = html.indexOf('<main id="transcript"');
+  assert.ok(needsYou >= 0 && needsYou < team && team < transcript, 'between #needs-you and #transcript');
+  const scripts = [...html.matchAll(/<script nonce="([^"]+)" src="([^"]+)"><\/script>/g)].map((match) => ({ nonce: match[1], file: (match[2] ?? '').split('/').pop() }));
+  const chat = scripts.findIndex((script) => script.file === 'chat.js');
+  const teamScript = scripts.findIndex((script) => script.file === 'team.js');
+  assert.ok(chat >= 0 && teamScript === chat + 1, `team.js right after chat.js: ${scripts.map((script) => script.file).join(', ')}`);
+  assert.equal(scripts[teamScript]?.nonce, scripts[chat]?.nonce, 'the same nonce');
+});
+
 test('new sidebar intents are strictly validated', () => {
   assert.deepEqual(parseChatWebviewMessage({ type: 'new-chat' }), { type: 'new-chat' });
   assert.deepEqual(parseChatWebviewMessage({ type: 'open-tools' }), { type: 'open-tools' });
