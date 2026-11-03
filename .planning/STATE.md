@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-23-PLAN.md
-last_updated: "2026-11-03T23:34:42.838Z"
+stopped_at: Completed 61-22-PLAN.md
+last_updated: "2026-11-03T23:57:26.855Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 42b99c665bf8a51562943ae1c84d965dbdccae39
+state_head: 7e2f56de6189b30b9ed0c68bf52e552cd7769e31
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 59
-  completed_plans: 49
+  completed_plans: 50
   percent: 13
 ---
 
@@ -103,6 +103,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P20 | 12min | 2 tasks | 4 files |
 | Phase 61 P21 | 11min | 3 tasks | 9 files |
 | Phase 61 P23 | 11min | 2 tasks | 4 files |
+| Phase 61 P22 | 17min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -212,6 +213,8 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-21: the manager status adds how many people wait in Members (managerStatus waiting count)
 - [Phase 61]: 61-23: the invite modal is 'Invite ready for <name>' with the invite, a blank line and how to send it, button 'Copy invite'; closing it asks 'Close without copying? The invite is not shown again.' (Copy invite, Close), and Close points at Members in the Team section
 - [Phase 61]: 61-23: Link Your Organization (and the NEAR line in Manage Team Members) shares a new link through ensureTeamSetupShared reason link with one confirmation; declining keeps the link here and points at Share in the Team section; the push helpers are removed, so no membership command pushes a branch
+- [Phase 61]: 61-22: the lead's e2e steps (team-lead then team-confirm) run in one window alongside the invitee's window, because VS Code keeps all storage, SecretStorage included, in memory during extension tests; no key is exported
+- [Phase 61]: 61-22: the self-import tests derive finished plans from the SUMMARYs committed at HEAD
 
 ### Pending Todos
 
@@ -233,8 +236,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T23:34:42.408Z
-Stopped at: Completed 61-23-PLAN.md
+Last session: 2026-11-03T23:57:26.539Z
+Stopped at: Completed 61-22-PLAN.md
 Resume file: None
 
 ## Notes

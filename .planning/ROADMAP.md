@@ -106,7 +106,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. After the full invite, join and remove flow, a privacy canary finds no secret (API key, session token, clear-text invite code) in the coordination branch, `team.json`, settings, audit or transcripts.
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 23/24 plans executed in 13 waves (Waves 8 to 13 are the fix pass for the owner's 61-UAT findings, 2026-11-03)
+**Plans**: 24/24 plans executed in 13 waves (Waves 8 to 13 are the fix pass for the owner's 61-UAT findings, 2026-11-03)
 **UI hint**: yes
 
 **Wave 1**
@@ -157,7 +157,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [x] 61-23-PLAN.md — Invite modal with Copy invite and how to send it; Link Your Organization shares; push helpers removed (TEAM-02)
 
 **Wave 13** *(blocked on Wave 12 completion)*
-- [ ] 61-22-PLAN.md — Real-window e2e: enable, invite, join from a behind copy, confirm; full phase gate (TEAM-01, TEAM-02, TEAM-03)
+- [x] 61-22-PLAN.md — Real-window e2e: enable, invite, join from a behind copy, confirm; full phase gate (TEAM-01, TEAM-02, TEAM-03)
 
 ### Phase 62: Work model, GSD import, Team Board (live, read and move)
 
@@ -318,7 +318,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
-| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 23/24 | In Progress (fix pass planned) | - |
+| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 24/24 | In Progress (fix pass planned) | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 14/23 | In Progress (fix pass planned) | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
