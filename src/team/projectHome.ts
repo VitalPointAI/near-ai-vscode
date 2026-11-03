@@ -168,3 +168,24 @@ export async function teamSetupShared(input: ShareInput): Promise<SharedState> {
       return inspected.remote.same ? { kind: 'shared' } : { kind: 'not-shared', missing: 'different-team-file' };
   }
 }
+
+export const SHARE_COMMIT_MESSAGE = 'chore(team): share the team setup';
+
+export type SharePlan =
+  | { kind: 'already' }
+  | { kind: 'fast-forward'; commits: number }
+  | { kind: 'setup-only' }
+  | { kind: 'first-upload' }
+  | { kind: 'blocked'; reason: 'not-reachable-by-teammates' | 'record-missing' | 'no-local-branch' | 'offline'; detail: string; home?: OnlineHome };
+
+export type ShareResult =
+  | { ok: true; how: 'already' | 'fast-forward' | 'setup-only' | 'first-upload' }
+  | { ok: false; code: 'not-reachable-by-teammates' | 'record-missing' | 'no-local-branch' | 'offline' | 'rejected' | 'changed'; detail: string };
+
+export async function planShare(_input: ShareInput): Promise<SharePlan> {
+  throw new Error('not implemented');
+}
+
+export async function shareTeamSetup(_input: ShareInput & { plan?: SharePlan; attempts?: number }): Promise<ShareResult> {
+  throw new Error('not implemented');
+}

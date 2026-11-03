@@ -2,13 +2,13 @@
 // exactly team.json to the integration branch without moving any of the person's other work.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import type { TeamFile } from '../domain/team/types';
 import { enableTeamMode } from '../team/enable';
 import { cleanRepoUrl } from '../team/inviteBundle';
-import { checkOnlineHome, configuredRemoteUrl, teamSetupShared } from '../team/projectHome';
+import { SHARE_COMMIT_MESSAGE, checkOnlineHome, configuredRemoteUrl, planShare, shareTeamSetup, teamSetupShared } from '../team/projectHome';
 import { runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { TEAM_FILE_REL, readTeamFile, writeTeamFile } from '../team/teamFile';
@@ -62,6 +62,59 @@ function remoteHasRef(fixture: TeamFixture, ref: string): boolean {
     if ((error as { status?: number }).status === 2) return false;
     throw error;
   }
+}
+
+interface LocalSnapshot { heads: string; head: string; headCommit: string; index: string; status: string }
+
+// Everything of the person's own work that sharing must leave alone: every local branch, HEAD, the index and the working tree status.
+function snapshot(dir: string): LocalSnapshot {
+  return {
+    heads: gitIn(dir, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']),
+    head: gitIn(dir, ['symbolic-ref', '-q', 'HEAD']),
+    headCommit: gitIn(dir, ['rev-parse', 'HEAD']),
+    index: gitIn(dir, ['ls-files', '-s', '--debug']),
+    status: gitIn(dir, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored'])
+  };
+}
+
+function pushes(calls: string[][]): string[][] {
+  return calls.filter((call) => call[0] === 'push');
+}
+
+// git push, options, then exactly the remote name and <commit>:refs/heads/<branch>; never a force, mirror, all, tags or delete.
+function assertNarrowPush(call: string[], remote: string, branch: string): void {
+  for (const flag of call.filter((arg) => arg.startsWith('-'))) {
+    assert.ok(!/^(--force|-f$|--force-with-lease|--mirror|--all|--tags|--delete|-d$|--prune)/.test(flag), `forbidden push option ${flag}`);
+  }
+  const positional = call.slice(1).filter((arg) => !arg.startsWith('-'));
+  assert.equal(positional.length, 2, call.join(' '));
+  assert.equal(positional[0], remote);
+  assert.match(positional[1] ?? '', new RegExp(`^[0-9a-f]{40,64}:refs/heads/${branch}$`));
+}
+
+function leftoverShareIndexes(dir: string): string[] {
+  const gitDir = gitIn(dir, ['rev-parse', '--absolute-git-dir']);
+  return readdirSync(gitDir).filter((name) => name.startsWith('near-ai-share-index'));
+}
+
+function remoteFileOf(fixture: TeamFixture, rev: string): string {
+  return execFileSync('git', ['show', `${rev}:${TEAM_FILE_REL}`], { cwd: fixture.remote, encoding: 'utf8' });
+}
+
+function remoteHasObject(fixture: TeamFixture, object: string): boolean {
+  try {
+    execFileSync('git', ['cat-file', '-e', object], { cwd: fixture.remote, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// An unrelated local commit (a README edit) that must never reach the online home.
+function commitReadmeEdit(dir: string, text = 'A local note that is not shared yet.\n'): string {
+  writeFileSync(path.join(dir, 'README.md'), `# Team test project\n${text}`, 'utf8');
+  gitIn(dir, ['commit', '-q', '-am', 'local readme edit']);
+  return gitIn(dir, ['rev-parse', 'HEAD']);
 }
 
 // ---- Task 1: the online home and whether the team setup is on it ----------------------------------------------------------------------
@@ -183,5 +236,150 @@ test('a team.json on the online home that cannot be read as a team file counts a
     gitIn(other, ['push', '-q', 'origin', 'main']);
     assert.deepEqual(await teamSetupShared({ projectRoot: dir, teamFile, branch: 'main' }), { kind: 'not-shared', missing: 'different-team-file' });
     assert.equal(readFileSync(path.join(dir, TEAM_FILE_REL), 'utf8').includes(teamFile.teamId), true, 'the local file is untouched');
+  });
+});
+
+// ---- Task 2: planning and sharing exactly the team setup ------------------------------------------------------------------------------
+
+test('only the Enable commit unshared on main: planShare gives fast-forward 1 and the share moves the online main to the local main', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    const teamFile = await enable(fixture, 'a');
+    const { git, calls } = recorder();
+    assert.deepEqual(await planShare({ projectRoot: dir, teamFile, branch: 'main', git }), { kind: 'fast-forward', commits: 1 });
+    const before = snapshot(dir);
+    assert.deepEqual(await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main', git }), { ok: true, how: 'fast-forward' });
+    assert.equal(gitIn(fixture.remote, ['rev-parse', 'refs/heads/main']), gitIn(dir, ['rev-parse', 'refs/heads/main']));
+    assert.deepEqual(snapshot(dir), before);
+    assert.equal(pushes(calls).length, 1);
+    for (const call of pushes(calls)) assertNarrowPush(call, 'origin', 'main');
+    assert.deepEqual(await teamSetupShared({ projectRoot: dir, teamFile, branch: 'main' }), { kind: 'shared' });
+  });
+});
+
+test('an unrelated local commit before Enable: planShare gives setup-only and only team.json reaches the online home, nothing local moves', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    const oldTip = gitIn(fixture.remote, ['rev-parse', 'refs/heads/main']);
+    const readmeCommit = commitReadmeEdit(dir);
+    const teamFile = await enable(fixture, 'a');
+    const { git, calls } = recorder();
+    assert.deepEqual(await planShare({ projectRoot: dir, teamFile, branch: 'main', git }), { kind: 'setup-only' });
+
+    const before = snapshot(dir);
+    assert.deepEqual(await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main', git }), { ok: true, how: 'setup-only' });
+    assert.deepEqual(snapshot(dir), before, 'local branches, HEAD, the index and the working tree are untouched');
+    assert.deepEqual(leftoverShareIndexes(dir), [], 'the temporary index is removed');
+    assert.equal(pushes(calls).length, 1);
+    for (const call of pushes(calls)) assertNarrowPush(call, 'origin', 'main');
+
+    const shared = gitIn(fixture.remote, ['rev-parse', 'refs/heads/main']);
+    assert.equal(gitIn(fixture.remote, ['rev-parse', `${shared}^`]), oldTip, 'one new commit on the old online tip');
+    assert.equal(gitIn(fixture.remote, ['rev-list', '--count', `${oldTip}..${shared}`]), '1');
+    assert.equal(gitIn(fixture.remote, ['log', '-1', '--format=%s', shared]), SHARE_COMMIT_MESSAGE);
+    assert.equal(gitIn(fixture.remote, ['diff-tree', '--no-commit-id', '-r', '--name-only', shared]), TEAM_FILE_REL);
+    assert.equal(remoteFileOf(fixture, shared), readFileSync(path.join(dir, TEAM_FILE_REL), 'utf8'), 'byte for byte the local team.json');
+    assert.equal(remoteHasObject(fixture, readmeCommit), false, 'the unrelated commit stays on this computer');
+    assert.deepEqual(await teamSetupShared({ projectRoot: dir, teamFile, branch: 'main' }), { kind: 'shared' });
+
+    // The lead catches up without a conflict, by merge and, from the same starting point, by rebase.
+    const start = gitIn(dir, ['rev-parse', 'HEAD']);
+    gitIn(dir, ['fetch', '-q', 'origin']);
+    gitIn(dir, ['merge', '-q', '--no-edit', 'origin/main']);
+    assert.equal(readFileSync(path.join(dir, TEAM_FILE_REL), 'utf8'), remoteFileOf(fixture, shared));
+    assert.equal(gitIn(dir, ['status', '--porcelain']), '');
+    gitIn(dir, ['reset', '-q', '--hard', start]);
+    gitIn(dir, ['pull', '-q', '--rebase', 'origin', 'main']);
+    assert.equal(gitIn(dir, ['rev-list', '--count', 'origin/main..HEAD']), '1', 'only the README commit is left; the Enable commit was already applied');
+    assert.equal(gitIn(dir, ['log', '-1', '--format=%s', 'HEAD']), 'local readme edit');
+  });
+});
+
+test('Enable on a feature branch: the share lands on main, not on the feature branch, and the lead fast-forwards main', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    gitIn(dir, ['checkout', '-q', '-b', 'feature']);
+    const teamFile = await enable(fixture, 'a');
+    assert.equal(gitIn(dir, ['rev-parse', 'main']), gitIn(fixture.remote, ['rev-parse', 'main']), 'main is unchanged');
+    assert.deepEqual(await planShare({ projectRoot: dir, teamFile, branch: 'main' }), { kind: 'setup-only' });
+    const before = snapshot(dir);
+    assert.deepEqual(await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main' }), { ok: true, how: 'setup-only' });
+    assert.deepEqual(snapshot(dir), before);
+    assert.equal(remoteHasRef(fixture, 'refs/heads/feature'), false);
+    assert.equal(remoteFileOf(fixture, 'refs/heads/main'), readFileSync(path.join(dir, TEAM_FILE_REL), 'utf8'));
+
+    gitIn(dir, ['fetch', '-q', 'origin']);
+    gitIn(dir, ['checkout', '-q', 'main']);
+    gitIn(dir, ['merge', '-q', '--ff-only', 'origin/main']);
+    assert.equal(gitIn(dir, ['rev-parse', 'HEAD']), gitIn(fixture.remote, ['rev-parse', 'main']));
+  });
+});
+
+test('an online home without the integration branch: planShare gives first-upload, and only that consented plan uploads the local branch', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    const teamFile = await enable(fixture, 'a');
+    gitIn(fixture.remote, ['update-ref', '-d', 'refs/heads/main']);
+    const plan = await planShare({ projectRoot: dir, teamFile, branch: 'main' });
+    assert.deepEqual(plan, { kind: 'first-upload' });
+
+    const { git, calls } = recorder();
+    const unasked = await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main', git });
+    assert.equal(unasked.ok, false);
+    assert.equal(!unasked.ok && unasked.code, 'changed', 'without the first-upload plan nothing is uploaded');
+    assert.equal(pushes(calls).length, 0);
+    assert.equal(remoteHasRef(fixture, 'refs/heads/main'), false);
+
+    assert.deepEqual(await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main', git, plan }), { ok: true, how: 'first-upload' });
+    assert.equal(gitIn(fixture.remote, ['rev-parse', 'refs/heads/main']), gitIn(dir, ['rev-parse', 'refs/heads/main']));
+    for (const call of pushes(calls)) assertNarrowPush(call, 'origin', 'main');
+
+    assert.deepEqual(await planShare({ projectRoot: dir, teamFile, branch: 'release' }), {
+      kind: 'blocked', reason: 'no-local-branch', detail: 'Neither this computer nor the team remote has the integration branch release.'
+    });
+  });
+});
+
+test('already shared: planShare gives already and shareTeamSetup makes no push', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    const teamFile = await enable(fixture, 'a');
+    gitIn(dir, ['push', '-q', 'origin', 'main']);
+    const { git, calls } = recorder();
+    assert.deepEqual(await planShare({ projectRoot: dir, teamFile, branch: 'main', git }), { kind: 'already' });
+    assert.deepEqual(await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main', git }), { ok: true, how: 'already' });
+    assert.equal(pushes(calls).length, 0);
+  });
+});
+
+test('with no user name or email in any git config the setup-only commit is made with the neutral NEAR AI identity', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    commitReadmeEdit(dir);
+    const teamFile = await enable(fixture, 'a');
+    gitIn(dir, ['config', '--unset', 'user.name']);
+    gitIn(dir, ['config', '--unset', 'user.email']);
+    // Without this git could guess an address from the host name; the person has told git nothing.
+    gitIn(dir, ['config', 'user.useConfigOnly', 'true']);
+    assert.deepEqual(await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main' }), { ok: true, how: 'setup-only' });
+    assert.equal(gitIn(fixture.remote, ['log', '-1', '--format=%an <%ae>|%cn <%ce>', 'main']), 'NEAR AI Team <coordination@near-ai.invalid>|NEAR AI Team <coordination@near-ai.invalid>');
+    assert.deepEqual(leftoverShareIndexes(dir), []);
+  });
+});
+
+test("with the person's identity in git config the setup-only commit is theirs", async () => {
+  await withFixture(['a'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    commitReadmeEdit(dir);
+    const teamFile = await enable(fixture, 'a');
+    assert.deepEqual(await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main' }), { ok: true, how: 'setup-only' });
+    assert.equal(gitIn(fixture.remote, ['log', '-1', '--format=%an <%ae>', 'main']), 'Team Test <team-test@example.invalid>');
   });
 });
