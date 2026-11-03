@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Panels now fit narrow widths.** The chat, Agent Activity, Compare Models,
+  MCP connections, Team Studio, Tools and the welcome page wrap, stack or hide
+  less important columns when you make them narrow, instead of scrolling
+  sideways. A hidden column's values show in a short line under the row's
+  name, and on a very narrow panel each table row becomes a small card. Code
+  and diffs still scroll sideways inside their own box, so lines are never
+  wrapped in a misleading way.
+
 ## 0.4.13
 
 Replies in the chat are easier to read. Tables, quotes and crossed-out text
