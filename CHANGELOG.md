@@ -7,6 +7,9 @@
   place while the reply is still arriving.
 - **Quoted text stays together as one quote**, and crossed-out text shows
   crossed out.
+- **Links in replies open the right page** even when the address has
+  characters like underscores, tildes or asterisks in it. Before, some of
+  these links went to a broken address.
 
 ## 0.4.12
 
