@@ -59,8 +59,9 @@ const DIFFERENT_LINK = 'This invite names a different organization than this pro
 // D-07 and D-26: nothing is kept between this call and the next. After a clone the invitee pastes the bundle again, so the answer here depends on
 // the folder that is open right now and on the bundle in this call only. Nothing in a refusal repeats the pasted text.
 // G-61-4 (amends D-07): when the open folder is a copy of the invite's project (one of its remotes has the invite's address) but its team.json
-// is missing or names another team, the copy is first brought up to date from that remote, and only when no work can be lost. A different
-// or missing project still answers clone-needed. A team.json that already matches is used as it is, with no network call.
+// is missing, names another team, or lacks the organization link the invite names, the copy is first brought up to date from that remote,
+// once, and only when no work can be lost. A different or missing project still answers clone-needed. A team.json that already matches the
+// invite is used as it is, with no network call. The link itself still comes only from team.json (WR-03).
 export async function prepareJoin(input: {
   projectRoot: string | undefined; bundleText: string; git?: GitRunner; onStep?: (step: JoinPreparationStep) => void;
 }): Promise<JoinPreparation> {
@@ -72,7 +73,8 @@ export async function prepareJoin(input: {
     throw error;
   }
   const projectRoot = input.projectRoot;
-  if (projectRoot === undefined) return { kind: 'clone-needed', repoUrl: bundle.repo, teamId: bundle.team };
+  const cloneNeeded: JoinPreparation = { kind: 'clone-needed', repoUrl: bundle.repo, teamId: bundle.team };
+  if (projectRoot === undefined) return cloneNeeded;
   const read = async (): Promise<TeamFile | undefined | { refused: string }> => {
     try {
       return await readTeamFile(projectRoot);
@@ -83,23 +85,28 @@ export async function prepareJoin(input: {
   };
   let teamFile = await read();
   if (teamFile !== undefined && 'refused' in teamFile) return { kind: 'refused', message: teamFile.refused };
+  const otherTeam = teamFile === undefined || teamFile.teamId !== bundle.team;
+  const linkMissing = !otherTeam && bundle.near !== undefined && teamFile?.near === undefined;
   let updated = false;
-  if (teamFile === undefined || teamFile.teamId !== bundle.team) {
+  if (otherTeam || linkMissing) {
     const remote = await findSameProjectRemote(projectRoot, bundle.repo, input.git);
-    if (remote === undefined) return { kind: 'clone-needed', repoUrl: bundle.repo, teamId: bundle.team };
-    input.onStep?.('update');
-    const caughtUp = await catchUpCopy({ projectRoot, remote, teamId: bundle.team, ...(input.git === undefined ? {} : { git: input.git }) });
-    if (!caughtUp.ok) {
-      return { kind: 'not-ready', reason: caughtUp.reason, repoUrl: bundle.repo, teamId: bundle.team, ...(caughtUp.detail === undefined ? {} : { detail: caughtUp.detail }) };
+    if (remote === undefined && otherTeam) return cloneNeeded;
+    if (remote !== undefined) {
+      input.onStep?.('update');
+      const caughtUp = await catchUpCopy({ projectRoot, remote, teamId: bundle.team, ...(input.git === undefined ? {} : { git: input.git }) });
+      if (!caughtUp.ok) {
+        return { kind: 'not-ready', reason: caughtUp.reason, repoUrl: bundle.repo, teamId: bundle.team, ...(caughtUp.detail === undefined ? {} : { detail: caughtUp.detail }) };
+      }
+      updated = caughtUp.updated;
+      teamFile = await read();
+      if (teamFile !== undefined && 'refused' in teamFile) return { kind: 'refused', message: teamFile.refused };
     }
-    updated = caughtUp.updated;
-    teamFile = await read();
-    if (teamFile !== undefined && 'refused' in teamFile) return { kind: 'refused', message: teamFile.refused };
-    if (teamFile === undefined || teamFile.teamId !== bundle.team) return { kind: 'not-ready', reason: 'not-shared', repoUrl: bundle.repo, teamId: bundle.team };
   }
+  if (teamFile === undefined || teamFile.teamId !== bundle.team) return { kind: 'not-ready', reason: 'not-shared', repoUrl: bundle.repo, teamId: bundle.team };
   if (teamFile.coordination.ref !== bundle.ref) {
     return { kind: 'refused', message: 'This invite is for a different copy of this project than the one that is open. Ask your lead for a new invite.' };
   }
+  // The online version has no link either (the lead linked but did not share it), or this copy is not a copy of the invite's project.
   if (bundle.near !== undefined && teamFile.near === undefined) return { kind: 'refused', message: BUNDLE_LINK_NOT_IN_PROJECT };
   if (teamFile.near !== undefined && bundle.near !== undefined && !sameNear(teamFile.near, bundle.near)) return { kind: 'refused', message: DIFFERENT_LINK };
   const near = teamFile.near;
