@@ -252,6 +252,7 @@ test('choosing Link now while inviting links first, and the one share confirmati
     assert.deepEqual((await readTeamFile(lead.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' });
     assert.equal(stub.notifications.filter((entry) => entry.message === SHARE_TEXT.inviteQuestion).length, 1, 'one share confirmation');
     assert.equal(stub.notificationActions.some((actions) => actions.includes('Share with my team')), false, 'the link flow asked no share question of its own');
+    assert.equal(stub.notifications.some((entry) => entry.message === SHARE_TEXT.linkQuestion), false, 'nor the Link command\'s share question (61-23)');
     assert.equal(remoteTeamJson(lead), localTeamJson(lead), 'the online team.json is the linked one');
     assert.deepEqual(JSON.parse(remoteTeamJson(lead)).near, { organizationId: 'org-1', workspaceId: 'ws-1' });
     assert.equal(stub.clipboardWrites.length, 1);

@@ -3,7 +3,7 @@
 // log, the clipboard, SecretStorage and the output channel. Secret-shaped values (invite codes, API keys, refresh tokens) are built at run
 // time or read back from the code under test, never written as literals. Team modules load lazily, as in the product.
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -181,11 +181,20 @@ async function shareSetup(root: string): Promise<void> {
   assert.equal(shared.ok, true, JSON.stringify(shared));
 }
 
-// The lead links the team to Team Org / Team workspace through the Link command, then pushes the code branch so a clone sees team.json.
+// G-61-3 (owner, 2026-11-03): Link Your Organization shares the team setup it changed with one confirmation ('Share'), through the share flow.
+const LINK_SHARE_QUESTION = 'Share your team setup so teammates see the organization link?';
+const LINK_NOT_SHARED = 'The link is saved on this computer only. Teammates will not see it until you share your team setup. Choose Share in the Team section of your NEAR AI sidebar.';
+const shareWhenAsked = (text: string, actions: string[]): string | undefined => (text === LINK_SHARE_QUESTION && actions.includes('Share') ? 'Share' : undefined);
+const remoteTeamJson = (t: Team): string => gitIn(t.fixture.remote, ['show', `refs/heads/main:${TEAM_FILE_REL}`]);
+
+// The lead links the team to Team Org / Team workspace through the Link command and answers its one share confirmation, so a clone sees the
+// linked team.json (was: the test pushed the code branch itself, because the command only offered a push).
 async function linkAndPush(t: Team): Promise<void> {
   stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
+  stub.setMessageResponder(shareWhenAsked);
   await t.run(LINK_NEAR_COMMAND);
-  gitIn(t.root, ['push', '-q', 'origin', 'main']);
+  stub.setMessageResponder(undefined);
+  assert.deepEqual(JSON.parse(remoteTeamJson(t)).near, { organizationId: 'org-1', workspaceId: 'ws-1' }, `the link was shared (${stub.notifications.map((entry) => entry.message).join(' | ')})`);
   clearUi();
 }
 
@@ -581,10 +590,10 @@ test('an unfinished earlier join is offered a reset only when the team list does
 
 // ---- Link Your Organization -------------------------------------------------------------------------------------------------------------
 
-test('Link signs in, lists only organizations the lead owns or administers, commits team.json only, and pushes only when asked', async () => {
+test('Link signs in, lists only organizations the lead owns or administers, commits team.json only, and shares the team setup after one confirmation', async () => {
   await withTeam(async (t) => {
     stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Second workspace');
-    const remoteBefore = gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']);
+    stub.setMessageResponder(shareWhenAsked);
     await t.run(LINK_NEAR_COMMAND);
 
     assert.equal(t.signIns.count, 1, 'signed in once');
@@ -594,12 +603,18 @@ test('Link signs in, lists only organizations the lead owns or administers, comm
     assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-2' });
     assert.equal(gitIn(t.root, ['log', '-1', '--format=%s']), LINK_COMMIT_MESSAGE);
     assert.equal(gitIn(t.root, ['show', '--name-only', '--format=', 'HEAD']), TEAM_FILE_REL);
-    assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), remoteBefore, 'nothing was pushed');
     assert.ok(t.secrets.values.has(nearSessionSecretName((await readTeamFile(t.root))?.teamId as string)), 'the sign-in is kept for this team');
-    const offer = stub.notifications.findIndex((entry) => entry.message.startsWith('Linked Invite team to Team Org'));
-    assert.ok(offer >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
-    assert.equal(stub.notifications[offer]?.message, 'Linked Invite team to Team Org. Share it so your teammates see the link.');
-    assert.deepEqual(stub.notificationActions[offer], ['Share with my team']);
+    assert.ok(shownMessages().includes('Linked Invite team to Team Org.'), shownMessages().join(' | '));
+    // One confirmation, in a modal, with Share; then the online team setup has the link.
+    const asked = stub.notifications.flatMap((entry, index) => (entry.message === LINK_SHARE_QUESTION ? [index] : []));
+    assert.equal(asked.length, 1, 'asked once');
+    assert.equal(stub.notificationOptions[asked[0] as number]?.modal, true);
+    assert.deepEqual(stub.notificationActions[asked[0] as number], ['Share']);
+    assert.equal(remoteTeamJson(t), (await fs.readFile(path.join(t.root, TEAM_FILE_REL), 'utf8')).trim(), 'the online team.json is this computer\'s');
+    assert.deepEqual(JSON.parse(remoteTeamJson(t)).near, { organizationId: 'org-1', workspaceId: 'ws-2' }, 'the online team setup has the link');
+    assert.ok(shownMessages().includes('Your team setup is online. Teammates can now join.'), shownMessages().join(' | '));
+    assert.equal(stub.notificationActions.some((actions) => actions?.includes('Share with my team') === true), false, 'no old push offer');
+    assert.equal(stub.notifications.some((entry) => /Pushed|push|origin|commit|branch/i.test(entry.message)), false, 'no git words in what is shown');
     assert.ok(outputLines().includes('team.json is committed on main. Sharing pushes it.'), 'the git detail is in the channel only');
     assert.equal(t.handle.session()?.teamFile.near?.workspaceId, 'ws-2', 'the session was restarted on the new team.json');
     // UI review issue 1: reading the lists can be stopped; the write cannot.
@@ -607,16 +622,29 @@ test('Link signs in, lists only organizations the lead owns or administers, comm
     assert.deepEqual(progressNamed('Linking Invite team to Team Org'), { title: 'Linking Invite team to Team Org', cancellable: false, messages: ['Saving the link in this project'] });
     assert.equal(everythingShown().includes(t.signIns.tokens?.refreshToken as string), false);
   }, { near: true });
+});
 
+test('declining the share after Link keeps the link on this computer and says teammates will not see it until it is shared, pointing at Share in the Team section', async () => {
   await withTeam(async (t) => {
+    const remoteBefore = gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']);
     stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
-    stub.setMessageResponder((_text, actions) => (actions.includes('Share with my team') ? 'Share with my team' : undefined));
     await t.run(LINK_NEAR_COMMAND);
-    assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), gitIn(t.root, ['rev-parse', 'HEAD']), 'choosing Share with my team pushed the branch');
-    assert.ok(stub.notifications.some((entry) => entry.level === 'info' && entry.message === 'Shared with your team.'));
-    assert.equal(stub.notifications.some((entry) => /Pushed|origin/.test(entry.message)), false, 'no git words in what is shown');
-    assert.ok(outputLines().includes('Pushed main to origin.'));
+    assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' }, 'the link is kept on this computer');
+    assert.equal(gitIn(t.root, ['log', '-1', '--format=%s']), LINK_COMMIT_MESSAGE);
+    assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), remoteBefore, 'nothing was shared');
+    assert.equal(JSON.parse(remoteTeamJson(t)).near, undefined, 'the online team setup has no link yet');
+    assert.equal(stub.notifications.filter((entry) => entry.message === LINK_SHARE_QUESTION).length, 1, 'asked once');
+    assert.ok(shownMessages().includes('Linked Invite team to Team Org.'), shownMessages().join(' | '));
+    assert.equal(shownMessages().at(-1), LINK_NOT_SHARED, shownMessages().join(' | '));
+    assert.ok(outputLines().some((line) => line.includes('not on main online (declined)')), outputLines().join(' | '));
+    assert.equal(stub.notificationActions.some((actions) => actions?.includes('Share with my team') === true), false, 'no old push offer');
   }, { near: true });
+});
+
+test('no membership command pushes a branch: memberCommands.ts has no push offer or push helper, and the team setup goes online only through the share flow', () => {
+  const source = readFileSync(path.resolve(__dirname, '..', '..', 'src', 'services', 'team', 'memberCommands.ts'), 'utf8');
+  for (const gone of ['pushCodeBranch', 'offerPush', 'pushBranch', 'Share with my team']) assert.equal(source.includes(gone), false, `${gone} is gone`);
+  assert.match(source, /reason: 'link'/);
 });
 
 test('the handle tells listeners when Link restarts the session on the new team.json', async () => {
