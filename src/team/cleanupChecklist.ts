@@ -38,7 +38,7 @@ export type NewCleanupItem = Omit<CleanupItem, 'id' | 'attempts' | 'createdAt'>;
 export interface CleanupPatch { status?: CleanupStatus; lastError?: string; keyId?: string; attempted?: boolean }
 
 export function repoAccessText(name: string): string {
-  return `Remove ${name}'s access to the git repository last, after their client has seen the removal.`;
+  return `Remove ${name}'s access to the project on GitHub (or wherever the project is hosted) last, after NEAR AI on their computer has seen the removal.`;
 }
 
 // The wording with the member's name left as a placeholder, for callers that fill it in themselves.

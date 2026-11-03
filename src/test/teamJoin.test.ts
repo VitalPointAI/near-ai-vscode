@@ -207,7 +207,7 @@ test('prepareJoin takes the NEAR link only from team.json, refuses a bundle link
     await writeTeamFile(joiner.projectRoot, withoutNear);
     const fallback = await prepareJoin({ projectRoot: joiner.projectRoot, bundleText: bundle });
     assert.equal(fallback.kind, 'refused');
-    if (fallback.kind === 'refused') assert.match(fallback.message, /push the NEAR link/);
+    if (fallback.kind === 'refused') assert.match(fallback.message, /share the NEAR link with the team/);
     const direct = await joinTeam({
       projectRoot: joiner.projectRoot, globalStorageDir: joiner.globalStorageDir, teamFile: withoutNear, bundle: parseInviteBundle(bundle), near: NEAR_LINK,
       secrets: joiner.secrets, displayName: 'Dana'

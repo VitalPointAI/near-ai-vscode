@@ -606,7 +606,7 @@ test('checklist: concurrent adds from two instances on one folder all land, and 
   });
 });
 
-test('checklist: every step kind the phase uses exists, and the repository reminder names the member and says last', async () => {
+test('checklist: every step kind the phase uses exists, and the project access reminder names the member and says last', async () => {
   await withStorage(async (dir) => {
     const checklist = new CleanupChecklist(dir);
     const steps: CleanupItem['step'][] = ['send-invitation', 'cancel-invitation', 'deliver-key', 'rotate-key', 'zero-limit', 'revoke-key', 'remove-org-member', 'repo-access'];
@@ -614,8 +614,9 @@ test('checklist: every step kind the phase uses exists, and the repository remin
     assert.deepEqual(added.map((item) => item.step), steps);
     assert.deepEqual((await checklist.list()).map((item) => item.step), steps);
   });
-  assert.match(REPO_ACCESS_TEXT, /access to the git repository last, after their client has seen the removal/);
-  assert.equal(repoAccessText('Dana Developer'), "Remove Dana Developer's access to the git repository last, after their client has seen the removal.");
+  assert.match(REPO_ACCESS_TEXT, /access to the project on GitHub \(or wherever the project is hosted\) last, after NEAR AI on their computer has seen the removal/);
+  assert.equal(repoAccessText('Dana Developer'), "Remove Dana Developer's access to the project on GitHub (or wherever the project is hosted) last, after NEAR AI on their computer has seen the removal.");
+  assert.equal(/repository|\bgit\b/i.test(REPO_ACCESS_TEXT), false, 'plain words for the person removing someone');
   assert.equal(REPO_ACCESS_TEXT.includes('\u2014'), false, 'no em-dash');
 });
 

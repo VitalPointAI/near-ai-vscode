@@ -209,7 +209,7 @@ async function deliveryLanded(log: TeamLog, memberId: string, keyId: string): Pr
 }
 
 const unknownDeliveryText = (name: string, keyId: string): string =>
-  `It is not known whether ${name}'s new key reached the team log, because the team's repository could not be reached to check. The key was kept, so a delivery that did land still works. When you are online, open "NEAR AI: Manage Team Members": if ${name} still needs a key, revoke key ${keyId} in the NEAR console and send a new one.`;
+  `It is not known whether ${name}'s new key reached the team record, because the team could not be reached to check. The key was kept, so a delivery that did land still works. When you are online, open "NEAR AI: Manage Team Members": if ${name} still needs a key, revoke key ${keyId} in the NEAR console and send a new one.`;
 
 // Creates the key with its cap in the create call, seals it to every target, and appends member.key-sealed. The append builder re-checks the
 // fresh state: the member must still be there, still hold the key this delivery replaces, and still have exactly the sealed set of devices.

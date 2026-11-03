@@ -43,7 +43,10 @@ function sameNear(left: NearLink, right: NearLink): boolean {
 
 // WR-03: the bundle is plain base64url JSON with no MAC, so anyone who handles it can change its link. team.json is the only source of the
 // link; a bundle link that team.json does not have is refused, never used.
-const BUNDLE_LINK_NOT_IN_PROJECT = 'This invite names a NEAR organization, but this project has no NEAR link yet. Ask your lead to push the NEAR link (or pull it if they already did), then run "NEAR AI: Join Team" again. Nothing was changed.';
+const BUNDLE_LINK_NOT_IN_PROJECT = 'This invite names a NEAR organization, but this project has no NEAR link yet. Ask your lead to share the NEAR link with the team (or get the latest version of the project if they already did), then run "NEAR AI: Join Team" again. Nothing was changed.';
+const JOIN_UNREACHABLE = 'The team could not be reached, so your join did not start. Check your internet connection and try again.';
+const JOIN_PAUSED = 'Something unexpected changed in the shared team record, so joining is paused to protect the team. Ask your lead.';
+const JOIN_REFUSED = 'The shared team record failed a safety check, so this computer cannot join it. Ask your lead.';
 const DIFFERENT_LINK = 'This invite names a different NEAR organization than this project does. Ask your lead to check the link and send a new invite.';
 
 // D-07 and D-26: nothing is kept between this call and the next. After a clone the invitee pastes the bundle again, so the answer here depends on
@@ -67,7 +70,7 @@ export async function prepareJoin(input: { projectRoot: string | undefined; bund
   }
   if (teamFile === undefined || teamFile.teamId !== bundle.team) return { kind: 'clone-needed', repoUrl: bundle.repo, teamId: bundle.team };
   if (teamFile.coordination.ref !== bundle.ref) {
-    return { kind: 'refused', message: 'This invite names a different coordination branch than this project does. Ask your lead for a new invite.' };
+    return { kind: 'refused', message: 'This invite is for a different copy of this project than the one that is open. Ask your lead for a new invite.' };
   }
   if (bundle.near !== undefined && teamFile.near === undefined) return { kind: 'refused', message: BUNDLE_LINK_NOT_IN_PROJECT };
   if (teamFile.near !== undefined && bundle.near !== undefined && !sameNear(teamFile.near, bundle.near)) return { kind: 'refused', message: DIFFERENT_LINK };
@@ -109,12 +112,15 @@ export type JoinResult =
     ok: false;
     code: 'not-invited' | 'cancelled' | 'used' | 'expired' | 'wrong-code' | 'already-has-key' | 'team-file' | 'offline' | 'conflict' | 'invalid-name';
     message: string;
+    /** The technical reason (git, remote), for the output channel only. */
+    detail?: string;
   };
 
 type JoinFailure = Extract<JoinResult, { ok: false }>;
 
-function fail(code: JoinFailure['code'], message: string): JoinFailure {
-  return { ok: false, code, message };
+// `message` is what the person reads; `detail` is the technical reason, written only to the output channel (plain-language pass).
+function fail(code: JoinFailure['code'], message: string, detail?: string): JoinFailure {
+  return detail === undefined ? { ok: false, code, message } : { ok: false, code, message, detail };
 }
 
 const ALREADY_HAS_KEY = 'This computer already has a team key from an earlier Join, either one that worked or one that was interrupted. If you are not on the team list, ask your lead to re-issue your invitation and clear the old key before you join again.';
@@ -179,10 +185,10 @@ function failureOf(log: TeamLog, memberId: string, kind: string, reason: string)
   const text = redactGitMessage(reason);
   if (text.includes(R.inviteExpired)) return fail('expired', 'This invitation has expired. Ask your lead to send a new one.');
   if (text.includes(R.inviteProof)) return fail('wrong-code', 'The code in this invite does not match the team record. Paste the whole invite exactly as you were sent it, or ask for a new one.');
-  if (kind === 'offline') return fail('offline', `Your join could not be saved because the team's repository could not be reached: ${text}`);
+  if (kind === 'offline') return fail('offline', 'Your join could not be saved because the team could not be reached. Check your internet connection and try again.', `The team's repository could not be reached: ${text}`);
   if (kind === 'paused') return fail('team-file', text);
-  if (kind === 'remote-rejected') return fail('conflict', `The team's repository did not accept your join: ${text}`);
-  if (kind === 'busy') return fail('conflict', 'The team log changed too often while your join was being saved. Try again in a moment.');
+  if (kind === 'remote-rejected') return fail('conflict', 'The team did not accept your join. The NEAR AI Team output has the details.', `The team's repository did not accept your join: ${text}`);
+  if (kind === 'busy') return fail('conflict', 'The team record changed too often while your join was being saved. Try again in a moment.');
   return fail('conflict', `Your join was not accepted: ${text}`);
 }
 
@@ -337,12 +343,12 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
   try {
     await log.sync();
   } catch (error) {
-    return fail('offline', `The team log could not be read: ${describe(error)}`);
+    return fail('offline', JOIN_UNREACHABLE, `The team log could not be read: ${describe(error)}`);
   }
   const status = log.status();
-  if (status.state === 'offline') return fail('offline', `The team log could not be reached: ${redactGitMessage(status.reason ?? 'the remote did not answer')}`);
-  if (status.state === 'paused') return fail('team-file', redactGitMessage(status.reason ?? R.logRewritten));
-  if (log.state().refused !== undefined) return fail('team-file', redactGitMessage(log.state().refused ?? R.logRefused));
+  if (status.state === 'offline') return fail('offline', JOIN_UNREACHABLE, `The team log could not be reached: ${redactGitMessage(status.reason ?? 'the remote did not answer')}`);
+  if (status.state === 'paused') return fail('team-file', JOIN_PAUSED, redactGitMessage(status.reason ?? R.logRewritten));
+  if (log.state().refused !== undefined) return fail('team-file', JOIN_REFUSED, redactGitMessage(log.state().refused ?? R.logRefused));
 
   const standing = standingOf(log.state(), bundle.member);
   if (!standing.ok) return fail(standing.code, standing.message);
@@ -382,7 +388,7 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
           const landing = await didJoinLand(log, identity);
           if (landing === 'landed') failure = undefined;
           else if (landing === 'unknown') {
-            return fail('offline', `Your join may or may not have been saved, because the team's repository could not be reached to check. The keys made for this join were kept on this computer. Check the team list when you are online; if you are not on it, ask your lead to re-issue your invitation.`);
+            return fail('offline', `Your join may or may not have been saved, because the team could not be reached to check. The keys made for this join were kept on this computer. Check the team list when you are online; if you are not on it, ask your lead to re-issue your invitation.`);
           }
         }
       }

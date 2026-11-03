@@ -713,11 +713,11 @@ export class GitTransport<S> implements CoordinationTransport<S> {
           this.setStatus({ state: 'offline', reason: outcome.detail });
           return { ok: false, kind: 'offline', reason: outcome.detail, attempts: attempt };
         }
-        return { ok: false, kind: 'busy', reason: 'The team log changed too often while saving. Try again in a moment.', attempts: attempt };
+        return { ok: false, kind: 'busy', reason: 'The team record changed too often while saving. Try again in a moment.', attempts: attempt };
       }
       await this.sleep(this.backoff(attempt));
     }
-    return { ok: false, kind: 'busy', reason: 'The team log changed too often while saving. Try again in a moment.', attempts: maxAttempts };
+    return { ok: false, kind: 'busy', reason: 'The team record changed too often while saving. Try again in a moment.', attempts: maxAttempts };
   }
 
   private async appendGenesis(build: AppendBuilder<S>, teamFileText: string): Promise<AppendResult> {

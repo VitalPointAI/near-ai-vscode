@@ -321,7 +321,7 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
     message: sentence([
       `${member.name} was removed from ${input.teamFile.name}.`, stoppedEarly ? 'You stopped before the last NEAR steps; they are on your cleanup list.' : undefined,
       keyNote, leftToDo(organization, `${member.name} is still in the NEAR organization.`),
-      'Remove their repository access last; it is on your cleanup list.', saved.notice, invitationNote
+      'Remove their access to the project on GitHub (or wherever the project is hosted) last; it is on your cleanup list.', saved.notice, invitationNote
     ])
   };
 }

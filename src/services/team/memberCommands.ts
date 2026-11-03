@@ -22,10 +22,16 @@ export const LINK_NEAR_COMMAND = 'nearAi.team.linkNearOrganization';
 export const SIGN_OUT_NEAR_COMMAND = 'nearAi.team.signOutNear';
 
 const COPY_ACTION = 'Copy';
-const PUSH_ACTION = 'Push';
+// Plain-language pass: people share and get the project; the extension runs git. Git words stay in the output channel.
+const PUSH_ACTION = 'Share with my team';
+const SHOW_DETAILS_ACTION = 'Show details';
+const SHARED_TEXT = 'Shared with your team.';
+const SHARE_FAILED_TEXT = 'The change could not be shared with your team yet. Check your internet connection and try again. Choose Show details for more.';
+const NOT_ON_A_VERSION_TEXT = 'This project could not be shared right now. Choose Show details for what to do.';
+const INVITE_ADDRESS_TEXT = 'The address this project is shared from cannot be put in an invite, so no invite was made. Choose Show details for why.';
 const LINK_CHOICE = 'Link a NEAR organization';
 const SKIP_CHOICE = 'Skip';
-const CLONE_ACTION = 'Clone repository';
+const CLONE_ACTION = 'Get the project';
 const SIGN_IN_ACTION = 'Sign in';
 const WITHOUT_NEAR_ACTION = 'Invite without NEAR';
 const REPLACE_LINK_ACTION = 'Replace link';
@@ -34,24 +40,24 @@ const CONTINUE_WITHOUT_NEAR_ACTION = 'Continue without NEAR';
 const REMOVE_ACTION = 'Remove';
 const CANCEL_INVITATION_ACTION = 'Cancel invitation';
 // UI review issue 1: what each long flow is doing, in plain words. The steps come from the vscode-free flows as codes.
-const INVITE_STEP_TEXT: Record<'log' | 'near', string> = { log: 'Saving the invitation to the team log', near: 'Sending the NEAR organization invitation' };
+const INVITE_STEP_TEXT: Record<'log' | 'near', string> = { log: 'Saving the invitation to the team record', near: 'Sending the NEAR organization invitation' };
 const JOIN_STEP_TEXT: Record<'check' | 'keys' | 'log' | 'near' | 'key', string> = {
-  check: 'Reading the team log and checking your invitation', keys: 'Making the keys for this computer', log: 'Saving your join to the team log',
+  check: 'Reading the team record and checking your invitation', keys: 'Making the keys for this computer', log: 'Saving your join to the team record',
   near: 'Accepting the NEAR organization invitation', key: 'Adding your API key'
 };
 const DELIVERY_STEP_TEXT: Record<'confirm' | 'read-old' | 'create' | 'seal' | 'log' | 'retire', string> = {
-  confirm: 'Saving the confirmation to the team log', 'read-old': 'Reading the limit and spend of the old key', create: 'Creating the key with its spend cap',
-  seal: 'Sealing the key to their computer', log: 'Saving the key delivery to the team log', retire: 'Setting the old key limit to 0 and revoking it'
+  confirm: 'Saving the confirmation to the team record', 'read-old': 'Reading the limit and spend of the old key', create: 'Creating the key with its spend cap',
+  seal: 'Sealing the key to their computer', log: 'Saving the key delivery to the team record', retire: 'Setting the old key limit to 0 and revoking it'
 };
 const REMOVE_STEP_TEXT: Record<'cap' | 'log' | 'revoke' | 'organization' | 'cancel-near', string> = {
-  cap: 'Setting the NEAR key limit to 0', log: 'Saving the removal to the team log', revoke: 'Revoking the NEAR key',
+  cap: 'Setting the NEAR key limit to 0', log: 'Saving the removal to the team record', revoke: 'Revoking the NEAR key',
   organization: 'Removing them from the NEAR organization', 'cancel-near': 'Cancelling the NEAR invitation'
 };
 const READ_ONLY_TEXT = 'Only the owner or a lead can change the team. You can see everyone here, but not change anything.';
 const STEP_TEXT: Record<CleanupStep, string> = {
   'send-invitation': 'Send the NEAR invitation', 'cancel-invitation': 'Cancel the NEAR invitation', 'deliver-key': 'Send the team key',
   'rotate-key': 'Replace the team key', 'zero-limit': 'Set the key limit to 0', 'revoke-key': 'Revoke the key',
-  'remove-org-member': 'Remove from the NEAR organization', 'repo-access': 'Remove repository access'
+  'remove-org-member': 'Remove from the NEAR organization', 'repo-access': 'Remove their access to the project on GitHub (or wherever the project is hosted)'
 };
 const MEMBER_ACTIONS = ['confirm', 'deliver-key', 'rotate-key', 'remove'] as const;
 type MemberAction = (typeof MEMBER_ACTIONS)[number];
@@ -85,7 +91,7 @@ type Level = 'info' | 'warn' | 'error';
 
 export interface MemberCommandDeps {
   context: vscode.ExtensionContext;
-  output: { appendLine(line: string): void };
+  output: { appendLine(line: string): void; show?(preserveFocus?: boolean): void };
   // Shows a message and keeps it in the NEAR AI Team channel.
   report(level: Level, message: string): void;
   // Shows a message only. A project without a team uses this, so it never creates the channel.
@@ -302,16 +308,33 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   async function pushBranch(projectRoot: string, remote: string, branch: string | undefined): Promise<void> {
     const target = branch ?? await currentBranch(projectRoot);
     if (target === undefined) {
-      deps.report('error', 'There is no current branch to push. Check out your project branch and push it with git.');
+      deps.output.appendLine('There is no current branch to push. Check out your project branch and push it with git.');
+      await showDetailsOffer('error', NOT_ON_A_VERSION_TEXT);
       return;
     }
     const { pushCodeBranch } = await import('../../team/enable');
     const pushed = await pushCodeBranch(projectRoot, remote, target);
-    if (pushed.ok) deps.report('info', `Pushed ${target} to ${remote}.`);
-    else deps.report('error', await safe(pushed.message));
+    if (pushed.ok) {
+      deps.output.appendLine(`Pushed ${target} to ${remote}.`);
+      deps.report('info', SHARED_TEXT);
+    } else {
+      deps.output.appendLine(await safe(pushed.message));
+      await showDetailsOffer('error', SHARE_FAILED_TEXT);
+    }
   }
 
-  // A message with Push. Nothing is pushed unless the person chooses it. Callers that must not wait for a notification nobody clicks do not await it.
+  // Plain words with Show details, which opens the NEAR AI Team channel where the technical reason was written just before.
+  async function showDetailsOffer(level: Level, message: string): Promise<void> {
+    try {
+      const shown = level === 'info' ? vscode.window.showInformationMessage(message, SHOW_DETAILS_ACTION)
+        : level === 'warn' ? vscode.window.showWarningMessage(message, SHOW_DETAILS_ACTION) : vscode.window.showErrorMessage(message, SHOW_DETAILS_ACTION);
+      if (await shown === SHOW_DETAILS_ACTION) deps.output.show?.(true);
+    } catch (error) {
+      deps.output.appendLine(`A Team Mode message could not be shown: ${await describe(error)}`);
+    }
+  }
+
+  // A message with Share with my team. Nothing is pushed unless the person chooses it. Callers that must not wait for a notification nobody clicks do not await it.
   async function offerPush(level: 'info' | 'warn', message: string, projectRoot: string, remote: string, branch?: string): Promise<void> {
     deps.output.appendLine(message);
     try {
@@ -373,7 +396,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const near = { organizationId: organization.choice.organization.id, workspaceId: workspace.workspace.id };
     const link = { projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamId: teamFile.teamId, near };
     const saveLink = (replace: boolean): ReturnType<typeof linkNearOrganization> => withSteps(`Linking ${teamName} to ${organization.label}`, false, async (step) => {
-      step('Writing the link to team.json and committing it');
+      step('Saving the link in this project');
       return linkNearOrganization(replace ? { ...link, replace: true } : link);
     });
     let result = await saveLink(false);
@@ -399,8 +422,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       return true;
     }
     await deps.restartSession(projectRoot);
-    const where = result.branch === undefined ? 'team.json is committed.' : `team.json is committed on ${result.branch}. Push it so your teammates see the link.`;
-    const message = `Linked ${teamName} to ${organization.label}. ${where}`;
+    deps.output.appendLine(result.branch === undefined ? 'team.json is committed.' : `team.json is committed on ${result.branch}. Sharing pushes it.`);
+    const message = result.branch === undefined ? `Linked ${teamName} to ${organization.label}.` : `Linked ${teamName} to ${organization.label}. Share it so your teammates see the link.`;
     if (result.branch === undefined) {
       deps.report('info', message);
     } else {
@@ -464,7 +487,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   async function askLifetime(): Promise<number | undefined> {
     const { INVITE_TTL_CHOICES, DEFAULT_INVITE_TTL_SECONDS } = await import('../../domain/team/invite');
     const lifetimes = [...INVITE_TTL_CHOICES].sort((left, right) => (left === DEFAULT_INVITE_TTL_SECONDS ? -1 : right === DEFAULT_INVITE_TTL_SECONDS ? 1 : left - right))
-      .map((ttlSeconds) => ({ label: ttlSeconds === 86_400 ? '24 hours' : `${ttlSeconds / 86_400} days`, description: ttlSeconds === DEFAULT_INVITE_TTL_SECONDS ? 'Recommended' : '', ttlSeconds }));
+      .map((ttlSeconds) => ({ label: ttlSeconds === 86_400 ? '24 hours' : `${ttlSeconds / 86_400} days`, ...(ttlSeconds === DEFAULT_INVITE_TTL_SECONDS ? { description: 'Recommended' } : {}), ttlSeconds }));
     return (await pick(lifetimes, { title: 'Invite to Team', placeHolder: 'How long the invite works before it expires' }))?.ttlSeconds;
   }
 
@@ -497,7 +520,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     });
     if (name === undefined) return;
     const email = await ask({
-      title: 'Invite to Team', prompt: 'Their email address. The team log stores only a salted hash of it.', placeHolder: 'name@example.com',
+      title: 'Invite to Team', prompt: 'Their email address. The team record keeps only a scrambled code (a salted hash) of it.', placeHolder: 'name@example.com',
       validateInput: (value) => (validEmail(value.trim()) ? undefined : 'Enter a full email address such as name@example.com.')
     });
     if (email === undefined) return;
@@ -530,7 +553,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     if (teamFile.near === undefined) {
       const choice = await pick([
         { label: LINK_CHOICE, description: 'Sign in to NEAR and pick the organization that pays for the team' },
-        { label: SKIP_CHOICE, description: 'Invite without one' }
+        { label: SKIP_CHOICE, description: 'Invite without a NEAR organization' }
       ], { title: 'Invite to Team', placeHolder: 'This team has no NEAR organization linked yet' });
       if (choice === undefined) return;
       if (choice.label === LINK_CHOICE) {
@@ -559,7 +582,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       }
       const { teamFileUnpushed } = await import('../../team/nearLink');
       if (await teamFileUnpushed(projectRoot) === true) {
-        void offerPush('warn', 'The NEAR link is not pushed yet, so a teammate who clones the project now will not see it. Push your branch before they join.', projectRoot, teamFile.coordination.remote);
+        void offerPush('warn', 'The NEAR link is not shared with your team yet, so a teammate who gets the project now will not see it. Share it before they join.', projectRoot, teamFile.coordination.remote);
       }
     }
 
@@ -572,7 +595,13 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       onStep: (code) => { step(INVITE_STEP_TEXT[code]); }
     }));
     if (!result.ok) {
-      deps.report('error', await safe(result.message));
+      if (result.code === 'remote-url') {
+        // The reason names the remote address and git; it is kept in the channel and the lead gets plain words.
+        deps.output.appendLine(await safe(result.message));
+        await showDetailsOffer('error', INVITE_ADDRESS_TEXT);
+      } else {
+        deps.report('error', await safe(result.message));
+      }
       return;
     }
     await presentBundle(shownName, result.bundle);
@@ -589,7 +618,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   async function join(): Promise<void> {
     const projectRoot = deps.firstFolder();
     const pasted = await ask({
-      title: 'Join Team', prompt: 'Paste the invite your lead sent you. It works once.', password: true, placeHolder: 'near-ai-invite-v1....',
+      title: 'Join Team', prompt: 'Paste the invite your lead sent you. It works once.', password: true, placeHolder: 'Paste the invite here',
       validateInput: (value) => (value.trim() === '' || value.trim().startsWith('near-ai-invite-v1.') ? undefined : 'This does not look like an invite. Paste the whole invite exactly as it was sent.')
     });
     if (pasted === undefined || pasted === '') return;
@@ -602,7 +631,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     if (prepared.kind === 'clone-needed') {
       // Nothing is kept: after the clone the person runs Join again and pastes the invite in the new window.
       const choice = await vscode.window.showInformationMessage(
-        'This invite is for a project that is not open. Clone it, then run NEAR AI: Join Team in the new window and paste the invite again.', CLONE_ACTION
+        'This invite is for a project that is not open. Choose Get the project to download it, then run NEAR AI: Join Team in the new window and paste the invite again.', CLONE_ACTION
       );
       if (choice === CLONE_ACTION) await vscode.commands.executeCommand('git.clone', prepared.repoUrl);
       return;
@@ -641,7 +670,10 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
 
     if (!result.ok) {
       if (result.code === 'already-has-key') await offerReset(projectRoot, teamFile, result.message);
-      else deps.report(result.code === 'offline' ? 'warn' : 'error', await safe(result.message));
+      else {
+        if (result.detail !== undefined) deps.output.appendLine(`Join details: ${await safe(result.detail)}`);
+        deps.report(result.code === 'offline' ? 'warn' : 'error', await safe(result.message));
+      }
       return;
     }
     await deps.restartSession(projectRoot);
@@ -775,8 +807,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       }
       case 'remove': {
         const detail = teamFile.near === undefined
-          ? `${name} loses access to the team log. Remove their access to the git repository yourself afterwards.`
-          : `${name}'s NEAR key is set to a limit of 0 first, then the team log removes them, then the key is revoked. Remove their access to the git repository yourself afterwards.`;
+          ? `${name} loses access to the team record. Afterwards, remove their access to the project on GitHub (or wherever the project is hosted) yourself.`
+          : `${name}'s NEAR key is set to a limit of 0 first, then the team record removes them, then the key is revoked. Afterwards, remove their access to the project on GitHub (or wherever the project is hosted) yourself.`;
         const confirmed = await vscode.window.showWarningMessage(`Remove ${name} from ${team}?`, { modal: true, detail }, REMOVE_ACTION);
         if (confirmed !== REMOVE_ACTION) return;
         const chosen = await orgForAction(teamFile, `Removing ${name} also ends their NEAR key, which needs your NEAR sign-in. Sign in now, or remove them now and finish the NEAR steps later from this list.`, true);
@@ -865,7 +897,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       const { retryNearInvitation } = await import('../../team/invite');
       const org = async (): Promise<NearOrgClient | undefined> => (await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false))?.org;
       const outcome = await withSteps(`Retrying: ${what}`, false, (step) => {
-        step('Checking the team log, then sending the NEAR invitation');
+        step('Checking the team record, then sending the NEAR invitation');
         return retryNearInvitation({ item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist, org });
       });
       switch (outcome.outcome) {
@@ -944,7 +976,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     for (const item of items) {
       const name = await display(item.memberName);
       rows.push(item.step === 'repo-access'
-        ? { label: `Repository access for ${name}`, detail: repoAccessText(name), row: { kind: 'cleanup', item } }
+        ? { label: `Project access for ${name}`, detail: repoAccessText(name), row: { kind: 'cleanup', item } }
         : { label: `NEAR cleanup: ${STEP_TEXT[item.step]} for ${name}`, description: `${item.status}${item.lastError === undefined ? '' : `: ${await safe(item.lastError)}`}`, row: { kind: 'cleanup', item } });
     }
     return rows;
@@ -988,7 +1020,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       }
     } else if (row.item.step === 'repo-access') {
       const item = row.item;
-      add('Mark done', 'You removed their repository access', async () => {
+      add('Mark done', 'You removed their access to the project where it is hosted', async () => {
         const { repoAccessText } = await import('../../team/cleanupChecklist');
         await ctx.checklist.update(item.id, { status: 'done' });
         deps.report('info', `Marked done: ${repoAccessText(await display(item.memberName))}`);

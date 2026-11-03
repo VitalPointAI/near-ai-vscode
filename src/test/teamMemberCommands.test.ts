@@ -255,7 +255,7 @@ test('tracer: Invite to Team asks its questions, writes member.invited, and show
     assert.equal(stub.notifications.filter((entry) => entry.message === NO_ORG_NOTICE).length, 1);
 
     // UI review issue 1: the write runs in a progress notification that says what it is doing.
-    assert.deepEqual(progressNamed('Inviting Ana'), { title: 'Inviting Ana', cancellable: false, messages: ['Saving the invitation to the team log'] });
+    assert.deepEqual(progressNamed('Inviting Ana'), { title: 'Inviting Ana', cancellable: false, messages: ['Saving the invitation to the team record'] });
   });
 });
 
@@ -381,20 +381,20 @@ test('nothing the Invite command shows contains an em-dash', async () => {
 
 // ---- Join Team --------------------------------------------------------------------------------------------------------------------------
 
-test('Join with no project open offers Clone repository, runs git.clone with the invite address, and writes nothing', async () => {
+test('Join with no project open offers Get the project, runs git.clone with the invite address, and writes nothing', async () => {
   await withTeam(async (t) => {
     const bundleText = await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
     gitIn(t.root, ['push', '-q', 'origin', 'main']);
     const j = await openJoiner(t, { folder: false });
     stub.inputAnswers.push(bundleText);
-    stub.setMessageResponder((_text, actions) => (actions.includes('Clone repository') ? 'Clone repository' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes('Get the project') ? 'Get the project' : undefined));
     await j.run(JOIN_COMMAND);
 
     assert.equal(stub.inputRequests[0]?.password, true, 'the pasted invite is masked');
     assert.deepEqual(stub.notifications.map((entry) => entry.message), [
-      'This invite is for a project that is not open. Clone it, then run NEAR AI: Join Team in the new window and paste the invite again.'
+      'This invite is for a project that is not open. Choose Get the project to download it, then run NEAR AI: Join Team in the new window and paste the invite again.'
     ]);
-    assert.deepEqual(stub.notificationActions[0], ['Clone repository']);
+    assert.deepEqual(stub.notificationActions[0], ['Get the project']);
     assert.deepEqual(stub.externalCommands, [{ command: 'git.clone', args: [PUBLIC_URL] }]);
     assert.equal(j.secrets.values.size, 0, 'nothing was stored in SecretStorage');
     assert.equal(existsSync(j.storage), false, 'nothing was written to the extension storage');
@@ -424,7 +424,7 @@ test('Join inside the matching project joins as an observer, says what comes nex
     const memberId = parseInviteBundle(bundleText).member;
     assert.equal(j.handle.session()?.memberId(), memberId, 'the restarted session signs with the new device key');
     // UI review issue 1: Join says each step.
-    assert.deepEqual(progressNamed('Joining Invite team')?.messages, ['Reading the team log and checking your invitation', 'Making the keys for this computer', 'Saving your join to the team log']);
+    assert.deepEqual(progressNamed('Joining Invite team')?.messages, ['Reading the team record and checking your invitation', 'Making the keys for this computer', 'Saving your join to the team record']);
     assert.ok(j.secrets.values.has(deviceKeySecretName((await readTeamFile(j.root))?.teamId as string)));
     assert.equal(everythingShown().includes(bundleText), false);
     assert.equal(everythingShown().includes(parseInviteBundle(bundleText).code), false);
@@ -519,19 +519,24 @@ test('Link signs in, lists only organizations the lead owns or administers, comm
     assert.ok(t.secrets.values.has(nearSessionSecretName((await readTeamFile(t.root))?.teamId as string)), 'the sign-in is kept for this team');
     const offer = stub.notifications.findIndex((entry) => entry.message.startsWith('Linked Invite team to Team Org'));
     assert.ok(offer >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
-    assert.deepEqual(stub.notificationActions[offer], ['Push']);
+    assert.equal(stub.notifications[offer]?.message, 'Linked Invite team to Team Org. Share it so your teammates see the link.');
+    assert.deepEqual(stub.notificationActions[offer], ['Share with my team']);
+    assert.ok(outputLines().includes('team.json is committed on main. Sharing pushes it.'), 'the git detail is in the channel only');
     assert.equal(t.handle.session()?.teamFile.near?.workspaceId, 'ws-2', 'the session was restarted on the new team.json');
     // UI review issue 1: reading the lists can be stopped; the write cannot.
     assert.equal(progressNamed('Reading your NEAR organizations')?.cancellable, true);
-    assert.deepEqual(progressNamed('Linking Invite team to Team Org'), { title: 'Linking Invite team to Team Org', cancellable: false, messages: ['Writing the link to team.json and committing it'] });
+    assert.deepEqual(progressNamed('Linking Invite team to Team Org'), { title: 'Linking Invite team to Team Org', cancellable: false, messages: ['Saving the link in this project'] });
     assert.equal(everythingShown().includes(t.signIns.tokens?.refreshToken as string), false);
   }, { near: true });
 
   await withTeam(async (t) => {
     stub.quickPickAnswers.push('Team Org', 'Team workspace');
-    stub.setMessageResponder((_text, actions) => (actions.includes('Push') ? 'Push' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes('Share with my team') ? 'Share with my team' : undefined));
     await t.run(LINK_NEAR_COMMAND);
-    assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), gitIn(t.root, ['rev-parse', 'HEAD']), 'choosing Push pushed the branch');
+    assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), gitIn(t.root, ['rev-parse', 'HEAD']), 'choosing Share with my team pushed the branch');
+    assert.ok(stub.notifications.some((entry) => entry.level === 'info' && entry.message === 'Shared with your team.'));
+    assert.equal(stub.notifications.some((entry) => /Pushed|origin/.test(entry.message)), false, 'no git words in what is shown');
+    assert.ok(outputLines().includes('Pushed main to origin.'));
   }, { near: true });
 });
 
@@ -617,19 +622,19 @@ test('inviting a lead in a linked team asks the lead to sign in to NEAR first, a
   }, { near: true });
 });
 
-test('inviting in a linked team whose NEAR link is not pushed yet warns that a teammate who clones now would not see it', async () => {
+test('inviting in a linked team whose NEAR link is not shared yet warns that a teammate who gets the project now would not see it', async () => {
   await withTeam(async (t) => {
     stub.quickPickAnswers.push('Team Org', 'Team workspace');
     await t.run(LINK_NEAR_COMMAND);
     clearUi();
     await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
-    const warning = stub.notifications.findIndex((entry) => entry.level === 'warn' && entry.message.includes('not pushed'));
+    const warning = stub.notifications.findIndex((entry) => entry.level === 'warn' && entry.message === 'The NEAR link is not shared with your team yet, so a teammate who gets the project now will not see it. Share it before they join.');
     assert.ok(warning >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
-    assert.deepEqual(stub.notificationActions[warning], ['Push']);
+    assert.deepEqual(stub.notificationActions[warning], ['Share with my team']);
     clearUi();
     gitIn(t.root, ['push', '-q', 'origin', 'main']);
     await inviteBundle(t, { name: 'Eve', email: 'eve@example.invalid', role: 'Developer' });
-    assert.equal(stub.notifications.some((entry) => entry.message.includes('not pushed')), false, 'no warning once the link is pushed');
+    assert.equal(stub.notifications.some((entry) => entry.message.includes('not shared')), false, 'no warning once the link is shared');
   }, { near: true });
 });
 
@@ -684,7 +689,7 @@ test('Manage Team Members lists the NEAR line first, then members with their sta
       'Invitation for Dana D, developer, used',
       'Invitation for Eve, reviewer, pending',
       'Invitation for Fay, observer, pending',
-      'Repository access for Dana D'
+      'Project access for Dana D'
     ]);
     assert.ok(parseInviteBundle(fay).member.length > 0);
     assert.equal(everythingShown().includes(EM_DASH), false);
@@ -719,7 +724,7 @@ test('Confirm makes the member their invited role and in a linked team sends a k
     assert.ok(shownMessages().includes('Dana D is now a developer. Their team key has a spend cap of $5.00 set by you.'), shownMessages().join(' | '));
     assert.deepEqual(progressNamed('Confirming Dana D'), {
       title: 'Confirming Dana D', cancellable: false,
-      messages: ['Saving the confirmation to the team log', 'Creating the key with its spend cap', 'Sealing the key to their computer', 'Saving the key delivery to the team log']
+      messages: ['Saving the confirmation to the team record', 'Creating the key with its spend cap', 'Sealing the key to their computer', 'Saving the key delivery to the team record']
     });
     const member = t.handle.session()?.state().members.get(await readMemberId(t, 'Dana D'));
     assert.equal(member?.role, 'developer');
@@ -759,7 +764,7 @@ test('Remove asks for confirmation, caps and revokes the key, and lists what is 
     assert.ok(shownMessages().some((message) => message.startsWith('Dana D was removed from Invite team.') && message.includes('capped at 0 and revoked')), shownMessages().join(' | '));
     // UI review issue 1: each removal step is shown while it runs; the removal can be stopped only where that is safe.
     assert.deepEqual(progressNamed('Removing Dana D from Invite team'), {
-      title: 'Removing Dana D from Invite team', cancellable: true, messages: ['Setting the NEAR key limit to 0', 'Saving the removal to the team log', 'Revoking the NEAR key']
+      title: 'Removing Dana D from Invite team', cancellable: true, messages: ['Setting the NEAR key limit to 0', 'Saving the removal to the team record', 'Revoking the NEAR key']
     });
     const lines = outputLines();
     const todo = lines.slice(lines.indexOf('Still to do for Dana D:') + 1).filter((line) => line.startsWith('- '));
@@ -850,7 +855,7 @@ test('Cancel ends a pending invitation and Re-issue replaces it with a new bundl
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.ok(shownMessages().includes('The invitation for Eve was cancelled.'), shownMessages().join(' | '));
     assert.notEqual(t.handle.session()?.state().members.get(fresh.member)?.removedEvent, undefined);
-    assert.deepEqual(progressNamed('Cancelling the invitation for Eve')?.messages, ['Saving the removal to the team log']);
+    assert.deepEqual(progressNamed('Cancelling the invitation for Eve')?.messages, ['Saving the removal to the team record']);
   });
 });
 
@@ -883,7 +888,7 @@ test('a member without management rights sees the list read-only with no actions
   });
 });
 
-test('Retry sends a NEAR invitation left on the cleanup list after asking the lead to sign in, Mark done is only for repository access, and an unknown email is explained', async () => {
+test('Retry sends a NEAR invitation left on the cleanup list after asking the lead to sign in, Mark done is only for project access, and an unknown email is explained', async () => {
   await withTeam(async (t) => {
     await linkAndPush(t);
     await t.run(SIGN_OUT_NEAR_COMMAND);
@@ -906,7 +911,7 @@ test('Retry sends a NEAR invitation left on the cleanup list after asking the le
 
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.ok(lastList().includes('NEAR cleanup: Send the NEAR invitation for Lee'), lastList().join(' | '));
-    assert.ok(lastList().includes('Repository access for Lee'));
+    assert.ok(lastList().includes('Project access for Lee'));
     clearUi();
 
     stub.quickPickAnswers.push('NEAR cleanup: Send the NEAR invitation for Lee', 'Retry');
@@ -942,7 +947,7 @@ test('Retry sends a NEAR invitation left on the cleanup list after asking the le
     assert.equal(t.fake?.emailedToken('uma@example.invalid'), undefined);
     clearUi();
 
-    stub.quickPickAnswers.push('Repository access for Lee', 'Mark done');
+    stub.quickPickAnswers.push('Project access for Lee', 'Mark done');
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.deepEqual(manageActions(), ['Mark done']);
     assert.equal((await cleanup.list()).find((item) => item.step === 'repo-access')?.status, 'done');
