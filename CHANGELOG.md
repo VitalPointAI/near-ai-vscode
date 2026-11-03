@@ -2,15 +2,15 @@
 
 ## Unreleased
 
-- **Tables show as tables in chat.** A reply with a Markdown table used to
-  show its raw pipes and dashes. Tables now render with a header row, borders
-  and the column alignment the reply asks for. A table wider than the chat
-  scrolls sideways inside its own box (click it or Tab to it, then use the
-  arrow keys), so the rest of the chat stays put. While a reply is still
-  arriving, its table appears as a table straight away instead of flashing
-  up as lines of pipes first.
-- **Quotes and strikethrough.** Several `>` lines in a row now form one quote
-  instead of a stack of separate ones, and `~~text~~` shows as struck through.
+- **Tables in replies now show as real tables** with headers and lined-up
+  columns. Wide tables scroll sideways inside the message, and keep their
+  place while the reply is still arriving. To scroll one with the keyboard,
+  press Tab until the table is selected, then use the arrow keys.
+- **Quoted text stays together as one quote**, and crossed-out text shows
+  crossed out.
+- **Links in replies open the right page** even when the address has
+  characters like underscores, tildes or asterisks in it. Before, some of
+  these links went to a broken address.
 
 ## 0.4.12
 

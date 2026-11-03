@@ -5,6 +5,14 @@
 
   const vscode = acquireVsCodeApi();
   const markdown = window.nearMarkdown;
+  // If the table helper is missing, replies still render; tables only lose their kept scroll and focus.
+  const tables = window.nearTables || {
+    capture: () => ({ wraps: [], scroll: [], focused: -1, inner: -1 }),
+    restore: () => [],
+    syncTabStop: () => undefined,
+    focusLeft: () => undefined,
+    watchSizes: () => ({ observe: () => undefined, release: () => undefined, reset: () => undefined })
+  };
   const $ = (id) => document.getElementById(id);
   const transcript = $('transcript');
   const welcome = $('welcome');
@@ -261,9 +269,19 @@
     if (!m.replay && (m.state === 'returned' || m.state === 'blocked') && m.text && !input.value.trim()) { input.value = m.text; autosize(); updateSendState(); }
   }
 
+  // A table box becomes a Tab stop when it gets wider than the chat, and stops being one when the
+  // chat is widened again. Boxes are let go when their reply is removed or the chat is cleared.
+  const tableSizes = tables.watchSizes(typeof ResizeObserver === 'function' ? ResizeObserver : undefined, () => document.activeElement);
+  const removeTurn = (node) => { tableSizes.release(node.querySelectorAll('.table-wrap')); node.remove(); };
+  // A table that is not wider than the chat stops being a Tab stop once focus leaves it.
+  transcript.addEventListener('focusout', tables.focusLeft);
+
   // Assistant text is re-rendered from the full buffer so partial Markdown settles as it streams.
-  // `partial` is true while more text is still on its way.
+  // `partial` is true while more text is still on its way. Each table keeps its sideways scroll
+  // and keyboard focus across the rebuild.
   function renderMarkdown(target, text, partial) {
+    const saved = tables.capture(target, document.activeElement);
+    tableSizes.release(saved.wraps);
     target.replaceChildren();
     for (const block of markdown.parse(text, { partial: partial === true })) {
       if (block.type === 'html') {
@@ -288,6 +306,7 @@
       wrapper.append(header, pre);
       target.append(wrapper);
     }
+    tableSizes.observe(tables.restore(target, saved));
   }
 
   function startAssistant() {
@@ -449,6 +468,7 @@
     renderTodos([]);
     renderAgents([]);
     clearPending();
+    tableSizes.reset();
     transcript.replaceChildren(welcome);
     welcome.hidden = false;
     tools = new Map();
@@ -463,7 +483,7 @@
     if (!current) return;
     if (current.frame) cancelAnimationFrame(current.frame);
     flushAssistant();
-    if (!current.text) current.node.remove();
+    if (!current.text) removeTurn(current.node);
     current = undefined;
   }
   function onAgentToolStart(m) {
@@ -1012,7 +1032,7 @@
       case 'action-policy': renderPolicy(m); break;
       case 'models-error': model.replaceChildren(el('option', '', 'Models unavailable')); model.title = m.text || ''; break;
       case 'auth-required':
-        if (current) { current.node.remove(); current = undefined; }
+        if (current) { removeTurn(current.node); current = undefined; }
         setBusy(false);
         notice(m.text || 'Set up NEAR AI to start chatting.', [
           textButton('Set up', () => post({ type: 'open-setup' }), true),
@@ -1086,7 +1106,7 @@
         break;
       }
       case 'outbound-blocked': {
-        if (current) { current.node.remove(); current = undefined; }
+        if (current) { removeTurn(current.node); current = undefined; }
         setBusy(false);
         const actions = m.overrideToken ? [textButton(m.confirm ? 'Send anyway' : 'Send once anyway', () => {
           setBusy(true);
