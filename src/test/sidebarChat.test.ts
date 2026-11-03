@@ -107,7 +107,7 @@ test('markdown shows a streaming table as a table before its delimiter row arriv
       assert.equal((html.match(new RegExp(`<${tag}[ >]`, 'g')) || []).length, (html.match(new RegExp(`</${tag}>`, 'g')) || []).length, `cut ${cut} <${tag}>`);
     }
   }
-  // Prose with a pipe only becomes a provisional table when it starts with one, and the final render applies the strict rules.
+  // Prose with a pipe stays prose while it streams until a delimiter row starts under it, and the final render applies the strict rules.
   assert.equal(render('use a | b', true), '<p>use a | b</p>');
   assert.equal(render('| a | b |'), '<p>| a | b |</p>');
   assert.equal(render(owner, true), render(owner));
@@ -184,6 +184,10 @@ test('markdown keeps list items and headings with pipes as they are, next to tab
   assert.equal(render('| a | b |\n|---|---|\n| 1 | 2 |\n- list | x'), `${table}<ul><li>list | x</li></ul>`);
   assert.equal(render('| a | b |\n|---|---|\n| 1 | 2 |\n## H | x'), `${table}<h4>H | x</h4>`);
   assert.equal(render('| a | b |\n|---|---|\n| 1 | 2 |\n3. step | x'), `${table}<ol><li>step | x</li></ol>`);
+  // A body row that starts like a list item ends the table and becomes a list item, as in GFM.
+  const named = '<div class="table-wrap" role="region" aria-label="Table: Name, Value"><table><thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead>';
+  assert.equal(render('Name | Value\n--- | ---\nfoo | 1\n- | 2'), `${named}<tbody><tr><td>foo</td><td>1</td></tr></tbody></table></div><ul><li>| 2</li></ul>`);
+  assert.equal(render('Name | Value\n--- | ---\n1. | ok'), `${named}</table></div><ol><li>| ok</li></ol>`);
   // Streaming never takes a heading or list item for a provisional table header either.
   assert.equal(render('## H | x\n|', true), '<h4>H | x</h4>');
   assert.equal(render('- a | b\n|--', true), '<ul><li>a | b</li></ul><p>|--</p>');
