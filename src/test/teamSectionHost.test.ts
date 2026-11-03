@@ -434,7 +434,7 @@ test('names from the team record are shown as safe plain text', async () => {
 // ---- the real lead and joiner windows ----------------------------------------------------------------------------------------------------
 
 const PUBLIC_URL = 'https://example.invalid/team.git';
-const copyWhenOffered = (_text: string, actions: string[]): string | undefined => (actions.includes('Copy') ? 'Copy' : undefined);
+const copyWhenOffered = (_text: string, actions: string[]): string | undefined => (actions.includes('Copy invite') ? 'Copy invite' : undefined);
 
 function resetStub(): void {
   for (const list of [stub.outputChannels, stub.statusBarItems, stub.notifications, stub.notificationActions, stub.notificationOptions, stub.inputAnswers, stub.inputRequests,

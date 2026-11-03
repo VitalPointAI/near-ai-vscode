@@ -138,7 +138,7 @@ test('tracer: inviting with the team setup not online asks once to share it firs
         inputsWhenAsked = stub.inputRequests.length;
         return SHARE_TEXT.shareAndContinue;
       }
-      return actions.includes('Copy') ? 'Copy' : undefined;
+      return actions.includes('Copy invite') ? 'Copy invite' : undefined;
     });
     await lead.run(INVITE_COMMAND);
 
@@ -161,8 +161,10 @@ test('tracer: inviting with the team setup not online asks once to share it firs
     const bundle = parseInviteBundle(bundleText);
     assert.equal(bundle.repo, PUBLIC_URL);
     const last = modals[modals.length - 1] as number;
-    assert.ok(stub.notifications[last]?.message.startsWith('Invite ready for Ana'), 'the bundle modal comes last');
-    assert.equal(stub.notificationOptions.filter((options) => options?.detail === bundleText).length, 1, 'the bundle is shown once');
+    assert.equal(stub.notifications[last]?.message, 'Invite ready for Ana', 'the bundle modal comes last');
+    assert.deepEqual(stub.notificationActions[last], ['Copy invite']);
+    assert.ok(stub.notificationOptions[last]?.detail?.startsWith(`${bundleText}\n\n`), 'the invite, a blank line, then how to send it');
+    assert.equal(stub.notificationOptions.filter((options) => options?.detail?.includes(bundleText) === true).length, 1, 'the bundle is shown once');
     const elsewhere = JSON.stringify({ lines: outputLines(), notifications: stub.notifications, picks: stub.quickPickRequests, inputs: stub.inputRequests, progress: stub.progress });
     assert.equal(elsewhere.includes(bundleText), false, 'the bundle is in no other message, prompt or channel line');
     assert.equal(elsewhere.includes(bundle.code), false, 'nor is its code');
@@ -230,10 +232,10 @@ test('with the team setup already online there is no share question: the organiz
     await shareNow(lead);
     const before = remoteMain(lead);
     answerQuestions({ linked: false });
-    stub.setMessageResponder((_text, actions) => (actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes('Copy invite') ? 'Copy invite' : undefined));
     await lead.run(INVITE_COMMAND);
     assert.equal(stub.notifications.some((entry) => entry.message === SHARE_TEXT.inviteQuestion || entry.message === SHARE_TEXT.already), false, 'nothing about sharing');
-    assert.deepEqual(modalIndexes().map((index) => stub.notifications[index]?.message), ['Invite ready for Ana. Send them this invite; it works once and is not shown again.']);
+    assert.deepEqual(modalIndexes().map((index) => stub.notifications[index]?.message), ['Invite ready for Ana']);
     assert.equal(stub.clipboardWrites.length, 1);
     assert.equal(invitedCount(lead), 1);
     assert.equal(remoteMain(lead), before, 'nothing new was shared');
@@ -244,7 +246,7 @@ test('choosing Link now while inviting links first, and the one share confirmati
   await withLead(async (lead) => {
     stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace', 'Developer', '7 days');
     stub.inputAnswers.push('Dana', 'dana@example.invalid', '5');
-    stub.setMessageResponder((_text, actions) => (actions.includes(SHARE_TEXT.shareAndContinue) ? SHARE_TEXT.shareAndContinue : actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes(SHARE_TEXT.shareAndContinue) ? SHARE_TEXT.shareAndContinue : actions.includes('Copy invite') ? 'Copy invite' : undefined));
     await lead.run(INVITE_COMMAND);
     assert.deepEqual([stub.quickPickRequests[0]?.placeHolder, stub.quickPickRequests[0]?.labels], [LINK_EXPLANATION, [LINK_NOW_CHOICE, NOT_NOW_CHOICE]], 'the organization choice comes first');
     assert.deepEqual((await readTeamFile(lead.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' });
@@ -271,7 +273,7 @@ test('under the extension-host test variable a script answers every invite promp
       { match: 'Developer', answer: 'Developer' },
       { match: 'Allocation in US dollars', answer: '5' },
       { match: '7 days', answer: '7 days' },
-      { match: 'Invite ready', answer: 'Copy' }
+      { match: 'Invite ready', answer: 'Copy invite' }
     ];
     try {
       await lead.run(INVITE_COMMAND);
@@ -280,16 +282,57 @@ test('under the extension-host test variable a script answers every invite promp
       const asked = promptTap.shown.filter((record) => record.kind !== 'message' || record.modal);
       assert.deepEqual(asked.map((record) => [record.kind, record.answer]), [
         ['pick', NOT_NOW_CHOICE], ['message', SHARE_TEXT.shareAndContinue], ['input', 'Ana'], ['input', 'ana@example.invalid'], ['pick', 'Developer'],
-        ['input', '5'], ['pick', '7 days'], ['message', 'Copy']
+        ['input', '5'], ['pick', '7 days'], ['message', 'Copy invite']
       ]);
       assert.equal(asked[1]?.text, SHARE_TEXT.inviteQuestion);
       const bundleText = stub.clipboardWrites[0] as string;
       assert.ok(bundleText.startsWith('near-ai-invite-v1.'));
       assert.equal(promptTap.shown.filter((record) => JSON.stringify(record).includes(bundleText)).length, 1, 'only the bundle modal record holds the invite');
-      assert.equal(promptTap.shown.filter((record) => record.detail === bundleText).length, 1);
+      assert.equal(promptTap.shown.filter((record) => record.detail?.startsWith(`${bundleText}\n\n`) === true).length, 1, 'the bundle modal detail is the invite, a blank line, then how to send it');
       assert.equal(stub.inputRequests.length + stub.quickPickRequests.length + stub.notifications.length, 0, 'VS Code was shown nothing');
       assert.equal(invitedCount(lead), 1);
       assert.equal(remoteTeamJson(lead), localTeamJson(lead));
+    } finally {
+      if (previous === undefined) delete process.env.NEAR_AI_E2E;
+      else process.env.NEAR_AI_E2E = previous;
+      promptTap.script = undefined;
+      promptTap.shown.length = 0;
+    }
+  });
+});
+
+test('under the extension-host test variable, closing the invite asks once more, and Copy invite there copies it; only the first record holds the invite', async () => {
+  await withLead(async (lead) => {
+    await shareNow(lead);
+    const previous = process.env.NEAR_AI_E2E;
+    process.env.NEAR_AI_E2E = '1';
+    promptTap.shown.length = 0;
+    promptTap.script = [
+      { match: 'Not now', answer: NOT_NOW_CHOICE },
+      { match: 'Name of the person', answer: 'Ana' },
+      { match: 'Their email address', answer: 'ana@example.invalid' },
+      { match: 'Developer', answer: 'Developer' },
+      { match: 'Allocation in US dollars', answer: '5' },
+      { match: '7 days', answer: '7 days' },
+      { match: 'Invite ready', answer: undefined },
+      { match: 'Close without copying', answer: 'Copy invite' }
+    ];
+    try {
+      await lead.run(INVITE_COMMAND);
+      assert.deepEqual(promptTap.script, [], 'every step was used');
+      const modals = promptTap.shown.filter((record) => record.kind === 'message' && record.modal);
+      assert.deepEqual(modals.map((record) => [record.text, record.choices, record.answer]), [
+        ['Invite ready for Ana', ['Copy invite'], undefined],
+        ['Close without copying? The invite is not shown again.', ['Copy invite', 'Close'], 'Copy invite']
+      ]);
+      assert.equal(stub.clipboardWrites.length, 1, 'copied once');
+      const bundleText = stub.clipboardWrites[0] as string;
+      const code = parseInviteBundle(bundleText).code;
+      assert.equal(promptTap.shown.filter((record) => JSON.stringify(record).includes(bundleText)).length, 1, 'only the first modal record holds the invite');
+      assert.equal(promptTap.shown.filter((record) => JSON.stringify(record).includes(code)).length, 1, 'and its code');
+      assert.ok(promptTap.shown.some((record) => record.text === 'Invite for Ana copied. Send it to them in a private message.'));
+      assert.equal(outputLines().some((line) => line.includes(bundleText) || line.includes(code)), false, 'not in the channel');
+      assert.equal(stub.inputRequests.length + stub.quickPickRequests.length + stub.notifications.length, 0, 'VS Code was shown nothing');
     } finally {
       if (previous === undefined) delete process.env.NEAR_AI_E2E;
       else process.env.NEAR_AI_E2E = previous;

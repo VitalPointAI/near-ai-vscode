@@ -236,11 +236,25 @@ const everythingShown = (): string => JSON.stringify({
   inputs: stub.inputRequests.map((request) => [request.title, request.prompt, request.value, request.placeHolder]),
   bars: stub.statusBarItems.map((item) => [item.text, item.tooltip])
 });
-const copyWhenOffered = (_text: string, actions: string[]): string | undefined => (actions.includes('Copy') ? 'Copy' : undefined);
+const copyWhenOffered = (_text: string, actions: string[]): string | undefined => (actions.includes('Copy invite') ? 'Copy invite' : undefined);
+// G-61-5 (owner, 2026-11-03): the invite modal says how to hand the invite over and what the invitee does, and closing it asks once more.
+const HOW_TO_SEND = 'Send it to them in a private message, such as a direct chat or an email. It works once. To join, they open the project in VS Code, open the NEAR AI sidebar, choose Join a team and paste the invite. If they do not have the project yet, Join a team offers to download it.';
+const CLOSE_WITHOUT_COPYING = 'Close without copying? The invite is not shown again.';
+const shownMessages = (): string[] => stub.notifications.map((entry) => entry.message);
+const modalsShown = (): Array<{ message: string; detail: string | undefined; actions: string[] | undefined }> => stub.notifications.flatMap((entry, index) => (stub.notificationOptions[index]?.modal === true
+  ? [{ message: entry.message, detail: stub.notificationOptions[index]?.detail, actions: stub.notificationActions[index] }] : []));
+
+// Everything written under a folder, as one text, for the scans that the invite is stored nowhere (D-05, T-61-98).
+async function filesUnder(dir: string): Promise<string> {
+  if (!existsSync(dir)) return '';
+  const entries = await fs.readdir(dir, { recursive: true, withFileTypes: true });
+  const texts = await Promise.all(entries.filter((entry) => entry.isFile()).map((entry) => fs.readFile(path.join(entry.parentPath, entry.name), 'utf8')));
+  return texts.join('\n');
+}
 
 // ---- the tracer -------------------------------------------------------------------------------------------------------------------------
 
-test('tracer: Invite to Team asks its questions, writes member.invited, and shows the bundle once with Copy and nowhere else', async () => {
+test('tracer: Invite to Team asks its questions, writes member.invited, and shows the bundle once with Copy invite, how to send it, and nowhere else', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
     stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
@@ -258,15 +272,20 @@ test('tracer: Invite to Team asks its questions, writes member.invited, and show
     assert.equal(member?.allocationNanoUsd, 5_000_000_000, 'five dollars as integer nano-USD');
     assert.equal(member?.invite?.ttlSeconds, 604_800, 'seven days');
 
-    // One modal, with Copy, carrying the bundle in its detail and nothing else carrying it.
+    // One modal, with Copy invite, carrying the bundle and then how to send it in its detail, and nothing else carrying it (G-61-5).
     const modals = stub.notifications.flatMap((entry, index) => (stub.notificationOptions[index]?.modal === true ? [{ entry, index }] : []));
     assert.equal(modals.length, 1, 'exactly one modal');
-    assert.equal(modals[0]?.entry.message, 'Invite ready for Ana. Send them this invite; it works once and is not shown again.');
-    assert.equal(stub.notificationOptions[modals[0]?.index as number]?.detail, bundleText);
-    assert.deepEqual(stub.notificationActions[modals[0]?.index as number], ['Copy']);
-    assert.equal(stub.notificationOptions.filter((options) => options?.detail === bundleText).length, 1, 'the bundle is shown once');
+    assert.equal(modals[0]?.entry.message, 'Invite ready for Ana');
+    assert.equal(stub.notificationOptions[modals[0]?.index as number]?.detail, `${bundleText}\n\n${HOW_TO_SEND}`, 'the invite, a blank line, then how to send it');
+    assert.deepEqual(stub.notificationActions[modals[0]?.index as number], ['Copy invite']);
+    assert.equal(stub.notificationOptions.filter((options) => options?.detail?.includes(bundleText) === true).length, 1, 'the bundle is shown once');
+    assert.ok(stub.notifications.some((entry, index) => stub.notificationOptions[index]?.modal !== true && entry.message === 'Invite for Ana copied. Send it to them in a private message.'), 'copying is announced');
     assert.equal(everythingShown().includes(bundleText), false, 'not in the channel, the other messages, the inputs or the status bar');
     assert.equal(everythingShown().includes(bundle.code), false, 'the code is nowhere either');
+    // Nor in the settings, SecretStorage, the extension storage or the project's team folder.
+    const stored = [JSON.stringify(stub.configUpdates), JSON.stringify([...t.secrets.values.values()]), await filesUnder(t.storage), await filesUnder(path.join(t.root, '.planning', '.near-ai'))].join('\n');
+    assert.equal(stored.includes(bundleText), false, 'the invite is stored nowhere');
+    assert.equal(stored.includes(bundle.code), false, 'nor is its code');
 
     // The skip path says plainly that there is no provider cap, once.
     assert.equal(stub.notifications.filter((entry) => entry.message === NO_ORG_NOTICE).length, 1);
@@ -307,17 +326,52 @@ test('a lifetime of 24 hours is stored as 86400 seconds', async () => {
   });
 });
 
-test('closing the bundle without Copy says the invite can be issued again from Manage Team Members and never repeats it', async () => {
+test('closing the invite asks once more before it is lost; Close says it can be issued again from Members and never repeats the invite', async () => {
+  await withTeam(async (t) => {
+    stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
+    stub.setMessageResponder((text, actions) => (text === CLOSE_WITHOUT_COPYING && actions.includes('Close') ? 'Close' : undefined));
+    await t.run(INVITE_COMMAND);
+    assert.equal(stub.clipboardWrites.length, 0);
+    const modals = modalsShown();
+    assert.deepEqual(modals.map((modal) => [modal.message, modal.actions]), [['Invite ready for Ana', ['Copy invite']], [CLOSE_WITHOUT_COPYING, ['Copy invite', 'Close']]]);
+    const detail = modals[0]?.detail as string;
+    assert.ok(detail.startsWith('near-ai-invite-v1.'));
+    const bundleText = detail.split('\n')[0] as string;
+    assert.equal(JSON.stringify(modals[1]).includes(bundleText), false, 'the second question does not show the invite again');
+    const later = stub.notifications.filter((_entry, index) => stub.notificationOptions[index]?.modal !== true).map((entry) => entry.message);
+    assert.deepEqual(later, ['The invite for Ana was not copied. You can issue it again from Members in the Team section of your NEAR AI sidebar.']);
+    assert.equal(everythingShown().includes(bundleText), false);
+    assert.equal(t.handle.session()?.state().members.size, 2, 'the invitation stays, so it can be issued again');
+  });
+});
+
+test('dismissing both invite modals is the same as Close: nothing is copied and the person reads where to issue it again', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
     stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
     await t.run(INVITE_COMMAND);
     assert.equal(stub.clipboardWrites.length, 0);
-    const detail = stub.notificationOptions.find((options) => options?.modal === true)?.detail as string;
-    assert.ok(detail.startsWith('near-ai-invite-v1.'));
-    const later = stub.notifications.filter((_entry, index) => stub.notificationOptions[index]?.modal !== true).map((entry) => entry.message);
-    assert.ok(later.some((message) => message.includes('Manage Team Members')), later.join(' | '));
-    assert.equal(everythingShown().includes(detail), false);
+    assert.deepEqual(modalsShown().map((modal) => modal.message), ['Invite ready for Ana', CLOSE_WITHOUT_COPYING], 'asked once more, and only once');
+    assert.ok(shownMessages().includes('The invite for Ana was not copied. You can issue it again from Members in the Team section of your NEAR AI sidebar.'), shownMessages().join(' | '));
+  });
+});
+
+test('choosing Copy invite in the second question copies the invite once and announces it', async () => {
+  await withTeam(async (t) => {
+    stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
+    stub.setMessageResponder((text, actions) => (text === CLOSE_WITHOUT_COPYING && actions.includes('Copy invite') ? 'Copy invite' : undefined));
+    await t.run(INVITE_COMMAND);
+    const modals = modalsShown();
+    assert.deepEqual(modals.map((modal) => modal.message), ['Invite ready for Ana', CLOSE_WITHOUT_COPYING]);
+    assert.equal(stub.clipboardWrites.length, 1, 'copied once');
+    const bundleText = stub.clipboardWrites[0] as string;
+    assert.equal(modals[0]?.detail, `${bundleText}\n\n${HOW_TO_SEND}`, 'the copied invite is the one shown');
+    assert.equal(parseInviteBundle(bundleText).team, t.handle.session()?.teamFile.teamId);
+    assert.ok(shownMessages().includes('Invite for Ana copied. Send it to them in a private message.'), shownMessages().join(' | '));
+    assert.equal(shownMessages().some((message) => message.includes('not copied')), false);
+    assert.equal(everythingShown().includes(bundleText), false, 'not in the channel or any other message');
   });
 });
 
@@ -703,7 +757,7 @@ test('inviting a lead in a linked team asks the lead to sign in to NEAR first, a
     clearUi();
     stub.inputAnswers.push('Lee', 'lee@example.invalid', '5');
     stub.quickPickAnswers.push('Lead', '7 days');
-    stub.setMessageResponder((_text, actions) => (actions.includes('Sign in') ? 'Sign in' : actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes('Sign in') ? 'Sign in' : actions.includes('Copy invite') ? 'Copy invite' : undefined));
     const before = t.signIns.count;
     await t.run(INVITE_COMMAND);
     assert.equal(t.signIns.count, before + 1, 'the lead was asked to sign in');
@@ -721,7 +775,7 @@ test('inviting in a linked team whose organization link is not shared yet asks o
     clearUi();
     stub.inputAnswers.push('Dana', 'dana@example.invalid', '5');
     stub.quickPickAnswers.push('Developer', '7 days');
-    stub.setMessageResponder((_text, actions) => (actions.includes('Share and continue') ? 'Share and continue' : actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes('Share and continue') ? 'Share and continue' : actions.includes('Copy invite') ? 'Copy invite' : undefined));
     await t.run(INVITE_COMMAND);
     stub.setMessageResponder(undefined);
     assert.equal(stub.notificationActions.filter((actions) => actions.includes('Share and continue')).length, 1, 'one share confirmation');
@@ -739,7 +793,7 @@ test('choosing Link now while inviting links the team first, without asking twic
     stub.inputAnswers.push('Dana', 'dana@example.invalid', '5');
     // 61-20: the organization choice comes first, and the invite's one share confirmation puts the linked team setup online.
     stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace', 'Developer', '7 days');
-    stub.setMessageResponder((_text, actions) => (actions.includes('Share and continue') ? 'Share and continue' : actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes('Share and continue') ? 'Share and continue' : actions.includes('Copy invite') ? 'Copy invite' : undefined));
     await t.run(INVITE_COMMAND);
     assert.equal(stub.quickPickRequests.filter((request) => request.placeHolder === LINK_EXPLANATION).length, 1, 'the explanation is asked once');
     assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' });
@@ -767,7 +821,6 @@ async function joinMember(t: Team, person: { name: string; email: string; role: 
 }
 
 const lastList = (): string[] => stub.quickPickRequests[stub.quickPickRequests.length - 1]?.labels ?? [];
-const shownMessages = (): string[] => stub.notifications.map((entry) => entry.message);
 const manageActions = (): string[] => stub.quickPickRequests[1]?.labels ?? [];
 
 test('Manage Team Members lists the NEAR line first, then members with their state, invitations and cleanup items', async () => {
@@ -917,7 +970,7 @@ test('Remove warns that the key can still spend when it could not be capped, and
   }, { near: true });
 });
 
-test('Cancel ends a pending invitation and Re-issue replaces it with a new bundle shown once with Copy', async () => {
+test('Cancel ends a pending invitation and Re-issue replaces it with a new bundle shown once in the same modal with Copy invite', async () => {
   await withTeam(async (t) => {
     const eve = await inviteBundle(t, { name: 'Eve', email: 'eve@example.invalid', role: 'Reviewer' });
     const eveId = parseInviteBundle(eve).member;
@@ -933,6 +986,8 @@ test('Cancel ends a pending invitation and Re-issue replaces it with a new bundl
     assert.notEqual(state?.members.get(eveId)?.removedEvent, undefined, 'the old invitation stopped working');
     assert.equal(state?.members.get(fresh.member)?.invite?.ttlSeconds, 259_200);
     assert.equal(everythingShown().includes(stub.clipboardWrites[0] as string), false);
+    // G-61-5: Re-issue uses the same modal as Invite.
+    assert.deepEqual(modalsShown(), [{ message: 'Invite ready for Eve', detail: `${stub.clipboardWrites[0] as string}\n\n${HOW_TO_SEND}`, actions: ['Copy invite'] }]);
     clearUi();
 
     // UI review issue 2: Cancel invitation asks first, in a modal; declining changes nothing.
@@ -1010,7 +1065,7 @@ test('Retry sends a NEAR invitation left on the cleanup list after asking the le
     // A lead invited without NEAR leaves the NEAR invitation on the cleanup list.
     stub.inputAnswers.push('Lee', 'lee@example.invalid', '5');
     stub.quickPickAnswers.push('Lead', '7 days');
-    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy invite') ? 'Copy invite' : undefined));
     await t.run(INVITE_COMMAND);
     assert.equal(t.fake?.emailedToken('lee@example.invalid'), undefined, 'nothing reached NEAR yet');
     const teamId = (await readTeamFile(t.root))?.teamId as string;
@@ -1047,7 +1102,7 @@ test('Retry sends a NEAR invitation left on the cleanup list after asking the le
     clearUi();
     stub.inputAnswers.push('Uma', 'uma@example.invalid', '5');
     stub.quickPickAnswers.push('Lead', '7 days');
-    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy invite') ? 'Copy invite' : undefined));
     await t.run(INVITE_COMMAND);
     const umaId = parseInviteBundle(stub.clipboardWrites[0] as string).member;
     const invitesFile = path.join(teamStorageDir(t.storage, teamId), INVITE_FILE);
@@ -1076,7 +1131,7 @@ test('CR-02: Retry of a NEAR invitation for a removed lead closes the item witho
     // Lee is invited as a lead without a NEAR sign-in, so the NEAR invitation waits on the cleanup list, and joins.
     stub.inputAnswers.push('Lee', 'lee@example.invalid', '5');
     stub.quickPickAnswers.push('Lead', '7 days');
-    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy invite') ? 'Copy invite' : undefined));
     await t.run(INVITE_COMMAND);
     stub.setMessageResponder(undefined);
     const bundle = stub.clipboardWrites[0] as string;
@@ -1116,12 +1171,12 @@ test('CR-02: Retry of a NEAR invitation for a removed lead closes the item witho
     // Re-issuing a lead invitation closes the unsent NEAR invitation of the invitation it replaces.
     stub.inputAnswers.push('Kim', 'kim@example.invalid', '5');
     stub.quickPickAnswers.push('Lead', '7 days');
-    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy invite') ? 'Copy invite' : undefined));
     await t.run(INVITE_COMMAND);
     const kim = parseInviteBundle(stub.clipboardWrites[0] as string).member;
     clearUi();
     stub.quickPickAnswers.push('Invitation for Kim, lead, pending', 'Re-issue', '3 days');
-    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy') ? 'Copy' : undefined));
+    stub.setMessageResponder((_text, actions) => (actions.includes(WITHOUT_NEAR) ? WITHOUT_NEAR : actions.includes('Copy invite') ? 'Copy invite' : undefined));
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.equal(stub.clipboardWrites.length, 1, shownMessages().join(' | '));
     assert.deepEqual((await cleanup.forMember(kim)).filter((item) => item.step === 'send-invitation').map((item) => item.status), ['done'], 'the replaced invitation will not be sent');
