@@ -30,6 +30,8 @@ const SHARE_FAILED_TEXT = 'The change could not be shared with your team yet. Ch
 const NOT_ON_A_VERSION_TEXT = 'This project could not be shared right now. Choose Show details for what to do.';
 const LINK_SAVE_UNFINISHED_TEXT = 'The link is saved in this project, but saving it for the team did not finish. Choose Show details for the one step that is left.';
 const INVITE_ADDRESS_TEXT = 'The address this project is shared from cannot be put in an invite, so no invite was made. Choose Show details for why.';
+// G-61-3: an invite is only made once the team setup is online, so the invite can find the team.
+export const INVITE_NEEDS_SHARE_TEXT = 'No invite was made, because your team setup must be online before anyone can join with an invite. Nothing was changed.';
 // G-61-6 (owner, 2026-11-03): wherever linking is offered, one plain line says what the organization is, then Link now or Not now.
 export const LINK_EXPLANATION = 'Your organization is the account that pays for your team\'s AI, so each person can get a spending limit.';
 export const LINK_NOW_CHOICE = 'Link now';
