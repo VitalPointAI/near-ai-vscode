@@ -79,7 +79,7 @@ export function notReachableStatus(name: string): string {
 }
 
 /** The owner or a lead of a team that is ready for people. */
-export function managerStatus(name: string, otherMembers: number, pendingInvites: number): string {
+export function managerStatus(name: string, otherMembers: number, pendingInvites: number, _waiting: number = 0): string {
   const who = otherMembers === 0
     ? `${name} is ready. Invite someone to work with you.`
     : `${name} has ${otherMembers} ${plural(otherMembers, 'other member', 'other members')}. Invite someone to add more.`;

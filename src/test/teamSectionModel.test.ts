@@ -133,6 +133,13 @@ test('a lead with people waiting sees the count on Members, and only a manager d
   assert.equal(model({ folderOpen: true, team: developer({ waiting: 3 }) }).actions.find((action) => action.id === 'members')?.badge, undefined);
 });
 
+test('a lead with people waiting is also told so in the status, in plain words', () => {
+  assert.equal(text.managerStatus('Harbor', 1, 0, 1), 'Harbor has 1 other member. Invite someone to add more. 1 person is waiting for you in Members.');
+  assert.equal(text.managerStatus('Harbor', 2, 1, 2), 'Harbor has 2 other members. Invite someone to add more. 1 invite is not used yet. 2 people are waiting for you in Members.');
+  assert.equal(model({ folderOpen: true, team: lead({ waiting: 1 }) }).status, text.managerStatus('Harbor', 1, 0, 1));
+  assert.equal(model({ folderOpen: true, team: lead({ waiting: 0 }) }).status, text.managerStatus('Harbor', 1, 0));
+});
+
 test('the board slot is shown only when the host supplies it, and Open board is offered in every team state except removed', () => {
   const withBoard = model({ folderOpen: true, team: developer(), board: { ready: 3, blocked: 1, mine: 2 } });
   assert.deepEqual(withBoard.board, { ready: 3, blocked: 1, mine: 2, text: text.boardSummaryText(3, 1, 2) });
