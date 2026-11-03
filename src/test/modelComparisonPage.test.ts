@@ -117,7 +117,7 @@ test('the estimate view lists each reused result with its age', () => {
   assert.deepEqual(estimateView(plan, estimate).reused, [{ model: 'z-ai/glm-5.3', task: 'implement', at: '2026-10-29T00:00:00.000Z', runId: run.id }]);
 });
 
-test('the page loads one nonce script and one stylesheet under a strict content policy, and the Tools page may open it', () => {
+test('the page loads one nonce script and two stylesheets (shared base, then its own) under a strict content policy, and the Tools page may open it', () => {
   const html = comparisonPageHtml({ cspSource: 'vscode-resource:', nonce: 'abc123', script: 'compare.js', style: 'compare.css', base: 'base.css' });
   assert.match(html, /default-src 'none'; style-src vscode-resource:; script-src 'nonce-abc123';/);
   assert.equal((html.match(/<script /g) ?? []).length, 1);

@@ -147,7 +147,7 @@ export function selectionProblem(models: string[], catalog: CatalogEntry[]): str
   return undefined;
 }
 
-/** The page's HTML: one nonce script and one stylesheet, everything else rendered by the script with textContent. */
+/** The page's HTML: one nonce script and two stylesheets (the shared base, then its own), everything else rendered by the script with textContent. */
 export function comparisonPageHtml(options: { cspSource: string; nonce: string; script: string; style: string; base: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">

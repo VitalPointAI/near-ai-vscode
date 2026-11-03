@@ -702,7 +702,7 @@ function displayPath(file: string, root: string | undefined): string {
 
 export type { TeamDefinition };
 
-/** The page's HTML: one nonce script and one stylesheet; everything else is rendered by the script with textContent. */
+/** The page's HTML: one nonce script and two stylesheets (the shared base, then its own); everything else is rendered by the script with textContent. */
 export function teamStudioHtml(options: { cspSource: string; nonce: string; script: string; style: string; base: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">

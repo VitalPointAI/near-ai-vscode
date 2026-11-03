@@ -247,7 +247,7 @@ test('every page message is strictly validated', () => {
   for (const message of bad) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message));
 });
 
-test('the page HTML is one nonce script and one stylesheet under a strict CSP', () => {
+test('the page HTML is one nonce script and two stylesheets (shared base, then its own) under a strict CSP', () => {
   const html = teamStudioHtml({ cspSource: 'vscode-webview://test', nonce: 'n0nce', script: 'teams.js', style: 'teams.css', base: 'base.css' });
   assert.match(html, /default-src 'none'; style-src vscode-webview:\/\/test; script-src 'nonce-n0nce';/);
   assert.equal([...html.matchAll(/<script\b/g)].length, 1);
