@@ -177,7 +177,7 @@ function projectTests(): Array<[string, () => Promise<void>]> {
           console.log(`  ${name}: editor area ${editor}px, a page can be up to ${room}px beside a second group`);
           assert.ok(room >= Math.max(...EDITOR_WIDTHS), `the editor area holds a ${Math.max(...EDITOR_WIDTHS)}px page beside a second group (editor area ${editor}px, page at most ${room}px)`);
           for (const width of WIDER_EDITOR_WIDTHS.filter((width) => width > room)) unmeasured.push(`${name} at ${width}px (the window holds ${room}px)`);
-          for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) record(name, target, await sizeEditor(name, target));
+          for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) record(name, target, await sizeEditor(name, target, editor));
           await vscode.commands.executeCommand('workbench.action.closeAllEditors');
           await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
         }
@@ -299,15 +299,13 @@ async function editorAreaOnly(): Promise<void> {
 }
 
 /** Splits the editor area in two and sizes the first group (holding the page) to the target width. */
-async function sizeEditor(name: string, target: number): Promise<LayoutReport> {
-  let fraction = 0.5;
+async function sizeEditor(name: string, target: number, editor: number): Promise<LayoutReport> {
+  let fraction = target / editor;
   await splitEditor(fraction);
   let report = await settled(name);
-  for (let attempt = 0; attempt < 6 && Math.abs(report.width - target) > 4; attempt += 1) {
-    const total = report.width / fraction;
-    const next = Math.min(0.99, Math.max(0.02, target / total));
-    if (Math.abs(next - fraction) < 0.001) break;
-    fraction = next;
+  for (let attempt = 0; attempt < 8 && Math.abs(report.width - target) > 4; attempt += 1) {
+    // A page as wide as the whole editor area means the split did not take yet: ask again as it was.
+    if (report.width < editor - 10) fraction = Math.min(0.99, Math.max(0.02, fraction * target / report.width));
     await splitEditor(fraction);
     report = await settled(name);
   }
