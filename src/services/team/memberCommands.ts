@@ -1,7 +1,7 @@
 // The membership commands (TEAM-02, TEAM-03): Invite to Team, Join Team, Manage Team Members, Link Your Organization and Sign Out of NEAR AI for This Team.
 // Each is a thin adapter: it asks plain questions, calls the vscode-free flows in src/team, and says what happened and what to do next. Nothing here
 // logs, stores or shows a code, key, token or repository address: the invite bundle appears once in a modal and on the clipboard when the lead
-// chooses Copy, and pasted bundles and keys go through password inputs.
+// chooses Copy invite, and pasted bundles and keys go through password inputs.
 // Solo activation stays one fs.stat, so this module imports only vscode, Node built-ins, types and the prompts module (which imports only vscode);
 // every team module is loaded with a dynamic import inside a handler (the teamCommands.ts header rule). Every input, pick and message goes through
 // teamPrompts, so the extension-host test can answer them (61-20).
@@ -24,7 +24,6 @@ export const MANAGE_MEMBERS_COMMAND = 'nearAi.team.manageMembers';
 export const LINK_NEAR_COMMAND = 'nearAi.team.linkNearOrganization';
 export const SIGN_OUT_NEAR_COMMAND = 'nearAi.team.signOutNear';
 
-const COPY_ACTION = 'Copy';
 // Plain-language pass: people share and get the project; the extension runs git. Git words stay in the output channel.
 const PUSH_ACTION = 'Share with my team';
 const SHOW_DETAILS_ACTION = 'Show details';
@@ -34,6 +33,17 @@ const NOT_ON_A_VERSION_TEXT = 'This project could not be shared right now. Choos
 const LINK_SAVE_UNFINISHED_TEXT = 'The link is saved in this project, but saving it for the team did not finish. Choose Show details for the one step that is left.';
 const INVITE_ADDRESS_TEXT = 'No invite was made, because the address your project is kept at online cannot be given to teammates as it is.';
 const INVITE_ADDRESS_DETAIL = 'Keep the project online at an address your teammates can use, for example on GitHub, with no password or token in it, then invite again. Choose Show details for why.';
+// G-61-5 (owner, 2026-11-03): the invite is shown once, in a modal that says how to hand it over and what the invitee does. Closing it without
+// copying asks once more, because the invite is not shown again. Plain words only; the invite itself is only ever in that modal's detail.
+export const INVITE_TEXT = Object.freeze({
+  copy: 'Copy invite',
+  close: 'Close',
+  howToSend: 'Send it to them in a private message, such as a direct chat or an email. It works once. To join, they open the project in VS Code, open the NEAR AI sidebar, choose Join a team and paste the invite. If they do not have the project yet, Join a team offers to download it.',
+  closeWithoutCopying: 'Close without copying? The invite is not shown again.'
+} as const);
+const inviteReadyText = (name: string): string => `Invite ready for ${name}`;
+const inviteCopiedText = (name: string): string => `Invite for ${name} copied. Send it to them in a private message.`;
+const inviteNotCopiedText = (name: string): string => `The invite for ${name} was not copied. You can issue it again from Members in the Team section of your NEAR AI sidebar.`;
 // G-61-3: an invite is only made once the team setup is online, so the invite can find the team.
 export const INVITE_NEEDS_SHARE_TEXT = 'No invite was made, because your team setup must be online before anyone can join with an invite. Nothing was changed.';
 // G-61-6 (owner, 2026-11-03): wherever linking is offered, one plain line says what the organization is, then Link now or Not now.
@@ -537,17 +547,19 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     return (await pick(lifetimes, { title: 'Invite to Team', placeHolder: 'How long the invite works before it expires' }))?.ttlSeconds;
   }
 
-  // D-05: the bundle is shown once, in a modal with Copy. It is written to the clipboard only when the lead chooses Copy, and never logged.
+  // D-05, G-61-5: the bundle is shown once, in a modal whose detail is the invite, a blank line and how to send it, with Copy invite. Closing it
+  // asks once more (Copy invite or Close), without showing the invite again. It is written to the clipboard only when the lead chooses Copy invite,
+  // and never logged or stored. Invite and Re-issue both use this.
   async function presentBundle(shownName: string, bundle: string): Promise<void> {
-    const copied = await teamPrompts.message(
-      'info', `Invite ready for ${shownName}. Send them this invite; it works once and is not shown again.`,
-      { modal: true, detail: bundle }, COPY_ACTION
-    );
-    if (copied === COPY_ACTION) {
+    let choice = await teamPrompts.message('info', inviteReadyText(shownName), { modal: true, detail: `${bundle}\n\n${INVITE_TEXT.howToSend}` }, INVITE_TEXT.copy);
+    if (choice !== INVITE_TEXT.copy) {
+      choice = await teamPrompts.message('warn', INVITE_TEXT.closeWithoutCopying, { modal: true }, INVITE_TEXT.copy, INVITE_TEXT.close);
+    }
+    if (choice === INVITE_TEXT.copy) {
       await vscode.env.clipboard.writeText(bundle);
-      deps.announce('info', `Invite for ${shownName} copied. Send it to them in a private message.`);
+      deps.announce('info', inviteCopiedText(shownName));
     } else {
-      deps.announce('info', `The invite for ${shownName} was not copied. You can issue it again from "NEAR AI: Manage Team Members".`);
+      deps.announce('info', inviteNotCopiedText(shownName));
     }
   }
 

@@ -329,7 +329,7 @@ test('under the extension-host test variable, closing the invite asks once more,
       const bundleText = stub.clipboardWrites[0] as string;
       const code = parseInviteBundle(bundleText).code;
       assert.equal(promptTap.shown.filter((record) => JSON.stringify(record).includes(bundleText)).length, 1, 'only the first modal record holds the invite');
-      assert.equal(promptTap.shown.filter((record) => JSON.stringify(record).includes(code)).length, 1, 'and its code');
+      assert.equal(promptTap.shown.filter((record) => JSON.stringify(record).includes(code)).length, 0, 'its code is in no record as plain text (the invite carries it encoded)');
       assert.ok(promptTap.shown.some((record) => record.text === 'Invite for Ana copied. Send it to them in a private message.'));
       assert.equal(outputLines().some((line) => line.includes(bundleText) || line.includes(code)), false, 'not in the channel');
       assert.equal(stub.inputRequests.length + stub.quickPickRequests.length + stub.notifications.length, 0, 'VS Code was shown nothing');

@@ -340,7 +340,7 @@ test('closing the invite asks once more before it is lost; Close says it can be 
     const bundleText = detail.split('\n')[0] as string;
     assert.equal(JSON.stringify(modals[1]).includes(bundleText), false, 'the second question does not show the invite again');
     const later = stub.notifications.filter((_entry, index) => stub.notificationOptions[index]?.modal !== true).map((entry) => entry.message);
-    assert.deepEqual(later, ['The invite for Ana was not copied. You can issue it again from Members in the Team section of your NEAR AI sidebar.']);
+    assert.deepEqual(later, [NO_ORG_NOTICE, 'The invite for Ana was not copied. You can issue it again from Members in the Team section of your NEAR AI sidebar.']);
     assert.equal(everythingShown().includes(bundleText), false);
     assert.equal(t.handle.session()?.state().members.size, 2, 'the invitation stays, so it can be issued again');
   });
