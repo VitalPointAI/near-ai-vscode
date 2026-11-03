@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-24-PLAN.md
-last_updated: "2026-11-03T22:23:35.621Z"
+stopped_at: Completed 61-19-PLAN.md
+last_updated: "2026-11-03T22:46:58.582Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 6c7a7d4e4a378d47c79e56404349ae9eba9780aa
+state_head: edbecb2590c1c63683a99d3fd05519c9b91a2905
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 59
-  completed_plans: 45
+  completed_plans: 46
   percent: 13
 ---
 
@@ -99,6 +99,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P17 | 8 min | 3 tasks | 9 files |
 | Phase 61 P18 | 11 min | 3 tasks | 5 files |
 | Phase 61 P24 | 35min | 3 tasks | 12 files |
+| Phase 61 P19 | 19min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -195,6 +196,10 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-24: Link Your Organization explains linking only when the team has no organization link; a linked team goes straight to the pickers
 - [Phase 61]: 61-24: 'Invite without NEAR' became 'Invite without signing in' (linked team, not signed in); Not now from the Link command says Nothing was changed plus NO_ORG_NOTICE
 - [Phase 61]: 61-24: people-facing files are found by convention and a naming scan reads every Team Mode literal and command title (src/test/helpers/plainWords.ts)
+- [Phase 61]: 61-19: Enable connects NEAR AI in place (Connect NEAR AI modal, connectNearAi bound to configureApiKey), re-checks once and otherwise says nothing was changed; it never names NEAR AI: Set Up
+- [Phase 61]: 61-19: Enable checks the online home before any question; a local folder or a password in the address gets one modal with Turn on anyway or Not now, and Turn on anyway ends without a share button
+- [Phase 61]: 61-19: Share Team Setup (nearAi.team.share, owner or lead) shares only team.json after one confirmation via shareFlow.ensureTeamSetupShared; Enable's Share with my team runs it; consent survives Try again except a new first upload
+- [Phase 61]: 61-19: every teamCommands prompt goes through teamPrompts; scripted answers only with NEAR_AI_E2E exactly 1 and promptTap.script set; teamPrompts.js is the one extra module at solo activation
 
 ### Pending Todos
 
@@ -216,8 +221,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T22:23:35.371Z
-Stopped at: Completed 61-24-PLAN.md
+Last session: 2026-11-03T22:46:58.319Z
+Stopped at: Completed 61-19-PLAN.md
 Resume file: None
 
 ## Notes

@@ -106,7 +106,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. After the full invite, join and remove flow, a privacy canary finds no secret (API key, session token, clear-text invite code) in the coordination branch, `team.json`, settings, audit or transcripts.
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 19/24 plans executed in 13 waves (Waves 8 to 13 are the fix pass for the owner's 61-UAT findings, 2026-11-03)
+**Plans**: 20/24 plans executed in 13 waves (Waves 8 to 13 are the fix pass for the owner's 61-UAT findings, 2026-11-03)
 **UI hint**: yes
 
 **Wave 1**
@@ -147,7 +147,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [x] 61-24-PLAN.md — "Your organization" in the commands and session, one-line linking explanation with Link now or Not now, renamed titles, banned term and discovery scan (TEAM-02, TEAM-03)
 
 **Wave 10** *(blocked on Wave 9 completion)*
-- [ ] 61-19-PLAN.md — Enable connects NEAR AI in place and checks the online home up front; Share Team Setup; prompts seam (TEAM-01, TEAM-02)
+- [x] 61-19-PLAN.md — Enable connects NEAR AI in place and checks the online home up front; Share Team Setup; prompts seam (TEAM-01, TEAM-02)
 
 **Wave 11** *(blocked on Wave 10 completion)*
 - [ ] 61-20-PLAN.md — Invite shares first with one confirmation; Join uses catch-up (TEAM-02)
@@ -318,7 +318,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
-| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 19/24 | In Progress (fix pass planned) | - |
+| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 20/24 | In Progress (fix pass planned) | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 14/23 | In Progress (fix pass planned) | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
