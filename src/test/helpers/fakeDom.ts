@@ -2,6 +2,7 @@
 // selectors, event dispatch with bubbling, keyboard and drag events, focus tracking, ResizeObserver and matchMedia stubs, timers under test control and
 // acquireVsCodeApi with getState and setState, so the later board scripts add tests without editing this file. Like the real page, its elements throw
 // when markup is assigned or inserted: the board must write text only (T-62-32).
+// The sidebar's media/chat scripts load through the same harness (scripts: 'chat'), with an optional section#team and a nearChat stub (61-17).
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';

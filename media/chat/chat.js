@@ -3,7 +3,9 @@
 (function () {
   'use strict';
 
+  // The page has one VS Code API; the Team section script (team.js, loaded after this one) posts through the frozen post below.
   const vscode = acquireVsCodeApi();
+  window.nearChat = Object.freeze({ post });
   const markdown = window.nearMarkdown;
   const $ = (id) => document.getElementById(id);
   const transcript = $('transcript');

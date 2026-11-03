@@ -1,6 +1,9 @@
 // The sidebar Team section model (G-61-5): what is known about this project and this computer in, one heading, one plain status line and the buttons
 // to show out, with exactly one primary next action. The page (media/chat/team.js) draws it; the host (61-21) feeds it and runs the commands through
 // TEAM_ACTION_COMMANDS. Pure: no vscode, no I/O, no clock. Every label and sentence comes from teamSectionText.ts.
+import {
+  TEAM_ACTION_HINTS, TEAM_ACTION_LABELS, TEAM_SECTION_HEADING, TEAM_STATUS, managerStatus, teamHeading
+} from './teamSectionText';
 import type { Role } from './types';
 
 export const TEAM_ACTION_IDS = ['turn-on', 'join', 'share', 'invite', 'members', 'board', 'link', 'check'] as const;
@@ -18,7 +21,7 @@ export const TEAM_ACTION_COMMANDS: Readonly<Record<TeamActionId, string>> = Obje
 });
 
 export function isTeamActionId(value: unknown): value is TeamActionId {
-  throw new Error(`not implemented ${String(value)}`);
+  return typeof value === 'string' && (TEAM_ACTION_IDS as readonly string[]).includes(value);
 }
 
 /** Filled by Phase 62's board fix; shown only when the host supplies it. */
@@ -59,7 +62,20 @@ export interface TeamSectionModel { heading: string; status: string; compact: bo
 
 /** Undefined when no folder is open. */
 export function teamSectionModel(input: TeamSectionInput): TeamSectionModel | undefined {
-  throw new Error(`not implemented ${String(input.folderOpen)}`);
+  if (!input.folderOpen) return undefined;
+  const team = input.team;
+  if (team === undefined) {
+    return { heading: TEAM_SECTION_HEADING, status: TEAM_STATUS.noTeam, compact: true, actions: ordered('turn-on', ['join']) };
+  }
+  const offered: TeamActionId[] = ['members', 'board'];
+  if (!team.linked) offered.push('link');
+  return { heading: teamHeading(team.name), status: managerStatus(team.name, team.otherMembers, team.pendingInvites), compact: false, actions: ordered('invite', offered) };
+}
+
+// The primary action first, then the others in the order of TEAM_ACTION_IDS, so the buttons never jump around between states.
+function ordered(primary: TeamActionId, others: readonly TeamActionId[]): TeamSectionAction[] {
+  const rest = TEAM_ACTION_IDS.filter((id) => id !== primary && others.includes(id));
+  return [primary, ...rest].map((id) => ({ id, label: TEAM_ACTION_LABELS[id], primary: id === primary, hint: TEAM_ACTION_HINTS[id] }));
 }
 
 export interface TeamSetupStep { id: 'team.turn-on' | 'team.share' | 'team.invite' | 'team.link'; title: string; done: boolean; action: TeamActionId; optional: boolean }
