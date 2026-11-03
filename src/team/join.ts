@@ -18,6 +18,7 @@ import { GitTransport } from './gitTransport';
 import { createDeviceIdentity, createSealIdentity, forgetDeviceIdentity, loadDeviceIdentity, loadSealIdentity } from './identity';
 import type { DeviceIdentity } from './identity';
 import { InviteBundleError, parseInviteBundle } from './inviteBundle';
+import type { CatchUpReason } from './joinCatchUp';
 import type { InviteBundle } from './inviteBundle';
 import { deriveInviteKey, inviteKeyMatches, parseInviteCode } from './inviteCode';
 import { NearOrgClient, scrubNearText } from './nearOrg';
@@ -33,9 +34,14 @@ export const NO_ORG_NOTICE = 'No organization linked, so everyone uses their own
 const R = TEAM_REJECTION_REASONS;
 
 export type JoinPreparation =
-  | { kind: 'ready'; bundle: InviteBundle; teamFile: TeamFile; near?: NearLink }
+  /** updated: the open copy was brought up to date before it was found ready (G-61-4). */
+  | { kind: 'ready'; bundle: InviteBundle; teamFile: TeamFile; near?: NearLink; updated?: true }
   | { kind: 'clone-needed'; repoUrl: string; teamId: string }
+  /** The open copy is the invite's project, but it could not be brought up to date safely, so nothing in it was changed. */
+  | { kind: 'not-ready'; reason: CatchUpReason; repoUrl: string; teamId: string; detail?: string }
   | { kind: 'refused'; message: string };
+
+export type JoinPreparationStep = 'update';
 
 function sameNear(left: NearLink, right: NearLink): boolean {
   return left.organizationId === right.organizationId && left.workspaceId === right.workspaceId;
@@ -51,7 +57,9 @@ const DIFFERENT_LINK = 'This invite names a different organization than this pro
 
 // D-07 and D-26: nothing is kept between this call and the next. After a clone the invitee pastes the bundle again, so the answer here depends on
 // the folder that is open right now and on the bundle in this call only. Nothing in a refusal repeats the pasted text.
-export async function prepareJoin(input: { projectRoot: string | undefined; bundleText: string }): Promise<JoinPreparation> {
+export async function prepareJoin(input: {
+  projectRoot: string | undefined; bundleText: string; git?: GitRunner; onStep?: (step: JoinPreparationStep) => void;
+}): Promise<JoinPreparation> {
   let bundle: InviteBundle;
   try {
     bundle = parseInviteBundle(input.bundleText);

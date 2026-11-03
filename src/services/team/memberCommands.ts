@@ -643,6 +643,12 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       if (choice === CLONE_ACTION) await vscode.commands.executeCommand('git.clone', prepared.repoUrl);
       return;
     }
+    if (prepared.kind === 'not-ready') {
+      // The open copy is this team's project but could not be brought up to date safely. Plan 61-20 gives each reason its own sentence.
+      if (prepared.detail !== undefined) deps.output.appendLine(`Bringing the project up to date did not finish (${prepared.reason}): ${await safe(prepared.detail)}`);
+      deps.report('error', 'Your copy of this project could not be brought up to date by itself, so nothing in it was changed. Ask your lead for help, then run NEAR AI: Join Team again.');
+      return;
+    }
     if (projectRoot === undefined) return;
     const { teamFile, bundle, near } = prepared;
     const teamName = await display(teamFile.name);
