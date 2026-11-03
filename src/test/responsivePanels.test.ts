@@ -187,3 +187,7 @@ test('the MCP approval explanation is tied to its menu, and Tools badges wrap in
   assert.match(badge, /white-space: normal;/);
   assert.doesNotMatch(badge, /text-overflow: ellipsis|overflow: hidden/);
 });
+
+test('chat reply tables keep their natural width instead of filling the reply', () => {
+  assert.match(css('chat/chat.css'), /\.turn \.table-wrap > table \{ width: auto; \}/);
+});

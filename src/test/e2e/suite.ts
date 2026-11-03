@@ -189,6 +189,8 @@ function projectTests(): Array<[string, () => Promise<void>]> {
         await vscode.commands.executeCommand('nearAiChatView.focus');
       }
       if (unmeasured.length) console.warn(`  !! NOT MEASURED, the window is too small: ${unmeasured.join('; ')}`);
+      // In CI the window must hold every width, so a width it could not measure fails rather than passing unseen.
+      if (unmeasured.length && process.env.CI) problems.push(`not measured in CI (window too small): ${unmeasured.join('; ')}`);
       console.log(`  Widths measured: chat ${SIDEBAR_WIDTHS.join(', ')}px; pages ${[...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS].join(', ')}px${unmeasured.length ? ` except ${unmeasured.length} too wide for this window` : ''}; text set in a wider stand-in font.`);
       assert.deepEqual(problems, []);
     }],

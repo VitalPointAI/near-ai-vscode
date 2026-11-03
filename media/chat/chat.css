@@ -74,6 +74,8 @@ button { font: inherit; color: inherit; }
 /* Tables scroll sideways inside their own box, so a wide table never widens the chat. */
 .turn .table-wrap { max-width: 100%; margin: 0 0 10px; overflow-x: auto; border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
 .turn .table-wrap:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+/* Reply tables keep their natural width (the shared rule makes data tables fill their box). */
+.turn .table-wrap > table { width: auto; }
 .turn table { border-collapse: collapse; font-size: 0.95em; line-height: 1.4; word-break: normal; overflow-wrap: normal; }
 .turn th, .turn td { padding: 3px 8px; text-align: left; vertical-align: top; border: 1px solid var(--vscode-panel-border); min-width: 4em; max-width: 28em; overflow-wrap: break-word; }
 .turn tr > :first-child { border-left: 0; }
