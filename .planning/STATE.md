@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-16-PLAN.md
-last_updated: "2026-11-03T21:42:38.398Z"
+stopped_at: Completed 61-17-PLAN.md
+last_updated: "2026-11-03T21:53:46.557Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 1bebe1b48b72cbe8683d11de189c95d27f312697
+state_head: fb80e7b6dade1916ae253d0bbfdba601af3fd292
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 59
-  completed_plans: 42
+  completed_plans: 43
   percent: 13
 ---
 
@@ -96,6 +96,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P14 | 70min | 3 tasks | 9 files |
 | Phase 61 P15 | 30min | 3 tasks | 13 files |
 | Phase 61 P16 | 12 min | 3 tasks | 3 files |
+| Phase 61 P17 | 8 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,10 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-16: an http or https address with a user part, or ssh with a password, is not-shareable with cleanRepoUrl's credentials sentence, stricter than the invite's credential stripping (cleanRepoUrl unchanged)
 - [Phase 61]: 61-16: the setup-only share commit reuses the local team.json blob or serialiseTeamFile bytes, never canonical JSON, so the lead's merge or rebase cannot conflict
 - [Phase 61]: 61-16: shareTeamSetup re-plans every attempt; a first upload of the whole branch runs only with the consented first-upload plan, otherwise it returns changed
+- [Phase 61]: 61-17: offline or paused makes Check the team the one primary action and the status the connection text
+- [Phase 61]: 61-17: while the team setup is not shared or not reachable, a manager gets Share instead of Invite someone
+- [Phase 61]: 61-17: sidebar modules post through window.nearChat (chat.js's frozen post); team.js never calls acquireVsCodeApi or setState
+- [Phase 61]: 61-17: setup steps turn-on and share are required, invite and link optional (plain data for SETUP-01)
 
 ### Pending Todos
 
@@ -203,8 +208,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T21:42:38.167Z
-Stopped at: Completed 61-16-PLAN.md
+Last session: 2026-11-03T21:53:46.319Z
+Stopped at: Completed 61-17-PLAN.md
 Resume file: None
 
 ## Notes

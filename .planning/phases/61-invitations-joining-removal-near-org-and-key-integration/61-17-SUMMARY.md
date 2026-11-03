@@ -175,3 +175,7 @@ None - no external service configuration required.
 ---
 *Phase: 61-invitations-joining-removal-near-org-and-key-integration*
 *Completed: 2026-11-03*
+
+## Self-Check: PASSED
+
+All 5 created files exist; commits fee01d0, 698a81a, 60ea56b, 099f5c3, 59ac5a5 and a5b76dd are on this branch; no file deletions.
