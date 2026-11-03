@@ -21,9 +21,22 @@ let resolved = false;
  * The runtime for this test, or a skip. Resolved lazily because this project compiles to CommonJS,
  * where a module-level await is not allowed.
  */
+/**
+ * The runtime for this test, or a skip. `--version` answering is not enough: a CI runner has the
+ * docker CLI but no daemon, so the CLI answers and every `run` fails. The check is whether a
+ * container actually starts, which is the capability these tests are about (D-08's own rule: a
+ * runtime that answered and then failed is not a working runtime).
+ */
 async function requireRuntime(t: TestContext): Promise<ContainerRuntime | undefined> {
-  if (!resolved) { detected = await detectRuntime(); resolved = true; }
-  if (!detected) { t.skip('no container runtime (docker or podman) answered --version on this machine'); return undefined; }
+  if (!resolved) {
+    detected = await detectRuntime();
+    if (detected) {
+      const usable = await runCapture(detected, ['run', '--rm', IMAGE, 'true']).then(() => true).catch(() => false);
+      if (!usable) detected = undefined;
+    }
+    resolved = true;
+  }
+  if (!detected) { t.skip('no usable container runtime (the CLI may be present without a daemon)'); return undefined; }
   return detected;
 }
 
