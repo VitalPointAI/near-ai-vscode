@@ -40,6 +40,20 @@ export const LINK_EXPLANATION = 'Your organization is the account that pays for 
 export const LINK_NOW_CHOICE = 'Link now';
 export const NOT_NOW_CHOICE = 'Not now, everyone uses their own key';
 const CLONE_ACTION = 'Get the project';
+// G-61-4: what Join says about the copy that is open. Plain words only; the technical reason goes to the NEAR AI Team channel.
+const FRESH_COPY_TEXT = 'To join now, get a fresh copy of the project. This copy stays as it is.';
+export const JOIN_TEXT = Object.freeze({
+  title: 'Joining',
+  updateStep: 'Getting the latest version of the project',
+  updated: 'Your copy of the project was brought up to date.',
+  localChanges: `Your copy of the project has changes that are not online yet, so it was not brought up to date and nothing in it was changed. ${FRESH_COPY_TEXT}`,
+  otherVersion: `Your copy of the project is set to a different version than the one your team shares, so it was not brought up to date and nothing in it was changed. ${FRESH_COPY_TEXT}`,
+  notShared: 'Your team\'s setup is not online yet, so you cannot join from this copy. Ask the person who invited you to choose Share in the Team section of their NEAR AI sidebar, then paste the invite again.',
+  offline: 'Your copy of the project could not be brought up to date, because the online home of the project could not be reached. Check your internet connection, then choose Try again. Nothing was changed.',
+  cloneNeeded: 'This invite is for a project that is not open here. Choose Get the project to download it, open it, then choose Join a team in the NEAR AI sidebar and paste the invite again.',
+  freshCopy: 'Get a fresh copy',
+  tryAgain: 'Try again'
+} as const);
 const SIGN_IN_ACTION = 'Sign in';
 const WITHOUT_NEAR_ACTION = 'Invite without signing in';
 const REPLACE_LINK_ACTION = 'Replace link';
