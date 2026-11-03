@@ -58,51 +58,40 @@ async function prepareInviteProjects(): Promise<InviteProjects> {
   return { remote, lead, copy, handoff };
 }
 
-const SCENARIOS = ['project', 'plain', 'team', 'team-lead', 'team-join', 'team-confirm'] as const;
-type Scenario = (typeof SCENARIOS)[number];
-
-// Launches a real VS Code with the extension under development: in a project set up with the extension, in an unrelated folder, in a git project where
-// Team Mode gets enabled, and then three launches of one invite: the lead turns Team Mode on and invites (user data L), the invitee joins from a copy that
-// is behind (user data J), and the lead confirms them (user data L again, so the lead's device key in SecretStorage is still there). The three invite
-// launches use the basic password store, so SecretStorage persists between launches without an OS keyring. Run under `xvfb-run` on Linux
-// (`npm run test:e2e`), or with DISPLAY set to a running display.
+// Launches a real VS Code with the extension under development: in a project set up with the extension, in an unrelated folder and in a git project where
+// Team Mode gets enabled, one after another. Then one invite in two windows open at the same time: the lead's window (team-lead, then team-confirm)
+// turns Team Mode on, shares, invites, and once the invitee has joined confirms them; the invitee's window (team-join) joins from a copy that is behind.
+// The lead's steps stay in one window because VS Code keeps all storage, SecretStorage included, in memory while extension tests run, so the lead's
+// device key cannot outlive the window and is never written anywhere else (T-61-94). The basic password store keeps VS Code from looking for an OS
+// keyring (no keyring prompt on a desktop display). Run under `xvfb-run` on Linux (`npm run test:e2e`), or with DISPLAY set to a running display.
 async function main(): Promise<void> {
   const extensionDevelopmentPath = path.resolve(__dirname, '../../..');
   const extensionTestsPath = path.resolve(__dirname, 'suite.js');
   const version = process.env.VSCODE_TEST_VERSION ?? 'stable';
+  const launch = (scenario: string, workspace: string, userData: string, extra: { args?: string[]; env?: Record<string, string> } = {}): Promise<number> => runTests({
+    version,
+    extensionDevelopmentPath,
+    extensionTestsPath,
+    launchArgs: [workspace, '--disable-extensions', '--disable-workspace-trust', `--user-data-dir=${userData}`, '--skip-welcome', '--skip-release-notes', ...(extra.args ?? [])],
+    extensionTestsEnv: { NEAR_AI_E2E: '1', NEAR_AI_E2E_SCENARIO: scenario, NEAR_AI_E2E_WORKSPACE: workspace, ...(extra.env ?? {}) }
+  });
+  for (const scenario of ['project', 'plain', 'team'] as const) {
+    const workspace = await mkdtemp(path.join(tmpdir(), `near-ai-e2e-${scenario}-`));
+    if (scenario === 'project') await mkdir(path.join(workspace, '.planning', '.near-ai'), { recursive: true });
+    if (scenario === 'team') await prepareTeamProject(workspace, extensionDevelopmentPath);
+    await launch(scenario, workspace, await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-')));
+  }
   const invite = await prepareInviteProjects();
   try {
-    const leadUserData = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-lead-'));
-    const joinUserData = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-join-'));
-    for (const scenario of SCENARIOS as readonly Scenario[]) {
-      const inviteLaunch = scenario === 'team-lead' || scenario === 'team-join' || scenario === 'team-confirm';
-      let workspace: string;
-      let userData: string;
-      if (inviteLaunch) {
-        workspace = scenario === 'team-join' ? invite.copy : invite.lead;
-        userData = scenario === 'team-join' ? joinUserData : leadUserData;
-      } else {
-        workspace = await mkdtemp(path.join(tmpdir(), `near-ai-e2e-${scenario}-`));
-        if (scenario === 'project') await mkdir(path.join(workspace, '.planning', '.near-ai'), { recursive: true });
-        if (scenario === 'team') await prepareTeamProject(workspace, extensionDevelopmentPath);
-        userData = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-'));
-      }
-      await runTests({
-        version,
-        extensionDevelopmentPath,
-        extensionTestsPath,
-        launchArgs: [
-          workspace, '--disable-extensions', '--disable-workspace-trust', `--user-data-dir=${userData}`, '--skip-welcome', '--skip-release-notes',
-          ...(inviteLaunch ? ['--password-store=basic'] : [])
-        ],
-        extensionTestsEnv: {
-          NEAR_AI_E2E: '1', NEAR_AI_E2E_SCENARIO: scenario, NEAR_AI_E2E_WORKSPACE: workspace,
-          ...(inviteLaunch ? { NEAR_AI_E2E_HANDOFF: invite.handoff, NEAR_AI_E2E_REMOTE: invite.remote } : {})
-        }
-      });
-    }
+    const extra = { args: ['--password-store=basic'], env: { NEAR_AI_E2E_HANDOFF: invite.handoff, NEAR_AI_E2E_REMOTE: invite.remote } };
+    const windows = await Promise.allSettled([
+      launch('team-lead,team-confirm', invite.lead, await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-lead-')), extra),
+      launch('team-join', invite.copy, await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-join-')), extra)
+    ]);
+    const failed = windows.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed !== undefined) throw failed.reason;
   } finally {
-    // The invite text is a test secret: it is not left on disk, whatever happened above.
+    // The invite text is a test secret: it is not left on disk, whatever happened above (T-61-93).
     await rm(invite.handoff, { recursive: true, force: true });
     if (existsSync(invite.handoff)) throw new Error(`The handoff folder could not be removed: ${invite.handoff}`);
     console.log('The handoff folder with the invite text is removed.');
