@@ -17,7 +17,7 @@ code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; word-br
 .table-wrap:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { padding: 5px 10px; text-align: left; vertical-align: top; white-space: nowrap; border-bottom: 1px solid var(--border); }
-th { font-weight: 600; font-size: 0.85em; color: var(--muted); background: var(--vscode-editorWidget-background); }
+th { white-space: normal; font-weight: 600; font-size: 0.85em; color: var(--muted); background: var(--vscode-editorWidget-background); }
 tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; }
 .strong { font-weight: 600; }
@@ -70,8 +70,17 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 button.link { background: none; color: var(--vscode-textLink-foreground); padding: 2px 0; }
 button.link:hover { text-decoration: underline; background: none; }
 button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+/* The leaderboard has 14 columns, so its least important ones (scores by kind, tokens per second,
+   last tested) go below 1300px rather than the shared 900px; their values show under the model. */
+@media (max-width: 1300px) {
+  .col-tertiary { display: none !important; }
+  .when-medium { display: block; }
+}
 /* The role picker is as wide as its longest role name; on a smaller panel it takes the cell's
    width instead, with Apply under it, so it never widens the table. */
+@media (max-width: 1300px) {
+  .model-cell { min-width: 10em; }
+}
 @media (max-width: 900px) {
   .role { flex-direction: column; align-items: stretch; min-width: 8em; }
   .role select { width: 100%; }

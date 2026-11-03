@@ -50,6 +50,7 @@ test('each page has narrow-width rules', () => {
   assert.match(css('activity/activity.css'), /\.controls \{ display: flex; flex-wrap: wrap;/);
   assert.match(css('activity/activity.css'), /\.segmented \{ display: inline-flex; flex-wrap: wrap;/);
   assert.match(css('compare/compare.css'), /fieldset \{ min-width: 0;/);
+  assert.match(css('compare/compare.css'), /@media \(max-width: 1300px\) \{\s*\.col-tertiary \{ display: none !important; \}\s*\.when-medium \{ display: block; \}/, 'the 14-column leaderboard drops its least important columns below 1300px');
   assert.match(css('compare/compare.css'), /\.role select \{ min-width: 0; max-width: 100%; \}/);
   assert.match(css('compare/compare.css'), /@media \(max-width: 900px\) \{\s*\.role \{ flex-direction: column;[^}]*\}\s*\.role select \{ width: 100%; \}/, 'the role picker takes the cell width on smaller panels');
   assert.match(css('mcp/mcp.css'), /@media \(max-width: 420px\)/);
