@@ -140,7 +140,7 @@ completed: 2026-11-03
 | Check | Command (under the mandated memory wrapper) | Result |
 |-------|---------------------------------------------|--------|
 | Lint + full suite | `npm run check` (MemoryMax=6G, timeout 1800) | exit 0. 1765 tests: 1755 pass, 0 fail, 10 skipped (missing external tools or live keys) |
-| e2e | `npm run compile && xvfb-run -a node dist/test/e2e/run.js` (MemoryMax=6G) | exit 0. All 30 tests pass: project 8, plain 2, team 7, team-lead 5, team-join 5, team-confirm 3. The handoff folder is removed. Re-run in Task 3 for stability (green twice in a row after Task 2) |
+| e2e | `npm run compile && xvfb-run -a node dist/test/e2e/run.js` (MemoryMax=6G) | exit 0. All 30 tests pass: project 8, plain 2, team 7, team-lead 5, team-join 5, team-confirm 3. The handoff folder is removed. Re-run in Task 3 for stability (green on the Task 2 run and on this rerun) |
 | Release content | `npm run verify:release` | exit 0. 268 entries, 191 runtime JS files, 51 required assets |
 | Invariants | `! grep -rlE "from .vscode.\|require\(.vscode.\)" src/team src/domain/team && git diff --quiet a7fcba5 -- <types, validate, materialize, canonical, permissions, invite, eventLog, inviteBundle, inviteCode, gitTransport, identity, keySeal>` | exit 0 |
 | Dependencies | `git diff a7fcba5 -- package.json` (only command titles and the Share command) + teamManifest.test.ts inside npm test | no new runtime or dev dependency |
@@ -174,7 +174,7 @@ See key-decisions: the same-window lead, Share before Invite, and SUMMARY-derive
 - **Issue:** A separate team-confirm launch with user data L found no device key. The user data folder had no `state.vscdb` at all. VS Code 1.144.1 `mainImpl.js` has `getStorageOptions(){return{useInMemoryStorage:!!this.environmentService.extensionTestsLocationURI}}`, so every storage, SecretStorage included, lives in memory while extension tests run. `--password-store=basic` cannot change that. This is not a keyring problem on this host.
 - **Fix:** The plan said to stop rather than change the flow and never export a key. The product flow and production code are unchanged and no key is exported. Only the test launch plan changed: the lead's window stays open and runs team-confirm after team-lead, while the invitee's window runs team-join at the same time (`Promise.allSettled` over two `runTests`). The invite is handed over through `bundle.txt`, written whole then renamed. Cross-window waits are bounded at 180 s. `--password-store=basic` stays, documented as keeping VS Code from looking for an OS keyring, not as persistence.
 - **Files modified:** src/test/e2e/run.ts, src/test/e2e/suite.ts
-- **Verification:** e2e green on three consecutive runs of this design (Task 2, and twice in Task 3 counting the gate rerun)
+- **Verification:** e2e green on both runs of this design (the Task 2 run and the Task 3 gate rerun)
 - **Committed in:** ba3b708
 
 **3. [Rule 1 - Bug, deferred from 61-15] The self-import tests assumed Phase 61 had exactly 14 finished plans**
@@ -210,7 +210,7 @@ None.
 Repeat 61-UAT tests 1 to 6 in code-server on the scratch project (`ALuhning/team-check-scratch`, clones alice and bob) with the VSIX built from this branch, using only the sidebar Team section:
 1. In alice, with NEAR AI not connected, choose Turn on Team Mode and connect NEAR AI from the offer. Team Mode turns on.
 2. With alice's origin pointed at a local folder, Turn on Team Mode warns up front in plain words. Restore origin afterwards.
-3. Invite someone from the sidebar. After turn-on the section shows Share first: one confirmation shares the setup, then Invite someone shows the invite with Copy invite and how to send it. Choosing Invite someone through the Enable message's "Share with my team" also works.
+3. Invite someone from the sidebar. After turn-on the section shows Share first: one confirmation shares the setup, then Invite someone shows the invite with Copy invite and how to send it. The "Share with my team" button on the Enable message is another way to share.
 4. In bob's existing clone (not pulled), choose Join a team and paste. The copy updates itself and bob joins.
 5. Every step was a sidebar button, with no Command Palette.
 6. No text says "NEAR organization", and linking is explained in one line with Link now or Not now.
@@ -229,3 +229,8 @@ None. No external service configuration required.
 ---
 *Phase: 61-invitations-joining-removal-near-org-and-key-integration*
 *Completed: 2026-11-03*
+
+## Self-Check: PASSED
+
+- All 6 key files exist; task commits 8381250, ba3b708, e064ed3, 2fb0625 and the SUMMARY commit 0b7b9a9 are on this branch.
+- Acceptance criteria re-run: "team-lead", "team-confirm" and "password-store=basic" grep matches in run.ts/suite.ts; insteadOf in run.ts; the validation map names the fix-pass plans (29 matches, baseline 0); e2e, check, verify:release and invariant commands exit 0.
