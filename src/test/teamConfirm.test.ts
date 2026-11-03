@@ -283,7 +283,7 @@ test('CR-01: a key is never created in, or installed from, a NEAR link that diff
     assert.equal(result.ok, true, result.ok ? '' : result.message);
     if (!result.ok) return;
     assert.equal(result.key, 'queued');
-    assert.match(result.message, /different NEAR organization or workspace/);
+    assert.match(result.message, /different organization or workspace/);
     assert.equal(world.fake.requests.slice(before).some((request) => request.path.includes('/api-keys')), false, 'no key was made anywhere');
 
     // With the pinned link the key is delivered; the member's computer pinned the real link too, and refuses a forged one when installing.
@@ -293,7 +293,7 @@ test('CR-01: a key is never created in, or installed from, a NEAR link that diff
     assert.deepEqual(await checkNearPin(teamStorageDir(world.first.globalStorageDir, world.teamId), world.teamFile), NEAR_LINK);
     const refused = await installDeliveredKey({ ...installFor(world, world.first), teamFile: forged });
     assert.equal(refused.status, 'failed');
-    if (refused.status === 'failed') assert.match(refused.message, /different NEAR organization or workspace/);
+    if (refused.status === 'failed') assert.match(refused.message, /different organization or workspace/);
     assert.equal((await activeKeyOf(world, world.first)).key, undefined, 'nothing was installed');
   });
 });

@@ -305,7 +305,7 @@ test('CR-01: a team.json whose NEAR workspace differs from the one this computer
     assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 5 * GIGA);
     assert.equal(w.fake.key(keyId)?.revoked, false);
     assert.deepEqual(stepsOf(result.checklist), ['zero-limit:manual', 'revoke-key:pending', 'repo-access:manual']);
-    assert.match(result.checklist[0]?.lastError ?? '', /different NEAR organization or workspace/);
+    assert.match(result.checklist[0]?.lastError ?? '', /different organization or workspace/);
 
     // A retry with the forged file is refused the same way; with the pinned file it caps and revokes the real key.
     const zero = result.checklist[0] as CleanupItem;

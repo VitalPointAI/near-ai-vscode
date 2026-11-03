@@ -207,7 +207,7 @@ test('prepareJoin takes the NEAR link only from team.json, refuses a bundle link
     await writeTeamFile(joiner.projectRoot, withoutNear);
     const fallback = await prepareJoin({ projectRoot: joiner.projectRoot, bundleText: bundle });
     assert.equal(fallback.kind, 'refused');
-    if (fallback.kind === 'refused') assert.match(fallback.message, /share the NEAR link with the team/);
+    if (fallback.kind === 'refused') assert.match(fallback.message, /share the organization link with the team/);
     const direct = await joinTeam({
       projectRoot: joiner.projectRoot, globalStorageDir: joiner.globalStorageDir, teamFile: withoutNear, bundle: parseInviteBundle(bundle), near: NEAR_LINK,
       secrets: joiner.secrets, displayName: 'Dana'
@@ -220,6 +220,7 @@ test('prepareJoin takes the NEAR link only from team.json, refuses a bundle link
     await writeTeamFile(joiner.projectRoot, { ...linked.teamFile, near: { organizationId: 'org-2', workspaceId: 'ws-9' } });
     const clash = await prepareJoin({ projectRoot: joiner.projectRoot, bundleText: bundle });
     assert.equal(clash.kind, 'refused');
+    if (clash.kind === 'refused') assert.match(clash.message, /names a different organization than this project does/);
 
     // A bundle for another coordination branch than the project's is refused as well.
     await writeTeamFile(joiner.projectRoot, linked.teamFile);

@@ -301,7 +301,7 @@ test('CR-01: the NEAR link pin is taken on first sight of a linked team.json and
     assert.deepEqual(await checkNearPin(dir, { ...file, name: 'Renamed' }), file.near);
 
     const otherWorkspace = { ...file, near: { organizationId: 'org_123', workspaceId: 'ws-decoy' } };
-    await assert.rejects(() => checkNearPin(dir, otherWorkspace), (error: unknown) => error instanceof NearPinError && error instanceof TrustPinError && /different NEAR organization or workspace/.test(error.message));
+    await assert.rejects(() => checkNearPin(dir, otherWorkspace), (error: unknown) => error instanceof NearPinError && error instanceof TrustPinError && /different organization or workspace/.test(error.message) && error.message.includes('"NEAR AI: Link Your Organization"'));
     await assert.rejects(() => checkNearPin(dir, { ...file, near: { organizationId: 'org-other', workspaceId: 'ws:456' } }), NearPinError);
     await assert.rejects(() => checkNearPin(dir, unlinked), (error: unknown) => error instanceof NearPinError && /no longer names/.test(error.message), 'dropping the link is refused too');
     await assert.rejects(() => checkNearPin(dir, { ...file, teamId: newTeamId() }), NearPinError);
