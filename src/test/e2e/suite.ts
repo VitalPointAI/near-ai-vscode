@@ -170,12 +170,17 @@ function projectTests(): Array<[string, () => Promise<void>]> {
         await vscode.commands.executeCommand(command);
         await waitForProbe(name);
         samples.set(name, sampleData(name, seen));
-        const room = await editorRoom(name);
-        assert.ok(room >= Math.max(...EDITOR_WIDTHS), `the editor area holds a ${Math.max(...EDITOR_WIDTHS)}px page beside a second group (it holds ${room}px)`);
+        await editorAreaOnly();
+        const { room, editor } = await editorRoom(name);
+        console.log(`  ${name}: editor area ${editor}px, a page can be up to ${room}px beside a second group`);
+        assert.ok(room >= Math.max(...EDITOR_WIDTHS), `the editor area holds a ${Math.max(...EDITOR_WIDTHS)}px page beside a second group (editor area ${editor}px, page at most ${room}px)`);
         for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) record(name, target, await sizeEditor(name, target));
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
         await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
       }
+      // Back to the usual layout for the tests after this one.
+      await vscode.commands.executeCommand('workbench.view.explorer');
+      await vscode.commands.executeCommand('nearAiChatView.focus');
       assert.deepEqual(problems, []);
     }],
     ['a file write asks for approval, applies on approval, and Revert removes it', async () => {
@@ -252,11 +257,22 @@ async function waitForProbe(name: string): Promise<void> {
   }
 }
 
-/** The widest a page can get in the first of two editor groups (the second keeps room for its minimum). */
-async function editorRoom(name: string): Promise<number> {
+/**
+ * The widest a page can get in the first of two editor groups: the first group is asked for nearly
+ * all of the editor area, so the second shrinks to its real minimum. Also returns the editor area's
+ * width, so a failure says how big the window was.
+ */
+async function editorRoom(name: string): Promise<{ room: number; editor: number }> {
   await splitEditor(0.5);
-  const report = await settled(name);
-  return Math.floor(report.width / 0.5) - 260;
+  const half = await settled(name);
+  await splitEditor(0.99);
+  const most = await settled(name);
+  return { room: most.width, editor: half.width * 2 };
+}
+
+/** Gives the editor area the whole window (no sidebars or panel) for the editor page checks. */
+async function editorAreaOnly(): Promise<void> {
+  for (const command of ['workbench.action.closeSidebar', 'workbench.action.closeAuxiliaryBar', 'workbench.action.closePanel']) await vscode.commands.executeCommand(command);
 }
 
 /** Splits the editor area in two and sizes the first group (holding the page) to the target width. */
@@ -266,7 +282,7 @@ async function sizeEditor(name: string, target: number): Promise<LayoutReport> {
   let report = await settled(name);
   for (let attempt = 0; attempt < 6 && Math.abs(report.width - target) > 4; attempt += 1) {
     const total = report.width / fraction;
-    const next = Math.min(0.95, Math.max(0.02, target / total));
+    const next = Math.min(0.99, Math.max(0.02, target / total));
     if (Math.abs(next - fraction) < 0.001) break;
     fraction = next;
     await splitEditor(fraction);
