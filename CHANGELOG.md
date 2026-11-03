@@ -25,6 +25,8 @@ test, and runs a scan against it.
   only inside a container or a temporary folder, under a rate limit and a time
   budget, with a stop button that works within one step. Cleanup is verified
   both ways, and after a successful exploit only read-only commands may run.
+- **Stopped runs keep what they found.** Stopping a scan still records every finding it had
+  already reached, so a stopped run reports honestly instead of losing its evidence.
 - **Honest results.** Every attempt ends in one of four verdicts — not
   vulnerable, exploit failed, could not determine, or verified access — and a
   failure always says why. A check that could not run is always named, so a
