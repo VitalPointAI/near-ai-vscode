@@ -65,7 +65,8 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
   registerSpendTracking(context, auth);
-  const team = registerTeamMode(context);
+  // Turning on Team Mode where NEAR AI is not connected yet runs the same key setup as the chat's Set up button, then carries on (G-61-1).
+  const team = registerTeamMode(context, { connectNearAi: () => configureApiKey(auth, sidebar) });
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
   registerModelComparison(context, auth);

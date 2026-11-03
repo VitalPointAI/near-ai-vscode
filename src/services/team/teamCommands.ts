@@ -6,6 +6,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { JOIN_COMMAND, registerMemberCommands } from './memberCommands';
+import { teamPrompts } from './teamPrompts';
 import type { FetchLike, SessionTokens } from '../reportingSignIn';
 import type { TeamSession } from './teamSession';
 
@@ -35,6 +36,11 @@ const ENABLE_PLAIN_TEXT: Readonly<Record<string, string>> = Object.freeze({
 });
 const SETTINGS_TEXT = 'The sharing settings of this project could not be used, so nothing was changed. Choose Show details for more.';
 export const JOIN_ACTION = 'Join Team';
+// G-61-1: Enable in a project where NEAR AI is not connected yet connects it right there (the chat's Set up key flow) and then carries on.
+export const CONNECT_NEAR_AI_ACTION = 'Connect NEAR AI';
+export const NOT_CONNECTED_TEXT = 'NEAR AI is not connected in this project yet. Connect it to turn on Team Mode.';
+const NOT_CONNECTED_DETAIL = 'Connecting asks where your AI models run and for your NEAR AI key, the same as Set up in the chat. Turning on Team Mode carries on right after.';
+export const STILL_NOT_CONNECTED_TEXT = 'NEAR AI was not connected, so Team Mode was not turned on and nothing was changed.';
 const OUTPUT_CHANNEL_NAME = 'NEAR AI Team';
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 const ENABLE_PROGRESS_TITLE = 'Enabling Team Mode';
@@ -50,8 +56,14 @@ export type TeamModeState = 'solo' | 'team' | 'error';
 // What registerTeamMode keeps of the board, which is loaded only once a session runs (a solo project never loads it).
 interface BoardHandle { openPanel(): void; controller: { sessionChanged(): void } }
 export interface TeamModeHandle { ready: Promise<TeamModeState>; session(): TeamSession | undefined }
-// The extension passes nothing. Tests point the NEAR calls at a fake server and replace the browser sign-in.
-export interface TeamModeOptions { nearBaseUrl?: string; fetch?: FetchLike; signIn?: (teamId: string) => Promise<SessionTokens | undefined> }
+// The extension passes connectNearAi, the same key setup the chat's Set up button runs. Tests point the NEAR calls at a fake server and replace the
+// browser sign-in and the key setup.
+export interface TeamModeOptions {
+  nearBaseUrl?: string;
+  fetch?: FetchLike;
+  signIn?: (teamId: string) => Promise<SessionTokens | undefined>;
+  connectNearAi?: () => Promise<void>;
+}
 
 type Level = 'info' | 'warn' | 'error';
 
@@ -161,9 +173,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
 
   // Shows a message without waiting for the user to dismiss it. A failure to show it is written to the channel.
   function announce(level: Level, message: string): void {
-    const shown = level === 'info' ? vscode.window.showInformationMessage(message)
-      : level === 'warn' ? vscode.window.showWarningMessage(message)
-        : vscode.window.showErrorMessage(message);
+    const shown = teamPrompts.message(level, message, undefined);
     Promise.resolve(shown).catch(async (error: unknown) => {
       output.appendLine(`A Team Mode message could not be shown: ${await describe(error)}`);
     });
@@ -178,9 +188,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   // A message with buttons: the choice, or undefined when it is dismissed or cannot be shown (the failure goes to the channel).
   async function choose(level: Level, message: string, ...actions: string[]): Promise<string | undefined> {
     try {
-      return await (level === 'info' ? vscode.window.showInformationMessage(message, ...actions)
-        : level === 'warn' ? vscode.window.showWarningMessage(message, ...actions)
-          : vscode.window.showErrorMessage(message, ...actions));
+      return await teamPrompts.message(level, message, undefined, ...actions);
     } catch (error) {
       output.appendLine(`A Team Mode message could not be shown: ${await describe(error)}`);
       return undefined;
@@ -287,8 +295,21 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   }
 
   async function ask(options: vscode.InputBoxOptions): Promise<string | undefined> {
-    const answer = await vscode.window.showInputBox({ ignoreFocusOut: true, ...options });
+    const answer = await teamPrompts.input({ ignoreFocusOut: true, ...options });
     return answer === undefined ? undefined : answer.trim();
+  }
+
+  // One modal with Connect NEAR AI; true once the person chose it and the key setup ran (whether or not it finished).
+  async function connectNearAi(): Promise<boolean> {
+    output.appendLine('NEAR AI is not set up in this project: .planning/.near-ai is missing. Offering the key setup before Team Mode is turned on.');
+    const choice = await teamPrompts.message('warn', NOT_CONNECTED_TEXT, { modal: true, detail: NOT_CONNECTED_DETAIL }, CONNECT_NEAR_AI_ACTION);
+    if (choice !== CONNECT_NEAR_AI_ACTION) return false;
+    try {
+      await options.connectNearAi?.();
+    } catch (error) {
+      output.appendLine(`The NEAR AI key setup did not finish: ${await describe(error)}`);
+    }
+    return true;
   }
 
   async function enable(): Promise<void> {
@@ -298,7 +319,16 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       return;
     }
     const enableModule = await import('../../team/enable');
-    const checked = await enableModule.checkEnablePreconditions(projectRoot);
+    let checked = await enableModule.checkEnablePreconditions(projectRoot);
+    if (!checked.ok && checked.code === 'not-initialised') {
+      // G-61-1: connected right here instead of naming another command; Enable then checks again once.
+      if (!(await connectNearAi())) return;
+      checked = await enableModule.checkEnablePreconditions(projectRoot);
+      if (!checked.ok && checked.code === 'not-initialised') {
+        report('warn', STILL_NOT_CONNECTED_TEXT);
+        return;
+      }
+    }
     if (!checked.ok) {
       await enableStopped('error', checked.code, checked.message);
       return;
@@ -310,7 +340,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       if (existing !== undefined) {
         const message = `This project already has a team: ${existing.name}. If your lead sent you an invite, join with it.`;
         output.appendLine(message);
-        const choice = await vscode.window.showInformationMessage(message, JOIN_ACTION);
+        const choice = await choose('info', message, JOIN_ACTION);
         if (choice === JOIN_ACTION) await vscode.commands.executeCommand(JOIN_COMMAND);
         return;
       }
@@ -352,7 +382,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     output.appendLine(message);
     output.appendLine(result.branch === undefined ? 'team.json is committed.' : `team.json is committed on ${result.branch}. Sharing pushes ${result.branch} to ${result.remote}.`);
     const actions = result.branch === undefined ? [VERIFY_ACTION] : [PUSH_ACTION, VERIFY_ACTION];
-    const choice = await vscode.window.showInformationMessage(message, ...actions);
+    const choice = await choose('info', message, ...actions);
     if (choice === PUSH_ACTION && result.branch !== undefined) {
       await share(projectRoot, result.remote, result.branch);
     } else if (choice === VERIFY_ACTION) {
@@ -410,7 +440,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     const milestones = await listImportableMilestones({ projectRoot, remote: running.teamFile.coordination.remote, branch: running.state().team.policy.integrationBranch });
     if (milestones.length < 2) return undefined;
     const items = milestones.map((milestone) => ({ label: milestone.title, ...(milestone.current ? { description: RECOMMENDED } : {}), key: milestone.key, current: milestone.current }));
-    const picked = await vscode.window.showQuickPick(items, { title: IMPORT_PICK_TITLE, placeHolder: IMPORT_PICK_PLACEHOLDER, ignoreFocusOut: true });
+    const picked = await teamPrompts.pick(items, { title: IMPORT_PICK_TITLE, placeHolder: IMPORT_PICK_PLACEHOLDER, ignoreFocusOut: true });
     if (picked === undefined) return DISMISSED;
     return picked.current ? undefined : picked.key;
   }

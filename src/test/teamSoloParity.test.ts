@@ -3,7 +3,7 @@
 // team starts its session lazily. The vscode stub is installed for the whole file. Team modules are loaded lazily inside the team test, so
 // require.cache can prove the solo tests loaded none of them.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -21,11 +21,21 @@ const COMMANDS_FILE = path.join(DIST_ROOT, 'services', 'team', 'teamCommands.js'
 // The membership commands are registered at activation too. Like teamCommands.js this module imports only vscode and Node built-ins; its handlers
 // load the team core with dynamic imports, which the solo tests below prove never run.
 const MEMBER_COMMANDS_FILE = path.join(DIST_ROOT, 'services', 'team', 'memberCommands.js');
+// The one prompts module every Team Mode prompt goes through. It is the only extra module a solo activation loads, because it imports only vscode
+// (no team core, no timer, no file access); its own test proves the script is read only under NEAR_AI_E2E=1.
+const PROMPTS_FILE = path.join(DIST_ROOT, 'services', 'team', 'teamPrompts.js');
+const ALLOWED_AT_ACTIVATION = [COMMANDS_FILE, MEMBER_COMMANDS_FILE, PROMPTS_FILE];
 
-// Every compiled team module in the module cache except the two command modules themselves.
+// Every compiled team module in the module cache except the two command modules and the prompts module.
 function loadedTeamModules(): string[] {
-  return Object.keys(require.cache).filter((file) => file !== COMMANDS_FILE && file !== MEMBER_COMMANDS_FILE && TEAM_DIRS.some((dir) => file.startsWith(dir)));
+  return Object.keys(require.cache).filter((file) => !ALLOWED_AT_ACTIVATION.includes(file) && TEAM_DIRS.some((dir) => file.startsWith(dir)));
 }
+
+test('the prompts module a solo activation loads imports only vscode', () => {
+  const source = readFileSync(PROMPTS_FILE, 'utf8');
+  const required = [...source.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1]);
+  assert.deepEqual(required, ['vscode']);
+});
 
 type TimerFn = (...args: unknown[]) => unknown;
 interface TimerSpy { setTimeoutCalls: number[]; setIntervalCalls: number; cleared: unknown[]; created: Array<{ ms: number; handle: unknown }>; restore(): void }
