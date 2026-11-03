@@ -4,7 +4,11 @@ import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
-import { readAgentLimits, readSettings, shouldAutoInstallGsd } from './services/settings';
+import { readAgentLimits, readModelTiers, readSettings, shouldAutoInstallGsd } from './services/settings';
+import { activeProvider } from './services/providerCache';
+import { modelOptions } from './services/chatBridge';
+import { chatHandoff, runApprovedCommand } from './services/cyberHandoff';
+import { panelCyberRunStarter } from './services/cyberAssembly';
 import { openOnboarding } from './services/onboarding';
 import { registerAgentActivity } from './services/activityView';
 import { registerUsageExport } from './services/usageExport';
@@ -14,6 +18,8 @@ import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerMcpConnections } from './services/mcpView';
 import { openTools } from './services/toolsPage';
+import { openCyberPanel } from './services/cyberPanel';
+import { cyberPanelService } from './services/cyberService';
 import { registerModelComparison } from './services/modelComparisonPanel';
 import { openTeamStudio } from './services/teamStudioPanel';
 import { sharedTranscriptKey, TranscriptStore } from './services/transcripts';
@@ -23,7 +29,7 @@ import { deriveProfileId } from './domain/auth';
 import { isSecureEndpoint } from './domain/config';
 import { registerChatParticipant } from './services/chatParticipant';
 import { registerWorkspaceCommands } from './services/workspaceCommands';
-import { initEmergencyStop, setEmergencyStop } from './services/emergencyStop';
+import { initEmergencyStop, isEmergencyStopped, setEmergencyStop } from './services/emergencyStop';
 import { clearProviderCache } from './services/providerCache';
 import { setNearAiDiagnostics } from './services/nearAiClient';
 import { closeInterruptedRuns } from './services/activityStore';
@@ -83,6 +89,31 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
     vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
     vscode.commands.registerCommand('nearAi.openTools', () => openTools(context, auth, sidebar)),
+    vscode.commands.registerCommand('nearAi.openCyber', () => openCyberPanel(context, cyberPanelService(context, {
+      // The provider profile is keyed by the workspace root, not by globalStorage: passing the store
+      // path here found no profile and reported "no model is reachable" while chat worked fine.
+      startRun: panelCyberRunStarter(context, (root) => activeProvider(root, auth).then((active) => active?.provider.client), {
+        root: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+        model: readModelTiers().standard,
+        stopped: () => isEmergencyStopped(),
+        // Every ask goes to the same approval card the chat uses, so a shell or exploit step is
+        // never silently allowed.
+        requestApproval: async (step) => {
+          const label = `${step.action}: ${step.tool} on ${step.target}`;
+          const answer = await vscode.window.showInformationMessage(label, { modal: true, detail: step.expectedResult }, 'Run it', 'Skip');
+          return answer === 'Run it' ? { decision: 'allow' as const } : { decision: 'deny' as const, reason: 'The user skipped this step.' };
+        }
+      }),
+      handToChat: (input) => chatHandoff((message) => sidebar.request(message as never), { focusChat: async () => { await vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`); } })(input),
+      runApprovedCommand: (command) => runApprovedCommand(command),
+      defaultModel: () => readModelTiers().standard,
+      availableModels: async () => {
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const active = root ? await activeProvider(root, auth).catch(() => undefined) : undefined;
+        return active ? modelOptions(active.models, readSettings().defaultModel).map((option) => option.id) : [];
+      },
+      stopped: () => readSettings().actionPolicy.emergencyStop
+    }))),
     vscode.commands.registerCommand('nearAi.showHistory', () => showHistory(context, sidebar)),
     vscode.commands.registerCommand('nearAi.gsdCommand', async () => {
       const selected = await chooseGsdCommand();

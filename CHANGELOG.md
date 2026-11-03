@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+NEAR AI can now test your own systems for security problems. A new
+**NEAR AI: Cybersecurity** panel takes a target, records who authorized the
+test, and runs a scan against it.
+
+- **Pick what to test.** A web address, a folder in your project, a range of
+  addresses, a running container, or a git folder. The panel shows exactly what
+  it will touch — hosts, ports, folders and any exclusions — before anything is
+  sent to a model.
+- **Accept a disclaimer once per engagement.** Twelve regions, each with its own
+  statement of the law that applies, detected from your locale and changeable.
+  The record names who accepted it, on which machine, and which version of the
+  text, so a later change asks you to accept again.
+- **Defensive scans need no extra tools.** Nine built-in checks cover response
+  headers, TLS certificates, DNS, open ports, robots.txt, committed secrets,
+  infrastructure-as-code, dependency vulnerabilities and fingerprints. Ten
+  optional tools (nmap, nuclei, trivy and others) add more for a scan run from
+  the chat; the panel lists them with how strongly it recommends each one, what
+  installing it changes on your machine, and a one-click install that asks
+  first and reports whether it worked.
+- **Offensive scans run in a sandbox.** A deep scan can attempt exploits, but
+  only inside a container or a temporary folder, under a rate limit and a time
+  budget, with a stop button that works within one step. Cleanup is verified
+  both ways, and after a successful exploit only read-only commands may run.
+- **Honest results.** Every attempt ends in one of four verdicts — not
+  vulnerable, exploit failed, could not determine, or verified access — and a
+  failure always says why. A check that could not run is always named, so a
+  scan never reads as clean when it was merely incomplete.
+- **Evidence you can check.** Each step is an entry in an append-only chain
+  that proves the report was not edited afterwards, with the raw evidence stored
+  beside it and an offline replay.
+- **Reports you can hand over.** Markdown, JSON and SARIF exports, each carrying
+  the authorization record.
+
+Long scans can run in the panel or in the chat; a deep run keeps going if you
+close the panel and can be steered by typing.
+
 ## 0.4.13
 
 Replies in the chat are easier to read. Tables, quotes and crossed-out text

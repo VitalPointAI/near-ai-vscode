@@ -20,6 +20,7 @@ Last reviewed: 2026-10-26, against the code on `main`.
 | Your environment variables | Not passed to the agent's commands when they look like credentials (by name or value) | So `env` or a careless script cannot send them to the model. Pass specific ones with `nearAi.agent.shellEnvAllow`. Local MCP servers get only a minimal environment plus what you configure; the Open-GSD installer gets the environment without credential-like variables. |
 | Web searches | Only after **NEAR AI: Set Up Web Search**: your SearXNG instance, Brave Search, or Tavily | The query text; Brave and Tavily also receive your API key, which links the searches to your account. A SearXNG instance you run keeps queries on your infrastructure. |
 | Web pages the agent fetches | The page's site | A plain GET with the extension's user agent and no cookies, login, or referrer. Asks first under `approve-risky`. |
+| Cybersecurity scans (**NEAR AI: Cybersecurity**) | The model you picked: step results, and response headers, bodies, and TLS certificate details from the target you nominated | Only the target you resolved to a scope is contacted. What comes back is treated as untrusted: fenced as data, invisible characters stripped, injection attempts flagged, and secrets redacted before it is stored or exported. Engagement records and evidence stay in VS Code's extension storage, never in the project. |
 | MCP tool calls | Only servers you add and switch on for the project | The call's arguments, shown on the approval card; see MCP connections below. |
 | Dependency checks | OSV.dev (package names and versions) and endoflife.date (runtime versions), after you agree once per project | No code, file contents, or project names. See Checking your project's dependencies. |
 | Activity and cost records | `.planning/.near-ai/` in your project | Operational facts only (models, token counts, costs, outcomes); no prompts or replies. Add it to `.gitignore` if you do not want it committed. |
@@ -98,6 +99,32 @@ Search results leave out credential-looking files unless you search one
 directly. WebFetch follows redirects itself, requires https at every hop, and
 refuses hosts that resolve to loopback, private, link-local or metadata
 addresses.
+
+### Cybersecurity scans
+
+A scan is the one feature that deliberately reaches private addresses, because
+the target is usually your own machine or network. Its own rules different:
+
+- **Only the resolved scope is contacted.** A step naming a host, URL or folder
+  outside the scope the panel showed you is refused, and the refusal is recorded
+  in the run's ledger. A folder is compared as a resolved path, so `..` cannot
+  climb out of it.
+- **Loopback is allowed only when named literally.** Typing `127.0.0.1` or
+  `localhost` scans this machine; a *hostname* that resolves to loopback is
+  refused, so a target cannot point the harness at your own machine by accident.
+- **Intrusive steps need one grant.** Defensive scans run freely. Exploit and
+  post-exploitation steps need the engagement's intrusive grant, given once for
+  the run; after that each step is still scope-checked and denied rather than
+  asked again if it strays. A step that would be risky also asks through the
+  same approval card as chat, unless the grant covers it.
+- **Payloads run in a sandbox, never on the host.** A container (`--rm`,
+  `--network none`, target mounted read-only) or a temporary folder, chosen per
+  engagement. A disabled sandbox refuses the step rather than falling back.
+  Cleanup is verified against the runtime, and only read-only commands
+  (`cat`, `ls`, `whoami`, `hostname`, `id`, `uname`) may follow a successful
+  exploit.
+- **Installs ask first.** A one-click host-tool install shows the exact
+  command and waits for your confirmation before running a package manager.
 
 Sub-agents, model tiers and image generation only use models on the same route
 as the one you picked (local or cloud) that are at least as private. A run on a
