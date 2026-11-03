@@ -5,7 +5,14 @@
 
   const vscode = acquireVsCodeApi();
   const markdown = window.nearMarkdown;
-  const tables = window.nearTables;
+  // If the table helper is missing, replies still render; tables only lose their kept scroll and focus.
+  const tables = window.nearTables || {
+    capture: () => ({ wraps: [], scroll: [], focused: -1, inner: -1 }),
+    restore: () => [],
+    syncTabStop: () => undefined,
+    focusLeft: () => undefined,
+    watchSizes: () => ({ observe: () => undefined, release: () => undefined, reset: () => undefined })
+  };
   const $ = (id) => document.getElementById(id);
   const transcript = $('transcript');
   const welcome = $('welcome');

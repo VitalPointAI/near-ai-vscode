@@ -410,6 +410,9 @@ test('chat view renders streaming text as partial and the finished reply strictl
   const renders = [...script.matchAll(/renderMarkdown\(([^)]*)\);/g)].map((match) => match[1]);
   assert.deepEqual(renders, ['current.body, current.text, partial === true', "body, turn.text || ''"]);
   assert.match(script, /transcript\.addEventListener\('focusout', tables\.focusLeft\)/);
+  // Without the table helper the view falls back to stand-ins for every part of it.
+  const fallback = script.slice(script.indexOf('window.nearTables || {'), script.indexOf('\n  };\n', script.indexOf('window.nearTables || {')));
+  assert.deepEqual([...fallback.matchAll(/^ {4}(\w+):/gm)].map((match) => match[1]).sort(), Object.keys(tables).sort());
   assert.match(script, /tables\.capture\(target, document\.activeElement\)[\s\S]*target\.replaceChildren\(\)[\s\S]*tables\.restore\(target, saved\)/);
   assert.ok(panel.indexOf("asset('tables.js')") > 0 && panel.indexOf("asset('tables.js')") < panel.indexOf("asset('chat.js')"), 'tables.js loads before chat.js');
   const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.css'), 'utf8');
