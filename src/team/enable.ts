@@ -132,7 +132,8 @@ export async function enableDefaults(projectRoot: string, git: GitRunner = runGi
   return defaults;
 }
 
-async function networkEnv(projectRoot: string, git: GitRunner): Promise<Record<string, string>> {
+// The environment for a network git call: a non-interactive ssh unless the person set their own (core.sshCommand or GIT_SSH_COMMAND).
+export async function networkEnv(projectRoot: string, git: GitRunner = runGit): Promise<Record<string, string>> {
   const inherited = process.env.GIT_SSH_COMMAND;
   if (inherited !== undefined && inherited !== '') return {};
   const configured = await gitConfigValue(projectRoot, 'core.sshCommand', git);

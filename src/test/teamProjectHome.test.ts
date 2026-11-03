@@ -84,15 +84,29 @@ test('checkOnlineHome tells shareable, local-only, no-remote and not-shareable f
     gitIn(dir, ['remote', 'set-url', 'origin', 'file:///tmp/x']);
     assert.deepEqual(await checkOnlineHome(dir, 'origin', git), { kind: 'local-only', remote: 'origin' });
 
-    for (const url of ['https://user:secret@example.invalid/x.git', 'ext::sh -c true', 'fd::3']) {
+    // Remote helpers and an unsupported scheme: cleanRepoUrl refuses them, and its sentence is the reason.
+    for (const url of ['ext::sh -c true', 'fd::3', 'ftp://example.invalid/x.git']) {
       gitIn(dir, ['remote', 'set-url', 'origin', url]);
       const home = await checkOnlineHome(dir, 'origin', git);
       const refused = cleanRepoUrl(url);
       assert.equal(refused.ok, false);
       assert.deepEqual(home, { kind: 'not-shareable', remote: 'origin', reason: refused.ok ? '' : refused.reason });
       const text = JSON.stringify(home);
+      assert.ok(!text.includes(url) && !text.includes('example.invalid'), `the reason never carries the address: ${text}`);
+    }
+    // Credentials: cleanRepoUrl would strip them for an invite, but an address this computer reaches with a password or token in it is not
+    // one teammates can use as it is, so it is not shareable, with cleanRepoUrl's own credentials sentence.
+    const credentialsSentence = cleanRepoUrl('user:password@example.invalid:repo.git');
+    assert.equal(credentialsSentence.ok, false);
+    for (const url of ['https://user:secret@example.invalid/x.git', 'https://secrettoken@example.invalid/x.git', 'ssh://git:secret@example.invalid/x.git', 'user:secret@example.invalid:x.git']) {
+      gitIn(dir, ['remote', 'set-url', 'origin', url]);
+      const home = await checkOnlineHome(dir, 'origin', git);
+      assert.deepEqual(home, { kind: 'not-shareable', remote: 'origin', reason: credentialsSentence.ok ? '' : credentialsSentence.reason }, url);
+      const text = JSON.stringify(home);
       assert.ok(!text.includes(url) && !text.includes('secret') && !text.includes('example.invalid'), `the reason never carries the address: ${text}`);
     }
+    gitIn(dir, ['remote', 'set-url', 'origin', 'ssh://git@example.invalid/team.git']);
+    assert.deepEqual(await checkOnlineHome(dir, 'origin', git), { kind: 'shareable', remote: 'origin' }, 'a plain ssh login name is not a credential');
 
     assert.deepEqual(await checkOnlineHome(dir, 'upstream', git), { kind: 'no-remote', remote: 'upstream' });
     assert.deepEqual(await checkOnlineHome(dir, '-bad name', git), { kind: 'no-remote', remote: '-bad name' });
