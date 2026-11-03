@@ -170,6 +170,9 @@ details.tool .log {
 }
 #welcome .suggestions button:hover { background: var(--vscode-list-hoverBackground); }
 #welcome .suggestions small { display: block; color: var(--vscode-descriptionForeground); }
+/* The welcome's Connect NEAR AI panel, shown until the project has a working profile. */
+.welcome-connect-actions { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+#welcome-connect button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 /* The empty chat's "no team yet" card (media/chat/setup.js). */
 .setup-nudge { margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--vscode-focusBorder); border-radius: 4px; background: var(--vscode-editorWidget-background); color: var(--vscode-foreground); }
 #welcome .setup-nudge h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }

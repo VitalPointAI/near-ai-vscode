@@ -388,6 +388,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand('nearAi.selectProfile');
       return;
     }
+    if (message.type === 'new-profile') {
+      await vscode.commands.executeCommand('nearAi.newProfile');
+      return;
+    }
     if (message.type === 'setup-nudge') {
       // Hidden at once; a card worked out before the flag was saved is dropped (latestOnly).
       if (message.action === 'later') { await context.workspaceState?.update(SETUP_NUDGE_DISMISSED_KEY, true); setupNudge.set(false); return; }

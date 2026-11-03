@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The chat asks you to connect NEAR AI first.** Until the project has a
+  working profile, the empty chat shows only **Connect NEAR AI to start**
+  with a **Set up a new profile** button. If you have a saved profile whose
+  key needs checking again, it also offers **Choose a profile**. The
+  suggestions to start a new project, onboard an existing one or show
+  progress appear once you are connected, without reloading. The new
+  command **NEAR AI: Set Up a New Profile…** starts the same setup.
 - **After you connect NEAR AI, the extension suggests what to do next.**
   If the project has no team yet, it starts with setting up your project
   team. You can also set a spending limit, turn on web search, or go

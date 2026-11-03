@@ -58,3 +58,10 @@ export function registerProjectSetup(context: Pick<vscode.ExtensionContext, 'sub
     vscode.commands.registerCommand(PROJECT_SETUP_COMMAND, () => showSetupMenu(host))
   );
 }
+
+export const NEW_PROFILE_COMMAND = 'nearAi.newProfile';
+
+/** NEAR AI: Set Up a New Profile… (the chat welcome's button): straight to the key setup, without the welcome page. */
+export function registerNewProfile(context: Pick<vscode.ExtensionContext, 'subscriptions'>, configure: () => Promise<void>): void {
+  context.subscriptions.push(vscode.commands.registerCommand(NEW_PROFILE_COMMAND, () => configure()));
+}

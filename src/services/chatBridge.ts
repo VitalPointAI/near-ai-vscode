@@ -52,6 +52,8 @@ export type ChatWebviewMessage =
   | { type: 'reporting-token' }
   | { type: 'open-activity'; agentId?: string }
   | { type: 'select-profile' }
+  /** The welcome's "Set up a new profile": runs the NEAR AI key setup. */
+  | { type: 'new-profile' }
   /** The empty chat's "no team yet" card: set up the team, hide the card for this project, or open all setup steps. */
   | { type: 'setup-nudge'; action: 'team' | 'later' | 'menu' }
   | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'allow-always' | 'deny'; feedback?: string; conversationId?: string }
@@ -274,7 +276,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'conversationId')) return undefined;
     return { type: 'stop', ...scoped };
   }
-  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'reporting-token' || message.type === 'select-profile' || message.type === 'chat-ready') {
+  if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'reporting-token' || message.type === 'select-profile' || message.type === 'new-profile' || message.type === 'chat-ready') {
     if (Object.keys(message).some((key) => key !== 'type')) return undefined;
     return { type: message.type };
   }

@@ -1,5 +1,6 @@
-// The "no team yet" card at the top of an empty chat. The host decides when it shows (a working
-// profile, no project team, not dismissed); this only draws it and reports the click.
+// The empty chat's welcome: the Connect NEAR AI panel until the project has a working profile,
+// and the "no team yet" card at the top of the usual welcome. The host decides when the card shows
+// (a working profile, no project team, not dismissed); this only draws it and reports the click.
 (function (root) {
   'use strict';
 
@@ -56,7 +57,44 @@
     return card;
   }
 
-  const api = { renderSetupNudge, TEXT };
+  /**
+   * Which welcome the empty chat shows, from the host's profile-status value: 'ready' with a
+   * working profile (its key checked), 'choose' when profiles exist but none works, 'connect'
+   * when there is none.
+   */
+  function welcomeState(value) {
+    const profiles = (value && Array.isArray(value.profiles)) ? value.profiles : [];
+    const active = profiles.find((item) => item && item.profileId === value.activeProfileId);
+    if (active && active.validation && active.validation.status === 'valid') return 'ready';
+    return profiles.length ? 'choose' : 'connect';
+  }
+
+  /**
+   * Shows the welcome for `state`: the Connect NEAR AI panel (with Choose a profile and its reason
+   * only for 'choose'), or the usual welcome with its suggestion cards. Elements by id:
+   * welcome-ready, welcome-connect, welcome-connect-reason, welcome-choose-profile,
+   * welcome-new-profile. Returns the button to focus: the primary one, the first time the Connect
+   * panel appears, and only when the person is not typing a message.
+   */
+  function applyWelcomeState(doc, state, memory) {
+    const byId = (id) => doc.getElementById(id);
+    const connecting = state !== 'ready';
+    const ready = byId('welcome-ready');
+    const connect = byId('welcome-connect');
+    if (ready) ready.hidden = connecting;
+    if (connect) connect.hidden = !connecting;
+    const reason = byId('welcome-connect-reason');
+    const choose = byId('welcome-choose-profile');
+    if (reason) reason.hidden = state !== 'choose';
+    if (choose) choose.hidden = state !== 'choose';
+    if (!connecting || memory.connectShown) return undefined;
+    memory.connectShown = true;
+    const active = doc.activeElement;
+    const typing = Boolean(active) && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT') && Boolean(active.value);
+    return typing ? undefined : byId('welcome-new-profile') || undefined;
+  }
+
+  const api = { renderSetupNudge, welcomeState, applyWelcomeState, TEXT };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.nearSetup = api;
 })(typeof window === 'undefined' ? globalThis : window);

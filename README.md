@@ -412,7 +412,9 @@ copy of Open-GSD to a project that doesn't already have one.
 ## Get started in two minutes
 
 1. Install **NEAR AI for VS Code** and open a project folder.
-2. Run **NEAR AI: Set Up** from the Command Palette.
+2. Run **NEAR AI: Set Up** from the Command Palette, or open the **NEAR AI**
+   chat and choose **Set up a new profile**. Until you are connected, the chat
+   shows only that, because everything else needs a working profile.
 3. Choose where models run: **NEAR AI Cloud** (create a key at
    [cloud.near.ai](https://cloud.near.ai/)), a **local runtime** (Ollama, LM
    Studio, vLLM, or any OpenAI-compatible server), or **both**, picking a cloud

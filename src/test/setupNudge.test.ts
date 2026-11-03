@@ -22,6 +22,8 @@ class FakeNode {
   public className = '';
   public id = '';
   public type = '';
+  public hidden = false;
+  public value = '';
   public textContent = '';
   public readonly attributes = new Map<string, string>();
   public readonly listeners = new Map<string, Array<() => void>>();
@@ -44,7 +46,12 @@ class FakeDocument {
   public getElementById(id: string): FakeNode | undefined { return this.body.find((node) => node.id === id); }
 }
 
-interface SetupKit { renderSetupNudge(doc: FakeDocument, container: FakeNode, show: boolean, post: (message: unknown) => void, afterDismiss?: () => void): FakeNode | undefined; TEXT: Record<string, string> }
+interface SetupKit {
+  renderSetupNudge(doc: FakeDocument, container: FakeNode, show: boolean, post: (message: unknown) => void, afterDismiss?: () => void): FakeNode | undefined;
+  welcomeState(value: unknown): 'ready' | 'choose' | 'connect';
+  applyWelcomeState(doc: FakeDocument, state: string, memory: Record<string, unknown>): FakeNode | undefined;
+  TEXT: Record<string, string>;
+}
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const setup = require(path.join(ROOT, 'media', 'chat', 'setup.js')) as SetupKit;
 
@@ -123,13 +130,91 @@ test('the chat loads the card helper before chat.js, draws it in the welcome sec
   assert.ok(panel.indexOf("<script nonce=\"${nonce}\" src=\"${asset('setup.js')}\"></script>") > 0);
   assert.ok(panel.indexOf("asset('setup.js')") < panel.indexOf("asset('chat.js')"), 'setup.js loads before chat.js');
   const script = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.js'), 'utf8');
-  assert.match(script, /case 'setup-nudge': setupKit\.renderSetupNudge\(document, welcome, m\.show === true, post, \(\) => input\.focus\(\)\); break;/);
-  assert.match(script, /window\.nearSetup \|\| \{ renderSetupNudge: \(\) => undefined \}/);
+  assert.match(script, /case 'setup-nudge': setupKit\.renderSetupNudge\(document, welcomeReady, m\.show === true, post, \(\) => input\.focus\(\)\); break;/);
+  assert.match(script, /window\.nearSetup \|\| \{ renderSetupNudge: \(\) => undefined,/);
   const css = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.css'), 'utf8');
   const rules = css.split('\n').filter((line) => line.includes('setup-nudge')).join('\n');
   assert.match(rules, /\.setup-nudge \{/);
   assert.doesNotMatch(rules, /#[0-9a-f]{3,8}\b/i, 'no fixed colours');
   assert.match(rules, /var\(--vscode-/);
+});
+
+// ---- the welcome before a working profile ----
+
+const profileValue = (status?: string, active = true) => ({ projectScope: 'p', configured: true, activeProfileId: status && active ? 'profile-a' : undefined, profiles: status ? [{ profileId: 'profile-a', displayName: 'Demo', validation: { status } }] : [] });
+
+function welcomeDom(): { doc: FakeDocument; parts: Record<string, FakeNode> } {
+  const doc = new FakeDocument();
+  const welcome = doc.createElement('section');
+  welcome.id = 'welcome';
+  const parts: Record<string, FakeNode> = {};
+  for (const [id, tag, hidden] of [['welcome-connect', 'div', true], ['welcome-connect-reason', 'p', true], ['welcome-new-profile', 'button', false], ['welcome-choose-profile', 'button', true], ['welcome-ready', 'div', true]] as const) {
+    const node = doc.createElement(tag);
+    node.id = id;
+    node.hidden = hidden;
+    parts[id] = node;
+  }
+  parts['welcome-connect'].append(parts['welcome-connect-reason'], parts['welcome-new-profile'], parts['welcome-choose-profile']);
+  welcome.append(parts['welcome-connect'], parts['welcome-ready']);
+  doc.body.append(welcome);
+  return { doc, parts };
+}
+
+test('the welcome state follows the profile: connect with none, choose when none works, ready with a working one', () => {
+  assert.equal(setup.welcomeState(profileValue()), 'connect');
+  assert.equal(setup.welcomeState(undefined), 'connect');
+  assert.equal(setup.welcomeState(profileValue('invalid')), 'choose');
+  assert.equal(setup.welcomeState(profileValue('pending')), 'choose');
+  assert.equal(setup.welcomeState(profileValue('valid', false)), 'choose', 'a working profile that is not selected');
+  assert.equal(setup.welcomeState(profileValue('valid')), 'ready');
+});
+
+test('without a working profile only the Connect panel shows, and setup switches to the usual welcome', () => {
+  const { doc, parts } = welcomeDom();
+  const memory = {};
+  const focus = setup.applyWelcomeState(doc, 'connect', memory);
+  assert.equal(parts['welcome-connect'].hidden, false);
+  assert.equal(parts['welcome-ready'].hidden, true, 'no Open-GSD cards and no team card');
+  assert.equal(parts['welcome-choose-profile'].hidden, true);
+  assert.equal(parts['welcome-connect-reason'].hidden, true);
+  assert.equal(focus, parts['welcome-new-profile'], 'focus goes to Set up a new profile the first time');
+  // A saved profile that needs its key checked: Choose a profile, with the reason.
+  assert.equal(setup.applyWelcomeState(doc, 'choose', memory), undefined, 'not focused again');
+  assert.equal(parts['welcome-choose-profile'].hidden, false);
+  assert.equal(parts['welcome-connect-reason'].hidden, false);
+  // After setup (profile-status refreshes): the usual welcome, with no reload.
+  assert.equal(setup.applyWelcomeState(doc, 'ready', memory), undefined);
+  assert.equal(parts['welcome-connect'].hidden, true);
+  assert.equal(parts['welcome-ready'].hidden, false);
+});
+
+test('the Connect panel does not take focus from a message being typed', () => {
+  const { doc } = welcomeDom();
+  const input = doc.createElement('TEXTAREA');
+  input.value = 'half a question';
+  doc.activeElement = input;
+  assert.equal(setup.applyWelcomeState(doc, 'connect', {}), undefined);
+  input.value = '';
+  assert.ok(setup.applyWelcomeState(doc, 'connect', {}), 'an empty message box is not typing');
+});
+
+test('the sidebar HTML has the Connect panel, hidden until the profile is known, and the chat wires it', () => {
+  const panel = readFileSync(path.join(ROOT, 'src', 'services', 'panelView.ts'), 'utf8');
+  assert.match(panel, /<div id="welcome-connect" role="region" aria-labelledby="welcome-connect-title" hidden>/);
+  assert.match(panel, /<h2 id="welcome-connect-title">Connect NEAR AI to start<\/h2>/);
+  assert.match(panel, /<button id="welcome-new-profile" class="text-button primary" type="button">Set up a new profile<\/button>/);
+  assert.match(panel, /<button id="welcome-choose-profile" class="text-button" type="button" hidden>Choose a profile<\/button>/);
+  assert.match(panel, /<p id="welcome-connect-reason" hidden>Your saved profile needs its key checked again\.<\/p>/);
+  assert.match(panel, /<div id="welcome-ready" hidden>\s*<h2>Private AI for this project<\/h2>[\s\S]*class="suggestions"/);
+  const welcome = panel.slice(panel.indexOf('<section id="welcome">'), panel.indexOf('</section>', panel.indexOf('<section id="welcome">')));
+  assert.doesNotMatch(welcome, /style=|—/);
+  const script = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.js'), 'utf8');
+  assert.match(script, /\$\('welcome-new-profile'\)\.addEventListener\('click', \(\) => post\(\{ type: 'new-profile' \}\)\)/);
+  assert.match(script, /\$\('welcome-choose-profile'\)\.addEventListener\('click', \(\) => post\(\{ type: 'select-profile' \}\)\)/);
+  assert.match(script, /setupKit\.applyWelcomeState\(document, setupKit\.welcomeState\(value\), welcomeMemory\)/);
+  assert.match(script, /case 'setup-nudge': setupKit\.renderSetupNudge\(document, welcomeReady,/, 'the team card lives in the usual welcome');
+  assert.deepEqual(parseChatWebviewMessage({ type: 'new-profile' }), { type: 'new-profile' });
+  assert.equal(parseChatWebviewMessage({ type: 'new-profile', command: 'workbench.action.terminal.new' }), undefined);
 });
 
 test('the view\'s card messages are parsed strictly', () => {
@@ -206,7 +291,8 @@ test('the host shows the card for a working profile without a team, hides it on 
     // The buttons run the host's commands, never a command the view names.
     await receive!({ type: 'setup-nudge', action: 'team' });
     await receive!({ type: 'setup-nudge', action: 'menu' });
-    assert.deepEqual(executed.splice(0), [['nearAi.setupProjectTeam'], ['nearAi.projectSetup']]);
+    await receive!({ type: 'new-profile' });
+    assert.deepEqual(executed.splice(0), [['nearAi.setupProjectTeam'], ['nearAi.projectSetup'], ['nearAi.newProfile']]);
     // A team saved by Team Studio: the watcher sees the file and the card goes away.
     const [watcher] = watchers;
     assert.equal(watcher.pattern.base.fsPath, root);

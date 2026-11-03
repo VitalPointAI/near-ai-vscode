@@ -28,7 +28,7 @@ import { clearProviderCache } from './services/providerCache';
 import { setNearAiDiagnostics } from './services/nearAiClient';
 import { closeInterruptedRuns } from './services/activityStore';
 import { offerProxyAdvice } from './domain/proxyAdvice';
-import { offerNextStep, registerProjectSetup } from './services/setupMenu';
+import { offerNextStep, registerNewProfile, registerProjectSetup } from './services/setupMenu';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
@@ -95,6 +95,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
+  registerNewProfile(context, () => configureApiKey(context, auth, sidebar));
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));

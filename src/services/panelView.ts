@@ -84,10 +84,21 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 <div id="needs-you" role="status" hidden></div>
 <main id="transcript" aria-label="Conversation" aria-live="off">
   <section id="welcome">
-    <h2>Private AI for this project</h2>
-    <p>Ask anything about your code, or type <strong>/</strong> for Open-GSD workflows. Models marked 🔒 run inside NEAR AI's attested TEE; others are forwarded by NEAR to another provider, and every reply says which.</p>
-    <div class="suggestions">
-      ${start.map((definition) => `<button type="button" data-command="gsd-${definition.command}">${escapeText(definition.title)}<small>${escapeText(definition.description)}</small></button>`).join('\n      ')}
+    <div id="welcome-connect" role="region" aria-labelledby="welcome-connect-title" hidden>
+      <h2 id="welcome-connect-title">Connect NEAR AI to start</h2>
+      <p>Connect NEAR AI to use private models in this project. Your key stays in VS Code's secure storage, never in your project files.</p>
+      <p id="welcome-connect-reason" hidden>Your saved profile needs its key checked again.</p>
+      <div class="welcome-connect-actions">
+        <button id="welcome-new-profile" class="text-button primary" type="button">Set up a new profile</button>
+        <button id="welcome-choose-profile" class="text-button" type="button" hidden>Choose a profile</button>
+      </div>
+    </div>
+    <div id="welcome-ready" hidden>
+      <h2>Private AI for this project</h2>
+      <p>Ask anything about your code, or type <strong>/</strong> for Open-GSD workflows. Models marked 🔒 run inside NEAR AI's attested TEE; others are forwarded by NEAR to another provider, and every reply says which.</p>
+      <div class="suggestions">
+        ${start.map((definition) => `<button type="button" data-command="gsd-${definition.command}">${escapeText(definition.title)}<small>${escapeText(definition.description)}</small></button>`).join('\n        ')}
+      </div>
     </div>
   </section>
 </main>

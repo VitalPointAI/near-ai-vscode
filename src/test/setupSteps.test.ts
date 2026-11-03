@@ -352,6 +352,31 @@ test('after setup in a project that has a team, a short ready message offers to 
   assert.deepEqual(executed, [], 'dismissing the message does nothing more');
 });
 
+test('NEAR AI: Set Up a New Profile runs the key setup straight away, then suggests the next step', async () => {
+  reset();
+  const root = await emptyProject();
+  const { configureApiKey } = load<typeof import('../extension')>('../extension');
+  const { AuthService } = load<typeof import('../services/auth')>('../services/auth');
+  menu.registerNewProfile(context as never, () => configureApiKey({ ...context, secrets: new MemorySecrets() } as never, new AuthService(new MemorySecrets()), { refresh: async () => undefined } as never));
+  vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => String(input).endsWith('/models') ? Response.json({ data: [{ id: 'fake-coder' }] }) : new Response('{}', { status: 404 })) as typeof fetch;
+  inputBoxes = ['Demo', '', 'http://127.0.0.1:11434/v1', ''];
+  quickPick = (items) => items.find((item) => item.provider === 'local') ?? items[0];
+  try {
+    await commands.get('nearAi.newProfile')!();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(picks[0].options.placeHolder, 'Where should models run?', 'the key setup, not the welcome page');
+  assert.equal(picks[1].options.title, 'NEAR AI is ready for “Demo (local)”. What next?');
+  assert.deepEqual(executed, [['nearAi.setupProjectTeam']]);
+  const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
+  assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === 'nearAi.newProfile'), { command: 'nearAi.newProfile', title: 'Set Up a New Profile…', category: 'NEAR AI' });
+  const { PAGE_COMMANDS } = load<typeof import('../services/toolsDirectory')>('../services/toolsDirectory');
+  assert.ok((PAGE_COMMANDS as readonly string[]).includes('nearAi.newProfile'));
+});
+
 test('Project Setup is a contributed command and a Tools tab command', () => {
   const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === 'nearAi.projectSetup'), { command: 'nearAi.projectSetup', title: 'Project Setup…', category: 'NEAR AI' });
