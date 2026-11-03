@@ -163,7 +163,7 @@ completed: 2026-11-03
 
 - G-61-5 host half: `createTeamSectionHost` builds the model input from the session (display-safe team name, role and pending role, removed, owner or lead from the `member.invite` decision, `memberAttention` count, unused invites, other members, organization link, connection text) and posts `{type:'team-state', model}`; no user text lives in the host.
 - `parseTeamSectionMessage` accepts exactly `{type:'team-action', action}` with a known id (and `team-e2e-facts` with a finite id); the command comes only from `TEAM_ACTION_COMMANDS`; a second click while a command runs is ignored.
-- Refresh triggers: `handle.onDidChange` (start, restart, Enable, stop), the session's `onStateChange` (re-followed when a restart brings a new session), the host's own actions, the sidebar becoming visible, and the page's `chat-ready` is not needed because posts after the html are buffered by VS Code.
+- Refresh triggers: `handle.onDidChange` (start, restart, Enable, stop), the session's `onStateChange` (re-followed when a restart brings a new session), the host's own actions and the sidebar becoming visible. No timer or polling.
 - `teamSetupShared` check only for owners and leads, throttled to once a minute on a monotonic clock while shown, forced after Share, Invite, Link, Turn on and Join.
 - Board summary slot (`boardSummary` provider) ready for Phase 62.
 - Sidebar: `section#team` (role region, aria-label Team, hidden) between `#needs-you` and `#transcript`, `team.js` after `chat.js` with the same nonce; `setTeamSection` and attach after the chat; wired in extension.ts and disposed with the extension.
@@ -247,3 +247,7 @@ None - no external service configuration required.
 ---
 *Phase: 61-invitations-joining-removal-near-org-and-key-integration*
 *Completed: 2026-11-03*
+
+## Self-Check: PASSED
+
+Both created files exist; commits 9fb8d64, fa7db9c, 23d333d, 232c0d6, a5965e1 and 2701b37 are on this branch; no file deletions.
