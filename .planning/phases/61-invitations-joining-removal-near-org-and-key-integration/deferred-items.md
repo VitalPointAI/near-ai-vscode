@@ -1,0 +1,5 @@
+# Phase 61 deferred items
+
+## Found during 61-15 (2026-11-03)
+
+- `src/test/teamGsdImport.test.ts` "every plan committed at HEAD parses, and HEAD gives milestone v0.6.0 with phases 60 to 67 and finished phases 60 and 61" fails (actual 24 plans in phase 61, expected 14), and `src/test/teamImport.test.ts` "this repository's own .planning at HEAD imports into a correct graph" fails (`plan:61-15` is `backlog`, expected `done`). Both read this repository's own `.planning` at HEAD and assume Phase 61 is finished with 14 plans. They fail since the fix-pass plans 61-15 to 61-24 were committed (7b3a441), before any 61-15 code change, and are unrelated to the wording rename. They should be brought in line with the fix pass (for example by the final full-suite plan 61-22) once the gap-closure plans are done.
