@@ -208,6 +208,14 @@ export async function startCyberRun(input: CyberRunInput): Promise<CyberRunResul
     }
   };
 
+  /** Drains the tools' findings and writes each into the chain. Every exit path calls this. */
+  const persistFindings = async () => {
+    drainExternal();
+    for (const finding of findings) {
+      await record({ tool: 'finding', arguments: finding.checkId, result: findingResult(finding), modelReasoning: finding.remediation || hardeningAdvice(finding.checkId), evidenceHash: finding.evidenceHash });
+    }
+  };
+
   const incompatibility: string[] = [];
   const note = (role: StepRole, reason: string) => {
     const text = `${role} could not follow the JSON protocol: ${reason}. The model did not produce a valid Step, so this role's work is missing from the run.`;
@@ -237,7 +245,9 @@ export async function startCyberRun(input: CyberRunInput): Promise<CyberRunResul
   emit({ type: 'notice', text: 'Asking the planner which check to run first. The model may think for a while; the timeline fills in as steps complete.' });
   const depthChecks = profileChecks(input.depth ?? 'quick');
   const maxSteps = Math.max(1, Math.min(MAX_PLAN_STEPS, depthChecks.length * 2));
-  const plan = await askRole('planner', planPrompt(depthChecks, []));
+  // The first plan is asked for the full check list. Passing [] read as 'every check has run', so
+  // the planner's first answer was a done step that was then refused as an unknown tool.
+  const plan = await askRole('planner', planPrompt(depthChecks, depthChecks));
   if (plan.kind === 'incompatible') {
     note('planner', plan.reason);
     await record({ tool: 'planner', arguments: '', result: 'incompatible', modelReasoning: plan.reason });
@@ -279,16 +289,19 @@ export async function startCyberRun(input: CyberRunInput): Promise<CyberRunResul
     ran.push(step.tool);
     if (input.stopped?.() || input.signal.aborted) {
       await record({ tool: 'stop', arguments: step.id, result: 'stopped before the step ran', modelReasoning: 'the stop control was engaged' });
+      await persistFindings();
       return done('stopped', { reason: 'stopped', ledgerOk: await input.ledger.verify(runId) });
     }
     const budget = input.budget?.();
     if (budget && !budget.ok) {
       await record({ tool: 'budget', arguments: step.id, result: `${budget.reason} Not reached: ${budget.shortfall.unreachedHosts.join(', ')}; ${budget.shortfall.unreachedChecks.join(', ')}`, modelReasoning: 'the wall-clock budget was reached' });
+      await persistFindings();
       return done('stopped', { reason: budget.reason, ledgerOk: await input.ledger.verify(runId) });
     }
     const rate = input.limiter?.acquire();
     if (rate && !rate.ok) {
       await record({ tool: 'rate-limit', arguments: step.id, result: rate.reason, modelReasoning: 'the rate limit refused the step' });
+      await persistFindings();
       return done('stopped', { reason: rate.reason, ledgerOk: await input.ledger.verify(runId) });
     }
 
@@ -380,7 +393,7 @@ export async function startCyberRun(input: CyberRunInput): Promise<CyberRunResul
   const report = await askRole('reporter', `Write the PTES summary for these ${findings.length} finding(s).`);
   if (report.kind === 'incompatible') note('reporter', report.reason);
   else transcript.push(`report: ${report.steps[0]?.expectedResult ?? ''}`);
-  for (const finding of findings) await record({ tool: 'finding', arguments: finding.checkId, result: findingResult(finding), modelReasoning: finding.remediation || hardeningAdvice(finding.checkId), evidenceHash: finding.evidenceHash });
+  await persistFindings();
 
   const ledgerOk = await input.ledger.verify(runId);
   if (!ledgerOk) emit({ type: 'notice', text: 'The ledger chain did not verify after this run.' });

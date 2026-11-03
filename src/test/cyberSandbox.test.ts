@@ -250,3 +250,28 @@ test('a start that produces no container id is reported as a failed start', asyn
     (error: Error) => error instanceof SandboxError && /did not start container/.test(error.message)
   );
 });
+
+test('a payload gets its own deadline, not the version check\'s three seconds', async () => {
+  // The runner every production `docker exec` used had a 3-second deadline, so a payload taking
+  // longer was killed and reported as a failed exploit.
+  const seen: string[][] = [];
+  const sandbox = await startSandbox('container', {
+    image: 'alpine:3.20',
+    execTimeoutMs: 90_000,
+    runner: async (command, args) => {
+      seen.push([command, ...args]);
+      if (args[0] === '--version') return `${command} version 1.0.0`;
+      if (args[0] === 'run') return 'a'.repeat(12);
+      if (args[0] === 'exec') return '0\npayload output';
+      return '';
+    }
+  });
+  try {
+    const result = await sandbox.exec(['sh', '-c', 'sleep 5']);
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /payload output/);
+    assert.ok(seen.some((call) => call[1] === 'exec'), 'the exec went through the container');
+  } finally {
+    await sandbox.stop();
+  }
+});

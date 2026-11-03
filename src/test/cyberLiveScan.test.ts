@@ -184,10 +184,39 @@ test('a check that already ran is never asked for again, and findings reach the 
     // recon legitimately ('do not repeat a check that already ran').
     // After recon ran, no mid-run prompt may list it as outstanding. The planner is asked for a
     // second step only once a check is covered, so every 'still needs' prompt here is post-recon.
+    // The FIRST prompt legitimately lists every check; only later prompts must drop the ones done.
     const stillNeedsRecon = prompts.filter((prompt) => /still needs:[^.]*\brecon\b/.test(prompt));
-    assert.deepEqual(stillNeedsRecon, [], 'no mid-run prompt asked for recon again');
+    assert.equal(stillNeedsRecon.length, 1, 'recon was outstanding only on the opening prompt');
     // And the follow-up prompts did name the checks that genuinely remained.
     assert.ok(prompts.some((prompt) => /still needs:[^.]*\b(http-headers|tls)\b/.test(prompt)), 'the outstanding checks were named');
+  } finally {
+    await box.dispose();
+  }
+});
+
+test('a run stopped before its last step still chains the findings it found', async () => {
+  // The stopped, budget and rate-limit exits used to return before the persistence loop, so a
+  // stopped run's findings were absent from the ledger and invisible to replay.
+  const box = await harness((t) => [stepOn('s1', 'CyberHttpProbe', t.httpUrl),
+    stepOn('s2', 'CyberTlsProbe', t.tlsUrl),
+    stepOn('s3', 'CyberFingerprintProbe', t.httpUrl, 'recon')]);
+  let stopped = false;
+  try {
+    const result = await startCyberRunInPanel(
+      { ...box.assembly, grants: new RunGrants(), tools: box.assembly.tools(box.engagement), externalFindings: box.collected, currentAcceptance: box.assembly.currentAcceptance, stopped: () => stopped },
+      {
+        engagement: box.engagement, mode: 'defensive', depth: 'quick', signal: new AbortController().signal,
+        // Stop after the first step, so later steps never run.
+        onEvent: (event) => { if (event.type === 'step-finished') stopped = true; }
+      }
+    );
+    const replay = await box.assembly.ledger.replay(result.runId);
+    if (result.outcome === 'stopped') {
+      assert.ok(result.findings.length >= 1, 'the stopped run kept what it found');
+      assert.equal(replay.findings.length, result.findings.length, 'and every one of them is in the chain');
+    }
+    // Whatever the outcome, the chain verifies and holds no orphaned finding.
+    assert.equal(replay.chainOk, true);
   } finally {
     await box.dispose();
   }

@@ -187,7 +187,10 @@ async function startContainer(options: SandboxOptions): Promise<Sandbox> {
       if (!argv.length) throw new SandboxError('An empty command was given to the sandbox.');
       if (signal?.aborted) throw new SandboxError('The stop control was engaged before the command started.');
       // Fixed argv, never a joined shell string: an argument with a space or a quote must survive.
-      const started = await (options.runner ? run : runCapturingExit)(runtime, ['exec', name, ...argv]);
+      // The payload's deadline, not the version check's: a payload over three seconds used to be
+      // killed and reported as a failed exploit.
+      const exec = options.runner ? run : runnerWithTimeout(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS, 4 * 1024 * 1024);
+      const started = await exec(runtime, ['exec', name, ...argv]);
       if (signal?.aborted) throw new SandboxError('The stop control stopped the sandbox command.');
       const match = /^(\d+)\n([\s\S]*)$/.exec(started);
       return { argv, exitCode: match ? Number(match[1]) : 0, stdout: match ? match[2] : started, stderr: '' };
