@@ -2,7 +2,7 @@
 // through a shell, so PR titles, branch names and file contents cannot inject commands.
 import { execFileSync } from 'node:child_process';
 
-export function run(command, args, options = {}) {
+function execRun(command, args, options = {}) {
   try {
     return execFileSync(command, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'], ...options });
   } catch (error) {
@@ -10,6 +10,25 @@ export function run(command, args, options = {}) {
     throw new Error(`${command} ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`);
   }
 }
+
+let runner = execRun;
+
+/** Runs a command (gh or git) and returns its standard output; throws with stderr on failure. */
+export function run(command, args, options = {}) {
+  return runner(command, args, options);
+}
+
+/**
+ * Replaces how commands are run, for tests: `next(command, args, options)` returns the output or
+ * throws. Returns the previous runner; call with no argument to restore the real one.
+ */
+export function setRunner(next) {
+  const previous = runner;
+  runner = next ?? execRun;
+  return previous;
+}
+
+export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function gh(args, options) { return run('gh', args, options); }
 export function ghJson(args, options) { return JSON.parse(gh(args, options) || 'null'); }
@@ -32,23 +51,26 @@ export function viewPr(repo, number) {
 }
 
 /** Polls while GitHub is still computing mergeability (mergeable UNKNOWN). */
-export async function viewPrSettled(repo, number, attempts = 6) {
+export async function viewPrSettled(repo, number, { attempts = 6, wait = sleep } = {}) {
   let pr = viewPr(repo, number);
   for (let i = 1; i < attempts && (pr.mergeable === 'UNKNOWN' || pr.mergeStateStatus === 'UNKNOWN'); i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 2_000 * i));
+    await wait(2_000 * i);
     pr = viewPr(repo, number);
   }
   return pr;
 }
 
-/** Required status check contexts from branch protection, or [] when the branch is not protected. */
+/** Required status check contexts from branch protection, or [] when GitHub says there are none (404). */
 export function protectedContexts(repo, branch) {
   try {
     const result = ghJson(['api', `repos/${repo}/branches/${branch}/protection/required_status_checks`]);
     const fromChecks = (result?.checks ?? []).map((check) => check.context);
     return [...new Set([...(result?.contexts ?? []), ...fromChecks])];
-  } catch {
-    return [];
+  } catch (error) {
+    // Only "not found" means the branch has no required checks; any other failure (no access,
+    // an outage) is raised, so the merge gate refuses rather than skipping protected checks.
+    if (isNotFound(error)) return [];
+    throw error;
   }
 }
 
@@ -101,6 +123,11 @@ function ghLines(endpoint, jq) {
   return gh(['api', '--paginate', endpoint, '--jq', jq]).split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line));
 }
 
+/** Every file path a PR changes, through the paginated API (gh pr view stops at 100). */
+export function prFiles(repo, number) {
+  return ghLines(`repos/${repo}/pulls/${number}/files?per_page=100`, '.[] | .filename | tojson');
+}
+
 /**
  * Everything the merge and release gates need about one commit (see evaluateCommit in
  * workflow.mjs): every check run attempt with the app and check suite it came from, the workflow
@@ -111,13 +138,13 @@ export function commitChecks(repo, sha) {
     checkRuns: ghLines(`repos/${repo}/commits/${sha}/check-runs?per_page=100&filter=all`,
       '.check_runs[] | {id, name, status, conclusion, startedAt: .started_at, completedAt: .completed_at, app: .app.slug, suiteId: .check_suite.id, url: .html_url} | tojson'),
     workflowRuns: ghLines(`repos/${repo}/actions/runs?head_sha=${sha}&per_page=100`,
-      '.workflow_runs[] | {id, name, path, event, suiteId: .check_suite_id} | tojson'),
+      '.workflow_runs[] | {id, name, path, event, status, conclusion, suiteId: .check_suite_id} | tojson'),
     statuses: ghLines(`repos/${repo}/commits/${sha}/statuses?per_page=100`,
       '.[] | {id, context, state, createdAt: .created_at, creator: .creator.login, url: .target_url} | tojson')
   };
 }
 
-/** The GitHub account the scripts run as: the only account whose `agent-review` status counts. */
+/** The GitHub account gh runs as (agent-review.mjs checks it is AGENT_REVIEW_ACCOUNT before it posts). */
 export function currentLogin() {
   const login = gh(['api', 'user', '--jq', '.login']).trim();
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(login)) throw new Error(`could not read the GitHub account gh runs as (got "${login}")`);
@@ -154,8 +181,14 @@ export function tagCommit(repo, tag) {
     if (isNotFound(error)) return undefined;
     throw error;
   }
-  if (ref.object.type === 'commit') return ref.object.sha;
-  return ghJson(['api', `repos/${repo}/git/tags/${ref.object.sha}`]).object.sha;
+  // An annotated tag can point at another tag object; follow the chain down to the commit.
+  let object = ref.object;
+  for (let depth = 0; object.type === 'tag'; depth += 1) {
+    if (depth >= 10) throw new Error(`${tag} is a chain of more than 10 tag objects`);
+    object = ghJson(['api', `repos/${repo}/git/tags/${object.sha}`]).object;
+  }
+  if (object.type !== 'commit') throw new Error(`${tag} points at a ${object.type}, not a commit`);
+  return object.sha;
 }
 
 /** Creates the annotated tag v<version> on sha. Pushing a v*.*.* tag starts release.yml. */

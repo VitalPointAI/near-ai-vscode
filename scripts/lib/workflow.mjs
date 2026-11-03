@@ -5,6 +5,13 @@
 export const CI_CHECKS = Object.freeze(['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan']);
 /** Commit status set by scripts/agent-review.mjs after the agent review team has run. */
 export const AGENT_REVIEW_CONTEXT = 'agent-review';
+/**
+ * The only GitHub account whose `agent-review` status the merge and release gates trust: the
+ * repository owner, whose account the review agents run as. Fixed here rather than taken from
+ * whoever runs a script, so another admin running merge-pr cannot have their own status
+ * accepted. Changing it is a change to the gates and goes through review like one.
+ */
+export const AGENT_REVIEW_ACCOUNT = 'ALuhning';
 export const REQUIRED_CHECKS = Object.freeze([...CI_CHECKS, AGENT_REVIEW_CONTEXT]);
 /** Where the CI_CHECKS must come from: jobs of this workflow file, run by GitHub Actions. */
 export const CI_WORKFLOW = Object.freeze({ name: 'CI', path: '.github/workflows/ci.yml', app: 'github-actions' });
@@ -25,10 +32,15 @@ export function releaseVersionFromBranch(branch) {
  *   Verdict: PASS            (or FAIL; exactly one such line, nothing else on it)
  *   Head-SHA: <40-hex commit the team reviewed>   (exactly one)
  *   - [BLOCKER] ... (open)    - [BLOCKER][RESOLVED] ... (closed)
+ * Each line is first normalized the way GitHub shows it (normalizeReviewLine), so an escaped,
+ * spaced, fullwidth or zero-width-split [BLOCKER] still counts, and a tag written with lookalike
+ * letters from another script is reported in `problems`.
  * Verdict and Head-SHA lines inside code fences are ignored, so quoted code cannot fake them.
- * Severity tags count everywhere, fences included, and a fence that is never closed (or is
- * closed by a different character or a shorter run) makes the structure ambiguous, which is
- * reported in `problems` so the review fails closed.
+ * Severity tags count everywhere, fences and HTML comments included. Anything GitHub would show
+ * differently from how it is read here is reported in `problems`, so the review fails closed:
+ * a fence never closed (or closed by a different character or a shorter run), a fence-like line
+ * indented 4 or more spaces (text or code on GitHub, never a fence), a Verdict or Head-SHA inside
+ * an HTML comment, a quote, a list item or an indented block, and an HTML comment never closed.
  */
 export function parseReview(text) {
   const lines = String(text ?? '').split(/\r?\n/);
@@ -38,24 +50,58 @@ export function parseReview(text) {
   const problems = [];
   const openBlockers = [];
   const counts = { blocker: 0, major: 0, minor: 0, nit: 0, resolved: 0 };
+  let comment;
   for (const [index, raw] of lines.entries()) {
-    const line = raw.trim();
+    const full = normalizeReviewLine(raw);
+    const line = full.trim();
     // Every tag on the line counts: "[BLOCKER][RESOLVED] ... [BLOCKER] ..." has one open blocker.
-    for (const severity of ['BLOCKER', 'MAJOR', 'MINOR', 'NIT']) {
-      const resolved = line.match(new RegExp(`\\[${severity}\\]\\s*\\[RESOLVED\\]`, 'gi'))?.length ?? 0;
-      const open = (line.match(new RegExp(`\\[${severity}\\]`, 'gi'))?.length ?? 0) - resolved;
-      counts.resolved += resolved;
-      counts[severity.toLowerCase()] += open;
-      if (severity === 'BLOCKER') for (let i = 0; i < open; i += 1) openBlockers.push(line);
+    const tags = severityTags(line);
+    for (const [i, tag] of tags.entries()) {
+      if (tag.lookalike) {
+        problems.push(`line ${index + 1} ("${line.slice(0, 80)}") has a tag that looks like [${tag.lookalike}] but is not written in plain letters; write severity tags as plain ASCII`);
+      }
+      if (!SEVERITIES.includes(tag.word)) continue;
+      const next = tags[i + 1];
+      if (next?.word === 'RESOLVED' && /^[\s*_]*$/.test(line.slice(tag.end, next.start))) counts.resolved += 1;
+      else {
+        counts[tag.word.toLowerCase()] += 1;
+        if (tag.word === 'BLOCKER') openBlockers.push(line);
+      }
     }
-    const marker = fenceMarker(line);
     if (fence) {
+      // A closing fence may be indented at most 3 spaces; a deeper one is content.
+      const marker = indentOf(full) <= 3 ? fenceMarker(line) : undefined;
       if (marker && marker.char === fence.char && marker.length >= fence.length && marker.info === '') fence = undefined;
       continue;
     }
-    if (marker) { fence = { ...marker, line: index + 1 }; continue; }
+    // HTML comments are not shown on GitHub, so a Verdict or Head-SHA inside one is refused.
+    const startsInComment = Boolean(comment);
+    const parts = splitComments(full, startsInComment);
+    if (!startsInComment && parts.open) comment = { line: index + 1 };
+    if (!parts.open) comment = undefined;
+    if (/\b(?:verdict|head-sha)\s*:/i.test(parts.hidden.replace(/[*_`]/g, ''))) {
+      problems.push(`line ${index + 1} has a Verdict or Head-SHA inside an HTML comment, which GitHub does not show; remove it`);
+    }
+    const visible = parts.visible.trim();
+    if (!visible) continue;
+    const indent = startsInComment ? 0 : indentOf(parts.visible);
+    const marker = fenceMarker(visible);
+    if (marker && indent <= 3) { fence = { ...marker, line: index + 1 }; continue; }
+    if (marker) {
+      problems.push(`line ${index + 1} looks like a code fence but is indented 4 or more spaces, so GitHub may show it as text; indent code fences by at most 3 spaces`);
+    }
     // Emphasis and code marks are ignored: **Verdict:** PASS and Head-SHA: `<sha>` are fine.
-    const plain = line.replace(/[*_`]/g, '').trim();
+    const plain = visible.replace(/[*_`]/g, '').trim();
+    // A Verdict or Head-SHA inside a quote, a list item or an indented block is shown as part of
+    // that block, not as the review's own line, so it is refused rather than guessed at. A list
+    // marker needs a space after it, so **Verdict:** is not a list item.
+    const unwrappedRaw = visible.replace(/^(?:>\s*|(?:[-+*]|\d{1,9}[.)])\s+)+/, '');
+    const unwrapped = unwrappedRaw.replace(/[*_`]/g, '').trim();
+    if ((indent > 3 || unwrappedRaw !== visible) && /^(?:verdict|head-sha)\s*:/i.test(unwrapped)) {
+      problems.push(`line ${index + 1} ("${line.slice(0, 80)}") has a Verdict or Head-SHA inside a quote, list or indented block; put it on its own line, not indented`);
+      continue;
+    }
+    if (indent > 3) continue;
     if (/^verdict\b/i.test(plain)) {
       const value = /^verdict\s*:\s*(.*)$/i.exec(plain)?.[1];
       if (value === 'PASS' || value === 'FAIL') verdicts.push(value);
@@ -68,11 +114,93 @@ export function parseReview(text) {
     }
   }
   if (fence) problems.push(`the code fence opened on line ${fence.line} is never closed, so the review's structure is ambiguous`);
+  if (comment) problems.push(`the HTML comment opened on line ${comment.line} is never closed, so GitHub hides everything after it`);
   if (verdicts.length > 1) problems.push(`the review has ${verdicts.length} Verdict lines; it must have exactly one`);
   if (headShas.length > 1) problems.push(`the review has ${headShas.length} Head-SHA lines; it must have exactly one`);
   const verdict = verdicts.length === 1 ? verdicts[0] : undefined;
   const headSha = headShas.length === 1 ? headShas[0] : undefined;
   return { verdict, headSha, openBlockers, counts, problems, verdictLines: verdicts.length, headShaLines: headShas.length };
+}
+
+const SEVERITIES = ['BLOCKER', 'MAJOR', 'MINOR', 'NIT'];
+const TAG_WORDS = [...SEVERITIES, 'RESOLVED'];
+// Characters GitHub shows as nothing (zero-width, joiners, bidi controls, variation selectors).
+const INVISIBLE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/g;
+// Brackets that look like [ and ] (fullwidth ones are already mapped by NFKC).
+const OPEN_LIKE = /[\u2045\u2772\u27E6\u27EC\u2983\u2985\u298B\u298D\u298F\u3010\u3014\u3016\u3018\u301A]/g;
+const CLOSE_LIKE = /[\u2046\u2773\u27E7\u27ED\u2984\u2986\u298C\u298E\u2990\u3011\u3015\u3017\u3019\u301B]/g;
+// Cyrillic and Greek capitals and small letters that look like Latin ones.
+const CONFUSABLE = new Map(Object.entries({
+  А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', Х: 'X', У: 'Y', І: 'I', Ј: 'J', Ѕ: 'S',
+  а: 'a', е: 'e', о: 'o', р: 'p', с: 'c', х: 'x', у: 'y', і: 'i', ј: 'j', ѕ: 's', к: 'k', м: 'm', н: 'h', т: 't',
+  Α: 'A', Β: 'B', Ε: 'E', Ζ: 'Z', Η: 'H', Ι: 'I', Κ: 'K', Μ: 'M', Ν: 'N', Ο: 'O', Ρ: 'P', Τ: 'T', Υ: 'Y', Χ: 'X',
+  ο: 'o', ν: 'v', ι: 'i', κ: 'k', İ: 'I', ı: 'i'
+}));
+
+/**
+ * A review line as a reader sees it on GitHub: compatibility forms folded (NFKC turns fullwidth
+ * brackets and letters into ASCII), invisible characters removed, bracket entities and
+ * lookalike brackets turned into [ and ], and backslash escapes before brackets dropped.
+ */
+export function normalizeReviewLine(line) {
+  return String(line ?? '').normalize('NFKC').replace(INVISIBLE, '')
+    .replace(/&(?:#0*91|#x0*5b|lbrack|lsqb);/gi, '[').replace(/&(?:#0*93|#x0*5d|rbrack|rsqb);/gi, ']')
+    .replace(OPEN_LIKE, '[').replace(CLOSE_LIKE, ']')
+    .replace(/\\(?=[[\]])/g, '');
+}
+
+/**
+ * The bracketed tags on a normalized line, in order. `word` is the ASCII letters inside, upper
+ * case, so [ BLOCKER ], [**blocker**] and [BLOCKER] are all BLOCKER. `lookalike` names the tag a
+ * bracket imitates with letters from another script (fail closed: the review is refused).
+ */
+function severityTags(line) {
+  const tags = [];
+  for (const match of line.matchAll(/\[([^[\]]{0,40})\]/g)) {
+    const letters = match[1].replace(/[^\p{L}]/gu, '');
+    const word = /^[A-Za-z]*$/.test(letters) ? letters.toUpperCase() : '';
+    let lookalike;
+    if (!word && letters) {
+      const latin = [...letters].map((c) => CONFUSABLE.get(c) ?? c).join('').toUpperCase();
+      lookalike = TAG_WORDS.find((tag) => latin === tag
+        || (latin.length === tag.length && [...latin].filter((c, i) => c === tag[i]).length >= tag.length - (tag.length >= 7 ? 2 : 1)));
+    }
+    tags.push({ word, lookalike, start: match.index, end: match.index + match[0].length });
+  }
+  return tags;
+}
+
+/** Leading indentation in columns, a tab advancing to the next multiple of 4. */
+function indentOf(line) {
+  let width = 0;
+  for (const char of line) {
+    if (char === ' ') width += 1;
+    else if (char === '\t') width += 4 - (width % 4);
+    else break;
+  }
+  return width;
+}
+
+/**
+ * Splits a line into the text GitHub shows and the text inside HTML comments (<!-- ... -->),
+ * given whether a comment is already open. Comment markers inside inline code do not count.
+ * Returns { visible, hidden, open } with `open` true when a comment is still open at the end.
+ */
+function splitComments(line, open) {
+  // Blank out inline code spans (same length) so their contents cannot open or close a comment.
+  const scan = line.replace(/(`+)(?:(?!\1)[^\n])*?\1/g, (span) => ' '.repeat(span.length));
+  let visible = '';
+  let hidden = '';
+  let at = 0;
+  while (at < line.length) {
+    const next = scan.indexOf(open ? '-->' : '<!--', at);
+    const end = next < 0 ? line.length : next;
+    if (open) hidden += line.slice(at, end); else visible += line.slice(at, end);
+    if (next < 0) break;
+    at = next + (open ? 3 : 4);
+    open = !open;
+  }
+  return { visible, hidden, open };
 }
 
 /** A CommonMark code fence line: three or more ` or ~, then an info string (no ` after backticks). */
@@ -154,11 +282,14 @@ export function evaluateChecks(checks, required = REQUIRED_CHECKS) {
 const time = (value) => Date.parse(value ?? '') || 0;
 const sameLogin = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 
+const CONCLUSIONS = ['success', 'skipped', 'neutral', 'cancelled', 'timed_out', 'action_required', 'startup_failure', 'stale', 'failure'];
+/** pending until it finished; then its conclusion (cancelled stays cancelled), unknown ones as failure. */
 function checkRunState(run) {
   if (String(run.status ?? '').toLowerCase() !== 'completed') return 'pending';
   const conclusion = String(run.conclusion ?? '').toLowerCase();
-  return ['success', 'skipped', 'neutral'].includes(conclusion) ? conclusion : 'failure';
+  return CONCLUSIONS.includes(conclusion) ? conclusion : 'failure';
 }
+const failed = (state) => !['success', 'skipped', 'neutral', 'pending'].includes(state);
 
 function statusState(status) {
   const state = String(status.state ?? '').toLowerCase();
@@ -179,27 +310,31 @@ function newest(entries, startOf, { unfinishedFirst = false } = {}) {
  *
  * `commit` is what scripts/lib/gh.mjs commitChecks returns: every check run attempt
  * ({ id, name, status, conclusion, startedAt, app, suiteId }), the workflow runs on the commit
- * ({ name, path, event, suiteId }) and every commit status with who set it
+ * ({ id, name, path, event, status, conclusion, suiteId }) and every commit status with who set it
  * ({ id, context, state, createdAt, creator }).
  *
- * - The CI_CHECKS count only as check runs of CI_WORKFLOW (that file, GitHub Actions). Every CI
- *   run on the commit must pass them; within one run the newest attempt counts. A report with
+ * - The CI_CHECKS count only as check runs of CI_WORKFLOW (that file, GitHub Actions). For the
+ *   merge gate every CI run on the commit must pass them; within one run the newest attempt
+ *   counts. A report with
  *   the same name from anywhere else refuses, so a duplicate-named job cannot stand in for or
  *   mask the real one.
- * - `agent-review` counts only as a commit status set by `reviewer` (the account the scripts run
- *   as). A check run of that name, or the status set by any other account, refuses.
+ * - `agent-review` counts only as a commit status set by `reviewer` (AGENT_REVIEW_ACCOUNT in the
+ *   scripts). A check run of that name, or the status set by any other account, refuses.
  * - Any other required name must be green wherever it reports; any other failed check refuses.
- * - With exactCommitCi (tagging a release), at least one CI run must have tested the commit
- *   itself (a push or a run started by hand), not only a pull request's merge with main.
+ * - With exactCommitCi (tagging a release), the CI_CHECKS are judged only on the newest CI run
+ *   that tested the commit itself (a push or a run started by hand), not a pull request's merge
+ *   with main. That run must have finished with conclusion success and every CI job green:
+ *   queued or running is waited for; cancelled, startup_failure, a failed or missing job refuse.
  *
  * Returns { ok, problems, waiting }: `waiting` is true when the only problems are CI jobs that
  * are still running or have not reported yet.
  */
 export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, exactCommitCi = false } = {}) {
   const { checkRuns = [], workflowRuns = [], statuses = [] } = commit ?? {};
-  const ciSuites = new Set(workflowRuns
-    .filter((run) => run.name === CI_WORKFLOW.name && String(run.path ?? '').replace(/@.*$/, '') === CI_WORKFLOW.path)
-    .map((run) => run.suiteId));
+  const ciWorkflowRuns = workflowRuns
+    .filter((run) => run.name === CI_WORKFLOW.name && String(run.path ?? '').replace(/@.*$/, '') === CI_WORKFLOW.path);
+  const ciSuites = new Set(ciWorkflowRuns.map((run) => run.suiteId));
+  const runIdOfSuite = new Map(ciWorkflowRuns.map((run) => [run.suiteId, run.id]));
   const attempts = new Map();
   for (const run of checkRuns) {
     if (!run.name) continue;
@@ -220,6 +355,34 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
   const block = (message) => problems.push({ message, waiting: false });
   const wait = (message) => problems.push({ message, waiting: true });
   const source = (run) => `${run.app ?? 'an unknown app'}${run.app === CI_WORKFLOW.app ? ` (check suite ${run.suiteId})` : ''}`;
+  const inRun = (run) => {
+    const id = runIdOfSuite.get(run.suiteId);
+    return id === undefined ? '' : ` in ${CI_WORKFLOW.name} run ${id} (gh run rerun ${id} --failed)`;
+  };
+
+  // Which CI runs judge the CI_CHECKS. For the merge gate, every CI run on the commit. For tagging
+  // (exactCommitCi), only the newest run that tested the commit itself (a push or a run started
+  // by hand): it must have finished, with conclusion success, and every CI job in it green.
+  // Pull request runs test the PR merged with main, not the commit, so they do not count there.
+  let judged = ciSuites;
+  let judgedRunDone = false;
+  if (exactCommitCi) {
+    const own = ciWorkflowRuns.filter((run) => run.event !== 'pull_request').sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+    judged = new Set(own.slice(0, 1).map((run) => run.suiteId));
+    if (ciWorkflowRuns.length === 0) wait(`no ${CI_WORKFLOW.name} run has started on this commit yet`);
+    else if (own.length === 0) {
+      block(`${CI_WORKFLOW.name} ran on this commit only as part of a pull request, which tests its merge with main; run it on the commit itself (gh workflow run ci.yml --ref <branch>) and tag once it passes`);
+    } else {
+      const latest = own[0];
+      const status = String(latest.status ?? '').toLowerCase();
+      const conclusion = String(latest.conclusion ?? '').toLowerCase();
+      if (status !== 'completed') wait(`${CI_WORKFLOW.name} run ${latest.id} on this commit is ${status || 'not finished'}`);
+      else {
+        judgedRunDone = true;
+        if (conclusion !== 'success') block(`${CI_WORKFLOW.name} run ${latest.id} on this commit ended ${conclusion || 'without a conclusion'}; re-run it (gh run rerun ${latest.id}) or start a new one, and tag once it passes`);
+      }
+    }
+  }
 
   for (const name of required) {
     const named = runs.filter((run) => run.name === name);
@@ -238,11 +401,15 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
     if (CI_CHECKS.includes(name)) {
       for (const run of named.filter((r) => !r.fromCi)) block(`a check named "${name}" also comes from ${source(run)}, not the ${CI_WORKFLOW.name} workflow; refusing so it cannot stand in for the real job`);
       for (const status of namedStatuses) block(`a commit status named "${name}" was set by ${status.creator ?? 'an unknown account'}; "${name}" must come from the ${CI_WORKFLOW.name} workflow`);
-      const fromCi = named.filter((r) => r.fromCi);
-      if (fromCi.length === 0) wait(`required check "${name}" has not reported from the ${CI_WORKFLOW.name} workflow on this commit`);
+      const fromCi = named.filter((r) => r.fromCi && judged.has(r.suiteId));
+      if (fromCi.length === 0) {
+        const missing = `required check "${name}" has not reported from the ${CI_WORKFLOW.name} workflow on this commit`;
+        if (judgedRunDone) block(`${missing}, and the run has finished`);
+        else wait(missing);
+      }
       for (const run of fromCi) {
         if (run.state === 'pending') wait(`required check "${name}" is still running`);
-        else if (run.state !== 'success') block(`required check "${name}" is ${run.state}`);
+        else if (run.state !== 'success') block(`required check "${name}" is ${run.state}${inRun(run)}`);
       }
       continue;
     }
@@ -253,14 +420,7 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
       else if (entry.state !== 'success') block(`required check "${name}" is ${entry.state}`);
     }
   }
-  if (exactCommitCi) {
-    const ciRuns = workflowRuns.filter((run) => ciSuites.has(run.suiteId));
-    if (ciRuns.length === 0) wait(`no ${CI_WORKFLOW.name} run has started on this commit yet`);
-    else if (!ciRuns.some((run) => run.event !== 'pull_request')) {
-      block(`${CI_WORKFLOW.name} ran on this commit only as part of a pull request, which tests its merge with main; run it on the commit itself (gh workflow run ci.yml --ref <branch>) and tag once it passes`);
-    }
-  }
-  for (const run of runs) if (!required.includes(run.name) && run.state === 'failure') block(`check "${run.name}" failed`);
+  for (const run of runs) if (!required.includes(run.name) && failed(run.state)) block(`check "${run.name}" ${run.state === 'failure' ? 'failed' : `is ${run.state}`}`);
   for (const status of latestStatuses) if (!required.includes(status.context) && status.state === 'failure') block(`status "${status.context}" (set by ${status.creator ?? 'an unknown account'}) failed`);
 
   const messages = [...new Set(problems.map((problem) => problem.message))];
@@ -330,17 +490,62 @@ export function latestReleaseVersion(lsRemoteOutput) {
   return versions.reduce((best, version) => (best === undefined || isVersionBump(best, version) ? version : best), undefined);
 }
 
+/** The first `length` UTF-16 units of text, one less if that would split a surrogate pair. */
+function sliceSafe(text, length) {
+  const cut = text.slice(0, Math.max(0, length));
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
+/** The line that closes the code fence left open at the end of text, or '' when none is open. */
+function closingFence(text) {
+  let fence;
+  for (const line of text.split('\n')) {
+    const marker = indentOf(line) <= 3 ? fenceMarker(line.trim()) : undefined;
+    if (!marker) continue;
+    if (!fence) fence = marker;
+    else if (marker.char === fence.char && marker.length >= fence.length && marker.info === '') fence = undefined;
+  }
+  return fence ? fence.char.repeat(fence.length) : '';
+}
+
 /**
  * Joins the review text and the footer (verdict, CI table, head marker) into one comment within
- * GitHub's 65536-character limit. Only the end of the review text is cut; the footer is always
- * kept whole.
+ * GitHub's 65536-character limit. The end of the review text is cut, never inside a surrogate
+ * pair, and a code fence left open by the cut is closed so the footer is not shown as code. The
+ * footer is kept whole unless it alone would take more than half the limit; then its middle is
+ * cut and its last line (the head marker) is kept.
  */
 export function fitComment(review, footer = '', limit = 65_000) {
-  const join = (text) => (footer ? `${text}\n\n${footer}` : text);
-  if (join(review).length <= limit) return join(review);
+  const whole = footer ? `${review}\n\n${footer}` : review;
+  if (whole.length <= limit) return whole;
+  let tail = footer;
+  if (tail.length > limit / 2) {
+    const lastBreak = tail.lastIndexOf('\n');
+    const last = tail.slice(lastBreak + 1);
+    const gap = '\n\n_(Cut: too long for a GitHub comment.)_\n\n';
+    tail = `${sliceSafe(tail.slice(0, Math.max(0, lastBreak)), Math.floor(limit / 2) - last.length - gap.length)}${gap}${last}`;
+  }
+  const join = (text) => (tail ? `${text}\n\n${tail}` : text);
   const note = '\n\n_(Truncated: the full review is longer than a GitHub comment allows.)_';
   const room = Math.max(0, limit - join('').length - note.length);
-  return join(`${review.slice(0, room)}${note}`);
+  let cut = sliceSafe(review, room);
+  let close = closingFence(cut);
+  if (close) {
+    cut = sliceSafe(review, room - close.length - 1);
+    close = closingFence(cut);
+    if (close) cut = `${cut}\n${close}`;
+  }
+  return join(`${cut}${note}`);
+}
+
+/**
+ * Changed files that are part of the gates themselves (CI and release workflows, the secret-scan
+ * allowlist, the gate scripts, the agent commands). CI runs the PR's own copies of these, so a PR
+ * can weaken the checks it is judged by; merge-pr points them out.
+ */
+export function gateFileChanges(paths) {
+  const gates = [/^\.github\//, /^scripts\/lib\//, /^scripts\/(secret-scan|merge-pr|agent-review|tag-release|prepare-release|verify-release-content)\.mjs$/, /^\.claude\/commands\//];
+  return (paths ?? []).filter((file) => gates.some((pattern) => pattern.test(file)));
 }
 
 // ---- Secret scanning ----------------------------------------------------------------------------

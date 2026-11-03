@@ -302,9 +302,22 @@ pull request merges, CI type checks it, runs the unit tests and the end-to-end t
 VS Code, packages and inspects the VSIX, runs `npm audit` on runtime dependencies, and scans the
 files and every commit for secrets, and a security and code review must pass. Releases are
 built by GitHub Actions from a tagged commit on `main` (or, for an urgent fix to an older
-release, the reviewed head of its hotfix branch), attached to a GitHub release with a SHA-256
-checksum, and published to the Marketplace only after the owner approves that run. Every GitHub
-Action is pinned to a full commit hash.
+release, the reviewed head of its hotfix branch) and attached to a GitHub release with a SHA-256
+checksum. Publishing to the Marketplace waits for an approval in GitHub, which is the owner's
+decision. Every GitHub Action is pinned to a full commit hash.
+
+The checksum shows that the VSIX published is the one the build job made; it does not protect
+the build itself. The build job installs dependencies with their install scripts and runs the
+tests, so a compromised dependency could change the VSIX before its checksum is taken.
+
+AI agents do much of this work, and today they act through the owner's GitHub account, which
+is a repository and organization admin. So the review result (`agent-review`), the Marketplace
+approval and the repository settings are not barriers an agent session cannot cross: an agent
+running as the owner could technically set that status, approve the deployment or change the
+settings. These steps are kept by policy: the agents are instructed never to take them, the
+scripts they use never do, and the approval is given by the owner in person. The planned
+hardening is a separate, non-admin GitHub identity for the agents that cannot approve
+deployments, with only that identity's `agent-review` trusted.
 
 GitHub enforces these rules through repository settings (branch protection on `main`, a ruleset
 that keeps release tags from being moved or deleted, and a protected `marketplace` environment).

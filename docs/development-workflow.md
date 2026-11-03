@@ -92,10 +92,11 @@ only the final diff, because a PR's commits stay public on GitHub even after a s
 Findings are printed masked. Test fixtures with fake keys are listed in
 `.github/secret-scan-allow.txt` with the rules their fake keys match and a reason; any other kind
 of key in such a file is still reported. A single line can carry the marker
-`secret-scan: allow`. Both
-are visible in review: the scan lists every marked line that matches a rule (masked), and fails
-when a marked line was added by one commit and removed by a later one, since the PR's final diff
-would no longer show it.
+`secret-scan: allow`. Both are visible in review: the scan lists every marked line that matches
+a rule (masked), and fails when a line let through by the marker or by the allowlist was added
+by one commit and removed by a later one, since the PR's final diff would no longer show it. The
+scan reads every file as text, even one `.gitattributes` marks as binary, and also checks the
+PR's commit messages.
 
 ## 4. The agent review gate
 
@@ -104,12 +105,27 @@ its own PR. So the review team's result is recorded as a **commit status** named
 `agent-review` on the PR's head commit, and branch protection requires it. A push to the branch
 creates a new head commit without that status, so new commits always need a new review.
 
+**Agents act as the owner's admin account.** The agents run `gh` as the owner, who is an
+admin of the repository and the organization. GitHub therefore lets an agent session do
+everything the owner can: set the `agent-review` status, approve the `marketplace` deployment
+(the owner is its only reviewer) and change branch protection or rulesets. Today these are
+enforced by policy for agent sessions, not by GitHub: the agents are told never to set
+`agent-review` except through `/review-pr`, never to approve a deployment and never to change
+settings, and the scripts never do. The planned hardening is a separate, non-admin bot identity
+for the agents (a machine user or a fine-grained token) that is not an environment reviewer,
+with only that identity's `agent-review` trusted.
+
 A commit status is not a strong signature: GitHub accepts an `agent-review` status from any
 account or workflow with write access, and branch protection cannot require a particular
-account. `merge-pr.mjs` therefore counts only the status set by the account it runs as (the
-owner), and refuses when another account set one or when a check run uses that name. Merges
-outside `merge-pr.mjs` rely on trust in everyone with write access, until the review result comes
-from a GitHub App or check run that only the review process can write.
+account. `merge-pr.mjs` and `tag-release.mjs` therefore count only the status set by the
+owner's account, which is fixed in the scripts (`AGENT_REVIEW_ACCOUNT` in
+`scripts/lib/workflow.mjs`), not taken from whoever runs them: another admin running
+`merge-pr.mjs` still needs the owner's `agent-review`, and their own does not count. They refuse
+when another account set one or when a check run uses that name. `agent-review.mjs submit`
+refuses to post unless `gh` runs as that account. Changing `AGENT_REVIEW_ACCOUNT` changes the
+gate, so it goes through review like any gate change. Merges outside `merge-pr.mjs` rely on trust
+in everyone with write access, until the review result comes from a GitHub App or check run that
+only the review process can write.
 
 ### Running the review team from Claude Code
 
@@ -135,16 +151,27 @@ The command (`.claude/commands/review-pr.md`) does the following:
 3. **Aggregate.** It merges the findings into one review file. Each finding starts with a
    severity: `[BLOCKER]` (must not merge), `[MAJOR]`, `[MINOR]` or `[NIT]`. The file must contain
    `Verdict: PASS` or `Verdict: FAIL` and `Head-SHA: <the reviewed commit>`.
-4. **Submit.** `node scripts/agent-review.mjs submit <number> --review <file>` posts the file as
-   a PR comment (with a snapshot of CI) and sets `agent-review` on the head commit.
+4. **Submit.** `node scripts/agent-review.mjs submit <number> --review <file>` sets
+   `agent-review` on the head commit to pending, posts the file as a PR comment (with a snapshot
+   of CI), and only then sets the result. If the comment cannot be posted, the status stays
+   pending and the merge gate refuses, so an earlier success on the same commit never survives a
+   failed re-review.
 
 `agent-review` is **success** only when the file has exactly one verdict line and it reads
 `Verdict: PASS`, its one `Head-SHA` line names the PR's current head, and it has no open
 `[BLOCKER]` anywhere, code blocks included (a fixed one is written `[BLOCKER][RESOLVED]`).
-Otherwise it is **failure** and the comment lists why. Verdict and Head-SHA lines inside code
-fences are ignored, so quoted code cannot fake them, and a code fence left open fails the review
-rather than hiding what follows it. Use `--dry-run` to see the comment and the status without
-posting.
+Otherwise it is **failure** and the comment lists why. A tag counts however it is typed, as long
+as GitHub shows it as one: escaped (`\[BLOCKER\]`), with spaces inside the brackets, in
+fullwidth or other bracket characters, in bold, in any case, or with invisible characters
+inside. A tag spelled with lookalike letters from another alphabet fails the review.
+
+Verdict and Head-SHA lines inside code fences are ignored, so quoted code cannot fake them, and a
+code fence left open fails the review rather than hiding what follows it. The file is read the
+way GitHub shows it, and anything that could look different there fails the review: a fence
+indented 4 or more spaces (GitHub shows it as text or code, never as a fence), a Verdict or
+Head-SHA line inside an HTML comment (hidden on GitHub), inside a quote, a list item or an
+indented block, and an HTML comment that is never closed. Use `--dry-run` to see the comment and
+the status without posting.
 
 The format of the review file is shown in `.claude/commands/review-pr.md`.
 
@@ -161,7 +188,8 @@ The merge agent runs `node scripts/merge-pr.mjs <number>` (first with `--dry-run
 - refuses unless every required check (the six CI jobs, `agent-review`, and anything else branch
   protection requires) is green on the current head, and no other check failed. The CI jobs
   count only from the `CI` workflow, so a job of the same name elsewhere cannot stand in for
-  one, and `agent-review` counts only as a commit status set by the account the script runs as;
+  one, and `agent-review` counts only as a commit status set by the owner's account
+  (`AGENT_REVIEW_ACCOUNT`), whoever runs the script;
 - refuses if the branch is behind `main`, has conflicts, or has unresolved conversations;
 - for a `release/x.y.z` or `hotfix/x.y.z` PR, refuses unless the head's package.json is
   `x.y.z`, CHANGELOG.md has its section, and `vx.y.z` does not exist yet (pass `--no-tag` for a
@@ -170,6 +198,10 @@ The merge agent runs `node scripts/merge-pr.mjs <number>` (first with `--dry-run
   and ` (#<number>)` as the subject. `--match-head-commit` stops the merge if someone pushed in
   the meantime, and `--repo` keeps `gh` from touching local branches or worktrees. A release PR
   is tagged only after GitHub confirms the merge and its squash commit.
+
+When a PR changes the gates themselves (the workflows, the secret-scan allowlist, the gate
+scripts or the agent commands), the script says so before merging: CI ran the PR's own copies
+of those files, so the review must have covered what they change.
 
 It never uses `--admin` and never changes branch protection. A refusal names each reason and
 the fix (for example `gh pr update-branch <number> --rebase`, then CI and a new review).
@@ -192,10 +224,11 @@ the fix (for example `gh pr update-branch <number> --rebase`, then CI and a new 
 6. The tag starts `.github/workflows/release.yml`:
    - **build** has a read-only token. It checks that the tag matches package.json and points
      at a commit on `main` (or at the head of `hotfix/<x.y.z>`, see the hotfix section), runs
-     the tests, builds and verifies the VSIX, and records its SHA-256;
+     the tests, builds and verifies the VSIX, and records the SHA-256 of the VSIX and of the
+     release notes;
    - **release** creates the GitHub release named `<x.y.z>` with the VSIX, the checksum, and
      the CHANGELOG section as notes. It is the only job that can write to the repository, so it
-     installs and runs nothing: it downloads the build's files and checks the checksum first;
+     installs and runs nothing: it downloads the build's files and checks both checksums first;
    - **publish** runs in the protected `marketplace` environment. It **waits for the owner**:
      GitHub shows "Review deployments" on the run, and nothing is published until the owner
      approves. Its first step checks the VSIX against the checksum the build job recorded. It
@@ -215,6 +248,13 @@ gh api -X POST "repos/$repo/actions/runs/<run-id>/pending_deployments" \
 ```
 
 Rejecting it leaves the GitHub release in place and nothing published.
+
+What the checksum covers: it shows that the VSIX the release and publish jobs use is the one the
+build job made, so nothing can swap it on the way. It does not protect the build itself. The
+build job runs `npm ci` with dependency install scripts and runs the tests, so a compromised
+dependency could change the VSIX before its checksum is taken. That job has a read-only token
+and no secrets, which limits what such a dependency could reach, but not what it could put in
+the package.
 
 ## 7. Recovery
 
@@ -254,18 +294,36 @@ bump the version and CHANGELOG with `scripts/prepare-release.mjs`, and go throug
 `/merge-pr`, which tags and starts the release.
 
 **Main has unreleased work that must not ship yet.** Branch from the last release tag instead.
-The tag starts the Release workflow of the tagged commit, so the hotfix branch must contain
-`.github/workflows/release.yml` and the `scripts/` it uses. Tags made before this workflow
-existed (v0.4.12 and earlier) do not; on such a branch, first bring them over from `main`
-(`git checkout origin/main -- .github/workflows scripts`, then commit). With `<last>` the last
-release (say 0.5.0) and `<next>` the next patch (0.5.1):
+With `<last>` the last release (say 0.5.0) and `<next>` the next patch (0.5.1):
 
 ```bash
+git fetch origin
 git worktree add -b hotfix/<next> .claude/worktrees/hotfix-<next> v<last>
+cd .claude/worktrees/hotfix-<next>
+git checkout origin/main -- .github scripts .vscodeignore
+git diff --cached --stat     # check what came over, see below
+git commit -m "chore(release): bring the release workflow and gates from main"
 # fix, bump to <next>, write the CHANGELOG section, commit
 git push -u origin hotfix/<next>
 gh pr create --base main --title "fix: ... (<next>)"
 ```
+
+The `git checkout origin/main -- ...` step matters because CI and the Release workflow run the
+files on the branch, not the ones on `main`, and an older tag may predate them (v0.4.12 and
+earlier do). All three paths are needed:
+
+- `.github` brings `workflows/ci.yml` and `workflows/release.yml`, and also
+  `secret-scan-allow.txt`: the old tag already contains test fixtures with fake keys, and
+  without the allowlist the `secret-scan` job fails on every run.
+- `scripts` brings the scripts those workflows run (`secret-scan.mjs`, `lib/workflow.mjs`,
+  `verify-release-content.mjs` and the rest).
+- `.vscodeignore` keeps `.github/` (and the contributor docs) out of the VSIX. An older one
+  does not, so `release-content` in CI and the `build` job of the Release workflow refuse the
+  package.
+
+Check the staged diff before committing: it should only add or update workflow and gate files.
+If `main` changed a script the old code still relies on (for example the vendoring or SBOM
+scripts), restore that file from the tag with `git checkout v<last> -- scripts/<file>`.
 
 Run `/review-pr` on the PR as usual: the tag needs `agent-review` set by the owner's account on
 the exact head commit you release. The PR's CI tests the hotfix merged with `main` (and does not
@@ -277,8 +335,11 @@ gh run list --workflow ci.yml --branch hotfix/<next> --limit 1   # wait until it
 ```
 
 Then tag the hotfix head. `tag-release.mjs` refuses unless the commit is the head of
-`hotfix/<next>`, a CI run on that commit passed, and the owner's `agent-review` on it is
-success; the Release workflow also accepts only the head of `hotfix/<version>`:
+`hotfix/<next>`, the newest CI run on that exact commit (not the PR's run) has finished with
+all six jobs green, and the owner's `agent-review` on it is success. A run that is queued or
+still running is waited for; one that was cancelled, failed to start or has a failed job is
+refused, with the run id to re-run. The Release workflow also accepts only the head of
+`hotfix/<version>`:
 
 ```bash
 node scripts/tag-release.mjs <next> --sha "$(git rev-parse HEAD)"
@@ -303,8 +364,9 @@ There is no "unpublish one version" that users reliably follow. Options, best fi
 ### The Release workflow failed
 
 - **build failed:** fix the cause in a PR. If the tag points at a commit that should not be
-  released, do not move the tag (the tag ruleset refuses that anyway); release the fix as the
-  next patch. If only an outside service failed, re-run the job.
+  released, do not move the tag (once the tag rulesets in section 8 are applied, GitHub refuses
+  that anyway); release the fix as the next patch. If only an outside service failed, re-run
+  the job.
 - **release failed:** the workflow never changes an existing GitHub release (no `--clobber`), so
   a re-run refuses if the failed run already created one. The owner checks the partial release
   in the web UI, deletes it if it is incomplete, then re-runs the failed jobs.
@@ -367,6 +429,7 @@ JSON
 Merging and vulnerability reporting:
 
 ```bash
+repo=VitalPointAI/near-ai-vscode
 gh api -X PATCH "repos/$repo" -F allow_squash_merge=true -F allow_merge_commit=false \
   -F allow_rebase_merge=false -F delete_branch_on_merge=true
 gh api -X PUT "repos/$repo/private-vulnerability-reporting"
@@ -377,6 +440,7 @@ Rulesets accept roles, teams and apps as bypass actors, not single accounts, so 
 limited to the organization owner role; every organization owner can create a tag.
 
 ```bash
+repo=VitalPointAI/near-ai-vscode
 gh api -X POST "repos/$repo/rulesets" --input - <<'JSON'
 {"name": "release tags are permanent", "target": "tag", "enforcement": "active",
  "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
@@ -394,6 +458,7 @@ JSON
 The `marketplace` environment:
 
 ```bash
+repo=VitalPointAI/near-ai-vscode
 owner_id="$(gh api users/ALuhning --jq .id)"
 gh api -X PUT "repos/$repo/environments/marketplace" --input - <<JSON
 {"reviewers": [{"type": "User", "id": $owner_id}], "prevent_self_review": false,

@@ -70,6 +70,52 @@ test('a review of an older head is stale once new commits are pushed', () => {
   assert.match(decision.reasons.join(), /review the new commits/);
 });
 
+test('a BLOCKER that GitHub shows as one is counted, however it is written', () => {
+  const head = `Verdict: PASS\nHead-SHA: ${SHA}\n`;
+  const lookalikes = {
+    'escaped brackets': '- \\[BLOCKER\\] token logged',
+    'spaces inside the brackets': '- [ BLOCKER ] token logged',
+    'a zero-width space in the word': '- [BLOC​KER] token logged',
+    'a zero-width joiner and a bidi mark': '- [‪BLO‍CKER‬] token logged',
+    'fullwidth brackets': '- ［BLOCKER］ token logged',
+    'fullwidth letters': '- [ＢＬＯＣＫＥＲ] token logged',
+    'lenticular brackets': '- 【BLOCKER】 token logged',
+    'HTML entities': '- &#91;BLOCKER&#93; token logged',
+    'bold inside the brackets': '- [**BLOCKER**] token logged',
+    'lower case': '- [blocker] token logged'
+  };
+  for (const [what, line] of Object.entries(lookalikes)) {
+    const review = parseReview(`${head}${line}\n`);
+    assert.equal(review.openBlockers.length, 1, what);
+    assert.equal(reviewDecision(review, SHA).state, 'failure', what);
+  }
+  for (const resolved of ['- \\[BLOCKER\\]\\[RESOLVED\\] fixed', '- [ BLOCKER ] [ RESOLVED ] fixed', '- ［BLOCKER］［RESOLVED］ fixed']) {
+    const review = parseReview(`${head}${resolved}\n`);
+    assert.deepEqual([review.openBlockers.length, review.counts.resolved], [0, 1], resolved);
+  }
+  assert.equal(parseReview(`${head}- \\[ MAJOR \\] and [NIT ]\n`).counts.major, 1);
+});
+
+test('a severity tag spelled with lookalike letters fails the review instead of being skipped', () => {
+  const head = `Verdict: PASS\nHead-SHA: ${SHA}\n`;
+  // Cyrillic O and Greek K: they look like BLOCKER but are not the ASCII word.
+  for (const line of ['- [BLОCKER] token logged', '- [BLOCΚER] token logged', '- [ВЛОСКЕР] all Cyrillic']) {
+    const decision = reviewDecision(parseReview(`${head}${line}\n`), SHA);
+    assert.equal(decision.state, 'failure', line);
+    assert.match(decision.reasons.join('\n'), /looks like \[BLOCKER\]/, line);
+  }
+  // Other words in brackets, in any script, are fine.
+  assert.equal(reviewDecision(parseReview(`${head}- [MAJOR] see [the café](https://example.com) and [тест]\n`), SHA).state, 'success');
+});
+
+test('Verdict and Head-SHA lines are read the way GitHub shows them', () => {
+  // A zero-width space hides "Verdict: FAIL" from a literal match but not from a reader.
+  const hidden = reviewDecision(parseReview(`Verdict: PASS\nVer​dict: FAIL\nHead-SHA: ${SHA}\n`), SHA);
+  assert.equal(hidden.state, 'failure');
+  assert.match(hidden.reasons.join('\n'), /2 Verdict lines/);
+  assert.equal(reviewDecision(parseReview(`Ｖerdict: PASS\nHead-SHA: ${SHA}\n`), SHA).state, 'success', 'fullwidth letters read as ASCII');
+});
+
 test('a verdict inside a code fence is ignored, but a BLOCKER tag inside one still counts', () => {
   const review = parseReview(`Verdict: FAIL\nHead-SHA: ${SHA}\n\`\`\`\nVerdict: PASS\n- [BLOCKER] example\n\`\`\``);
   assert.equal(review.verdict, 'FAIL');
@@ -98,6 +144,46 @@ test('a code fence closes only on the same character, at least as long, with not
   // Inline code that starts with three backticks is not a fence.
   assert.deepEqual(parseReview(`${head}\`\`\`x\`\`\` is inline\n`).problems, []);
   assert.equal(reviewDecision(parseReview(`${head}~~~\n\`\`\`\n~~~\n`), SHA).state, 'success');
+});
+
+test('a fence indented 4 or more spaces is not a fence, so it cannot hide a verdict GitHub shows', () => {
+  // Reproduced in review: after a paragraph, an indented ``` line is paragraph text on GitHub,
+  // so the FAIL between two of them is visible, but the parser read them as a fence around it.
+  const text = `Verdict: PASS\nHead-SHA: ${SHA}\n\nSome notes\n    \`\`\`\nVerdict: FAIL\n    \`\`\`\n`;
+  const decision = reviewDecision(parseReview(text), SHA);
+  assert.equal(decision.state, 'failure');
+  assert.match(decision.reasons.join('\n'), /2 Verdict lines/);
+  assert.match(decision.reasons.join('\n'), /line 5 .*indented 4 or more spaces/);
+  assert.match(reviewDecision(parseReview(`Verdict: PASS\nHead-SHA: ${SHA}\n\t\`\`\`\n`), SHA).reasons.join('\n'), /indented 4 or more spaces/, 'a tab counts as 4 spaces');
+  // Up to 3 spaces is still a fence, on both ends.
+  const fenced = parseReview(`Verdict: FAIL\nHead-SHA: ${SHA}\n   \`\`\`\nVerdict: PASS\n   \`\`\`\n`);
+  assert.deepEqual([fenced.verdict, fenced.problems], ['FAIL', []]);
+  // Inside a fence, an indented ``` line is content and does not close it.
+  assert.match(parseReview(`Verdict: PASS\nHead-SHA: ${SHA}\n\`\`\`\n    \`\`\`\n`).problems.join(), /never closed/);
+});
+
+test('Verdict and Head-SHA lines GitHub hides or shows differently fail the review', () => {
+  const head = `Verdict: PASS\nHead-SHA: ${SHA}\n`;
+  const fails = (text, pattern) => {
+    const decision = reviewDecision(parseReview(text), SHA);
+    assert.equal(decision.state, 'failure', text);
+    assert.match(decision.reasons.join('\n'), pattern, text);
+  };
+  fails(`${head}<!-- Verdict: FAIL -->\n`, /inside an HTML comment/);
+  fails(`<!--\nVerdict: FAIL\n-->\n${head}`, /line 2 .*inside an HTML comment/);
+  fails(`<!-- notes\n${head}-->\n`, /inside an HTML comment/);
+  fails(`${head}<!-- never closed\n- [MAJOR] x\n`, /HTML comment opened on line 3 is never closed/);
+  fails(`${head}> Verdict: FAIL\n`, /quote, list or indented block/);
+  fails(`${head}- Head-SHA: ${OTHER}\n`, /quote, list or indented block/);
+  fails(`${head}* Verdict: FAIL\n`, /quote, list or indented block/);
+  fails(`${head}1. **Verdict:** FAIL\n`, /quote, list or indented block/);
+  fails(`${head}    Verdict: FAIL\n`, /quote, list or indented block/);
+  // Comments that say nothing about the verdict, and comment markers in inline code, are fine.
+  const ok = `${head}<!-- reviewers: list findings below -->\n- [MINOR] the footer marker \`<!-- agent-review head=... -->\` is fine\n`;
+  assert.deepEqual(reviewDecision(parseReview(ok), SHA), { state: 'success', reasons: [] });
+  // Text after a comment closes on the same line is visible again.
+  assert.equal(parseReview(`<!-- note --> Verdict: PASS\nHead-SHA: ${SHA}\n`).verdict, 'PASS');
+  assert.match(parseReview(`<!--\nx\n--> Verdict: FAIL\n${head}`).problems.join(), /not exactly "Verdict: PASS"|2 Verdict lines/);
 });
 
 test('check runs and commit statuses are normalized, keeping the latest run per name', () => {
@@ -133,7 +219,7 @@ test('every required check must be green, and any other failed check blocks too'
 
 const OWNER = 'ALuhning';
 const CI_SUITE = 101;
-const ciWorkflowRun = { id: 1, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', suiteId: CI_SUITE };
+const ciWorkflowRun = { id: 1, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', status: 'completed', conclusion: 'success', suiteId: CI_SUITE };
 const ciRun = (name, extra = {}) => ({ id: name.length, name, status: 'completed', conclusion: 'success', startedAt: '2026-01-01T00:00:00Z', app: 'github-actions', suiteId: CI_SUITE, ...extra });
 const ownerReview = (state = 'success', extra = {}) => ({ id: 1, context: 'agent-review', state, createdAt: '2026-01-01T01:00:00Z', creator: OWNER, ...extra });
 const greenCommit = () => ({ checkRuns: CI_CHECKS.map((name) => ciRun(name)), workflowRuns: [ciWorkflowRun], statuses: [ownerReview()] });
@@ -221,6 +307,60 @@ test('tagging needs a CI run that tested the commit itself, not only a pull requ
   assert.equal(gate(notStarted, { required: CI_CHECKS, exactCommitCi: true }).waiting, true, 'CI that has not started yet is waited for');
 });
 
+/** A green PR run plus a CI run on the commit itself (workflow_dispatch) with the given jobs. */
+function withExactRun(run, jobs = CI_CHECKS.map((name) => ciRun(name, { suiteId: 909 }))) {
+  const commit = greenCommit();
+  commit.workflowRuns.push({ ...ciWorkflowRun, id: 77, event: 'workflow_dispatch', suiteId: 909, ...run });
+  commit.checkRuns.push(...jobs);
+  return commit;
+}
+
+test('tagging needs the CI run on the commit itself to have finished with every job green', () => {
+  const exact = (commit) => gate(commit, { exactCommitCi: true });
+  // Reproduced in review: a green PR run plus a dispatched run that has no jobs yet passed.
+  const queued = exact(withExactRun({ status: 'queued', conclusion: null }, []));
+  assert.equal(queued.ok, false);
+  assert.equal(queued.waiting, true, 'a queued run is waited for');
+  assert.match(queued.problems.join('\n'), /run 77 .*queued/);
+  const running = exact(withExactRun({ status: 'in_progress', conclusion: null }, CI_CHECKS.map((name) => ciRun(name, { suiteId: 909, status: 'in_progress', conclusion: null }))));
+  assert.deepEqual([running.ok, running.waiting], [false, true]);
+  for (const conclusion of ['startup_failure', 'cancelled', 'failure', 'timed_out']) {
+    const result = exact(withExactRun({ conclusion }, conclusion === 'startup_failure' ? [] : undefined));
+    assert.equal(result.ok, false, conclusion);
+    assert.equal(result.waiting, false, `${conclusion} is refused, not waited for`);
+    assert.match(result.problems.join('\n'), new RegExp(`run 77 .*${conclusion}.*gh run rerun 77`), conclusion);
+  }
+  const failedJob = exact(withExactRun({}, CI_CHECKS.map((name) => ciRun(name, { suiteId: 909, conclusion: name === 'e2e' ? 'failure' : 'success' }))));
+  assert.equal(failedJob.ok, false, 'a failed job refuses even if the run reports success');
+  assert.match(failedJob.problems.join('\n'), /"e2e" is failure/);
+  const cancelledJob = exact(withExactRun({}, CI_CHECKS.map((name) => ciRun(name, { suiteId: 909, conclusion: name === 'audit' ? 'cancelled' : 'success' }))));
+  assert.match(cancelledJob.problems.join('\n'), /"audit" is cancelled/, 'cancelled is reported as cancelled');
+  const missingJob = exact(withExactRun({}, CI_CHECKS.filter((name) => name !== 'lint').map((name) => ciRun(name, { suiteId: 909 }))));
+  assert.deepEqual([missingJob.ok, missingJob.waiting], [false, false], 'a finished run that never ran a job is refused');
+  assert.equal(exact(withExactRun({})).ok, true, 'a finished, green run on the commit passes');
+});
+
+test('for tagging only the newest run on the commit itself counts, not pull request runs', () => {
+  const exact = (commit) => gate(commit, { exactCommitCi: true });
+  // A hotfix whose PR run (its merge with main) failed, while CI on the hotfix head passed.
+  const prFailed = withExactRun({});
+  prFailed.checkRuns = prFailed.checkRuns.map((run) => (run.suiteId === CI_SUITE && run.name === 'test' ? { ...run, conclusion: 'failure' } : run));
+  assert.equal(exact(prFailed).ok, true);
+  assert.equal(gate(prFailed).ok, false, 'the merge gate still needs every run green');
+  // A newer run on the commit that failed wins over an older one that passed.
+  const newerFailure = withExactRun({});
+  newerFailure.workflowRuns.push({ ...ciWorkflowRun, id: 78, event: 'workflow_dispatch', conclusion: 'failure', suiteId: 910 });
+  newerFailure.checkRuns.push(...CI_CHECKS.map((name) => ciRun(name, { suiteId: 910, conclusion: name === 'test' ? 'failure' : 'success' })));
+  assert.match(exact(newerFailure).problems.join('\n'), /run 78 .*failure/);
+});
+
+test('a failed CI job names its run and how to re-run it', () => {
+  const commit = greenCommit();
+  commit.checkRuns = commit.checkRuns.map((run) => (run.name === 'e2e' ? { ...run, conclusion: 'cancelled' } : run));
+  const message = gate(commit).problems.join('\n');
+  assert.match(message, /"e2e" is cancelled in CI run 1 \(gh run rerun 1 --failed\)/);
+});
+
 test('a release PR is checked before it merges, not only when it is tagged afterwards', () => {
   const changelog = '# Changelog\n\n## 1.2.3\n\nFixes.\n';
   assert.deepEqual(releasePrProblems({ version: '1.2.3', pkgVersion: '1.2.3', changelog }), []);
@@ -282,6 +422,23 @@ test('truncating a review keeps its verdict and the footer with the head marker'
   assert.ok(body.endsWith(footer));
   assert.match(body, /Truncated/);
   assert.equal(fitComment('short', footer), `short\n\n${footer}`);
+});
+
+test('truncating never cuts inside a code fence or a surrogate pair, and caps a huge footer', () => {
+  const footer = `---\n**agent-review: failure.**\n\n<!-- agent-review head=${SHA} state=failure -->`;
+  // A cut inside an open fence would render the footer as code.
+  const fenced = fitComment(`Verdict: PASS\n\`\`\`\n${'x\n'.repeat(40_000)}`, footer, 1_000);
+  assert.ok(fenced.length <= 1_000);
+  assert.deepEqual(parseReview(fenced).problems, [], 'the fence is closed before the footer');
+  assert.ok(fenced.endsWith(footer));
+  // A cut between the two halves of an emoji would leave a lone surrogate.
+  const emoji = fitComment('\u{1F600}'.repeat(600), footer, 1_000);
+  assert.doesNotMatch(emoji, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  // A footer longer than the limit is cut too, keeping its last line (the head marker).
+  const long = `${'- reason\n'.repeat(500)}<!-- agent-review head=${SHA} state=failure -->`;
+  const body = fitComment('review', long, 1_000);
+  assert.ok(body.length <= 1_000);
+  assert.ok(body.endsWith(`<!-- agent-review head=${SHA} state=failure -->`));
 });
 
 test('the secret scan catches common key formats and masks them in its output', () => {
