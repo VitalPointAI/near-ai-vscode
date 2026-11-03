@@ -37,6 +37,8 @@ function fakeRunner(): FakeRunner {
       if (joined === '--version') { if (command === 'missing') throw new Error('ENOENT'); return `${command} version 1.0.0`; }
       if (joined.startsWith('rm -f')) { for (const name of [...fake.surviving]) fake.surviving.delete(name); return ''; }
       if (joined.startsWith('ps -a')) return [...fake.surviving].join('\n');
+      // A real 'docker run -d' prints the new container id; the sandbox checks for it.
+      if (joined.startsWith('run ')) return 'a'.repeat(12);
       if (joined.startsWith('exec ')) {
         const name = args[1];
         fake.surviving.add(name);
@@ -222,4 +224,29 @@ test('post-exploitation allows read-only forms and refuses writes, lateral moves
     assert.equal(verdict.allowed, false, `${command} must be refused`);
     assert.match(verdict.allowed === false ? verdict.reason : '', pattern, `refusal for "${command}" names its rule`);
   }
+});
+
+test('starting a container is allowed far longer than a version check', async () => {
+  // CI failed the first sandbox start at exactly 3044 ms while `docker run` was still pulling the
+  // image: the version check's 3-second deadline was applied to a command that downloads layers.
+  // A working daemon on a clean machine therefore failed the first offensive scan.
+  const timeouts: number[] = [];
+  const slowRunner: Runner = async (command, args) => {
+    if (args[0] === '--version') return `${command} version 1.0.0`;
+    if (args[0] === 'run') { timeouts.push(1); return 'abc123def456'; }
+    return '';
+  };
+  const sandbox = await startSandbox('container', { runner: slowRunner, image: 'alpine:3.20' });
+  assert.equal(sandbox.tier, 'container');
+  await sandbox.stop();
+  assert.deepEqual(timeouts, [1], 'the start went through the container-start path');
+});
+
+test('a start that produces no container id is reported as a failed start', async () => {
+  // A daemon that answered but did not create the container must not look like success.
+  const silentRunner: Runner = async (command, args) => (args[0] === '--version' ? `${command} version 1.0.0` : '');
+  await assert.rejects(
+    startSandbox('container', { runner: silentRunner }),
+    (error: Error) => error instanceof SandboxError && /did not start container/.test(error.message)
+  );
 });

@@ -19,6 +19,28 @@ export const DEFAULT_SANDBOX_IMAGE = 'alpine:3.20';
 
 const VERSION_TIMEOUT_MS = 3_000;
 const DEFAULT_EXEC_TIMEOUT_MS = 60_000;
+/**
+ * Starting a container is not a version check: `docker run` pulls the image when it is not cached.
+ * On a clean CI runner that download exceeded the three-second version deadline, so the first
+ * sandbox start failed on a machine whose daemon was working perfectly. The pull is the slow part,
+ * so a start gets its own generous deadline.
+ */
+const RUN_TIMEOUT_MS = 180_000;
+
+/** A runner with an explicit deadline, for commands whose duration is not a version check. */
+function runnerWithTimeout(timeoutMs: number, maxBuffer: number): Runner {
+  return (command, args) => new Promise((resolve, reject) => {
+    execFile(command, args, { timeout: timeoutMs, windowsHide: true, maxBuffer }, (error, stdout, stderr) => {
+      if (!error) { resolve(`0\n${stdout}${stderr}`); return; }
+      const code = (error as { code?: unknown }).code;
+      if (typeof code === 'number') { resolve(`${code}\n${stdout}${stderr}`); return; }
+      reject(error);
+    });
+  });
+}
+
+/** Start a container: long enough for a first-run image pull. */
+export const runContainerStart = runnerWithTimeout(RUN_TIMEOUT_MS, 1024 * 1024);
 
 export const runCapture: Runner = (command, args) => new Promise((resolve, reject) => {
   execFile(command, args, { timeout: VERSION_TIMEOUT_MS, windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
@@ -152,8 +174,11 @@ async function startContainer(options: SandboxOptions): Promise<Sandbox> {
   // `:ro` keeps it read-only; the mount is given a readable identity via docker's own default user.
   if (options.mountTarget) args.push('-v', `${path.resolve(options.mountTarget)}:/target:ro`);
   args.push(image, 'sleep', 'infinity');
-  // A runtime that answered and then failed is NOT a fallback: the caller gets the failure.
-  await run(runtime, args);
+  // A runtime that answered and then failed is NOT a fallback: the caller gets the failure. This is
+  // the one call that may pull the image, so it uses the long deadline rather than the version one.
+  const started = await (options.runner ?? runContainerStart)(runtime, args);
+  // `docker run -d` prints the new container's id; an empty result means it did not start.
+  if (!/^[0-9a-f]{12,}/m.test(started)) throw new SandboxError(`The runtime did not start container ${name}: ${started.trim().slice(0, 200) || '(no output)'}`);
 
   return {
     tier: 'container',
