@@ -14,7 +14,17 @@ export const ENABLE_COMMAND = 'nearAi.team.enable';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 export const OPEN_BOARD_COMMAND = 'nearAi.team.openBoard';
 export const IMPORT_PLANS_COMMAND = 'nearAi.team.importPlans';
-export const SOLO_TEXT = 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.';
+// Every team action is a button in the Team section of the NEAR AI sidebar, so the person is pointed there rather than at a palette command.
+export const SOLO_TEXT = 'Team Mode is not on for this project. To turn it on, choose Turn on Team Mode in the Team section of the NEAR AI sidebar.';
+const OPEN_FOLDER_TEXT = 'Open your project folder first, then choose Turn on Team Mode in the Team section of the NEAR AI sidebar.';
+// G-61-2: before any question, Enable says plainly when teammates cannot reach the project's online home. Share Team Setup uses the same words.
+export const TURN_ON_ANYWAY_ACTION = 'Turn on anyway';
+export const NOT_NOW_ACTION = 'Not now';
+export const LOCAL_ONLY_TEXT = 'Teammates cannot reach this project yet, because it is kept only on this computer.';
+export const LOCAL_ONLY_DETAIL = 'Put the project online where your teammates can reach it, for example on GitHub, then invite people.';
+export const NOT_SHAREABLE_TEXT = 'Teammates cannot reach this project yet, because the address it is kept at online cannot be given to them as it is.';
+export const NOT_SHAREABLE_DETAIL = 'Keep the project online at an address your teammates can use, for example on GitHub, with no password or token in it, then invite people.';
+const ENABLE_ANYWAY_DETAIL = ' You can turn on Team Mode now and share it with your team once the project is online.';
 // J-10: the person shares Team Mode with their team; the extension does the push. Git words stay in the output channel.
 export const PUSH_ACTION = 'Share with my team';
 export const VERIFY_ACTION = 'Check the team';
@@ -55,7 +65,8 @@ const EMAIL_PROMPT = 'Your email is kept only as a scrambled code (a salted hash
 export type TeamModeState = 'solo' | 'team' | 'error';
 // What registerTeamMode keeps of the board, which is loaded only once a session runs (a solo project never loads it).
 interface BoardHandle { openPanel(): void; controller: { sessionChanged(): void } }
-export interface TeamModeHandle { ready: Promise<TeamModeState>; session(): TeamSession | undefined }
+// onDidChange: called when Team Mode starts, restarts or stops, and when a turn-on attempt ends, so the sidebar's Team section can refresh.
+export interface TeamModeHandle { ready: Promise<TeamModeState>; session(): TeamSession | undefined; onDidChange(listener: () => void): { dispose(): void } }
 // The extension passes connectNearAi, the same key setup the chat's Set up button runs. Tests point the NEAR calls at a fake server and replace the
 // browser sign-in and the key setup.
 export interface TeamModeOptions {
@@ -145,6 +156,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   let projectRootForSlot: string | undefined;
   let board: BoardHandle | undefined;
   let contextKeySet = false;
+  const changeListeners = new Set<() => void>();
 
   // Created on first use, so a solo project never gets one.
   const output = {
@@ -192,6 +204,17 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     } catch (error) {
       output.appendLine(`A Team Mode message could not be shown: ${await describe(error)}`);
       return undefined;
+    }
+  }
+
+  // Tells every listener that Team Mode may have changed. A listener that throws never stops the others; its failure goes to the channel.
+  function changed(): void {
+    for (const listener of [...changeListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        void describe(error).then((reason) => { output.appendLine(`A Team Mode listener failed: ${reason}`); });
+      }
     }
   }
 
@@ -256,6 +279,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     projectRootForSlot = projectRoot;
     const state = await slot.start();
     if (state === 'team') await bringUpBoard();
+    changed();
     return state;
   }
 
@@ -277,6 +301,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     projectRootForSlot = projectRoot;
     await slot.restart();
     await bringUpBoard();
+    changed();
   }
 
   async function verifyLog(): Promise<void> {
@@ -312,10 +337,36 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     return true;
   }
 
+  // Every turn-on attempt, however it ends, is reported to the listeners.
   async function enable(): Promise<void> {
+    try {
+      await enableOnce();
+    } finally {
+      changed();
+    }
+  }
+
+  // G-61-2: whether teammates can reach the online home, read from git config only. When they cannot, one modal says so with what to do and
+  // the person chooses Turn on anyway or Not now; the technical steps go to the channel. Undefined means Not now.
+  async function confirmOnlineHome(projectRoot: string, remote: string): Promise<{ shareable: boolean } | undefined> {
+    const { checkOnlineHome } = await import('../../team/projectHome');
+    const home = await checkOnlineHome(projectRoot, remote);
+    if (home.kind !== 'local-only' && home.kind !== 'not-shareable') return { shareable: home.kind === 'shareable' };
+    if (home.kind === 'local-only') {
+      output.appendLine(`The team remote "${home.remote}" is a folder on this computer (a local path or a file:// address), so teammates cannot fetch from it. To fix: create an online repository (for example on GitHub), run git remote set-url ${home.remote} <its address>, push your branch, then invite people.`);
+    } else {
+      output.appendLine(`The team remote "${home.remote}" cannot be given to teammates: ${home.reason} To fix: run git remote set-url ${home.remote} <an address without a password or token> and let git keep the credential, then invite people.`);
+    }
+    const text = home.kind === 'local-only' ? LOCAL_ONLY_TEXT : NOT_SHAREABLE_TEXT;
+    const detail = `${home.kind === 'local-only' ? LOCAL_ONLY_DETAIL : NOT_SHAREABLE_DETAIL}${ENABLE_ANYWAY_DETAIL}`;
+    const choice = await teamPrompts.message('warn', text, { modal: true, detail }, TURN_ON_ANYWAY_ACTION, NOT_NOW_ACTION);
+    return choice === TURN_ON_ANYWAY_ACTION ? { shareable: false } : undefined;
+  }
+
+  async function enableOnce(): Promise<void> {
     const projectRoot = firstFolder();
     if (projectRoot === undefined) {
-      announce('error', 'Open your project folder first, then run "NEAR AI: Enable Team Mode" again.');
+      announce('error', OPEN_FOLDER_TEXT);
       return;
     }
     const enableModule = await import('../../team/enable');
@@ -351,6 +402,8 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     }
 
     const defaults = await enableModule.enableDefaults(projectRoot);
+    const home = await confirmOnlineHome(projectRoot, defaults.remote);
+    if (home === undefined) return;
     const required = (value: string): string | undefined => (value.trim() === '' ? 'Enter a value to continue.' : undefined);
     const teamName = await ask({ title: 'Enable Team Mode', prompt: 'Team name', value: defaults.teamName, validateInput: required });
     if (teamName === undefined) return;
@@ -376,14 +429,17 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     }
 
     await startSession(projectRoot);
-    const message = result.branch === undefined
-      ? `Team Mode is on for ${result.teamFile.name}.`
-      : `Team Mode is on for ${result.teamFile.name}. Share it so teammates can see the team.`;
+    const offerShare = home.shareable && result.branch !== undefined;
+    const message = !home.shareable
+      ? `Team Mode is on for ${result.teamFile.name}, for you only until the project is online where teammates can reach it.`
+      : result.branch === undefined
+        ? `Team Mode is on for ${result.teamFile.name}.`
+        : `Team Mode is on for ${result.teamFile.name}. Share it so teammates can see the team.`;
     output.appendLine(message);
     output.appendLine(result.branch === undefined ? 'team.json is committed.' : `team.json is committed on ${result.branch}. Sharing pushes ${result.branch} to ${result.remote}.`);
-    const actions = result.branch === undefined ? [VERIFY_ACTION] : [PUSH_ACTION, VERIFY_ACTION];
+    const actions = offerShare ? [PUSH_ACTION, VERIFY_ACTION] : [VERIFY_ACTION];
     const choice = await choose('info', message, ...actions);
-    if (choice === PUSH_ACTION && result.branch !== undefined) {
+    if (choice === PUSH_ACTION && offerShare && result.branch !== undefined) {
       await share(projectRoot, result.remote, result.branch);
     } else if (choice === VERIFY_ACTION) {
       await verifyLog();
@@ -482,12 +538,19 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.signIn === undefined ? {} : { signIn: options.signIn })
     }),
-    { dispose: (): void => { disposed = true; slot.clear(); if (contextKeySet) setContextKey(false); } }
+    { dispose: (): void => { disposed = true; slot.clear(); if (contextKeySet) setContextKey(false); changed(); changeListeners.clear(); } }
   );
 
   const ready = detect().catch(async (error: unknown): Promise<TeamModeState> => {
     output.appendLine(`Team Mode could not start: ${await describe(error)}`);
     return 'error';
   });
-  return { ready, session: () => slot.current() };
+  return {
+    ready,
+    session: () => slot.current(),
+    onDidChange(listener: () => void): { dispose(): void } {
+      changeListeners.add(listener);
+      return { dispose: (): void => { changeListeners.delete(listener); } };
+    }
+  };
 }

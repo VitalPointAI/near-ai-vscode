@@ -358,7 +358,7 @@ test('the handle tells listeners when Team Mode turns on, when a turn-on attempt
     gone.dispose();
     await p.enable([undefined]);
     assert.ok(calls.length >= 1, 'a declined turn-on attempt is reported');
-    assert.ok(calls.every((name) => name === undefined));
+    assert.deepEqual(calls.filter((name) => name !== undefined), [], 'no team was running');
     calls.length = 0;
     await p.enable(['Change team', 'Lead Owner', '']);
     assert.ok(calls.includes('Change team'), 'listeners hear once Team Mode is on');
