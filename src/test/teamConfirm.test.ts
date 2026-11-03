@@ -374,7 +374,7 @@ test('confirming without a NEAR sign-in changes the role, queues the key and lea
     assert.equal(items[0]?.status, 'pending');
     assert.equal(items[0]?.memberName, 'Dana Developer');
     assert.equal(items[0]?.memberId, world.memberId);
-    assert.match(items[0]?.lastError ?? '', /Sign in to NEAR to send Dana Developer's key/);
+    assert.match(items[0]?.lastError ?? '', /Sign in to NEAR AI to send Dana Developer's key/);
     assert.deepEqual(memberAttention(world.a.log.state(), true), [{ memberId: world.memberId, kind: 'deliver-key' }]);
 
     // Signing in later and retrying sends the key and settles the same item.
@@ -400,7 +400,7 @@ test('a lead whose NEAR sign-in is gone gets signed-out and a pending item, with
     const items = await world.checklist.list();
     assert.equal(items.length, 1);
     assert.equal(items[0]?.status, 'pending');
-    assert.match(items[0]?.lastError ?? '', /Sign in to NEAR to send Dana Developer's key/);
+    assert.match(items[0]?.lastError ?? '', /Sign in to NEAR AI to send Dana Developer's key/);
     assert.equal(world.fake.requests.filter((request) => request.path.includes('/api-keys')).length, 0);
   });
 });
@@ -742,7 +742,7 @@ test('an old key NEAR no longer has gives the new key a cap of 0 and a manual no
     const items = await world.checklist.list();
     // CR-01: the old key NEAR does not list is also a manual revoke item for the NEAR console, never counted as revoked.
     assert.deepEqual(items.map((item) => [item.step, item.status, item.keyId]), [['revoke-key', 'manual', oldKeyId], ['rotate-key', 'manual', oldKeyId]]);
-    assert.match(items[0]?.lastError ?? '', /NEAR console/);
+    assert.match(items[0]?.lastError ?? '', /your organization's settings on the NEAR AI website/);
     assert.ok((items[1]?.lastError ?? '').length > 0, 'the note says what to check');
     assert.match(rotated.notice ?? '', /limit of 0/);
     assert.equal(memberOf(world).nearApiKeyId, rotated.keyId);

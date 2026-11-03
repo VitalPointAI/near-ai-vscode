@@ -332,7 +332,7 @@ test('CR-01: a key the linked workspace does not list is a manual item for the N
     assert.equal(result.keyStillSpends, true);
     assert.ok(result.message.includes(KEY_STILL_SPENDS_WARNING.replace('<name>', 'Dana Developer')), result.message);
     assert.deepEqual(stepsOf(result.checklist), ['zero-limit:manual', 'revoke-key:pending', 'repo-access:manual']);
-    assert.match(result.checklist[0]?.lastError ?? '', /NEAR console/);
+    assert.match(result.checklist[0]?.lastError ?? '', /your organization's settings on the NEAR AI website/);
     assert.equal(w.fake.key(keyId)?.spendLimitNanoUsd, 5 * GIGA);
     assert.equal(w.fake.key(keyId)?.revoked, false);
   });
@@ -396,7 +396,7 @@ test('retrying the cleanup items caps first, refuses a revoke before the cap, th
     assert.equal(await w.org.revokeKey('ws-1', erinKey), 'revoked');
     const gone = await retryCleanupItem(retryArgs(second.checklist[1] as CleanupItem));
     assert.equal(gone.status, 'manual');
-    assert.match(gone.lastError ?? '', /NEAR console/);
+    assert.match(gone.lastError ?? '', /your organization's settings on the NEAR AI website/);
   });
 });
 
@@ -476,7 +476,7 @@ test('the organization member is never an owner or the remover; no safe match be
     if (!result.ok) return;
     assert.deepEqual(stepsOf(result.checklist), ['remove-org-member:manual', 'repo-access:manual']);
     assert.match(result.checklist[0]?.lastError ?? '', /Lena Lead/);
-    assert.match(result.checklist[0]?.lastError ?? '', /NEAR console/);
+    assert.match(result.checklist[0]?.lastError ?? '', /your organization's settings on the NEAR AI website/);
     assert.deepEqual(deletesOf(requestsSince(w, before), '/organizations/org-1/members/'), []);
   });
   // The matching NEAR user is the lead doing the removing: nothing is removed.
@@ -504,10 +504,10 @@ test('NEAR does not return member emails (the real server): the lead is not remo
     if (!result.ok) return;
     assert.deepEqual(stepsOf(result.checklist), ['remove-org-member:manual', 'repo-access:manual']);
     assert.match(result.checklist[0]?.lastError ?? '', /Lena Lead/);
-    assert.match(result.checklist[0]?.lastError ?? '', /NEAR console/);
+    assert.match(result.checklist[0]?.lastError ?? '', /your organization's settings on the NEAR AI website/);
     assert.deepEqual(deletesOf(requestsSince(w, before), '/organizations/org-1/members/'), [], 'no organization member was removed');
     assert.equal(await w.org.listMembers('org-1').then((members) => members.some((member) => member.userId === 'user-lena')), true);
-    assert.ok(result.message.includes('NEAR console'));
+    assert.ok(result.message.includes("your organization's settings on the NEAR AI website"));
   });
 });
 

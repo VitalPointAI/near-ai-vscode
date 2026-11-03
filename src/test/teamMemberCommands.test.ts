@@ -806,7 +806,7 @@ test('UI review issue 1: stopping a removal after the log write leaves the key c
     assert.notEqual(t.handle.session()?.state().members.get(id)?.removedEvent, undefined, 'the removal was written');
     assert.equal(t.fake?.key(keyId)?.spendLimitNanoUsd, 0, 'the key is capped');
     assert.equal(t.fake?.key(keyId)?.revoked, false, 'the revoke waits on the cleanup list');
-    assert.ok(shownMessages().some((message) => message.includes('You stopped before the last NEAR steps')), shownMessages().join(' | '));
+    assert.ok(shownMessages().some((message) => message.includes('You stopped before the last steps in your organization')), shownMessages().join(' | '));
     assert.equal(shownMessages().some((message) => message.includes('can still spend')), false);
     const teamId = (await readTeamFile(t.root))?.teamId as string;
     const items = await new CleanupChecklist(teamStorageDir(t.storage, teamId)).forMember(id);
@@ -829,7 +829,7 @@ test('Remove warns that the key can still spend when it could not be capped, and
     await t.run(MANAGE_MEMBERS_COMMAND);
     const warning = stub.notifications.find((entry) => entry.level === 'warn' && entry.message.includes('can still spend'));
     assert.ok(warning !== undefined, shownMessages().join(' | '));
-    assert.ok(warning.message.includes('set its limit to 0 in the NEAR console'), 'the manual step is shown as written');
+    assert.ok(warning.message.includes("set its limit to 0 in your organization's settings on the NEAR AI website"), 'the manual step is shown as written');
     assert.notEqual(t.handle.session()?.state().members.get(id)?.removedEvent, undefined, 'the removal still happened');
   }, { near: true });
 });
