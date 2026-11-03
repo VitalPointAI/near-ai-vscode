@@ -20,6 +20,10 @@ const NETWORK_TIMEOUT_MS = 60_000;
 const MAX_TEAM_FILE_READ_BYTES = 64 * 1024;
 const SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/]*)/;
 const COMMIT_ID = /^[0-9a-f]{40,64}$/;
+// The online default branch is fetched here only to tell other-version from not-shared, and the ref is deleted again straight after.
+export const CATCH_UP_PROBE_REF = 'refs/near-ai/catch-up/head';
+const MISSING_REMOTE_REF = /couldn't find remote ref/i;
+const SYMREF_LINE = /^ref: refs\/heads\/(\S+)\tHEAD$/;
 
 // An http, https or ssh address with a password in its user part. cleanRepoUrl would drop it, but such an address is never matched.
 function hasPassword(url: string): boolean {
@@ -122,6 +126,33 @@ async function teamAt(context: Context, commit: string): Promise<string | undefi
   }
 }
 
+type DefaultBranch = { kind: 'has-team' } | { kind: 'no-team' } | { kind: 'offline'; detail: string };
+
+// Does the online default branch (when it is not the copy's own branch) hold this team's team.json? Then the copy is simply on another
+// version than the shared one; otherwise the project with the team in it was never shared.
+async function defaultBranchHasTeam(context: Context, branch: string): Promise<DefaultBranch> {
+  const { projectRoot, remote } = context;
+  const listed = await context.net(['ls-remote', '--symref', remote, 'HEAD'], { cwd: projectRoot, timeoutMs: NETWORK_TIMEOUT_MS });
+  if (listed.code !== 0) return { kind: 'offline', detail: detailOf(context, listed) };
+  let named: string | undefined;
+  for (const line of gitText(listed).split('\n')) named ??= SYMREF_LINE.exec(line)?.[1];
+  if (named === undefined || named === branch || !isGitRefName(`refs/heads/${named}`)) return { kind: 'no-team' };
+  const fetched = await context.net(['fetch', '--no-tags', '--quiet', '--no-write-fetch-head', remote, `+refs/heads/${named}:${CATCH_UP_PROBE_REF}`], { cwd: projectRoot, timeoutMs: NETWORK_TIMEOUT_MS });
+  try {
+    if (fetched.code !== 0) return MISSING_REMOTE_REF.test(fetched.stderr) ? { kind: 'no-team' } : { kind: 'offline', detail: detailOf(context, fetched) };
+    const commit = await commitOf(context, CATCH_UP_PROBE_REF);
+    return commit !== undefined && await teamAt(context, commit) === context.teamId ? { kind: 'has-team' } : { kind: 'no-team' };
+  } finally {
+    await context.git(['update-ref', '-d', CATCH_UP_PROBE_REF], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  }
+}
+
+async function versionRefusal(context: Context, branch: string): Promise<CatchUpResult> {
+  const online = await defaultBranchHasTeam(context, branch);
+  if (online.kind === 'offline') return refuse('offline', online.detail);
+  return refuse(online.kind === 'has-team' ? 'other-version' : 'not-shared');
+}
+
 // Brings the current branch of this copy up to the online version of the same branch, fetched from the named remote only. Every check runs
 // before anything in the copy changes; the only change is a fast-forward (merge --ff-only). Nothing is reset, stashed or checked out.
 export async function catchUpCopy(input: { projectRoot: string; remote: string; teamId: string; git?: GitRunner }): Promise<CatchUpResult> {
@@ -140,11 +171,14 @@ export async function catchUpCopy(input: { projectRoot: string; remote: string; 
 
   const tracking = `refs/remotes/${remote}/${branch}`;
   const fetched = await net(['fetch', '--no-tags', '--quiet', '--no-write-fetch-head', remote, `+refs/heads/${branch}:${tracking}`], { cwd: projectRoot, timeoutMs: NETWORK_TIMEOUT_MS });
-  if (fetched.code !== 0) return refuse('offline', detailOf(context, fetched));
+  if (fetched.code !== 0) {
+    // The branch the copy is on is not online at all: either another version than the shared one, or nothing was shared yet.
+    return MISSING_REMOTE_REF.test(fetched.stderr) ? versionRefusal(context, branch) : refuse('offline', detailOf(context, fetched));
+  }
   const tip = await commitOf(context, tracking);
   if (tip === undefined) return refuse('offline');
 
-  if (await teamAt(context, tip) !== teamId) return refuse('not-shared');
+  if (await teamAt(context, tip) !== teamId) return versionRefusal(context, branch);
   if (head !== tip) {
     const ancestor = await git(['merge-base', '--is-ancestor', head, tip], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
     if (ancestor.code !== 0) return refuse('unshared-work', ancestor.code === 1 ? undefined : detailOf(context, ancestor));
@@ -152,6 +186,11 @@ export async function catchUpCopy(input: { projectRoot: string; remote: string; 
   const status = await git(['status', '--porcelain=v1', '--untracked-files=no'], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
   if (status.code !== 0) return refuse('local-changes', detailOf(context, status));
   if (gitText(status) !== '') return refuse('local-changes');
+  // git counts an ignored file as expendable and a fast-forward would overwrite it, so a team.json left by an earlier attempt is checked
+  // on its own (no --exclude-standard: ignored files are listed too).
+  const untracked = await git(['ls-files', '--others', '-z', '--', TEAM_FILE_REL], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
+  if (untracked.code !== 0) return refuse('local-changes', detailOf(context, untracked));
+  if (untracked.stdout.length > 0) return refuse('local-changes');
 
   if (head !== tip) {
     const merged = await git(['merge', '--ff-only', '--quiet', tip], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
