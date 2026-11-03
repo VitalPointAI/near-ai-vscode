@@ -30,8 +30,10 @@ const SHARE_FAILED_TEXT = 'The change could not be shared with your team yet. Ch
 const NOT_ON_A_VERSION_TEXT = 'This project could not be shared right now. Choose Show details for what to do.';
 const LINK_SAVE_UNFINISHED_TEXT = 'The link is saved in this project, but saving it for the team did not finish. Choose Show details for the one step that is left.';
 const INVITE_ADDRESS_TEXT = 'The address this project is shared from cannot be put in an invite, so no invite was made. Choose Show details for why.';
-const LINK_CHOICE = 'Link a NEAR organization';
-const SKIP_CHOICE = 'Skip';
+// G-61-6 (owner, 2026-11-03): wherever linking is offered, one plain line says what the organization is, then Link now or Not now.
+export const LINK_EXPLANATION = 'Your organization is the account that pays for your team\'s AI, so each person can get a spending limit.';
+export const LINK_NOW_CHOICE = 'Link now';
+export const NOT_NOW_CHOICE = 'Not now, everyone uses their own key';
 const CLONE_ACTION = 'Get the project';
 const SIGN_IN_ACTION = 'Sign in';
 const WITHOUT_NEAR_ACTION = 'Invite without signing in';
@@ -441,10 +443,30 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     return true;
   }
 
+  // The explanation before linking: 'link' goes on into the sign-in, 'not-now' and undefined (the pick was closed) change nothing.
+  async function askToLink(title: string): Promise<'link' | 'not-now' | undefined> {
+    const choice = await pick([
+      { label: LINK_NOW_CHOICE, description: 'Sign in to NEAR AI and pick your organization' },
+      { label: NOT_NOW_CHOICE, description: 'Spending is not capped until your organization is linked' }
+    ], { title, placeHolder: LINK_EXPLANATION });
+    if (choice === undefined) return undefined;
+    return choice.label === LINK_NOW_CHOICE ? 'link' : 'not-now';
+  }
+
   async function linkCommand(): Promise<void> {
     const found = await requireTeam();
     if (found === undefined) return;
     if (!await requireManager(found.session, 'link your organization')) return;
+    // A team without a link is told what linking is for first; a linked team goes straight to the pickers (same link, or replace it).
+    const { readTeamFile } = await import('../../team/teamFile');
+    if ((await readTeamFile(found.projectRoot))?.near === undefined) {
+      const choice = await askToLink('Link Your Organization');
+      if (choice === undefined) return;
+      if (choice === 'not-now') {
+        deps.report('info', `Nothing was changed. ${(await import('../../team/join')).NO_ORG_NOTICE}`);
+        return;
+      }
+    }
     await linkFlow(found.projectRoot, true);
   }
 
@@ -551,19 +573,17 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const lifetime = await askLifetime();
     if (lifetime === undefined) return;
 
-    // D-03: a team with no NEAR organization is offered the link once per invite, and Skip is said out loud.
+    // D-03, G-61-6: a team with no organization link is offered the link once per invite with the one-line explanation, and Not now is
+    // said out loud. linkFlow itself does not ask again.
     let teamFile: TeamFile | undefined = await readTeamFile(projectRoot);
     if (teamFile === undefined) {
       deps.report('error', 'This project has no team file any more, so no invite was made. Nothing was changed.');
       return;
     }
     if (teamFile.near === undefined) {
-      const choice = await pick([
-        { label: LINK_CHOICE, description: 'Sign in to NEAR and pick the organization that pays for the team' },
-        { label: SKIP_CHOICE, description: 'Invite without a NEAR organization' }
-      ], { title: 'Invite to Team', placeHolder: 'This team has no NEAR organization linked yet' });
+      const choice = await askToLink('Invite to Team');
       if (choice === undefined) return;
-      if (choice.label === LINK_CHOICE) {
+      if (choice === 'link') {
         if (!await linkFlow(projectRoot, false)) {
           deps.report('info', 'Your organization was not linked, so no invite was made. Nothing was changed.');
           return;
