@@ -29,7 +29,9 @@ const commandsModule = require('../services/team/teamCommands') as typeof import
 const memberModule = require('../services/team/memberCommands') as typeof import('../services/team/memberCommands');
 test.after(() => { uninstall(); });
 const { ENABLE_COMMAND, registerTeamMode } = commandsModule;
-const { INVITE_COMMAND, JOIN_COMMAND, LINK_NEAR_COMMAND, MANAGE_MEMBERS_COMMAND, SIGN_OUT_NEAR_COMMAND, parseUsdToNanoUsd } = memberModule;
+const {
+  INVITE_COMMAND, JOIN_COMMAND, LINK_EXPLANATION, LINK_NEAR_COMMAND, LINK_NOW_CHOICE, MANAGE_MEMBERS_COMMAND, NOT_NOW_CHOICE, SIGN_OUT_NEAR_COMMAND, parseUsdToNanoUsd
+} = memberModule;
 
 const EM_DASH = '—';
 const WITHOUT_NEAR = 'Invite without signing in';
@@ -167,7 +169,7 @@ async function withTeam(work: (team: Team) => Promise<void>, options: { near?: b
 
 // The lead links the team to Team Org / Team workspace through the Link command, then pushes the code branch so a clone sees team.json.
 async function linkAndPush(t: Team): Promise<void> {
-  stub.quickPickAnswers.push('Team Org', 'Team workspace');
+  stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
   await t.run(LINK_NEAR_COMMAND);
   gitIn(t.root, ['push', '-q', 'origin', 'main']);
   clearUi();
@@ -204,7 +206,7 @@ async function openJoiner(t: Team, options: { folder?: boolean; pull?: boolean; 
 async function inviteBundle(t: Team, person: { name: string; email: string; role: string; amount?: string }): Promise<string> {
   stub.inputAnswers.push(person.name, person.email, person.amount ?? '5');
   stub.quickPickAnswers.push(person.role, '7 days');
-  if (t.handle.session()?.teamFile.near === undefined) stub.quickPickAnswers.push('Skip');
+  if (t.handle.session()?.teamFile.near === undefined) stub.quickPickAnswers.push(NOT_NOW_CHOICE);
   stub.setMessageResponder(copyWhenOffered);
   const before = stub.clipboardWrites.length;
   await t.run(INVITE_COMMAND);
@@ -226,7 +228,7 @@ const copyWhenOffered = (_text: string, actions: string[]): string | undefined =
 test('tracer: Invite to Team asks its questions, writes member.invited, and shows the bundle once with Copy and nowhere else', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', 'Skip');
+    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
     stub.setMessageResponder(copyWhenOffered);
     await t.run(INVITE_COMMAND);
 
@@ -259,15 +261,19 @@ test('tracer: Invite to Team asks its questions, writes member.invited, and show
   });
 });
 
-test('Invite offers the roles and the four lifetimes with seven days first, and Skip or Link when the team has no NEAR organization', async () => {
+test('Invite offers the roles and the four lifetimes with seven days first, and explains linking with Link now or Not now when the team has no organization', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', 'Skip');
+    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
     await t.run(INVITE_COMMAND);
     assert.deepEqual(stub.quickPickRequests[0]?.labels, ['Developer', 'Reviewer', 'Observer', 'Lead']);
     assert.deepEqual([...(stub.quickPickRequests[1]?.labels ?? [])].sort(), ['14 days', '24 hours', '3 days', '7 days']);
     assert.equal(stub.quickPickRequests[1]?.labels[0], '7 days', 'the first item is the one Enter picks');
-    assert.deepEqual(stub.quickPickRequests[2]?.labels, ['Link a NEAR organization', 'Skip']);
+    assert.deepEqual(stub.quickPickRequests[2]?.labels, ['Link now', 'Not now, everyone uses their own key']);
+    assert.equal(stub.quickPickRequests[2]?.placeHolder, 'Your organization is the account that pays for your team\'s AI, so each person can get a spending limit.');
+    assert.equal(stub.quickPickRequests[2]?.placeHolder, LINK_EXPLANATION);
+    assert.ok(stub.notifications.some((entry) => entry.message === NO_ORG_NOTICE), 'Not now continues the invite and says everyone uses their own key');
+    assert.ok(stub.notifications.some((entry) => entry.message.startsWith('The invite for Ana')), 'the invite was still made');
     assert.deepEqual(stub.inputRequests.map((request) => request.prompt?.split('.')[0]), ['Name of the person you are inviting', 'Their email address', 'Allocation in US dollars']);
   });
 });
@@ -275,7 +281,7 @@ test('Invite offers the roles and the four lifetimes with seven days first, and 
 test('a lifetime of 24 hours is stored as 86400 seconds', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Bo', 'bo@example.invalid', '0.01');
-    stub.quickPickAnswers.push('Observer', '24 hours', 'Skip');
+    stub.quickPickAnswers.push('Observer', '24 hours', NOT_NOW_CHOICE);
     stub.setMessageResponder(copyWhenOffered);
     await t.run(INVITE_COMMAND);
     const bundle = parseInviteBundle(stub.clipboardWrites[0] as string);
@@ -288,7 +294,7 @@ test('a lifetime of 24 hours is stored as 86400 seconds', async () => {
 test('closing the bundle without Copy says the invite can be issued again from Manage Team Members and never repeats it', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', 'Skip');
+    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
     await t.run(INVITE_COMMAND);
     assert.equal(stub.clipboardWrites.length, 0);
     const detail = stub.notificationOptions.find((options) => options?.modal === true)?.detail as string;
@@ -324,7 +330,7 @@ test('parseUsdToNanoUsd turns dollars into integer nano-USD with string arithmet
 test('the questions refuse an empty name, an address without @ and an amount that is not dollars and cents', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', 'Skip');
+    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
     await t.run(INVITE_COMMAND);
     const [name, email, amount] = stub.inputRequests;
     assert.equal(typeof name?.validateInput?.(''), 'string');
@@ -372,7 +378,7 @@ test('cancelling at any question writes nothing to the log, the clipboard or the
 test('nothing the Invite command shows contains an em-dash', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', 'Skip');
+    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
     stub.setMessageResponder(copyWhenOffered);
     await t.run(INVITE_COMMAND);
     assert.equal(everythingShown().includes(EM_DASH), false);
@@ -505,13 +511,14 @@ test('an unfinished earlier join is offered a reset only when the team list does
 
 test('Link signs in, lists only organizations the lead owns or administers, commits team.json only, and pushes only when asked', async () => {
   await withTeam(async (t) => {
-    stub.quickPickAnswers.push('Team Org', 'Second workspace');
+    stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Second workspace');
     const remoteBefore = gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']);
     await t.run(LINK_NEAR_COMMAND);
 
     assert.equal(t.signIns.count, 1, 'signed in once');
-    assert.deepEqual(stub.quickPickRequests[0]?.labels, ['Team Org'], 'the organization where the lead is only a member is not offered');
-    assert.deepEqual(stub.quickPickRequests[1]?.labels, ['Team workspace', 'Second workspace']);
+    assert.deepEqual([stub.quickPickRequests[0]?.placeHolder, stub.quickPickRequests[0]?.labels], [LINK_EXPLANATION, [LINK_NOW_CHOICE, NOT_NOW_CHOICE]], 'the one-line explanation comes first');
+    assert.deepEqual(stub.quickPickRequests[1]?.labels, ['Team Org'], 'the organization where the lead is only a member is not offered');
+    assert.deepEqual(stub.quickPickRequests[2]?.labels, ['Team workspace', 'Second workspace']);
     assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-2' });
     assert.equal(gitIn(t.root, ['log', '-1', '--format=%s']), LINK_COMMIT_MESSAGE);
     assert.equal(gitIn(t.root, ['show', '--name-only', '--format=', 'HEAD']), TEAM_FILE_REL);
@@ -530,7 +537,7 @@ test('Link signs in, lists only organizations the lead owns or administers, comm
   }, { near: true });
 
   await withTeam(async (t) => {
-    stub.quickPickAnswers.push('Team Org', 'Team workspace');
+    stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
     stub.setMessageResponder((_text, actions) => (actions.includes('Share with my team') ? 'Share with my team' : undefined));
     await t.run(LINK_NEAR_COMMAND);
     assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), gitIn(t.root, ['rev-parse', 'HEAD']), 'choosing Share with my team pushed the branch');
@@ -543,7 +550,7 @@ test('Link signs in, lists only organizations the lead owns or administers, comm
 test('a Link whose save for the team does not finish says so in plain words with Show details, and keeps the git step in the channel', async () => {
   await withTeam(async (t) => {
     await fs.writeFile(path.join(t.root, '.git', 'hooks', 'commit-msg'), '#!/bin/sh\necho "hook rejected this commit message" >&2\nexit 1\n', { encoding: 'utf8', mode: 0o755 });
-    stub.quickPickAnswers.push('Team Org', 'Team workspace');
+    stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
     await t.run(LINK_NEAR_COMMAND);
     const warning = stub.notifications.findIndex((entry) => entry.level === 'warn');
     assert.ok(warning >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
@@ -581,6 +588,45 @@ test('Link of a different organization is only done after a clear confirmation',
     stub.setMessageResponder((_text, actions) => (actions.includes('Replace link') ? 'Replace link' : undefined));
     await t.run(LINK_NEAR_COMMAND);
     assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-2' });
+  }, { near: true });
+});
+
+test('Link Your Organization first explains the organization in one line; Not now changes nothing and says so, and Link now signs in', async () => {
+  await withTeam(async (t) => {
+    clearUi();
+    const fileBefore = await fs.readFile(path.join(t.root, TEAM_FILE_REL), 'utf8');
+    const head = gitIn(t.root, ['rev-parse', 'HEAD']);
+    const secretsBefore = [...t.secrets.values.keys()].sort();
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE);
+    await t.run(LINK_NEAR_COMMAND);
+    assert.deepEqual(stub.quickPickRequests.map((request) => [request.title, request.placeHolder, request.labels]), [
+      ['Link Your Organization', LINK_EXPLANATION, [LINK_NOW_CHOICE, NOT_NOW_CHOICE]]
+    ], 'one pick, the explanation, nothing else');
+    assert.ok(stub.quickPickRequests[0]?.descriptions[0]?.includes('Sign in to NEAR AI'), 'Link now says it signs in to NEAR AI');
+    assert.equal(t.signIns.count, 0, 'Not now asks for no sign-in');
+    assert.equal(await fs.readFile(path.join(t.root, TEAM_FILE_REL), 'utf8'), fileBefore, 'team.json is unchanged');
+    assert.equal(gitIn(t.root, ['rev-parse', 'HEAD']), head, 'nothing was saved for the team');
+    assert.deepEqual([...t.secrets.values.keys()].sort(), secretsBefore, 'SecretStorage is unchanged');
+    assert.deepEqual(shownMessages(), [`Nothing was changed. ${NO_ORG_NOTICE}`]);
+    clearUi();
+
+    // Closing the pick is the same as Not now, without a message.
+    await t.run(LINK_NEAR_COMMAND);
+    assert.equal(t.signIns.count, 0);
+    assert.equal(await fs.readFile(path.join(t.root, TEAM_FILE_REL), 'utf8'), fileBefore);
+    clearUi();
+
+    stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
+    await t.run(LINK_NEAR_COMMAND);
+    assert.equal(t.signIns.count, 1, 'Link now goes on into the sign-in');
+    assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' });
+    clearUi();
+
+    // A team that is already linked goes straight to the organization pickers.
+    stub.quickPickAnswers.push('Team Org', 'Team workspace');
+    await t.run(LINK_NEAR_COMMAND);
+    assert.equal(stub.quickPickRequests.some((request) => request.placeHolder === LINK_EXPLANATION), false, 'no explanation once linked');
+    assert.ok(shownMessages().some((message) => message.includes('already linked')), shownMessages().join(' | '));
   }, { near: true });
 });
 
@@ -639,7 +685,7 @@ test('inviting a lead in a linked team asks the lead to sign in to NEAR first, a
 
 test('inviting in a linked team whose NEAR link is not shared yet warns that a teammate who gets the project now would not see it', async () => {
   await withTeam(async (t) => {
-    stub.quickPickAnswers.push('Team Org', 'Team workspace');
+    stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
     await t.run(LINK_NEAR_COMMAND);
     clearUi();
     await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
@@ -653,12 +699,13 @@ test('inviting in a linked team whose NEAR link is not shared yet warns that a t
   }, { near: true });
 });
 
-test('choosing Link a NEAR organization while inviting links the team first and the bundle carries the link', async () => {
+test('choosing Link now while inviting links the team first, without asking twice, and the bundle carries the link', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Dana', 'dana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', 'Link a NEAR organization', 'Team Org', 'Team workspace');
+    stub.quickPickAnswers.push('Developer', '7 days', LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
     stub.setMessageResponder(copyWhenOffered);
     await t.run(INVITE_COMMAND);
+    assert.equal(stub.quickPickRequests.filter((request) => request.placeHolder === LINK_EXPLANATION).length, 1, 'the explanation is asked once');
     assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' });
     assert.equal(stub.clipboardWrites.length, 1);
     assert.deepEqual(parseInviteBundle(stub.clipboardWrites[0] as string).near, { organizationId: 'org-1', workspaceId: 'ws-1' });
