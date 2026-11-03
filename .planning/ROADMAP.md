@@ -172,8 +172,9 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Moves are permission-checked and follow only permitted transitions; an illegal drop snaps back and says why. (BOARD-03)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
 
-**Plans**: 14/14 plans executed in 6 waves
+**Plans**: 14/23 plans executed in 12 waves (Waves 7 to 12 are the fix pass for the owner's 62-UAT findings, 2026-11-03; they run after Phase 61's fix pass, 61-22)
 **UI hint**: yes
+**Owner amendments (2026-11-03)**: the board opens only in its own editor tab and the sidebar Team section shows a summary; a lead assigns cards (signed item.assigned and item.unassigned, claims stay in Phase 63); planless phases show as Backlog cards; Done folds by default; layout and drag are proven in a real window with real screenshots the owner reviews (recorded in 62-CONTEXT.md and 62-UI-SPEC.md by 62-17).
 
 **Wave 1**
 - [x] 62-01-PLAN.md — Item events: confirm the signed bodies, then validators, item.move permission row and the state machine on write and read, two-clone tracer (BOARD-01, BOARD-03)
@@ -200,6 +201,27 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 
 **Wave 6** *(blocked on Wave 5 completion)*
 - [x] 62-14-PLAN.md — E2E team scenario in a real VS Code, release content, phase gate (BOARD-01, BOARD-02, BOARD-03)
+
+**Wave 7** *(gap closure for 62-UAT G-62-1 to G-62-6; blocked on Phase 61's fix pass, 61-22)*
+- [ ] 62-15-PLAN.md — Assignment events: confirm the shape, then item.assigned and item.unassigned with rules, permission, removal release and pinned hashes (BOARD-02, BOARD-03)
+- [ ] 62-16-PLAN.md — Verification tools: Xvfb framebuffer to PNG, board layout probe (not packaged), DevTools client for a real-input drag (BOARD-01, BOARD-03)
+- [ ] 62-17-PLAN.md — Board only in its own editor tab: no sidebar board view, nothing opens by itself; owner amendments recorded (BOARD-01)
+- [ ] 62-18-PLAN.md — Sidebar Team section board summary: ready, blocked and mine beside Open board (BOARD-01, BOARD-02)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [ ] 62-19-PLAN.md — Board model: assignee on cards and member rows, planAssign and the person list, planless phases as Backlog cards, folded defaults (BOARD-01, BOARD-03)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+- [ ] 62-20-PLAN.md — Assign and unassign from Move to... and the card detail, native person list, the person on the card, seen within one poll (BOARD-02, BOARD-03)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+- [ ] 62-21-PLAN.md — Real-window layout: solid toolbar band, one board scroller, aligned columns and lanes, open on active work; probe and screenshots at four widths and four themes (BOARD-01)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+- [ ] 62-22-PLAN.md — Real drag in a real window: allowed drop lands, refused drop snaps back with the reason, Escape cancels, keyboard path kept (BOARD-03)
+
+**Wave 12** *(blocked on Wave 11 completion)*
+- [ ] 62-23-PLAN.md — Realistic board with teammates and assignments, final screenshot set, full gate, owner review and hands-on repeat (BOARD-01, BOARD-02, BOARD-03)
 
 ### Phase 63: Claims, leases, claim workspaces, LeaseGuard, duplicate checks
 
@@ -297,7 +319,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 14/24 | In Progress (fix pass planned) | - |
-| 62. Work model, GSD import, Team Board | v0.6.0 | 14/14 | In Progress | - |
+| 62. Work model, GSD import, Team Board | v0.6.0 | 14/23 | In Progress (fix pass planned) | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
 | 65. Integration merge train | v0.6.0 | 0/TBD | Not started | - |
