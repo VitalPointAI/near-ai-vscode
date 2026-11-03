@@ -8,6 +8,6 @@ import { toolsPageHtml } from '../services/toolsDirectory';
 // accepts memory explorer messages at all (see chatBridge.test.ts).
 
 test('the Tools tab no longer carries the retired memory explorer', () => {
-  const html = toolsPageHtml({ cspSource: 'vscode-webview://test', nonce: 'nonce-test-0001', script: 'tools.js', style: 'tools.css' });
+  const html = toolsPageHtml({ cspSource: 'vscode-webview://test', nonce: 'nonce-test-0001', script: 'tools.js', style: 'tools.css', base: 'base.css' });
   for (const id of ['memory-graph', 'memory-filters', 'memory-actions', 'memory-table', 'memory-scope-kind', 'team-studio', 'attachments', 'generation-heading']) assert.doesNotMatch(html, new RegExp(`id="${id}"`), id);
 });

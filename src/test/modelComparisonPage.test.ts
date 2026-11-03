@@ -118,7 +118,7 @@ test('the estimate view lists each reused result with its age', () => {
 });
 
 test('the page loads one nonce script and one stylesheet under a strict content policy, and the Tools page may open it', () => {
-  const html = comparisonPageHtml({ cspSource: 'vscode-resource:', nonce: 'abc123', script: 'compare.js', style: 'compare.css' });
+  const html = comparisonPageHtml({ cspSource: 'vscode-resource:', nonce: 'abc123', script: 'compare.js', style: 'compare.css', base: 'base.css' });
   assert.match(html, /default-src 'none'; style-src vscode-resource:; script-src 'nonce-abc123';/);
   assert.equal((html.match(/<script /g) ?? []).length, 1);
   assert.match(html, /id="board"[\s\S]*id="setup"[\s\S]*id="history"/, 'the leaderboard comes first, then the controls, then past comparisons');

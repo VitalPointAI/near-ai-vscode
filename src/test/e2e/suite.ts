@@ -170,7 +170,9 @@ function projectTests(): Array<[string, () => Promise<void>]> {
         await vscode.commands.executeCommand(command);
         await waitForProbe(name);
         samples.set(name, sampleData(name, seen));
-        for (const target of EDITOR_WIDTHS) record(name, target, await sizeEditor(name, target));
+        const room = await editorRoom(name);
+        assert.ok(room >= Math.max(...EDITOR_WIDTHS), `the editor area holds a ${Math.max(...EDITOR_WIDTHS)}px page beside a second group (it holds ${room}px)`);
+        for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) record(name, target, await sizeEditor(name, target));
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
         await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
       }
@@ -210,8 +212,11 @@ function plainTests(): Array<[string, () => Promise<void>]> {
 
 // ---- Layout at narrow widths (the pages report their own measurements through the test-only probe) ----
 
-const SIDEBAR_WIDTHS = [170, 220, 320, 600];
-const EDITOR_WIDTHS = [220, 320, 600];
+// The sidebar resizes in 60px steps from its 170px minimum, so every step up to about 600px is checked.
+const SIDEBAR_WIDTHS = [170, 230, 290, 350, 410, 470, 530, 590];
+// Editor pages: these always (run.ts opens a window wide enough), plus wider ones when the window holds them.
+const EDITOR_WIDTHS = [220, 320, 470, 600];
+const WIDER_EDITOR_WIDTHS = [800, 1000];
 const PANELS: Array<[string, string]> = [
   ['activity', 'nearAi.openAgentActivity'], ['compare', 'nearAi.compareModels'], ['mcp', 'nearAi.manageMcp'],
   ['teams', 'nearAi.manageTeams'], ['tools', 'nearAi.openTools'], ['onboarding', 'nearAi.setup']
@@ -245,6 +250,13 @@ async function waitForProbe(name: string): Promise<void> {
   for (;;) {
     try { await probe(name); await pause(1_000); return; } catch (error) { if (Date.now() > deadline) throw error; await pause(250); }
   }
+}
+
+/** The widest a page can get in the first of two editor groups (the second keeps room for its minimum). */
+async function editorRoom(name: string): Promise<number> {
+  await splitEditor(0.5);
+  const report = await settled(name);
+  return Math.floor(report.width / 0.5) - 260;
 }
 
 /** Splits the editor area in two and sizes the first group (holding the page) to the target width. */

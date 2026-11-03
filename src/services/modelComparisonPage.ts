@@ -148,10 +148,10 @@ export function selectionProblem(models: string[], catalog: CatalogEntry[]): str
 }
 
 /** The page's HTML: one nonce script and one stylesheet, everything else rendered by the script with textContent. */
-export function comparisonPageHtml(options: { cspSource: string; nonce: string; script: string; style: string; base?: string; probe?: string }): string {
+export function comparisonPageHtml(options: { cspSource: string; nonce: string; script: string; style: string; base: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">
-${options.base ? `<link rel="stylesheet" href="${options.base}">` : ''}<link rel="stylesheet" href="${options.style}"><title>Compare Models</title></head><body>
+<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><title>Compare Models</title></head><body>
 <header class="top"><div><h1>Compare Models</h1><p class="hint">Test NEAR AI models on the same coding, research, and planning tasks, graded automatically, and put the best one to work.</p></div>
 <div class="actions"><button id="refresh" type="button" class="secondary">Refresh</button></div></header>
 <p id="problem" class="error" role="alert" hidden></p>
