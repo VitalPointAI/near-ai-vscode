@@ -78,12 +78,13 @@ export function notReachableStatus(name: string): string {
   return `Your teammates cannot reach this project yet, so they cannot join ${name}. Choose Share to see what to do.`;
 }
 
-/** The owner or a lead of a team that is ready for people. */
-export function managerStatus(name: string, otherMembers: number, pendingInvites: number, _waiting: number = 0): string {
+/** The owner or a lead of a team that is ready for people; waiting is how many people need them in Members (to confirm, or for a key). */
+export function managerStatus(name: string, otherMembers: number, pendingInvites: number, waiting: number = 0): string {
   const who = otherMembers === 0
     ? `${name} is ready. Invite someone to work with you.`
     : `${name} has ${otherMembers} ${plural(otherMembers, 'other member', 'other members')}. Invite someone to add more.`;
-  return pendingInvites === 0 ? who : `${who} ${pendingInvites} ${plural(pendingInvites, 'invite is', 'invites are')} not used yet.`;
+  const invites = pendingInvites === 0 ? who : `${who} ${pendingInvites} ${plural(pendingInvites, 'invite is', 'invites are')} not used yet.`;
+  return waiting === 0 ? invites : `${invites} ${waiting} ${plural(waiting, 'person is', 'people are')} waiting for you in Members.`;
 }
 
 /** The status when the team cannot be reached or updates are paused: the connection text, as one sentence. */

@@ -100,7 +100,7 @@ function teamPlan(team: NonNullable<TeamSectionInput['team']>): TeamPlan {
   // Invites do not work until the team setup is on the online home, so Share replaces Invite someone until then.
   if (team.shared === 'no') return { status: notSharedStatus(name), primary: 'share', others: managed, compact: false };
   if (team.shared === 'not-reachable-by-teammates') return { status: notReachableStatus(name), primary: 'share', others: managed, compact: false };
-  return { status: managerStatus(name, team.otherMembers, team.pendingInvites), primary: 'invite', others: managed, compact: false };
+  return { status: managerStatus(name, team.otherMembers, team.pendingInvites, team.waiting), primary: 'invite', others: managed, compact: false };
 }
 
 // The primary action first, then the others in the order of TEAM_ACTION_IDS, so the buttons never jump around between states.

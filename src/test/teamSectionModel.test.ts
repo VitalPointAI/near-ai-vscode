@@ -62,7 +62,7 @@ const CASES: Case[] = [
   },
   {
     name: 'a lead with a shared setup and 2 people waiting', input: { folderOpen: true, team: lead({ waiting: 2 }) },
-    heading: text.teamHeading('Harbor'), status: text.managerStatus('Harbor', 1, 0), primary: 'invite', actions: ['invite', 'members', 'board', 'link']
+    heading: text.teamHeading('Harbor'), status: text.managerStatus('Harbor', 1, 0, 2), primary: 'invite', actions: ['invite', 'members', 'board', 'link']
   },
   {
     name: 'a linked lead', input: { folderOpen: true, team: lead({ linked: true, otherMembers: 0, pendingInvites: 2 }) },
