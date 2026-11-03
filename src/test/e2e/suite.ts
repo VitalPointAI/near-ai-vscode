@@ -161,7 +161,8 @@ function projectTests(): Array<[string, () => Promise<void>]> {
         let report = await size();
         checkOverflow(name, report);
         for (let attempt = 2; attempt <= 4 && Math.abs(report.width - target) > 40; attempt += 1) {
-          console.log(`  retrying ${name} at ${target}px, attempt ${attempt} (it was ${report.width}px${trace ? `; ${trace()}` : ''})`);
+          const groups = vscode.window.tabGroups.all.map((group) => `column ${group.viewColumn}${group.isActive ? ' (active)' : ''}: ${group.tabs.map((tab) => tab.label).join(', ') || 'empty'}`).join(' | ');
+          console.log(`  retrying ${name} at ${target}px, attempt ${attempt} (it was ${report.width}px; editor groups: ${groups}${trace ? `; ${trace()}` : ''})`);
           await reset();
           await pause(2_000);
           report = await size();
@@ -200,7 +201,13 @@ function projectTests(): Array<[string, () => Promise<void>]> {
           console.log(`  ${name}: editor area ${editor}px, a page can be up to ${room}px beside a second group`);
           assert.ok(room >= Math.max(...EDITOR_WIDTHS), `the editor area holds a ${Math.max(...EDITOR_WIDTHS)}px page beside a second group (editor area ${editor}px, page at most ${room}px)`);
           for (const width of WIDER_EDITOR_WIDTHS.filter((width) => width > room)) unmeasured.push(`${name} at ${width}px (the window holds ${room}px)`);
-          for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) await measure(name, target, () => sizeEditor(name, target, editor), oneGroup);
+          for (const target of [...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS.filter((width) => width <= room)]) await measure(name, target, () => sizeEditor(name, target, editor), async () => {
+            // A fresh start: the page closed and opened again, alone in one group.
+            await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+            await oneGroup();
+            await vscode.commands.executeCommand(command);
+            await waitForProbe(name);
+          });
           await vscode.commands.executeCommand('workbench.action.closeAllEditors');
           await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
         }
