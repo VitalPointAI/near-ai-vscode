@@ -31,7 +31,9 @@ exactly what is allowed to leave your machine.
 
 **NEAR AI: Set Up Project Team** asks which kind of project you have and sets
 up a team and workflow for it. Your files stay in your workspace, and work is
-sent only to the model you pick.
+sent only to the model you pick. After you connect NEAR AI, the extension
+suggests this as your next step. **NEAR AI: Project Setup…** shows every setup
+step again: your project team, a spending limit and web search.
 
 ## Why choose NEAR AI
 

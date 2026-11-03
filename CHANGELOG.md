@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **After you connect NEAR AI, the extension suggests what to do next**,
+  starting with setting up your project team. You can also set a spending
+  limit, turn on web search, or go straight to the chat. Steps you have done
+  are marked done. To see these steps again, run **NEAR AI: Project Setup…**
+  or use Project setup on the Tools tab. Until the project has a team, the
+  empty chat shows a small card to set one up, which you can hide with
+  **Not now**.
+
 ## 0.4.13
 
 Replies in the chat are easier to read. Tables, quotes and crossed-out text
