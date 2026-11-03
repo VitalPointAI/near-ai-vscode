@@ -40,6 +40,13 @@ test('package.json contributes Enable Team Mode and Check Team Record (the verif
   assert.equal(barModule.VERIFY_LOG_COMMAND, commandsModule.VERIFY_LOG_COMMAND, 'the status bar item points at the registered command');
 });
 
+test('package.json contributes Share Team Setup under the NEAR AI category with an icon (G-61-3)', () => {
+  const share = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.team.share');
+  assert.deepEqual([share?.title, share?.category], ['Share Team Setup', 'NEAR AI']);
+  assert.ok((share?.icon ?? '').startsWith('$('), 'it has an icon');
+  assert.equal(commandsModule.SHARE_COMMAND, 'nearAi.team.share');
+});
+
 test('package.json contributes the five membership commands under the NEAR AI category with plain titles', () => {
   const byId = new Map(manifest.contributes.commands.map((entry) => [entry.command, entry]));
   const expected: Array<[string, string]> = [
@@ -110,7 +117,7 @@ test('registerTeamMode registers every contributed nearAi.team command', async (
   const contributed = manifest.contributes.commands.map((entry) => entry.command).filter((id) => id.startsWith('nearAi.team.'));
   assert.deepEqual([...contributed].sort(), [
     'nearAi.team.enable', 'nearAi.team.importPlans', 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.linkNearOrganization', 'nearAi.team.manageMembers', 'nearAi.team.openBoard',
-    'nearAi.team.signOutNear', 'nearAi.team.verifyLog'
+    'nearAi.team.share', 'nearAi.team.signOutNear', 'nearAi.team.verifyLog'
   ]);
   const context = createFakeContext(path.join(ROOT, 'does-not-exist'), {});
   const handle = commandsModule.registerTeamMode(context as never);
@@ -133,7 +140,7 @@ test('in a project without a team, every membership command except Join answers 
     const context = createFakeContext(path.join(base, 'storage'), {});
     const handle = commandsModule.registerTeamMode(context as never);
     assert.equal(await handle.ready, 'solo');
-    for (const id of ['nearAi.team.invite', 'nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear']) {
+    for (const id of ['nearAi.team.invite', 'nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear', 'nearAi.team.share']) {
       stub.notifications.length = 0;
       await (stub.commands.get(id) as () => Promise<void>)();
       assert.deepEqual(stub.notifications.map((entry) => entry.message), [commandsModule.SOLO_TEXT], id);

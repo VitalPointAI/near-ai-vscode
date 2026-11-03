@@ -123,8 +123,9 @@ test('solo project: activation makes one fs.stat and no timers, channel, status 
     assert.deepEqual(loadedTeamModules(), [], 'no compiled team module was loaded');
     assert.equal(handle.session(), undefined);
     assert.deepEqual([...stub.commands.keys()].sort(), [
-      ENABLE_COMMAND, VERIFY_LOG_COMMAND, OPEN_BOARD_COMMAND, IMPORT_PLANS_COMMAND, 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear'
-    ].sort(), 'the nine Team Mode commands are registered and nothing else');
+      ENABLE_COMMAND, VERIFY_LOG_COMMAND, OPEN_BOARD_COMMAND, IMPORT_PLANS_COMMAND, 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear',
+      'nearAi.team.share'
+    ].sort(), 'the ten Team Mode commands are registered and nothing else');
     assert.equal(stub.webviewPanels.length + stub.viewProviders.length, 0, 'no webview panel and no view provider');
     assert.deepEqual(stub.externalCommands, [], 'no context key is set');
   } finally {

@@ -20,7 +20,7 @@ const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 test.after(() => { uninstall(); });
-const { ENABLE_COMMAND, PUSH_ACTION, SHARED_TEXT, SHARE_FAILED_TEXT, SHOW_DETAILS_ACTION, TRY_AGAIN_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, createSessionSlot, registerTeamMode } = commandsModule;
+const { ENABLE_COMMAND, PUSH_ACTION, SHARE_COMMAND, SHOW_DETAILS_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, createSessionSlot, registerTeamMode } = commandsModule;
 const { CONNECT_NEAR_AI_ACTION, NOT_CONNECTED_TEXT, STILL_NOT_CONNECTED_TEXT } = commandsModule;
 const { LOCAL_ONLY_TEXT, NOT_NOW_ACTION, NOT_SHAREABLE_TEXT, SOLO_TEXT, TURN_ON_ANYWAY_ACTION } = commandsModule;
 // The address teammates would use. An insteadOf rule maps it back to the fixture's bare remote, so git still works on this computer.
@@ -146,7 +146,7 @@ test('Enable asks for team name, owner name and email with defaults, creates tea
     assert.deepEqual(stub.notificationActions[doneIndex], [PUSH_ACTION, VERIFY_ACTION]);
     // J-10: plain words in the notification; the git detail is in the channel only.
     assert.equal(done.message, 'Team Mode is on for Command team. Share it so teammates can see the team.');
-    assert.ok(outputLines().includes('team.json is committed on main. Sharing pushes main to origin.'));
+    assert.ok(outputLines().includes('team.json is committed on main. Sharing puts only team.json on main at origin.'));
     assert.equal(remoteMain(p.fixture), mainBefore, 'the code branch was not pushed because Push was not clicked');
     assert.deepEqual(stub.configUpdates, [], 'settings were never written');
     assert.ok(remoteHasCoordination(p.fixture), 'the coordination branch exists on the remote');
@@ -154,23 +154,29 @@ test('Enable asks for team name, owner name and email with defaults, creates tea
   });
 });
 
-test('choosing Share with my team pushes the current branch and says so in plain words', async () => {
+// G-61-3: Share with my team runs Share Team Setup, which shares exactly the team setup after one confirmation (the old push of the checked-out
+// branch is gone).
+test('choosing Share with my team runs Share Team Setup: one confirmation, then the online main holds this computer\'s team.json', async () => {
+  const { SHARE_TEXT } = require('../services/team/shareFlow') as typeof import('../services/team/shareFlow');
   await withProject(async (p) => {
     const mainBefore = remoteMain(p.fixture);
-    await p.enable(['Share team', 'Lead Owner', ''], [PUSH_ACTION]);
-    const head = gitIn(p.root, ['rev-parse', 'HEAD']);
-    assert.notEqual(head, mainBefore);
-    assert.equal(remoteMain(p.fixture), head, 'the remote main now equals the clone HEAD');
-    assert.equal(SHARED_TEXT, 'Shared with your team.');
-    assert.ok(messages().includes(SHARED_TEXT));
+    writeFileSync(path.join(p.root, 'notes.txt'), 'my own work in progress', 'utf8');
+    gitIn(p.root, ['checkout', '-q', '-b', 'my-feature']);
+    gitIn(p.root, ['checkout', '-q', 'main']);
+    await p.enable(['Share team', 'Lead Owner', ''], [PUSH_ACTION, SHARE_TEXT.share]);
+    assert.equal(SHARE_COMMAND, 'nearAi.team.share');
+    assert.ok(stub.notifications.some((entry, index) => entry.message === SHARE_TEXT.question && stub.notificationOptions[index]?.modal === true), 'one plain confirmation');
+    assert.deepEqual(gitIn(p.fixture.remote, ['diff', '--name-only', mainBefore, 'refs/heads/main']).split('\n'), [TEAM_FILE_REL], 'only the team setup reached the online main');
+    assert.equal(gitIn(p.fixture.remote, ['show', `refs/heads/main:${TEAM_FILE_REL}`]), gitIn(p.root, ['show', `HEAD:${TEAM_FILE_REL}`]));
+    assert.equal(gitIn(p.fixture.remote, ['for-each-ref', 'refs/heads/my-feature']), '', 'no other branch was pushed');
+    assert.ok(messages().includes(SHARE_TEXT.shared));
     assert.equal(messages().some((message) => /push|branch|origin/i.test(message)), false, 'no git words in what is shown');
-    assert.ok(outputLines().includes('Pushed main to origin.'), 'the channel keeps the git detail');
   });
 });
 
-test('a failing share shows plain words with Try again and Show details, and keeps the redacted git reason in the channel', async () => {
+test('Share with my team after a teammate moved the online main puts only the team setup on top of their work and never moves this computer', async () => {
+  const { SHARE_TEXT } = require('../services/team/shareFlow') as typeof import('../services/team/shareFlow');
   await withProject(async (p) => {
-    // The bare remote refuses non-fast-forward updates, so a diverged main makes the push fail.
     const other = path.join(p.fixture.root, 'other');
     gitIn(p.fixture.root, ['clone', '-q', p.fixture.remote, other]);
     gitIn(other, ['config', 'user.name', 'Other']);
@@ -179,13 +185,39 @@ test('a failing share shows plain words with Try again and Show details, and kee
     gitIn(other, ['add', 'other.txt']);
     gitIn(other, ['commit', '-q', '-m', 'other work']);
     gitIn(other, ['push', '-q', 'origin', 'main']);
-    await p.enable(['Failing push', 'Lead Owner', ''], [PUSH_ACTION, TRY_AGAIN_ACTION]);
-    const failures = stub.notifications.filter((entry) => entry.level === 'error');
-    assert.equal(SHARE_FAILED_TEXT, 'Team Mode could not be shared with your team yet. Check your internet connection, then choose Try again. Nothing was lost.');
-    assert.deepEqual(failures.map((entry) => entry.message), [SHARE_FAILED_TEXT, SHARE_FAILED_TEXT], 'Try again tried once more and said so again');
-    const index = stub.notifications.findIndex((entry) => entry.level === 'error');
-    assert.deepEqual(stub.notificationActions[index], [TRY_AGAIN_ACTION, SHOW_DETAILS_ACTION]);
-    assert.equal(outputLines().filter((line) => line.startsWith('Pushing main to origin failed')).length, 2, 'the redacted git reason is in the channel for each try');
+    const theirs = remoteMain(p.fixture);
+    await p.enable(['Diverged team', 'Lead Owner', ''], [PUSH_ACTION, SHARE_TEXT.share]);
+    const head = gitIn(p.root, ['rev-parse', 'HEAD']);
+    assert.equal(gitIn(p.fixture.remote, ['rev-parse', 'refs/heads/main^']), theirs, 'the share sits on the teammate\'s work');
+    assert.deepEqual(gitIn(p.fixture.remote, ['diff', '--name-only', theirs, 'refs/heads/main']).split('\n'), [TEAM_FILE_REL]);
+    assert.equal(gitIn(p.root, ['rev-parse', 'HEAD']), head, 'this computer did not move');
+    assert.ok(messages().includes(SHARE_TEXT.shared));
+  });
+});
+
+test('a share the online home refuses shows plain words with Show details and keeps the redacted reason in the channel', async () => {
+  const { SHARE_TEXT } = require('../services/team/shareFlow') as typeof import('../services/team/shareFlow');
+  await withProject(async (p) => {
+    await p.enable(['Refused team', 'Lead Owner', '']);
+    const hook = path.join(p.fixture.remote, 'hooks', 'pre-receive');
+    writeFileSync(hook, '#!/bin/sh\necho "main only takes reviewed changes" >&2\nexit 1\n', { encoding: 'utf8', mode: 0o755 });
+    stub.notifications.length = 0;
+    stub.notificationActions.length = 0;
+    stub.notificationOptions.length = 0;
+    stub.messageAnswers.push(SHARE_TEXT.share, undefined);
+    await stub.commands.get(SHARE_COMMAND)?.();
+    const index = stub.notifications.findIndex((entry) => entry.message === SHARE_TEXT.rejected);
+    assert.ok(index >= 0, messages().join(' | '));
+    assert.deepEqual(stub.notificationActions[index], [SHOW_DETAILS_ACTION]);
+    assert.ok(outputLines().some((line) => line.includes('main only takes reviewed changes')), 'the reason is in the channel');
+  });
+});
+
+test('Share Team Setup from the palette in a project without a team only explains how to turn Team Mode on', async () => {
+  await withProject(async () => {
+    await stub.commands.get(SHARE_COMMAND)?.();
+    assert.deepEqual(messages(), [SOLO_TEXT]);
+    assert.equal(stub.inputRequests.length, 0);
   });
 });
 

@@ -28,7 +28,7 @@ const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 const memberModule = require('../services/team/memberCommands') as typeof import('../services/team/memberCommands');
 test.after(() => { uninstall(); });
-const { ENABLE_COMMAND, registerTeamMode } = commandsModule;
+const { ENABLE_COMMAND, SHARE_COMMAND, registerTeamMode } = commandsModule;
 const {
   INVITE_COMMAND, JOIN_COMMAND, LINK_EXPLANATION, LINK_NEAR_COMMAND, LINK_NOW_CHOICE, MANAGE_MEMBERS_COMMAND, NOT_NOW_CHOICE, SIGN_OUT_NEAR_COMMAND, parseUsdToNanoUsd
 } = memberModule;
@@ -958,6 +958,20 @@ test('a member without management rights sees the list read-only with no actions
     assert.equal(stub.quickPickRequests.length, 1, 'no second list of actions');
     assert.ok(lastList().includes('Lead Owner, owner'));
     assert.ok(shownMessages().some((message) => message.includes('Only the owner or a lead can change the team')), shownMessages().join(' | '));
+    await closeWindow(j);
+  });
+});
+
+test('a member without management rights is told who can share the team setup, and nothing is asked or shared', async () => {
+  await withTeam(async (t) => {
+    const dana = await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    const j = await openJoiner(t, { pull: false, secrets: dana.secrets });
+    const before = gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']);
+    clearUi();
+    await j.run(SHARE_COMMAND);
+    assert.ok(shownMessages().includes('Only the owner or a lead can share the team setup. Your role in this team is developer.'), shownMessages().join(' | '));
+    assert.equal(stub.notificationOptions.some((options) => options?.modal === true), false, 'no confirmation was asked');
+    assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), before, 'nothing was shared');
     await closeWindow(j);
   });
 });
