@@ -262,9 +262,10 @@
   }
 
   // Assistant text is re-rendered from the full buffer so partial Markdown settles as it streams.
-  function renderMarkdown(target, text) {
+  // `partial` is true while more text is still on its way.
+  function renderMarkdown(target, text, partial) {
     target.replaceChildren();
-    for (const block of markdown.parse(text)) {
+    for (const block of markdown.parse(text, { partial: partial === true })) {
       if (block.type === 'html') {
         const holder = document.createElement('div');
         holder.innerHTML = block.html;
@@ -296,10 +297,10 @@
     current.body.append(el('span', 'spinner'));
     return current;
   }
-  function flushAssistant() {
+  function flushAssistant(partial) {
     if (!current) return;
     current.frame = 0;
-    renderMarkdown(current.body, current.text);
+    renderMarkdown(current.body, current.text, partial === true);
     scrollToEnd();
   }
   function finishAssistant(meta) {
@@ -1030,7 +1031,7 @@
       case 'assistant-delta':
         if (!current) startAssistant();
         current.text += m.text || '';
-        if (!current.frame) current.frame = requestAnimationFrame(flushAssistant);
+        if (!current.frame) current.frame = requestAnimationFrame(() => flushAssistant(true));
         break;
       case 'assistant-done': {
         // A run is several text segments around tool rows; the footer goes after the last one.
@@ -1104,7 +1105,7 @@
         break;
       case 'assistant-retry':
         // The failed attempt's partial text is void; the retry streams its own.
-        if (current && m.discard) { current.text = current.text.slice(0, Math.max(0, current.text.length - m.discard)); flushAssistant(); }
+        if (current && m.discard) { current.text = current.text.slice(0, Math.max(0, current.text.length - m.discard)); flushAssistant(true); }
         notice(m.text || 'Retrying…', []);
         break;
       case 'assistant-error':
