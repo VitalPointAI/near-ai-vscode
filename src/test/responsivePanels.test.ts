@@ -158,3 +158,20 @@ test('Compare Models hides less important columns on narrow panels and shows the
   const lines = row.children[1].all().filter((node) => node.classList.contains('when-medium') || node.classList.contains('when-narrow')).map((node) => node.textContent);
   assert.deepEqual(lines, ['Coding 8.4 · 55 tokens/s · tested just now', 'Passed 75% · median 41 s · $0.01 per task · no failures']);
 });
+
+test('Past comparisons keep the run mode visible when the Tasks column is hidden', async () => {
+  const page = await runCompare();
+  const entry = { id: 'h1', startedAt: new Date().toISOString(), models: ['deepseek/flash'], taskSet: 'full', mode: 'reuse', ran: 2, reused: 1, costUsd: 0.02, status: 'completed' };
+  page.dispatch({ type: 'state', state: { leaderboard: [], catalog: [], roles: [], taskSets: [], history: [entry], selected: [] } });
+  const lines = page.body.all().filter((node) => node.classList.contains('when-narrow')).map((node) => node.textContent);
+  assert.ok(lines.some((line) => line.includes('Full set, reused saved')), `hidden Tasks value shows the mode: ${JSON.stringify(lines)}`);
+});
+
+test('the MCP approval explanation is tied to its menu, and Tools badges wrap instead of cutting text off', () => {
+  const script = readFileSync(path.join(MEDIA, 'mcp', 'mcp.js'), 'utf8');
+  assert.match(script, /select\.setAttribute\('aria-describedby', hint\.id\)/);
+  assert.match(script, /approvalField\.append\(approvalHint\(approval\)\)/, 'the form hint sits inside its field');
+  const badge = /\.badge \{[^}]*\}/.exec(css('tools/tools.css'))![0];
+  assert.match(badge, /white-space: normal;/);
+  assert.doesNotMatch(badge, /text-overflow: ellipsis|overflow: hidden/);
+});

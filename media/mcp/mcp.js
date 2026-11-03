@@ -8,8 +8,12 @@
   const APPROVAL = { 'ask-for-changes': 'Ask before changes', 'ask-every-call': 'Ask before every call', trusted: 'Trusted' };
   const APPROVAL_HINT = { 'ask-for-changes': 'Read-only tools follow your normal approval rules.', 'ask-every-call': 'Every tool call asks you first.', trusted: 'Your normal approval rules apply to every tool.' };
   // Keeps a hint line under an approval menu in step with its choice.
+  let hintCount = 0;
   function approvalHint(select) {
     const hint = el('span', 'hint approval-hint');
+    hint.id = 'approval-hint-' + (++hintCount);
+    // Screen readers announce the explanation with the menu.
+    select.setAttribute('aria-describedby', hint.id);
     const sync = () => { hint.textContent = APPROVAL_HINT[select.value] || ''; };
     select.addEventListener('change', sync);
     sync();
@@ -58,7 +62,9 @@
     const cancel = button('Cancel', () => { form.hidden = true; form.replaceChildren(); }, true);
     const title = el('h2', '', editing ? 'Edit ' + server.config.name : 'Add an MCP server');
     title.id = 'form-title';
-    form.replaceChildren(title, field('Name', name), field('Type', transport), remote, local, field('Approval', approval, 'Tools that can change data ask first in every mode unless the server is Trusted.'), approvalHint(approval), el('div', 'actions'));
+    const approvalField = field('Approval', approval, 'Tools that can change data ask first in every mode unless the server is Trusted.');
+    approvalField.append(approvalHint(approval));
+    form.replaceChildren(title, field('Name', name), field('Type', transport), remote, local, approvalField, el('div', 'actions'));
     form.querySelector('.actions').append(save, cancel);
     name.focus();
   }

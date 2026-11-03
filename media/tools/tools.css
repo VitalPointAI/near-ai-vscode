@@ -31,7 +31,7 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 1px solid 
 .members { margin: 6px 0 0; padding-left: 18px; }
 .members li { margin: 3px 0; }
 .model { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.badge { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 0.82em; padding: 0 7px; border-radius: 9px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.badge { display: inline-block; max-width: 100%; font-size: 0.82em; padding: 0 7px; border-radius: 9px; border: 1px solid var(--border); color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
 .badge.status.ok { color: var(--vscode-testing-iconPassed, #3fb950); border-color: currentColor; }
 .badge.status.ask { color: var(--vscode-editorWarning-foreground, #cca700); border-color: currentColor; }
 .badge.status.checked { color: var(--vscode-textLink-foreground); border-color: currentColor; }

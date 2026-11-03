@@ -335,7 +335,7 @@
     for (const entry of state.history) {
       const row = el('tr');
       const started = cell(row, when(entry.startedAt), 'wrap');
-      started.append(hiddenValues('when-narrow', [(entry.taskSet === 'full' ? 'Full' : 'Short') + ' set', entry.ran + ' run' + (entry.ran === 1 ? '' : 's') + (entry.reused ? ' + ' + entry.reused + ' reused' : '')]));
+      started.append(hiddenValues('when-narrow', [(entry.taskSet === 'full' ? 'Full' : 'Short') + ' set, ' + (entry.mode === 'reuse' ? 'reused saved' : 'all again'), entry.ran + ' run' + (entry.ran === 1 ? '' : 's') + (entry.reused ? ' + ' + entry.reused + ' reused' : '')]));
       cell(row, entry.models.join(', '), 'wrap');
       cell(row, (entry.taskSet === 'full' ? 'Full' : 'Short') + ', ' + (entry.mode === 'reuse' ? 'reused saved' : 'all again'));
       cell(row, entry.ran + (entry.reused ? ' + ' + entry.reused + ' reused' : ''), 'num');

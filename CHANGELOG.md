@@ -9,6 +9,9 @@
   name, and on a very narrow panel each table row becomes a small card. Code
   and diffs still scroll sideways inside their own box, so lines are never
   wrapped in a misleading way.
+- **Shorter MCP approval choices.** The approval menu for a tool server now
+  reads "Ask before changes", "Ask before every call" or "Trusted", with a
+  one-line explanation of the chosen setting under it.
 
 ## 0.4.13
 
