@@ -252,3 +252,9 @@ None.
 ---
 *Phase: 61-invitations-joining-removal-near-org-and-key-integration*
 *Completed: 2026-11-03*
+
+## Self-Check: PASSED
+
+- src/services/team/memberCommands.ts, src/test/teamMemberCommands.test.ts, src/test/teamInviteShare.test.ts and src/test/teamSectionHost.test.ts exist and were modified.
+- Commits f1bcd4c, 5d9ed53, 72b4908 and 43b3e07 (tasks) and 30df5e2 (summary) are ancestors of HEAD. There are 4 task commits since 44cc690.
+- Every acceptance grep and both task verify commands passed as listed above.
