@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-21-PLAN.md
-last_updated: "2026-11-03T23:20:39.195Z"
+stopped_at: Completed 61-23-PLAN.md
+last_updated: "2026-11-03T23:34:42.838Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 27edb934563d52c3433fd3c51d6506f61fcc5392
+state_head: 42b99c665bf8a51562943ae1c84d965dbdccae39
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 59
-  completed_plans: 48
+  completed_plans: 49
   percent: 13
 ---
 
@@ -102,6 +102,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P19 | 19min | 3 tasks | 11 files |
 | Phase 61 P20 | 12min | 2 tasks | 4 files |
 | Phase 61 P21 | 11min | 3 tasks | 9 files |
+| Phase 61 P23 | 11min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -209,6 +210,8 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-21: the teamSetupShared check runs only for an owner or a lead, at most once a minute on a monotonic clock while the sidebar is shown, and at once after Share, Invite, Link, Turn on and Join
 - [Phase 61]: 61-21: only {type:'team-action', action} with a known id runs anything, through TEAM_ACTION_COMMANDS; one action at a time; teamSectionTap.probe only with NEAR_AI_E2E exactly 1
 - [Phase 61]: 61-21: the manager status adds how many people wait in Members (managerStatus waiting count)
+- [Phase 61]: 61-23: the invite modal is 'Invite ready for <name>' with the invite, a blank line and how to send it, button 'Copy invite'; closing it asks 'Close without copying? The invite is not shown again.' (Copy invite, Close), and Close points at Members in the Team section
+- [Phase 61]: 61-23: Link Your Organization (and the NEAR line in Manage Team Members) shares a new link through ensureTeamSetupShared reason link with one confirmation; declining keeps the link here and points at Share in the Team section; the push helpers are removed, so no membership command pushes a branch
 
 ### Pending Todos
 
@@ -230,8 +233,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T23:20:38.891Z
-Stopped at: Completed 61-21-PLAN.md
+Last session: 2026-11-03T23:34:42.408Z
+Stopped at: Completed 61-23-PLAN.md
 Resume file: None
 
 ## Notes
