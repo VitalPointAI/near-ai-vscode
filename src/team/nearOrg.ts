@@ -389,7 +389,7 @@ export class NearOrgClient {
     if (first['success']) return { ok: true, alreadyMember: false };
     const error = typeof first['error'] === 'string' ? first['error'] : '';
     if (/already a member/i.test(error)) return { ok: true, alreadyMember: true };
-    if (/insufficient permission/i.test(error)) return { ok: false, reason: 'Your NEAR role cannot invite people to this organization.' };
+    if (/insufficient permission/i.test(error)) return { ok: false, reason: 'Your role in your organization cannot invite people to it.' };
     return { ok: false, reason: scrubNearText(error) || 'NEAR AI Cloud did not send the invitation.' };
   }
 
@@ -466,7 +466,7 @@ export class NearOrgClient {
       await this.revokeKey(workspaceId, keyId);
       return 'The new key was revoked.';
     } catch (error) {
-      return `The new key could not be revoked (${error instanceof NearOrgError ? error.code : 'unknown'}); revoke it in the NEAR console.`;
+      return `The new key could not be revoked (${error instanceof NearOrgError ? error.code : 'unknown'}); revoke it in your organization's settings on the NEAR AI website.`;
     }
   }
 
@@ -484,7 +484,7 @@ export class NearOrgClient {
       for (const id of matches) await this.revokeKey(workspaceId, id);
       return matches.length === 0 ? 'No key with that name was found.' : `Revoked ${matches.length} key${matches.length === 1 ? '' : 's'} with that name that may have been made.`;
     } catch (error) {
-      return `Could not check for a key that may have been made (${error instanceof NearOrgError ? error.code : 'unknown'}); look for one in the NEAR console.`;
+      return `Could not check for a key that may have been made (${error instanceof NearOrgError ? error.code : 'unknown'}); look for one in your organization's settings on the NEAR AI website.`;
     }
   }
 

@@ -86,9 +86,9 @@ function nearFailure(error: unknown): DeliveryResult {
   return fail('near', errorText(error));
 }
 
-export const signInToSendKeyText = (memberName: string): string => `Sign in to NEAR to send ${memberName}'s key.`;
+export const signInToSendKeyText = (memberName: string): string => `Sign in to NEAR AI to send ${memberName}'s key.`;
 
-const NOT_LINKED_TEXT = 'This team is not linked to a NEAR organization, so there is no key to send.';
+const NOT_LINKED_TEXT = 'This team has no organization linked, so there is no key to send.';
 
 // CR-01: the workspace a key is created, capped and revoked in is team.json `near`, but only when it matches the link this computer pinned.
 async function trustedLink(teamFile: TeamFile, storageDir: string): Promise<{ ok: true; near: NearLink | undefined } | { ok: false; message: string }> {
@@ -96,7 +96,7 @@ async function trustedLink(teamFile: TeamFile, storageDir: string): Promise<{ ok
     return { ok: true, near: await checkNearPin(storageDir, teamFile) };
   } catch (error) {
     if (error instanceof NearPinError) return { ok: false, message: error.message };
-    return { ok: false, message: `The saved NEAR link for this team could not be checked, so no NEAR key was changed: ${errorText(error)}` };
+    return { ok: false, message: `The saved organization link for this team could not be checked, so no team key was changed: ${errorText(error)}` };
   }
 }
 
@@ -136,7 +136,7 @@ async function settle(checklist: CleanupChecklist, person: Person, step: Cleanup
 
 const joinNotes = (notes: Array<string | undefined>): string => notes.filter((text): text is string => text !== undefined && text !== '').join(' ');
 
-const KEY_NOT_FOUND_TEXT = 'NEAR did not find this key in the linked workspace, so it was not capped or revoked here. Find it in the NEAR console, set its limit to 0 and revoke it.';
+const KEY_NOT_FOUND_TEXT = "NEAR AI did not find this key in the linked workspace, so it was not capped or revoked here. Find it in your organization's settings on the NEAR AI website, set its limit to 0 and revoke it.";
 
 // Sets a key to a limit of 0 and then revokes it, in that order so a half-finished clean-up never leaves a spendable key. A key NEAR does not
 // find in the linked workspace is never counted as done (CR-01): it becomes a manual item for the NEAR console. A step that failed goes on the
@@ -151,7 +151,7 @@ async function retireKey(input: LeadInput, near: NearLink, person: Person, keyId
   try {
     if (await input.org.revokeKey(near.workspaceId, keyId) === 'missing') {
       const problem = await note(input.checklist, person, 'revoke-key', 'manual', KEY_NOT_FOUND_TEXT, keyId);
-      return ['NEAR did not find a key it should have in the linked workspace, so that key was not revoked here. It is on your cleanup list; check it in the NEAR console.', ...(problem === undefined ? [] : [problem])];
+      return ["NEAR AI did not find a key it should have in the linked workspace, so that key was not revoked here. It is on your cleanup list; check it in your organization's settings on the NEAR AI website.", ...(problem === undefined ? [] : [problem])];
     }
     return [];
   } catch (error) {
@@ -209,7 +209,7 @@ async function deliveryLanded(log: TeamLog, memberId: string, keyId: string): Pr
 }
 
 const unknownDeliveryText = (name: string, keyId: string): string =>
-  `It is not known whether ${name}'s new key reached the team record, because the team could not be reached to check. The key was kept, so a delivery that did land still works. When you are online, open "NEAR AI: Manage Team Members": if ${name} still needs a key, revoke key ${keyId} in the NEAR console and send a new one.`;
+  `It is not known whether ${name}'s new key reached the team record, because the team could not be reached to check. The key was kept, so a delivery that did land still works. When you are online, open "NEAR AI: Manage Team Members": if ${name} still needs a key, revoke key ${keyId} in your organization's settings on the NEAR AI website and send a new one.`;
 
 // Creates the key with its cap in the create call, seals it to every target, and appends member.key-sealed. The append builder re-checks the
 // fresh state: the member must still be there, still hold the key this delivery replaces, and still have exactly the sealed set of devices.
@@ -298,9 +298,9 @@ export async function rotateMemberKey(input: LeadInput): Promise<DeliveryResult>
   try {
     const old = await input.org.findKey(near.workspaceId, oldKeyId);
     if (old === undefined) {
-      manual = `NEAR no longer has ${member.name}'s earlier key, so the new key was given a limit of 0. Raise it in the NEAR console once you know what is left.`;
+      manual = `NEAR AI no longer has ${member.name}'s earlier key, so the new key was given a limit of 0. Raise it in your organization's settings on the NEAR AI website once you know what is left.`;
     } else if (old.spendLimitNanoUsd === null || old.usageNanoUsd === null || !Number.isSafeInteger(old.spendLimitNanoUsd) || !Number.isSafeInteger(old.usageNanoUsd)) {
-      manual = `NEAR did not report the limit and usage of ${member.name}'s earlier key, so the new key was given a limit of 0. Raise it in the NEAR console once you know what is left.`;
+      manual = `NEAR AI did not report the limit and usage of ${member.name}'s earlier key, so the new key was given a limit of 0. Raise it in your organization's settings on the NEAR AI website once you know what is left.`;
     } else {
       limit = Math.max(0, old.spendLimitNanoUsd - old.usageNanoUsd);
     }
@@ -358,10 +358,10 @@ export async function confirmMember(input: Omit<LeadInput, 'org'> & { org?: Near
   if (input.org === undefined) {
     // No NEAR session on this computer: nothing can be created, so the key waits on the cleanup list with the way to send it.
     const problem = keyDue ? await note(input.checklist, member, 'deliver-key', 'pending', signInToSendKeyText(member.name)) : undefined;
-    return { ok: true, roleChanged, key: 'queued', message: joinNotes([confirmed, 'Their key was not sent because you are not signed in to NEAR.', problem]) };
+    return { ok: true, roleChanged, key: 'queued', message: joinNotes([confirmed, 'Their key was not sent because you are not signed in to NEAR AI.', problem]) };
   }
   const delivery = await deliverMemberKey({ log: input.log, teamFile: input.teamFile, memberId: input.memberId, org: input.org, checklist: input.checklist, ...(input.onStep === undefined ? {} : { onStep: input.onStep }) });
-  if (delivery.ok) return { ok: true, roleChanged, key: 'delivered', message: joinNotes([confirmed, 'Their NEAR key was sent to their computer.', delivery.notice]) };
+  if (delivery.ok) return { ok: true, roleChanged, key: 'delivered', message: joinNotes([confirmed, 'Their AI key was sent to their computer.', delivery.notice]) };
   return { ok: true, roleChanged, key: 'queued', message: joinNotes([confirmed, `Their key was not sent: ${delivery.message}`]) };
 }
 

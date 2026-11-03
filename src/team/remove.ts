@@ -22,7 +22,7 @@ import { redactGitMessage } from './runGit';
 import { NearPinError, checkNearPin } from './teamFile';
 import type { AppendResult } from './transport';
 
-export const KEY_STILL_SPENDS_WARNING = "<name>'s NEAR key could not be capped and can still spend. Retry from Manage Team Members, or set its limit to 0 in the NEAR console now.";
+export const KEY_STILL_SPENDS_WARNING = "<name>'s AI key could not be capped and can still spend. Retry from Manage Team Members, or set its limit to 0 in your organization's settings on the NEAR AI website now.";
 
 export const keyStillSpendsWarning = (name: string): string => KEY_STILL_SPENDS_WARNING.replace('<name>', name);
 
@@ -55,16 +55,16 @@ export interface RetryInput { item: CleanupItem; teamFile: TeamFile; log: TeamLo
 type StepState = { status: 'done' } | { status: 'pending' | 'failed' | 'manual'; text: string };
 const DONE: StepState = { status: 'done' };
 
-const SIGN_IN_TEXT = 'Sign in to NEAR to finish this step.';
+const SIGN_IN_TEXT = 'Sign in to NEAR AI to finish this step.';
 const CAP_FIRST_TEXT = 'Set the limit to 0 first.';
 const OTHER_COMMAND_TEXT = 'Retry this step from NEAR AI: Manage Team Members.';
-const NO_LINK_TEXT = 'This team has no NEAR organization link, so do this step in the NEAR console.';
+const NO_LINK_TEXT = "This team has no organization link, so do this step in your organization's settings on the NEAR AI website.";
 const STOPPED_TEXT = 'You stopped the removal before this step. Retry it from NEAR AI: Manage Team Members.';
 export const STOPPED_BEFORE_START = 'You stopped the removal before anything was changed. Nothing was changed.';
 // CR-01: NEAR not listing a key in the linked workspace never proves the key is gone, because the workspace id comes from team.json.
-const KEY_NOT_FOUND_CAP_TEXT = 'NEAR did not find this key in the linked workspace, so it may still be able to spend. Find it in the NEAR console and set its limit to 0.';
-const KEY_NOT_FOUND_REVOKE_TEXT = 'NEAR did not find this key in the linked workspace, so it was not revoked here. Find it in the NEAR console and revoke it.';
-const NO_LINK_KEY_TEXT = 'This computer has no NEAR organization link for this team, so the key was not capped. Find it in the NEAR console and set its limit to 0.';
+const KEY_NOT_FOUND_CAP_TEXT = "NEAR AI did not find this key in the linked workspace, so it may still be able to spend. Find it in your organization's settings on the NEAR AI website and set its limit to 0.";
+const KEY_NOT_FOUND_REVOKE_TEXT = "NEAR AI did not find this key in the linked workspace, so it was not revoked here. Find it in your organization's settings on the NEAR AI website and revoke it.";
+const NO_LINK_KEY_TEXT = "This computer has no organization link for this team, so the key was not capped. Find it in your organization's settings on the NEAR AI website and set its limit to 0.";
 
 const errorText = (error: unknown): string => scrubNearText(error instanceof Error ? error.message : String(error));
 
@@ -74,10 +74,10 @@ function problem(error: unknown): StepState {
   return { status: 'failed', text: errorText(error) };
 }
 
-const manualOrganizationText = (name: string): string => `Remove ${name} from the NEAR organization in the NEAR console. Their email address could not be matched to an organization member here.`;
-const protectedMatchText = (name: string): string => `${name} matches an organization owner or you, so nothing was removed. If ${name} should leave the NEAR organization, remove them in the NEAR console.`;
-const ambiguousMatchText = (name: string): string => `More than one organization member matches ${name}, so nothing was removed. Remove the right one in the NEAR console.`;
-const noInvitationText = (name: string): string => `No pending NEAR invitation for ${name} was found. If they already accepted it, remove them from the NEAR organization in the NEAR console.`;
+const manualOrganizationText = (name: string): string => `In your organization's settings on the NEAR AI website, remove ${name} from the organization. Their email address could not be matched to an organization member here.`;
+const protectedMatchText = (name: string): string => `${name} matches an organization owner or you, so nothing was removed. If ${name} should leave your organization, remove them in your organization's settings on the NEAR AI website.`;
+const ambiguousMatchText = (name: string): string => `More than one organization member matches ${name}, so nothing was removed. Remove the right one in your organization's settings on the NEAR AI website.`;
+const noInvitationText = (name: string): string => `No pending invitation to your organization for ${name} was found. If they already accepted it, remove them in your organization's settings on the NEAR AI website.`;
 
 // Every key id ever delivered to the member: the current one and each one a rotation replaced, once each.
 function deliveredKeys(member: Member): string[] {
@@ -97,7 +97,7 @@ async function trustedLink(teamFile: TeamFile, checklist: CleanupChecklist): Pro
     return { ok: true, near: await checkNearPin(checklist.storageDir, teamFile) };
   } catch (error) {
     if (error instanceof NearPinError) return { ok: false, text: error.message };
-    return { ok: false, text: `The saved NEAR link for this team could not be checked, so no NEAR key was changed: ${errorText(error)}` };
+    return { ok: false, text: `The saved organization link for this team could not be checked, so no team key was changed: ${errorText(error)}` };
   }
 }
 
@@ -205,7 +205,7 @@ function appendFailure(result: Extract<AppendResult, { ok: false }>): { code: Ex
 function leftToDo(state: StepState, what: string): string | undefined {
   if (state.status === 'done') return undefined;
   if (state.status === 'manual') return state.text;
-  return state.status === 'pending' ? `${what} It is on your cleanup list; sign in to NEAR and retry it.` : `${what} It is on your cleanup list.`;
+  return state.status === 'pending' ? `${what} It is on your cleanup list; sign in to NEAR AI and retry it.` : `${what} It is on your cleanup list.`;
 }
 
 // ---- removal and cancel -----------------------------------------------------------------------------------------------------------------
@@ -262,7 +262,7 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
     const saved = await save(input.checklist, member.id, finished.map((step) => itemOf(member, 'zero-limit', DONE, step.keyId)));
     const message = failure.code === 'already-removed' || finished.length === 0
       ? failure.message
-      : sentence([failure.message, `${member.name}'s NEAR key was capped at 0 here but the removal was not saved to the team, so try removing them again.`, saved.notice]);
+      : sentence([failure.message, `${member.name}'s AI key was capped at 0 here but the removal was not saved to the team, so try removing them again.`, saved.notice]);
     return { ok: false, code: failure.code, message };
   }
 
@@ -307,7 +307,7 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
 
   const keyStillSpends = steps.some((step) => step.cap.status !== 'done');
   const plural = steps.length !== 1;
-  const keyWords = plural ? `Their ${steps.length} NEAR keys` : 'Their NEAR key';
+  const keyWords = plural ? `Their ${steps.length} AI keys` : 'Their AI key';
   // Why a cap could not be done here, once each (a pin mismatch or a key NEAR did not find).
   const capReasons = [...new Set(steps.flatMap((step) => (step.cap.status === 'manual' ? [step.cap.text] : [])))];
   let keyNote: string | undefined;
@@ -319,8 +319,8 @@ async function removeJoinedMember(input: RemoveInput, member: Member): Promise<R
   return {
     ok: true, kind: 'removed', keyStillSpends, checklist: saved.items,
     message: sentence([
-      `${member.name} was removed from ${input.teamFile.name}.`, stoppedEarly ? 'You stopped before the last NEAR steps; they are on your cleanup list.' : undefined,
-      keyNote, leftToDo(organization, `${member.name} is still in the NEAR organization.`),
+      `${member.name} was removed from ${input.teamFile.name}.`, stoppedEarly ? 'You stopped before the last steps in your organization; they are on your cleanup list.' : undefined,
+      keyNote, leftToDo(organization, `${member.name} is still in your organization.`),
       'Remove their access to the project on GitHub (or wherever the project is hosted) last; it is on your cleanup list.', saved.notice, invitationNote
     ])
   };
@@ -364,7 +364,7 @@ async function cancelInvitationFor(input: RemoveInput, member: Member): Promise<
   const open = saved.items.filter((item) => item.status !== 'done' && item.step === 'cancel-invitation');
   return {
     ok: true, kind: 'cancelled', keyStillSpends: false, checklist: open,
-    message: sentence([`The invitation for ${member.name} was cancelled.`, leftToDo(nearState, 'Their NEAR invitation could not be cancelled yet.'), saved.notice, notice])
+    message: sentence([`The invitation for ${member.name} was cancelled.`, leftToDo(nearState, 'Their invitation to your organization could not be cancelled yet.'), saved.notice, notice])
   };
 }
 
