@@ -9,11 +9,12 @@
   const APPROVAL_HINT = { 'ask-for-changes': 'Read-only tools follow your normal approval rules.', 'ask-every-call': 'Every tool call asks you first.', trusted: 'Your normal approval rules apply to every tool.' };
   // Keeps a hint line under an approval menu in step with its choice.
   let hintCount = 0;
-  function approvalHint(select) {
+  // `describe` ties it to the menu for screen readers; a hint inside the menu's <label> is already
+  // part of its name, so it is not described a second time.
+  function approvalHint(select, describe) {
     const hint = el('span', 'hint approval-hint');
     hint.id = 'approval-hint-' + (++hintCount);
-    // Screen readers announce the explanation with the menu.
-    select.setAttribute('aria-describedby', hint.id);
+    if (describe) select.setAttribute('aria-describedby', hint.id);
     const sync = () => { hint.textContent = APPROVAL_HINT[select.value] || ''; };
     select.addEventListener('change', sync);
     sync();
@@ -63,7 +64,7 @@
     const title = el('h2', '', editing ? 'Edit ' + server.config.name : 'Add an MCP server');
     title.id = 'form-title';
     const approvalField = field('Approval', approval, 'Tools that can change data ask first in every mode unless the server is Trusted.');
-    approvalField.append(approvalHint(approval));
+    approvalField.append(approvalHint(approval, false));
     form.replaceChildren(title, field('Name', name), field('Type', transport), remote, local, approvalField, el('div', 'actions'));
     form.querySelector('.actions').append(save, cancel);
     name.focus();
@@ -90,7 +91,7 @@
     approval.value = server.config.approval;
     approval.addEventListener('change', () => vscode.postMessage({ type: 'approval', id: server.config.id, approval: approval.value }));
     const approvalBox = el('div', 'approval');
-    approvalBox.append(approval, approvalHint(approval));
+    approvalBox.append(approval, approvalHint(approval, true));
     controls.append(hereLabel, approvalBox);
     box.append(controls);
     const stats = el('p', 'stats', server.calls ? server.calls + ' call' + (server.calls === 1 ? '' : 's') + (server.errors ? ' (' + server.errors + ' failed)' : '') + (server.averageMs !== undefined ? ' · ' + server.averageMs + ' ms average' : '') + (server.lastUsed ? ' · last used ' + new Date(server.lastUsed).toLocaleTimeString() : '') : 'Not used this session.');

@@ -169,8 +169,9 @@ test('Past comparisons keep the run mode visible when the Tasks column is hidden
 
 test('the MCP approval explanation is tied to its menu, and Tools badges wrap instead of cutting text off', () => {
   const script = readFileSync(path.join(MEDIA, 'mcp', 'mcp.js'), 'utf8');
-  assert.match(script, /select\.setAttribute\('aria-describedby', hint\.id\)/);
-  assert.match(script, /approvalField\.append\(approvalHint\(approval\)\)/, 'the form hint sits inside its field');
+  assert.match(script, /if \(describe\) select\.setAttribute\('aria-describedby', hint\.id\);/);
+  assert.match(script, /approvalBox\.append\(approval, approvalHint\(approval, true\)\)/, 'the server row menu is described by its hint');
+  assert.match(script, /approvalField\.append\(approvalHint\(approval, false\)\)/, 'the form hint sits inside its label, so it is not read twice');
   const badge = /\.badge \{[^}]*\}/.exec(css('tools/tools.css'))![0];
   assert.match(badge, /white-space: normal;/);
   assert.doesNotMatch(badge, /text-overflow: ellipsis|overflow: hidden/);
