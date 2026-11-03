@@ -4,7 +4,17 @@
   const $ = (id) => document.getElementById(id);
   const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
   const button = (label, onClick, secondary) => { const node = el('button', secondary ? 'secondary' : '', label); node.type = 'button'; node.addEventListener('click', onClick); return node; };
-  const APPROVAL = { 'ask-for-changes': 'Ask before changes (read-only tools follow your normal rules)', 'ask-every-call': 'Ask before every call', trusted: 'Trusted (your normal approval rules apply to every tool)' };
+  // Short labels so the menu fits a narrow panel; the explanation of the chosen one shows under it.
+  const APPROVAL = { 'ask-for-changes': 'Ask before changes', 'ask-every-call': 'Ask before every call', trusted: 'Trusted' };
+  const APPROVAL_HINT = { 'ask-for-changes': 'Read-only tools follow your normal approval rules.', 'ask-every-call': 'Every tool call asks you first.', trusted: 'Your normal approval rules apply to every tool.' };
+  // Keeps a hint line under an approval menu in step with its choice.
+  function approvalHint(select) {
+    const hint = el('span', 'hint approval-hint');
+    const sync = () => { hint.textContent = APPROVAL_HINT[select.value] || ''; };
+    select.addEventListener('change', sync);
+    sync();
+    return hint;
+  }
   const STATE = { connected: 'Connected', connecting: 'Connecting…', disconnected: 'Not connected', error: 'Error' };
   let project = '';
 
@@ -48,7 +58,7 @@
     const cancel = button('Cancel', () => { form.hidden = true; form.replaceChildren(); }, true);
     const title = el('h2', '', editing ? 'Edit ' + server.config.name : 'Add an MCP server');
     title.id = 'form-title';
-    form.replaceChildren(title, field('Name', name), field('Type', transport), remote, local, field('Approval', approval, 'Tools that can change data ask first in every mode unless the server is Trusted.'), el('div', 'actions'));
+    form.replaceChildren(title, field('Name', name), field('Type', transport), remote, local, field('Approval', approval, 'Tools that can change data ask first in every mode unless the server is Trusted.'), approvalHint(approval), el('div', 'actions'));
     form.querySelector('.actions').append(save, cancel);
     name.focus();
   }
@@ -73,7 +83,9 @@
     Object.entries(APPROVAL).forEach(([value, label]) => { const option = el('option', '', label); option.value = value; approval.append(option); });
     approval.value = server.config.approval;
     approval.addEventListener('change', () => vscode.postMessage({ type: 'approval', id: server.config.id, approval: approval.value }));
-    controls.append(hereLabel, approval);
+    const approvalBox = el('div', 'approval');
+    approvalBox.append(approval, approvalHint(approval));
+    controls.append(hereLabel, approvalBox);
     box.append(controls);
     const stats = el('p', 'stats', server.calls ? server.calls + ' call' + (server.calls === 1 ? '' : 's') + (server.errors ? ' (' + server.errors + ' failed)' : '') + (server.averageMs !== undefined ? ' · ' + server.averageMs + ' ms average' : '') + (server.lastUsed ? ' · last used ' + new Date(server.lastUsed).toLocaleTimeString() : '') : 'Not used this session.');
     box.append(stats);
