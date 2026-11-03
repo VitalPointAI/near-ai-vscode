@@ -86,11 +86,12 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
   <section id="welcome">
     <div id="welcome-connect" role="region" aria-labelledby="welcome-connect-title" hidden>
       <h2 id="welcome-connect-title">Connect NEAR AI to start</h2>
-      <p>Connect NEAR AI to use private models in this project. Your key stays in VS Code's secure storage, never in your project files.</p>
-      <p id="welcome-connect-reason" hidden>Your saved profile needs its key checked again.</p>
+      <p id="welcome-connect-body">Connect NEAR AI to use private models in this project. Your key stays in VS Code's secure storage, never in your project files.</p>
+      <p id="welcome-connect-reason" hidden></p>
       <div class="welcome-connect-actions">
         <button id="welcome-new-profile" class="text-button primary" type="button">Set up a new profile</button>
         <button id="welcome-choose-profile" class="text-button" type="button" hidden>Choose a profile</button>
+        <button id="welcome-open-folder" class="text-button primary" type="button" hidden>Open a folder</button>
       </div>
     </div>
     <div id="welcome-ready" hidden>

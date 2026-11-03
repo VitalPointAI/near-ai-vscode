@@ -57,44 +57,79 @@
     return card;
   }
 
+  /** What the welcome's Connect panel says in each state. */
+  const WELCOME = {
+    'no-folder': { title: 'Open a folder to start', body: 'NEAR AI works in a project folder. Open the folder you want to work on, then connect NEAR AI.' },
+    connect: { title: 'Connect NEAR AI to start', body: 'Connect NEAR AI to use private models in this project. Your key stays in VS Code\'s secure storage, never in your project files.' },
+    choose: { title: 'Connect NEAR AI to start', body: 'Connect NEAR AI to use private models in this project. Your key stays in VS Code\'s secure storage, never in your project files.', reason: 'Your saved profile needs its key checked again.' },
+    select: { title: 'Connect NEAR AI to start', body: 'Connect NEAR AI to use private models in this project. Your key stays in VS Code\'s secure storage, never in your project files.', reason: 'Choose which saved profile this project uses.' }
+  };
+
   /**
-   * Which welcome the empty chat shows, from the host's profile-status value: 'ready' with a
-   * working profile (its key checked), 'choose' when profiles exist but none works, 'connect'
-   * when there is none.
+   * Which welcome the empty chat shows, from the host's profile-status value:
+   * - 'no-folder': no folder is open, so there is nothing to set up yet;
+   * - 'ready': the selected profile works (its key was checked);
+   * - 'choose': a saved profile needs its key checked again;
+   * - 'select': saved profiles all work, but none is selected for this project;
+   * - 'connect': no saved profile.
    */
   function welcomeState(value) {
-    const profiles = (value && Array.isArray(value.profiles)) ? value.profiles : [];
-    const active = profiles.find((item) => item && item.profileId === value.activeProfileId);
-    if (active && active.validation && active.validation.status === 'valid') return 'ready';
-    return profiles.length ? 'choose' : 'connect';
+    if (value && value.noWorkspace === true) return 'no-folder';
+    const profiles = (value && Array.isArray(value.profiles)) ? value.profiles.filter(Boolean) : [];
+    const works = (item) => Boolean(item.validation) && item.validation.status === 'valid';
+    const active = profiles.find((item) => item.profileId === value.activeProfileId);
+    if (active) return works(active) ? 'ready' : 'choose';
+    if (!profiles.length) return 'connect';
+    return profiles.every(works) ? 'select' : 'choose';
+  }
+
+  /** True when focus must not move: the window is in the background, or a text box or list (the message box, even empty, or the model picker) has focus. */
+  function focusBusy(doc) {
+    if (typeof doc.hasFocus === 'function' && !doc.hasFocus()) return true;
+    const active = doc.activeElement;
+    return Boolean(active) && /^(INPUT|TEXTAREA|SELECT)$/i.test(active.tagName || '');
   }
 
   /**
-   * Shows the welcome for `state`: the Connect NEAR AI panel (with Choose a profile and its reason
-   * only for 'choose'), or the usual welcome with its suggestion cards. Elements by id:
-   * welcome-ready, welcome-connect, welcome-connect-reason, welcome-choose-profile,
-   * welcome-new-profile. Returns the button to focus: the primary one, the first time the Connect
-   * panel appears, and only when the person is not typing a message.
+   * Shows the welcome for `state`: the Connect panel (its words, buttons and reason follow the
+   * state), or the usual welcome with its suggestion cards. Elements by id: welcome-ready,
+   * welcome-connect, welcome-connect-title, welcome-connect-body, welcome-connect-reason,
+   * welcome-new-profile, welcome-choose-profile, welcome-open-folder, input.
+   * Returns the element to focus, if any: the panel's main button the first time the panel shows
+   * (never while focus is busy), or the message box when the panel goes away under the focus.
    */
   function applyWelcomeState(doc, state, memory) {
     const byId = (id) => doc.getElementById(id);
     const connecting = state !== 'ready';
     const ready = byId('welcome-ready');
     const connect = byId('welcome-connect');
+    const focusInPanel = Boolean(connect) && !connect.hidden && Boolean(doc.activeElement) && connect.contains(doc.activeElement);
+    const focused = focusInPanel ? doc.activeElement : undefined;
     if (ready) ready.hidden = connecting;
     if (connect) connect.hidden = !connecting;
+    if (!connecting) return focusInPanel ? byId('input') || undefined : undefined;
+    const words = WELCOME[state] || WELCOME.connect;
+    const title = byId('welcome-connect-title');
+    const body = byId('welcome-connect-body');
     const reason = byId('welcome-connect-reason');
+    if (title) title.textContent = words.title;
+    if (body) body.textContent = words.body;
+    if (reason) { reason.hidden = !words.reason; reason.textContent = words.reason || ''; }
+    const newProfile = byId('welcome-new-profile');
     const choose = byId('welcome-choose-profile');
-    if (reason) reason.hidden = state !== 'choose';
-    if (choose) choose.hidden = state !== 'choose';
-    if (!connecting || memory.connectShown) return undefined;
+    const openFolder = byId('welcome-open-folder');
+    if (newProfile) newProfile.hidden = state === 'no-folder';
+    if (choose) choose.hidden = state !== 'choose' && state !== 'select';
+    if (openFolder) openFolder.hidden = state !== 'no-folder';
+    const main = state === 'no-folder' ? openFolder : newProfile;
+    // A button that just hid while it had focus hands it to the one now shown.
+    if (focused && focused.hidden) return main || undefined;
+    if (memory.connectShown) return undefined;
     memory.connectShown = true;
-    const active = doc.activeElement;
-    const typing = Boolean(active) && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT') && Boolean(active.value);
-    return typing ? undefined : byId('welcome-new-profile') || undefined;
+    return focusBusy(doc) ? undefined : main || undefined;
   }
 
-  const api = { renderSetupNudge, welcomeState, applyWelcomeState, TEXT };
+  const api = { renderSetupNudge, welcomeState, applyWelcomeState, focusBusy, TEXT, WELCOME };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.nearSetup = api;
 })(typeof window === 'undefined' ? globalThis : window);

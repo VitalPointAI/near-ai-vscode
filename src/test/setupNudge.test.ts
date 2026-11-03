@@ -42,14 +42,17 @@ class FakeNode {
 class FakeDocument {
   public readonly body: FakeNode = new FakeNode('body', this);
   public activeElement?: FakeNode;
+  public hasFocus: () => boolean = () => true;
   public createElement(tag: string): FakeNode { return new FakeNode(tag, this); }
   public getElementById(id: string): FakeNode | undefined { return this.body.find((node) => node.id === id); }
 }
 
 interface SetupKit {
   renderSetupNudge(doc: FakeDocument, container: FakeNode, show: boolean, post: (message: unknown) => void, afterDismiss?: () => void): FakeNode | undefined;
-  welcomeState(value: unknown): 'ready' | 'choose' | 'connect';
+  welcomeState(value: unknown): 'no-folder' | 'ready' | 'choose' | 'select' | 'connect';
   applyWelcomeState(doc: FakeDocument, state: string, memory: Record<string, unknown>): FakeNode | undefined;
+  focusBusy(doc: FakeDocument): boolean;
+  WELCOME: Record<string, Record<string, string>>;
   TEXT: Record<string, string>;
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -141,35 +144,39 @@ test('the chat loads the card helper before chat.js, draws it in the welcome sec
 
 // ---- the welcome before a working profile ----
 
-const profileValue = (status?: string, active = true) => ({ projectScope: 'p', configured: true, activeProfileId: status && active ? 'profile-a' : undefined, profiles: status ? [{ profileId: 'profile-a', displayName: 'Demo', validation: { status } }] : [] });
+const profile = (id: string, status: string) => ({ profileId: id, displayName: id, validation: { status } });
+const profileValue = (status?: string, active = true) => ({ projectScope: 'p', configured: true, activeProfileId: status && active ? 'profile-a' : undefined, profiles: status ? [profile('profile-a', status)] : [] });
 
 function welcomeDom(): { doc: FakeDocument; parts: Record<string, FakeNode> } {
   const doc = new FakeDocument();
   const welcome = doc.createElement('section');
   welcome.id = 'welcome';
   const parts: Record<string, FakeNode> = {};
-  for (const [id, tag, hidden] of [['welcome-connect', 'div', true], ['welcome-connect-reason', 'p', true], ['welcome-new-profile', 'button', false], ['welcome-choose-profile', 'button', true], ['welcome-ready', 'div', true]] as const) {
+  for (const [id, tag, hidden] of [['welcome-connect', 'div', true], ['welcome-connect-title', 'h2', false], ['welcome-connect-body', 'p', false], ['welcome-connect-reason', 'p', true], ['welcome-new-profile', 'button', false], ['welcome-choose-profile', 'button', true], ['welcome-open-folder', 'button', true], ['welcome-ready', 'div', true], ['input', 'TEXTAREA', false]] as const) {
     const node = doc.createElement(tag);
     node.id = id;
     node.hidden = hidden;
     parts[id] = node;
   }
-  parts['welcome-connect'].append(parts['welcome-connect-reason'], parts['welcome-new-profile'], parts['welcome-choose-profile']);
+  parts['welcome-connect'].append(parts['welcome-connect-title'], parts['welcome-connect-body'], parts['welcome-connect-reason'], parts['welcome-new-profile'], parts['welcome-choose-profile'], parts['welcome-open-folder']);
   welcome.append(parts['welcome-connect'], parts['welcome-ready']);
-  doc.body.append(welcome);
+  doc.body.append(welcome, parts.input);
   return { doc, parts };
 }
 
-test('the welcome state follows the profile: connect with none, choose when none works, ready with a working one', () => {
+test('the welcome state follows the folder and the profile', () => {
+  assert.equal(setup.welcomeState({ ...profileValue(), noWorkspace: true }), 'no-folder');
   assert.equal(setup.welcomeState(profileValue()), 'connect');
   assert.equal(setup.welcomeState(undefined), 'connect');
   assert.equal(setup.welcomeState(profileValue('invalid')), 'choose');
   assert.equal(setup.welcomeState(profileValue('pending')), 'choose');
-  assert.equal(setup.welcomeState(profileValue('valid', false)), 'choose', 'a working profile that is not selected');
   assert.equal(setup.welcomeState(profileValue('valid')), 'ready');
+  // Saved profiles that all work, none selected: choose one; one of them needs checking: check its key.
+  assert.equal(setup.welcomeState(profileValue('valid', false)), 'select');
+  assert.equal(setup.welcomeState({ profiles: [profile('a', 'valid'), profile('b', 'invalid')] }), 'choose');
 });
 
-test('without a working profile only the Connect panel shows, and setup switches to the usual welcome', () => {
+test('without a working profile only the Connect panel shows, its words follow the state, and setup switches to the usual welcome', () => {
   const { doc, parts } = welcomeDom();
   const memory = {};
   const focus = setup.applyWelcomeState(doc, 'connect', memory);
@@ -177,25 +184,66 @@ test('without a working profile only the Connect panel shows, and setup switches
   assert.equal(parts['welcome-ready'].hidden, true, 'no Open-GSD cards and no team card');
   assert.equal(parts['welcome-choose-profile'].hidden, true);
   assert.equal(parts['welcome-connect-reason'].hidden, true);
+  assert.equal(parts['welcome-connect-title'].textContent, 'Connect NEAR AI to start');
   assert.equal(focus, parts['welcome-new-profile'], 'focus goes to Set up a new profile the first time');
-  // A saved profile that needs its key checked: Choose a profile, with the reason.
+  // A saved profile that needs its key checked: Choose a profile, with that reason.
   assert.equal(setup.applyWelcomeState(doc, 'choose', memory), undefined, 'not focused again');
   assert.equal(parts['welcome-choose-profile'].hidden, false);
-  assert.equal(parts['welcome-connect-reason'].hidden, false);
+  assert.deepEqual([parts['welcome-connect-reason'].hidden, parts['welcome-connect-reason'].textContent], [false, 'Your saved profile needs its key checked again.']);
+  // Working profiles, none selected: a different reason.
+  setup.applyWelcomeState(doc, 'select', memory);
+  assert.equal(parts['welcome-choose-profile'].hidden, false);
+  assert.equal(parts['welcome-connect-reason'].textContent, 'Choose which saved profile this project uses.');
   // After setup (profile-status refreshes): the usual welcome, with no reload.
   assert.equal(setup.applyWelcomeState(doc, 'ready', memory), undefined);
   assert.equal(parts['welcome-connect'].hidden, true);
   assert.equal(parts['welcome-ready'].hidden, false);
+  for (const words of Object.values(setup.WELCOME)) for (const text of Object.values(words)) assert.doesNotMatch(text, /[—–]/, text);
 });
 
-test('the Connect panel does not take focus from a message being typed', () => {
-  const { doc } = welcomeDom();
-  const input = doc.createElement('TEXTAREA');
-  input.value = 'half a question';
-  doc.activeElement = input;
+test('with no folder open the panel asks to open one, and its button is the only action', () => {
+  const { doc, parts } = welcomeDom();
+  const focus = setup.applyWelcomeState(doc, 'no-folder', {});
+  assert.equal(parts['welcome-connect-title'].textContent, 'Open a folder to start');
+  assert.match(parts['welcome-connect-body'].textContent, /Open the folder you want to work on/);
+  assert.deepEqual(['welcome-new-profile', 'welcome-choose-profile', 'welcome-open-folder'].map((id) => parts[id].hidden), [true, true, false]);
+  assert.equal(focus, parts['welcome-open-folder']);
+  // Once a folder is open (a new window), the usual Connect panel.
+  setup.applyWelcomeState(doc, 'connect', { connectShown: true });
+  assert.deepEqual(['welcome-new-profile', 'welcome-open-folder'].map((id) => parts[id].hidden), [false, true]);
+  assert.equal(parts['welcome-connect-title'].textContent, 'Connect NEAR AI to start');
+});
+
+test('the Connect panel never takes focus from a text box, a list, or a window in the background', () => {
+  const { doc, parts } = welcomeDom();
+  doc.activeElement = parts.input;
+  assert.equal(setup.applyWelcomeState(doc, 'connect', {}), undefined, 'the message box, even empty');
+  parts.input.value = 'half a question';
   assert.equal(setup.applyWelcomeState(doc, 'connect', {}), undefined);
-  input.value = '';
-  assert.ok(setup.applyWelcomeState(doc, 'connect', {}), 'an empty message box is not typing');
+  doc.activeElement = doc.createElement('SELECT');
+  assert.equal(setup.applyWelcomeState(doc, 'connect', {}), undefined, 'the model picker');
+  doc.activeElement = undefined;
+  doc.hasFocus = () => false;
+  assert.equal(setup.applyWelcomeState(doc, 'connect', {}), undefined, 'the window is in the background');
+  doc.hasFocus = () => true;
+  assert.equal(setup.applyWelcomeState(doc, 'connect', {}), parts['welcome-new-profile']);
+  assert.equal(setup.focusBusy(doc), false);
+});
+
+test('when the Connect panel goes away under the focus, focus moves to the message box', () => {
+  const { doc, parts } = welcomeDom();
+  const memory = {};
+  setup.applyWelcomeState(doc, 'connect', memory);
+  doc.activeElement = parts['welcome-new-profile'];
+  assert.equal(setup.applyWelcomeState(doc, 'ready', memory), parts.input);
+  // Focus elsewhere: nothing moves.
+  setup.applyWelcomeState(doc, 'choose', memory);
+  doc.activeElement = undefined;
+  assert.equal(setup.applyWelcomeState(doc, 'ready', memory), undefined);
+  // A button that hides under the focus (Choose a profile, when the state goes back to connect) hands it to the main one.
+  setup.applyWelcomeState(doc, 'choose', memory);
+  doc.activeElement = parts['welcome-choose-profile'];
+  assert.equal(setup.applyWelcomeState(doc, 'connect', memory), parts['welcome-new-profile']);
 });
 
 test('the sidebar HTML has the Connect panel, hidden until the profile is known, and the chat wires it', () => {
@@ -204,17 +252,25 @@ test('the sidebar HTML has the Connect panel, hidden until the profile is known,
   assert.match(panel, /<h2 id="welcome-connect-title">Connect NEAR AI to start<\/h2>/);
   assert.match(panel, /<button id="welcome-new-profile" class="text-button primary" type="button">Set up a new profile<\/button>/);
   assert.match(panel, /<button id="welcome-choose-profile" class="text-button" type="button" hidden>Choose a profile<\/button>/);
-  assert.match(panel, /<p id="welcome-connect-reason" hidden>Your saved profile needs its key checked again\.<\/p>/);
+  assert.match(panel, /<p id="welcome-connect-reason" hidden><\/p>/);
+  assert.match(panel, /<button id="welcome-open-folder" class="text-button primary" type="button" hidden>Open a folder<\/button>/);
   assert.match(panel, /<div id="welcome-ready" hidden>\s*<h2>Private AI for this project<\/h2>[\s\S]*class="suggestions"/);
   const welcome = panel.slice(panel.indexOf('<section id="welcome">'), panel.indexOf('</section>', panel.indexOf('<section id="welcome">')));
   assert.doesNotMatch(welcome, /style=|—/);
   const script = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.js'), 'utf8');
   assert.match(script, /\$\('welcome-new-profile'\)\.addEventListener\('click', \(\) => post\(\{ type: 'new-profile' \}\)\)/);
   assert.match(script, /\$\('welcome-choose-profile'\)\.addEventListener\('click', \(\) => post\(\{ type: 'select-profile' \}\)\)/);
+  assert.match(script, /\$\('welcome-open-folder'\)\.addEventListener\('click', \(\) => post\(\{ type: 'open-folder' \}\)\)/);
   assert.match(script, /setupKit\.applyWelcomeState\(document, setupKit\.welcomeState\(value\), welcomeMemory\)/);
+  // Without the helper the usual welcome shows, not a blank one.
+  assert.match(script, /applyWelcomeState: \(\) => \{ const ready = \$\('welcome-ready'\); if \(ready\) ready\.hidden = false; \}/);
+  // The sign-in notice uses the panel's words.
+  assert.match(script, /textButton\('Set up a new profile', \(\) => post\(\{ type: 'new-profile' \}\), true\),\n\s*textButton\('Choose a profile', \(\) => post\(\{ type: 'select-profile' \}\)\)/);
   assert.match(script, /case 'setup-nudge': setupKit\.renderSetupNudge\(document, welcomeReady,/, 'the team card lives in the usual welcome');
   assert.deepEqual(parseChatWebviewMessage({ type: 'new-profile' }), { type: 'new-profile' });
   assert.equal(parseChatWebviewMessage({ type: 'new-profile', command: 'workbench.action.terminal.new' }), undefined);
+  assert.deepEqual(parseChatWebviewMessage({ type: 'open-folder' }), { type: 'open-folder' });
+  assert.equal(parseChatWebviewMessage({ type: 'open-folder', path: '/etc' }), undefined);
 });
 
 test('the view\'s card messages are parsed strictly', () => {
@@ -292,7 +348,8 @@ test('the host shows the card for a working profile without a team, hides it on 
     await receive!({ type: 'setup-nudge', action: 'team' });
     await receive!({ type: 'setup-nudge', action: 'menu' });
     await receive!({ type: 'new-profile' });
-    assert.deepEqual(executed.splice(0), [['nearAi.setupProjectTeam'], ['nearAi.projectSetup'], ['nearAi.newProfile']]);
+    await receive!({ type: 'open-folder' });
+    assert.deepEqual(executed.splice(0), [['nearAi.setupProjectTeam'], ['nearAi.projectSetup'], ['nearAi.newProfile'], ['workbench.action.files.openFolder']]);
     // A team saved by Team Studio: the watcher sees the file and the card goes away.
     const [watcher] = watchers;
     assert.equal(watcher.pattern.base.fsPath, root);
@@ -342,4 +399,15 @@ test('the host does not show the card before a profile works', async () => {
   const shown = posted.filter((message) => message.type === 'setup-nudge').map((message) => message.show);
   assert.ok(shown.length >= 2);
   assert.ok(shown.every((show) => show === false));
+  const status = () => posted.filter((message) => message.type === 'profile-status').at(-1)?.value as { noWorkspace?: boolean } | undefined;
+  assert.equal(status()?.noWorkspace, undefined, 'a folder is open');
+  // No folder open: the profile status says so, and the view asks to open one.
+  vscodeStub.workspace.workspaceFolders = [];
+  try {
+    await receive!({ type: 'refresh-status' });
+    assert.equal(status()?.noWorkspace, true);
+    assert.equal(setup.welcomeState(status()), 'no-folder');
+  } finally {
+    vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }];
+  }
 });

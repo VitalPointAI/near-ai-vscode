@@ -34,7 +34,9 @@ up a team and workflow for it. Your files stay in your workspace, and work is
 sent only to the model you pick. After you connect NEAR AI, the extension
 suggests this as your next step when the project has no team yet.
 **NEAR AI: Project Setup** shows every setup step again: your project team, a
-spending limit and web search.
+spending limit and web search. **NEAR AI: Set Up a New Profile** connects
+another NEAR AI key or local runtime, and **NEAR AI: Select Profile** picks the
+one this project uses.
 
 ## Why choose NEAR AI
 
@@ -412,9 +414,11 @@ copy of Open-GSD to a project that doesn't already have one.
 ## Get started in two minutes
 
 1. Install **NEAR AI for VS Code** and open a project folder.
-2. Run **NEAR AI: Set Up** from the Command Palette, or open the **NEAR AI**
-   chat and choose **Set up a new profile**. Until you are connected, the chat
-   shows only that, because everything else needs a working profile.
+2. Open the **NEAR AI** chat and choose **Set up a new profile** (or run
+   **NEAR AI: Set Up a New Profile** from the Command Palette). A profile is
+   your NEAR AI key or local runtime for this project; it is working once the
+   extension has checked that it connects. Until then the chat shows only
+   this step, because everything else needs a working profile.
 3. Choose where models run: **NEAR AI Cloud** (create a key at
    [cloud.near.ai](https://cloud.near.ai/)), a **local runtime** (Ollama, LM
    Studio, vLLM, or any OpenAI-compatible server), or **both**, picking a cloud
@@ -494,8 +498,10 @@ Read the full [security and trust report](SECURITY.md).
 
 ## Troubleshooting
 
-- **Chat asks you to set up:** run **NEAR AI: Set Up**, then select and
-  validate a profile for this project.
+- **Chat says "Connect NEAR AI to start":** choose **Set up a new profile**.
+  If it also offers **Choose a profile**, pick a saved profile; one whose key
+  needs checking again is checked when you pick it. If it says "Open a folder
+  to start", open your project folder first.
 - **No models or costs shown:** check your API key and endpoint; prices appear
   when the provider publishes them.
 - **A workflow won't start:** make sure npm can reach the registry, then run

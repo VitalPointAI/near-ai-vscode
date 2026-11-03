@@ -3,21 +3,26 @@
 ## Unreleased
 
 - **The chat asks you to connect NEAR AI first.** Until the project has a
-  working profile, the empty chat shows only **Connect NEAR AI to start**
-  with a **Set up a new profile** button. If you have a saved profile whose
-  key needs checking again, it also offers **Choose a profile**. The
-  suggestions to start a new project, onboard an existing one or show
-  progress appear once you are connected, without reloading. The new
-  command **NEAR AI: Set Up a New Profile…** starts the same setup.
+  working profile (a saved NEAR AI key or local runtime that was checked
+  and works), the empty chat shows only **Connect NEAR AI to start** with a
+  **Set up a new profile** button. If a saved profile needs its key checked
+  again, or you have saved profiles but none is chosen for this project, it
+  also offers **Choose a profile** and says why. With no folder open, it
+  asks you to open one first. The suggestions to start a new project,
+  onboard an existing one or show progress appear once you are connected,
+  without reloading. The new command **NEAR AI: Set Up a New Profile**
+  starts the same setup, and the chat's sign-in message now offers the same
+  two buttons.
 - **After you connect NEAR AI, the extension suggests what to do next.**
   If the project has no team yet, it starts with setting up your project
   team. You can also set a spending limit, turn on web search, or go
   straight to the chat. Steps you have done are marked done. If the project
-  already has a team, you get a short message with a way to review it. To
-  see these steps again, run **NEAR AI: Project Setup…** or use Project
-  setup on the Tools tab.
+  already has a team, you get a short message with **Review project team**
+  and **More setup steps**. To see these steps again, run **NEAR AI:
+  Project Setup** or use Project setup on the Tools tab.
 - **The empty chat shows a small card while the project has no team**, with
-  a button to set one up. **Not now** hides the card for this project only.
+  a button to set one up and an **All setup steps** link. **Not now** hides
+  the card for this project only.
 - **The NEAR AI welcome page has a new step, Choose your team**, right after
   connecting NEAR AI, with a button to set up your project team.
 

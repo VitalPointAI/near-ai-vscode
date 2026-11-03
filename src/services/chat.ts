@@ -388,6 +388,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand('nearAi.selectProfile');
       return;
     }
+    if (message.type === 'open-folder') {
+      await vscode.commands.executeCommand('workbench.action.files.openFolder');
+      return;
+    }
     if (message.type === 'new-profile') {
       await vscode.commands.executeCommand('nearAi.newProfile');
       return;
@@ -828,7 +832,7 @@ async function loadModels(panel: ChatHost, auth: AuthService): Promise<void> {
 async function sendProfileStatus(panel: ChatHost, auth: AuthService, existing?: ProfileStore): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) {
-    panel.webview.postMessage({ type: 'profile-status', value: profileStatusMessage([], 'No workspace', undefined, false) });
+    panel.webview.postMessage({ type: 'profile-status', value: { ...profileStatusMessage([], 'No workspace', undefined, false), noWorkspace: true } });
     return;
   }
   const profiles = existing ?? new ProfileStore(root, auth);

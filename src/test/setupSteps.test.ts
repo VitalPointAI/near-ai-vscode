@@ -287,11 +287,15 @@ test('the menu marks web search done once a provider is set up', async () => {
   settings['webSearch.provider'] = 'brave';
   await secrets.store('nearAi.webSearch.brave.apiKey', 'brave-test-key-123');
   settings.dailySpendLimitUsd = 10;
+  // Registers the web search fact itself, so this test passes on its own.
+  const own = { subscriptions: [] as Array<{ dispose(): void }> };
+  menu.registerProjectSetup(own as never, host);
   try {
     await menu.showSetupMenu(host);
     assert.deepEqual(picks[0].items.map((item) => item.label), ['$(organization) Set up your project team (recommended)', '$(check) Set a spending limit (done)', '$(check) Turn on web search (done)', '$(comment-discussion) Start chatting']);
   } finally {
     secrets.values.clear();
+    for (const subscription of own.subscriptions) subscription.dispose();
   }
 });
 
