@@ -563,3 +563,80 @@ test('a real lead and joiner: Share first, then Invite; the joiner waits; the le
     await removeFixture(fixture);
   }
 });
+
+// ---- Task 3: the e2e probe only under the extension-host tests ------------------------------------------------------------------------------
+
+function withE2e<T>(value: string | undefined, work: () => Promise<T>): Promise<T> {
+  const before = process.env.NEAR_AI_E2E;
+  if (value === undefined) delete process.env.NEAR_AI_E2E; else process.env.NEAR_AI_E2E = value;
+  return work().finally(() => { if (before === undefined) delete process.env.NEAR_AI_E2E; else process.env.NEAR_AI_E2E = before; });
+}
+
+test('without NEAR_AI_E2E exactly 1 there is no probe, and facts from the page are ignored', async () => {
+  const { teamSectionTap } = hostModule;
+  for (const value of [undefined, '', '0', 'true', ' 1']) {
+    await withE2e(value, async () => {
+      const project = soloProject();
+      const host = createTeamSectionHost({ team: soloHandle(), firstFolder: () => project.root, executeCommand: async () => undefined });
+      try {
+        teamSectionTap.facts.length = 0;
+        const { webview, record } = webviewView();
+        host.attach(webview);
+        await host.refresh();
+        assert.equal(teamSectionTap.probe, undefined, `NEAR_AI_E2E=${JSON.stringify(value)}: no probe`);
+        await record.receive({ type: 'team-e2e-facts', id: 1, heading: 'Team', status: 'x', actions: [] });
+        assert.deepEqual(teamSectionTap.facts, [], 'facts are not taken');
+        assert.equal(record.posted.some((message) => (message as { type?: string }).type === 'team-e2e'), false);
+      } finally {
+        host.dispose();
+        project.cleanup();
+      }
+    });
+  }
+});
+
+test('under NEAR_AI_E2E=1 the probe asks the page what it drew, may ask it to click a drawn button, and the answer is kept', async () => {
+  const { teamSectionTap } = hostModule;
+  await withE2e('1', async () => {
+    const project = soloProject();
+    const commands: string[] = [];
+    const host = createTeamSectionHost({ team: soloHandle(), firstFolder: () => project.root, executeCommand: async (command: string) => { commands.push(command); return undefined; } });
+    try {
+      teamSectionTap.facts.length = 0;
+      const { webview, record } = webviewView();
+      host.attach(webview);
+      await host.refresh();
+      assert.ok(teamSectionTap.probe !== undefined, 'the probe is offered');
+      await teamSectionTap.probe({ id: 3 });
+      assert.deepEqual(record.posted.at(-1), { type: 'team-e2e', id: 3 });
+      await record.receive({ type: 'team-e2e-facts', id: 3, heading: 'Team', status: 'Work on this project', actions: [{ id: 'turn-on', label: 'Turn on Team Mode' }] });
+      assert.deepEqual(teamSectionTap.facts, [{ id: 3, heading: 'Team', status: 'Work on this project', actions: [{ id: 'turn-on', label: 'Turn on Team Mode' }] }]);
+      await teamSectionTap.probe({ id: 4, click: 'invite' });
+      assert.deepEqual(record.posted.at(-1), { type: 'team-e2e', id: 4, click: 'invite' });
+      assert.deepEqual(commands, [], 'the probe itself runs nothing: the page clicks its own button, which posts team-action');
+      // Facts never run a command, and a malformed answer is not kept.
+      await record.receive({ type: 'team-e2e-facts', id: 'x' });
+      await record.receive({ type: 'team-e2e-facts', id: Number.NaN });
+      assert.equal(teamSectionTap.facts.length, 1);
+      assert.deepEqual(commands, []);
+    } finally {
+      host.dispose();
+      project.cleanup();
+    }
+    assert.equal(teamSectionTap.probe, undefined, 'the probe goes away with the host');
+  });
+  // An explicit testSeams overrides the variable both ways.
+  await withE2e(undefined, async () => {
+    const project = soloProject();
+    const host = createTeamSectionHost({ team: soloHandle(), firstFolder: () => project.root, executeCommand: async () => undefined, testSeams: true });
+    try {
+      host.attach(webviewView().webview);
+      assert.ok(hostModule.teamSectionTap.probe !== undefined);
+    } finally {
+      host.dispose();
+      project.cleanup();
+    }
+  });
+  assert.equal(parseTeamSectionMessage({ type: 'team-e2e-facts', id: 2, status: 'x' })?.type, 'team-e2e-facts');
+  assert.equal(parseTeamSectionMessage({ type: 'team-e2e', id: 2 }), undefined, 'the host never takes its own probe back');
+});

@@ -226,6 +226,66 @@ test('Verify Team Log with no folder open also explains and does nothing else', 
   assert.deepEqual(loadedTeamModules(), []);
 });
 
+// The sidebar Team section (61-21) in a project without a team: the host module is loaded at activation (it imports only Node built-ins at run time),
+// and a refresh loads only the model modules teamSection.js and teamSectionText.js (pure: no I/O, no clock). Placed after the solo tests above,
+// because the model modules stay in the module cache once loaded.
+const SECTION_HOST_FILE = path.join(DIST_ROOT, 'services', 'team', 'teamSectionHost.js');
+const SECTION_MODEL_FILES = [path.join(DIST_ROOT, 'domain', 'team', 'teamSection.js'), path.join(DIST_ROOT, 'domain', 'team', 'teamSectionText.js')];
+
+test('the Team section host imports only Node built-ins at run time', () => {
+  const source = readFileSync(SECTION_HOST_FILE, 'utf8');
+  const required = [...source.matchAll(/require\("([^"]+)"\)/g)].map((match) => match[1]);
+  assert.deepEqual(required.sort(), ['node:fs/promises', 'node:path']);
+});
+
+test('solo project: the sidebar Team section costs one fs.stat and no timer, channel, status item, storage, git or team core module', async () => {
+  resetStub();
+  const project = soloProject();
+  const context = createFakeContext(project.storage, {});
+  const handle = registerTeamMode(context as never);
+  assert.equal(await handle.ready, 'solo');
+  const childProcess = require('node:child_process') as Record<string, unknown>;
+  const spawned: string[] = [];
+  const realChild: Record<string, unknown> = {};
+  for (const name of ['spawn', 'execFile', 'exec', 'fork']) {
+    realChild[name] = childProcess[name];
+    childProcess[name] = (...args: unknown[]): unknown => { spawned.push(String(args[0])); return (realChild[name] as TimerFn)(...args); };
+  }
+  const timers = spyTimers();
+  const fsCalls = spyFs();
+  const { createTeamSectionHost } = require('../services/team/teamSectionHost') as typeof import('../services/team/teamSectionHost');
+  const host = createTeamSectionHost({ team: handle, firstFolder: () => project.root, executeCommand: async () => undefined, testSeams: false });
+  try {
+    stub.setWorkspaceFolders([project.root]);
+    const made = stub.createWebviewView();
+    const view = made.view as { webview: never; visible: boolean; onDidChangeVisibility: never };
+    host.attach(view.webview, view.onDidChangeVisibility, () => view.visible);
+    await host.refresh();
+    timers.restore();
+    fsCalls.restore();
+    assert.deepEqual(fsCalls.calls, { stat: 1 }, 'one fs.stat and no other filesystem call');
+    assert.deepEqual(timers.setTimeoutCalls, [], 'no setTimeout');
+    assert.equal(timers.setIntervalCalls, 0, 'no setInterval');
+    assert.deepEqual(spawned, [], 'no git or other process');
+    assert.equal(stub.outputChannels.length, 0, 'no output channel');
+    assert.equal(stub.statusBarItems.length, 0, 'no status bar item');
+    assert.equal(existsSync(project.storage), false, 'no extension storage');
+    // Allowed beyond the activation modules: the host itself (G-61-5 lives in the sidebar) and the two pure model modules it draws from.
+    const allowed = [SECTION_HOST_FILE, ...SECTION_MODEL_FILES];
+    assert.deepEqual(loadedTeamModules().filter((file) => !allowed.includes(file)), [], 'no other compiled team module was loaded');
+    const posted = made.record.posted as Array<{ type: string; model: { actions: Array<{ id: string }> } | null }>;
+    assert.deepEqual(posted.map((message) => message.type), ['team-state']);
+    assert.deepEqual(posted[0]?.model?.actions.map((action) => action.id), ['turn-on', 'join']);
+  } finally {
+    timers.restore();
+    fsCalls.restore();
+    for (const name of Object.keys(realChild)) childProcess[name] = realChild[name];
+    host.dispose();
+    for (const subscription of context.subscriptions) subscription.dispose();
+    project.cleanup();
+  }
+});
+
 test('a team project loads the session lazily, shows Team: <name> and stops its poll timer when disposed', async () => {
   resetStub();
   const harness = require('./helpers/teamHarness') as typeof import('./helpers/teamHarness');
