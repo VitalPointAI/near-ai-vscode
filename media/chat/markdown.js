@@ -151,7 +151,9 @@
       const scope = tag === 'th' ? ' scope="row"' : '';
       return `<${tag}${scope}${attrs(column)}>${inline(row[column] || '')}</${tag}>`;
     }).join('')}</tr>`).join('');
-    return `<div class="table-wrap" role="region" aria-label="${escapeHtml(label)}"><table><thead><tr>${head}</tr></thead>${body ? `<tbody>${body}</tbody>` : ''}</table></div>`;
+    // A lone backtick in a header is kept in the label, but as a character reference, so the
+    // attribute holds nothing a browser could ever treat as a quote.
+    return `<div class="table-wrap" role="region" aria-label="${escapeHtml(label).replace(/`/g, '&#96;')}"><table><thead><tr>${head}</tr></thead>${body ? `<tbody>${body}</tbody>` : ''}</table></div>`;
   }
 
   function renderQuote(lines) {

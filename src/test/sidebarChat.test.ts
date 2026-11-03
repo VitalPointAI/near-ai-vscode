@@ -222,6 +222,9 @@ test('markdown table labels match the header text people see', () => {
   assert.equal(markdown.tableLabel(['a * b', 'x ~ y', 'C:\\path']), 'Table: a * b, x ~ y, C:\\path');
   assert.equal(markdown.tableLabel(['**Bold**', '_em_', '~~old~~']), 'Table: Bold, em, old');
   assert.equal(markdown.tableLabel(['a &amp; b', '`x_y`']), 'Table: a &amp; b, x_y');
+  // A lone backtick stays in the label but never appears raw in the attribute.
+  assert.equal(markdown.tableLabel(['a`b']), 'Table: a`b');
+  assert.match(render('| a`b |\n|---|'), /aria-label="Table: a&#96;b"/);
   // Placeholder characters show as the replacement character, as they do in the cell.
   assert.equal(markdown.tableLabel(['a\u0001b', 'c\u0000']), 'Table: a\ufffdb, c\ufffd');
   // A long label is cut by characters, so an emoji is never split in half.
