@@ -52,6 +52,12 @@ result: issue
 reported: "can't seem to drag them anywhere"
 severity: blocker
 
+### 8. Cards are readable
+expected: every card's title, state and details are readable.
+result: issue
+reported: "check the board cards - they look like the formatting is off/they are unreadable" ... "I just noticed them during the e2e tests, I think it's #1" (collapsed columns)
+severity: major
+
 ### 7. Themes, zoom, screen reader, two windows
 expected: see 62-VERIFICATION.md human_verification.
 result: blocked
@@ -60,9 +66,9 @@ reason: stopped before reaching them; resume after the fix pass.
 
 ## Summary
 
-total: 7
+total: 8
 passed: 0
-issues: 6
+issues: 7
 pending: 0
 skipped: 0
 blocked: 1
@@ -122,4 +128,13 @@ blocked: 1
   root_cause: "drag and drop was only exercised against the fake DOM (boardDrag.test.ts); real webview drag events/data transfer behave differently"
   artifacts: [media/board/drag.js, media/board/board.js, src/test/e2e/suite.ts]
   missing: ["working real-window drag", "e2e that drags"]
+  debug_session: ""
+- truth: "Every card is readable in every state, width and theme: a collapsed column shows only its name and count (never squeezed cards), titles wrap at word boundaries, and the card's clickable area keeps card styling (left-aligned, theme foreground), verified in real-window screenshots"
+  status: failed
+  reason: "User reported: the board cards look like the formatting is off / they are unreadable (seen in e2e windows; owner thinks it is collapsed columns)"
+  severity: major
+  test: 8
+  root_cause: "media/board/board.css: .cell.collapsed { width: 40px; overflow: hidden; font-size: 0 } still contains rendered cards; .card and descendants use overflow-wrap: anywhere (mid-word breaks); .card-main is a button and inherits global button styles (centred, button colours)"
+  artifacts: [media/board/board.css, media/board/board.js]
+  missing: ["collapsed cells render no cards (only name and count)", "word-boundary wrapping for titles", "card-main resets button styles", "screenshot check of card readability"]
   debug_session: ""
