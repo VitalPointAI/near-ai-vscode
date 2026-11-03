@@ -64,6 +64,11 @@
 - [ ] **SEC-03**: Teammate-authored text reaches agents only as untrusted data.
 - [x] **SEC-04**: Role permissions in section 6.3 are enforced on write and on read.
 
+### Workflow for every project
+
+- [ ] **FLOW-01**: A single developer working with agents gets task workspaces, review, one path into the main branch and releases without setting up a team; the team layer turns on when a second person joins.
+- [ ] **UX-01**: No step, decision or message requires git or developer knowledge; git details appear only in an optional details view.
+
 ## Future Requirements
 
 None deferred. The spec allows Phase 67 to be split by the planner; the relay transport is separable and can ship last within this milestone.
@@ -115,12 +120,14 @@ Phases are numbered 60 to 67; spec phase 25 is Phase 60, and so on in order.
 | SEC-02 | Phase 67 | Pending |
 | SEC-03 | Phase 67 | Pending |
 | BOARD-04 | Phase 67 | Pending |
+| FLOW-01 | Phases 63, 65 | Pending |
+| UX-01 | Phases 63, 64, 65, 66, 67 | Pending |
 
 **Coverage:**
-- v1 requirements: 31 total
-- Mapped to phases: 31
+- v1 requirements: 33 total
+- Mapped to phases: 33
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-10-31*
-*Last updated: 2026-10-31 after milestone v0.6.0 Team Mode start*
+*Last updated: 2026-11-02: added FLOW-01 and UX-01 (Workflow for every project) after the owner decisions that there is no separate solo mode and that no developer knowledge is required*
