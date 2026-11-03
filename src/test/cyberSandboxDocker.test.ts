@@ -28,15 +28,8 @@ let resolved = false;
  * runtime that answered and then failed is not a working runtime).
  */
 async function requireRuntime(t: TestContext): Promise<ContainerRuntime | undefined> {
-  if (!resolved) {
-    detected = await detectRuntime();
-    if (detected) {
-      const usable = await runCapture(detected, ['run', '--rm', IMAGE, 'true']).then(() => true).catch(() => false);
-      if (!usable) detected = undefined;
-    }
-    resolved = true;
-  }
-  if (!detected) { t.skip('no usable container runtime (the CLI may be present without a daemon)'); return undefined; }
+  if (!resolved) { detected = await detectRuntime(); resolved = true; }
+  if (!detected) { t.skip('no container runtime (docker or podman) answered --version on this machine'); return undefined; }
   return detected;
 }
 
