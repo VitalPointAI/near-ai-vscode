@@ -125,6 +125,7 @@ test('setup texts are plain words: no dashes for punctuation, no developer terms
 // ---- the host side, against a VS Code stand-in ----
 
 const executed: unknown[][] = [];
+let webviewPanel: unknown;
 const infos: Array<{ text: string; items: string[] }> = [];
 const picks: Array<{ items: Array<Record<string, unknown>>; options: Record<string, unknown> }> = [];
 const commands = new Map<string, (...args: unknown[]) => unknown>();
@@ -136,6 +137,7 @@ let inputBoxes: string[] = [];
 const vscodeStub = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   ProgressLocation: { Notification: 15 },
+  ViewColumn: { One: 1 },
   workspace: {
     workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
     name: 'Demo',
@@ -149,6 +151,7 @@ const vscodeStub = {
     showQuickPick: async (items: Array<Record<string, unknown>>, options: Record<string, unknown>) => { picks.push({ items, options }); return quickPick(items); },
     showInputBox: async () => inputBoxes.shift(),
     withProgress: async (_options: unknown, task: () => Promise<unknown>) => task(),
+    createWebviewPanel: () => webviewPanel,
     createOutputChannel: () => ({ appendLine() {}, dispose() {} })
   },
   commands: {
@@ -260,4 +263,20 @@ test('Project Setup is a contributed command and a Tools tab command', () => {
   assert.deepEqual(parseToolsPageMessage({ type: 'run-command', command: 'nearAi.projectSetup' }), { type: 'run-command', command: 'nearAi.projectSetup' });
   const tools = readFileSync(path.join(ROOT, 'media', 'tools', 'tools.js'), 'utf8');
   assert.match(tools, /\['Project setup', 'nearAi\.projectSetup'\]/);
+});
+
+test('the onboarding page lists setting up the project team right after connecting NEAR AI, and its button runs it', async () => {
+  const { onboardingHtml, openOnboarding } = load<typeof import('../services/onboarding')>('../services/onboarding');
+  const html = onboardingHtml({ cspSource: 'vscode-resource:' });
+  const steps = [...html.matchAll(/<div class="number">(\d+)<\/div><strong>([^<]+)<\/strong>/g)].map((match) => [match[1], match[2]]);
+  assert.deepEqual(steps.slice(1, 3), [['02', 'Connect privately'], ['03', 'Choose your team']]);
+  assert.deepEqual(steps.map((step) => step[0]), ['01', '02', '03', '04', '05', '06']);
+  assert.match(html, /<button data-action="setup-project-team">Set up your project team<\/button>/);
+  let receive: ((message: unknown) => Promise<void>) | undefined;
+  const panel = { webview: { html: '', cspSource: 'vscode-resource:', onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } } };
+  webviewPanel = panel;
+  reset();
+  openOnboarding({ subscriptions: [] } as never, { openApiKeyPortal: async () => undefined, configureApiKey: async () => undefined, showProgress: async () => undefined });
+  await receive!({ type: 'setup-project-team' });
+  assert.deepEqual(executed, [['nearAi.setupProjectTeam']]);
 });

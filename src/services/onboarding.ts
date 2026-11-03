@@ -16,6 +16,7 @@ export function openOnboarding(context: vscode.ExtensionContext, actions: Onboar
     if (message.type === 'configure-api-key') await actions.configureApiKey();
     if (message.type === 'open-api-key-portal') await actions.openApiKeyPortal();
     if (message.type === 'show-progress') await actions.showProgress();
+    if (message.type === 'setup-project-team') await vscode.commands.executeCommand('nearAi.setupProjectTeam');
     if (message.type === 'complete') {
       void vscode.window.showInformationMessage('You are ready. Open the chat to start your first GSD project.');
       await vscode.commands.executeCommand('nearAi.openChat');
@@ -24,7 +25,7 @@ export function openOnboarding(context: vscode.ExtensionContext, actions: Onboar
   return panel;
 }
 
-function onboardingHtml(webview: vscode.Webview): string {
+export function onboardingHtml(webview: Pick<vscode.Webview, 'cspSource'>): string {
   const nonce = `${Date.now()}${Math.random().toString(16).slice(2)}`;
   return `<!doctype html>
 <html lang="en">
@@ -41,7 +42,7 @@ function onboardingHtml(webview: vscode.Webview): string {
   h1 { margin: 18px 0 8px; font-size: 30px; } h2 { margin-top: 34px; font-size: 20px; } p { color: var(--muted); }
   .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 24px 0; }
   .step { border: 1px solid var(--vscode-editorWidget-border); border-radius: 12px; padding: 15px; background: color-mix(in srgb, var(--panel) 75%, transparent); }
-  .number { color: var(--near-orange); font-weight: 800; } .step strong { display: block; margin: 8px 0 4px; } .step span { color: var(--muted); font-size: 13px; }
+  .number { color: var(--near-orange); font-weight: 800; } .step strong { display: block; margin: 8px 0 4px; } .step span { color: var(--muted); font-size: 13px; } .step button { margin-top: 10px; }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; } button { border: 0; border-radius: 8px; padding: 10px 15px; cursor: pointer; font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background); } button:hover { background: var(--vscode-button-hoverBackground); } button.primary { background: var(--near-orange); color: #151515; font-weight: 700; }
   .note { border-left: 3px solid var(--near-purple); padding-left: 14px; color: var(--muted); } code { color: var(--near-orange); }
   @media (prefers-reduced-motion: reduce) { .mark { animation: none; } }
@@ -58,9 +59,10 @@ function onboardingHtml(webview: vscode.Webview): string {
   <div class="steps" role="list">
     <div class="step" role="listitem"><div class="number">01</div><strong>Get oriented</strong><span>Understand what the agents will do and what GSD files mean.</span></div>
     <div class="step" role="listitem"><div class="number">02</div><strong>Connect privately</strong><span>Add the NEAR AI Cloud API key used for inference.</span></div>
-    <div class="step" role="listitem"><div class="number">03</div><strong>Set guardrails</strong><span>Reads and planning are automatic; risky actions ask first.</span></div>
-    <div class="step" role="listitem"><div class="number">04</div><strong>Describe the idea</strong><span>Chat through the project brief and let GSD create the plan.</span></div>
-    <div class="step" role="listitem"><div class="number">05</div><strong>Keep momentum</strong><span>Watch phase, plan, agent, cost, and verification progress below chat.</span></div>
+    <div class="step" role="listitem"><div class="number">03</div><strong>Choose your team</strong><span>Tell us what this project is for. We suggest a team of agents and the models they use.</span><button data-action="setup-project-team">Set up your project team</button></div>
+    <div class="step" role="listitem"><div class="number">04</div><strong>Set guardrails</strong><span>Reads and planning are automatic; risky actions ask first.</span></div>
+    <div class="step" role="listitem"><div class="number">05</div><strong>Describe the idea</strong><span>Chat through the project brief and let GSD create the plan.</span></div>
+    <div class="step" role="listitem"><div class="number">06</div><strong>Keep momentum</strong><span>Watch phase, plan, agent, cost, and verification progress below chat.</span></div>
   </div>
   <h2>Connect NEAR AI Cloud</h2>
   <p>Inference requires a NEAR AI Cloud API key. Paste it into the extension and credentials stay in VS Code SecretStorage: they are never written into your project files or sent to an agent as configuration text.</p>
