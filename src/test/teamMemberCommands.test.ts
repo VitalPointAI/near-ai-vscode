@@ -14,6 +14,7 @@ import { INVITE_FILE } from '../team/invite';
 import { NO_ORG_NOTICE } from '../team/join';
 import { nearSessionSecretName } from '../team/nearSession';
 import { LINK_COMMIT_MESSAGE } from '../team/nearLink';
+import { planShare, shareTeamSetup } from '../team/projectHome';
 import { TEAM_FILE_REL, readTeamFile, teamStorageDir } from '../team/teamFile';
 import { startFakeNear } from './helpers/fakeNear';
 import type { FakeNear } from './helpers/fakeNear';
@@ -159,6 +160,9 @@ async function withTeam(work: (team: Team) => Promise<void>, options: { near?: b
     stub.inputAnswers.push('Invite team', 'Lead Owner', 'lead@example.invalid');
     await run(ENABLE_COMMAND);
     assert.equal(handle.session()?.teamFile.name, 'Invite team', 'Enable started the session');
+    // The team setup is put online with the core share, so an invite finds it online and asks no share question (61-20). Inviting with the setup
+    // not online is covered in teamInviteShare.test.ts.
+    await shareSetup(root);
     clearUi();
     await work({ fixture, root, storage, secrets, context, handle, canaries, fake, signIns, run });
   } finally {
@@ -166,6 +170,15 @@ async function withTeam(work: (team: Team) => Promise<void>, options: { near?: b
     await fake?.close();
     await removeFixture(fixture);
   }
+}
+
+// This computer's team.json put on main at origin by the core share, as Share Team Setup does after its confirmation.
+async function shareSetup(root: string): Promise<void> {
+  const teamFile = await readTeamFile(root);
+  assert.ok(teamFile !== undefined, 'the team file exists');
+  const plan = await planShare({ projectRoot: root, teamFile, branch: 'main' });
+  const shared = await shareTeamSetup({ projectRoot: root, teamFile, branch: 'main', plan });
+  assert.equal(shared.ok, true, JSON.stringify(shared));
 }
 
 // The lead links the team to Team Org / Team workspace through the Link command, then pushes the code branch so a clone sees team.json.
@@ -206,8 +219,9 @@ async function openJoiner(t: Team, options: { folder?: boolean; pull?: boolean; 
 // The lead invites someone and the bundle comes back from the clipboard.
 async function inviteBundle(t: Team, person: { name: string; email: string; role: string; amount?: string }): Promise<string> {
   stub.inputAnswers.push(person.name, person.email, person.amount ?? '5');
-  stub.quickPickAnswers.push(person.role, '7 days');
+  // The organization choice comes first when the team is not linked (61-20).
   if (t.handle.session()?.teamFile.near === undefined) stub.quickPickAnswers.push(NOT_NOW_CHOICE);
+  stub.quickPickAnswers.push(person.role, '7 days');
   stub.setMessageResponder(copyWhenOffered);
   const before = stub.clipboardWrites.length;
   await t.run(INVITE_COMMAND);
@@ -229,7 +243,7 @@ const copyWhenOffered = (_text: string, actions: string[]): string | undefined =
 test('tracer: Invite to Team asks its questions, writes member.invited, and shows the bundle once with Copy and nowhere else', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
     stub.setMessageResponder(copyWhenOffered);
     await t.run(INVITE_COMMAND);
 
@@ -265,14 +279,15 @@ test('tracer: Invite to Team asks its questions, writes member.invited, and show
 test('Invite offers the roles and the four lifetimes with seven days first, and explains linking with Link now or Not now when the team has no organization', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
     await t.run(INVITE_COMMAND);
-    assert.deepEqual(stub.quickPickRequests[0]?.labels, ['Developer', 'Reviewer', 'Observer', 'Lead']);
-    assert.deepEqual([...(stub.quickPickRequests[1]?.labels ?? [])].sort(), ['14 days', '24 hours', '3 days', '7 days']);
-    assert.equal(stub.quickPickRequests[1]?.labels[0], '7 days', 'the first item is the one Enter picks');
-    assert.deepEqual(stub.quickPickRequests[2]?.labels, ['Link now', 'Not now, everyone uses their own key']);
-    assert.equal(stub.quickPickRequests[2]?.placeHolder, 'Your organization is the account that pays for your team\'s AI, so each person can get a spending limit.');
-    assert.equal(stub.quickPickRequests[2]?.placeHolder, LINK_EXPLANATION);
+    // 61-20: the organization choice comes first, then the questions.
+    assert.deepEqual(stub.quickPickRequests[0]?.labels, ['Link now', 'Not now, everyone uses their own key']);
+    assert.equal(stub.quickPickRequests[0]?.placeHolder, 'Your organization is the account that pays for your team\'s AI, so each person can get a spending limit.');
+    assert.equal(stub.quickPickRequests[0]?.placeHolder, LINK_EXPLANATION);
+    assert.deepEqual(stub.quickPickRequests[1]?.labels, ['Developer', 'Reviewer', 'Observer', 'Lead']);
+    assert.deepEqual([...(stub.quickPickRequests[2]?.labels ?? [])].sort(), ['14 days', '24 hours', '3 days', '7 days']);
+    assert.equal(stub.quickPickRequests[2]?.labels[0], '7 days', 'the first item is the one Enter picks');
     assert.ok(stub.notifications.some((entry) => entry.message === NO_ORG_NOTICE), 'Not now continues the invite and says everyone uses their own key');
     assert.ok(stub.notifications.some((entry) => entry.message.startsWith('The invite for Ana')), 'the invite was still made');
     assert.deepEqual(stub.inputRequests.map((request) => request.prompt?.split('.')[0]), ['Name of the person you are inviting', 'Their email address', 'Allocation in US dollars']);
@@ -282,7 +297,7 @@ test('Invite offers the roles and the four lifetimes with seven days first, and 
 test('a lifetime of 24 hours is stored as 86400 seconds', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Bo', 'bo@example.invalid', '0.01');
-    stub.quickPickAnswers.push('Observer', '24 hours', NOT_NOW_CHOICE);
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Observer', '24 hours');
     stub.setMessageResponder(copyWhenOffered);
     await t.run(INVITE_COMMAND);
     const bundle = parseInviteBundle(stub.clipboardWrites[0] as string);
@@ -295,7 +310,7 @@ test('a lifetime of 24 hours is stored as 86400 seconds', async () => {
 test('closing the bundle without Copy says the invite can be issued again from Manage Team Members and never repeats it', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
     await t.run(INVITE_COMMAND);
     assert.equal(stub.clipboardWrites.length, 0);
     const detail = stub.notificationOptions.find((options) => options?.modal === true)?.detail as string;
@@ -331,7 +346,7 @@ test('parseUsdToNanoUsd turns dollars into integer nano-USD with string arithmet
 test('the questions refuse an empty name, an address without @ and an amount that is not dollars and cents', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
     await t.run(INVITE_COMMAND);
     const [name, email, amount] = stub.inputRequests;
     assert.equal(typeof name?.validateInput?.(''), 'string');
@@ -347,13 +362,14 @@ test('the questions refuse an empty name, an address without @ and an amount tha
 // ---- cancelling -------------------------------------------------------------------------------------------------------------------------
 
 test('cancelling at any question writes nothing to the log, the clipboard or the invitation list', async () => {
+  // 61-20: the organization choice comes first, so every later stage answers it with Not now; the first stage stops at it.
   const stages: Array<{ inputs: string[]; picks: string[] }> = [
     { inputs: [], picks: [] },
-    { inputs: ['Ana'], picks: [] },
-    { inputs: ['Ana', 'ana@example.invalid'], picks: [] },
-    { inputs: ['Ana', 'ana@example.invalid'], picks: ['Developer'] },
-    { inputs: ['Ana', 'ana@example.invalid', '5'], picks: ['Developer'] },
-    { inputs: ['Ana', 'ana@example.invalid', '5'], picks: ['Developer', '7 days'] }
+    { inputs: [], picks: [NOT_NOW_CHOICE] },
+    { inputs: ['Ana'], picks: [NOT_NOW_CHOICE] },
+    { inputs: ['Ana', 'ana@example.invalid'], picks: [NOT_NOW_CHOICE] },
+    { inputs: ['Ana', 'ana@example.invalid'], picks: [NOT_NOW_CHOICE, 'Developer'] },
+    { inputs: ['Ana', 'ana@example.invalid', '5'], picks: [NOT_NOW_CHOICE, 'Developer'] }
   ];
   await withTeam(async (t) => {
     const session = t.handle.session();
@@ -379,7 +395,7 @@ test('cancelling at any question writes nothing to the log, the clipboard or the
 test('nothing the Invite command shows contains an em-dash', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Ana', 'ana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', NOT_NOW_CHOICE);
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
     stub.setMessageResponder(copyWhenOffered);
     await t.run(INVITE_COMMAND);
     assert.equal(everythingShown().includes(EM_DASH), false);
@@ -695,27 +711,34 @@ test('inviting a lead in a linked team asks the lead to sign in to NEAR first, a
   }, { near: true });
 });
 
-test('inviting in a linked team whose NEAR link is not shared yet warns that a teammate who gets the project now would not see it', async () => {
+// 61-20 (owner, 2026-11-03): instead of warning after the fact, Invite shares the team setup first with one confirmation, so the link is online
+// before anyone is invited. Was: "... whose NEAR link is not shared yet warns that a teammate who gets the project now would not see it".
+test('inviting in a linked team whose organization link is not shared yet asks once to share the team setup first, and then the online setup has the link', async () => {
   await withTeam(async (t) => {
     stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
     await t.run(LINK_NEAR_COMMAND);
     clearUi();
-    await inviteBundle(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer' });
-    const warning = stub.notifications.findIndex((entry) => entry.level === 'warn' && entry.message === 'The organization link is not shared with your team yet, so a teammate who gets the project now will not see it. Share it before they join.');
-    assert.ok(warning >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
-    assert.deepEqual(stub.notificationActions[warning], ['Share with my team']);
+    stub.inputAnswers.push('Dana', 'dana@example.invalid', '5');
+    stub.quickPickAnswers.push('Developer', '7 days');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Share and continue') ? 'Share and continue' : actions.includes('Copy') ? 'Copy' : undefined));
+    await t.run(INVITE_COMMAND);
+    stub.setMessageResponder(undefined);
+    assert.equal(stub.notificationActions.filter((actions) => actions.includes('Share and continue')).length, 1, 'one share confirmation');
+    assert.deepEqual(JSON.parse(gitIn(t.fixture.remote, ['show', `refs/heads/main:${TEAM_FILE_REL}`])).near, { organizationId: 'org-1', workspaceId: 'ws-1' }, 'the online team setup has the link');
+    assert.equal(stub.notifications.some((entry) => entry.message.includes('not shared')), false, 'no after-the-fact warning');
+    assert.equal(stub.clipboardWrites.length, 1, 'the invite was made after the share');
     clearUi();
-    gitIn(t.root, ['push', '-q', 'origin', 'main']);
     await inviteBundle(t, { name: 'Eve', email: 'eve@example.invalid', role: 'Developer' });
-    assert.equal(stub.notifications.some((entry) => entry.message.includes('not shared')), false, 'no warning once the link is shared');
+    assert.equal(stub.notificationActions.some((actions) => actions.includes('Share and continue')), false, 'no share question once the setup is online');
   }, { near: true });
 });
 
 test('choosing Link now while inviting links the team first, without asking twice, and the bundle carries the link', async () => {
   await withTeam(async (t) => {
     stub.inputAnswers.push('Dana', 'dana@example.invalid', '5');
-    stub.quickPickAnswers.push('Developer', '7 days', LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
-    stub.setMessageResponder(copyWhenOffered);
+    // 61-20: the organization choice comes first, and the invite's one share confirmation puts the linked team setup online.
+    stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace', 'Developer', '7 days');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Share and continue') ? 'Share and continue' : actions.includes('Copy') ? 'Copy' : undefined));
     await t.run(INVITE_COMMAND);
     assert.equal(stub.quickPickRequests.filter((request) => request.placeHolder === LINK_EXPLANATION).length, 1, 'the explanation is asked once');
     assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' });

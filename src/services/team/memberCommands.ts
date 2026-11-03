@@ -2,8 +2,9 @@
 // Each is a thin adapter: it asks plain questions, calls the vscode-free flows in src/team, and says what happened and what to do next. Nothing here
 // logs, stores or shows a code, key, token or repository address: the invite bundle appears once in a modal and on the clipboard when the lead
 // chooses Copy, and pasted bundles and keys go through password inputs.
-// Solo activation stays one fs.stat, so this module imports only vscode, Node built-ins and types; every team module is loaded with a dynamic import
-// inside a handler (the teamCommands.ts header rule).
+// Solo activation stays one fs.stat, so this module imports only vscode, Node built-ins, types and the prompts module (which imports only vscode);
+// every team module is loaded with a dynamic import inside a handler (the teamCommands.ts header rule). Every input, pick and message goes through
+// teamPrompts, so the extension-host test can answer them (61-20).
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -12,6 +13,7 @@ import type { CleanupChecklist, CleanupItem, CleanupStep } from '../../team/clea
 import type { NearOrgClient } from '../../team/nearOrg';
 import type { NearSession } from '../../team/nearSession';
 import type { FetchLike, SessionTokens } from '../reportingSignIn';
+import { teamPrompts } from './teamPrompts';
 import type { TeamSession } from './teamSession';
 
 export const INVITE_COMMAND = 'nearAi.team.invite';
@@ -29,7 +31,8 @@ const SHARED_TEXT = 'Shared with your team.';
 const SHARE_FAILED_TEXT = 'The change could not be shared with your team yet. Check your internet connection and try again. Choose Show details for more.';
 const NOT_ON_A_VERSION_TEXT = 'This project could not be shared right now. Choose Show details for what to do.';
 const LINK_SAVE_UNFINISHED_TEXT = 'The link is saved in this project, but saving it for the team did not finish. Choose Show details for the one step that is left.';
-const INVITE_ADDRESS_TEXT = 'The address this project is shared from cannot be put in an invite, so no invite was made. Choose Show details for why.';
+const INVITE_ADDRESS_TEXT = 'No invite was made, because the address your project is kept at online cannot be given to teammates as it is.';
+const INVITE_ADDRESS_DETAIL = 'Keep the project online at an address your teammates can use, for example on GitHub, with no password or token in it, then invite again. Choose Show details for why.';
 // G-61-3: an invite is only made once the team setup is online, so the invite can find the team.
 export const INVITE_NEEDS_SHARE_TEXT = 'No invite was made, because your team setup must be online before anyone can join with an invite. Nothing was changed.';
 // G-61-6 (owner, 2026-11-03): wherever linking is offered, one plain line says what the organization is, then Link now or Not now.
@@ -150,12 +153,12 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   }
 
   async function ask(options: vscode.InputBoxOptions): Promise<string | undefined> {
-    const answer = await vscode.window.showInputBox({ ignoreFocusOut: true, ...options });
+    const answer = await teamPrompts.input({ ignoreFocusOut: true, ...options });
     return answer === undefined ? undefined : answer.trim();
   }
 
   async function pick<T extends vscode.QuickPickItem>(items: T[], options: { title: string; placeHolder: string }): Promise<T | undefined> {
-    return vscode.window.showQuickPick(items, { ignoreFocusOut: true, ...options });
+    return teamPrompts.pick(items, { ignoreFocusOut: true, ...options });
   }
 
   // A long flow in a progress notification with plain step messages (UI review issue 1). `cancellable` is only set where the flow can stop
@@ -331,9 +334,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   // Plain words with Show details, which opens the NEAR AI Team channel where the technical reason was written just before.
   async function showDetailsOffer(level: Level, message: string): Promise<void> {
     try {
-      const shown = level === 'info' ? vscode.window.showInformationMessage(message, SHOW_DETAILS_ACTION)
-        : level === 'warn' ? vscode.window.showWarningMessage(message, SHOW_DETAILS_ACTION) : vscode.window.showErrorMessage(message, SHOW_DETAILS_ACTION);
-      if (await shown === SHOW_DETAILS_ACTION) deps.output.show?.(true);
+      if (await teamPrompts.message(level, message, undefined, SHOW_DETAILS_ACTION) === SHOW_DETAILS_ACTION) deps.output.show?.(true);
     } catch (error) {
       deps.output.appendLine(`A Team Mode message could not be shown: ${await describe(error)}`);
     }
@@ -343,7 +344,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   async function offerPush(level: 'info' | 'warn', message: string, projectRoot: string, remote: string, branch?: string): Promise<void> {
     deps.output.appendLine(message);
     try {
-      const choice = await (level === 'info' ? vscode.window.showInformationMessage(message, PUSH_ACTION) : vscode.window.showWarningMessage(message, PUSH_ACTION));
+      const choice = await teamPrompts.message(level, message, undefined, PUSH_ACTION);
       if (choice === PUSH_ACTION) await pushBranch(projectRoot, remote, branch);
     } catch (error) {
       deps.output.appendLine(`The push could not run: ${await describe(error)}`);
@@ -353,7 +354,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   // ---- Link Your Organization (D-03) -----------------------------------------------------------------------------------------------------
 
   // Returns true when the team ends up linked to the chosen organization (also when it already was), false when nothing was linked.
-  async function linkFlow(projectRoot: string, wait: boolean): Promise<boolean> {
+  // `offerShare` false is the Invite flow: it asks its own single share confirmation right after, so the link flow offers none (61-20).
+  async function linkFlow(projectRoot: string, offerShare: boolean): Promise<boolean> {
     const { readTeamFile } = await import('../../team/teamFile');
     const { linkChoices, linkNearOrganization } = await import('../../team/nearLink');
     const teamFile = await readTeamFile(projectRoot);
@@ -406,8 +408,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     });
     let result = await saveLink(false);
     if (!result.ok && result.code === 'different-link') {
-      const confirmed = await vscode.window.showWarningMessage(
-        `${teamName} is already linked to a different organization or workspace. Replace the link only if your whole team agrees.`,
+      const confirmed = await teamPrompts.message(
+        'warn', `${teamName} is already linked to a different organization or workspace. Replace the link only if your whole team agrees.`,
         { modal: true }, REPLACE_LINK_ACTION
       );
       if (confirmed !== REPLACE_LINK_ACTION) {
@@ -435,12 +437,10 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     await deps.restartSession(projectRoot);
     deps.output.appendLine(result.branch === undefined ? 'team.json is committed.' : `team.json is committed on ${result.branch}. Sharing pushes it.`);
     const message = result.branch === undefined ? `Linked ${teamName} to ${organization.label}.` : `Linked ${teamName} to ${organization.label}. Share it so your teammates see the link.`;
-    if (result.branch === undefined) {
-      deps.report('info', message);
+    if (result.branch === undefined || !offerShare) {
+      deps.report('info', result.branch === undefined ? message : `Linked ${teamName} to ${organization.label}.`);
     } else {
-      const offered = offerPush('info', message, projectRoot, teamFile.coordination.remote, result.branch);
-      if (wait) await offered;
-      else void offered;
+      await offerPush('info', message, projectRoot, teamFile.coordination.remote, result.branch);
     }
     return true;
   }
@@ -504,8 +504,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   async function orgForLeadInvite(teamId: string, name: string): Promise<NearOrgClient | undefined | 'cancelled'> {
     const kept = await keptSession(teamId);
     if (kept !== undefined) return kept.org;
-    const choice = await vscode.window.showInformationMessage(
-      `${name} will also be invited to your organization, which needs your NEAR AI sign-in. Sign in now, or invite without signing in and finish that step later from "NEAR AI: Manage Team Members".`,
+    const choice = await teamPrompts.message(
+      'info', `${name} will also be invited to your organization, which needs your NEAR AI sign-in. Sign in now, or invite without signing in and finish that step later from "NEAR AI: Manage Team Members".`,
       { modal: true }, SIGN_IN_ACTION, WITHOUT_NEAR_ACTION
     );
     if (choice === undefined) return 'cancelled';
@@ -524,8 +524,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
 
   // D-05: the bundle is shown once, in a modal with Copy. It is written to the clipboard only when the lead chooses Copy, and never logged.
   async function presentBundle(shownName: string, bundle: string): Promise<void> {
-    const copied = await vscode.window.showInformationMessage(
-      `Invite ready for ${shownName}. Send them this invite; it works once and is not shown again.`,
+    const copied = await teamPrompts.message(
+      'info', `Invite ready for ${shownName}. Send them this invite; it works once and is not shown again.`,
       { modal: true, detail: bundle }, COPY_ACTION
     );
     if (copied === COPY_ACTION) {
@@ -536,6 +536,20 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     }
   }
 
+  // G-61-2, G-61-3: an invite is only usable when the team setup is online on the team's main version, so it is shared first, with the one
+  // confirmation of the share flow ('Share and continue'). Returns true when the setup is online (shared now or already). On anything else the
+  // share flow has already said why in plain words; a declined share is followed by one sentence that no invite was made.
+  async function inviteNeedsShared(projectRoot: string, session: TeamSession, teamFile: TeamFile): Promise<boolean> {
+    const { ensureTeamSetupShared } = await import('./shareFlow');
+    const outcome = await ensureTeamSetupShared({ output: deps.output, announce: deps.announce }, {
+      projectRoot, teamFile, branch: session.state().team.policy.integrationBranch, reason: 'invite'
+    });
+    if (outcome === 'shared' || outcome === 'already') return true;
+    deps.output.appendLine(`No invite was made because the team setup is not on ${session.state().team.policy.integrationBranch} online (${outcome}).`);
+    if (outcome === 'declined') deps.report('info', INVITE_NEEDS_SHARE_TEXT);
+    return false;
+  }
+
   async function invite(): Promise<void> {
     const found = await requireTeam();
     if (found === undefined) return;
@@ -544,6 +558,39 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const { validateName } = await import('../../domain/team/validate');
     const { readTeamFile } = await import('../../team/teamFile');
     if (!await requireManager(session, 'invite people')) return;
+
+    let teamFile: TeamFile | undefined = await readTeamFile(projectRoot);
+    if (teamFile === undefined) {
+      deps.report('error', 'This project has no team file any more, so no invite was made. Nothing was changed.');
+      return;
+    }
+    // A project teammates cannot reach (kept only on this computer, or at an address that cannot be given out) is known without going online,
+    // so it is said before anything is asked, even the organization choice. The share flow shows its modal and shares nothing.
+    const { checkOnlineHome } = await import('../../team/projectHome');
+    if ((await checkOnlineHome(projectRoot, teamFile.coordination.remote)).kind !== 'shareable') {
+      await inviteNeedsShared(projectRoot, session, teamFile);
+      return;
+    }
+
+    // D-03, G-61-6: a team with no organization link is offered the link first, once per invite, with the one-line explanation, and Not now is
+    // said out loud. linkFlow itself does not ask again and offers no share of its own: the share below covers the link too.
+    if (teamFile.near === undefined) {
+      const choice = await askToLink('Invite to Team');
+      if (choice === undefined) return;
+      if (choice === 'link') {
+        if (!await linkFlow(projectRoot, false)) {
+          deps.report('info', 'Your organization was not linked, so no invite was made. Nothing was changed.');
+          return;
+        }
+        session = deps.session() ?? session;
+        teamFile = await readTeamFile(projectRoot) ?? teamFile;
+      } else {
+        deps.report('info', (await import('../../team/join')).NO_ORG_NOTICE);
+      }
+    }
+
+    // The team setup this computer has, link included, must be online before the first question (G-61-3).
+    if (!await inviteNeedsShared(projectRoot, session, teamFile)) return;
 
     const name = await ask({
       title: 'Invite to Team', prompt: 'Name of the person you are inviting.', placeHolder: 'Their name',
@@ -575,44 +622,15 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const lifetime = await askLifetime();
     if (lifetime === undefined) return;
 
-    // D-03, G-61-6: a team with no organization link is offered the link once per invite with the one-line explanation, and Not now is
-    // said out loud. linkFlow itself does not ask again.
-    let teamFile: TeamFile | undefined = await readTeamFile(projectRoot);
-    if (teamFile === undefined) {
-      deps.report('error', 'This project has no team file any more, so no invite was made. Nothing was changed.');
-      return;
-    }
-    if (teamFile.near === undefined) {
-      const choice = await askToLink('Invite to Team');
-      if (choice === undefined) return;
-      if (choice === 'link') {
-        if (!await linkFlow(projectRoot, false)) {
-          deps.report('info', 'Your organization was not linked, so no invite was made. Nothing was changed.');
-          return;
-        }
-        session = deps.session() ?? session;
-        teamFile = await readTeamFile(projectRoot) ?? teamFile;
-      } else {
-        deps.report('info', (await import('../../team/join')).NO_ORG_NOTICE);
-      }
-    }
-
-    // A link that only exists on this computer is invisible to a teammate who clones now (research Pitfall 11).
     let org: NearOrgClient | undefined;
     const shownName = await display(name);
-    if (teamFile.near !== undefined) {
-      if (roleChoice.role === 'lead') {
-        const chosen = await orgForLeadInvite(teamFile.teamId, shownName);
-        if (chosen === 'cancelled') {
-          deps.report('info', 'No invite was made. Nothing was changed.');
-          return;
-        }
-        org = chosen;
+    if (teamFile.near !== undefined && roleChoice.role === 'lead') {
+      const chosen = await orgForLeadInvite(teamFile.teamId, shownName);
+      if (chosen === 'cancelled') {
+        deps.report('info', 'No invite was made. Nothing was changed.');
+        return;
       }
-      const { teamFileUnpushed } = await import('../../team/nearLink');
-      if (await teamFileUnpushed(projectRoot) === true) {
-        void offerPush('warn', 'The organization link is not shared with your team yet, so a teammate who gets the project now will not see it. Share it before they join.', projectRoot, teamFile.coordination.remote);
-      }
+      org = chosen;
     }
 
     const { inviteMember } = await import('../../team/invite');
@@ -625,9 +643,10 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     }));
     if (!result.ok) {
       if (result.code === 'remote-url') {
-        // The reason names the remote address and git; it is kept in the channel and the lead gets plain words.
+        // The address changed between the check above and the invite. The reason names the address and git; it is kept in the channel and the
+        // lead reads what to do in a modal.
         deps.output.appendLine(await safe(result.message));
-        await showDetailsOffer('error', INVITE_ADDRESS_TEXT);
+        if (await teamPrompts.message('error', INVITE_ADDRESS_TEXT, { modal: true, detail: INVITE_ADDRESS_DETAIL }, SHOW_DETAILS_ACTION) === SHOW_DETAILS_ACTION) deps.output.show?.(true);
       } else {
         deps.report('error', await safe(result.message));
       }
@@ -659,8 +678,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     }
     if (prepared.kind === 'clone-needed') {
       // Nothing is kept: after the clone the person runs Join again and pastes the invite in the new window.
-      const choice = await vscode.window.showInformationMessage(
-        'This invite is for a project that is not open. Choose Get the project to download it, then run NEAR AI: Join Team in the new window and paste the invite again.', CLONE_ACTION
+      const choice = await teamPrompts.message(
+        'info', 'This invite is for a project that is not open. Choose Get the project to download it, then run NEAR AI: Join Team in the new window and paste the invite again.', undefined, CLONE_ACTION
       );
       if (choice === CLONE_ACTION) await vscode.commands.executeCommand('git.clone', prepared.repoUrl);
       return;
@@ -738,8 +757,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       deps.report('info', 'This computer is already on the team, so there is nothing to join. If you need a new invite, ask your lead.');
       return;
     }
-    const choice = await vscode.window.showWarningMessage(
-      'An earlier Join on this computer did not finish, and the team list does not show this computer. Remove the unfinished keys, then ask your lead to re-issue your invitation?',
+    const choice = await teamPrompts.message(
+      'warn', 'An earlier Join on this computer did not finish, and the team list does not show this computer. Remove the unfinished keys, then ask your lead to re-issue your invitation?',
       { modal: true }, RESET_ACTION
     );
     if (choice !== RESET_ACTION) {
@@ -762,7 +781,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     if (teamFile.near === undefined) return {};
     const kept = await keptSession(teamFile.teamId);
     if (kept !== undefined) return { org: kept.org };
-    const choice = await vscode.window.showInformationMessage(text, { modal: true }, SIGN_IN_ACTION, ...(canContinue ? [CONTINUE_WITHOUT_NEAR_ACTION] : []));
+    const choice = await teamPrompts.message('info', text, { modal: true }, SIGN_IN_ACTION, ...(canContinue ? [CONTINUE_WITHOUT_NEAR_ACTION] : []));
     if (choice === undefined) return undefined;
     if (choice === CONTINUE_WITHOUT_NEAR_ACTION) return {};
     const signedIn = await signInAndKeep(teamFile.teamId);
@@ -844,7 +863,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
         const detail = teamFile.near === undefined
           ? `${name} loses access to the team record. Afterwards, remove their access to the project on GitHub (or wherever the project is hosted) yourself.`
           : `${name}'s AI key is set to a limit of 0 first, then the team record removes them, then the key is revoked. Afterwards, remove their access to the project on GitHub (or wherever the project is hosted) yourself.`;
-        const confirmed = await vscode.window.showWarningMessage(`Remove ${name} from ${team}?`, { modal: true, detail }, REMOVE_ACTION);
+        const confirmed = await teamPrompts.message('warn', `Remove ${name} from ${team}?`, { modal: true, detail }, REMOVE_ACTION);
         if (confirmed !== REMOVE_ACTION) return;
         const chosen = await orgForAction(teamFile, `Removing ${name} also ends their AI key, which needs your NEAR AI sign-in. Sign in now, or remove them now and finish those steps later from this list.`, true);
         if (chosen === undefined) return;
@@ -879,7 +898,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const needsNear = (member.pendingRole ?? member.role) === 'lead';
     // UI review issue 2: cancelling cannot be undone, so it is confirmed first, like Remove.
     const detail = `The invite code stops working at once and cannot be used again. To bring ${name} in later, invite them again.${needsNear && ctx.teamFile.near !== undefined ? ' Their invitation to your organization is cancelled too.' : ''}`;
-    const confirmed = await vscode.window.showWarningMessage(`Cancel the invitation for ${name}?`, { modal: true, detail }, CANCEL_INVITATION_ACTION);
+    const confirmed = await teamPrompts.message('warn', `Cancel the invitation for ${name}?`, { modal: true, detail }, CANCEL_INVITATION_ACTION);
     if (confirmed !== CANCEL_INVITATION_ACTION) {
       deps.announce('info', `The invitation for ${name} was not changed.`);
       return;
