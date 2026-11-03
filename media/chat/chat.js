@@ -35,6 +35,8 @@
   const agentPanel = $('agents');
   const pendingRegion = $('pending');
   const pendingKit = window.nearPending;
+  // The empty chat's "no team yet" card; without its helper the chat simply shows no card.
+  const setupKit = window.nearSetup || { renderSetupNudge: () => undefined };
   const tabList = $('conversation-tabs');
   const newConversationButton = $('new-conversation');
   const needsYou = $('needs-you');
@@ -970,6 +972,7 @@
       // The view's "New Chat" action: a new conversation, alongside any still running.
       case 'reset': post({ type: 'new-chat' }); break;
       case 'conversations': renderConversations(m); break;
+      case 'setup-nudge': setupKit.renderSetupNudge(document, welcome, m.show === true, post, () => input.focus()); break;
       case 'conversation-show': {
         draftsLive = false;
         activeId = m.id;

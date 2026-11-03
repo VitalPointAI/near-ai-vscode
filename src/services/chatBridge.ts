@@ -52,6 +52,8 @@ export type ChatWebviewMessage =
   | { type: 'reporting-token' }
   | { type: 'open-activity'; agentId?: string }
   | { type: 'select-profile' }
+  /** The empty chat's "no team yet" card: set up the team, hide the card for this project, or open all setup steps. */
+  | { type: 'setup-nudge'; action: 'team' | 'later' | 'menu' }
   | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'allow-always' | 'deny'; feedback?: string; conversationId?: string }
   | { type: 'revert-run'; runId: string; conversationId?: string }
   | { type: 'verify-response'; runId: string; conversationId?: string }
@@ -275,6 +277,10 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   if (message.type === 'load-models' || message.type === 'open-setup' || message.type === 'refresh-status' || message.type === 'new-chat' || message.type === 'open-tools' || message.type === 'reporting-token' || message.type === 'select-profile' || message.type === 'chat-ready') {
     if (Object.keys(message).some((key) => key !== 'type')) return undefined;
     return { type: message.type };
+  }
+  if (message.type === 'setup-nudge') {
+    if (Object.keys(message).some((key) => key !== 'type' && key !== 'action')) return undefined;
+    return message.action === 'team' || message.action === 'later' || message.action === 'menu' ? { type: 'setup-nudge', action: message.action } : undefined;
   }
   const promptResponse = promptResponseMessage(value);
   if (promptResponse) return promptResponse;

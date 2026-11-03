@@ -116,6 +116,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 <script nonce="${nonce}" src="${asset('tables.js')}"></script>
 <script nonce="${nonce}" src="${asset('pending.js')}"></script>
 <script nonce="${nonce}" src="${asset('composer.js')}"></script>
+<script nonce="${nonce}" src="${asset('setup.js')}"></script>
 <script nonce="${nonce}" src="${asset('chat.js')}"></script>
 </body>
 </html>`;

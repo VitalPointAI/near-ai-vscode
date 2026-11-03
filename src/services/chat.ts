@@ -40,6 +40,7 @@ import { hostAttribution } from '../domain/activity';
 import { ContextGraphMemory } from './contextGraphMemory';
 import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
+import { projectHasTeam, projectTeamFiles, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 
 /** Chat model and safety model pairs already told that auto approve has no private safety model. */
 const warnedSafetyModels = new Set<string>();
@@ -385,6 +386,11 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand('nearAi.selectProfile');
       return;
     }
+    if (message.type === 'setup-nudge') {
+      if (message.action === 'later') { await context.workspaceState?.update(SETUP_NUDGE_DISMISSED_KEY, true); await sendSetupNudge(panel, context, auth); return; }
+      await vscode.commands.executeCommand(message.action === 'team' ? 'nearAi.setupProjectTeam' : 'nearAi.projectSetup');
+      return;
+    }
     if (message.type === 'open-activity') {
       await vscode.commands.executeCommand('nearAi.openAgentActivity', message.agentId);
       return;
@@ -419,6 +425,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'refresh-status') {
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account: state.spend }));
       await sendProfileStatus(panel, auth);
+      await sendSetupNudge(panel, context, auth);
       await sendArtifacts(panel);
       return;
     }
@@ -629,7 +636,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const tokenWatch = onReportingTokenChange(() => { void statusMessage({ agents: runningAgents(), account: state.spend }).then((status) => panel.webview.postMessage(status)); });
   // Back in the window (or its browser tab): prompts that waited unannounced are announced now.
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
-  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
+  const teamWatch = watchProjectTeam(() => { if (!disposed) void sendSetupNudge(panel, context, auth); });
+  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -652,7 +661,31 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   await ready;
   state.activity = createActivityStore();
   await sendProfileStatus(panel, auth);
+  await sendSetupNudge(panel, context, auth);
   await loadModels(panel, auth);
+}
+
+/** Shows the empty chat's "no team yet" card while the project has a working profile and no team, unless dismissed. */
+async function sendSetupNudge(panel: ChatHost, context: vscode.ExtensionContext, auth: AuthService): Promise<void> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  let show = false;
+  if (root) {
+    const exported = await new ProfileStore(root, auth).exportMetadata().catch(() => undefined);
+    const active = exported?.profiles.find((profile) => profile.profileId === exported.activeProfileId);
+    show = shouldShowSetupNudge({ workingProfile: active?.validation.status === 'valid', hasTeam: await projectHasTeam(root), dismissed: context.workspaceState?.get(SETUP_NUDGE_DISMISSED_KEY) === true });
+  }
+  void panel.webview.postMessage({ type: 'setup-nudge', show });
+}
+
+/** Calls `changed` when the project's team.md or project.json is created or deleted. */
+function watchProjectTeam(changed: () => void): vscode.Disposable | undefined {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root || typeof vscode.workspace.createFileSystemWatcher !== 'function' || typeof vscode.RelativePattern !== 'function') return undefined;
+  // Relative to the project folder, so it works before .planning/.near-ai exists.
+  const files = projectTeamFiles(root).map((file) => path.relative(root, file).split(path.sep).join('/'));
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(root), `{${files.join(',')}}`));
+  const subscriptions = [watcher.onDidCreate(changed), watcher.onDidDelete(changed), watcher];
+  return { dispose: () => subscriptions.forEach((subscription) => subscription.dispose()) };
 }
 
 /** How the close picker describes each conversation. */
