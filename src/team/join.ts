@@ -28,7 +28,7 @@ import type { GitRunner } from './runGit';
 import { TeamFileError, TrustPinError, checkNearPin, checkTrustPin, readTeamFile, teamStorageDir } from './teamFile';
 import { installTeamKey } from './teamKeyProfile';
 
-export const NO_ORG_NOTICE = 'No NEAR organization linked: spend is not capped at the provider.';
+export const NO_ORG_NOTICE = 'No organization linked, so everyone uses their own key and spending is not capped.';
 
 const R = TEAM_REJECTION_REASONS;
 
