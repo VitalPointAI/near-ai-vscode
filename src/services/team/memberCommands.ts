@@ -25,11 +25,9 @@ export const LINK_NEAR_COMMAND = 'nearAi.team.linkNearOrganization';
 export const SIGN_OUT_NEAR_COMMAND = 'nearAi.team.signOutNear';
 
 // Plain-language pass: people share and get the project; the extension runs git. Git words stay in the output channel.
-const PUSH_ACTION = 'Share with my team';
 const SHOW_DETAILS_ACTION = 'Show details';
-const SHARED_TEXT = 'Shared with your team.';
-const SHARE_FAILED_TEXT = 'The change could not be shared with your team yet. Check your internet connection and try again. Choose Show details for more.';
-const NOT_ON_A_VERSION_TEXT = 'This project could not be shared right now. Choose Show details for what to do.';
+// G-61-3: a link the lead chose not to share yet stays on this computer; they are told teammates will not see it and where to share it.
+export const LINK_NOT_SHARED_TEXT = 'The link is saved on this computer only. Teammates will not see it until you share your team setup. Choose Share in the Team section of your NEAR AI sidebar.';
 const LINK_SAVE_UNFINISHED_TEXT = 'The link is saved in this project, but saving it for the team did not finish. Choose Show details for the one step that is left.';
 const INVITE_ADDRESS_TEXT = 'No invite was made, because the address your project is kept at online cannot be given to teammates as it is.';
 const INVITE_ADDRESS_DETAIL = 'Keep the project online at an address your teammates can use, for example on GitHub, with no password or token in it, then invite again. Choose Show details for why.';
@@ -329,32 +327,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     }
   }
 
-  // ---- pushing ---------------------------------------------------------------------------------------------------------------------------
-
-  async function currentBranch(projectRoot: string): Promise<string | undefined> {
-    const { gitText, runGit } = await import('../../team/runGit');
-    const result = await runGit(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: projectRoot, timeoutMs: 30_000 });
-    const branch = result.code === 0 ? gitText(result) : '';
-    return branch === '' ? undefined : branch;
-  }
-
-  async function pushBranch(projectRoot: string, remote: string, branch: string | undefined): Promise<void> {
-    const target = branch ?? await currentBranch(projectRoot);
-    if (target === undefined) {
-      deps.output.appendLine('There is no current branch to push. Check out your project branch and push it with git.');
-      await showDetailsOffer('error', NOT_ON_A_VERSION_TEXT);
-      return;
-    }
-    const { pushCodeBranch } = await import('../../team/enable');
-    const pushed = await pushCodeBranch(projectRoot, remote, target);
-    if (pushed.ok) {
-      deps.output.appendLine(`Pushed ${target} to ${remote}.`);
-      deps.report('info', SHARED_TEXT);
-    } else {
-      deps.output.appendLine(await safe(pushed.message));
-      await showDetailsOffer('error', SHARE_FAILED_TEXT);
-    }
-  }
+  // ---- messages ------------------------------------------------------------------------------------------------------------------------
 
   // Plain words with Show details, which opens the NEAR AI Team channel where the technical reason was written just before.
   async function showDetailsOffer(level: Level, message: string): Promise<void> {
@@ -365,22 +338,27 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     }
   }
 
-  // A message with Share with my team. Nothing is pushed unless the person chooses it. Callers that must not wait for a notification nobody clicks do not await it.
-  async function offerPush(level: 'info' | 'warn', message: string, projectRoot: string, remote: string, branch?: string): Promise<void> {
-    deps.output.appendLine(message);
-    try {
-      const choice = await teamPrompts.message(level, message, undefined, PUSH_ACTION);
-      if (choice === PUSH_ACTION) await pushBranch(projectRoot, remote, branch);
-    } catch (error) {
-      deps.output.appendLine(`The push could not run: ${await describe(error)}`);
-    }
-  }
-
   // ---- Link Your Organization (D-03) -----------------------------------------------------------------------------------------------------
 
+  // G-61-3: the team setup this computer now has, link included, is shared with the share flow's one confirmation (reason link), so a link is
+  // never left only on the lead's computer. Declining keeps the link here and says how to share it later; on anything else the share flow has
+  // already said why in plain words. The share flow is the only way a membership command puts anything online.
+  async function shareLink(projectRoot: string): Promise<void> {
+    const session = deps.session();
+    const teamFile = await (await import('../../team/teamFile')).readTeamFile(projectRoot);
+    if (session === undefined || teamFile === undefined) return;
+    const branch = session.state().team.policy.integrationBranch;
+    const { ensureTeamSetupShared } = await import('./shareFlow');
+    const outcome = await ensureTeamSetupShared({ output: deps.output, announce: deps.announce }, { projectRoot, teamFile, branch, reason: 'link' });
+    if (outcome === 'shared' || outcome === 'already') return;
+    deps.output.appendLine(`The organization link is committed on this computer but not on ${branch} online (${outcome}).`);
+    if (outcome === 'declined') deps.report('info', LINK_NOT_SHARED_TEXT);
+  }
+
   // Returns true when the team ends up linked to the chosen organization (also when it already was), false when nothing was linked.
-  // `offerShare` false is the Invite flow: it asks its own single share confirmation right after, so the link flow offers none (61-20).
-  async function linkFlow(projectRoot: string, offerShare: boolean): Promise<boolean> {
+  // `share` false is the Invite flow: it asks its own single share confirmation right after, so the link flow asks none (61-20). Everywhere else
+  // a new link is shared through the share flow with one confirmation (61-23).
+  async function linkFlow(projectRoot: string, share: boolean): Promise<boolean> {
     const { readTeamFile } = await import('../../team/teamFile');
     const { linkChoices, linkNearOrganization } = await import('../../team/nearLink');
     const teamFile = await readTeamFile(projectRoot);
@@ -461,12 +439,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     }
     await deps.restartSession(projectRoot);
     deps.output.appendLine(result.branch === undefined ? 'team.json is committed.' : `team.json is committed on ${result.branch}. Sharing pushes it.`);
-    const message = result.branch === undefined ? `Linked ${teamName} to ${organization.label}.` : `Linked ${teamName} to ${organization.label}. Share it so your teammates see the link.`;
-    if (result.branch === undefined || !offerShare) {
-      deps.report('info', result.branch === undefined ? message : `Linked ${teamName} to ${organization.label}.`);
-    } else {
-      await offerPush('info', message, projectRoot, teamFile.coordination.remote, result.branch);
-    }
+    deps.report('info', `Linked ${teamName} to ${organization.label}.`);
+    if (share) await shareLink(projectRoot);
     return true;
   }
 
