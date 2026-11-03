@@ -4,7 +4,8 @@
 
 - **Tables in replies now show as real tables** with headers and lined-up
   columns. Wide tables scroll sideways inside the message, and keep their
-  place while the reply is still arriving.
+  place while the reply is still arriving. To scroll one with the keyboard,
+  press Tab until the table is selected, then use the arrow keys.
 - **Quoted text stays together as one quote**, and crossed-out text shows
   crossed out.
 - **Links in replies open the right page** even when the address has
