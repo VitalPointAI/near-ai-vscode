@@ -67,6 +67,7 @@
 ### Workflow for every project
 
 - [ ] **FLOW-01**: A single developer working with agents gets task workspaces, review, one path into the main branch and releases without setting up a team; the team layer turns on when a second person joins.
+- [ ] **SETUP-01**: One guided project setup follows connecting NEAR AI, in plain words and with every step skippable: (1) what the project is for, which sets up the agent team and project type; (2) where the project is kept: if the folder is not yet a repository the extension makes it one automatically, and it offers to connect or create an online home (for example GitHub) so work is backed up and can be shared; a project with no online home still works for one person; (3) who else is working on it: invite people by email with a role and allocation (Phase 61 invitations), or "just me for now"; (4) spending limits. Steps already done are shown as done, and the same setup can be reopened later. (owner, 2026-11-03)
 - [ ] **UX-01**: No step, decision or message requires git or developer knowledge; git details appear only in an optional details view.
 
 ## Future Requirements
@@ -121,6 +122,7 @@ Phases are numbered 60 to 67; spec phase 25 is Phase 60, and so on in order.
 | SEC-03 | Phase 67 | Pending |
 | BOARD-04 | Phase 67 | Pending |
 | FLOW-01 | Phases 63, 65 | Pending |
+| SETUP-01 | Phase 63 | Pending |
 | UX-01 | Phases 63, 64, 65, 66, 67 | Pending |
 
 **Coverage:**
