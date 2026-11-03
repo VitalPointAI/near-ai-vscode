@@ -29,9 +29,24 @@
       update(row, item);
       const next = previous ? previous.nextSibling : tbody.firstChild;
       if (row !== next) tbody.insertBefore(row, next);
+      if (row.tagName === 'TR' && !row.dataset.labelled) labelRow(row);
       previous = row;
     }
     existing.forEach((row) => row.remove());
+  }
+  // Each cell takes its column's name (shown before the value when a narrow panel turns rows into
+  // cards) and how much the column matters (less important columns hide on narrow panels).
+  function labelRow(row) {
+    const table = row.closest('table');
+    if (!table) return;
+    const heads = table.querySelectorAll('thead th');
+    [...row.children].forEach((cell, index) => {
+      const head = heads[index];
+      if (!head) return;
+      cell.dataset.label = head.querySelector('.sr-only') ? '' : head.textContent.trim();
+      if (head.classList.contains('col-secondary')) cell.classList.add('col-secondary');
+    });
+    row.dataset.labelled = 'true';
   }
   const cells = (row, count, numeric) => { for (let i = 0; i < count; i += 1) row.append(el('td', numeric && numeric.includes(i) ? 'num' : '')); return row.children; };
 
@@ -51,7 +66,7 @@
       cells(row, 8, [3, 4, 5, 6]);
       row.tabIndex = -1;
       const name = row.children[0];
-      name.append(el('span', 'agent-name'));
+      name.append(el('span', 'agent-name'), el('p', 'when-narrow'));
       const model = row.children[1];
       model.append(el('span', 'model-name'), el('span', 'badge'));
       const controls = row.children[7];
@@ -70,6 +85,8 @@
       row.dataset.since = String(agent.startedAt);
       row.className = 'phase-' + agent.phase + (state.focus === agent.agentId ? ' focused' : '');
       setText(row.children[0].firstChild, (agent.sub ? '↳ ' : '') + agent.label);
+      // On a narrow panel the hidden columns' values show under the agent's name.
+      setText(row.children[0].lastChild, duration(now - agent.startedAt) + ' · ' + number(agent.turns) + ' turns · ' + number(agent.toolCalls) + ' tool calls');
       setText(row.children[1].firstChild, agent.model);
       const badge = row.children[1].lastChild;
       const boundary = BOUNDARY[agent.boundary];
@@ -177,9 +194,10 @@
     const p = summary.problems;
     const parts = [[p.rateLimited, 'rate limited (429)'], [p.retries, 'retries'], [p.errors, 'agent errors'], [p.stopped, 'stopped'], [p.toolErrors, 'failed tool calls']].filter((part) => part[0]).map((part) => number(part[0]) + ' ' + part[1]);
     setText($('problems-summary'), parts.length ? parts.join(' · ') : 'No problems.');
-    syncRows($('models').querySelector('tbody'), summary.models, (model) => model.model, (row) => cells(row, 9, [1, 2, 3, 4, 5, 6, 7, 8]), (row, model) => {
+    syncRows($('models').querySelector('tbody'), summary.models, (model) => model.model, (row) => { cells(row, 9, [1, 2, 3, 4, 5, 6, 7, 8]); row.children[0].append(el('span', 'model-id'), el('p', 'when-narrow')); }, (row, model) => {
       const values = [model.model, number(model.agents), number(model.turns), number(model.rateLimited), number(model.retries), number(model.errors), number(model.stopped), number(model.inputTokens), number(model.outputTokens)];
-      values.forEach((value, index) => setText(row.children[index], value));
+      values.forEach((value, index) => setText(index ? row.children[index] : row.children[0].firstChild, value));
+      setText(row.children[0].lastChild, values[4] + ' retries · ' + values[6] + ' stopped · tokens ' + values[7] + ' in, ' + values[8] + ' out');
       [3, 4, 5].forEach((index) => row.children[index].classList.toggle('bad', Number(values[index].replace(/\D/g, '')) > 0));
     });
   }
@@ -194,6 +212,7 @@
         open.title = 'Open this conversation in the chat';
         title.append(open);
       } else title.append(el('span', 'title-text'));
+      title.append(el('p', 'when-narrow'));
     }, (row, run) => {
       row.dataset.runId = run.runId || '';
       row.className = 'outcome-' + run.outcome + (state.focus && state.focusRun === run.runId ? ' focused' : '');
@@ -202,6 +221,7 @@
       if (run.conversationId) row.children[1].firstChild.setAttribute('aria-label', 'Open in chat: ' + run.title);
       setText(row.children[2], number(run.agents));
       setText(row.children[3], duration(run.durationMs));
+      setText(row.children[1].lastChild, number(run.agents) + (run.agents === 1 ? ' agent · ' : ' agents · ') + duration(run.durationMs));
       setText(row.children[4], run.costText || '–');
       setText(row.children[5], OUTCOME[run.outcome] || run.outcome);
     });
