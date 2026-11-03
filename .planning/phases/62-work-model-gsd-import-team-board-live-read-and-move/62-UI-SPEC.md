@@ -121,8 +121,8 @@ Every value is a VS Code theme variable. No custom palette. State is never encod
 | Dominant (60%) | `--vscode-editor-background` (editor panel) and `--vscode-sideBar-background` falling back to `--vscode-editor-background` (sidebar view) | Page background, empty cells, column bodies |
 | Secondary (30%) | `--vscode-editorWidget-background` for cards, menu, detail drawer, banners; `--vscode-sideBarSectionHeader-background` falling back to `--vscode-editorWidget-background` for column and lane headers; `--vscode-panel-border` (fallback `--vscode-widget-border`) for all borders; `--vscode-foreground` for text; `--vscode-descriptionForeground` for muted text | Cards, headers, borders, text |
 | Accent (10%) | `--vscode-focusBorder`, `--vscode-button-background` with `--vscode-button-foreground`, `--vscode-textLink-foreground`, `--vscode-progressBar-background` | See "Accent reserved for" |
-| Warning | `--vscode-editorWarning-foreground` | Blocked badge text and icon, offline banner icon, "Done in GSD, confirm" is NOT warning (uses info) |
-| Info | `--vscode-editorInfo-foreground` | "Done in GSD, confirm" badge, notice banners |
+| Warning | `--vscode-editorWarning-foreground` | Blocked badge text and icon, offline banner icon, "Looks finished, please confirm" is NOT warning (uses info) |
+| Info | `--vscode-editorInfo-foreground` | "Looks finished, please confirm" badge, notice banners |
 | Success | `--vscode-testing-iconPassed` | Done state icon, done task check, "Live" status icon (existing precedent in media/tools and media/activity) |
 | Destructive / error | `--vscode-errorForeground` | Refusal message on a card, error banner, invalid field text, `aria-invalid` field border `--vscode-inputValidation-errorBorder`. Used for nothing else. |
 | Hover / selection | `--vscode-list-hoverBackground`; selected card tint `color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent)` over the card background, text stays `--vscode-foreground` | Card hover, selected card |
@@ -155,12 +155,12 @@ Library: codicons. Delivery (Decision AD-3): copy `codicon.css` and `codicon.ttf
 | Claimed | `person` | same (empty this phase) |
 | In progress | `sync` (static, never spinning) | same (empty this phase) |
 | In review | `eye` | same (empty this phase) |
-| Integrating | `git-merge` | same (empty this phase) |
+| Shipping (key `integrating`) | `check-all` (no git icon) | same (empty this phase) |
 | Done | `pass` (success colour) | same |
 | Cancelled | `circle-slash` | same |
 | Blocked | `lock` (warning colour) | Badge, detail banner |
 | On hold | `debug-pause` | Badge |
-| Done in GSD, confirm | `info` (info colour) | Badge |
+| Looks finished, please confirm | `info` (info colour) | Badge |
 | Dependencies | `link` | Card meta |
 | Age in state | `clock` | Card meta |
 | Move to... | `arrow-swap` | Button icon |
@@ -203,7 +203,7 @@ Top to bottom:
 2. **Banners** (stacked, only those that apply): paused/offline, read-only, error, notice.
 3. **Summary line** (Small, muted): `{n} cards · {r} ready · {b} blocked` ("1 card" singular). Milestone picker below it as a labelled select: label "Milestone", options the current milestone first, then others, then "All milestones".
 4. **Filters disclosure**: a button `Filters` (icon `filter`, shows `Filters (2)` when 2 are active) with `aria-expanded` and `aria-controls`. Collapsed by default. Expanded content: toggle chips `Mine`, `Ready`, `Blocked`; select `Phase`; text input `Requirement` with a `datalist` of requirement IDs on the board; `Clear filters` link button (only when any filter is on).
-5. **State groups**, in column order: Backlog, Ready, Claimed, In progress, In review, Integrating, Done, Cancelled. Each group is a heading (`h2`) containing a button: chevron, state icon, state name, count in brackets (`Ready (3)`), `aria-expanded`. Default open: Ready, Backlog. Default closed: every other group (empty groups are closed and show their caption when opened; Done and Cancelled closed even when they have cards). Empty group opened shows the line "No cards here." and, for Claimed, In progress, In review and Integrating, the caption from the copy table so the list looks the same in every phase (D-13).
+5. **State groups**, in column order: Backlog, Ready, Claimed, In progress, In review, Shipping, Done, Cancelled. Each group is a heading (`h2`) containing a button: chevron, state icon, state name, count in brackets (`Ready (3)`), `aria-expanded`. Default open: Ready, Backlog. Default closed: every other group (empty groups are closed and show their caption when opened; Done and Cancelled closed even when they have cards). Empty group opened shows the line "No cards here." and, for Claimed, In progress, In review and Shipping, the caption from the copy table so the list looks the same in every phase (D-13).
 6. **Rows** inside a group: `ul > li`. Each row: a main button (state icon, ID in monospace, title up to 2 lines) and a `Move to...` icon button on the right. Second line (Small, muted): badges and meta in the order used on the card face. Rows are never draggable (D-16). Row height grows with content; no fixed height.
 7. Clicking a row main button opens **detail as a drill-in page**: the list is replaced by the detail with a `Back to list` button (icon `arrow-left`) at the top. Focus moves to the detail heading. Back restores focus to the row that opened it, scroll position preserved.
 
@@ -215,12 +215,12 @@ At 200px (the narrowest VS Code sidebar) nothing scrolls horizontally: buttons w
    - Row 1: `h1` "Team Board" (Display size) with status chip; right aligned: `Import plans` (secondary, owner and lead only), `New item` (primary).
    - Row 2: milestone select (label "Milestone"), the milestone summary `v0.6.0 Team Mode: 62%, 16 of 26 plans done` with a progress bar (weighted by estimate, text always shown), "Group by" segmented control (`Member`, `Phase`, `Milestone`, `None`; default Member), filters inline (chips Mine, Ready, Blocked; select Phase; Requirement input; `Clear filters`).
 2. **Banners** under the toolbar.
-3. **Column header row** (`role="toolbar"`, `aria-label="Columns"`, sticky below the toolbar): 8 columns in this order: Backlog, Ready, Claimed, In progress, In review, Integrating, Done, Cancelled. Each header: state icon, name, count, collapse chevron button (`aria-expanded`), and a one-line caption (Small, muted) on the four columns that later phases own: "Claiming arrives in a later update." (Claimed), "Starting work arrives with claims." (In progress), "Review arrives in a later update." (In review), "Merging arrives in a later update." (Integrating). Backlog caption: "Waiting, on hold or not ready." Ready caption: "Ready to be claimed." Done caption: none. Cancelled caption: none.
+3. **Column header row** (`role="toolbar"`, `aria-label="Columns"`, sticky below the toolbar): 8 columns in this order: Backlog, Ready, Claimed, In progress, In review, Shipping, Done, Cancelled. Each header: state icon, name, count, collapse chevron button (`aria-expanded`), and a one-line caption (Small, muted) on the four columns that later phases own: "Claiming arrives in a later update." (Claimed), "Starting work arrives with claims." (In progress), "Review arrives in a later update." (In review), "Adding finished work to the project arrives in a later update." (Shipping). Backlog caption: "Waiting, on hold or not ready." Ready caption: "Ready to be claimed." Done caption: none. Cancelled caption: none.
 4. **Lanes**: for each lane a `section` with a header button (chevron, lane label, card count) and, for Phase and Milestone lanes, the progress block (`8px` bar, text `60%, 3 of 5 plans done`, or `No plans yet` with no bar). A lane with no plans starts collapsed. Under the header, one grid row of 8 cells aligned to the column headers. Group by None draws one row with no lane header.
 5. **Horizontal scroll**: the board region scrolls horizontally when the columns exceed the width (8 columns at 224px is about 2000px). Column header row and cell rows scroll together. Collapsed columns are 40px stubs showing the icon, the count and the vertical name; clicking the stub or pressing Enter on its header button expands it.
 6. **Detail drawer**: `aside#detail` on the right, 360px, opened by Enter or click on a card; non-modal; the board stays usable. `Close details` button, Escape closes it. Opening moves focus to the detail heading; closing returns focus to the opener card.
 
-Card sort order inside a cell: Backlog, Ready, Claimed, In progress, In review, Integrating: ascending by phase number then plan number, board-created items after plans in creation order. Done and Cancelled: descending (newest phase and plan first). No wall-clock ordering. A cell with more than 30 cards shows the first 30 and a `Show all {n}` link button.
+Card sort order inside a cell: Backlog, Ready, Claimed, In progress, In review, Shipping: ascending by phase number then plan number, board-created items after plans in creation order. Done and Cancelled: descending (newest phase and plan first). No wall-clock ordering. A cell with more than 30 cards shows the first 30 and a `Show all {n}` link button.
 
 Member lanes: before Phase 63 every card is in one lane labelled `Unassigned`; board-created items still sit there and show `Created by {name}` in the card meta. From Phase 63 the lane label is the claimant's name. Lane order: members alphabetically by display name, Unassigned last. Phase lanes ascending by phase number. Milestone lanes: current first.
 
@@ -236,14 +236,14 @@ Same content in list and kanban, laid out as below (kanban card, 8px 12px paddin
 |-----|---------|-------|
 | 1 | State icon, GSD display ID, kind badge for board items | Plans show `62-03` (strip `plan:`). Board items show kind word plus the last 4 characters of the ULID in capitals, for example `Bug 7F3K`. IDs in monospace. |
 | 2 | Title | Body size, weight 600 only for the ID, title regular. Clamp 3 lines (kanban) or 2 lines (list). |
-| 3 | Meta row, wraps | In this order: assignee initials chip (Phase 63, hidden until claimed), `Blocked` badge, `On hold` badge, `Done in GSD, confirm` badge, dependencies `link` icon plus `2 dependencies` (hidden at 0, `1 dependency` singular), estimate `Est. 48k tokens` or `No estimate`, age `clock` icon plus `3 days` |
+| 3 | Meta row, wraps | In this order: assignee initials chip (Phase 63, hidden until claimed), `Blocked` badge, `On hold` badge, `Looks finished, please confirm` badge, dependencies `link` icon plus `2 dependencies` (hidden at 0, `1 dependency` singular), estimate `Est. 48k tokens` or `No estimate`, age `clock` icon plus `3 days` |
 | 4 | Pending line (only while a write is in flight) | `Moving to Done...` or `Saving...`, Small, muted, card has `aria-busy="true"` |
 | 5 | Refusal line (only after a refused move) | `error` icon plus reason, `--vscode-errorForeground`, with a `Dismiss message` icon button |
 | 6 | Footer | `Move to...` button (hidden when the viewer has no permitted move) |
 
 Formats: estimate `800 tokens`, `48k tokens`, `1.2M tokens`; age `Under 1 hour`, `5 hours`, `1 day`, `3 days`, `2 months` (60 days and over), computed by the host from the display-only `at` of the last state change and passed in as text; the webview never reads a clock for this. Age for an imported card counts from its import event.
 
-Badges: pill, 1px `currentColor` border, Small size, always icon plus word. Blocked uses warning colour and shows only `Blocked` on the face; the reason is in the detail and in the accessible name. Done in GSD, confirm appears when a plan gained a SUMMARY but its stored state is not done (D-06); only owner and lead see a `Mark done` path for it (via Move to...).
+Badges: pill, 1px `currentColor` border, Small size, always icon plus word. Blocked uses warning colour and shows only `Blocked` on the face; the reason is in the detail and in the accessible name. Looks finished, please confirm appears when a plan gained a SUMMARY but its stored state is not done (D-06); only owner and lead see a `Mark done` path for it (via Move to...).
 
 Card states:
 
@@ -260,7 +260,7 @@ Card states:
 | Done | success-coloured `pass` icon, title regular | |
 | Cancelled | title with `text-decoration: line-through` plus the word `Cancelled` badge | never strike-through alone |
 
-Accessible name of `card-main` (`aria-label`), built by one pure function, example: `Plan 62-03, Board webview client. State: Ready. Blocked: no. 2 dependencies. Estimated 48 thousand tokens. In this state for 3 days.` Variants insert `Blocked: waiting for the API key.`, `On hold.`, `Done in GSD, waiting for confirmation.`, `Cancelled.` The name never contains raw HTML and is set via `setAttribute`. `aria-describedby` points to one hidden node: `Press Enter to open details. Press M to move this card.` (omitted when the viewer cannot move it: `Press Enter to open details.`).
+Accessible name of `card-main` (`aria-label`), built by one pure function, example: `Plan 62-03, Board webview client. State: Ready. Blocked: no. 2 dependencies. Estimated 48 thousand tokens. In this state for 3 days.` Variants insert `Blocked: waiting for the API key.`, `On hold.`, `The project plans say this is finished. Waiting for someone to confirm.`, `Cancelled.` The name never contains raw HTML and is set via `setAttribute`. `aria-describedby` points to one hidden node: `Press Enter to open details. Press M to move this card.` (omitted when the viewer cannot move it: `Press Enter to open details.`).
 
 ---
 
@@ -270,10 +270,10 @@ Heading order inside detail: `h2` is the card title, `h3` for each section. Sect
 
 1. **Title block**: state icon and state word, display ID, title (Heading size), badges, then actions: `Move to...` (hidden when no moves), `Edit` (only for a board-created item the viewer may edit, see Permissions), `Close details` (kanban) or `Back to list` (list).
 2. **Blocked notice** when blocked: `Blocked by {name}: {reason}` with the time (`<time datetime>`). Reason is user text, set by `textContent`.
-3. **Why this is not ready** (Backlog cards only, from `readiness().reasons`): bullet list in plain words: `It has no estimate.`, `It lists no files.`, `It waits for {n} unfinished plan(s).`, `A plan it depends on is not on the board.`, `It is blocked.`, `It is on hold.`, `Its phase is on hold.`
-4. **Facts** (`dl`): Phase, Milestone, Wave (plans), Kind, Created by (board items), Estimate, In this state for, Source (`From the project plans` or `Added on the board`).
+3. **Why this is not ready** (Backlog cards only, from `readiness().reasons`): bullet list in plain words: `It has no estimate.`, `It does not say which parts of the project it covers.`, `It waits for {n} unfinished plan(s).`, `A plan it depends on is not on the board.`, `It is blocked.`, `It is on hold.`, `Its phase is on hold.`
+4. **Facts** (`dl`): Phase, Milestone, Order within the phase (plans), Type, Created by (board items), Estimate, In this state for, Where it came from (`From the project plans` or `Added on the board`).
 5. **Description** (board-created items only; imported items carry none, see A1).
-6. **Must-haves** (`ul`, wrapped text, each up to 600 characters).
+6. **What must be true when it is done** (`ul`, wrapped text, each up to 600 characters).
 7. **Requirements**: link-style buttons, each applies the requirement filter (`aria-label` `Filter the board by BOARD-01`).
 8. **Dependencies** (`ul`): each row is a button `62-01 Work model` with state icon and state word; missing ones read `61-09 (not on the board)` as plain text.
 9. **Files** (`ul`, monospace): first 8 shown, `Show all {n}` link button for the rest.
@@ -328,7 +328,7 @@ See "Keyboard Model". `M`, Shift+F10 or the ContextMenu key on a card, or Enter/
 | Unblock | none | none (reversible, no side effect) |
 | Hold, release hold | none | none |
 | Reopen | none | none (lands in Backlog, clears block and hold) |
-| Mark done | modal `showWarningMessage` | Always. Title `Mark {ID} as done?`, detail `Use this when the work is finished and merged. The whole team will see it as done, and plans that wait for it can become ready. You can reopen it later.` Buttons `Mark done` and `Not yet` (`isCloseAffordance`). |
+| Mark done | modal `showWarningMessage` | Always. Title `Mark {ID} as done?`, detail `Use this when the work is finished and added to the project. The whole team will see it as done, and plans that wait for it can become ready. You can reopen it later.` Buttons `Mark done` and `Not yet` (`isCloseAffordance`). |
 | Cancel item | reason `showInputBox` first (title `Cancel {ID}`, prompt `Why is this being cancelled? The team will see your answer.`, placeholder `For example: replaced by another plan`, same validation), then a modal only when other cards depend on it | Modal title `Cancel {ID}?`, detail `{n} plan(s) wait for this card. They stay waiting until someone changes what they depend on. You can reopen this card later.` Buttons `Cancel this item` and `Keep item` (`isCloseAffordance`). When nothing depends on it the reason prompt alone is the confirmation. |
 | Import plans | `withProgress` notification, `cancellable: false` | No confirmation. Title `Importing plans to the Team Board`. Result notice `Imported {n} items to the Team Board.` / `The Team Board is already up to date.` / on failure `The import did not finish: {safe reason}. Nothing was changed.` (Phase 61 lesson: progress for long actions). |
 | Discard an unsaved New item or Edit form | inline row in the form | If any field changed: `Discard this item?` with `Discard changes` and `Keep editing`, focus on `Keep editing`. Unchanged forms close without asking. |
@@ -342,15 +342,16 @@ Nothing in this phase deletes data (D-05: nothing is ever deleted). The only str
 | Into Claimed | `Claiming a plan arrives in a later update. Nothing was moved.` |
 | Into In progress | `Starting work from the board arrives with claims in a later update. Nothing was moved.` |
 | Into In review | `Review arrives in a later update. Nothing was moved.` |
-| Into Integrating | `Merging arrives in a later update. Nothing was moved.` |
-| Into Ready, plan not ready | `This plan is not ready yet: {reasons}. Nothing was moved.` where reasons are joined with `, ` from: `it has no estimate`, `it lists no files`, `it waits for {n} unfinished plan(s)`, `a plan it depends on is not on the board`, `it is blocked`, `its phase is on hold` |
+| Into Shipping | `Adding finished work to the project arrives in a later update. Nothing was moved.` |
+| Into Ready, plan not ready | `This plan is not ready yet: {reasons}. Nothing was moved.` where reasons are joined with `, ` from: `it has no estimate`, `it does not say which parts of the project it covers`, `it waits for {n} unfinished plan(s)`, `a plan it depends on is not on the board`, `it is blocked`, `its phase is on hold` |
 | Into Ready, plan already ready | no message (it is already shown in Ready) |
 | Out of Done or Cancelled to anything but reopen | `A finished or cancelled card can only be reopened. Use Move to... and choose Reopen. Nothing was moved.` |
 | Viewer may not move | `Only the team owner or a lead can move cards. Nothing was moved.` |
-| No device key | the existing `READ_ONLY_TEXT` string |
+| No device key | the existing `READ_ONLY_TEXT` string, now `This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.` |
 | Different row | `This card stays in its own row. Drop it in another column of the same row.` |
 | Stale (write found a newer state) | `{Name} already changed this card. The board now shows the latest. Nothing was moved.` (`{Name}` is `displayText` flattened) |
-| Team remote unreachable | `The team remote could not be reached, so nothing was changed. Try again when you are back online.` |
+| Team unreachable | `The team could not be reached, so nothing was changed. Check your internet connection and try again.` |
+| Busy (lost too many saves to teammates) | `The team was busy saving other changes. Try again in a moment. Nothing was moved.` (the raw reason goes to the output channel) |
 | Secret-like text in a reason or form field | `This text looks like a password or key, so it was not saved. Remove it and try again.` |
 
 ---
@@ -421,19 +422,21 @@ Filters combine with AND. They apply to cards only (milestones, phases and tasks
 
 ## Copywriting Contract
 
-Rules: plain language, no em-dashes or en-dashes in any authored string (a test greps the strings), sentence case, say what happened and what to do next, no internal vocabulary (not "CAS", "lease", "WorkItem", "tree hash", "relay"). Teammate and plan text is shown as data, never as copy. The middle dot in `ready · pending` is the character D-17 specifies.
+Rules: plain language, no em-dashes or en-dashes in any authored string (a test greps the strings), sentence case, say what happened and what to do next, no internal vocabulary (not "CAS", "lease", "WorkItem", "tree hash", "relay").
+
+> **Plain-language pass (owner principle, 2026-11-02).** PROJECT.md's first principle is "No developer knowledge required: people build together without knowing git. Git terms appear only in an optional details view, never as a required step or decision." The copy below was amended from the approved contract after 62-UI-REVIEW (J-01 to J-19, warnings 2 to 7): no branch, commit, push, remote, worktree, glob, GSD, repository, clone, merge, team log or device key in anything a person reads; the technical reason goes to the NEAR AI Team output channel, reached with Show details. `src/test/teamPlainLanguage.test.ts` scans the text tables for those terms. Enable Team Mode offers `Share with my team` (success `Shared with your team.`) instead of Push. Teammate and plan text is shown as data, never as copy. The middle dot in `ready · pending` is the character D-17 specifies.
 
 | Element | Copy |
 |---------|------|
 | View name | `Team Board` |
-| Command titles (category NEAR AI) | `Open Team Board` (icon `$(project)`), `Import Plans to Team Board` (icon `$(sync)`) |
+| Command titles (category NEAR AI) | `Open Team Board` (icon `$(project)`), `Import Plans to Team Board` (icon `$(sync)`), `Check Team Record` (was `Verify Team Log`; id `nearAi.team.verifyLog` kept) |
 | Primary CTA (board with cards) | `New item` |
 | Primary CTA (empty board, owner or lead) | `Import plans` |
 | Secondary CTAs | `Open Team Board`, `Import plans`, `Move to...`, `Filters`, `Clear filters`, `Back to list`, `Close details`, `Try again`, `Show details`, `Show all {n}`, `Dismiss message` |
 | Form buttons | `Add item`, `Save changes`, `Close form`, `Discard changes`, `Keep editing`. The word `Cancel` is reserved for the real action `Cancel this item` (and the native prompt titles) so a screen-reader user never hears it for closing a form. |
 | Empty board heading | `No work on the board yet` |
 | Empty board body (owner, lead) | `Import your plans from the project roadmap, or add an item yourself.` |
-| Empty board body (developer) | `A lead has not imported the plans yet. You can add a bug, chore or spike yourself.` |
+| Empty board body (developer) | `A lead has not imported the plans yet. You can add a bug, chore or experiment yourself.` |
 | Empty board body (observer, reviewer, no key) | `A lead has not imported the plans yet. Cards show up here when they do.` |
 | Empty group (list) | `No cards here.` |
 | Empty filter result heading | `No cards match these filters` |
@@ -442,16 +445,18 @@ Rules: plain language, no em-dashes or en-dashes in any authored string (a test 
 | Empty history | `No changes recorded since this window opened.` |
 | Empty tasks | `This plan has no tasks listed.` |
 | Loading | `Loading the Team Board...` (`role="status"`) |
-| Loading, over 10 seconds | `This is taking longer than usual. The team remote may be slow.` with `Try again` |
+| Loading, over 10 seconds | `This is taking longer than usual. The connection to your team may be slow.` with `Try again` |
 | Error heading (state could not be built) | `The Team Board could not be loaded` |
 | Error body | `{safe reason}. Nothing was changed. Try again, or show details in the NEAR AI Team output.` |
-| Offline banner (remote unreachable) | `You are offline. The board shows the last update at {time}. Cards cannot be moved or added until the connection returns.` with `Try again` |
-| Paused: log rewritten or missing | `The team log changed in a way the board cannot trust, so the board is paused. Run "NEAR AI: Verify Team Log" to find out why.` (`role="alert"`) |
-| Paused: not trusted | `The team log did not pass its checks, so the board is paused. Run "NEAR AI: Verify Team Log" to find out why.` (`role="alert"`) |
+| Offline banner (team unreachable) | `You are offline. The board shows the last update at {time}. Cards cannot be moved or added until the connection returns.` with `Try again` |
+| Paused: record changed or missing | `Something unexpected changed in the shared team record, so the board is paused to protect your work. Choose "Check the team" to see what happened, or ask your lead.` with a `Check the team` button that runs `nearAi.team.verifyLog` (`role="alert"`) |
+| Paused: not trusted | `The shared team record failed a safety check, so the board is paused. Choose "Check the team" to see what happened, or ask your lead.` with the same `Check the team` button (`role="alert"`) |
+| Later columns (kanban) | Claimed, In progress, In review and Shipping start folded, with the note `Claimed, In progress, In review and Shipping are folded for now. They fill in when those steps arrive in a later update.`; a person who opens one keeps it open |
+| Backlog rule on a board card | `Stays in Backlog until it says which parts of the project it covers and roughly how big it is.` (normal text with an info icon, also appended to the accessible name) |
 | Removed from team | `You were removed from this team. You can still look at the board but not change it.` |
 | Read-only: observer or reviewer | `You can look at the board but not change it. A lead can change your role.` |
 | Read-only: developer | `You can add items and edit your own drafts. Leads and the owner move cards.` |
-| Read-only: no device key | existing `READ_ONLY_TEXT` |
+| Read-only: computer not approved | existing `READ_ONLY_TEXT` (see Refusal copy) |
 | Status chip | `Live`, `Syncing...`, `Offline`, `Paused`, `Read only` (always icon plus word) |
 | Import notice (once per window when something was written) | `Imported {n} items to the Team Board.` |
 | Import no-op | `The Team Board is already up to date.` |
@@ -469,12 +474,12 @@ Opens as the same drawer (kanban) or drill-in page (list). Title `New item` (or 
 
 | Field | Control | Rules and copy |
 |-------|---------|----------------|
-| Type | `select`, label `Type`, options `Bug`, `Chore`, `Spike`, default `Chore` | Required |
+| Type | `select`, label `Type`, options `Bug`, `Chore`, `Experiment` (stored kind `spike`), default `Chore` | Required |
 | Title | text input, label `Title` | Required, 1 to 200 characters. Errors: `Enter a title.` / `The title must be 200 characters or fewer.` |
 | Description | textarea, label `Description (optional)` | Up to 2000 characters. Counter appears under 200 left: `{n} characters left.` |
-| Files | textarea, label `Files this touches (optional)`, hint `One pattern per line, for example src/services/**` | Up to 64 lines, each a relative path or glob without a leading slash or `..`. Error: `Use one pattern per line, relative to the project folder, for example src/services/**.` |
+| Parts of the project | textarea, label `Parts of the project this covers (optional)`, hint `Add a folder or file name on each line, for example "settings". Leave empty if you are not sure.`, and a `Choose folders...` button that opens the native folder picker in the project (files and folders, many) and adds project-relative paths as lines | Up to 64 lines, each a relative path or glob without a leading slash or `..` (the same stored rule). Errors: `One of these lines is not a folder or file name in this project. Remove it and try again.` / `List 64 parts of the project or fewer.` |
 | Estimate | number input, label `Estimate in tokens (optional)`, `min=1000`, `step=1000`, hint `A rough size is fine. Typical plans are 50,000 to 100,000.` | Whole number, 1 or more. Error: `Enter a whole number of tokens, 1 or more.` |
-| Readiness hint | static line under the form | `Without files and an estimate this item stays in Backlog.` |
+| Backlog rule | a note (`role="note"`) in normal text with an accent left border, not a muted hint | `This item stays in Backlog until you say which parts of the project it covers and roughly how big it is.` |
 
 Validation: inline on blur and on submit; invalid fields get `aria-invalid="true"` and `aria-describedby` pointing at their error text; on submit with errors focus moves to the first invalid field and the live region announces `{n} fields need attention.` The submit button reads `Adding...` and is `aria-busy` while the write runs. Success announces `Added {kind} {code}: {title}.` Failure shows an in-form `role="alert"` banner with the refusal reason and keeps the input. The draft is kept in `setState` so a hidden or reloaded view does not lose it.
 
@@ -486,9 +491,9 @@ Rewritten in `teamStatusBar.ts`; the Phase 61 findings (no icon, no accessibilit
 |-------|------|---------|------------------------------------------------------------------|-----------|-------|
 | Synced, board has items | `$(organization) Team: 3 ready · 1 pending` (drop ` · 1 pending` when 0) | `{Team name}: 3 plans are ready to start. 1 member is waiting for confirmation. Click to open the Team Board.` plus the existing NEAR line. Singular forms: `1 plan is ready to start.`, `No plans are ready to start.`, `2 members are waiting for confirmation.` Omit the pending sentence at 0. | `Team Board. 3 plans ready. 1 member waiting for confirmation. Open the Team Board.` | none | `nearAi.team.openBoard` |
 | Synced, no items yet | `$(organization) Team: {name}` (existing text, plus the existing ` (N pending)` suffix when members wait) | `Team sync is working. Click to open the Team Board.` plus the NEAR line | `Team {name}. Sync is working. Open the Team Board.` | none | `nearAi.team.openBoard` |
-| Paused: remote unreachable | `$(warning) Team sync paused: remote unreachable` | existing tooltip plus ` The board shows the last update and cannot be changed until the connection returns. Click to run Verify Team Log.` | the visible text plus `Click to run Verify Team Log.` | `statusBarItem.warningBackground` | `nearAi.team.verifyLog` |
-| Paused: log rewritten or missing | `$(warning) Team sync paused: log rewritten` / `... log missing on remote` | existing tooltips | visible text plus action | `statusBarItem.warningBackground` | `nearAi.team.verifyLog` |
-| Log not trusted | `$(error) Team log not trusted` | `The team log did not pass its checks, so the board is paused. Click to run Verify Team Log.` | visible text plus action | `statusBarItem.errorBackground` | `nearAi.team.verifyLog` |
+| Paused: team unreachable | `$(warning) Team sync paused: offline` | `The team could not be reached. NEAR AI keeps trying, up to every 10 minutes, and right away when this window gets focus. The board shows the last update and cannot be changed until the connection returns. Click to check the team.` | the visible text plus `Click to check the team.` | `statusBarItem.warningBackground` | `nearAi.team.verifyLog` |
+| Paused: record changed / missing | `$(warning) Team sync paused: record changed` / `$(warning) Team sync paused: team record missing` | `Something unexpected changed in the shared team record, so team sync is paused to protect your work. Click to check the team.` / `The shared team record could not be found where the team keeps it. NEAR AI keeps the last good copy and checks again. Click to check the team.` | visible text plus action | `statusBarItem.warningBackground` | `nearAi.team.verifyLog` |
+| Record not trusted | `$(error) Team record not trusted` | `The shared team record failed a safety check, so the board is paused and new team activity is ignored. Click to check the team.` | visible text plus action | `statusBarItem.errorBackground` | `nearAi.team.verifyLog` |
 | Removed | `$(error) Team: removed` | existing removed text | visible text | `statusBarItem.errorBackground` | none |
 
 All teammate-authored text in the status bar passes `displayText` (escapes `$(`, flattens, bounds length). Text never relies on the icon or background alone. The count `N ready` is the pure `countReady(state)` result, updated on the same poll; `M pending` is the Phase 61 pending-confirmation count.
@@ -573,7 +578,7 @@ Link-style buttons (`--vscode-textLink-foreground`) always carry an underline (a
 | error | interactive-control (move) | ✅ covered | Refusal line on the card plus live region; stale, offline and secret-like text each have their own sentence |
 | offline | list-collection (board) | ✅ covered | Warning banner, status chip `Offline`, last known board, moves and creation disabled with `aria-disabled` and an explanation, status bar paused text |
 | populated | list-collection (kanban, list) | ✅ covered | Card face and detail fields fixed; sort order fixed; the live repository roadmap (26 done plans, six empty phases) is the reference populated case |
-| partial | list-collection (cards) | ✅ covered | Missing estimate shows `No estimate`; no files shows in detail `It lists no files.`; a dependency outside the board reads `(not on the board)`; a plan without tasks shows `This plan has no tasks listed.` |
+| partial | list-collection (cards) | ✅ covered | Missing estimate shows `No estimate`; no parts shows in detail `It does not say which parts of the project it covers.`; a dependency outside the board reads `(not on the board)`; a plan without tasks shows `This plan has no tasks listed.` |
 | partial | form (New item) | ✅ covered | Optional fields can be empty; the readiness hint explains the effect |
 | overflow | list-collection (cell, columns) | ✅ covered | More than 30 cards in a cell shows the first 30 plus `Show all {n}`; columns beyond the width scroll horizontally inside the board region; the list never scrolls sideways |
 | overflow | list-collection (detail lists) | ✅ covered | Files show 8 then `Show all {n}`; history stops at 50 with a note; must-haves wrap in full |
@@ -641,7 +646,7 @@ Messages (host validates every one, unknown shapes are ignored): webview to host
 | ID | Decision | Source |
 |----|----------|--------|
 | AD-1 | Design system is VS Code theme tokens plus plain CSS; no shadcn init; Component Inventory section omitted | Instruction and `Tool: none` rule |
-| AD-2 | Eight columns render (Backlog, Ready, Claimed, In progress, In review, Integrating, Done, Cancelled). `Blocked` is a flag shown as a badge and a filter, not a ninth column, because a blocked card must stay visible in the column it was in. The task brief said "nine state columns"; D-10 lists nine state words but defines blocked as a flag, and 62-RESEARCH "Board model" also draws eight columns. If the owner wants a ninth Blocked column, add one column with the same cell contract and make Block move the card there in the view only | auto: recommended (D-10, research) |
+| AD-2 | Eight columns render (Backlog, Ready, Claimed, In progress, In review, Shipping (key integrating), Done, Cancelled; the four later columns start folded in the kanban since the plain-language pass). `Blocked` is a flag shown as a badge and a filter, not a ninth column, because a blocked card must stay visible in the column it was in. The task brief said "nine state columns"; D-10 lists nine state words but defines blocked as a flag, and 62-RESEARCH "Board model" also draws eight columns. If the owner wants a ninth Blocked column, add one column with the same cell contract and make Block move the card there in the view only | auto: recommended (D-10, research) |
 | AD-3 | Icons via vendored codicon CSS and TTF with `font-src ${cspSource}`; SVG fallback if vendoring is rejected | auto: recommended (brief: codicons, no remote resources; addendum permits vendored helpers listed in the SBOM) |
 | AD-4 | 520px breakpoint decides list vs kanban | D-15, existing `max-width: 520px` rule |
 | AD-5 | Reasons for block and cancel are gathered with native `showInputBox` rather than an in-webview dialog | auto: recommended (native focus handling, no focus trap in a webview; Phase 61 lesson on native prompts) |
