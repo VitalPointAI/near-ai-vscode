@@ -2,7 +2,8 @@
 // to show out, with exactly one primary next action. The page (media/chat/team.js) draws it; the host (61-21) feeds it and runs the commands through
 // TEAM_ACTION_COMMANDS. Pure: no vscode, no I/O, no clock. Every label and sentence comes from teamSectionText.ts.
 import {
-  TEAM_ACTION_HINTS, TEAM_ACTION_LABELS, TEAM_SECTION_HEADING, TEAM_STATUS, managerStatus, teamHeading
+  TEAM_ACTION_HINTS, TEAM_ACTION_LABELS, TEAM_SECTION_HEADING, TEAM_SETUP_TITLES, TEAM_STATUS, boardSummaryText, connectionStatus, managerStatus, memberStatus,
+  notOnTeamStatus, notReachableStatus, notSharedStatus, teamHeading, waitingBadge, waitingStatus
 } from './teamSectionText';
 import type { Role } from './types';
 
@@ -67,9 +68,39 @@ export function teamSectionModel(input: TeamSectionInput): TeamSectionModel | un
   if (team === undefined) {
     return { heading: TEAM_SECTION_HEADING, status: TEAM_STATUS.noTeam, compact: true, actions: ordered('turn-on', ['join']) };
   }
-  const offered: TeamActionId[] = ['members', 'board'];
-  if (!team.linked) offered.push('link');
-  return { heading: teamHeading(team.name), status: managerStatus(team.name, team.otherMembers, team.pendingInvites), compact: false, actions: ordered('invite', offered) };
+  const heading = teamHeading(team.name);
+  // Removed: only the plain sentence, no button and no board summary.
+  if (team.removed) return { heading, status: TEAM_STATUS.removed, compact: true, actions: [] };
+
+  const plan = teamPlan(team);
+  const unreachable = team.connection === 'offline' || team.connection === 'paused';
+  // Offline or paused: Check the team becomes the next action and the status is the connection text; the rest stays offered.
+  const primary: TeamActionId = unreachable ? 'check' : plan.primary;
+  const others = unreachable ? [plan.primary, ...plan.others] : plan.others;
+  const status = unreachable ? connectionStatus(team.connectionText, team.connection === 'paused' ? 'paused' : 'offline') : plan.status;
+  const actions = ordered(primary, others).map((action) => (action.id === 'members' && team.canManage && team.waiting > 0 ? { ...action, badge: waitingBadge(team.waiting) } : action));
+  const model: TeamSectionModel = { heading, status, compact: plan.compact, actions };
+  if (input.board !== undefined) {
+    const { ready, blocked, mine } = input.board;
+    model.board = { ready, blocked, mine, text: boardSummaryText(ready, blocked, mine) };
+  }
+  return model;
+}
+
+interface TeamPlan { status: string; primary: TeamActionId; others: TeamActionId[]; compact: boolean }
+
+// What a live team offers this person, before the connection is taken into account.
+function teamPlan(team: NonNullable<TeamSectionInput['team']>): TeamPlan {
+  const { name } = team;
+  if (team.myRole === undefined && team.pendingRole === undefined) return { status: notOnTeamStatus(name), primary: 'join', others: ['board'], compact: true };
+  // Joined and waiting: nothing that changes the team, only the board to look at.
+  if (team.pendingRole !== undefined && (team.myRole === undefined || !team.canManage)) return { status: waitingStatus(name), primary: 'board', others: [], compact: true };
+  if (!team.canManage) return { status: memberStatus(name), primary: 'board', others: ['members'], compact: false };
+  const managed: TeamActionId[] = team.linked ? ['members', 'board'] : ['members', 'board', 'link'];
+  // Invites do not work until the team setup is on the online home, so Share replaces Invite someone until then.
+  if (team.shared === 'no') return { status: notSharedStatus(name), primary: 'share', others: managed, compact: false };
+  if (team.shared === 'not-reachable-by-teammates') return { status: notReachableStatus(name), primary: 'share', others: managed, compact: false };
+  return { status: managerStatus(name, team.otherMembers, team.pendingInvites), primary: 'invite', others: managed, compact: false };
 }
 
 // The primary action first, then the others in the order of TEAM_ACTION_IDS, so the buttons never jump around between states.
@@ -80,6 +111,17 @@ function ordered(primary: TeamActionId, others: readonly TeamActionId[]): TeamSe
 
 export interface TeamSetupStep { id: 'team.turn-on' | 'team.share' | 'team.invite' | 'team.link'; title: string; done: boolean; action: TeamActionId; optional: boolean }
 
+/**
+ * The team setup as plain steps with done flags and the action each runs, so the guided project setup (SETUP-01) can register them later without
+ * depending on this module's callers. Inviting and linking are optional: a team can be just one person for now, and work without an organization.
+ */
 export function teamSetupSteps(input: TeamSectionInput): TeamSetupStep[] {
-  throw new Error(`not implemented ${String(input.folderOpen)}`);
+  const team = input.team !== undefined && !input.team.removed ? input.team : undefined;
+  const step = (id: TeamSetupStep['id'], action: TeamActionId, done: boolean, optional: boolean): TeamSetupStep => ({ id, title: TEAM_SETUP_TITLES[id], done, action, optional });
+  return [
+    step('team.turn-on', 'turn-on', team !== undefined, false),
+    step('team.share', 'share', team?.shared === 'yes', false),
+    step('team.invite', 'invite', team !== undefined && (team.pendingInvites > 0 || team.otherMembers > 0), true),
+    step('team.link', 'link', team?.linked === true, true)
+  ];
 }
