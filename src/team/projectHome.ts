@@ -336,21 +336,28 @@ async function pushToBranch(input: ShareInput, commit: string): Promise<PushOutc
   }
 }
 
-// Shares the team setup by the narrowest change (D-03 and D-20 as amended 2026-11-03: the caller asks once, and only team.json is shared).
-// Every attempt plans afresh. A first upload sends the whole local branch, so it happens only when the caller passes the first-upload plan
-// the person agreed to; otherwise that case returns 'changed' so the caller can ask.
-export async function shareTeamSetup(input: ShareInput & { plan?: SharePlan; attempts?: number }): Promise<ShareResult> {
+const DEFAULT_SHARE_ATTEMPTS = 3;
+const MAX_SHARE_ATTEMPTS = 10;
+
+function messageOf(error: unknown): string {
+  return redactGitMessage(error instanceof Error ? error.message : String(error));
+}
+
+// One plan and, when there is something to push, one push.
+type Attempt = { done: ShareResult } | { lost: string };
+
+async function attemptShare(input: ShareInput & { plan?: SharePlan }): Promise<Attempt> {
   let planned: Planned;
   try {
     planned = await plan(input);
   } catch (error) {
-    return { ok: false, code: 'offline', detail: error instanceof Error ? error.message : String(error) };
+    return { done: { ok: false, code: 'offline', detail: messageOf(error) } };
   }
   const current = planned.plan;
-  if (current.kind === 'already') return { ok: true, how: 'already' };
-  if (current.kind === 'blocked') return { ok: false, code: current.reason, detail: current.detail };
+  if (current.kind === 'already') return { done: { ok: true, how: 'already' } };
+  if (current.kind === 'blocked') return { done: { ok: false, code: current.reason, detail: current.detail } };
   if (current.kind === 'first-upload' && input.plan?.kind !== 'first-upload') {
-    return { ok: false, code: 'changed', detail: `The team remote has no ${input.branch} branch yet, so sharing would upload the whole branch.` };
+    return { done: { ok: false, code: 'changed', detail: `The team remote has no ${input.branch} branch yet, so sharing would upload the whole branch.` } };
   }
   let commit: string;
   try {
@@ -358,9 +365,31 @@ export async function shareTeamSetup(input: ShareInput & { plan?: SharePlan; att
     else if ('local' in planned) commit = planned.local;
     else throw new Error('Nothing to push was planned.');
   } catch (error) {
-    return { ok: false, code: 'rejected', detail: error instanceof Error ? error.message : String(error) };
+    return { done: { ok: false, code: 'rejected', detail: messageOf(error) } };
   }
-  const pushed = await pushToBranch(input, commit);
-  if (pushed.kind === 'ok') return { ok: true, how: current.kind };
-  return { ok: false, code: pushed.kind, detail: pushed.detail };
+  let pushed: PushOutcomeKind;
+  try {
+    pushed = await pushToBranch(input, commit);
+  } catch (error) {
+    return { done: { ok: false, code: 'offline', detail: messageOf(error) } };
+  }
+  if (pushed.kind === 'ok') return { done: { ok: true, how: current.kind } };
+  if (pushed.kind === 'changed') return { lost: pushed.detail };
+  return { done: { ok: false, code: pushed.kind, detail: pushed.detail } };
+}
+
+// Shares the team setup by the narrowest change (D-03 and D-20 as amended 2026-11-03: the caller asks once, and only team.json is shared).
+// Every attempt plans afresh from a new fetch, so a push that lost a race with a teammate is re-planned on top of their commit, up to
+// `attempts` pushes (3 by default). A first upload sends the whole local branch, so it happens only when the caller passes the first-upload
+// plan the person agreed to; otherwise that case returns 'changed' so the caller can ask.
+export async function shareTeamSetup(input: ShareInput & { plan?: SharePlan; attempts?: number }): Promise<ShareResult> {
+  const requested = input.attempts ?? DEFAULT_SHARE_ATTEMPTS;
+  const attempts = Number.isFinite(requested) ? Math.min(MAX_SHARE_ATTEMPTS, Math.max(1, Math.floor(requested))) : DEFAULT_SHARE_ATTEMPTS;
+  let lost = '';
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const outcome = await attemptShare(input);
+    if ('done' in outcome) return outcome.done;
+    lost = outcome.lost;
+  }
+  return { ok: false, code: 'changed', detail: `The team remote changed during each of ${attempts} attempts to share: ${lost}` };
 }
