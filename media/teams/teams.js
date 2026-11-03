@@ -443,7 +443,8 @@
     root.append(tiers);
     if (ctx && ctx.modelsProblem) root.append(el('p', 'hint', ctx.modelsProblem));
     if (!draft.members.length) { root.append(el('p', 'hint', 'Add members first.')); return; }
-    const table = el('table', 'grid');
+    // On a narrow panel each member becomes a small card: name, then model, then where it runs.
+    const table = el('table', 'grid stack-narrow');
     const caption = el('caption', 'visually-hidden', 'Model for each member');
     const head = el('thead'); const headRow = el('tr');
     ['Member', 'Model', 'Runs on'].forEach((label) => { const cell = el('th', '', label); cell.setAttribute('scope', 'col'); headRow.append(cell); });
@@ -454,8 +455,8 @@
       const name = el('th', '', memberLabel(member, index)); name.setAttribute('scope', 'row');
       const pick = select(modelChoices(member), member.model, (value) => { member.model = value; changed(false); }, 'm-model-' + index);
       pick.setAttribute('aria-label', 'Model for ' + memberLabel(member, index));
-      const pickCell = el('td'); pickCell.append(pick);
-      const runs = el('td', 'runs-on');
+      const pickCell = el('td'); pickCell.append(pick); pickCell.dataset.label = 'Model';
+      const runs = el('td', 'runs-on'); runs.dataset.label = 'Runs on';
       reviewSlot(runs, 'model', index);
       reviewSlot(pickCell, 'member', index, ['model']);
       row.append(name, pickCell, runs);
