@@ -2,14 +2,19 @@
 // owner, clone b was cloned before Team Mode was turned on and points at the same public address through an insteadOf rule, exactly like
 // clone a. prepareJoin brings b up to date by itself when that is safe, and refuses with a precise reason, changing nothing, when it is not.
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import test from 'node:test';
 import { pushCodeBranch } from '../team/enable';
+import { parseInviteBundle } from '../team/inviteBundle';
 import { prepareJoin } from '../team/join';
 import type { JoinPreparation } from '../team/join';
-import { projectAddressKey } from '../team/joinCatchUp';
+import { catchUpCopy, projectAddressKey } from '../team/joinCatchUp';
+import type { CatchUpReason } from '../team/joinCatchUp';
 import { runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
-import { readTeamFile } from '../team/teamFile';
+import { TEAM_FILE_REL, readTeamFile, teamFilePath, writeTeamFile } from '../team/teamFile';
+import { newTeamId } from '../team/identity';
 import { closeRig, createRig, enable, invite, rootOf, teamIdOf } from './helpers/teamFlowRig';
 import type { Rig } from './helpers/teamFlowRig';
 import { gitIn } from './helpers/teamHarness';
@@ -51,6 +56,53 @@ function remoteMain(rig: Rig): string {
   return gitIn(rig.fixture.remote, ['rev-parse', 'refs/heads/main']);
 }
 
+// T-61-75, T-61-76: only these git commands, a merge only ever as a fast-forward, the private ref the only one ever deleted, and nothing the
+// invite says (its address) or any address at all ever reaches git.
+const ALLOWED_GIT = new Set(['config', 'symbolic-ref', 'rev-parse', 'fetch', 'ls-remote', 'cat-file', 'merge-base', 'status', 'ls-files', 'update-ref', 'merge']);
+
+function auditCalls(calls: string[][], bundle: string): void {
+  const repo = parseInviteBundle(bundle).repo;
+  for (const args of calls) {
+    const command = args[0] ?? '';
+    assert.ok(ALLOWED_GIT.has(command), `git ${command} is not used by a catch-up`);
+    if (command === 'update-ref') assert.deepEqual(args, ['update-ref', '-d', 'refs/near-ai/catch-up/head']);
+    if (command === 'merge') assert.ok(args.includes('--ff-only'), 'a merge is only ever a fast-forward');
+    if (command === 'config') assert.ok(args[1] === '--get' || args[1] === '--get-regexp', 'git config is only read');
+    for (const arg of args) {
+      assert.equal(arg.includes(repo), false, 'the invite\'s address never reaches git');
+      assert.equal(arg.includes('example.invalid'), false, 'no address reaches git');
+      assert.equal(/:\/\//.test(arg), false, 'no URL argument reaches git');
+    }
+  }
+}
+
+interface Snapshot { head: string; branches: string; staged: string; status: string }
+
+// HEAD (or the detached commit), every local branch, the staged changes and the working tree status.
+function snapshot(dir: string): Snapshot {
+  return {
+    head: `${gitIn(dir, ['rev-parse', 'HEAD'])} ${gitIn(dir, ['rev-parse', '--symbolic-full-name', 'HEAD'])}`,
+    branches: gitIn(dir, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']),
+    staged: gitIn(dir, ['diff', '--cached', '--binary']),
+    status: gitIn(dir, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored'])
+  };
+}
+
+// prepareJoin refuses with the reason and the invite's own address and team, changes nothing in the copy, and uses only safe git calls.
+async function refusedWith(rig: Rig, bundle: string, reason: CatchUpReason, dir: string = rootOf(rig, 'b')): Promise<Extract<JoinPreparation, { kind: 'not-ready' }>> {
+  const before = snapshot(dir);
+  const recorded = recorder();
+  const prepared = await prepareJoin({ projectRoot: dir, bundleText: bundle, git: recorded.git });
+  assert.equal(prepared.kind, 'not-ready', JSON.stringify(prepared.kind === 'ready' ? { kind: prepared.kind, updated: prepared.updated } : prepared));
+  if (prepared.kind !== 'not-ready') throw new Error('not refused');
+  assert.equal(prepared.reason, reason);
+  assert.equal(prepared.repoUrl, parseInviteBundle(bundle).repo);
+  assert.equal(prepared.teamId, teamIdOf(rig));
+  assert.deepEqual(snapshot(dir), before, 'nothing in the copy changed');
+  auditCalls(recorded.calls, bundle);
+  return prepared;
+}
+
 function readyOf(prepared: JoinPreparation): Extract<JoinPreparation, { kind: 'ready' }> {
   assert.equal(prepared.kind, 'ready', JSON.stringify(prepared.kind === 'ready' ? prepared.kind : prepared));
   if (prepared.kind !== 'ready') throw new Error('not ready');
@@ -75,6 +127,8 @@ test('tracer: a behind clone of the same project is brought up to date by itself
     assert.equal(gitIn(b, ['symbolic-ref', '--short', 'HEAD']), 'main');
     assert.equal((await readTeamFile(b))?.teamId, teamIdOf(rig));
     assert.ok(recorded.calls.some((args) => args[0] === 'fetch'), 'the copy was fetched');
+    assert.ok(recorded.calls.some((args) => args[0] === 'merge'), 'the copy was fast-forwarded');
+    auditCalls(recorded.calls, bundle);
   });
 });
 
@@ -102,4 +156,102 @@ test('projectAddressKey gives one key for every way of writing the same address,
   for (const none of ['/home/someone/repo', './repo', 'C:\\work\\repo', 'file:///tmp/repo.git', 'https://user:secret@github.com/org/repo.git', 'ssh://git:secret@github.com/org/repo', 'ext::sh -c touch% /tmp/x', '']) {
     assert.equal(projectAddressKey(none), undefined, none);
   }
+});
+
+// ---- Task 2: every refusal leaves the copy untouched -------------------------------------------------------------------------------------
+
+test('a copy with an edited tracked file is not updated (local-changes), and the edit, HEAD, branches, index and status stay as they were', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    const readme = path.join(b, 'README.md');
+    await fs.writeFile(readme, '# Team test project\nMy own edit\n', 'utf8');
+    await refusedWith(rig, bundle, 'local-changes');
+    assert.equal(await fs.readFile(readme, 'utf8'), '# Team test project\nMy own edit\n');
+
+    // The core answer itself: a code only.
+    const direct = await catchUpCopy({ projectRoot: b, remote: 'origin', teamId: teamIdOf(rig) });
+    assert.deepEqual(direct, { ok: false, reason: 'local-changes' });
+
+    // A staged change is a local change too.
+    gitIn(b, ['add', 'README.md']);
+    await refusedWith(rig, bundle, 'local-changes');
+  });
+});
+
+test('an untracked team.json left by an earlier attempt is a local change and stays exactly as it was', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    const teamFile = rig.teamFile;
+    assert.ok(teamFile !== undefined);
+    await writeTeamFile(b, { ...teamFile, teamId: newTeamId() });
+    const before = await fs.readFile(teamFilePath(b));
+    assert.equal(gitIn(b, ['ls-files', '--others', '--', TEAM_FILE_REL]), TEAM_FILE_REL, 'git ignores the folder but the file is there, untracked');
+    await refusedWith(rig, bundle, 'local-changes');
+    assert.deepEqual(await fs.readFile(teamFilePath(b)), before, 'the file is unchanged byte for byte');
+  });
+});
+
+test('an untracked file the online version would overwrite stops the fast-forward (local-changes) with a redacted detail', async () => {
+  await withTeam(async (rig, bundle) => {
+    const a = rootOf(rig, 'a');
+    await fs.writeFile(path.join(a, 'notes.txt'), 'shared notes\n', 'utf8');
+    gitIn(a, ['add', 'notes.txt']);
+    gitIn(a, ['commit', '-q', '-m', 'notes']);
+    gitIn(a, ['push', '-q', 'origin', 'main']);
+    const b = rootOf(rig, 'b');
+    await fs.writeFile(path.join(b, 'notes.txt'), 'my own notes\n', 'utf8');
+    const refused = await refusedWith(rig, bundle, 'local-changes');
+    assert.ok(refused.detail !== undefined && refused.detail !== '', 'the technical reason is kept for the output channel');
+    assert.equal(refused.detail?.includes(PUBLIC_URL), false);
+    assert.equal(await fs.readFile(path.join(b, 'notes.txt'), 'utf8'), 'my own notes\n');
+  });
+});
+
+test('a copy with a commit that is not online is not updated (unshared-work) and nothing changes', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    await fs.writeFile(path.join(b, 'mine.txt'), 'local work\n', 'utf8');
+    gitIn(b, ['add', 'mine.txt']);
+    gitIn(b, ['commit', '-q', '-m', 'local work']);
+    await refusedWith(rig, bundle, 'unshared-work');
+    assert.equal(await readTeamFile(b), undefined);
+  });
+});
+
+test('a copy on another version is not updated (other-version): a branch that is not online, an online branch without the team, and a detached copy', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    gitIn(b, ['switch', '-q', '-c', 'feature']);
+    await refusedWith(rig, bundle, 'other-version');
+    assert.equal(gitIn(b, ['for-each-ref', '--format=%(refname)', 'refs/near-ai']), '', 'the private ref was deleted');
+
+    // The branch is online now but has no team.json; the online default branch has it.
+    gitIn(b, ['push', '-q', 'origin', 'feature']);
+    await refusedWith(rig, bundle, 'other-version');
+    assert.equal(gitIn(b, ['for-each-ref', '--format=%(refname)', 'refs/near-ai']), '');
+
+    gitIn(b, ['switch', '-q', '--detach', 'main']);
+    await refusedWith(rig, bundle, 'other-version');
+  });
+});
+
+test('when the owner never published the project with the team in it, the copy is not updated (not-shared)', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    await refusedWith(rig, bundle, 'not-shared');
+    assert.equal(await readTeamFile(b), undefined);
+    assert.equal(gitIn(b, ['for-each-ref', '--format=%(refname)', 'refs/near-ai']), '');
+  }, { publish: false });
+});
+
+test('when the online home cannot be reached the copy is not updated (offline) and the detail is redacted', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    gitIn(b, ['config', '--remove-section', `url.${rig.fixture.remote}`]);
+    gitIn(b, ['config', `url.${path.join(rig.fixture.root, 'missing.git')}.insteadOf`, PUBLIC_URL]);
+    const refused = await refusedWith(rig, bundle, 'offline');
+    assert.ok(refused.detail !== undefined && refused.detail !== '');
+    assert.equal(refused.detail?.includes(PUBLIC_URL), false, 'the configured address is never in the detail');
+    assert.equal(await readTeamFile(b), undefined);
+  });
 });
