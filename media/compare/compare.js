@@ -35,11 +35,26 @@
   const selection = { models: new Set(), taskSet: 'full', mode: 'reuse', runs: 1, touched: false };
 
   function cell(row, text, className, title) { const td = el('td', className, text); if (title) td.title = title; row.append(td); return td; }
+  // Each label is [text, numeric, importance]: 'col-tertiary' columns hide at 900px and narrower,
+  // 'col-secondary' ones at 600px and narrower; their values then show in the row's first cells.
   function headRow(table, labels) {
     const thead = el('thead'); const tr = el('tr');
-    for (const [label, numeric] of labels) { const th = el('th', numeric ? 'num' : '', label); th.scope = 'col'; tr.append(th); }
+    for (const [label, numeric, importance] of labels) { const th = el('th', [numeric ? 'num' : '', importance || ''].join(' ').trim(), label); th.scope = 'col'; tr.append(th); }
     thead.append(tr); table.append(thead);
+    table.classList.add('stack-narrow');
   }
+  // Gives each cell its column's name (shown before the value when narrow rows become cards) and importance.
+  function labelRow(table, row) {
+    const heads = table.querySelectorAll('thead th');
+    [...row.children].forEach((cell, index) => {
+      const head = heads[index];
+      if (!head) return;
+      cell.dataset.label = head.textContent;
+      for (const importance of ['col-secondary', 'col-tertiary']) if (head.classList.contains(importance)) cell.classList.add(importance);
+    });
+  }
+  // A line in a row's main cell with the values of columns hidden on a narrower panel.
+  const hiddenValues = (className, parts) => el('p', 'mark ' + className, parts.filter(Boolean).join(' · '));
   function wrap(table, label) { const box = el('div', 'table-wrap'); box.setAttribute('role', 'region'); box.setAttribute('aria-label', label); box.tabIndex = 0; box.append(table); return box; }
 
   // ---- putting a model into a role ----
@@ -98,7 +113,7 @@
     if (!state.leaderboard.length) { root.append(el('p', 'hint', 'No models tested yet. Run a comparison below to start the leaderboard.')); return; }
     const table = el('table');
     table.append(el('caption', 'visually-hidden', 'Leaderboard: every model tested, best first'));
-    headRow(table, [['Rank', true], ['Model'], ['Overall', true], ...KINDS.map(([, label]) => [label, true]), ['Passed', true], ['Median time', true], ['Tokens/s', true], ['Cost per task', true], ['Reliability'], ['Last tested'], ['Put to work']]);
+    headRow(table, [['Rank', true], ['Model'], ['Overall', true], ...KINDS.map(([, label]) => [label, true, 'col-tertiary']), ['Passed', true, 'col-secondary'], ['Median time', true, 'col-secondary'], ['Tokens/s', true, 'col-tertiary'], ['Cost per task', true, 'col-secondary'], ['Reliability', false, 'col-secondary'], ['Last tested', false, 'col-tertiary'], ['Put to work']]);
     const body = el('tbody');
     for (const entry of state.leaderboard) {
       const row = el('tr', entry.stale.length || !entry.inCatalog ? 'dim' : '');
@@ -107,6 +122,8 @@
       if (!entry.inCatalog) marks.push(el('p', 'mark bad-mark', 'No longer in your key’s model list'));
       for (const reason of entry.stale) marks.push(el('p', 'mark stale', 'Out of date: ' + reason));
       if (entry.missingTasks.length) marks.push(el('p', 'mark', 'Not tested on: ' + entry.missingTasks.join(', ')));
+      marks.push(hiddenValues('when-medium', [...KINDS.map(([kind, label]) => entry.byKind[kind] ? label + ' ' + score(entry.byKind[kind].score) : ''), entry.tokPerSec === undefined ? '' : entry.tokPerSec + ' tokens/s', entry.lastTested ? 'tested ' + ago(entry.lastTested) : '']));
+      marks.push(hiddenValues('when-narrow', ['Passed ' + percent(entry.passRate), 'median ' + seconds(entry.medianSeconds), money(entry.costPerRunUsd) + (entry.costEstimated ? ' est.' : '') + ' per task', reliability(entry)]));
       modelCell(row, entry, marks);
       cell(row, score(entry.score), 'num strong', entry.runs + ' runs over ' + entry.tasks.length + ' tasks');
       for (const [kind] of KINDS) {
@@ -121,6 +138,7 @@
       cell(row, reliability(entry), entry.failures ? 'bad' : '');
       cell(row, entry.lastTested ? ago(entry.lastTested) : '—', '', entry.lastTested ? when(entry.lastTested) + ' · ' + entry.runs + ' runs' : '');
       const action = el('td'); action.append(entry.inCatalog ? roleControl(entry.model, entry.privacy) : el('span', 'hint', 'Not available')); row.append(action);
+      labelRow(table, row);
       body.append(row);
     }
     table.append(body);
@@ -250,7 +268,7 @@
     if (!report.summary.some((entry) => entry.runs)) { root.append(el('p', 'hint', 'No results yet.')); return; }
     const table = el('table');
     table.append(el('caption', 'visually-hidden', 'Ranking for this comparison'));
-    headRow(table, [['Rank', true], ['Model'], ['Score', true], ['Passed', true], ['Median time', true], ['Tokens/s', true], ['Cost', true], ['Reliability'], ['Put to work']]);
+    headRow(table, [['Rank', true], ['Model'], ['Score', true], ['Passed', true, 'col-secondary'], ['Median time', true, 'col-secondary'], ['Tokens/s', true, 'col-tertiary'], ['Cost', true, 'col-secondary'], ['Reliability', false, 'col-secondary'], ['Put to work']]);
     const body = el('tbody');
     for (const entry of report.summary) {
       const row = el('tr');
@@ -258,6 +276,8 @@
       const extras = [];
       if (entry.catalogChanged) extras.push(el('p', 'mark', 'Its NEAR listing (price or privacy) has changed since'));
       if (!entry.inCatalog) extras.push(el('p', 'mark bad-mark', 'No longer in your key’s model list'));
+      if (entry.tokPerSec !== undefined) extras.push(hiddenValues('when-medium', [entry.tokPerSec + ' tokens/s']));
+      if (entry.runs) extras.push(hiddenValues('when-narrow', ['Passed ' + percent(entry.passRate), 'median ' + seconds(entry.medianSeconds), money(entry.costUsd) + (entry.costEstimated ? ' est.' : ''), reliability(entry)]));
       modelCell(row, entry, extras);
       cell(row, entry.runs ? score(entry.score) : '—', 'num strong');
       cell(row, entry.runs ? percent(entry.passRate) : '—', 'num');
@@ -266,6 +286,7 @@
       cell(row, money(entry.costUsd) + (entry.costEstimated ? ' est.' : ''), 'num');
       cell(row, entry.runs ? reliability(entry) : '—', entry.failures ? 'bad' : '');
       const action = el('td'); action.append(entry.inCatalog ? roleControl(entry.model, entry.privacy) : el('span', 'hint', 'Not available')); row.append(action);
+      labelRow(table, row);
       body.append(row);
     }
     table.append(body);
@@ -275,11 +296,13 @@
       const details = el('details', 'model-tasks');
       details.append(el('summary', '', entry.model + ' — task by task'));
       const tasks = el('table');
-      headRow(tasks, [['Task'], ['Score', true], ['Runs', true], ['Median time', true], ['Tokens/s', true], ['Cost', true], ['Problems']]);
+      headRow(tasks, [['Task'], ['Score', true], ['Runs', true, 'col-secondary'], ['Median time', true, 'col-secondary'], ['Tokens/s', true, 'col-tertiary'], ['Cost', true, 'col-secondary'], ['Problems']]);
       const tbody = el('tbody');
       for (const task of entry.tasks) {
         const row = el('tr');
-        cell(row, labelOf(task.task) + (task.reused ? ' (reused, tested ' + ago(task.at) + ')' : ''));
+        const name = cell(row, labelOf(task.task) + (task.reused ? ' (reused, tested ' + ago(task.at) + ')' : ''), 'wrap');
+        if (task.tokPerSec !== undefined) name.append(hiddenValues('when-medium', [task.tokPerSec + ' tokens/s']));
+        name.append(hiddenValues('when-narrow', [task.runs + (task.runs === 1 ? ' run' : ' runs'), 'median ' + seconds(task.medianSeconds), money(task.costUsd)]));
         cell(row, score(task.score) + ' / 10', 'num');
         cell(row, task.runs, 'num');
         cell(row, seconds(task.medianSeconds), 'num');
@@ -287,6 +310,7 @@
         cell(row, money(task.costUsd), 'num');
         const outcomes = run.rows.filter((candidate) => candidate.model === entry.model && candidate.task === task.task && candidate.outcome !== 'completed').map((candidate) => OUTCOME_TEXT[candidate.outcome]);
         cell(row, [...new Set(outcomes)].concat(task.misses).join('; ') || '—', 'misses');
+        labelRow(tasks, row);
         tbody.append(row);
       }
       tasks.append(tbody);
@@ -306,11 +330,12 @@
     root.replaceChildren();
     if (!state.history.length) { root.append(el('p', 'hint', 'None yet. Every comparison is saved here automatically.')); return; }
     const table = el('table');
-    headRow(table, [['Started'], ['Models'], ['Tasks'], ['Runs', true], ['Cost', true], ['Status'], ['']]);
+    headRow(table, [['Started'], ['Models'], ['Tasks', false, 'col-secondary'], ['Runs', true, 'col-secondary'], ['Cost', true], ['Status'], ['']]);
     const body = el('tbody');
     for (const entry of state.history) {
       const row = el('tr');
-      cell(row, when(entry.startedAt));
+      const started = cell(row, when(entry.startedAt), 'wrap');
+      started.append(hiddenValues('when-narrow', [(entry.taskSet === 'full' ? 'Full' : 'Short') + ' set', entry.ran + ' run' + (entry.ran === 1 ? '' : 's') + (entry.reused ? ' + ' + entry.reused + ' reused' : '')]));
       cell(row, entry.models.join(', '), 'wrap');
       cell(row, (entry.taskSet === 'full' ? 'Full' : 'Short') + ', ' + (entry.mode === 'reuse' ? 'reused saved' : 'all again'));
       cell(row, entry.ran + (entry.reused ? ' + ' + entry.reused + ' reused' : ''), 'num');
@@ -319,6 +344,7 @@
       const actions = el('td', 'controls');
       actions.append(button('Open', () => vscode.postMessage({ type: 'open-run', id: entry.id }), { secondary: true, label: 'Open the comparison started ' + when(entry.startedAt) }), button('Export', () => vscode.postMessage({ type: 'export', id: entry.id }), { link: true, label: 'Export the comparison started ' + when(entry.startedAt) + ' as JSON' }));
       row.append(actions);
+      labelRow(table, row);
       body.append(row);
     }
     table.append(body);
