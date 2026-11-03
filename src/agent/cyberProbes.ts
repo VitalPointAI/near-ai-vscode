@@ -108,6 +108,20 @@ export function shellQuote(value: string): string {
 
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
 
+/**
+ * The folder a file-walking probe may read. The HTTP-shaped probes check every target with
+ * `inScope`; the secrets, IaC and dependency probes take a folder and used to walk any absolute
+ * path they were given. A folder must be inside one of the scope's paths.
+ */
+function scannedRoot(deps: CyberProbeDeps, requested: string | undefined): string {
+  const root = path.resolve(requested || deps.scope?.paths[0] || '.');
+  const allowed = deps.scope?.paths ?? [];
+  if (allowed.length && !allowed.some((entry) => root === path.resolve(entry) || root.startsWith(path.resolve(entry) + path.sep))) {
+    throw new ToolError(`${root} is outside the engagement's resolved scope.`);
+  }
+  return root;
+}
+
 export interface HttpProbeInput { url: string; checks: string[] }
 
 const BODY_EXCERPT_BYTES = 2_048;
@@ -659,7 +673,7 @@ function secretsProbe(deps: CyberProbeDeps): AgentTool<SecretsProbeInput> {
     },
     title: (input) => `Scan ${input.root || 'the workspace'} for committed secrets`,
     async run(input) {
-      const root = path.resolve(input.root || deps.scope?.paths[0] || '.');
+      const root = scannedRoot(deps, input.root);
       const hits = await scanSecrets(root);
       const findings = hits.map((hit) => makeFinding({
         checkId: 'committed-secret',
@@ -818,7 +832,7 @@ function iacProbe(deps: CyberProbeDeps): AgentTool<IacProbeInput> {
     parse: (raw) => ({ root: typeof raw.root === 'string' && raw.root.trim() ? raw.root.trim() : '' }),
     title: (input) => `Inspect infrastructure as code in ${input.root || 'the workspace'}`,
     async run(input) {
-      const root = path.resolve(input.root || deps.scope?.paths[0] || '.');
+      const root = scannedRoot(deps, input.root);
       const files = await walkWorkspace(root);
       const findings: Finding[] = [];
       const present = new Map<IacKind, number>();
@@ -874,7 +888,7 @@ function dependencyProbe(deps: CyberProbeDeps): AgentTool<DependencyProbeInput> 
     parse: (raw) => ({ root: typeof raw.root === 'string' && raw.root.trim() ? raw.root.trim() : '' }),
     title: (input) => `Check dependencies in ${input.root || 'the workspace'}`,
     async run(input) {
-      const root = path.resolve(input.root || deps.scope?.paths[0] || '.');
+      const root = scannedRoot(deps, input.root);
       if (deps.security && !deps.security.consented()) return NOT_CONSENTED;
       const report = deps.scan ? await deps.scan(root) : deps.security ? await deps.security.scan() : await scanProject(root, { write: 'never' });
       if (!report) return 'The dependency check could not run, so dependencies were not checked.';

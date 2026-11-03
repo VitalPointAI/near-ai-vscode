@@ -139,7 +139,8 @@ test('the IaC probe finds all five seeded misconfigurations with file:line and a
 
     const empty = await mkdtemp(path.join(tmpdir(), 'near-ai-cyber-empty-'));
     await writeFile(path.join(empty, 'README.md'), '# nothing here\n');
-    const emptyBox = await harness('patched');
+    // The scope must include the folder being scanned: a file-walking probe refuses a root outside it.
+    const emptyBox = await harness('patched', { scope: { hosts: [], ports: [], paths: [empty], exclusions: [] } });
     try {
       const emptyOutput = await runTool(emptyBox, 'CyberIacProbe', { root: empty });
       assert.doesNotMatch(emptyOutput, /(^|\n)iac-/);

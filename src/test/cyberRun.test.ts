@@ -299,3 +299,13 @@ test('scope includes a URL only at its host and port, and a workspace path by pr
   assert.equal(scopeIncludes(workspace, '/work/other'), false);
   assert.equal(scopeIncludes(SCOPE, ''), false);
 });
+
+test('a path target outside the scope is refused, including one that climbs out with ..', () => {
+  const scope = { hosts: [], ports: [], paths: ['/work/project'], exclusions: [] };
+  assert.equal(scopeIncludes(scope, '/work/project/src/index.ts'), true);
+  assert.equal(scopeIncludes(scope, '/work/project'), true);
+  // The raw-prefix check accepted this and the probes then resolved it and read /etc.
+  assert.equal(scopeIncludes(scope, '/work/project/../../etc/passwd'), false);
+  assert.equal(scopeIncludes(scope, '/work/projector/x'), false, 'a sibling with the same prefix is out of scope');
+  assert.equal(scopeIncludes(scope, '/work/other'), false);
+});

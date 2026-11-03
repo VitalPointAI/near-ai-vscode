@@ -33,11 +33,12 @@ test('a failure verdict without a reason is refused rather than rendered with an
   assert.match(renderVerdict(finding('verified_access', 'a shell was returned')), /Verified access/);
 });
 
-test('SARIF levels distinguish access from a failed attempt from a pass', () => {
+test('SARIF levels distinguish access from a failed attempt from a clean result', () => {
   assert.equal(verdictToSarifLevel('verified_access'), 'error');
   assert.equal(verdictToSarifLevel('exploit_failed'), 'note');
   assert.equal(verdictToSarifLevel('could_not_determine'), 'note');
-  assert.equal(verdictToSarifLevel('not_vulnerable'), 'pass');
+  // 'pass' is not in the SARIF 2.1.0 enum; a patched target is 'none'.
+  assert.equal(verdictToSarifLevel('not_vulnerable'), 'none');
   for (const verdict of VERDICTS) assert.ok(verdictToSarifLevel(verdict));
 });
 

@@ -1,13 +1,14 @@
 import { cyberRunPrompt, startCyberRun, type CyberRunInput, type CyberRunResult } from './cyberRun';
 import { CyberEvidenceStore, CyberLedgerStore } from './cyberLedgerStore';
 import { RunGrants } from '../agent/permissions';
-import { scopeFingerprint } from '../domain/cyberLegal';
-import type { Finding, ResolvedScope, SandboxTier } from '../domain/cyber';
+import { regionEntry, scopeFingerprint } from '../domain/cyberLegal';
+import type { Engagement, Finding, ResolvedScope, SandboxTier } from '../domain/cyber';
+import { isoTimestamp, PROFILE_CONTENT } from '../domain/cyber';
 import { cyberProbes } from '../agent/cyberProbes';
 import { cyberExploitTools } from '../agent/cyberExploitTools';
 import { scopeIncludes } from './cyberRun';
 import type { SecurityAccess } from '../agent/securityTool';
-import type { RateLimiter } from '../domain/cyberLimits';
+import { checkBudget, RateLimiter } from '../domain/cyberLimits';
 import { CyberProtocolDriver } from '../agent/cyberProtocolDriver';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { ShellSession } from '../agent/shell';
@@ -195,6 +196,8 @@ export function cyberAssembly(context: {
   workspaceRoot?: string;
   client?: { completeOnce(model: string, messages: Array<{ role: string; content: string }>, options: { maxTokens: number; signal?: AbortSignal }): Promise<{ text: string }> };
   model?: string;
+  stopped?: () => boolean;
+  requestApproval?: CyberRunInput['requestApproval'];
   policy?: CyberRunInput['policy'];
   toolContext: CyberRunInput['toolContext'];
   tools(engagement: CyberRunInput['engagement']): CyberRunInput['tools'];
@@ -214,18 +217,23 @@ export function cyberAssembly(context: {
     return reply.text;
   };
   return cyberAssemblyCore({
-    stopped: () => false,
+    // The emergency stop must reach the engine, not only the exploit tools' gate: this is what makes
+    // a mid-run Stop halt the next step and write a `stop` ledger entry.
+    stopped: options.stopped ?? (() => false),
     storeDirectory,
     driver: new CyberProtocolDriver({ model, complete }),
     title: 'NEAR AI: Cybersecurity',
     toolContext: options.toolContext,
+    // Derived from the engagement being run. The text version comes from the catalogue rather than
+    // the stored acceptance, or a bumped statement version could never force re-acceptance (D-18).
     currentAcceptance: (engagement) => ({
       region: engagement.region,
       scope: scopeFingerprint(engagement.resolvedScope),
       extensionVersion: String(context.extension?.packageJSON?.version ?? '0.0.0'),
-      textVersion: engagement.acceptedDisclaimer.textVersion
+      textVersion: regionEntry(engagement.acceptedDisclaimer.region)?.textVersion ?? engagement.acceptedDisclaimer.textVersion
     }),
     tools: options.tools,
+    ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
     ...(options.policy ? { policy: options.policy } : {})
   });
 }
@@ -298,16 +306,29 @@ export function chatHandoff(send: (message: { type: 'send'; text: string; model?
 }
 
 /**
- * The extension's Run action. The client is resolved per run (the active NEAR profile), the tools
- * are the real probe/exploit set for the engagement's modes, and each run gets its own grants.
+ * The extension's Run action. Everything a run needs that the engine cannot infer is resolved here:
+ * the sandbox tier from the engagement (not a default), the rate limit and wall-clock budget from the
+ * depth profile, the approval seam, the run record, and the mode the user actually chose.
  */
 export function panelCyberRunStarter(
   host: { globalStorageUri: { fsPath: string }; extension?: { packageJSON?: { version?: string } } },
   resolveClient: (root: string) => Promise<CompletionClient | undefined>,
-  options: { root?: string; model?: string; stopped?: () => boolean; sandboxTier?: () => Promise<SandboxTier>; security?: () => SecurityAccess | undefined } = {}
+  options: {
+    root?: string;
+    model?: string;
+    stopped?: () => boolean;
+    /** Resolves the detected tier; used only when the engagement says "auto". */
+    sandboxTier?: () => Promise<SandboxTier>;
+    security?: () => SecurityAccess | undefined;
+    /** Shows the approval card and resolves the user's answer. Required for anything that asks. */
+    requestApproval?: CyberRunInput['requestApproval'];
+    /** Records the run on the engagement; without it an export cannot find the run. */
+    recordRun?: (engagement: Engagement, runId: string, startedAt: string, mode: PanelRunRequest['mode'], depth: PanelRunRequest['depth'], model: string) => Promise<void>;
+  } = {}
 ): (request: PanelRunRequest) => Promise<CyberRunResult> {
   const root = options.root ?? host.globalStorageUri.fsPath;
   const toolContext = cyberToolContext(root);
+  const stopped = options.stopped ?? (() => false);
   return async (request) => {
     const client = await resolveClient(root);
     if (!client) {
@@ -315,30 +336,67 @@ export function panelCyberRunStarter(
       // cannot follow it. Say the real reason instead: nothing is configured to ask.
       throw new Error('No NEAR AI model is reachable: set up a profile (NEAR AI: Set Up) and choose a model in this panel before running a scan.');
     }
-    const tier = options.sandboxTier ? await options.sandboxTier() : 'tempFolder';
+    // The tier comes from the engagement. A `disabled` engagement used to fall through to the temp
+    // tier and run payloads on the host; "auto" is the only value that needs detection.
+    // The engagement's own tier decides. Detection is used only when the caller supplies it and the
+    // engagement names no tier it can run, so a 'disabled' engagement never falls back to the host.
+    const engagementTier = request.engagement.sandbox.tier;
+    const tier: SandboxTier = engagementTier === 'disabled'
+      ? 'disabled'
+      : engagementTier ?? (options.sandboxTier ? await options.sandboxTier() : 'tempFolder');
     const grants = new RunGrants();
     const collected: Finding[] = [];
     const security = options.security?.();
+    const model = request.model ?? options.model ?? '';
+    const profile = PROFILE_CONTENT[request.depth] ?? PROFILE_CONTENT.quick;
+    // The limits the profile promises: a rate limiter and a wall-clock budget, both of which were
+    // previously never constructed, so a "deep" run had no 45-minute bound at all.
+    // A scan is deliberately gentle on the target: the deepest profile may send the most probes per
+    // minute, and quick the fewest (D-09). A step may lower this further through safetyFlags.
+    const limiter = new RateLimiter(RATE_PER_MINUTE[request.depth] ?? 20);
+    const startedAt = isoTimestamp();
+    const budget = () => checkBudget(
+      { startedAt: Date.parse(startedAt), budgetMs: profile.budgetMs, planned: { hosts: request.engagement.resolvedScope.hosts, checks: profile.checks, completed: { hosts: [], checks: [] } } },
+      Date.now()
+    );
     const assembly = cyberAssembly(host, {
       ...(options.root ? { workspaceRoot: options.root } : {}),
       ...(client ? { client } : {}),
-      // The model the user chose for this engagement wins over the configured default; otherwise the
-      // panel's selector would be decorative and every run would use the fallback model.
-      ...((request.model ?? options.model) ? { model: request.model ?? options.model } : {}),
+      ...(model ? { model } : {}),
       toolContext,
+      stopped,
+      ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
       tools: (engagement) => panelTools({
-        engagement,
+        // The mode the user chose decides which tools attach, so running Defensive on an intrusive
+        // engagement no longer carries the exploit tools.
+        engagement: { ...engagement, allowedModes: modesFor(request.mode, engagement.allowedModes) } as Engagement,
         scope: engagement.resolvedScope,
         grants,
-        stopped: options.stopped ?? (() => false),
+        stopped,
         sandboxTier: tier,
         collect: (finding) => collected.push(finding),
         ...(security ? { security } : {})
       })
     });
-    // The run drains this array after every step, so the probes' findings are critiqued and chained
-    // exactly like the ones a step builds itself.
-    return startCyberRunInPanel({ ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected }, request);
+    const result = await startCyberRunInPanel(
+      { ...assembly, grants, tools: assembly.tools(request.engagement), externalFindings: collected, limiter, budget },
+      request
+    );
+    // The run record is what makes Export, replay and the diff work; nothing wrote one before.
+    if (options.recordRun) await options.recordRun(request.engagement, result.runId, startedAt, request.mode, request.depth, model).catch(() => undefined);
+    return result;
   };
+}
+
+/** How many probe operations each depth profile may send per minute, per D-09. */
+export const RATE_PER_MINUTE: Record<PanelRunRequest['depth'], number> = { quick: 10, standard: 20, deep: 40 };
+
+/**
+ * The engagement modes a chosen run mode allows. `defensive` never attaches the exploit tools, even
+ * on an engagement the user was allowed to intrude on.
+ */
+export function modesFor(mode: PanelRunRequest['mode'], allowed: Engagement['allowedModes']): Engagement['allowedModes'] {
+  if (mode === 'defensive') return ['passive'];
+  return allowed.includes('intrusive') ? ['passive', 'intrusive'] : ['passive'];
 }
 

@@ -229,6 +229,8 @@ export function acceptanceSnapshot(engagement: Engagement, extensionVersion: str
 interface PanelState {
   draft?: CyberEngagementDraft;
   scope?: ResolvedScope;
+  /** The draft and the scope it was resolved against, held together so they cannot drift apart. */
+  pending?: { draft: CyberEngagementDraft; scope: ResolvedScope };
   prompt?: DisclaimerPrompt;
   engagementId?: string;
   controller?: AbortController;
@@ -267,14 +269,16 @@ export function attachCyberPanel(host: CyberPageHost, deps: CyberPanelDeps): { d
         }
         case 'create-engagement': {
           if (!state.scope) { await post({ type: 'error', text: 'Resolve the target scope before creating an engagement.' }); break; }
-          state.draft = message.draft;
+          // The scope is captured with the draft. Resolving a second target after this point must not
+          // change what the acceptance is recorded against.
+          state.pending = { draft: message.draft, scope: state.scope };
           state.prompt = disclaimerPrompt(message.draft.value, timeZone());
           await post({ type: 'disclaimer', prompt: state.prompt });
           break;
         }
         case 'accept-disclaimer': {
-          const draft = state.draft;
-          const scope = state.scope;
+          const draft = state.pending?.draft;
+          const scope = state.pending?.scope;
           if (!draft || !scope) { await post({ type: 'error', text: 'Resolve a target and choose a mode before accepting the disclaimer.' }); break; }
           const region = message.region ?? state.prompt?.detectedRegion ?? 'us';
           const entry = regionEntry(region);
@@ -305,6 +309,7 @@ export function attachCyberPanel(host: CyberPageHost, deps: CyberPanelDeps): { d
         case 'decline-disclaimer': {
           // Nothing is created and nothing is written: the target stays untouched (CYBER-03).
           state.draft = undefined;
+          state.pending = undefined;
           state.prompt = undefined;
           state.engagementId = undefined;
           await post({ type: 'declined' });

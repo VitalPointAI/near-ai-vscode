@@ -6,7 +6,7 @@ import { SEVERITY_RANK } from '../domain/cyber';
 import type { LedgerEntry } from '../domain/cyberLedger';
 import { chainBreak, verifyChain } from '../domain/cyberLedger';
 import { redactSecrets } from '../domain/redaction';
-import { renderVerdict } from '../domain/cyberVerdicts';
+import { safeVerdictLine } from '../domain/cyberVerdicts';
 import { SCREENSHOT_ABSENT_NOTE } from './cyberVisualCapture';
 
 // The report is the product (D-26): PTES sections, WSTG ids and CVSS 3.1 per finding, the accepted
@@ -164,7 +164,7 @@ function narrativeSection(ordered: Finding[], commands: string[] = []): string |
   const offensive = ordered.filter((finding) => finding.verdict !== 'not_vulnerable' && (finding.checkId === 'sql-injection' || finding.verdict === 'verified_access'));
   if (!offensive.length && !commands.length) return undefined;
   return [
-    ...offensive.map((finding) => `- **${finding.checkId}** at \`${finding.target ?? 'engagement target'}\`: ${renderVerdict(finding)}`),
+    ...offensive.map((finding) => `- **${finding.checkId}** at \`${finding.target ?? 'engagement target'}\`: ${safeVerdictLine(finding)}`),
     ...(commands.length ? ['', 'Post-exploitation commands (read-only, D-11):', '', ...commands.map((command) => `- \`${command}\``)] : [])
   ].join('\n');
 }

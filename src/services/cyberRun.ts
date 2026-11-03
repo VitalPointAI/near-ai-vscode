@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { DEFAULT_RULES, decidePermission, intrusiveGrantDecision, type IntrusiveStep, type PermissionRules, type RunGrants } from '../agent/permissions';
 import { verifyFinding, type CriticEvidence } from '../agent/cyberCritic';
@@ -413,7 +414,27 @@ export function scopeIncludes(scope: ResolvedScope, target: string): boolean {
   if (hosts.includes(trimmed.toLowerCase())) return true;
   const [hostPart, portPart] = trimmed.split(':');
   if (portPart && /^\d+$/.test(portPart)) return hosts.includes(hostPart.toLowerCase()) && (!scope.ports.length || scope.ports.includes(Number(portPart)));
-  return scope.paths.some((entry) => trimmed === entry || trimmed.startsWith(`${entry}/`));
+  return pathInScope(scope.paths, trimmed);
+}
+
+/**
+ * Whether a path target is inside one of the scope's paths. A raw string prefix is not enough:
+ * "/workspace/../../etc" starts with "/workspace/" and the probes then resolve it and read outside
+ * the scope. Both sides are resolved and normalised, and the target must sit under the scope root.
+ */
+export function pathInScope(paths: string[], target: string): boolean {
+  const resolvedTarget = path.resolve(target);
+  for (const entry of paths) {
+    const root = path.resolve(entry);
+    if (resolvedTarget === root) return true;
+    if (resolvedTarget.startsWith(root.endsWith(path.sep) ? root : `${root}${path.sep}`)) {
+      // A `..` segment that survived normalisation would have climbed out; the prefix test above
+      // already rejects it, but check explicitly so a platform quirk cannot let one through.
+      const relative = path.relative(root, resolvedTarget);
+      if (!relative.split(path.sep).includes('..')) return true;
+    }
+  }
+  return false;
 }
 
 /** A finding built from a probe tool's output, when the tool supports one. */

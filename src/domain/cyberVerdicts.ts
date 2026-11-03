@@ -16,7 +16,8 @@ export function requiresReason(verdict: Verdict): boolean {
   return verdict === 'exploit_failed' || verdict === 'could_not_determine';
 }
 
-export type SarifLevel = 'error' | 'warning' | 'note' | 'pass';
+/** SARIF 2.1.0 result.level: none | note | warning | error. Anything else is schema-invalid. */
+export type SarifLevel = 'error' | 'warning' | 'note' | 'none';
 
 /** D-24 to SARIF: access is an error, a failed or inconclusive attempt is a note, a pass is a pass. */
 export function verdictToSarifLevel(verdict: Verdict): SarifLevel {
@@ -24,7 +25,8 @@ export function verdictToSarifLevel(verdict: Verdict): SarifLevel {
     case 'verified_access': return 'error';
     case 'exploit_failed': return 'note';
     case 'could_not_determine': return 'note';
-    case 'not_vulnerable': return 'pass';
+    // 'pass' is not in the SARIF enum; a patched target is a result with no severity.
+    case 'not_vulnerable': return 'none';
   }
 }
 
@@ -63,4 +65,20 @@ export function renderVerdict(finding: Pick<Finding, 'verdict' | 'checkId' | 're
 /** Every verdict's rendered line, in report order, for the summary table. */
 export function verdictSummary(findings: Array<Pick<Finding, 'verdict' | 'checkId' | 'reason' | 'title'>>): string[] {
   return findings.map((finding) => renderVerdict(finding));
+}
+
+/**
+ * A verdict line that never throws. An export renders every finding it is given, and a probe's
+ * finding routinely carries no reason (an open port is not a failure with a cause). The rendering
+ * rules still apply where a reason exists; where it does not, the line states the verdict plainly
+ * rather than refusing to produce a report.
+ */
+export function safeVerdictLine(finding: Pick<Finding, 'verdict' | 'checkId' | 'reason' | 'title'>): string {
+  try {
+    return renderVerdict(finding);
+  } catch (error) {
+    if (!(error instanceof VerdictError)) throw error;
+    const test = finding.checkId;
+    return `${finding.verdict}: ${finding.title || test} (${test}; no reason recorded for this check)`;
+  }
 }

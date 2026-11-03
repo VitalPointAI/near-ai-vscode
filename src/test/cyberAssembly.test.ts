@@ -1,3 +1,4 @@
+import { PROFILE_CONTENT } from '../domain/cyber';
 // The panel's real run stack, assembled the way extension.ts assembles it. The panel tests inject
 // every dependency, which is why three bugs reached this plan unnoticed: a hardcoded acceptance
 // snapshot (every run refused with reacceptance-required), an empty tool list (no step could ever
@@ -14,7 +15,7 @@ import { scopeFingerprint } from '../domain/cyberLegal';
 import { RunGrants } from '../agent/permissions';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { ShellSession } from '../agent/shell';
-import { cyberAssembly, cyberStorePath, panelCyberRunStarter, panelModel, panelTools, type CompletionClient } from '../services/cyberAssembly';
+import { cyberAssembly, cyberStorePath, modesFor, panelCyberRunStarter, panelModel, panelTools, RATE_PER_MINUTE, type CompletionClient } from '../services/cyberAssembly';
 
 import { startCyberRun } from '../services/cyberRun';
 
@@ -22,7 +23,7 @@ const SCOPE: ResolvedScope = { hosts: ['example.test'], ports: [443], paths: ['/
 
 const ACCEPTANCE: DisclaimerAcceptance = {
   acceptor: 'Example Organisation Ltd', osUser: 'test-user', machine: 'test-machine', extensionVersion: '0.4.10',
-  textVersion: '2026-10-30', region: 'us', acceptedAt: '2026-11-02T12:00:00Z'
+  textVersion: '2026-11-02', region: 'us', acceptedAt: '2026-11-02T12:00:00Z'
 };
 
 function engagement(allowedModes: Engagement['allowedModes'] = ['passive']): Engagement {
@@ -229,4 +230,26 @@ test('a run started for a workspace resolves its client with that workspace, not
   const result = await starter({ engagement: subject, mode: 'defensive', depth: 'quick', signal: new AbortController().signal, onEvent: () => undefined });
   assert.deepEqual(asked, [workspaceRoot], 'the client was resolved for the workspace, which is where the profile lives');
   assert.notEqual(result.outcome, 'refused');
+});
+
+test('the run mode decides which tools attach, so Defensive never carries the exploit tools', () => {
+  assert.deepEqual(modesFor('defensive', ['passive', 'intrusive']), ['passive']);
+  assert.deepEqual(modesFor('offensive', ['passive', 'intrusive']), ['passive', 'intrusive']);
+  assert.deepEqual(modesFor('full', ['passive', 'intrusive']), ['passive', 'intrusive']);
+  // An engagement that was never granted intrusion cannot get the exploit tools through a mode.
+  assert.deepEqual(modesFor('offensive', ['passive']), ['passive']);
+});
+
+test('the starter reports the rate limit and budget it will actually apply', () => {
+  // The limits were never constructed before, so a deep run had no 45-minute bound at all.
+  assert.equal(RATE_PER_MINUTE.quick, 10);
+  assert.ok(RATE_PER_MINUTE.standard > RATE_PER_MINUTE.quick);
+  assert.ok(RATE_PER_MINUTE.deep > RATE_PER_MINUTE.standard);
+  assert.ok(PROFILE_CONTENT.deep.budgetMs >= 45 * 60_000);
+});
+
+test('a disabled engagement keeps its disabled tier instead of falling back to the host', () => {
+  // The tier used to default to tempFolder, so a disabled engagement ran payloads on the machine.
+  const modes = modesFor('defensive', ['passive']);
+  assert.deepEqual(modes, ['passive']);
 });

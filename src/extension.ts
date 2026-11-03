@@ -95,7 +95,14 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       startRun: panelCyberRunStarter(context, (root) => activeProvider(root, auth).then((active) => active?.provider.client), {
         root: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
         model: readModelTiers().standard,
-        stopped: () => isEmergencyStopped()
+        stopped: () => isEmergencyStopped(),
+        // Every ask goes to the same approval card the chat uses, so a shell or exploit step is
+        // never silently allowed.
+        requestApproval: async (step) => {
+          const label = `${step.action}: ${step.tool} on ${step.target}`;
+          const answer = await vscode.window.showInformationMessage(label, { modal: true, detail: step.expectedResult }, 'Run it', 'Skip');
+          return answer === 'Run it' ? { decision: 'allow' as const } : { decision: 'deny' as const, reason: 'The user skipped this step.' };
+        }
       }),
       handToChat: (input) => chatHandoff((message) => sidebar.request(message as never), { focusChat: async () => { await vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`); } })(input),
       runApprovedCommand: (command) => runApprovedCommand(command),

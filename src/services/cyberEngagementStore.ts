@@ -143,11 +143,13 @@ export class CyberEngagementStore {
   private async write(file: string, value: unknown): Promise<void> {
     const payload = `${JSON.stringify(value, null, 2)}\n`;
     const temporary = `${file}.tmp-${process.pid}`;
-    this.writeQueue = this.writeQueue.then(async () => {
+    // The queue always settles resolved: one failed write must not poison every later write.
+    const run = async () => {
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(temporary, payload, 'utf8');
       await fs.rename(temporary, file);
-    });
+    };
+    this.writeQueue = this.writeQueue.then(run, run);
     await this.writeQueue;
   }
 }

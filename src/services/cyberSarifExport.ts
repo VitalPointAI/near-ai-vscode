@@ -1,7 +1,7 @@
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Engagement, Finding } from '../domain/cyber';
-import { renderVerdict, verdictToSarifLevel, type SarifLevel } from '../domain/cyberVerdicts';
+import { safeVerdictLine, verdictToSarifLevel, type SarifLevel } from '../domain/cyberVerdicts';
 import { redactSecrets } from '../domain/redaction';
 import { acceptanceBlock, buildPtesReport, type VisualCaptureSection } from './cyberReport';
 import type { EngagementRun } from '../domain/cyber';
@@ -104,7 +104,10 @@ export function toSarif(payload: SarifPayload): Record<string, unknown> {
   const results = payload.findings.map((finding) => {
     const ruleId = finding.wstg[0] ?? finding.checkId;
     const level: SarifLevel = verdictToSarifLevel(finding.verdict);
-    const verdictLine = renderVerdict(finding);
+    // An export must never throw on a finding: a probe's finding routinely has no reason (an open
+    // port needs none) and renderVerdict refuses a failure verdict without one. The fallback states
+    // the finding without inventing a reason.
+    const verdictLine = safeVerdictLine(finding);
     return {
       ruleId,
       ruleIndex: Math.max(0, rules.findIndex((rule) => rule.id === ruleId)),

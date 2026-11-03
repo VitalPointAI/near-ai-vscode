@@ -68,14 +68,15 @@ test('SARIF 2.1.0 carries the version, schema, driver, rules, and a location on 
   }
 });
 
-test('the level follows the verdict, and a not_vulnerable result stays visible as pass', () => {
+test('the level follows the verdict, and a not_vulnerable result stays visible as none', () => {
   const sarif = toSarif(payload([
     finding(),
     finding({ id: 'failed@https://example.test/x', checkId: 'sql-injection', verdict: 'exploit_failed', reason: 'the payload returned 401', wstg: ['WSTG-INJ-05'] }),
     finding({ id: 'patched@https://example.test/y', checkId: 'missing-hsts', verdict: 'not_vulnerable', wstg: ['WSTG-CONF-02'] })
   ]));
   const results = (sarif.runs as Array<Record<string, any>>)[0].results as Array<Record<string, any>>;
-  assert.deepEqual(results.map((result) => result.level), ['error', 'note', 'pass']);
+  // SARIF 2.1.0 allows only none | note | warning | error, so a clean result is 'none'.
+  assert.deepEqual(results.map((result) => result.level), ['error', 'note', 'none']);
   assert.equal(results.length, 3, 'a pass is present in results, not omitted');
 });
 

@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { SandboxTier } from '../domain/cyber';
+import type { EngagementRun, SandboxTier } from '../domain/cyber';
 import { detectRegion } from '../domain/cyberLegal';
 import { CyberEvidenceStore, CyberLedgerStore } from './cyberLedgerStore';
 import type { CyberPageHost, CyberPanelDeps } from './cyberPanelPage';
@@ -21,6 +21,14 @@ import { cyberStorePath } from './cyberAssembly';
 // in media/cyber/, so nothing but wiring is in this file.
 
 let current: vscode.WebviewPanel | undefined;
+
+/** The panel's run outcomes map onto the engagement store's own vocabulary. */
+const RUN_OUTCOME: Record<string, EngagementRun['outcome']> = {
+  completed: 'completed',
+  stopped: 'cancelled',
+  refused: 'failed',
+  incompatible: 'failed'
+};
 
 /** The storage folder for this workspace's engagements: globalStorage, never the workspace (D-06). */
 export function cyberStoreDirectory(context: vscode.ExtensionContext, root: string | undefined): string {
@@ -71,7 +79,23 @@ async function depsFor(context: vscode.ExtensionContext, service: CyberPanelServ
       get: (id) => engagements.get(id),
       runs: async (id) => (await engagements.runs(id)).map((run) => ({ id: run.id, startedAt: run.startedAt }))
     },
-    startRun: service.startRun,
+    // Every run is recorded on its engagement before it starts. Without this record Export cannot
+    // find the run, the engagement is never frozen, and the diff has no history to compare against.
+    startRun: async (input) => {
+      const result = await service.startRun(input);
+      const now = (service.now?.() ?? new Date()).toISOString();
+      await engagements.appendRun(input.engagement.id, {
+        id: result.runId,
+        engagementId: input.engagement.id,
+        startedAt: now,
+        ...(result.outcome === 'stopped' ? { finishedAt: now } : {}),
+        depth: input.depth,
+        ...(input.model ? { model: input.model } : {}),
+        ledgerPath: path.join('runs', result.runId, 'ledger.jsonl'),
+        outcome: RUN_OUTCOME[result.outcome] ?? 'failed'
+      }).catch(() => undefined);
+      return result;
+    },
     handToChat: service.handToChat,
     exportRun: async ({ runId, format }) => {
       const engagement = await engagementForRun(engagements, runId);

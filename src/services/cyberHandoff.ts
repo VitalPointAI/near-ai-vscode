@@ -23,16 +23,28 @@ import { isEmergencyStopped } from './emergencyStop';
 
 export * from './cyberAssembly';
 
-/** Runs one install command through VS Code's terminal path, which honours the user's approval setting. */
+/**
+ * Runs one install command and reports what actually happened. `terminal.sendText` returns as soon as
+ * the text is typed, so reporting success from it meant a failing `sudo apt-get install` read as
+ * "Installed". This asks first, then waits for the real exit status where shell integration offers it.
+ */
 export async function runApprovedCommand(command: string): Promise<{ ok: boolean; reason?: string }> {
-  try {
-    const terminal = vscode.window.createTerminal({ name: 'NEAR AI: install host tool' });
-    terminal.show(true);
+  const approved = await vscode.window.showWarningMessage(
+    'Install a host tool for cybersecurity scans?',
+    { modal: true, detail: `${command}\n\nThis runs a package manager on this machine, and may need an administrator password in the terminal.` },
+    'Install'
+  );
+  if (approved !== 'Install') return { ok: false, reason: 'The install was not approved.' };
+  const terminal = vscode.window.createTerminal({ name: 'NEAR AI: install host tool' });
+  terminal.show(true);
+  const integration = (terminal as unknown as { shellIntegration?: { executeCommand(text: string): { exitCode: Thenable<number> } } }).shellIntegration;
+  if (!integration) {
+    // No shell integration: the command still runs, but its status is shown in the terminal only.
     terminal.sendText(command, true);
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, reason: (error as Error).message };
+    return { ok: true, reason: 'Started in the terminal; its result is shown there.' };
   }
+  const exitCode = await integration.executeCommand(command).exitCode;
+  return exitCode === 0 ? { ok: true } : { ok: false, reason: `The install exited with status ${exitCode}.` };
 }
 
 /**
