@@ -540,6 +540,21 @@ test('Link signs in, lists only organizations the lead owns or administers, comm
   }, { near: true });
 });
 
+test('a Link whose save for the team does not finish says so in plain words with Show details, and keeps the git step in the channel', async () => {
+  await withTeam(async (t) => {
+    await fs.writeFile(path.join(t.root, '.git', 'hooks', 'commit-msg'), '#!/bin/sh\necho "hook rejected this commit message" >&2\nexit 1\n', { encoding: 'utf8', mode: 0o755 });
+    stub.quickPickAnswers.push('Team Org', 'Team workspace');
+    await t.run(LINK_NEAR_COMMAND);
+    const warning = stub.notifications.findIndex((entry) => entry.level === 'warn');
+    assert.ok(warning >= 0, stub.notifications.map((entry) => entry.message).join(' | '));
+    assert.equal(stub.notifications[warning]?.message, 'The link is saved in this project, but saving it for the team did not finish. Choose Show details for the one step that is left.');
+    assert.deepEqual(stub.notificationActions[warning], ['Show details']);
+    assert.ok(outputLines().some((line) => line.includes('hook rejected this commit message') && line.includes(`git add -f ${TEAM_FILE_REL}`)), 'the channel has the git reason and the step');
+    assert.equal(stub.notifications.some((entry) => /commit|git add/i.test(entry.message)), false, 'no git words in what is shown');
+    assert.deepEqual((await readTeamFile(t.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' }, 'the link is on disk');
+  }, { near: true });
+});
+
 test('Link does not sign in again when this team already has a NEAR session, says so when already linked, and asks before replacing a link', async () => {
   await withTeam(async (t) => {
     await linkAndPush(t);

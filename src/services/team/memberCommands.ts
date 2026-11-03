@@ -28,6 +28,7 @@ const SHOW_DETAILS_ACTION = 'Show details';
 const SHARED_TEXT = 'Shared with your team.';
 const SHARE_FAILED_TEXT = 'The change could not be shared with your team yet. Check your internet connection and try again. Choose Show details for more.';
 const NOT_ON_A_VERSION_TEXT = 'This project could not be shared right now. Choose Show details for what to do.';
+const LINK_SAVE_UNFINISHED_TEXT = 'The link is saved in this project, but saving it for the team did not finish. Choose Show details for the one step that is left.';
 const INVITE_ADDRESS_TEXT = 'The address this project is shared from cannot be put in an invite, so no invite was made. Choose Show details for why.';
 const LINK_CHOICE = 'Link a NEAR organization';
 const SKIP_CHOICE = 'Skip';
@@ -412,9 +413,15 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       result = await saveLink(true);
     }
     if (!result.ok) {
-      // A link that was written but not committed is still on disk, so the session is replaced to read it.
-      if (result.code === 'commit-failed') await deps.restartSession(projectRoot);
-      deps.report('error', await safe(result.message));
+      // A link that was written but not committed is still on disk, so the session is replaced to read it. The git step that is left goes to the
+      // channel; the person gets plain words with Show details (plain-language pass).
+      if (result.code === 'commit-failed') {
+        await deps.restartSession(projectRoot);
+        deps.output.appendLine(await safe(result.message));
+        await showDetailsOffer('warn', LINK_SAVE_UNFINISHED_TEXT);
+      } else {
+        deps.report('error', await safe(result.message));
+      }
       return false;
     }
     if (result.status === 'unchanged') {

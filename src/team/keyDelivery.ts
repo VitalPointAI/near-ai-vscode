@@ -395,9 +395,9 @@ export async function installDeliveredKey(input: InstallDeliveredInput): Promise
   if (!(member.nearKeyDevices ?? []).includes(input.deviceFingerprint)) return { status: 'not-for-this-device' };
 
   const event = await input.log.findEvent(eventId);
-  if (event === undefined || event.type !== 'member.key-sealed') return { status: 'failed', message: 'The key delivery for this computer could not be found in the team log yet. Try again after the next sync.' };
+  if (event === undefined || event.type !== 'member.key-sealed') return { status: 'failed', message: 'The key delivery for this computer could not be found in the team record yet. Try again after the next sync.' };
   const body = event.body;
-  if (body.memberId !== memberId || body.keyId !== keyId) return { status: 'failed', message: 'The key delivery in the team log does not match this member.' };
+  if (body.memberId !== memberId || body.keyId !== keyId) return { status: 'failed', message: 'The key delivery in the team record does not match this member.' };
   const entry = body.sealed.find((candidate) => candidate.device === input.deviceFingerprint);
   if (entry === undefined) return { status: 'not-for-this-device' };
 
