@@ -3,6 +3,7 @@
 // clone a. prepareJoin brings b up to date by itself when that is safe, and refuses with a precise reason, changing nothing, when it is not.
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { pushCodeBranch } from '../team/enable';
@@ -15,7 +16,7 @@ import { runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { TEAM_FILE_REL, readTeamFile, teamFilePath, writeTeamFile } from '../team/teamFile';
 import { newTeamId } from '../team/identity';
-import { closeRig, createRig, enable, invite, rootOf, teamIdOf } from './helpers/teamFlowRig';
+import { NEAR_LINK, closeRig, createRig, enable, invite, link, rootOf, teamIdOf } from './helpers/teamFlowRig';
 import type { Rig } from './helpers/teamFlowRig';
 import { gitIn } from './helpers/teamHarness';
 
@@ -254,4 +255,73 @@ test('when the online home cannot be reached the copy is not updated (offline) a
     assert.equal(refused.detail?.includes(PUBLIC_URL), false, 'the configured address is never in the detail');
     assert.equal(await readTeamFile(b), undefined);
   });
+});
+
+// ---- Task 3: the old answers stay, and a missing organization link is caught up too ------------------------------------------------------
+
+test('a different project, no open folder or a folder that is not a project still answers clone-needed, with no network call', async () => {
+  await withTeam(async (rig, bundle) => {
+    const expected = { kind: 'clone-needed', repoUrl: PUBLIC_URL, teamId: teamIdOf(rig) };
+    assert.deepEqual(await prepareJoin({ projectRoot: undefined, bundleText: bundle }), expected);
+
+    // Clone c is a copy of another project as far as its address says (it really points at the same bare remote): it is never updated.
+    const c = rootOf(rig, 'c');
+    gitIn(c, ['config', `url.${rig.fixture.remote}.insteadOf`, 'https://example.invalid/other.git']);
+    gitIn(c, ['remote', 'set-url', 'origin', 'https://example.invalid/other.git']);
+    const before = snapshot(c);
+    const recorded = recorder();
+    assert.deepEqual(await prepareJoin({ projectRoot: c, bundleText: bundle, git: recorded.git }), expected);
+    assert.equal(recorded.calls.some((args) => args[0] === 'fetch' || args[0] === 'ls-remote' || args[0] === 'merge'), false, 'no network call and no change');
+    assert.deepEqual(snapshot(c), before);
+    auditCalls(recorded.calls, bundle);
+
+    const plain = await fs.mkdtemp(path.join(tmpdir(), 'near-ai-not-a-project-'));
+    try {
+      const plainRecorded = recorder();
+      assert.deepEqual(await prepareJoin({ projectRoot: plain, bundleText: bundle, git: plainRecorded.git }), expected);
+      assert.equal(plainRecorded.calls.some((args) => args[0] === 'fetch'), false);
+    } finally {
+      await fs.rm(plain, { recursive: true, force: true });
+    }
+  });
+});
+
+test('an invite naming an organization link the copy does not have yet catches the copy up, and the link comes from team.json', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    const first = readyOf(await prepareJoin({ projectRoot: b, bundleText: bundle }));
+    assert.equal(first.updated, true);
+    assert.equal(first.near, undefined, 'the team had no link when the copy was first brought up to date');
+
+    // The lead links the organization after the invitee's copy was brought up to date, publishes it and sends a new invite naming it.
+    await link(rig);
+    const pushed = await pushCodeBranch(rootOf(rig, 'a'), 'origin', 'main');
+    assert.equal(pushed.ok, true, pushed.ok ? '' : pushed.message);
+    const second = await invite(rig, rig.lead);
+    assert.deepEqual(parseInviteBundle(second.bundle).near, NEAR_LINK);
+    const recorded = recorder();
+    const prepared = readyOf(await prepareJoin({ projectRoot: b, bundleText: second.bundle, git: recorded.git }));
+    assert.equal(prepared.updated, true);
+    assert.deepEqual(prepared.near, NEAR_LINK);
+    assert.deepEqual(prepared.teamFile.near, NEAR_LINK);
+    assert.equal(gitIn(b, ['rev-parse', 'HEAD']), remoteMain(rig));
+    auditCalls(recorded.calls, second.bundle);
+  }, { linked: true });
+});
+
+test('when the lead linked the organization but did not publish it, the join is refused with the existing sentence and nothing changes', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    readyOf(await prepareJoin({ projectRoot: b, bundleText: bundle }));
+    await link(rig);
+    const second = await invite(rig, rig.lead);
+    const before = snapshot(b);
+    const recorded = recorder();
+    const prepared = await prepareJoin({ projectRoot: b, bundleText: second.bundle, git: recorded.git });
+    assert.equal(prepared.kind, 'refused');
+    if (prepared.kind === 'refused') assert.match(prepared.message, /share the organization link with the team/);
+    assert.deepEqual(snapshot(b), before);
+    assert.equal((await readTeamFile(b))?.near, undefined);
+    auditCalls(recorded.calls, second.bundle);
+  }, { linked: true });
 });

@@ -25,6 +25,7 @@ import { NearOrgClient } from '../team/nearOrg';
 import type { NearAuth } from '../team/nearOrg';
 import { nearSessionSecretName } from '../team/nearSession';
 import { teamProfileId } from '../team/teamKeyProfile';
+import { runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { canonicalTeamFile, writeTeamFile } from '../team/teamFile';
 import { startFakeNear } from './helpers/fakeNear';
@@ -189,6 +190,24 @@ test('prepareJoin answers clone-needed without a folder or with another team, re
     const notInvite = await prepareJoin({ projectRoot: fixture.clones['b'] as string, bundleText: 'hello there' });
     assert.equal(notInvite.kind, 'refused');
     if (notInvite.kind === 'refused') assert.equal(notInvite.message.includes('hello there'), false, 'the pasted text is never echoed');
+  });
+});
+
+// G-61-4: a copy of the same project (one of its remotes has the invite's address) is now brought up to date instead (teamJoinCatchUp.test.ts).
+// Clone b above has a local path as its remote, so it stays clone-needed; this case keeps the old answer for a copy whose address differs.
+test('prepareJoin still answers clone-needed for a copy whose remote has a different address, and never fetches it', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const seed = await seedTeam(fixture);
+    pointOriginAt(fixture, PUBLIC_URL);
+    const { bundle } = await invite(fixture, seed);
+    const b = fixture.clones['b'] as string;
+    gitIn(b, ['config', `url.${fixture.remote}.insteadOf`, 'https://example.invalid/another-project.git']);
+    gitIn(b, ['remote', 'set-url', 'origin', 'https://example.invalid/another-project.git']);
+    const calls: string[][] = [];
+    const git: GitRunner = async (args, options) => { calls.push([...args]); return runGit(args, options); };
+    const prepared = await prepareJoin({ projectRoot: b, bundleText: bundle, git });
+    assert.deepEqual(prepared, { kind: 'clone-needed', repoUrl: PUBLIC_URL, teamId: seed.teamId });
+    assert.equal(calls.some((args) => args[0] !== 'config'), false, 'only git config was read');
   });
 });
 
