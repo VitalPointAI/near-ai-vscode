@@ -37,7 +37,6 @@ export async function run(): Promise<void> {
   const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : projectTests();
   let failed = 0;
   for (const [name, body] of tests) {
-    if (process.env.TEMP_ONLY && !/activates|sidebar webview|local profile|streams|narrow/.test(name)) continue; // TEMP
     try { await body(); console.log(`✔ [${scenario}] ${name}`); } catch (error) { failed += 1; console.error(`✖ [${scenario}] ${name}\n`, error); }
   }
   if (failed) throw new Error(`${failed} extension-host test(s) failed in the ${scenario} scenario.`);
@@ -158,9 +157,17 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       for (const target of SIDEBAR_WIDTHS) record('chat', target, await sizeSidebar(target));
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       // Editor panels: the page in the first of two editor groups, sized by the groups' proportions.
+      // Pages with little to show in a fresh project get wide sample data, as their hosts would send it.
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { activityTap } = require(path.join(extension.extensionPath, 'dist/services/activityView')) as typeof import('../../services/activityView');
+      const { comparisonTap } = require(path.join(extension.extensionPath, 'dist/services/modelComparisonPanel')) as typeof import('../../services/modelComparisonPanel');
+      const seen: Message[] = [];
+      activityTap.toView = (message) => seen.push(message as Message);
+      comparisonTap.toView = (message) => seen.push(message as Message);
       for (const [name, command] of PANELS) {
         await vscode.commands.executeCommand(command);
         await waitForProbe(name);
+        samples.set(name, sampleData(name, seen));
         for (const target of EDITOR_WIDTHS) record(name, target, await sizeEditor(name, target));
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
         await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
@@ -207,6 +214,7 @@ const PANELS: Array<[string, string]> = [
   ['activity', 'nearAi.openAgentActivity'], ['compare', 'nearAi.compareModels'], ['mcp', 'nearAi.manageMcp'],
   ['teams', 'nearAi.manageTeams'], ['tools', 'nearAi.openTools'], ['onboarding', 'nearAi.setup']
 ];
+const samples = new Map<string, Message[]>();
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function probe(name: string): Promise<LayoutReport> {
@@ -217,6 +225,9 @@ function probe(name: string): Promise<LayoutReport> {
 
 /** Measures once the panel has stopped changing size (a resize reaches the page a little later). */
 async function settled(name: string): Promise<LayoutReport> {
+  const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+  const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
+  for (const message of samples.get(name) ?? []) await postToPage(name, message);
   let last = await probe(name);
   for (let attempt = 0; attempt < 10; attempt += 1) {
     await pause(250);
@@ -246,7 +257,6 @@ async function sizeEditor(name: string, target: number): Promise<LayoutReport> {
     fraction = next;
     await splitEditor(fraction);
     report = await settled(name);
-    console.log('TEMP editor', name, fraction, report.width); // TEMP
   }
   return report;
 }
@@ -275,7 +285,6 @@ async function sizeSidebar(target: number): Promise<LayoutReport> {
   for (let attempt = 0; attempt < 30 && report.width !== target; attempt += 1) {
     const command = report.width > target ? 'workbench.action.decreaseViewSize' : 'workbench.action.increaseViewSize';
     const next = await sidebarStep(command);
-    console.log('TEMP sidebar', command, report.width, '->', next.width); // TEMP
     if (next.width === report.width) return report;
     if (Math.abs(next.width - target) >= Math.abs(report.width - target)) {
       // One step past the target and no closer: step back and stop.
@@ -284,6 +293,40 @@ async function sizeSidebar(target: number): Promise<LayoutReport> {
     report = next;
   }
   return report;
+}
+
+const LONG_MODEL = 'deepseek/deepseek-v4.1-flash-with-a-rather-long-name';
+
+/** Sample data with long names and every column filled, built on what the page's host last sent it. */
+function sampleData(name: string, seen: Message[]): Message[] {
+  const last = (type: string) => [...seen].reverse().find((message) => message.type === type);
+  if (name === 'activity') {
+    const overview = last('overview');
+    if (!overview) return [];
+    const now = Date.now();
+    const running = [{ agentId: 'main-run-e2e', runId: 'run-e2e', label: 'Main agent working on a long task name', model: LONG_MODEL, boundary: 'cloud', phase: 'tool', tool: 'Bash', startedAt: now - 95_000, phaseSince: now - 5_000, turns: 12, toolCalls: 34, costUsd: 0.0123 },
+      { agentId: 'sub-e2e', runId: 'run-e2e', label: 'gsd-planner', sub: true, model: LONG_MODEL, boundary: 'tee', phase: 'waiting-you', startedAt: now - 40_000, phaseSince: now - 20_000, turns: 3, toolCalls: 4, costUsd: 0.002 }];
+    const summary = overview.summary as Record<string, unknown>;
+    const models = [{ model: LONG_MODEL, agents: 3, turns: 40, rateLimited: 2, retries: 5, errors: 1, stopped: 1, inputTokens: 1_234_567, outputTokens: 345_678 }];
+    return [{ ...overview, running, summary: summary.empty ? summary : { ...summary, models } }];
+  }
+  if (name === 'compare') {
+    const state = last('state')?.state as Record<string, unknown> | undefined;
+    if (!state) return [];
+    const entry = (rank: number, model: string) => ({ rank, model, privacy: 'forwarded', privacyText: 'Forwarded', forwardedTo: 'another provider', holds: ['Planner (gsd-planner)'], inCatalog: true, stale: [], missingTasks: [], score: 8.1, runs: 8, tasks: ['a', 'b'],
+      byKind: { coding: { score: 8.4, tasks: 2, runs: 2 }, research: { score: 7.9, tasks: 2, runs: 2 }, planning: { score: 8, tasks: 2, runs: 2 }, execution: { score: 8.2, tasks: 2, runs: 2 } },
+      passRate: 0.9, passes: 7, medianSeconds: 41, tokPerSec: 55, costPerRunUsd: 0.0123, costUsd: 0.1, failures: 1, stalls: 2, lastTested: new Date(Date.now() - 2 * 86_400_000).toISOString() });
+    const history = [{ id: 'run-e2e', startedAt: new Date().toISOString(), models: [LONG_MODEL, 'zai-org/GLM-5.3-FP8'], taskSet: 'full', mode: 'reuse', ran: 8, reused: 4, costUsd: 0.12, status: 'cancelled', stopReason: 'Cancelled' }];
+    return [{ type: 'state', state: { ...state, leaderboard: [entry(1, LONG_MODEL), entry(2, 'zai-org/GLM-5.3-FP8')], history } }];
+  }
+  if (name === 'mcp') {
+    const server = { config: { id: 'catalog', name: 'Product catalog server with a long descriptive name', transport: 'stdio', approval: 'ask-for-changes', command: 'npx', args: ['-y', '@example/a-very-long-package-name-for-an-mcp-server', '--root=/home/someone/projects/deeply/nested/folder/structure'], disabledTools: [] },
+      state: 'error', serverInfo: 'example-server 1.2.3', error: 'Could not start: /home/someone/projects/deeply/nested/folder/structure/node_modules/.bin/a-very-long-package-name-for-an-mcp-server exited with code 1',
+      enabledHere: true, calls: 12, errors: 2, averageMs: 340, lastUsed: Date.now(), hasSecrets: { url: false, headers: [], env: [] },
+      tools: [{ name: 'search_products_by_a_long_identifier_name', description: 'Searches the catalog.', readOnly: true }, { name: 'delete_product', description: 'Deletes a product.', destructive: true }] };
+    return [{ type: 'state', servers: [server], project: 'a-project-folder-with-a-long-name', saved: false }];
+  }
+  return [];
 }
 
 const WIDE_REPLY = [
