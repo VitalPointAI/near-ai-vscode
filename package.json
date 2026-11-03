@@ -234,13 +234,13 @@
       },
       {
         "command": "nearAi.team.linkNearOrganization",
-        "title": "Link Team to NEAR Organization",
+        "title": "Link Your Organization",
         "category": "NEAR AI",
         "icon": "$(link)"
       },
       {
         "command": "nearAi.team.signOutNear",
-        "title": "Sign Out of NEAR (Team)",
+        "title": "Sign Out of NEAR AI for This Team",
         "category": "NEAR AI",
         "icon": "$(sign-out)"
       },
