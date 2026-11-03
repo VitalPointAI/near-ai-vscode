@@ -202,7 +202,7 @@ test('Verify Team Log in a solo project only explains how to turn Team Mode on',
     timers.restore();
     assert.deepEqual(stub.notifications, [{ level: 'info', message: SOLO_TEXT }]);
     assert.deepEqual(stub.notificationActions, [[]], 'the explanation has no buttons');
-    assert.equal(SOLO_TEXT, 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.');
+    assert.equal(SOLO_TEXT, 'Team Mode is not on for this project. To turn it on, choose Turn on Team Mode in the Team section of the NEAR AI sidebar.');
     assert.deepEqual(timers.setTimeoutCalls, []);
     assert.equal(timers.setIntervalCalls, 0);
     assert.equal(stub.statusBarItems.length, 0);

@@ -116,8 +116,8 @@ async function removeFixture(fixture: TeamFixture): Promise<void> {
   }
 }
 
-// A lead's window: Enable Team Mode through the command (so the session, device key and team.json are the product's own), then the project's
-// origin is given a public-looking address, which the bundle must carry. With `near` there is also a fake NEAR with one organization the lead
+// A lead's window: the project's origin is given a public-looking address, which the bundle must carry, then Enable Team Mode runs through the
+// command (so the session, device key and team.json are the product's own). With `near` there is also a fake NEAR with one organization the lead
 // owns (two workspaces), one the lead is only a member of, and a second person who can be invited as a lead.
 async function withTeam(work: (team: Team) => Promise<void>, options: { near?: boolean } = {}): Promise<void> {
   resetStub();
@@ -153,11 +153,12 @@ async function withTeam(work: (team: Team) => Promise<void>, options: { near?: b
       assert.ok(handler !== undefined, `${command} is registered`);
       await handler(...args);
     };
+    // The online home is given its public-looking address before Enable, so Enable sees a home teammates can reach and asks nothing extra.
+    gitIn(root, ['config', `url.${fixture.remote}.insteadOf`, PUBLIC_URL]);
+    gitIn(root, ['remote', 'set-url', 'origin', PUBLIC_URL]);
     stub.inputAnswers.push('Invite team', 'Lead Owner', 'lead@example.invalid');
     await run(ENABLE_COMMAND);
     assert.equal(handle.session()?.teamFile.name, 'Invite team', 'Enable started the session');
-    gitIn(root, ['config', `url.${fixture.remote}.insteadOf`, PUBLIC_URL]);
-    gitIn(root, ['remote', 'set-url', 'origin', PUBLIC_URL]);
     clearUi();
     await work({ fixture, root, storage, secrets, context, handle, canaries, fake, signIns, run });
   } finally {
@@ -544,6 +545,17 @@ test('Link signs in, lists only organizations the lead owns or administers, comm
     assert.ok(stub.notifications.some((entry) => entry.level === 'info' && entry.message === 'Shared with your team.'));
     assert.equal(stub.notifications.some((entry) => /Pushed|origin/.test(entry.message)), false, 'no git words in what is shown');
     assert.ok(outputLines().includes('Pushed main to origin.'));
+  }, { near: true });
+});
+
+test('the handle tells listeners when Link restarts the session on the new team.json', async () => {
+  await withTeam(async (t) => {
+    const seen: Array<string | undefined> = [];
+    const listener = t.handle.onDidChange(() => { seen.push(t.handle.session()?.teamFile.near?.workspaceId); });
+    stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Second workspace');
+    await t.run(LINK_NEAR_COMMAND);
+    listener.dispose();
+    assert.ok(seen.includes('ws-2'), 'a listener heard the restart on the linked team.json');
   }, { near: true });
 });
 

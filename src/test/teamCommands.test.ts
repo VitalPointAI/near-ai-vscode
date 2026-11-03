@@ -7,6 +7,7 @@ import * as path from 'node:path';
 import test from 'node:test';
 import { API_KEY_SECRET, REFRESH_TOKEN_SECRET } from '../services/auth';
 import { deviceKeySecretName } from '../team/identity';
+import { cleanRepoUrl } from '../team/inviteBundle';
 import { TEAM_FILE_REL, readTeamFile, teamStorageDir } from '../team/teamFile';
 import { deviceKeyForms, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
 import type { Needle } from './helpers/teamCanary';
@@ -21,6 +22,9 @@ const commandsModule = require('../services/team/teamCommands') as typeof import
 test.after(() => { uninstall(); });
 const { ENABLE_COMMAND, PUSH_ACTION, SHARED_TEXT, SHARE_FAILED_TEXT, SHOW_DETAILS_ACTION, TRY_AGAIN_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, createSessionSlot, registerTeamMode } = commandsModule;
 const { CONNECT_NEAR_AI_ACTION, NOT_CONNECTED_TEXT, STILL_NOT_CONNECTED_TEXT } = commandsModule;
+const { LOCAL_ONLY_TEXT, NOT_NOW_ACTION, NOT_SHAREABLE_TEXT, SOLO_TEXT, TURN_ON_ANYWAY_ACTION } = commandsModule;
+// The address teammates would use. An insteadOf rule maps it back to the fixture's bare remote, so git still works on this computer.
+const PUBLIC_URL = 'https://example.invalid/team.git';
 
 const EM_DASH = '—';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
@@ -58,7 +62,7 @@ function resetStub(): void {
 // `connect` stands in for the extension's key setup (configureApiKey): it gets the project folder and may set NEAR AI up there.
 async function withProject(
   run: (project: Project) => Promise<void>,
-  options: { initialised?: boolean; folderOpen?: boolean; connect?: (root: string) => Promise<void> } = {}
+  options: { initialised?: boolean; folderOpen?: boolean; connect?: (root: string) => Promise<void>; home?: 'public' | 'local' } = {}
 ): Promise<void> {
   resetStub();
   const fixture = await createTeamFixture({ clones: ['a'], initialised: options.initialised ?? true });
@@ -70,6 +74,11 @@ async function withProject(
   secrets.values.set(REPORTING_TOKEN_KEY, canaries.reportingToken);
   const storage = fixture.storageDir('a');
   const context = createFakeContext(storage, secrets);
+  // By default the project's online home is an address teammates can reach; `home: 'local'` keeps the fixture's folder path as origin.
+  if (options.home !== 'local') {
+    gitIn(root, ['config', `url.${fixture.remote}.insteadOf`, PUBLIC_URL]);
+    gitIn(root, ['remote', 'set-url', 'origin', PUBLIC_URL]);
+  }
   try {
     if (options.folderOpen !== false) stub.setWorkspaceFolders([root]);
     const counter = { connects: 0 };
@@ -141,6 +150,7 @@ test('Enable asks for team name, owner name and email with defaults, creates tea
     assert.equal(remoteMain(p.fixture), mainBefore, 'the code branch was not pushed because Push was not clicked');
     assert.deepEqual(stub.configUpdates, [], 'settings were never written');
     assert.ok(remoteHasCoordination(p.fixture), 'the coordination branch exists on the remote');
+    assert.equal(stub.notificationOptions.some((options) => options?.modal === true), false, 'an online home teammates can reach brings no warning');
   });
 });
 
@@ -287,10 +297,87 @@ test('dismissing the Connect NEAR AI question changes nothing and asks no questi
   }, { initialised: false });
 });
 
+// G-61-2: the online home is checked before any question. Teammates cannot reach a folder on this computer or an address with a password in it.
+test('Enable with the project kept only on this computer warns first in a modal; Not now changes nothing and asks no question', async () => {
+  await withProject(async (p) => {
+    await p.enable(['Never asked', 'Lead Owner', ''], [NOT_NOW_ACTION]);
+    assert.equal(stub.notifications[0]?.level, 'warn');
+    assert.equal(stub.notifications[0]?.message, LOCAL_ONLY_TEXT);
+    assert.equal(LOCAL_ONLY_TEXT, 'Teammates cannot reach this project yet, because it is kept only on this computer.');
+    assert.equal(stub.notificationOptions[0]?.modal, true);
+    assert.ok((stub.notificationOptions[0]?.detail ?? '').includes('for example on GitHub'), 'the detail says what to do');
+    assert.deepEqual(stub.notificationActions[0], [TURN_ON_ANYWAY_ACTION, NOT_NOW_ACTION]);
+    assert.deepEqual([TURN_ON_ANYWAY_ACTION, NOT_NOW_ACTION], ['Turn on anyway', 'Not now']);
+    assert.equal(stub.inputRequests.length, 0, 'no question was asked');
+    assert.equal(stub.notifications.length, 1, 'nothing else was shown');
+    assert.equal(await teamJsonExists(p.root), false);
+    assert.equal(remoteHasCoordination(p.fixture), false);
+    assert.ok(outputLines().some((line) => line.includes('git remote set-url origin')), 'the technical steps are in the channel');
+    assert.equal(uiText().includes(p.fixture.remote), false, 'the folder path is not shown or logged');
+  }, { home: 'local' });
+});
+
+test('Turn on anyway carries on; the final message says Team Mode is on for this person until the project is online, without a share button', async () => {
+  await withProject(async (p) => {
+    await p.enable(['Local team', 'Lead Owner', ''], [TURN_ON_ANYWAY_ACTION]);
+    assert.equal(stub.inputRequests.length, 3, 'the questions followed');
+    assert.equal(p.handle.session()?.teamFile.name, 'Local team', 'Team Mode is on');
+    const done = stub.notifications.findIndex((entry) => entry.message.startsWith('Team Mode is on for Local team'));
+    assert.ok(done >= 0);
+    assert.equal(stub.notifications[done]?.message, 'Team Mode is on for Local team, for you only until the project is online where teammates can reach it.');
+    assert.deepEqual(stub.notificationActions[done], [VERIFY_ACTION], 'no share button');
+  }, { home: 'local' });
+});
+
+test('Enable with a password in the online home address warns with the not-shareable wording; the channel has the reason and never the address', async () => {
+  await withProject(async (p) => {
+    const url = 'https://user:x@example.invalid/team.git';
+    gitIn(p.root, ['config', `url.${p.fixture.remote}.insteadOf`, url]);
+    gitIn(p.root, ['remote', 'set-url', 'origin', url]);
+    await p.enable(['Never asked', 'Lead Owner', ''], [NOT_NOW_ACTION]);
+    assert.equal(stub.notifications[0]?.message, NOT_SHAREABLE_TEXT);
+    assert.equal(NOT_SHAREABLE_TEXT, 'Teammates cannot reach this project yet, because the address it is kept at online cannot be given to them as it is.');
+    assert.equal(stub.notificationOptions[0]?.modal, true);
+    assert.deepEqual(stub.notificationActions[0], [TURN_ON_ANYWAY_ACTION, NOT_NOW_ACTION]);
+    assert.equal(stub.inputRequests.length, 0);
+    const refused = cleanRepoUrl('user:password@example.invalid:repo.git');
+    assert.equal(refused.ok, false);
+    assert.ok(outputLines().some((line) => !refused.ok && line.includes(refused.reason)), 'the cleanRepoUrl reason is in the channel');
+    assert.equal(uiText().includes('example.invalid'), false, 'no address in the channel or on screen');
+    assert.equal(uiText().includes('user:x'), false);
+    assert.equal(await teamJsonExists(p.root), false);
+  });
+});
+
+test('the handle tells listeners when Team Mode turns on, when a turn-on attempt ends, and when the window closes; a disposed listener is not called again', async () => {
+  await withProject(async (p) => {
+    const calls: Array<string | undefined> = [];
+    let disposedCalls = 0;
+    p.handle.onDidChange(() => { calls.push(p.handle.session()?.teamFile.name); });
+    const gone = p.handle.onDidChange(() => { disposedCalls += 1; });
+    gone.dispose();
+    await p.enable([undefined]);
+    assert.ok(calls.length >= 1, 'a declined turn-on attempt is reported');
+    assert.ok(calls.every((name) => name === undefined));
+    calls.length = 0;
+    await p.enable(['Change team', 'Lead Owner', '']);
+    assert.ok(calls.includes('Change team'), 'listeners hear once Team Mode is on');
+    calls.length = 0;
+    for (const subscription of p.context.subscriptions) subscription.dispose();
+    p.context.subscriptions.length = 0;
+    assert.ok(calls.length >= 1, 'closing the window is reported');
+    assert.equal(disposedCalls, 0, 'a disposed listener is never called');
+  });
+});
+
+test('SOLO_TEXT points at the Turn on Team Mode button in the Team section, not a palette command', () => {
+  assert.equal(SOLO_TEXT, 'Team Mode is not on for this project. To turn it on, choose Turn on Team Mode in the Team section of the NEAR AI sidebar.');
+});
+
 test('with no folder open Enable asks the user to open the project folder', async () => {
   await withProject(async (p) => {
     await p.enable([]);
-    assert.deepEqual(stub.notifications.map((entry) => [entry.level, entry.message]), [['error', 'Open your project folder first, then run "NEAR AI: Enable Team Mode" again.']]);
+    assert.deepEqual(stub.notifications.map((entry) => [entry.level, entry.message]), [['error', 'Open your project folder first, then choose Turn on Team Mode in the Team section of the NEAR AI sidebar.']]);
     assert.equal(stub.inputRequests.length, 0);
   }, { folderOpen: false });
 });
@@ -313,7 +400,9 @@ test('a failing commit-msg hook shows a plain warning with Show details and keep
 
 test('an unreachable remote shows a plain error, writes the git reason to the channel and creates nothing', async () => {
   await withProject(async (p) => {
-    gitIn(p.root, ['remote', 'set-url', 'origin', path.join(p.fixture.root, 'no-such-remote.git')]);
+    const missing = 'https://example.invalid/missing.git';
+    gitIn(p.root, ['config', `url.${path.join(p.fixture.root, 'no-such-remote.git')}.insteadOf`, missing]);
+    gitIn(p.root, ['remote', 'set-url', 'origin', missing]);
     const before = [...p.secrets.values.keys()].sort();
     await p.enable(['Unreachable team', 'Lead Owner', '']);
     const error = stub.notifications.find((entry) => entry.level === 'error');
@@ -343,7 +432,9 @@ test('SEC-01 canary: after Enable and Verify no secret or device key reaches the
     gitIn(p.root, ['remote', 'set-url', 'origin', url]);
     gitIn(p.root, ['config', `url.${p.fixture.remote}.insteadOf`, url]);
 
-    await p.enable(['Canary team', 'Lead Owner', 'canary.lead@example.invalid'], [VERIFY_ACTION]);
+    // A password in the address means teammates cannot use it as it is: the person is told first and turns Team Mode on anyway.
+    await p.enable(['Canary team', 'Lead Owner', 'canary.lead@example.invalid'], [TURN_ON_ANYWAY_ACTION, VERIFY_ACTION]);
+    assert.equal(stub.notifications[0]?.message, NOT_SHAREABLE_TEXT);
     await p.verify();
     const teamFile = await readTeamFile(p.root);
     assert.ok(teamFile !== undefined);
