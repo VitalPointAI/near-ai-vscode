@@ -2,7 +2,7 @@
 // exactly team.json to the integration branch without moving any of the person's other work.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import type { TeamFile } from '../domain/team/types';
@@ -12,7 +12,8 @@ import { SHARE_COMMIT_MESSAGE, checkOnlineHome, configuredRemoteUrl, planShare, 
 import { runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import { TEAM_FILE_REL, readTeamFile, writeTeamFile } from '../team/teamFile';
-import { MemorySecrets, createTeamFixture, gitIn } from './helpers/teamHarness';
+import { makeCanaries } from './helpers/teamCanary';
+import { MemorySecrets, createTeamFixture, fakeGitResult, faultRunner, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
 
 const PUBLIC_URL = 'https://example.invalid/team.git';
@@ -381,5 +382,150 @@ test("with the person's identity in git config the setup-only commit is theirs",
     const teamFile = await enable(fixture, 'a');
     assert.deepEqual(await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main' }), { ok: true, how: 'setup-only' });
     assert.equal(gitIn(fixture.remote, ['log', '-1', '--format=%an <%ae>', 'main']), 'Team Test <team-test@example.invalid>');
+  });
+});
+
+// ---- Task 3: races, refusals and redaction --------------------------------------------------------------------------------------------
+
+// Clone b, a teammate on the same online home, pushes an unrelated commit to main. Returns the new commit.
+function teammatePushes(fixture: TeamFixture, n: number): string {
+  const other = clone(fixture, 'b');
+  gitIn(other, ['pull', '-q', '--ff-only', 'origin', 'main']);
+  writeFileSync(path.join(other, `teammate-${n}.txt`), `change ${n}\n`, 'utf8');
+  gitIn(other, ['add', `teammate-${n}.txt`]);
+  gitIn(other, ['commit', '-q', '-m', `teammate change ${n}`]);
+  gitIn(other, ['push', '-q', 'origin', 'main']);
+  return gitIn(other, ['rev-parse', 'HEAD']);
+}
+
+// Runs `before` just ahead of every push this runner is asked to make, and records the push arguments.
+function beforeEveryPush(before: () => void): { git: GitRunner; pushCalls: string[][] } {
+  const pushCalls: string[][] = [];
+  return {
+    pushCalls,
+    git: async (args, options) => {
+      if (args[0] === 'push') {
+        before();
+        pushCalls.push([...args]);
+      }
+      return runGit(args, options);
+    }
+  };
+}
+
+test('a teammate pushing between the plan and the push: the share re-plans as setup-only and lands on top of their commit', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    const teamFile = await enable(fixture, 'a');
+    assert.deepEqual(await planShare({ projectRoot: dir, teamFile, branch: 'main' }), { kind: 'fast-forward', commits: 1 });
+    let theirs = '';
+    let raced = false;
+    const { git, pushCalls } = beforeEveryPush(() => {
+      if (raced) return;
+      raced = true;
+      theirs = teammatePushes(fixture, 1);
+    });
+    const before = snapshot(dir);
+    assert.deepEqual(await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main', git }), { ok: true, how: 'setup-only' });
+    assert.equal(pushCalls.length, 2, 'the first push lost the race, the second landed');
+    for (const call of pushCalls) assertNarrowPush(call, 'origin', 'main');
+    assert.equal(gitIn(fixture.remote, ['rev-parse', 'main^']), theirs, "the teammate's commit stays, as the parent of the share commit");
+    assert.equal(gitIn(fixture.remote, ['diff-tree', '--no-commit-id', '-r', '--name-only', 'main']), TEAM_FILE_REL);
+    assert.deepEqual(snapshot(dir), before);
+    assert.deepEqual(await teamSetupShared({ projectRoot: dir, teamFile, branch: 'main' }), { kind: 'shared' });
+  });
+});
+
+test('an online home that moves before every push: after exactly the given attempts the share stops as changed and nothing local moved', async () => {
+  await withFixture(['a', 'b'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    const teamFile = await enable(fixture, 'a');
+    let n = 0;
+    const { git, pushCalls } = beforeEveryPush(() => { n += 1; teammatePushes(fixture, n); });
+    const before = snapshot(dir);
+    const result = await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main', git, attempts: 3 });
+    assert.equal(result.ok, false);
+    assert.equal(!result.ok && result.code, 'changed');
+    assert.equal(pushCalls.length, 3);
+    assert.deepEqual(snapshot(dir), before);
+    assert.deepEqual(leftoverShareIndexes(dir), []);
+    assert.equal(gitIn(fixture.remote, ['log', '-1', '--format=%s', 'main']), 'teammate change 3', 'nothing of this computer reached main');
+  });
+});
+
+test('a refusing online home (pre-receive hook, for example a protected branch) gives rejected with the redacted reason and changes nothing', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    const teamFile = await enable(fixture, 'a');
+    const hook = path.join(fixture.remote, 'hooks', 'pre-receive');
+    writeFileSync(hook, '#!/bin/sh\necho "protected branch: main cannot be pushed to by https://bot:hooksecret@example.invalid/x" >&2\nexit 1\n', 'utf8');
+    chmodSync(hook, 0o755);
+    const tip = gitIn(fixture.remote, ['rev-parse', 'main']);
+    const before = snapshot(dir);
+    const result = await shareTeamSetup({ projectRoot: dir, teamFile, branch: 'main' });
+    assert.equal(result.ok, false);
+    assert.equal(!result.ok && result.code, 'rejected');
+    assert.ok(!result.ok && result.detail.includes('protected branch'), JSON.stringify(result));
+    assert.ok(!result.ok && !result.detail.includes('hooksecret'), JSON.stringify(result));
+    assert.deepEqual(snapshot(dir), before);
+    assert.equal(gitIn(fixture.remote, ['rev-parse', 'main']), tip);
+  });
+});
+
+test('no result, detail or thrown message carries a credential in the configured URL, or the configured URL of an unreachable home', async () => {
+  await withFixture(['a'], async (fixture) => {
+    const dir = clone(fixture, 'a');
+    usePublicUrl(fixture, 'a');
+    const teamFile = await enable(fixture, 'a');
+    const canary = makeCanaries().urlPassword;
+    const secretUrl = `https://user:${canary}@example.invalid/team.git`;
+    usePublicUrl(fixture, 'a', secretUrl);
+
+    const seen: string[] = [];
+    const capture = async (run: () => Promise<unknown>): Promise<void> => {
+      try {
+        seen.push(JSON.stringify(await run()));
+      } catch (error) {
+        seen.push(error instanceof Error ? `${error.message} ${String(error.stack)}` : String(error));
+      }
+    };
+    const input = { projectRoot: dir, teamFile, branch: 'main' };
+    const home = await checkOnlineHome(dir, 'origin');
+    assert.equal(home.kind, 'not-shareable');
+    seen.push(JSON.stringify(home));
+    await capture(() => teamSetupShared(input));
+    await capture(() => planShare(input));
+    await capture(() => shareTeamSetup(input));
+    await capture(() => shareTeamSetup({ ...input, plan: { kind: 'first-upload' } }));
+    for (const text of seen) assert.ok(!text.includes(canary), `the canary leaked: ${text}`);
+
+    // An https home whose rewrite points at a missing folder, and a push that fails naming the configured address.
+    gitIn(dir, ['config', '--unset-all', `url.${fixture.remote}.insteadOf`]);
+    gitIn(dir, ['remote', 'set-url', 'origin', PUBLIC_URL]);
+    gitIn(dir, ['config', `url.${path.join(fixture.root, 'missing.git')}.insteadOf`, PUBLIC_URL]);
+    const offline: string[] = [];
+    const unknown = await teamSetupShared(input);
+    assert.equal(unknown.kind, 'unknown');
+    offline.push(JSON.stringify(unknown));
+    const blocked = await planShare(input);
+    assert.equal(blocked.kind === 'blocked' && blocked.reason, 'offline');
+    offline.push(JSON.stringify(blocked));
+    const failed = await shareTeamSetup(input);
+    assert.equal(!failed.ok && failed.code, 'offline');
+    offline.push(JSON.stringify(failed));
+
+    gitIn(dir, ['config', '--unset-all', `url.${path.join(fixture.root, 'missing.git')}.insteadOf`]);
+    gitIn(dir, ['config', `url.${fixture.remote}.insteadOf`, PUBLIC_URL]);
+    const git = faultRunner(runGit, [{
+      when: (args) => args[0] === 'push',
+      replace: () => fakeGitResult(128, '', `fatal: unable to access '${PUBLIC_URL}/': Could not resolve host: example.invalid\n`)
+    }]);
+    const noAnswer = await shareTeamSetup({ ...input, git });
+    assert.equal(!noAnswer.ok && noAnswer.code, 'offline');
+    offline.push(JSON.stringify(noAnswer));
+    for (const text of offline) assert.ok(!text.includes(PUBLIC_URL), `the configured URL leaked: ${text}`);
   });
 });
