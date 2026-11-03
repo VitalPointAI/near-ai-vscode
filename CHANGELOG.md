@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **No more false "repeated the same action" stops for changing folder.** An
+  agent that runs `cd <folder>` (or `pwd`) on its own between its real commands
+  is no longer stopped for repeating itself. Changing folder does nothing new on
+  its own, so the loop guard now ignores it and only counts commands that do
+  work.
+
 ## 0.4.13
 
 Replies in the chat are easier to read. Tables, quotes and crossed-out text

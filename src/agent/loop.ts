@@ -397,6 +397,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const warnAt = guard.warnAt ?? Math.round((guard.nudgeAt + guard.stopAt) / 2);
     calls.forEach((call, index) => {
       const key = loopActionKey(call);
+      // Moving to a folder or asking where you are changes nothing and always gives the same
+      // result, so it is never progress or a loop by itself (the shell keeps the folder anyway).
+      if (isNavigationOnly(key)) return;
       const result = resultSignature(String(results.find((message) => message.role === 'tool' && message.tool_call_id === call.id)?.content ?? results[index]?.content ?? ''));
       for (let at = this.recent.length - 1; at >= 0; at -= 1) if (this.recent[at].key === key && this.recent[at].result !== result) this.recent.splice(at, 1);
       this.recent.push({ key, result });
@@ -558,6 +561,13 @@ export function loopActionKey(call: ToolCall): string {
   if (typeof file === 'string') return `${call.function.name} ${file}${typeof args.offset === 'number' ? `@${args.offset}` : ''}`;
   if (typeof args.command === 'string') return `${call.function.name} ${normalizeShellCommand(args.command)}`;
   return `${call.function.name} ${call.function.arguments.slice(0, 200)}`;
+}
+
+const NAVIGATION_ONLY = /^Bash (?:cd(?:\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+))?|pwd)\s*;?$/;
+
+/** Whether a loop key is only a change of folder (`cd <dir>`, a bare `cd`) or `pwd`, which the loop guard ignores. */
+export function isNavigationOnly(key: string): boolean {
+  return NAVIGATION_ONLY.test(key);
 }
 
 /** An action as the user and the model are shown it: short enough to read in one line. */

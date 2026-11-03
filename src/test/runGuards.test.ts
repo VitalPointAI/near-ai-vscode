@@ -64,6 +64,26 @@ test('the owner\'s case: many different `cd <worktree> && ...` commands with dif
   assert.equal(transcripts.at(-1)!.some((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>')), false, 'never nudged');
 });
 
+test('0.4.14, the owner\'s case: a bare `cd <worktree>` repeated between real commands is not a loop', async () => {
+  // As reported: the agent ran `cd <worktree>` on its own over and over (the shell already keeps
+  // the folder, so each one prints nothing), between commands that were making progress.
+  const worktree = tmpdir();
+  const commands = ['npm test', 'git status', 'npx tsc --noEmit', 'git diff --stat', 'ls src'];
+  const { result, transcripts } = await runScript((turn) => {
+    if (turn >= 20) return 'Done: the checks pass.';
+    return [call(`c${turn}a`, 'Bash', { command: `cd ${worktree}` }), call(`c${turn}b`, 'Bash', { command: `cd ${worktree}` }), call(`c${turn}c`, 'Bash', { command: 'pwd' }), call(`c${turn}d`, 'Bash', { command: `echo "${commands[turn % commands.length]} run ${turn}"` })];
+  });
+  assert.equal(result.outcome, 'completed');
+  assert.equal(transcripts.at(-1)!.some((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>')), false, 'never nudged');
+});
+
+test('only changing folder or printing it counts as navigation; anything that does work still counts', async () => {
+  const { isNavigationOnly, loopActionKey } = await import('../agent/loop');
+  for (const command of ['cd /a/b', 'cd "/a b"', "cd '/a b'", 'cd', 'pwd', 'cd /a/b && pwd', 'cd /a ;']) assert.equal(isNavigationOnly(loopActionKey(call('n', 'Bash', { command }))), true, command);
+  for (const command of ['cd /a && npm test', 'cat missing-file.txt', 'cd /a || exit 1', 'pwd && ls', 'cd /a\nnpm test']) assert.equal(isNavigationOnly(loopActionKey(call('w', 'Bash', { command }))), false, command);
+  assert.equal(isNavigationOnly(loopActionKey(call('r', 'Read', { file_path: 'cd' }))), false, 'other tools never count as navigation');
+});
+
 test('the same command whose output keeps changing is not a loop', async () => {
   const { result, turns, transcripts } = await runScript((turn) => (turn < 24 ? [call(`b${turn}`, 'Bash', { command: 'cd . && echo run >> runs.log && wc -l < runs.log' })] : 'done'));
   assert.equal(result.outcome, 'completed');
