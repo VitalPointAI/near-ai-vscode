@@ -270,6 +270,8 @@
       if (wrap) tables.syncTabStop(wrap, document.activeElement);
     }))
     : undefined;
+  // A table that is not wider than the chat stops being a Tab stop once focus leaves it.
+  transcript.addEventListener('focusout', tables.focusLeft);
 
   // Assistant text is re-rendered from the full buffer so partial Markdown settles as it streams.
   // `partial` is true while more text is still on its way. Each table keeps its sideways scroll

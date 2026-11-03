@@ -25,11 +25,20 @@
     }
   }
 
-  /** Saves each table's sideways scroll and which table (if any) holds focus. */
+  // What can hold focus inside a table: links today, anything focusable to be safe.
+  const FOCUSABLE = 'a[href],button,input,select,textarea,[tabindex]';
+
+  /**
+   * Saves each table's sideways scroll, which table (if any) holds focus, and which link or other
+   * focusable part of it holds focus, by position, so the same part gets focus back.
+   */
   function capture(target, active) {
     const wraps = wrapsOf(target);
     const focused = active ? wraps.findIndex((wrap) => wrap === active || wrap.contains(active)) : -1;
-    return { wraps, scroll: wraps.map((wrap) => wrap.scrollLeft), focused };
+    const inner = focused >= 0 && wraps[focused] !== active
+      ? Array.from(wraps[focused].querySelectorAll(FOCUSABLE)).indexOf(active)
+      : -1;
+    return { wraps, scroll: wraps.map((wrap) => wrap.scrollLeft), focused, inner };
   }
 
   /** Puts saved scroll and focus back on the rebuilt tables and sets their Tab stops. */
@@ -39,16 +48,31 @@
       if (saved && saved.scroll[index]) wrap.scrollLeft = saved.scroll[index];
       syncTabStop(wrap);
     });
-    const focus = saved && saved.focused >= 0 ? wraps[saved.focused] : undefined;
-    if (focus) {
-      // Focus needs a Tab stop; it is kept while the table has focus even if it stops overflowing.
-      if (!focus.hasAttribute('tabindex')) focus.setAttribute('tabindex', '0');
-      focus.focus({ preventScroll: true });
+    const box = saved && saved.focused >= 0 ? wraps[saved.focused] : undefined;
+    if (!box) return wraps;
+    // Focus goes back to the same link in the table, so keyboard users can stay on it or Tab on.
+    const part = saved.inner >= 0 ? box.querySelectorAll(FOCUSABLE)[saved.inner] : undefined;
+    if (part) {
+      part.focus({ preventScroll: true });
+      return wraps;
     }
+    // Focus on the box needs a Tab stop; it is kept while the box has focus even if it stops overflowing.
+    if (!box.hasAttribute('tabindex')) box.setAttribute('tabindex', '0');
+    box.focus({ preventScroll: true });
     return wraps;
   }
 
-  const api = { capture, restore, syncTabStop };
+  /** When focus leaves a table, a box that does not overflow stops being a Tab stop again. */
+  function focusLeft(event) {
+    const from = event && event.target;
+    const wrap = from && typeof from.closest === 'function' ? from.closest(WRAP) : null;
+    if (!wrap) return;
+    const to = event.relatedTarget;
+    if (to && (to === wrap || wrap.contains(to))) return;
+    syncTabStop(wrap, null);
+  }
+
+  const api = { capture, restore, syncTabStop, focusLeft };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.nearTables = api;
 })(typeof window === 'undefined' ? globalThis : window);

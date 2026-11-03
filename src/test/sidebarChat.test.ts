@@ -211,15 +211,27 @@ class FakeWrap {
   hasAttribute(name: string) { return this.attrs.has(name); }
   setAttribute(name: string, value: string) { this.attrs.set(name, value); }
   removeAttribute(name: string) { this.attrs.delete(name); }
-  contains(node: unknown) { return node === this; }
+  // The links inside the table, the only focusable parts the renderer makes.
+  links: FakeLink[] = [];
+  withLinks(count: number) { this.links = Array.from({ length: count }, () => new FakeLink(this)); return this; }
+  querySelectorAll() { return this.links; }
+  closest() { return this; }
+  contains(node: unknown) { return node === this || this.links.includes(node as FakeLink); }
+  focus() { this.focused = true; }
+}
+class FakeLink {
+  focused = false;
+  constructor(public wrap: FakeWrap) {}
+  closest() { return this.wrap; }
   focus() { this.focused = true; }
 }
 const fakeBody = (wraps: FakeWrap[]) => ({ querySelectorAll: () => wraps });
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tables = require(path.join(__dirname, '..', '..', 'media', 'chat', 'tables.js')) as {
-  capture(target: unknown, active: unknown): { scroll: number[]; focused: number };
+  capture(target: unknown, active: unknown): { scroll: number[]; focused: number; inner: number };
   restore(target: unknown, saved: unknown): FakeWrap[];
   syncTabStop(wrap: FakeWrap, active?: unknown): void;
+  focusLeft(event: { target: unknown; relatedTarget: unknown }): void;
 };
 
 test('chat tables keep their sideways scroll and focus when a streaming reply re-renders', () => {
@@ -239,6 +251,54 @@ test('chat tables keep their sideways scroll and focus when a streaming reply re
   const third = [new FakeWrap(950)];
   tables.restore(fakeBody(third), elsewhere);
   assert.equal(third[0].focused, false);
+});
+
+test('chat tables keep focus on the same link inside a table when a streaming reply re-renders', () => {
+  const before = [new FakeWrap(900).withLinks(3), new FakeWrap(200).withLinks(1)];
+  const saved = tables.capture(fakeBody(before), before[0].links[1]);
+  assert.deepEqual({ focused: saved.focused, inner: saved.inner }, { focused: 0, inner: 1 });
+  const after = [new FakeWrap(950).withLinks(3), new FakeWrap(200).withLinks(1)];
+  tables.restore(fakeBody(after), saved);
+  // The same link gets focus back, not the table box, so Tab moves on from the link.
+  assert.deepEqual(after[0].links.map((link) => link.focused), [false, true, false]);
+  assert.equal(after[0].focused, false);
+  assert.equal(after[1].focused || after[1].links[0].focused, false);
+  // A link in a table that does not overflow keeps focus, and the box does not become a Tab stop.
+  const narrow = [new FakeWrap(200).withLinks(2)];
+  const kept = tables.capture(fakeBody(narrow), narrow[0].links[0]);
+  const rebuilt = [new FakeWrap(200).withLinks(2)];
+  tables.restore(fakeBody(rebuilt), kept);
+  assert.equal(rebuilt[0].links[0].focused, true);
+  assert.equal(rebuilt[0].focused, false);
+  assert.equal(rebuilt[0].hasAttribute('tabindex'), false);
+  // If that link is gone from the next frame, focus falls back to the table box.
+  const fewer = [new FakeWrap(200).withLinks(0)];
+  tables.restore(fakeBody(fewer), kept);
+  assert.equal(fewer[0].focused, true);
+  assert.equal(fewer[0].getAttribute('tabindex'), '0');
+  // Focus that has moved past the table is left alone.
+  const past = tables.capture(fakeBody(rebuilt), { outside: true });
+  const next = [new FakeWrap(200).withLinks(2)];
+  tables.restore(fakeBody(next), past);
+  assert.equal(next[0].focused || next[0].links.some((link) => link.focused), false);
+});
+
+test('chat tables stop being a Tab stop when focus leaves a box that does not overflow', () => {
+  const box = new FakeWrap(200).withLinks(1);
+  box.setAttribute('tabindex', '0');
+  // Moving from the box to a link inside it keeps the Tab stop.
+  tables.focusLeft({ target: box, relatedTarget: box.links[0] });
+  assert.equal(box.getAttribute('tabindex'), '0');
+  tables.focusLeft({ target: box.links[0], relatedTarget: { outside: true } });
+  assert.equal(box.hasAttribute('tabindex'), false);
+  // A box that overflows stays a Tab stop.
+  const wide = new FakeWrap(900);
+  wide.setAttribute('tabindex', '0');
+  tables.focusLeft({ target: wide, relatedTarget: null });
+  assert.equal(wide.getAttribute('tabindex'), '0');
+  // Focus leaving anything outside a table is ignored.
+  tables.focusLeft({ target: { closest: () => null }, relatedTarget: null });
+  tables.focusLeft({ target: null, relatedTarget: null });
 });
 
 test('chat tables are Tab stops only while they are wider than their box', () => {
@@ -275,6 +335,7 @@ test('chat view renders streaming text as partial and the finished reply strictl
   // A saved reply replayed from the transcript is rendered strictly too.
   const renders = [...script.matchAll(/renderMarkdown\(([^)]*)\);/g)].map((match) => match[1]);
   assert.deepEqual(renders, ['current.body, current.text, partial === true', "body, turn.text || ''"]);
+  assert.match(script, /transcript\.addEventListener\('focusout', tables\.focusLeft\)/);
   assert.match(script, /tables\.capture\(target, document\.activeElement\)[\s\S]*target\.replaceChildren\(\)[\s\S]*tables\.restore\(target, saved\)/);
   assert.ok(panel.indexOf("asset('tables.js')") > 0 && panel.indexOf("asset('tables.js')") < panel.indexOf("asset('chat.js')"), 'tables.js loads before chat.js');
   const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.css'), 'utf8');
