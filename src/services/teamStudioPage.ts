@@ -703,14 +703,14 @@ function displayPath(file: string, root: string | undefined): string {
 export type { TeamDefinition };
 
 /** The page's HTML: one nonce script and one stylesheet; everything else is rendered by the script with textContent. */
-export function teamStudioHtml(options: { cspSource: string; nonce: string; script: string; style: string }): string {
+export function teamStudioHtml(options: { cspSource: string; nonce: string; script: string; style: string; base?: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">
-<link rel="stylesheet" href="${options.style}"><title>NEAR AI Team Studio</title></head><body>
+${options.base ? `<link rel="stylesheet" href="${options.base}">` : ''}<link rel="stylesheet" href="${options.style}"><title>NEAR AI Team Studio</title></head><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="title"><h1 id="title">Team Studio</h1><p id="subtitle" class="hint">Build and manage agent teams. Each team is a Markdown file; the studio reads and writes it for you.</p></div><nav id="crumbs" aria-label="Breadcrumb"></nav></header>
 <div id="announce" class="visually-hidden" aria-live="polite" role="status"></div>
 <div id="banner" class="banner" hidden role="alert"></div>
 <main id="main" tabindex="-1"><p class="hint">Loading…</p></main>
-<script nonce="${options.nonce}" src="${options.script}"></script></body></html>`;
+${options.probe ? `<script nonce="${options.nonce}" src="${options.probe}"></script>` : ''}<script nonce="${options.nonce}" src="${options.script}"></script></body></html>`;
 }

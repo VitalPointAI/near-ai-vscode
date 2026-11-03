@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { NearAiTestApi } from '../../extension';
+import type { LayoutReport } from '../../services/layoutProbe';
 
 // Runs inside the extension host. Messages are observed on both sides of the real sidebar webview,
 // so every request below goes host → webview script → host, as a user's click would.
@@ -36,6 +37,7 @@ export async function run(): Promise<void> {
   const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : projectTests();
   let failed = 0;
   for (const [name, body] of tests) {
+    if (process.env.TEMP_ONLY && !/activates|sidebar webview|local profile|streams|narrow/.test(name)) continue; // TEMP
     try { await body(); console.log(`✔ [${scenario}] ${name}`); } catch (error) { failed += 1; console.error(`✖ [${scenario}] ${name}\n`, error); }
   }
   if (failed) throw new Error(`${failed} extension-host test(s) failed in the ${scenario} scenario.`);
@@ -138,6 +140,33 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       assert.deepEqual({ score: graded.score, misses: graded.misses }, { score: 10, misses: [] });
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     }],
+    ['every panel fits narrow widths without scrolling sideways', async () => {
+      // A reply with a wide table, a long code line and a long path, so the chat has something to fit.
+      const before = observer.toView.length;
+      await api.sidebar.request({ type: 'send', text: 'wide reply', model: 'fake-coder' });
+      await observer.next('toView', (message) => message.type === 'assistant-done', before);
+      const problems: string[] = [];
+      const record = (name: string, target: number, report: LayoutReport) => {
+        console.log(`  ${name} at ${report.width}px (asked ${target}px): page ${report.scrollWidth}/${report.clientWidth}, body ${report.bodyScrollWidth}/${report.bodyClientWidth}`);
+        if (report.scrollWidth > report.clientWidth + 1 || report.bodyScrollWidth > report.bodyClientWidth + 1) problems.push(`${name} at ${report.width}px scrolls sideways: page ${report.scrollWidth} in ${report.clientWidth}, body ${report.bodyScrollWidth} in ${report.bodyClientWidth}`);
+        for (const offender of report.offenders) problems.push(`${name} at ${report.width}px: ${offender}`);
+        for (const scroller of report.scrollers) problems.push(`${name} at ${report.width}px: ${scroller}`);
+        if (report.width > target + 40) problems.push(`${name}: could not make the panel narrower than ${report.width}px (asked ${target}px)`);
+      };
+      // The sidebar: VS Code's own resize commands, a step at a time, until the chat is as close as they get.
+      await vscode.commands.executeCommand('nearAiChatView.focus');
+      for (const target of SIDEBAR_WIDTHS) record('chat', target, await sizeSidebar(target));
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      // Editor panels: the page in the first of two editor groups, sized by the groups' proportions.
+      for (const [name, command] of PANELS) {
+        await vscode.commands.executeCommand(command);
+        await waitForProbe(name);
+        for (const target of EDITOR_WIDTHS) record(name, target, await sizeEditor(name, target));
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+      }
+      assert.deepEqual(problems, []);
+    }],
     ['a file write asks for approval, applies on approval, and Revert removes it', async () => {
       const before = observer.toView.length;
       await api.sidebar.request({ type: 'send', text: 'write notes', model: 'fake-coder' });
@@ -170,6 +199,102 @@ function plainTests(): Array<[string, () => Promise<void>]> {
   ];
 }
 
+// ---- Layout at narrow widths (the pages report their own measurements through the test-only probe) ----
+
+const SIDEBAR_WIDTHS = [170, 220, 320, 600];
+const EDITOR_WIDTHS = [220, 320, 600];
+const PANELS: Array<[string, string]> = [
+  ['activity', 'nearAi.openAgentActivity'], ['compare', 'nearAi.compareModels'], ['mcp', 'nearAi.manageMcp'],
+  ['teams', 'nearAi.manageTeams'], ['tools', 'nearAi.openTools'], ['onboarding', 'nearAi.setup']
+];
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function probe(name: string): Promise<LayoutReport> {
+  const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+  const { probeLayout } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
+  return probeLayout(name);
+}
+
+/** Measures once the panel has stopped changing size (a resize reaches the page a little later). */
+async function settled(name: string): Promise<LayoutReport> {
+  let last = await probe(name);
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await pause(250);
+    const next = await probe(name);
+    if (next.width === last.width && next.scrollWidth === last.scrollWidth) return next;
+    last = next;
+  }
+  return last;
+}
+
+async function waitForProbe(name: string): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    try { await probe(name); await pause(1_000); return; } catch (error) { if (Date.now() > deadline) throw error; await pause(250); }
+  }
+}
+
+/** Splits the editor area in two and sizes the first group (holding the page) to the target width. */
+async function sizeEditor(name: string, target: number): Promise<LayoutReport> {
+  let fraction = 0.5;
+  await splitEditor(fraction);
+  let report = await settled(name);
+  for (let attempt = 0; attempt < 6 && Math.abs(report.width - target) > 4; attempt += 1) {
+    const total = report.width / fraction;
+    const next = Math.min(0.95, Math.max(0.02, target / total));
+    if (Math.abs(next - fraction) < 0.001) break;
+    fraction = next;
+    await splitEditor(fraction);
+    report = await settled(name);
+    console.log('TEMP editor', name, fraction, report.width); // TEMP
+  }
+  return report;
+}
+
+// VS Code applies new group sizes only when the layout changes shape, so it goes back to one group first.
+async function splitEditor(fraction: number): Promise<void> {
+  await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+  await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{ size: fraction }, { size: 1 - fraction }] });
+}
+
+/**
+ * Steps the sidebar's width with VS Code's resize commands until the chat is closest to the target.
+ * They resize the part that has focus, and a webview's focus does not count, so the Explorer (in
+ * the same sidebar) takes focus for each step and the chat is shown again to measure.
+ */
+async function sidebarStep(command: string): Promise<LayoutReport> {
+  await vscode.commands.executeCommand('workbench.action.chat.open');
+  await pause(500);
+  await vscode.commands.executeCommand(command);
+  await vscode.commands.executeCommand('nearAiChatView.focus');
+  return settled('chat');
+}
+
+async function sizeSidebar(target: number): Promise<LayoutReport> {
+  let report = await settled('chat');
+  for (let attempt = 0; attempt < 30 && report.width !== target; attempt += 1) {
+    const command = report.width > target ? 'workbench.action.decreaseViewSize' : 'workbench.action.increaseViewSize';
+    const next = await sidebarStep(command);
+    console.log('TEMP sidebar', command, report.width, '->', next.width); // TEMP
+    if (next.width === report.width) return report;
+    if (Math.abs(next.width - target) >= Math.abs(report.width - target)) {
+      // One step past the target and no closer: step back and stop.
+      return sidebarStep(command === 'workbench.action.decreaseViewSize' ? 'workbench.action.increaseViewSize' : 'workbench.action.decreaseViewSize');
+    }
+    report = next;
+  }
+  return report;
+}
+
+const WIDE_REPLY = [
+  'A wide reply:', '',
+  '| Model | Overall | Coding | Research | Planning | Execution | Passed | Median time | Tokens/s | Cost |',
+  '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+  '| deepseek/deepseek-v4.1-flash-with-a-long-name | 8.1 | 8.4 | 7.9 | 8.0 | 8.2 | 90% | 41 s | 55 | $0.0123 |', '',
+  '```ts', `const veryLongLine = '${'x'.repeat(200)}';`, '```', '',
+  `See /home/someone/projects/${'deeply-nested-folder/'.repeat(8)}file.ts and https://example.com/${'segment/'.repeat(12)}page`
+].join('\n');
+
 /** A minimal OpenAI-compatible server: one model, a text reply, and a Write tool call. */
 async function fakeModelServer(): Promise<Server> {
   const server = createServer((request, response) => {
@@ -183,7 +308,8 @@ async function fakeModelServer(): Promise<Server> {
       const lastUser = [...messages].reverse().find((message) => message.role === 'user');
       const delta = last.role === 'tool' ? { content: 'Done.' }
         : String(lastUser?.content).includes('write notes') ? { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'Write', arguments: JSON.stringify({ file_path: 'notes.txt', content: 'hello from e2e\n' }) } }] }
-          : { content: 'Hi from the fake model.' };
+          : String(lastUser?.content).includes('wide reply') ? { content: WIDE_REPLY }
+            : { content: 'Hi from the fake model.' };
       response.setHeader('content-type', 'text/event-stream');
       response.write(`data: ${JSON.stringify({ id: 'chatcmpl-e2e', choices: [{ delta }] })}\n\n`);
       response.write(`data: ${JSON.stringify({ id: 'chatcmpl-e2e', choices: [{ delta: {}, finish_reason: 'tool_calls' in delta ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 3 } })}\n\n`);

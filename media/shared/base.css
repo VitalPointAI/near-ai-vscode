@@ -1,0 +1,38 @@
+/* Shared by every NEAR AI page and the sidebar chat, linked before each page's own stylesheet.
+   Every colour comes from the active VS Code theme. Panels can be resized to any width, so the pages
+   wrap, stack or hide less important columns instead of scrolling sideways. */
+:root { --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35)); --muted: var(--vscode-descriptionForeground); }
+* { box-sizing: border-box; }
+/* Safety net: anything still too wide is cut off at the edge instead of scrolling the whole page
+   sideways. `clip` rather than `hidden`, so sticky headers keep sticking (it makes no scroll box). */
+html, body { overflow-x: clip; }
+body { margin: 0; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+[hidden] { display: none !important; }
+/* Long paths, URLs and error text break inside their line instead of widening the page. */
+.hint, .error { overflow-wrap: anywhere; }
+.table-wrap { max-width: 100%; overflow-x: auto; }
+
+/* Responsive tables. Pages mark each column's cells (and its header) with how much it matters:
+   - .col-tertiary hides at 900px and narrower, .col-secondary at 600px and narrower;
+   - a .when-medium or .when-narrow line in the row's main cell then shows those hidden values,
+     so they stay on screen and in what a screen reader reads;
+   - table.stack-narrow turns each row into a small card at 420px and narrower, every value under
+     its column's name (the cell's data-label). */
+.when-medium, .when-narrow { display: none; margin: 3px 0 0; font-size: 0.85em; color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  .col-tertiary { display: none !important; }
+  .when-medium { display: block; }
+}
+@media (max-width: 600px) {
+  .col-secondary { display: none !important; }
+  .when-narrow { display: block; }
+}
+@media (max-width: 420px) {
+  table.stack-narrow, table.stack-narrow > tbody, table.stack-narrow > tbody > tr, table.stack-narrow > tbody > tr > td, table.stack-narrow > tbody > tr > th { display: block; width: 100%; }
+  table.stack-narrow > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  table.stack-narrow > tbody > tr { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  table.stack-narrow > tbody > tr:last-child { border-bottom: 0; }
+  table.stack-narrow > tbody > tr > td, table.stack-narrow > tbody > tr > th { min-width: 0; max-width: none; padding: 2px 8px; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  table.stack-narrow > tbody > tr > [data-label]:not([data-label=""])::before { content: attr(data-label) ": "; color: var(--muted); font-size: 0.85em; }
+}

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { applyProjectType } from '../agent/projectTypes';
 import { TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
@@ -26,10 +27,12 @@ export function openTeamStudio(context: vscode.ExtensionContext, auth: AuthServi
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const library = new TeamLibrary(context.globalStorageUri.fsPath);
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'teams');
-  const panel = vscode.window.createWebviewPanel('nearAiTeamStudio', 'NEAR AI Team Studio', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media] });
+  const shared = sharedMedia(context.extensionUri);
+  const panel = vscode.window.createWebviewPanel('nearAiTeamStudio', 'NEAR AI Team Studio', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media, shared] });
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   const asset = (file: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
-  panel.webview.html = teamStudioHtml({ cspSource: panel.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('teams.js'), style: asset('teams.css') });
+  panel.webview.html = teamStudioHtml({ cspSource: panel.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('teams.js'), style: asset('teams.css'), base: panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString(), probe: layoutProbeAsset(panel.webview, shared) });
+  registerLayoutProbe('teams', panel.webview);
   const studio = attachTeamStudio(panel, {
     library, root,
     gather: () => gatherDirectoryInput(context, auth),

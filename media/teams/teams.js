@@ -779,6 +779,8 @@
 
   window.addEventListener('message', (event) => {
     const message = event.data || {};
+    // Only under the extension-host tests, which load the layout probe: report this page's layout.
+    if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     switch (message.type) {
       case 'state':
         ctx = message.context; lib = message.library; savedDraft = message.savedDraft || null;

@@ -103,6 +103,8 @@
 
   window.addEventListener('message', (event) => {
     const message = event.data || {};
+    // Only under the extension-host tests, which load the layout probe: report this page's layout.
+    if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     if (message.type === 'state') {
       project = message.project || '';
       $('servers').replaceChildren(...(message.servers || []).map(card));

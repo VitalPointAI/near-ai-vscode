@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import * as vscode from 'vscode';
+import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import type { ActivitySessionSummary } from '../domain/activity';
 import { buildWindowSummary, historyPage, nowRows, OverviewSpend, OverviewWindow } from './activityOverview';
 import { ActivityStore } from './activityStore';
@@ -118,10 +119,11 @@ export function openAgentActivity(context: vscode.ExtensionContext, agentId?: st
   const activity = sharedActivityFeed();
   if (panel) { panel.reveal(); if (agentId) void panel.webview.postMessage(focusMessage(activity, agentId)); return; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'activity');
-  const view = vscode.window.createWebviewPanel('nearAiAgentActivity', 'Agent Activity', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
+  const view = vscode.window.createWebviewPanel('nearAiAgentActivity', 'Agent Activity', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media, sharedMedia(context.extensionUri)] });
   panel = view;
   view.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   view.webview.html = activityHtml(view.webview, media);
+  registerLayoutProbe('activity', view.webview);
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const store = root ? new ActivityStore(root) : undefined;
   let sessions: ActivitySessionSummary[] = [];
@@ -292,8 +294,10 @@ export function activityMarkdown(entries: ActivityEntry[], stats: AgentStats[]):
 export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspSource'>, media: vscode.Uri): string {
   const nonce = randomBytes(16).toString('base64');
   const asset = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
+  const shared = vscode.Uri.joinPath(media, '..', 'shared');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+<link rel="stylesheet" href="${webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString()}">
 <link rel="stylesheet" href="${asset('activity.css')}"><title>Agent Activity</title></head><body>
 <header class="top">
   <h1>Agent activity</h1>
@@ -377,5 +381,5 @@ export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
 </section>
 <p class="hint">Figures come from this project's activity history and your API key's spend ledger on this computer, kept across reloads; nothing here includes prompt or reply content beyond each run's first line, redacted. Live agents update about once a second while this tab is visible.</p>
 </main>
-<script nonce="${nonce}" src="${asset('activity.js')}"></script></body></html>`;
+${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}" src="${asset('activity.js')}"></script></body></html>`;
 }

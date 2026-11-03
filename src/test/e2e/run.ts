@@ -9,7 +9,7 @@ async function main(): Promise<void> {
   const extensionDevelopmentPath = path.resolve(__dirname, '../../..');
   const extensionTestsPath = path.resolve(__dirname, 'suite.js');
   const version = process.env.VSCODE_TEST_VERSION ?? 'stable';
-  for (const scenario of ['project', 'plain'] as const) {
+  for (const scenario of (process.env.TEMP_ONLY ? ['project'] : ['project', 'plain']) as Array<'project' | 'plain'>) { // TEMP
     const workspace = await mkdtemp(path.join(tmpdir(), `near-ai-e2e-${scenario}-`));
     if (scenario === 'project') await mkdir(path.join(workspace, '.planning', '.near-ai'), { recursive: true });
     const userData = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-'));
@@ -18,7 +18,7 @@ async function main(): Promise<void> {
       extensionDevelopmentPath,
       extensionTestsPath,
       launchArgs: [workspace, '--disable-extensions', '--disable-workspace-trust', `--user-data-dir=${userData}`, '--skip-welcome', '--skip-release-notes'],
-      extensionTestsEnv: { NEAR_AI_E2E: '1', NEAR_AI_E2E_SCENARIO: scenario, NEAR_AI_E2E_WORKSPACE: workspace }
+      extensionTestsEnv: { ...(process.env.TEMP_ONLY ? { TEMP_ONLY: '1' } : {}), NEAR_AI_E2E: '1', NEAR_AI_E2E_SCENARIO: scenario, NEAR_AI_E2E_WORKSPACE: workspace }
     });
   }
 }
