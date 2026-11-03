@@ -314,7 +314,7 @@ export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
 <section aria-labelledby="now-heading">
   <h2 id="now-heading">Now</h2>
   <p id="now-empty" class="hint">No agents are running. Send a message or run a workflow in the NEAR AI chat.</p>
-  <div class="table-wrap" id="now-wrap" hidden><table id="now" class="stack-narrow" aria-labelledby="now-heading"><thead><tr>
+  <div class="table-wrap" id="now-wrap" hidden><table id="now" class="stack-narrow stack-medium" aria-labelledby="now-heading"><thead><tr>
     <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col" class="num col-secondary">Elapsed</th><th scope="col" class="num col-secondary">Turns</th><th scope="col" class="num col-secondary">Tool calls</th><th scope="col" class="num">Cost so far</th><th scope="col"><span class="sr-only">Controls</span></th>
   </tr></thead><tbody></tbody></table></div>
   <p id="focus-note" class="hint" role="status" hidden></p>

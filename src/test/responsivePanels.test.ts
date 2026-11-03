@@ -22,6 +22,8 @@ test('the shared stylesheet stops sideways page scroll and defines the responsiv
   assert.match(base, /@media \(max-width: 900px\) \{\s*\.col-tertiary \{ display: none !important; \}\s*\.when-medium \{ display: block; \}/);
   assert.match(base, /@media \(max-width: 600px\) \{\s*\.col-secondary \{ display: none !important; \}\s*\.when-narrow \{ display: block; \}/);
   assert.match(base, /@media \(max-width: 420px\) \{[\s\S]*table\.stack-narrow[\s\S]*content: attr\(data-label\)/);
+  assert.match(base, /@media \(max-width: 600px\) \{[\s\S]*table\.stack-medium[\s\S]*content: attr\(data-label\)/);
+  assert.match(base, /\.table-wrap \{ position: relative;/, 'hidden headers stay inside their table box');
   assert.match(base, /\.hint, \.error \{ overflow-wrap: anywhere; \}/);
   assert.doesNotMatch(base, RAW_HEX, 'colours come from the theme');
 });
@@ -89,7 +91,8 @@ test('the welcome page has its stylesheet in a file and no inline styles', () =>
 
 test('Agent Activity marks its less important columns and labels each cell', () => {
   const view = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'activityView.ts'), 'utf8');
-  for (const id of ['now', 'tools', 'models', 'history']) assert.match(view, new RegExp(`<table id="${id}" class="stack-narrow"`));
+  for (const id of ['now', 'tools', 'models', 'history']) assert.match(view, new RegExp(`<table id="${id}" class="stack-narrow[" ]`));
+  assert.match(view, /<table id="now" class="stack-narrow stack-medium"/, 'agents running now become cards below 600px: their controls need the room');
   for (const column of ['Elapsed', 'Turns', 'Tool calls', 'Retries', 'Stopped', 'Tokens in', 'Tokens out', 'Agents', 'Duration']) {
     assert.match(view, new RegExp(`<th scope="col" class="num col-secondary">${column}</th>`), column);
   }

@@ -78,8 +78,10 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 }
 @media (max-width: 600px) {
   th { white-space: normal; }
-  .model-cell { min-width: 9em; }
-  .wrap, .misses { min-width: 7em; }
+  .model-cell { min-width: 7em; }
+  .wrap, .misses { min-width: 5em; }
+  .role { min-width: 6em; }
+  td.controls { white-space: normal; }
   .model-cell code { overflow-wrap: anywhere; }
 }
 @media (max-width: 520px) { body { padding: 0 12px 32px; } th, td { padding: 4px 6px; } }

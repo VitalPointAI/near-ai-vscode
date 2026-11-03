@@ -81,7 +81,8 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
 .figure-source[data-source="partial"], .figure-source[data-source="estimated"] { color: var(--warn); }
 .credits { grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); }
 @media (max-width: 600px) {
-  #history td:nth-child(2) { min-width: 8em; }
+  #history td:nth-child(2) { min-width: 6em; }
+  #now td:nth-child(1), #now td:nth-child(2), #models td:nth-child(1) { min-width: 0; max-width: none; }
   th { white-space: normal; }
 }
 @media (max-width: 520px) {
