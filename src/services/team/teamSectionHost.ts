@@ -69,9 +69,21 @@ export function parseTeamSectionMessage(value: unknown): TeamSectionMessage | un
     if (!hasExactKeys(value, ['type', 'action']) || !isKnownAction(value.action)) return undefined;
     return { type: 'team-action', action: value.action };
   }
+  // The page's answer to the e2e probe (media/chat/team.js): what it drew. The host acts on it only under the extension-host tests.
+  if (value.type === 'team-e2e-facts') {
+    if (typeof value.id !== 'number' || !Number.isFinite(value.id)) return undefined;
+    const facts: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) if (key !== 'type' && key !== 'id') facts[key] = entry;
+    return { type: 'team-e2e-facts', id: value.id, facts };
+  }
   return undefined;
 }
 
+/**
+ * Extension-host tests only (NEAR_AI_E2E exactly '1', the board's IN-05 rule): `probe` asks the real page what the Team section shows, and may ask it
+ * to click one of its own drawn buttons (which then posts team-action through the normal path). The page's answers land in `facts`. In production
+ * `probe` is never set and the page's answers are dropped.
+ */
 export const teamSectionTap: { probe?: (request: { id: number; click?: TeamActionId }) => Promise<void>; facts: Array<Record<string, unknown>> } = { facts: [] };
 
 function isMissing(error: unknown): boolean {
@@ -111,6 +123,7 @@ interface RefreshRun { recheck: boolean }
 export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHost {
   const now = deps.now ?? ((): number => performance.now());
   const checkShared = deps.checkShared ?? defaultCheckShared;
+  const testSeams = deps.testSeams ?? process.env.NEAR_AI_E2E === '1';
   let webview: SectionWebview | undefined;
   let isVisible: () => boolean = () => true;
   let disposed = false;
@@ -261,9 +274,22 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
     await refresh({ recheckShared: RECHECK_AFTER.has(action) });
   }
 
+  // The probe posts to the attached page and never runs anything itself.
+  async function probe(request: { id: number; click?: TeamActionId }): Promise<void> {
+    const target = webview;
+    if (target === undefined || typeof request.id !== 'number' || !Number.isFinite(request.id)) return;
+    if (request.click !== undefined && !isKnownAction(request.click)) return;
+    await target.postMessage({ type: 'team-e2e', id: request.id, ...(request.click === undefined ? {} : { click: request.click }) });
+  }
+  if (testSeams) teamSectionTap.probe = probe;
+
   async function receive(value: unknown): Promise<void> {
     const message = parseTeamSectionMessage(value);
-    if (message === undefined || message.type !== 'team-action') return;
+    if (message === undefined) return;
+    if (message.type === 'team-e2e-facts') {
+      if (testSeams) teamSectionTap.facts.push({ id: message.id, ...message.facts });
+      return;
+    }
     // One team action at a time: a second click while a command still runs is ignored.
     if (busy) return;
     busy = true;
@@ -293,6 +319,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
       webview = undefined;
       handleSubscription.dispose();
       follow(undefined);
+      if (teamSectionTap.probe === probe) delete teamSectionTap.probe;
     }
   };
 }
