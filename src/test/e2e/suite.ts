@@ -73,6 +73,18 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       const models = await observer.next('toView', (message) => message.type === 'models' && JSON.stringify(message.models).includes('fake-coder'), before);
       assert.match(JSON.stringify(models.models), /fake-coder/);
     }],
+    ['a working profile without a project team shows the "no team yet" card, and Not now hides it', async () => {
+      const before = observer.toView.length;
+      await api.sidebar.refresh();
+      const shown = await observer.next('toView', (message) => message.type === 'setup-nudge', before);
+      assert.equal(shown.show, true);
+      const asked = observer.toView.length;
+      // Sent through the view, as the card's button would.
+      await api.sidebar.request({ type: 'setup-nudge', action: 'later' });
+      await observer.next('fromView', (message) => message.type === 'setup-nudge' && message.action === 'later');
+      const hidden = await observer.next('toView', (message) => message.type === 'setup-nudge', asked);
+      assert.equal(hidden.show, false);
+    }],
     ['a message streams a reply through the agent and reports usage', async () => {
       const before = observer.toView.length;
       await api.sidebar.request({ type: 'send', text: 'Say hi', model: 'fake-coder' });
