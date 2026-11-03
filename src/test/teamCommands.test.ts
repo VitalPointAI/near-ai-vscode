@@ -2,7 +2,7 @@
 // the team.json-only commit, Push only when clicked, quiet cancellation, the existing-team and failure messages, and a SEC-01 canary scan
 // of every place the command layer can show or store text. Team modules load lazily, as in the product.
 import assert from 'node:assert/strict';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import { API_KEY_SECRET, REFRESH_TOKEN_SECRET } from '../services/auth';
@@ -20,6 +20,7 @@ const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 test.after(() => { uninstall(); });
 const { ENABLE_COMMAND, PUSH_ACTION, SHARED_TEXT, SHARE_FAILED_TEXT, SHOW_DETAILS_ACTION, TRY_AGAIN_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, createSessionSlot, registerTeamMode } = commandsModule;
+const { CONNECT_NEAR_AI_ACTION, NOT_CONNECTED_TEXT, STILL_NOT_CONNECTED_TEXT } = commandsModule;
 
 const EM_DASH = '—';
 const COORDINATION_BRANCH = 'refs/heads/near-ai/coordination';
@@ -36,6 +37,8 @@ interface Project {
   handle: ReturnType<typeof registerTeamMode>;
   enable(answers: Array<string | undefined>, choices?: Array<string | undefined>): Promise<void>;
   verify(): Promise<void>;
+  // How many times Enable asked the extension to connect NEAR AI (the chat's Set up key flow).
+  connects: number;
 }
 
 function resetStub(): void {
@@ -47,11 +50,16 @@ function resetStub(): void {
   stub.inputAnswers.length = 0;
   stub.messageAnswers.length = 0;
   stub.inputRequests.length = 0;
+  stub.notificationOptions.length = 0;
   stub.commands.clear();
   stub.setWorkspaceFolders([]);
 }
 
-async function withProject(run: (project: Project) => Promise<void>, options: { initialised?: boolean; folderOpen?: boolean } = {}): Promise<void> {
+// `connect` stands in for the extension's key setup (configureApiKey): it gets the project folder and may set NEAR AI up there.
+async function withProject(
+  run: (project: Project) => Promise<void>,
+  options: { initialised?: boolean; folderOpen?: boolean; connect?: (root: string) => Promise<void> } = {}
+): Promise<void> {
   resetStub();
   const fixture = await createTeamFixture({ clones: ['a'], initialised: options.initialised ?? true });
   const root = fixture.clones['a'] as string;
@@ -64,7 +72,10 @@ async function withProject(run: (project: Project) => Promise<void>, options: { 
   const context = createFakeContext(storage, secrets);
   try {
     if (options.folderOpen !== false) stub.setWorkspaceFolders([root]);
-    const handle = registerTeamMode(context as never);
+    const counter = { connects: 0 };
+    const handle = registerTeamMode(context as never, {
+      connectNearAi: async () => { counter.connects += 1; await options.connect?.(root); }
+    });
     assert.equal(await handle.ready, 'solo');
     const run1 = async (command: string): Promise<void> => {
       const handler = stub.commands.get(command);
@@ -78,7 +89,8 @@ async function withProject(run: (project: Project) => Promise<void>, options: { 
         stub.messageAnswers.push(...choices);
         await run1(ENABLE_COMMAND);
       },
-      verify: () => run1(VERIFY_LOG_COMMAND)
+      verify: () => run1(VERIFY_LOG_COMMAND),
+      get connects() { return counter.connects; }
     });
   } finally {
     for (const subscription of context.subscriptions) subscription.dispose();
@@ -230,14 +242,48 @@ test('running Enable again names the existing team, asks no question, and offers
   });
 });
 
-test('a folder that is not set up for NEAR AI gets an error that names NEAR AI: Set Up', async () => {
+// G-61-1: a project where NEAR AI is not connected yet is connected from the Enable flow itself, which then carries on with its questions.
+const setUpNearAi = async (root: string): Promise<void> => { mkdirSync(path.join(root, '.planning', '.near-ai'), { recursive: true }); };
+
+test('Enable where NEAR AI is not connected offers Connect NEAR AI in one modal; once connected the questions follow and Team Mode turns on', async () => {
   await withProject(async (p) => {
-    await p.enable([]);
-    assert.equal(stub.notifications.length, 1);
-    assert.equal(stub.notifications[0]?.level, 'error');
-    assert.ok(stub.notifications[0]?.message.includes('NEAR AI: Set Up'));
-    assert.ok(outputLines().includes(stub.notifications[0]?.message as string));
+    await p.enable(['Connected team', 'Lead Owner', ''], [CONNECT_NEAR_AI_ACTION]);
+    assert.equal(CONNECT_NEAR_AI_ACTION, 'Connect NEAR AI');
+    assert.equal(stub.notifications[0]?.message, NOT_CONNECTED_TEXT);
+    assert.ok(NOT_CONNECTED_TEXT.startsWith('NEAR AI is not connected in this project yet.'));
+    assert.equal(stub.notificationOptions[0]?.modal, true, 'the question is a modal');
+    assert.deepEqual(stub.notificationActions[0], [CONNECT_NEAR_AI_ACTION]);
+    assert.equal(p.connects, 1, 'the key setup ran once');
+    assert.deepEqual(stub.inputRequests.map((request) => request.prompt?.split('.')[0]).slice(0, 2), ['Team name', 'Your name as teammates will see it'], 'the Enable questions followed');
+    assert.equal((await readTeamFile(p.root))?.name, 'Connected team', 'team.json was written');
+    assert.equal(p.handle.session()?.teamFile.name, 'Connected team', 'the session is running');
+    assert.equal(uiText().includes('NEAR AI: Set Up'), false, 'nobody is sent to another command');
+  }, { initialised: false, connect: setUpNearAi });
+});
+
+test('Enable where NEAR AI is still not connected after the key setup says so plainly, asks nothing and changes nothing', async () => {
+  await withProject(async (p) => {
+    const before = [...p.secrets.values.keys()].sort();
+    await p.enable(['Never asked', 'Lead Owner', ''], [CONNECT_NEAR_AI_ACTION]);
+    assert.equal(p.connects, 1);
+    assert.equal(stub.inputRequests.length, 0, 'no question was asked');
+    assert.equal(STILL_NOT_CONNECTED_TEXT, 'NEAR AI was not connected, so Team Mode was not turned on and nothing was changed.');
+    assert.deepEqual(messages(), [NOT_CONNECTED_TEXT, STILL_NOT_CONNECTED_TEXT]);
+    assert.equal(await teamJsonExists(p.root), false);
+    assert.deepEqual([...p.secrets.values.keys()].sort(), before, 'no key was stored');
+    assert.equal(remoteHasCoordination(p.fixture), false);
+    assert.equal(uiText().includes('NEAR AI: Set Up'), false);
+  }, { initialised: false });
+});
+
+test('dismissing the Connect NEAR AI question changes nothing and asks no question', async () => {
+  await withProject(async (p) => {
+    await p.enable(['Never asked', 'Lead Owner', ''], [undefined]);
+    assert.equal(p.connects, 0, 'the key setup did not run');
+    assert.deepEqual(messages(), [NOT_CONNECTED_TEXT], 'only the question was shown');
     assert.equal(stub.inputRequests.length, 0);
+    assert.equal(await teamJsonExists(p.root), false);
+    assert.equal(remoteHasCoordination(p.fixture), false);
   }, { initialised: false });
 });
 
