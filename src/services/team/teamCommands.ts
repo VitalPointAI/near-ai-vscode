@@ -14,6 +14,8 @@ export const ENABLE_COMMAND = 'nearAi.team.enable';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
 export const OPEN_BOARD_COMMAND = 'nearAi.team.openBoard';
 export const IMPORT_PLANS_COMMAND = 'nearAi.team.importPlans';
+// G-61-3: shares exactly the team setup after one plain confirmation (src/services/team/shareFlow.ts).
+export const SHARE_COMMAND = 'nearAi.team.share';
 // Every team action is a button in the Team section of the NEAR AI sidebar, so the person is pointed there rather than at a palette command.
 export const SOLO_TEXT = 'Team Mode is not on for this project. To turn it on, choose Turn on Team Mode in the Team section of the NEAR AI sidebar.';
 const OPEN_FOLDER_TEXT = 'Open your project folder first, then choose Turn on Team Mode in the Team section of the NEAR AI sidebar.';
@@ -25,13 +27,11 @@ export const LOCAL_ONLY_DETAIL = 'Put the project online where your teammates ca
 export const NOT_SHAREABLE_TEXT = 'Teammates cannot reach this project yet, because the address it is kept at online cannot be given to them as it is.';
 export const NOT_SHAREABLE_DETAIL = 'Keep the project online at an address your teammates can use, for example on GitHub, with no password or token in it, then invite people.';
 const ENABLE_ANYWAY_DETAIL = ' You can turn on Team Mode now and share it with your team once the project is online.';
-// J-10: the person shares Team Mode with their team; the extension does the push. Git words stay in the output channel.
+// J-10: the person shares Team Mode with their team through Share Team Setup. Git words stay in the output channel.
 export const PUSH_ACTION = 'Share with my team';
 export const VERIFY_ACTION = 'Check the team';
 export const SHOW_DETAILS_ACTION = 'Show details';
 export const TRY_AGAIN_ACTION = 'Try again';
-export const SHARED_TEXT = 'Shared with your team.';
-export const SHARE_FAILED_TEXT = 'Team Mode could not be shared with your team yet. Check your internet connection, then choose Try again. Nothing was lost.';
 const NOT_SHARED_TEXT = 'This project is not shared online yet, so a team cannot use it. Team Mode works through the place your project is hosted, such as GitHub. Ask whoever set up the project to put it online, or choose Show details for the steps.';
 // The plain sentence a person sees when Enable stops, by failure code. The technical message (git, remote, branch) goes to the output channel and
 // Show details opens it. A code that is not listed shows its own message, which has no developer words in it.
@@ -436,30 +436,13 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
         ? `Team Mode is on for ${result.teamFile.name}.`
         : `Team Mode is on for ${result.teamFile.name}. Share it so teammates can see the team.`;
     output.appendLine(message);
-    output.appendLine(result.branch === undefined ? 'team.json is committed.' : `team.json is committed on ${result.branch}. Sharing pushes ${result.branch} to ${result.remote}.`);
+    output.appendLine(result.branch === undefined ? 'team.json is committed.' : `team.json is committed on ${result.branch}. Sharing puts only team.json on ${defaults.integrationBranch} at ${result.remote}.`);
     const actions = offerShare ? [PUSH_ACTION, VERIFY_ACTION] : [VERIFY_ACTION];
     const choice = await choose('info', message, ...actions);
-    if (choice === PUSH_ACTION && offerShare && result.branch !== undefined) {
-      await share(projectRoot, result.remote, result.branch);
+    if (choice === PUSH_ACTION && offerShare) {
+      await vscode.commands.executeCommand(SHARE_COMMAND, { reason: 'enable' });
     } else if (choice === VERIFY_ACTION) {
       await verifyLog();
-    }
-  }
-
-  // J-10: Share with my team pushes the code branch that holds team.json. A failure keeps its git reason in the channel and offers Try again.
-  async function share(projectRoot: string, remote: string, branch: string): Promise<void> {
-    const { pushCodeBranch } = await import('../../team/enable');
-    for (;;) {
-      const pushed = await pushCodeBranch(projectRoot, remote, branch);
-      if (pushed.ok) {
-        output.appendLine(`Pushed ${branch} to ${remote}.`);
-        report('info', SHARED_TEXT);
-        return;
-      }
-      output.appendLine(await describe(pushed.message));
-      const next = await choose('error', SHARE_FAILED_TEXT, TRY_AGAIN_ACTION, SHOW_DETAILS_ACTION);
-      if (next === SHOW_DETAILS_ACTION) output.show(true);
-      if (next !== TRY_AGAIN_ACTION) return;
     }
   }
 
@@ -476,6 +459,32 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       if (state === 'solo') announce('info', SOLO_TEXT);
     }
     return slot.current();
+  }
+
+  // G-61-3: Share Team Setup. Only the owner or a lead may share (the member.invite decision, as Invite uses); anyone else is told who can.
+  async function shareCommand(argument?: unknown): Promise<void> {
+    const running = await sessionForCommand();
+    const projectRoot = firstFolder();
+    if (running === undefined || projectRoot === undefined) return;
+    const { decideTeamAction } = await import('../../domain/team/permissions');
+    const myId = running.memberId();
+    if (myId === undefined) {
+      report('info', 'This computer is not a member of the team yet, so it cannot share the team setup.');
+      return;
+    }
+    if (!decideTeamAction(running.state(), myId, { kind: 'member.invite' }).allowed) {
+      const role = running.state().members.get(myId)?.role ?? 'member';
+      report('info', `Only the owner or a lead can share the team setup. Your role in this team is ${role}.`);
+      return;
+    }
+    // This computer's team.json is what teammates must get; the running session may be a moment behind it.
+    const { readTeamFile } = await import('../../team/teamFile');
+    const teamFile = (await readTeamFile(projectRoot)) ?? running.teamFile;
+    const fromEnable = typeof argument === 'object' && argument !== null && (argument as { reason?: unknown }).reason === 'enable';
+    const { ensureTeamSetupShared } = await import('./shareFlow');
+    await ensureTeamSetupShared({ output, announce }, {
+      projectRoot, teamFile, branch: running.state().team.policy.integrationBranch, reason: fromEnable ? 'enable' : 'command'
+    });
   }
 
   async function openBoard(): Promise<void> {
@@ -532,6 +541,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     vscode.commands.registerCommand(VERIFY_LOG_COMMAND, guarded('Check Team Record', verifyLog)),
     vscode.commands.registerCommand(OPEN_BOARD_COMMAND, guarded('Open Team Board', openBoard)),
     vscode.commands.registerCommand(IMPORT_PLANS_COMMAND, guarded('Import Plans to Team Board', importPlansCommand)),
+    vscode.commands.registerCommand(SHARE_COMMAND, guarded('Share Team Setup', shareCommand)),
     ...registerMemberCommands({
       context, output, report, announce, soloText: SOLO_TEXT, firstFolder, session: () => slot.current(), startSession, restartSession,
       ...(options.nearBaseUrl === undefined ? {} : { nearBaseUrl: options.nearBaseUrl }),

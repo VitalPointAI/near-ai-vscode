@@ -255,6 +255,12 @@
         "title": "Import Plans to Team Board",
         "category": "NEAR AI",
         "icon": "$(sync)"
+      },
+      {
+        "command": "nearAi.team.share",
+        "title": "Share Team Setup",
+        "category": "NEAR AI",
+        "icon": "$(cloud-upload)"
       }
     ],
     "viewsContainers": {

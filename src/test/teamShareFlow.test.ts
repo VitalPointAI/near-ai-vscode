@@ -196,7 +196,9 @@ test('offline: plain words with Try again and Show details; each Try again tries
     const index = stub.notifications.findIndex((entry) => entry.message === SHARE_TEXT.offline);
     assert.deepEqual(stub.notificationActions[index], [TRY_AGAIN_ACTION, SHOW_DETAILS_ACTION]);
     assert.deepEqual(modals(), [], 'no confirmation was asked while nothing could be shared');
-    assert.equal(s.lines.join('\n').includes('unreachable.git'), false, 'the address is not in the channel');
+    // git's own reason (which names where it tried) is the technical detail kept in the channel; the person never reads it.
+    assert.ok(s.lines.some((line) => line.includes('(offline)')), 'the technical reason is in the channel');
+    assert.equal(shownText(s).includes('unreachable.git'), false, 'no address is shown to the person');
   });
 });
 

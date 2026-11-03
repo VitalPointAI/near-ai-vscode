@@ -969,7 +969,8 @@ test('a member without management rights is told who can share the team setup, a
     const before = gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']);
     clearUi();
     await j.run(SHARE_COMMAND);
-    assert.ok(shownMessages().includes('Only the owner or a lead can share the team setup. Your role in this team is developer.'), shownMessages().join(' | '));
+    // Dana joined as a developer invitee and stays an observer until the lead confirms her.
+    assert.ok(shownMessages().includes('Only the owner or a lead can share the team setup. Your role in this team is observer.'), shownMessages().join(' | '));
     assert.equal(stub.notificationOptions.some((options) => options?.modal === true), false, 'no confirmation was asked');
     assert.equal(gitIn(t.fixture.remote, ['rev-parse', 'refs/heads/main']), before, 'nothing was shared');
     await closeWindow(j);
