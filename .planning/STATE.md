@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Phase 62 executed, reviewed and fixed; verification human_needed (owner hands-on checks)
-last_updated: "2026-11-03T00:36:22.654Z"
+stopped_at: Completed 61-15-PLAN.md
+last_updated: "2026-11-03T21:27:32.381Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: e13ef2283bd35b4f02c1e72b4529bf6bfdb75d7e
+state_head: a774b5f946c51def546165200bdcccbc4e78a459
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 40
-  completed_plans: 40
+  total_plans: 59
+  completed_plans: 41
   percent: 13
 ---
 
@@ -94,6 +94,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P12 | 36 min | 2 tasks | 4 files |
 | Phase 62 P13 | 105 min | 3 tasks | 6 files |
 | Phase 62 P14 | 70min | 3 tasks | 9 files |
+| Phase 61 P15 | 30min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -175,6 +176,8 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-13: the host re-checks create and edit permission on fresh state inside the append, writes one item.created with the estimate, and answers a non-whole-number estimate from the parse-failure path while other malformed drafts stay unanswered
 - [Phase 62]: 62-14: the host does not send a state with error when the board model cannot be built; the page's slow-load message with Try again and Show details covers it
 - [Phase 62]: 62-14: BOARD-01/02/03 ticked; the 2 s relay half of BOARD-02 stays with Phase 67; owner-only manual checks (themes, reflow, screen reader, density, two real windows) remain
+- [Phase 61]: 61-15: a member's key is called AI key and a link-wide key team key; every manual step says your organization's settings on the NEAR AI website
+- [Phase 61]: 61-15: pin texts already name the command title NEAR AI: Link Your Organization; the command and adapter text are renamed in 61-24
 
 ### Pending Todos
 
@@ -196,9 +199,9 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-03T00:36:21.998Z
-Stopped at: Phase 62 executed, reviewed and fixed; verification human_needed (owner hands-on checks)
-Resume file: .planning/phases/62-work-model-gsd-import-team-board-live-read-and-move/62-VERIFICATION.md
+Last session: 2026-11-03T21:27:32.160Z
+Stopped at: Completed 61-15-PLAN.md
+Resume file: None
 
 ## Notes
 
