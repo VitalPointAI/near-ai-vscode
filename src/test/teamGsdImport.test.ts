@@ -254,7 +254,9 @@ function git(args: string[]): string {
   return execFileSync('git', ['-C', REPO_ROOT, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 }
 
-test('every plan committed at HEAD parses, and HEAD gives milestone v0.6.0 with phases 60 to 67 and finished phases 60 and 61', () => {
+// The expectations come from the files committed at HEAD, so the test follows the repository as plans and SUMMARYs are added (gap-closure plans
+// included): every committed plan is in the graph, and a plan counts as finished exactly when its SUMMARY is committed next to it.
+test('every plan committed at HEAD parses, and HEAD gives milestone v0.6.0 with phases 60 to 67, finished Phase 60 and the first 14 plans of Phase 61', () => {
   const listed = git(['ls-tree', '-r', '-z', '--full-tree', '--name-only', 'HEAD', '--', '.planning']).split('\0').filter((name) => name !== '');
   const files = new Map<string, string>();
   const planPaths = listed.filter((name) => name.endsWith('-PLAN.md'));
@@ -272,15 +274,19 @@ test('every plan committed at HEAD parses, and HEAD gives milestone v0.6.0 with 
       assert.ok(Number.isInteger(fields.wave), `${name} has an integer wave`);
     }
   }
+  // Which plans have a SUMMARY committed at HEAD, as phase-plan keys.
+  const summarised = new Set(listed.map((name) => planIdentity(name)).filter((identity) => identity?.kind === 'summary').map((identity) => `${identity!.phase}-${identity!.plan}`));
   const graph = graphOf({ paths: listed, files });
   assert.equal(graph.milestone.key, 'v0.6.0');
   assert.equal(graph.milestone.current, true);
   assert.deepEqual(graph.phases.map((phase) => phase.number), ['60', '61', '62', '63', '64', '65', '66', '67']);
   const inPhase = (number: string) => graph.plans.filter((plan) => plan.phase === number);
+  const onDisk = (number: string): number => planPaths.filter((name) => planIdentity(name)?.phase === number).length;
+  for (const phase of ['60', '61', '62']) assert.equal(inPhase(phase).length, onDisk(phase), `every plan of Phase ${phase} committed at HEAD is in the graph`);
   assert.equal(inPhase('60').length, 12);
-  assert.equal(inPhase('61').length, 14);
-  for (const plan of [...inPhase('60'), ...inPhase('61')]) assert.equal(plan.hasSummary, true, `${plan.phase}-${plan.plan} has a SUMMARY`);
-  const onDisk = planPaths.filter((name) => planIdentity(name)?.phase === '62').length;
-  assert.equal(inPhase('62').length, onDisk);
+  assert.ok(inPhase('61').length >= 14, `the 14 plans of Phase 61 and its gap-closure plans (${inPhase('61').length})`);
+  for (const plan of inPhase('60')) assert.equal(plan.hasSummary, true, `${plan.phase}-${plan.plan} has a SUMMARY`);
+  for (const plan of inPhase('61').filter((entry) => Number(entry.plan) <= 14)) assert.equal(plan.hasSummary, true, `${plan.phase}-${plan.plan} has a SUMMARY`);
+  for (const plan of graph.plans) assert.equal(plan.hasSummary, summarised.has(`${plan.phase}-${plan.plan}`), `${plan.phase}-${plan.plan} is finished exactly when its SUMMARY is committed`);
   assert.ok(graph.plans.every((plan) => plan.tasks.length > 0 && plan.title !== ''));
 });

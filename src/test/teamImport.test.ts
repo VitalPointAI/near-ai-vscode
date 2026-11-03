@@ -816,11 +816,22 @@ test('this repository\'s own .planning at HEAD imports into a correct graph, and
 
     assert.equal(items.get('milestone:v0.6.0')?.active, true);
     for (const phase of ['60', '61', '62', '63', '64', '65', '66', '67']) assert.equal(items.get(`phase:${phase}`)?.kind, 'phase', `phase:${phase}`);
-    const finished = [...items.values()].filter((item) => item.kind === 'plan' && /^plan:6[01]-/.test(item.id));
-    assert.ok(finished.length >= 26, `the 12 plans of Phase 60 and the 14 of Phase 61 (${finished.length})`);
-    for (const plan of finished) {
-      assert.equal(plan.state, 'done', plan.id);
-      assert.equal(plan.summary, true, plan.id);
+    // Phases 60 and 61 as committed at HEAD: every plan file is an item, and a plan is done exactly when its SUMMARY is committed (gap-closure plans
+    // are added to a finished phase without one until they are executed).
+    const committed = gitIn(REPO_ROOT, ['ls-tree', '-r', '--name-only', 'HEAD', '--', '.planning/phases']).split('\n');
+    const keysOf = (suffix: string): string[] => committed.map((name) => /\/(6[01]-\d+)-(PLAN|SUMMARY)\.md$/.exec(name)).filter((match) => match?.[2] === suffix).map((match) => match![1]!);
+    const plansAtHead = keysOf('PLAN');
+    const summariesAtHead = new Set(keysOf('SUMMARY'));
+    const plans = [...items.values()].filter((item) => item.kind === 'plan' && /^plan:6[01]-/.test(item.id));
+    assert.deepEqual(plans.map((plan) => plan.id).sort(), plansAtHead.map((key) => `plan:${key}`).sort(), 'every plan of Phases 60 and 61 at HEAD is an item');
+    assert.ok(summariesAtHead.size >= 26, `the 12 plans of Phase 60 and the first 14 of Phase 61 are finished (${summariesAtHead.size})`);
+    for (const key of [...Array.from({ length: 12 }, (_, index) => `60-${String(index + 1).padStart(2, '0')}`), ...Array.from({ length: 14 }, (_, index) => `61-${String(index + 1).padStart(2, '0')}`)]) {
+      assert.ok(summariesAtHead.has(key), `${key} has a SUMMARY at HEAD`);
+    }
+    for (const plan of plans) {
+      const finished = summariesAtHead.has(plan.id.slice('plan:'.length));
+      assert.equal(plan.state === 'done', finished, `${plan.id} is done exactly when its SUMMARY is committed (state ${plan.state})`);
+      assert.equal(plan.summary === true, finished, plan.id);
     }
 
     const planFile = gitIn(REPO_ROOT, ['ls-tree', '-r', '--name-only', 'HEAD', '--', '.planning/phases']).split('\n').find((name) => name.endsWith('/61-05-PLAN.md'));
