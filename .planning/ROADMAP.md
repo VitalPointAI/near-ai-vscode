@@ -106,7 +106,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. After the full invite, join and remove flow, a privacy canary finds no secret (API key, session token, clear-text invite code) in the coordination branch, `team.json`, settings, audit or transcripts.
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 14/22 plans executed in 11 waves (Waves 8 to 11 are the fix pass for the owner's 61-UAT findings, 2026-11-03)
+**Plans**: 14/24 plans executed in 13 waves (Waves 8 to 13 are the fix pass for the owner's 61-UAT findings, 2026-11-03)
 **UI hint**: yes
 
 **Wave 1**
@@ -138,19 +138,25 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [x] 61-14-PLAN.md — Full-flow test on three clones and the fake NEAR, privacy canary, opt-in live test, phase gate (TEAM-02, TEAM-03)
 
 **Wave 8** *(gap closure for 61-UAT G-61-1 to G-61-6)*
-- [ ] 61-15-PLAN.md — "Your organization" everywhere, one-line linking explanation with Link now or Not now, renamed titles, banned term in the plain-language scan (TEAM-02, TEAM-03)
+- [ ] 61-15-PLAN.md — "Your organization" in the core flows' text (join, invite, remove, key delivery, link, team file, NEAR AI client manual steps) (TEAM-02, TEAM-03)
 - [ ] 61-16-PLAN.md — Online home core: reachable-by-teammates check, team setup shared check, share exactly team.json (TEAM-02)
 - [ ] 61-17-PLAN.md — Sidebar Team section model and page: state-driven buttons, board summary slot, setup steps for SETUP-01 (TEAM-02)
 
 **Wave 9** *(blocked on Wave 8 completion)*
 - [ ] 61-18-PLAN.md — Join catch-up core: same-project copy brought up to date safely before joining (TEAM-02)
-- [ ] 61-19-PLAN.md — Enable connects NEAR AI in place and checks the online home up front; Share Team Setup; prompts seam (TEAM-01, TEAM-02)
+- [ ] 61-24-PLAN.md — "Your organization" in the commands and session, one-line linking explanation with Link now or Not now, renamed titles, banned term and discovery scan (TEAM-02, TEAM-03)
 
 **Wave 10** *(blocked on Wave 9 completion)*
-- [ ] 61-20-PLAN.md — Invite shares first with one confirmation and shows Copy invite; Join uses catch-up; Link shares (TEAM-02)
-- [ ] 61-21-PLAN.md — Team section host in the NEAR AI sidebar: buttons run the commands, live refresh, e2e probe (TEAM-02)
+- [ ] 61-19-PLAN.md — Enable connects NEAR AI in place and checks the online home up front; Share Team Setup; prompts seam (TEAM-01, TEAM-02)
 
 **Wave 11** *(blocked on Wave 10 completion)*
+- [ ] 61-20-PLAN.md — Invite shares first with one confirmation; Join uses catch-up (TEAM-02)
+- [ ] 61-21-PLAN.md — Team section host in the NEAR AI sidebar: buttons run the commands, live refresh, e2e probe (TEAM-02)
+
+**Wave 12** *(blocked on Wave 11 completion)*
+- [ ] 61-23-PLAN.md — Invite modal with Copy invite and how to send it; Link Your Organization shares; push helpers removed (TEAM-02)
+
+**Wave 13** *(blocked on Wave 12 completion)*
 - [ ] 61-22-PLAN.md — Real-window e2e: enable, invite, join from a behind copy, confirm; full phase gate (TEAM-01, TEAM-02, TEAM-03)
 
 ### Phase 62: Work model, GSD import, Team Board (live, read and move)
@@ -290,7 +296,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
-| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 14/22 | In Progress (fix pass planned) | - |
+| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 14/24 | In Progress (fix pass planned) | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 14/14 | In Progress | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
