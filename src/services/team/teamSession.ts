@@ -52,7 +52,7 @@ export const JOIN_COMMAND = 'nearAi.team.join';
 export const MANAGE_MEMBERS_COMMAND = 'nearAi.team.manageMembers';
 export const NOTIFIED_FILE = 'notified.json';
 export const JOIN_ACTION = 'Join Team';
-export const PERSONAL_KEY_WARNING = 'This team project is using your personal NEAR key, so the spend cap your lead set does not apply. Runs are marked as personal-key runs.';
+export const PERSONAL_KEY_WARNING = 'This team project is using your personal AI key, so the spend cap your lead set does not apply. Runs are marked as personal-key runs.';
 export const USE_TEAM_KEY_ACTION = 'Use team key';
 // The WR-02 notice's button. The command id is copied, like JOIN_COMMAND, so this module never loads the command module; teamManifest.test.ts pins it.
 export const IMPORT_NOW_ACTION = 'Import now';
@@ -707,7 +707,7 @@ export class TeamSession {
       const session = new NearSession({ teamId: this.teamFile.teamId, secrets: this.deps.secrets, baseUrl: this.deps.nearBaseUrl ?? DEFAULT_BASE_URL });
       return (await session.signedIn())?.label;
     } catch (error) {
-      this.reportIssue('near-label', `The NEAR sign-in for this team could not be read: ${describeError(error)}`);
+      this.reportIssue('near-label', `The NEAR AI sign-in for this team could not be read: ${describeError(error)}`);
       return undefined;
     }
   }
@@ -800,7 +800,7 @@ export class TeamSession {
     const teamProfile = teamProfileId(this.teamFile.teamId);
     if (selected === undefined || selected === teamProfile) return;
     this.personalKeyWarned = true;
-    this.line('This project is using a personal NEAR key, not the team key.');
+    this.line('This project is using a personal AI key, not the team key.');
     this.offer('warn', PERSONAL_KEY_WARNING, [{ label: USE_TEAM_KEY_ACTION, run: async () => { await store.select(teamProfile); } }]);
   }
 
@@ -841,10 +841,10 @@ export class TeamSession {
         ]);
       } else if (item.kind === 'deliver-key') {
         if (!(await this.firstTime(`deliver-key:${member.id}:${keyEvent}`))) continue;
-        this.offer('info', `${name} is confirmed and still needs a NEAR key`, [{ label: 'Send key', run: () => this.runManage(member.id, 'deliver-key') }]);
+        this.offer('info', `${name} is confirmed and still needs an AI key`, [{ label: 'Send key', run: () => this.runManage(member.id, 'deliver-key') }]);
       } else {
         if (!(await this.firstTime(`rotate-key:${member.id}:${keyEvent}`))) continue;
-        this.offer('info', `${name}'s NEAR key has to be replaced because their devices changed`, [{ label: 'Rotate key', run: () => this.runManage(member.id, 'rotate-key') }]);
+        this.offer('info', `${name}'s AI key has to be replaced because their devices changed`, [{ label: 'Rotate key', run: () => this.runManage(member.id, 'rotate-key') }]);
       }
     }
   }

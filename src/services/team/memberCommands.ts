@@ -1,4 +1,4 @@
-// The membership commands (TEAM-02, TEAM-03): Invite to Team, Join Team, Manage Team Members, Link Team to NEAR Organization and Sign Out of NEAR (Team).
+// The membership commands (TEAM-02, TEAM-03): Invite to Team, Join Team, Manage Team Members, Link Your Organization and Sign Out of NEAR AI for This Team.
 // Each is a thin adapter: it asks plain questions, calls the vscode-free flows in src/team, and says what happened and what to do next. Nothing here
 // logs, stores or shows a code, key, token or repository address: the invite bundle appears once in a modal and on the clipboard when the lead
 // chooses Copy, and pasted bundles and keys go through password inputs.
@@ -34,31 +34,31 @@ const LINK_CHOICE = 'Link a NEAR organization';
 const SKIP_CHOICE = 'Skip';
 const CLONE_ACTION = 'Get the project';
 const SIGN_IN_ACTION = 'Sign in';
-const WITHOUT_NEAR_ACTION = 'Invite without NEAR';
+const WITHOUT_NEAR_ACTION = 'Invite without signing in';
 const REPLACE_LINK_ACTION = 'Replace link';
 const RESET_ACTION = 'Remove unfinished keys';
-const CONTINUE_WITHOUT_NEAR_ACTION = 'Continue without NEAR';
+const CONTINUE_WITHOUT_NEAR_ACTION = 'Continue without signing in';
 const REMOVE_ACTION = 'Remove';
 const CANCEL_INVITATION_ACTION = 'Cancel invitation';
 // UI review issue 1: what each long flow is doing, in plain words. The steps come from the vscode-free flows as codes.
-const INVITE_STEP_TEXT: Record<'log' | 'near', string> = { log: 'Saving the invitation to the team record', near: 'Sending the NEAR organization invitation' };
+const INVITE_STEP_TEXT: Record<'log' | 'near', string> = { log: 'Saving the invitation to the team record', near: 'Sending the invitation to your organization' };
 const JOIN_STEP_TEXT: Record<'check' | 'keys' | 'log' | 'near' | 'key', string> = {
   check: 'Reading the team record and checking your invitation', keys: 'Making the keys for this computer', log: 'Saving your join to the team record',
-  near: 'Accepting the NEAR organization invitation', key: 'Adding your API key'
+  near: 'Accepting the invitation to your organization', key: 'Adding your API key'
 };
 const DELIVERY_STEP_TEXT: Record<'confirm' | 'read-old' | 'create' | 'seal' | 'log' | 'retire', string> = {
   confirm: 'Saving the confirmation to the team record', 'read-old': 'Reading the limit and spend of the old key', create: 'Creating the key with its spend cap',
   seal: 'Sealing the key to their computer', log: 'Saving the key delivery to the team record', retire: 'Setting the old key limit to 0 and revoking it'
 };
 const REMOVE_STEP_TEXT: Record<'cap' | 'log' | 'revoke' | 'organization' | 'cancel-near', string> = {
-  cap: 'Setting the NEAR key limit to 0', log: 'Saving the removal to the team record', revoke: 'Revoking the NEAR key',
-  organization: 'Removing them from the NEAR organization', 'cancel-near': 'Cancelling the NEAR invitation'
+  cap: 'Setting the AI key limit to 0', log: 'Saving the removal to the team record', revoke: 'Revoking the AI key',
+  organization: 'Removing them from your organization', 'cancel-near': 'Cancelling the invitation to your organization'
 };
 const READ_ONLY_TEXT = 'Only the owner or a lead can change the team. You can see everyone here, but not change anything.';
 const STEP_TEXT: Record<CleanupStep, string> = {
-  'send-invitation': 'Send the NEAR invitation', 'cancel-invitation': 'Cancel the NEAR invitation', 'deliver-key': 'Send the team key',
+  'send-invitation': 'Send the invitation to your organization', 'cancel-invitation': 'Cancel the invitation to your organization', 'deliver-key': 'Send the team key',
   'rotate-key': 'Replace the team key', 'zero-limit': 'Set the key limit to 0', 'revoke-key': 'Revoke the key',
-  'remove-org-member': 'Remove from the NEAR organization', 'repo-access': 'Remove their access to the project on GitHub (or wherever the project is hosted)'
+  'remove-org-member': 'Remove from your organization', 'repo-access': 'Remove their access to the project on GitHub (or wherever the project is hosted)'
 };
 const MEMBER_ACTIONS = ['confirm', 'deliver-key', 'rotate-key', 'remove'] as const;
 type MemberAction = (typeof MEMBER_ACTIONS)[number];
@@ -243,12 +243,12 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const choice = await pick<vscode.QuickPickItem & { provider: 'github' | 'google' }>([
       { label: 'Sign in with GitHub', description: 'Opens NEAR AI Cloud in your browser', provider: 'github' },
       { label: 'Sign in with Google', description: 'For a NEAR AI Cloud account that signs in with Google', provider: 'google' }
-    ], { title: 'Sign in to NEAR', placeHolder: 'NEAR AI keeps this sign-in for this team until you run "NEAR AI: Sign Out of NEAR (Team)"' });
+    ], { title: 'Sign in to NEAR AI', placeHolder: 'NEAR AI keeps this sign-in for this team until you run "NEAR AI: Sign Out of NEAR AI for This Team"' });
     if (choice === undefined) return undefined;
     const { browserSignIn, TEAM_SIGN_IN_COPY } = await import('../nearSignIn');
     const address = await baseUrl();
     return vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'Waiting for the NEAR sign-in in your browser', cancellable: true },
+      { location: vscode.ProgressLocation.Notification, title: 'Waiting for the NEAR AI sign-in in your browser', cancellable: true },
       (_progress, token) => {
         const abort = new AbortController();
         token.onCancellationRequested(() => { abort.abort(); });
@@ -274,12 +274,12 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       tokens = await getTokens(teamId);
     } catch (error) {
       const { SignInError } = await import('../reportingSignIn');
-      if (error instanceof SignInError && error.code === 'cancelled') deps.announce('info', 'The NEAR sign-in was cancelled. Nothing was changed.');
-      else deps.report('error', `The NEAR sign-in did not finish: ${await describeNear(error)}`);
+      if (error instanceof SignInError && error.code === 'cancelled') deps.announce('info', 'The NEAR AI sign-in was cancelled. Nothing was changed.');
+      else deps.report('error', `The NEAR AI sign-in did not finish: ${await describeNear(error)}`);
       return undefined;
     }
     if (tokens === undefined) {
-      deps.announce('info', 'You were not signed in to NEAR. Nothing was changed.');
+      deps.announce('info', 'You were not signed in to NEAR AI. Nothing was changed.');
       return undefined;
     }
     try {
@@ -292,7 +292,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       nearSessions.set(teamId, session);
       return { session, org: await orgClientFor(session), label: me.username };
     } catch (error) {
-      deps.report('error', `The NEAR sign-in did not finish: ${await describeNear(error, tokens)}`);
+      deps.report('error', `The NEAR AI sign-in did not finish: ${await describeNear(error, tokens)}`);
       return undefined;
     }
   }
@@ -346,7 +346,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     }
   }
 
-  // ---- Link Team to NEAR Organization (D-03) ---------------------------------------------------------------------------------------------
+  // ---- Link Your Organization (D-03) -----------------------------------------------------------------------------------------------------
 
   // Returns true when the team ends up linked to the chosen organization (also when it already was), false when nothing was linked.
   async function linkFlow(projectRoot: string, wait: boolean): Promise<boolean> {
@@ -365,33 +365,33 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     let stopped = false;
     try {
       // Reading the lists changes nothing, so it can be stopped: a stop is honoured once the lists come back.
-      choices = await withSteps('Reading your NEAR organizations', true, async (step, token) => {
+      choices = await withSteps('Reading your organizations', true, async (step, token) => {
         step('Listing the organizations and workspaces you can link');
         const read = await linkChoices(kept.org);
         stopped = token.isCancellationRequested;
         return read;
       });
     } catch (error) {
-      deps.report('error', `Your NEAR organizations could not be read: ${await describeNear(error)}`);
+      deps.report('error', `Your organizations could not be read: ${await describeNear(error)}`);
       return false;
     }
     if (stopped) {
-      deps.report('info', 'You stopped reading your NEAR organizations. The link was not changed.');
+      deps.report('info', 'You stopped reading your organizations. The link was not changed.');
       return false;
     }
     if (choices.length === 0) {
-      deps.report('info', 'You are not an owner or admin of any NEAR organization, so there is nothing to link. Ask an owner to make you an admin, then run "NEAR AI: Link Team to NEAR Organization" again.');
+      deps.report('info', 'You are not an owner or admin of any organization on NEAR AI, so there is nothing to link. Ask an owner to make you an admin, then run "NEAR AI: Link Your Organization" again.');
       return false;
     }
     const organizations = await Promise.all(choices.map(async (choice) => ({ label: await display(choice.organization.name), description: choice.organization.role, choice })));
-    const organization = await pick(organizations, { title: 'Link Team to NEAR Organization', placeHolder: `Pick the organization that pays for ${teamName}` });
+    const organization = await pick(organizations, { title: 'Link Your Organization', placeHolder: `Pick the organization that pays for ${teamName}` });
     if (organization === undefined) return false;
     if (organization.choice.workspaces.length === 0) {
-      deps.report('info', `${organization.label} has no workspaces yet. Create one in the NEAR console, then run "NEAR AI: Link Team to NEAR Organization" again.`);
+      deps.report('info', `${organization.label} has no workspaces yet. Create one in your organization's settings on the NEAR AI website, then run "NEAR AI: Link Your Organization" again.`);
       return false;
     }
     const workspaces = await Promise.all(organization.choice.workspaces.map(async (workspace) => ({ label: await display(workspace.name), workspace })));
-    const workspace = await pick(workspaces, { title: 'Link Team to NEAR Organization', placeHolder: `Pick the workspace for ${teamName}'s member keys` });
+    const workspace = await pick(workspaces, { title: 'Link Your Organization', placeHolder: `Pick the workspace for ${teamName}'s member keys` });
     if (workspace === undefined) return false;
 
     const near = { organizationId: organization.choice.organization.id, workspaceId: workspace.workspace.id };
@@ -403,7 +403,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     let result = await saveLink(false);
     if (!result.ok && result.code === 'different-link') {
       const confirmed = await vscode.window.showWarningMessage(
-        `${teamName} is already linked to a different NEAR organization or workspace. Replace the link only if your whole team agrees.`,
+        `${teamName} is already linked to a different organization or workspace. Replace the link only if your whole team agrees.`,
         { modal: true }, REPLACE_LINK_ACTION
       );
       if (confirmed !== REPLACE_LINK_ACTION) {
@@ -444,11 +444,11 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   async function linkCommand(): Promise<void> {
     const found = await requireTeam();
     if (found === undefined) return;
-    if (!await requireManager(found.session, 'link a NEAR organization')) return;
+    if (!await requireManager(found.session, 'link your organization')) return;
     await linkFlow(found.projectRoot, true);
   }
 
-  // ---- Sign Out of NEAR (Team) (D-01) -----------------------------------------------------------------------------------------------------
+  // ---- Sign Out of NEAR AI for This Team (D-01) -------------------------------------------------------------------------------------------
 
   async function signOutCommand(): Promise<void> {
     const projectRoot = deps.firstFolder();
@@ -465,13 +465,13 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const teamName = await display(teamFile.name);
     const session = await nearSessionFor(teamFile.teamId);
     if (await session.signedIn() === undefined) {
-      deps.report('info', `You are not signed in to NEAR for ${teamName}. There is nothing to sign out of.`);
+      deps.report('info', `You are not signed in to NEAR AI for ${teamName}. There is nothing to sign out of.`);
       return;
     }
     const { serverConfirmed } = await session.signOut();
     deps.report('info', serverConfirmed
-      ? `Signed out of NEAR for ${teamName}.`
-      : `Signed out of NEAR for ${teamName} on this computer. NEAR could not be reached to end the sign-in there; it expires on its own.`);
+      ? `Signed out of NEAR AI for ${teamName}.`
+      : `Signed out of NEAR AI for ${teamName} on this computer. NEAR AI could not be reached to end the sign-in there; it expires on its own.`);
   }
 
   // ---- Invite to Team ----------------------------------------------------------------------------------------------------------------
@@ -481,7 +481,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const kept = await keptSession(teamId);
     if (kept !== undefined) return kept.org;
     const choice = await vscode.window.showInformationMessage(
-      `${name} will also be invited to your NEAR organization, which needs your NEAR sign-in. Sign in now, or invite without it and finish the NEAR step later from "NEAR AI: Manage Team Members".`,
+      `${name} will also be invited to your organization, which needs your NEAR AI sign-in. Sign in now, or invite without signing in and finish that step later from "NEAR AI: Manage Team Members".`,
       { modal: true }, SIGN_IN_ACTION, WITHOUT_NEAR_ACTION
     );
     if (choice === undefined) return 'cancelled';
@@ -565,7 +565,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       if (choice === undefined) return;
       if (choice.label === LINK_CHOICE) {
         if (!await linkFlow(projectRoot, false)) {
-          deps.report('info', 'The NEAR organization was not linked, so no invite was made. Nothing was changed.');
+          deps.report('info', 'Your organization was not linked, so no invite was made. Nothing was changed.');
           return;
         }
         session = deps.session() ?? session;
@@ -589,7 +589,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       }
       const { teamFileUnpushed } = await import('../../team/nearLink');
       if (await teamFileUnpushed(projectRoot) === true) {
-        void offerPush('warn', 'The NEAR link is not shared with your team yet, so a teammate who gets the project now will not see it. Share it before they join.', projectRoot, teamFile.coordination.remote);
+        void offerPush('warn', 'The organization link is not shared with your team yet, so a teammate who gets the project now will not see it. Share it before they join.', projectRoot, teamFile.coordination.remote);
       }
     }
 
@@ -612,8 +612,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       return;
     }
     await presentBundle(shownName, result.bundle);
-    if (result.nearInvitation === 'sent') deps.report('info', `${shownName} was also invited to your NEAR organization as an admin. They accept it when they join.`);
-    else if (result.nearInvitation === 'already-member') deps.report('info', `${shownName} is already in your NEAR organization.`);
+    if (result.nearInvitation === 'sent') deps.report('info', `${shownName} was also invited to your organization as an admin. They accept it when they join.`);
+    else if (result.nearInvitation === 'already-member') deps.report('info', `${shownName} is already in your organization.`);
     if (result.notice !== undefined) deps.report('info', await safe(result.notice));
     session.nudge();
   }
@@ -673,11 +673,11 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       signIn: () => getTokens(teamFile.teamId),
       askInvitationLink: () => ask({
         title: 'Join Team', password: true, placeHolder: 'The link from the invitation email',
-        prompt: 'NEAR AI found no invitation for the NEAR login you used. Paste the link from your NEAR invitation email, or leave this empty to skip it.'
+        prompt: 'NEAR AI found no invitation for the NEAR AI account you used. Paste the link from the email inviting you to the organization, or leave this empty to skip it.'
       }),
       pasteOwnKey: () => ask({
         title: 'Join Team', password: true, placeHolder: 'Your NEAR AI API key',
-        prompt: 'This team has no NEAR organization, so your lead cannot send you a team key. Paste your own NEAR AI API key to start working, or leave this empty to add one later from the NEAR AI settings.'
+        prompt: 'This team has no organization linked, so your lead cannot send you a team key. Paste your own NEAR AI API key to start working, or leave this empty to add one later from the NEAR AI settings.'
       })
     }));
 
@@ -699,8 +699,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       said += ' Your team key is installed for this project.';
     }
     deps.report('info', said);
-    if (result.nearInvitation === 'accepted') deps.report('info', 'You joined the NEAR organization.');
-    else if (result.nearInvitation === 'already-member') deps.report('info', 'You are already in the NEAR organization.');
+    if (result.nearInvitation === 'accepted') deps.report('info', 'You joined your organization, the account that pays for your team\'s AI.');
+    else if (result.nearInvitation === 'already-member') deps.report('info', 'You are already in your organization.');
     for (const notice of result.notices) deps.report('info', await safe(notice));
   }
 
@@ -776,7 +776,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const keys = await import('../../team/keyDelivery');
     switch (action) {
       case 'confirm': {
-        const chosen = await orgForAction(teamFile, `Confirming ${name} also sends their NEAR key, which needs your NEAR sign-in. Sign in now, or confirm now and send the key later from this list.`, true);
+        const chosen = await orgForAction(teamFile, `Confirming ${name} also sends their AI key, which needs your NEAR AI sign-in. Sign in now, or confirm now and send the key later from this list.`, true);
         if (chosen === undefined) return;
         const result = await withSteps(`Confirming ${name}`, false, (step) => keys.confirmMember({
           log, teamFile, memberId, checklist, ...(chosen.org === undefined ? {} : { org: chosen.org }), onStep: (code) => { step(DELIVERY_STEP_TEXT[code]); }
@@ -796,7 +796,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       case 'deliver-key':
       case 'rotate-key': {
         const { signInToSendKeyText } = keys;
-        const chosen = await orgForAction(teamFile, `${signInToSendKeyText(name)} This step uses your NEAR sign-in.`, false);
+        const chosen = await orgForAction(teamFile, `${signInToSendKeyText(name)} This step uses your NEAR AI sign-in.`, false);
         if (chosen?.org === undefined) {
           deps.announce('info', signInToSendKeyText(name));
           return;
@@ -821,10 +821,10 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       case 'remove': {
         const detail = teamFile.near === undefined
           ? `${name} loses access to the team record. Afterwards, remove their access to the project on GitHub (or wherever the project is hosted) yourself.`
-          : `${name}'s NEAR key is set to a limit of 0 first, then the team record removes them, then the key is revoked. Afterwards, remove their access to the project on GitHub (or wherever the project is hosted) yourself.`;
+          : `${name}'s AI key is set to a limit of 0 first, then the team record removes them, then the key is revoked. Afterwards, remove their access to the project on GitHub (or wherever the project is hosted) yourself.`;
         const confirmed = await vscode.window.showWarningMessage(`Remove ${name} from ${team}?`, { modal: true, detail }, REMOVE_ACTION);
         if (confirmed !== REMOVE_ACTION) return;
-        const chosen = await orgForAction(teamFile, `Removing ${name} also ends their NEAR key, which needs your NEAR sign-in. Sign in now, or remove them now and finish the NEAR steps later from this list.`, true);
+        const chosen = await orgForAction(teamFile, `Removing ${name} also ends their AI key, which needs your NEAR AI sign-in. Sign in now, or remove them now and finish those steps later from this list.`, true);
         if (chosen === undefined) return;
         await finishRemoval(ctx, memberId, name, chosen.org, `Removing ${name} from ${team}`);
         return;
@@ -856,13 +856,13 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     // Only a lead's invitation went to NEAR, so only that cancel needs the sign-in.
     const needsNear = (member.pendingRole ?? member.role) === 'lead';
     // UI review issue 2: cancelling cannot be undone, so it is confirmed first, like Remove.
-    const detail = `The invite code stops working at once and cannot be used again. To bring ${name} in later, invite them again.${needsNear && ctx.teamFile.near !== undefined ? ' Their NEAR organization invitation is cancelled too.' : ''}`;
+    const detail = `The invite code stops working at once and cannot be used again. To bring ${name} in later, invite them again.${needsNear && ctx.teamFile.near !== undefined ? ' Their invitation to your organization is cancelled too.' : ''}`;
     const confirmed = await vscode.window.showWarningMessage(`Cancel the invitation for ${name}?`, { modal: true, detail }, CANCEL_INVITATION_ACTION);
     if (confirmed !== CANCEL_INVITATION_ACTION) {
       deps.announce('info', `The invitation for ${name} was not changed.`);
       return;
     }
-    const chosen = needsNear ? await orgForAction(ctx.teamFile, `Cancelling ${name}'s invitation also cancels it at NEAR, which needs your NEAR sign-in. Sign in now, or cancel now and finish that step later from this list.`, true) : {};
+    const chosen = needsNear ? await orgForAction(ctx.teamFile, `Cancelling ${name}'s invitation also cancels their invitation to your organization, which needs your NEAR AI sign-in. Sign in now, or cancel now and finish that step later from this list.`, true) : {};
     if (chosen === undefined) return;
     await finishRemoval(ctx, memberId, name, chosen.org, `Cancelling the invitation for ${name}`);
   }
@@ -908,41 +908,41 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     if (item.step === 'send-invitation') {
       // CR-02: the log is checked before any sign-in or NEAR call; an invitation for someone removed, joined or re-invited is closed instead.
       const { retryNearInvitation } = await import('../../team/invite');
-      const org = async (): Promise<NearOrgClient | undefined> => (await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false))?.org;
+      const org = async (): Promise<NearOrgClient | undefined> => (await orgForAction(ctx.teamFile, `${what} needs your NEAR AI sign-in.`, false))?.org;
       const outcome = await withSteps(`Retrying: ${what}`, false, (step) => {
-        step('Checking the team record, then sending the NEAR invitation');
+        step('Checking the team record, then sending the invitation to your organization');
         return retryNearInvitation({ item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist, org });
       });
       switch (outcome.outcome) {
         case 'sent':
-          deps.report('info', `${name} was invited to your NEAR organization as an admin. They accept it when they join.`);
+          deps.report('info', `${name} was invited to your organization as an admin. They accept it when they join.`);
           return;
         case 'already-member':
-          deps.report('info', `${name} is already in your NEAR organization.`);
+          deps.report('info', `${name} is already in your organization.`);
           return;
         case 'closed':
-          deps.report('info', `No NEAR invitation was sent to ${name}, and the item was closed. ${await safe(outcome.reason)}`);
+          deps.report('info', `No invitation to your organization was sent to ${name}, and the item was closed. ${await safe(outcome.reason)}`);
           return;
         case 'failed':
-          deps.report('warn', `The NEAR invitation for ${name} was not sent: ${await safe(outcome.reason)}`);
+          deps.report('warn', `The invitation to your organization for ${name} was not sent: ${await safe(outcome.reason)}`);
           return;
         case 'not-linked':
           deps.report('info', await safe(outcome.reason));
           return;
         case 'unknown-email':
-          deps.report('info', `The email address for ${name} is only known on the computer that sent the invitation. Send the NEAR invitation from that computer, or from the NEAR console.`);
+          deps.report('info', `The email address for ${name} is only known on the computer that sent the invitation. Send the invitation to your organization from that computer, or from your organization's settings on the NEAR AI website.`);
           return;
         case 'needs-sign-in':
-          deps.report('info', `${what} needs your NEAR sign-in. Nothing was changed.`);
+          deps.report('info', `${what} needs your NEAR AI sign-in. Nothing was changed.`);
           return;
       }
     }
-    const chosen = await orgForAction(ctx.teamFile, `${what} needs your NEAR sign-in.`, false);
+    const chosen = await orgForAction(ctx.teamFile, `${what} needs your NEAR AI sign-in.`, false);
     if (chosen === undefined) return;
     const { retryCleanupItem } = await import('../../team/remove');
     const nearOrg = chosen.org;
     const updated = await withSteps(`Retrying: ${what}`, false, (step) => {
-      step(`${STEP_TEXT[item.step]} at NEAR`);
+      step(`${STEP_TEXT[item.step]} with NEAR AI`);
       return retryCleanupItem({ item, teamFile: ctx.teamFile, log: ctx.session.currentLog(), checklist: ctx.checklist, ...(nearOrg === undefined ? {} : { org: nearOrg }) });
     });
     if (updated.status === 'done') deps.report('info', `Done: ${what}.`);
@@ -960,7 +960,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const rows: Row[] = [];
     const kept = linked ? await keptSession(ctx.teamFile.teamId) : undefined;
     if (!linked) rows.push({ label: (await import('../../team/join')).NO_ORG_NOTICE, row: { kind: 'near' } });
-    else rows.push({ label: kept === undefined ? 'NEAR: not signed in' : `NEAR: signed in as ${await display(kept.label)}`, row: { kind: 'near' } });
+    else rows.push({ label: kept === undefined ? 'NEAR AI sign-in: not signed in' : `NEAR AI sign-in: ${await display(kept.label)}`, row: { kind: 'near' } });
 
     const attention = new Map(memberAttention(state, linked).map((item) => [item.memberId, item.kind]));
     const suffix: Record<string, string> = { confirm: ', waiting for confirmation', 'deliver-key': ', key pending', 'rotate-key': ', key needs rotation' };
@@ -983,14 +983,14 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     try {
       items = (await ctx.checklist.list()).filter((item) => item.status !== 'done');
     } catch (error) {
-      deps.report('warn', `The NEAR cleanup list could not be read: ${await describe(error)}`);
+      deps.report('warn', `The list of steps still to finish could not be read: ${await describe(error)}`);
     }
     const { repoAccessText } = await import('../../team/cleanupChecklist');
     for (const item of items) {
       const name = await display(item.memberName);
       rows.push(item.step === 'repo-access'
         ? { label: `Project access for ${name}`, detail: repoAccessText(name), row: { kind: 'cleanup', item } }
-        : { label: `NEAR cleanup: ${STEP_TEXT[item.step]} for ${name}`, description: `${item.status}${item.lastError === undefined ? '' : `: ${await safe(item.lastError)}`}`, row: { kind: 'cleanup', item } });
+        : { label: `Still to finish: ${STEP_TEXT[item.step]} for ${name}`, description: `${item.status}${item.lastError === undefined ? '' : `: ${await safe(item.lastError)}`}`, row: { kind: 'cleanup', item } });
     }
     return rows;
   }
@@ -1012,9 +1012,9 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
         const kept = await keptSession(ctx.teamFile.teamId);
         if (kept === undefined) {
           const signedIn = await signInAndKeep(ctx.teamFile.teamId);
-          if (signedIn !== undefined) deps.report('info', `Signed in to NEAR as ${await display(signedIn.label)}.`);
+          if (signedIn !== undefined) deps.report('info', `Signed in to NEAR AI as ${await display(signedIn.label)}.`);
         } else {
-          deps.announce('info', `You are signed in to NEAR as ${await display(kept.label)}. Run "NEAR AI: Sign Out of NEAR (Team)" to sign out.`);
+          deps.announce('info', `You are signed in to NEAR AI as ${await display(kept.label)}. Run "NEAR AI: Sign Out of NEAR AI for This Team" to sign out.`);
         }
       }
       return;
@@ -1080,7 +1080,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     }
 
     const rows = await buildRows(ctx);
-    const picked = await pick(rows, { title: `Manage Team Members${canManage ? '' : ' (read only)'}`, placeHolder: 'Everyone on the team, invitations and NEAR steps still to finish' });
+    const picked = await pick(rows, { title: `Manage Team Members${canManage ? '' : ' (read only)'}`, placeHolder: 'Everyone on the team, invitations and organization steps still to finish' });
     if (picked === undefined) return;
     if (!canManage) {
       deps.announce('info', READ_ONLY_TEXT);
@@ -1094,7 +1094,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     vscode.commands.registerCommand(INVITE_COMMAND, guarded('Invite to Team', invite)),
     vscode.commands.registerCommand(JOIN_COMMAND, guarded('Join Team', join)),
     vscode.commands.registerCommand(MANAGE_MEMBERS_COMMAND, guarded('Manage Team Members', manage)),
-    vscode.commands.registerCommand(LINK_NEAR_COMMAND, guarded('Link Team to NEAR Organization', linkCommand)),
-    vscode.commands.registerCommand(SIGN_OUT_NEAR_COMMAND, guarded('Sign Out of NEAR (Team)', signOutCommand))
+    vscode.commands.registerCommand(LINK_NEAR_COMMAND, guarded('Link Your Organization', linkCommand)),
+    vscode.commands.registerCommand(SIGN_OUT_NEAR_COMMAND, guarded('Sign Out of NEAR AI for This Team', signOutCommand))
   ];
 }

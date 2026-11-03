@@ -1,5 +1,5 @@
-// The membership commands (Phase 61 plan 13) driven through the vscode stub on real git: Invite, Join, Manage Team Members, Link Team to NEAR
-// Organization and Sign Out of NEAR (Team). The commands are thin adapters, so these tests check what the person sees and what lands in the
+// The membership commands (Phase 61 plan 13) driven through the vscode stub on real git: Invite, Join, Manage Team Members, Link Your
+// Organization and Sign Out of NEAR AI for This Team. The commands are thin adapters, so these tests check what the person sees and what lands in the
 // log, the clipboard, SecretStorage and the output channel. Secret-shaped values (invite codes, API keys, refresh tokens) are built at run
 // time or read back from the code under test, never written as literals. Team modules load lazily, as in the product.
 import assert from 'node:assert/strict';
@@ -501,7 +501,7 @@ test('an unfinished earlier join is offered a reset only when the team list does
   });
 });
 
-// ---- Link Team to NEAR Organization -----------------------------------------------------------------------------------------------------
+// ---- Link Your Organization -------------------------------------------------------------------------------------------------------------
 
 test('Link signs in, lists only organizations the lead owns or administers, commits team.json only, and pushes only when asked', async () => {
   await withTeam(async (t) => {
@@ -584,7 +584,7 @@ test('Link of a different organization is only done after a clear confirmation',
   }, { near: true });
 });
 
-// ---- Sign Out of NEAR (Team) ------------------------------------------------------------------------------------------------------------
+// ---- Sign Out of NEAR AI for This Team ---------------------------------------------------------------------------------------------------
 
 test('Sign out deletes only this team\'s NEAR session, and with none says there is nothing to sign out of', async () => {
   await withTeam(async (t) => {

@@ -58,7 +58,7 @@ export interface StatusView {
 }
 
 function nearLine(extras: TeamStatusExtras): string {
-  if (extras.nearLabel !== undefined) return ` NEAR: signed in as ${displayText(extras.nearLabel)}.`;
+  if (extras.nearLabel !== undefined) return ` NEAR AI sign-in: ${displayText(extras.nearLabel)}.`;
   if (extras.nearLinked === false) return ` ${NO_ORG_NOTICE}`;
   return '';
 }

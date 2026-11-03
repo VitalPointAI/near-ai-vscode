@@ -35,7 +35,7 @@ export const TEAM_SIGN_IN_COPY: SignInCopy = {
   title: TITLE,
   loopbackPastePrompt: LOOPBACK_PASTE_PROMPT,
   pastePrompt: PASTE_PROMPT,
-  keptNote: 'NEAR AI keeps this sign-in for this team\'s invitations and member keys until you run "NEAR AI: Sign Out of NEAR (Team)".'
+  keptNote: 'NEAR AI keeps this sign-in for this team\'s invitations and member keys until you run "NEAR AI: Sign Out of NEAR AI for This Team".'
 };
 
 /** The session from NEAR's sign-in in the browser: sent back to a one-time local listener, or pasted. */
