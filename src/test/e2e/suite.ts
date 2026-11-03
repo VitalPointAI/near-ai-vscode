@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -34,7 +34,8 @@ class Observer {
 
 export async function run(): Promise<void> {
   const scenario = process.env.NEAR_AI_E2E_SCENARIO;
-  const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : scenario === 'team' ? teamTests() : projectTests();
+  const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : scenario === 'team' ? teamTests()
+    : scenario === 'team-lead' ? teamLeadTests() : scenario === 'team-join' || scenario === 'team-confirm' ? [] : projectTests();
   let failed = 0;
   for (const [name, body] of tests) {
     try { await body(); console.log(`✔ [${scenario}] ${name}`); } catch (error) { failed += 1; console.error(`✖ [${scenario}] ${name}\n`, error); }
@@ -312,6 +313,213 @@ function teamTests(): Array<[string, () => Promise<void>]> {
       session!.nudge();
       const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, 'plan:90-02')?.blocked?.reason === reason, toBefore, 20_000);
       assert.ok(state, 'the open board received the other client\'s change');
+    }]
+  ];
+}
+
+// ---- the invite scenarios: three launches on one online home, driven only by the buttons of the sidebar Team section --------------------------------
+// team-lead (the lead's project, user data L), team-join (the invitee's copy, made before Team Mode was on, user data J), team-confirm (the lead's
+// project, user data L again). The online home is a local bare folder behind a test-only insteadOf rule on a public-looking address (run.ts). Every
+// prompt is answered by a script through promptTap and recorded; the invite text passes from the lead's launch to the invitee's in a handoff folder.
+
+type TeamActionName = 'turn-on' | 'join' | 'share' | 'invite' | 'members' | 'board' | 'link' | 'check';
+interface SectionFacts { id: number; heading: string; status: string; actions: Array<{ id: TeamActionName; label: string; badge?: string }>; error?: string }
+type PromptRecordView = import('../../services/team/teamPrompts').PromptRecord;
+type PromptStepView = import('../../services/team/teamPrompts').PromptStep;
+
+const STEP_MS = 20_000;
+const INVITE_PREFIX = 'near-ai-invite-v1.';
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Bounded polling: the condition's value once it holds, or a failure that says what was awaited.
+async function until<T>(what: string, check: () => T | undefined | false | Promise<T | undefined | false>, timeoutMs = STEP_MS): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await check();
+    if (value !== undefined && value !== false) return value;
+    if (Date.now() > deadline) throw new Error(`Timed out after ${timeoutMs} ms waiting for ${what}.`);
+    await sleep(250);
+  }
+}
+
+function inviteKit() {
+  const extension = (): vscode.Extension<NearAiTestApi | undefined> => vscode.extensions.getExtension<NearAiTestApi | undefined>(EXTENSION_ID)!;
+  const load = <T>(file: string): T => require(path.join(extension().extensionPath, 'dist', file)) as T;
+  const section = (): typeof import('../../services/team/teamSectionHost')['teamSectionTap'] =>
+    load<typeof import('../../services/team/teamSectionHost')>('services/team/teamSectionHost').teamSectionTap;
+  const prompts = (): typeof import('../../services/team/teamPrompts')['promptTap'] =>
+    load<typeof import('../../services/team/teamPrompts')>('services/team/teamPrompts').promptTap;
+  const handoff = process.env.NEAR_AI_E2E_HANDOFF!;
+  const remote = process.env.NEAR_AI_E2E_REMOTE!;
+  let probes = 0;
+
+  // One probe of the real page: what the Team section draws, after clicking one of its drawn buttons when asked. A click is never repeated.
+  async function probe(click?: TeamActionName): Promise<SectionFacts> {
+    const tap = section();
+    assert.ok(tap.probe, 'the Team section probe is offered under NEAR_AI_E2E=1');
+    probes += 1;
+    const id = probes;
+    await tap.probe({ id, ...(click === undefined ? {} : { click }) });
+    return until(`the Team section to answer probe ${id}`, () => tap.facts.find((fact) => fact.id === id) as SectionFacts | undefined, 5_000);
+  }
+
+  // Waits until the section shows what the predicate wants (the page may still be loading, or the host still refreshing).
+  async function facts(what: string, predicate: (facts: SectionFacts) => boolean): Promise<SectionFacts> {
+    let last: SectionFacts | undefined;
+    try {
+      return await until(`the Team section to show ${what}`, async () => {
+        last = await probe().catch(() => undefined);
+        return last !== undefined && predicate(last) ? last : undefined;
+      });
+    } catch (error) {
+      throw new Error(`${(error as Error).message} Last seen: ${JSON.stringify(last)}`);
+    }
+  }
+
+  // Clicks a drawn button with a script for the prompts the command shows. The steps are used up as they answer.
+  async function click(action: TeamActionName, steps: PromptStepView[]): Promise<void> {
+    prompts().script = steps.map((step) => ({ ...step }));
+    const before = await probe(action);
+    assert.equal(before.error, undefined, `${action} is drawn in the Team section`);
+  }
+
+  // The command reached its last prompt and every scripted step was used.
+  async function finished(what: string, last: (record: PromptRecordView) => boolean): Promise<PromptRecordView> {
+    const record = await until(what, () => prompts().shown.find(last));
+    await until('every scripted step to be used', () => prompts().script?.length === 0);
+    return record;
+  }
+
+  // No prompt was left unanswered, and no sentence the window showed has a git word or the old name of the paying account (G-61-6). The invite line
+  // itself is left out of the scan: it is a code, not words.
+  function assertPlain(): void {
+    const { bannedPattern } = require(path.join(extension().extensionPath, 'dist/test/helpers/plainWords')) as typeof import('../helpers/plainWords');
+    const shown = prompts().shown;
+    assert.ok(shown.length > 0, 'the flow showed something');
+    for (const record of shown) {
+      assert.notEqual(record.unanswered, true, `a prompt was left unanswered: ${JSON.stringify(record)}`);
+      const detail = (record.detail ?? '').split('\n').filter((line) => !line.startsWith(INVITE_PREFIX)).join('\n');
+      for (const text of [record.text, detail, ...record.choices]) {
+        assert.doesNotMatch(text, bannedPattern, `plain words only: ${JSON.stringify(record.text)}`);
+      }
+    }
+  }
+
+  // The team as another computer reads it from the online home: its own mirror, no signer, the anchor from this project's team.json.
+  async function readLog(projectRoot: string): Promise<import('../../domain/team/types').TeamState> {
+    const { TeamLog } = load<typeof import('../../team/eventLog')>('team/eventLog');
+    const { GitTransport } = load<typeof import('../../team/gitTransport')>('team/gitTransport');
+    const { teamMaterializer } = load<typeof import('../../domain/team/materialize')>('domain/team/materialize');
+    const { readTeamFile, teamStorageDir } = load<typeof import('../../team/teamFile')>('team/teamFile');
+    const teamFile = await readTeamFile(projectRoot);
+    assert.ok(teamFile, 'the project has team.json');
+    const anchor = { teamId: teamFile.teamId, eventId: teamFile.genesis.eventId, ownerDevice: { ...teamFile.genesis.ownerDevice } };
+    const mirrorRoot = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-reader-'));
+    const transport = new GitTransport({
+      mirrorDir: path.join(teamStorageDir(mirrorRoot, teamFile.teamId), 'coordination.git'), projectRoot,
+      remote: teamFile.coordination.remote, ref: teamFile.coordination.ref, materializer: teamMaterializer(anchor), baseDelayMs: 1
+    });
+    const reader = new TeamLog({ anchor, transport });
+    await reader.sync();
+    return reader.state();
+  }
+
+  const memberNamed = (state: import('../../domain/team/types').TeamState, name: string): import('../../domain/team/types').Member | undefined =>
+    [...state.members.values()].find((member) => member.name === name && member.status !== 'invited' && member.removedEvent === undefined);
+
+  const remoteTeamFile = (): { teamId: string } | undefined => {
+    try {
+      return JSON.parse(execFileSync('git', ['-C', remote, 'show', 'main:.planning/.near-ai/team.json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) as { teamId: string };
+    } catch {
+      return undefined;
+    }
+  };
+
+  async function activate(): Promise<NearAiTestApi> {
+    const api = (await extension().activate())!;
+    assert.ok(api?.team, 'the test API carries the team handle');
+    // From here on no prompt reaches a real dialog: an empty script records a prompt nobody answered instead of waiting for a person.
+    prompts().script = [];
+    prompts().shown.length = 0;
+    await vscode.commands.executeCommand('nearAiChatView.focus');
+    return api;
+  }
+
+  return { load, prompts, handoff, remote, facts, click, finished, assertPlain, readLog, memberNamed, remoteTeamFile, activate };
+}
+
+const ids = (facts: SectionFacts): TeamActionName[] => facts.actions.map((action) => action.id);
+
+function teamLeadTests(): Array<[string, () => Promise<void>]> {
+  const kit = inviteKit();
+  let api: NearAiTestApi;
+  return [
+    ['the lead\'s project has no team yet, and the Team section offers Turn on Team Mode first and Join a team', async () => {
+      api = await kit.activate();
+      assert.equal(await api.team.handle.ready, 'solo', 'no team yet');
+      const shown = await kit.facts('Turn on Team Mode', (facts) => facts.actions.length > 0);
+      assert.equal(shown.actions[0]?.id, 'turn-on', 'Turn on Team Mode is the primary action');
+      assert.ok(ids(shown).includes('join'), 'Join a team is offered');
+    }],
+    ['Turn on Team Mode in the section asks the team name, your name and email once, and turns Team Mode on; Share comes next', async () => {
+      await kit.click('turn-on', [
+        { match: 'Team name', answer: 'E2E team' },
+        { match: 'Your name as teammates will see it', answer: 'E2E Lead' },
+        { match: 'Your email (optional)', answer: '' },
+        { match: 'Team Mode is on for', answer: undefined }
+      ]);
+      const done = await kit.finished('the Team Mode is on message', (record) => record.text.startsWith('Team Mode is on for E2E team'));
+      assert.equal(done.modal, false, 'the result is a plain message');
+      assert.ok(existsSync(path.join(workspace, '.planning', '.near-ai', 'team.json')), 'team.json exists');
+      const session = await until('the team session to run', () => api.team.handle.session());
+      assert.equal(session.teamFile.name, 'E2E team');
+      // The setup is not online yet, so Share takes the place of Invite someone until it is (61-17).
+      const shown = await kit.facts('Share first', (facts) => facts.actions[0]?.id === 'share');
+      assert.equal(ids(shown).includes('invite'), false, 'Invite someone waits until the setup is shared');
+      assert.match(shown.status, /not shared yet/);
+      assert.equal(kit.remoteTeamFile(), undefined, 'nothing of the team is on the online home\'s main version yet');
+    }],
+    ['Share in the section puts the team setup online after one confirmation, and Invite someone comes next', async () => {
+      await kit.click('share', [{ match: 'Share your team setup so teammates can join?', answer: 'Share' }]);
+      await kit.finished('the shared message', (record) => record.text === 'Your team setup is online. Teammates can now join.');
+      const confirmations = kit.prompts().shown.filter((record) => record.modal && record.text.includes('Share your team setup'));
+      assert.equal(confirmations.length, 1, 'one confirmation');
+      assert.equal(kit.remoteTeamFile()?.teamId, api.team.handle.session()!.teamFile.teamId, 'main online holds the lead\'s team.json');
+      const shown = await kit.facts('Invite someone first', (facts) => facts.actions[0]?.id === 'invite');
+      assert.ok(ids(shown).includes('members'), 'Members is offered');
+    }],
+    ['Invite someone in the section asks about the organization, who and what role, and shows the invite once with Copy invite', async () => {
+      const clipboardBefore = await vscode.env.clipboard.readText();
+      try {
+        await kit.click('invite', [
+          { match: 'Not now, everyone uses their own key', answer: 'Not now' },
+          { match: 'Name of the person you are inviting', answer: 'E2E Joiner' },
+          { match: 'Their email address', answer: 'joiner@example.invalid' },
+          { match: 'Role for', answer: 'Developer' },
+          { match: 'Allocation in US dollars', answer: '0' },
+          { match: 'How long the invite works', answer: '7 days' },
+          { match: 'Invite ready for E2E Joiner', answer: 'Copy invite' }
+        ]);
+        await kit.finished('the copied message', (record) => record.text.startsWith('Invite for E2E Joiner copied'));
+        const shown = kit.prompts().shown.filter((record) => record.detail?.startsWith(INVITE_PREFIX) === true);
+        assert.equal(shown.length, 1, 'the invite is shown exactly once');
+        const [modal] = shown;
+        assert.equal(modal!.modal, true);
+        assert.deepEqual(modal!.choices, ['Copy invite']);
+        assert.equal(modal!.answer, 'Copy invite');
+        const bundle = modal!.detail!.split('\n')[0]!;
+        assert.equal(kit.prompts().shown.filter((record) => JSON.stringify(record).includes(bundle)).length, 1, 'the invite is in no other prompt');
+        assert.equal(await vscode.env.clipboard.readText(), bundle, 'the clipboard holds the invite');
+        await writeFile(path.join(kit.handoff, 'bundle.txt'), bundle, { encoding: 'utf8', mode: 0o600 });
+      } finally {
+        await vscode.env.clipboard.writeText(clipboardBefore);
+      }
+      assert.equal(kit.remoteTeamFile()?.teamId, api.team.handle.session()!.teamFile.teamId, 'main online still holds the lead\'s team.json');
+      const shown = await kit.facts('one invite not used yet', (facts) => facts.actions[0]?.id === 'invite' && /1 invite is not used yet/.test(facts.status));
+      assert.ok(shown, 'Invite someone stays first, and the status counts the invite');
+    }],
+    ['every prompt of the lead\'s window was answered and spoke plain words', async () => {
+      kit.assertPlain();
     }]
   ];
 }
