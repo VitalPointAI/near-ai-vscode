@@ -46,6 +46,13 @@ export function registerLayoutProbe(name: string, webview: ProbedWebview): void 
   if (layoutProbeEnabled()) views.set(name, webview);
 }
 
+/** Sends a registered page a message as its host would (the tests use it to show sample data). */
+export async function postToPage(name: string, message: unknown): Promise<void> {
+  const webview = views.get(name);
+  if (!webview) throw new Error(`No page named ${name} is open for layout checks.`);
+  await webview.postMessage(message);
+}
+
 /** Asks a registered page to measure its layout and waits for the answer. */
 export async function probeLayout(name: string, timeoutMs = 10_000): Promise<LayoutReport> {
   const webview = views.get(name);

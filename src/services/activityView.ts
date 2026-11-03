@@ -314,8 +314,8 @@ export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
 <section aria-labelledby="now-heading">
   <h2 id="now-heading">Now</h2>
   <p id="now-empty" class="hint">No agents are running. Send a message or run a workflow in the NEAR AI chat.</p>
-  <div class="table-wrap" id="now-wrap" hidden><table id="now" aria-labelledby="now-heading"><thead><tr>
-    <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col" class="num">Elapsed</th><th scope="col" class="num">Turns</th><th scope="col" class="num">Tool calls</th><th scope="col" class="num">Cost so far</th><th scope="col"><span class="sr-only">Controls</span></th>
+  <div class="table-wrap" id="now-wrap" hidden><table id="now" class="stack-narrow" aria-labelledby="now-heading"><thead><tr>
+    <th scope="col">Agent</th><th scope="col">Model</th><th scope="col">State</th><th scope="col" class="num col-secondary">Elapsed</th><th scope="col" class="num col-secondary">Turns</th><th scope="col" class="num col-secondary">Tool calls</th><th scope="col" class="num">Cost so far</th><th scope="col"><span class="sr-only">Controls</span></th>
   </tr></thead><tbody></tbody></table></div>
   <p id="focus-note" class="hint" role="status" hidden></p>
 </section>
@@ -357,7 +357,7 @@ export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
       <div>
         <h3 id="tools-heading">Tool calls</h3>
         <p id="tools-empty" class="hint" hidden>No tool calls.</p>
-        <div class="table-wrap"><table id="tools" aria-labelledby="tools-heading"><thead><tr><th scope="col">Tool</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Failed</th></tr></thead><tbody></tbody></table></div>
+        <div class="table-wrap"><table id="tools" class="stack-narrow" aria-labelledby="tools-heading"><thead><tr><th scope="col">Tool</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Failed</th></tr></thead><tbody></tbody></table></div>
       </div>
       <div>
         <h3 id="approvals-heading">Approvals</h3>
@@ -366,16 +366,16 @@ export function activityHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
     </div>
     <h3 id="problems-heading">Problems by model</h3>
     <p id="problems-summary" class="hint"></p>
-    <div class="table-wrap"><table id="models" aria-labelledby="problems-heading"><thead><tr>
-      <th scope="col">Model</th><th scope="col" class="num">Agents</th><th scope="col" class="num">Turns</th><th scope="col" class="num" title="NEAR answered 429: too many requests">Rate limited (429)</th><th scope="col" class="num">Retries</th><th scope="col" class="num">Errors</th><th scope="col" class="num">Stopped</th><th scope="col" class="num">Tokens in</th><th scope="col" class="num">Tokens out</th>
+    <div class="table-wrap"><table id="models" class="stack-narrow" aria-labelledby="problems-heading"><thead><tr>
+      <th scope="col">Model</th><th scope="col" class="num">Agents</th><th scope="col" class="num">Turns</th><th scope="col" class="num" title="NEAR answered 429: too many requests">Rate limited (429)</th><th scope="col" class="num col-secondary">Retries</th><th scope="col" class="num">Errors</th><th scope="col" class="num col-secondary">Stopped</th><th scope="col" class="num col-secondary">Tokens in</th><th scope="col" class="num col-secondary">Tokens out</th>
     </tr></thead><tbody></tbody></table></div>
   </div>
 </section>
 <section aria-labelledby="history-heading">
   <h2 id="history-heading">History</h2>
   <p id="history-empty" class="hint" hidden>No runs recorded in this project yet.</p>
-  <div class="table-wrap"><table id="history" aria-labelledby="history-heading"><thead><tr>
-    <th scope="col">Started</th><th scope="col">Asked</th><th scope="col" class="num">Agents</th><th scope="col" class="num">Duration</th><th scope="col" class="num">Cost</th><th scope="col">Outcome</th>
+  <div class="table-wrap"><table id="history" class="stack-narrow" aria-labelledby="history-heading"><thead><tr>
+    <th scope="col">Started</th><th scope="col">Asked</th><th scope="col" class="num col-secondary">Agents</th><th scope="col" class="num col-secondary">Duration</th><th scope="col" class="num">Cost</th><th scope="col">Outcome</th>
   </tr></thead><tbody></tbody></table></div>
   <nav class="pager" aria-label="History pages"><button id="prev" type="button" class="secondary">Newer</button><span id="page" aria-live="polite"></span><button id="next" type="button" class="secondary">Older</button></nav>
 </section>
