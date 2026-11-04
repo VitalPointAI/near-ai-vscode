@@ -54,7 +54,7 @@ Component Inventory: omitted on purpose (`Tool: none`, no component package exis
 | Column header row | `div.colheads[role=toolbar]` | Roving tabindex, one tab stop |
 | Lane | `section.lane` with heading button | `aria-expanded` |
 | Cell | `ul.cell` (non-empty) or `div.cell` (empty) | Drop target |
-| Card | `li.card` > `button.card-main` + `button.move-btn` | `draggable` only in kanban and only when moves exist |
+| Card | `li.card` > `button.card-main` + `button.move-btn` | `draggable` in the kanban for the owner, a lead and a developer while the board is up (amended 2026-11-04, see Pointer path) |
 | Menu | `div#menu[role=menu]` | "Move to..." only; column collapse uses the header toolbar, not a menu (AD-6) |
 | Detail | `aside#detail` | Non-modal drawer (kanban) or drill-in page (list) |
 | Form | `form#item-form` | New item and Edit item |
@@ -307,7 +307,7 @@ An ellipsis after a label means a prompt follows. Targets that claim or integrat
 
 ### Pointer path (kanban only)
 
-- Cards are `draggable="true"` only when `moves.length > 0`. The sidebar list never drags.
+- ~~Cards are `draggable="true"` only when `moves.length > 0`.~~ Amended 2026-11-04 (owner's 0.6.3 re-test, debug session `.planning/debug/board-codeserver-cards-and-drag.md`): every kanban card is `draggable="true"` for the owner, a lead and a developer while the board is live or syncing; a reviewer, an observer and an offline, paused or removed board have nothing draggable. A card without moves (a phase card; any card for a developer) offers no cell, every other cell shows `Can't drop here: {reason}` on hover, and its drop shows the model's refusal on the card and announces it, posting nothing; its own reason comes before the row sentence. Reason: on the owner's board every drawn card was a phase card, so nothing could be picked up and a drag did nothing, with no word why. The sidebar list never drags.
 - `dragstart`: set `dataTransfer` type `application/x-near-ai-card` to the item id (not `text/plain`, so dropping on an editor inserts nothing), `effectAllowed = "move"`, add `.dragging`. Announce nothing.
 - During drag: cells whose column is in the card's `moves` and which are in the card's own lane get the 2px dashed `--vscode-focusBorder` outline and a 12% tint. All other cells stay quiet but still accept the drop so the reason can be given; hovering one shows a transient caption inside the cell (Small, `role="presentation"`): `Can't drop here: {reason}`.
 - `drop` on an offered cell: post `move`, show the card's pending line `Moving to {Column}...`, keep the card where it is until the new state arrives, then relocate it (with the 150ms move transition when motion is allowed) and announce `Moved plan 62-03 to Done.`
@@ -722,13 +722,13 @@ Added after the owner's hands-on check (62-UAT.md; the decisions are in 62-CONTE
 
 ### Readable cards
 
-- A folded column holds no cards: its stub shows only the column name and count. (62-21)
+- A folded column holds no cards: its stub shows only the column name and count. (62-21) In each row, a folded cell that holds cards shows their number (aria-hidden; screen readers keep `{n} cards, column folded`), and the row's count says how many of its cards are in folded columns: `Unassigned (45, 40 in folded columns)`. An open column header is as tall as its own words, not stretched to the folded stubs. (Amended 2026-11-04, owner's 0.6.3 re-test.)
 - Titles wrap between words, never inside a word. (62-21)
 - The card's main button keeps card styling: left aligned, theme text colour, no button background. (62-21, proven by 62-22)
 
 ### Move to... menu
 
-- After the moves and a separator, the owner and leads see `Assign to...` (a native list of the people who may take the card) and `Unassign {name}`. Any other member who is not an observer sees `Assign to me` on an unassigned card and `Unassign me` on a card assigned to them, with no list. A card that can only be assigned still shows `Move to...`; only cards with moves are draggable. (62-20, rules from 62-25)
+- After the moves and a separator, the owner and leads see `Assign to...` (a native list of the people who may take the card) and `Unassign {name}`. Any other member who is not an observer sees `Assign to me` on an unassigned card and `Unassign me` on a card assigned to them, with no list. A card that can only be assigned still shows `Move to...`; it can be picked up, and its drop says why it stays (amended 2026-11-04, see Pointer path). (62-20, rules from 62-25)
 
 ### Card detail
 

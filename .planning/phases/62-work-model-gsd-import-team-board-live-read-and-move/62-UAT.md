@@ -147,19 +147,19 @@ Passed: 62-UAT 1 (board opens only on purpose), 2, 4, 7 (themes, zoom), 10 (lead
   reason: "User reported (0.6.3, code-server): I don't see any cards under Backlog which says it has 5. Only five cards are showing under unassigned even though it says it has 45 and Done has 40"
   severity: blocker
   test: 9
-  root_cause: ""
+  root_cause: "Not saved state (the board panel has no serializer, so its state never crosses versions; the owner's browser storage holds none). The board drew the 5 phase cards in Backlog of the Unassigned row, but the row count (45) included the 40 cards of folded Done, whose cell showed nothing, and the open Backlog header was stretched to the height of the turned folded names, so it looked like an empty column and the cards read as Unassigned's. Second path: member rows came only from the selected milestone, so another milestone's cards could be counted with no row. Fixed in 185bb54 (RED 9886f8b); awaiting the owner's re-test."
   artifacts: [media/board/board.js, media/board/board.css, src/domain/team/board.ts]
-  missing: ["diagnosis in code-server (saved UI state from 0.6.0-0.6.2? folding defaults? cell rendering)"]
-  debug_session: ""
+  missing: ["owner re-test in code-server on the next preview"]
+  debug_session: ".planning/debug/board-codeserver-cards-and-drag.md"
 - truth: "Real mouse drag works in code-server in a browser (Brave/Chromium), not only in VS Code's own window"
   status: failed
   reason: "User reported (0.6.3, code-server): 12. fail - no drag and drop working"
   severity: blocker
   test: 6
-  root_cause: ""
+  root_cause: "Not the browser: a real mouse drag of a card with a move works in the owner's code-server build in Brave 156 and Chromium 156. On the owner's board every drawn card was a phase card (no move; the done plans sit in folded Done), and drag.js made only cards with moves draggable, for the owner or a lead only, so nothing could be picked up (bob, a developer, could pick up nothing anywhere) and the page said nothing. Fixed in f9c2b5d (RED 8f6667e): every kanban card can be picked up by the owner, a lead or a developer, and a card that cannot move shows the model's reason on the drop. Browser test src/test/e2e/codeServerBoard.ts (0f4c7d0). Not tested: Brave on a native Wayland session."
   artifacts: [media/board/drag.js, media/board/board.js]
-  missing: ["reproduce in a browser against code-server", "browser e2e for drag"]
-  debug_session: ""
+  missing: ["owner re-test in code-server on the next preview (a phase card drag shows its reason; open Done and drag a done plan to Backlog)"]
+  debug_session: ".planning/debug/board-codeserver-cards-and-drag.md"
 - truth: "A member can unassign themselves only from cards they assigned to themselves; a card a lead assigned to them stays until a lead (or the owner) changes it"
   status: failed
   reason: "User reported: Bob shouldn't be able to unassign himself from cards that Alice assigned him - only those he assigns himself."
