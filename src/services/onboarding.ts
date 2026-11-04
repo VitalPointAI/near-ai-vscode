@@ -1,4 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
 
 export interface OnboardingActions {
   openApiKeyPortal: () => Promise<void>;
@@ -9,9 +11,11 @@ export interface OnboardingActions {
 export function openOnboarding(context: vscode.ExtensionContext, actions: OnboardingActions): vscode.WebviewPanel {
   const panel = vscode.window.createWebviewPanel('nearAiOnboarding', 'Near AI: First Project', vscode.ViewColumn.One, {
     enableScripts: true,
-    retainContextWhenHidden: true
+    retainContextWhenHidden: true,
+    localResourceRoots: [onboardingMedia(context.extensionUri), sharedMedia(context.extensionUri)]
   });
-  panel.webview.html = onboardingHtml(panel.webview);
+  panel.webview.html = onboardingHtml(panel.webview, context.extensionUri);
+  registerLayoutProbe('onboarding', panel.webview);
   panel.webview.onDidReceiveMessage(async (message: { type?: string }) => {
     if (message.type === 'configure-api-key') await actions.configureApiKey();
     if (message.type === 'open-api-key-portal') await actions.openApiKeyPortal();
@@ -25,28 +29,18 @@ export function openOnboarding(context: vscode.ExtensionContext, actions: Onboar
   return panel;
 }
 
-export function onboardingHtml(webview: Pick<vscode.Webview, 'cspSource'>): string {
-  const nonce = `${Date.now()}${Math.random().toString(16).slice(2)}`;
+export function onboardingHtml(webview: Pick<vscode.Webview, 'cspSource' | 'asWebviewUri'>, extensionUri: vscode.Uri): string {
+  const nonce = randomBytes(16).toString('base64');
+  const shared = sharedMedia(extensionUri);
+  const asset = (folder: vscode.Uri, file: string) => webview.asWebviewUri(vscode.Uri.joinPath(folder, file)).toString();
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<title>Near AI for VSCode — First Project</title>
-<style>
-  :root { color-scheme: dark; --near-orange: #ffb81c; --near-purple: #8b5cf6; --panel: #171717; --muted: #a3a3a3; }
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); max-width: 860px; margin: 0 auto; padding: 36px 28px 56px; line-height: 1.55; }
-  .hero { border: 1px solid color-mix(in srgb, var(--near-orange) 45%, transparent); background: linear-gradient(135deg, color-mix(in srgb, var(--near-purple) 22%, transparent), color-mix(in srgb, var(--near-orange) 12%, transparent)); border-radius: 18px; padding: 30px; }
-  .mark { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 14px; background: linear-gradient(135deg, var(--near-orange), #ff7a18); color: #161616; font-weight: 900; font-size: 20px; animation: breathe 2.2s ease-in-out infinite; }
-  @keyframes breathe { 50% { transform: translateY(-3px) scale(1.04); box-shadow: 0 0 24px color-mix(in srgb, var(--near-orange) 50%, transparent); } }
-  h1 { margin: 18px 0 8px; font-size: 30px; } h2 { margin-top: 34px; font-size: 20px; } p { color: var(--muted); }
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 24px 0; }
-  .step { border: 1px solid var(--vscode-editorWidget-border); border-radius: 12px; padding: 15px; background: color-mix(in srgb, var(--panel) 75%, transparent); }
-  .number { color: var(--near-orange); font-weight: 800; } .step strong { display: block; margin: 8px 0 4px; } .step span { color: var(--muted); font-size: 13px; } .step button { margin-top: 10px; }
-  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; } button { border: 0; border-radius: 8px; padding: 10px 15px; cursor: pointer; font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background); } button:hover { background: var(--vscode-button-hoverBackground); } button.primary { background: var(--near-orange); color: #151515; font-weight: 700; }
-  .note { border-left: 3px solid var(--near-purple); padding-left: 14px; color: var(--muted); } code { color: var(--near-orange); }
-  @media (prefers-reduced-motion: reduce) { .mark { animation: none; } }
-</style>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+<title>Near AI for VSCode: First Project</title>
+<link rel="stylesheet" href="${asset(shared, 'base.css')}">
+<link rel="stylesheet" href="${asset(onboardingMedia(extensionUri), 'onboarding.css')}">
 </head>
 <body>
   <section class="hero" aria-labelledby="title">
@@ -68,9 +62,14 @@ export function onboardingHtml(webview: Pick<vscode.Webview, 'cspSource'>): stri
   <p>Inference requires a NEAR AI Cloud API key. Paste it into the extension and credentials stay in VS Code SecretStorage: they are never written into your project files or sent to an agent as configuration text.</p>
   <div class="actions"><button data-action="open-api-key-portal">Get a NEAR AI Cloud API key</button><button data-action="configure-api-key">I already have a key</button></div>
   <p class="note"><strong>New to GSD?</strong> You do not need to memorize commands. The chat will explain each step, show what is happening, and ask before any risky change.</p>
-  <script nonce="${nonce}">
+  ${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => vscode.postMessage({ type: button.dataset.action })));
+    window.addEventListener('message', (event) => { if (event.data && event.data.type === 'layout-probe' && window.nearAiLayoutProbe) vscode.postMessage(window.nearAiLayoutProbe()); });
   </script>
 </body></html>`;
+}
+
+function onboardingMedia(extensionUri: vscode.Uri): vscode.Uri {
+  return vscode.Uri.joinPath(extensionUri, 'media', 'onboarding');
 }

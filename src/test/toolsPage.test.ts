@@ -68,7 +68,7 @@ function input(overrides: Partial<DirectoryInput> = {}): DirectoryInput {
 }
 
 test('the Tools page is a directory: no composer, messages, or second chat', async () => {
-  const html = toolsPageHtml({ cspSource: 'vscode-webview://test', nonce: 'abc123nonce', script: 'tools.js', style: 'tools.css' });
+  const html = toolsPageHtml({ cspSource: 'vscode-webview://test', nonce: 'abc123nonce', script: 'tools.js', style: 'tools.css', base: 'base.css' });
   for (const id of ['messages', 'input', 'send', 'stop', 'model', 'attach', 'team-studio', 'fleet', 'history']) assert.doesNotMatch(html, new RegExp(`id="${id}"`), `no #${id}`);
   assert.doesNotMatch(html, /<textarea|<style|\son[a-z]+=|unsafe-inline/);
   assert.match(html, /default-src 'none'/);

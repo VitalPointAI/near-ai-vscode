@@ -1,0 +1,31 @@
+/* The first-project welcome page. The NEAR brand colours are the page's own; everything else comes
+   from the active VS Code theme. The page fits any panel width: the steps reflow into fewer columns
+   and the spacing tightens on a narrow panel. */
+:root { color-scheme: dark; --near-orange: #ffb81c; --near-orange-deep: #ff7a18; --near-ink: #161616; --near-purple: #8b5cf6; --panel: #171717; --muted: #a3a3a3; }
+body { background: var(--vscode-editor-background); max-width: 860px; margin: 0 auto; padding: 36px 28px 56px; line-height: 1.55; }
+.hero { border: 1px solid color-mix(in srgb, var(--near-orange) 45%, transparent); background: linear-gradient(135deg, color-mix(in srgb, var(--near-purple) 22%, transparent), color-mix(in srgb, var(--near-orange) 12%, transparent)); border-radius: 18px; padding: 30px; }
+.mark { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 14px; background: linear-gradient(135deg, var(--near-orange), var(--near-orange-deep)); color: var(--near-ink); font-weight: 900; font-size: 20px; animation: breathe 2.2s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: translateY(-3px) scale(1.04); box-shadow: 0 0 24px color-mix(in srgb, var(--near-orange) 50%, transparent); } }
+h1 { margin: 18px 0 8px; font-size: 30px; overflow-wrap: anywhere; }
+h2 { margin-top: 34px; font-size: 20px; }
+p { color: var(--muted); }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 12px; margin: 24px 0; }
+.step { border: 1px solid var(--vscode-editorWidget-border); border-radius: 12px; padding: 15px; background: color-mix(in srgb, var(--panel) 75%, transparent); min-width: 0; }
+.number { color: var(--near-orange); font-weight: 800; }
+.step strong { display: block; margin: 8px 0 4px; }
+.step span { color: var(--muted); font-size: 13px; }
+.step button { margin-top: 10px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+button { border: 0; border-radius: 8px; padding: 10px 15px; cursor: pointer; font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background); max-width: 100%; white-space: normal; }
+button:hover { background: var(--vscode-button-hoverBackground); }
+button.primary { background: var(--near-orange); color: var(--near-ink); font-weight: 700; }
+button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.note { border-left: 3px solid var(--near-purple); padding-left: 14px; color: var(--muted); }
+code { color: var(--near-orange); }
+@media (max-width: 480px) {
+  body { padding: 16px 12px 32px; }
+  .hero { padding: 16px; border-radius: 12px; }
+  h1 { font-size: 22px; }
+  h2 { margin-top: 24px; font-size: 17px; }
+}
+@media (prefers-reduced-motion: reduce) { .mark { animation: none; } }

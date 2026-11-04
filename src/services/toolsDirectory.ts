@@ -261,11 +261,11 @@ export function parseToolsPageMessage(value: unknown): ToolsPageMessage | undefi
   }
 }
 
-/** The page's HTML: one nonce script and one stylesheet, everything else rendered by the script with textContent. */
-export function toolsPageHtml(options: { cspSource: string; nonce: string; script: string; style: string }): string {
+/** The page's HTML: one nonce script and two stylesheets (the shared base, then its own), everything else rendered by the script with textContent. */
+export function toolsPageHtml(options: { cspSource: string; nonce: string; script: string; style: string; base: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">
-<link rel="stylesheet" href="${options.style}"><title>NEAR AI Tools</title></head><body>
+<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><title>NEAR AI Tools</title></head><body>
 <header><h1>NEAR AI Tools</h1><p class="hint">What the agents can use in this project: workflows, agents and teams, tools, MCP servers, and models. To run something, choose <strong>Use in chat</strong> and finish the message in the NEAR AI chat.</p>
 <p id="policy" class="policy" aria-live="polite"></p>
 <div class="search"><label for="filter" class="visually-hidden">Search the directory</label><input id="filter" type="search" placeholder="Search workflows, agents, tools, servers, models" aria-label="Search workflows, agents, tools, MCP servers, and models" aria-controls="directory"><button id="refresh" type="button" class="secondary">Refresh</button></div>
@@ -279,5 +279,5 @@ export function toolsPageHtml(options: { cspSource: string; nonce: string; scrip
 <section aria-labelledby="elsewhere-title"><h2 id="elsewhere-title">Elsewhere</h2><div id="elsewhere"></div></section>
 </main>
 <p id="empty-search" class="hint" hidden aria-live="polite">Nothing matches your search.</p>
-<script nonce="${options.nonce}" src="${options.script}"></script></body></html>`;
+${options.probe ? `<script nonce="${options.nonce}" src="${options.probe}"></script>` : ''}<script nonce="${options.nonce}" src="${options.script}"></script></body></html>`;
 }

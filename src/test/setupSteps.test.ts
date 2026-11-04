@@ -392,16 +392,18 @@ test('Project Setup is a contributed command and a Tools tab command', () => {
 
 test('the onboarding page lists setting up the project team right after connecting NEAR AI, and its button runs it', async () => {
   const { onboardingHtml, openOnboarding } = load<typeof import('../services/onboarding')>('../services/onboarding');
-  const html = onboardingHtml({ cspSource: 'vscode-resource:' });
+  const asWebviewUri = (uri: { fsPath: string }) => ({ toString: () => `vscode-resource:${uri.fsPath}` });
+  const extensionUri = { fsPath: ROOT };
+  const html = onboardingHtml({ cspSource: 'vscode-resource:', asWebviewUri } as never, extensionUri as never);
   const steps = [...html.matchAll(/<div class="number">(\d+)<\/div><strong>([^<]+)<\/strong>/g)].map((match) => [match[1], match[2]]);
   assert.deepEqual(steps.slice(1, 3), [['02', 'Connect privately'], ['03', 'Choose your team']]);
   assert.deepEqual(steps.map((step) => step[0]), ['01', '02', '03', '04', '05', '06']);
   assert.match(html, /<button data-action="setup-project-team">Set up your project team<\/button>/);
   let receive: ((message: unknown) => Promise<void>) | undefined;
-  const panel = { webview: { html: '', cspSource: 'vscode-resource:', onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } } };
+  const panel = { webview: { html: '', cspSource: 'vscode-resource:', asWebviewUri, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } } };
   webviewPanel = panel;
   reset();
-  openOnboarding({ subscriptions: [] } as never, { openApiKeyPortal: async () => undefined, configureApiKey: async () => undefined, showProgress: async () => undefined });
+  openOnboarding({ subscriptions: [], extensionUri } as never, { openApiKeyPortal: async () => undefined, configureApiKey: async () => undefined, showProgress: async () => undefined });
   await receive!({ type: 'setup-project-team' });
   assert.deepEqual(executed, [['nearAi.setupProjectTeam']]);
 });

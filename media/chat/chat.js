@@ -708,6 +708,8 @@
       option.id = 'command-' + command.command;
       option.setAttribute('role', 'option');
       option.setAttribute('aria-selected', String(index === menuIndex));
+      // The full name and description stay in the tooltip when a narrow sidebar shortens them.
+      option.title = '/' + command.command + (command.description ? ': ' + command.description : '');
       option.append(el('strong', '', '/' + command.command), el('span', '', command.description));
       option.addEventListener('mousedown', (event) => { event.preventDefault(); chooseCommand(command); });
       return option;
@@ -974,6 +976,8 @@
 
   window.addEventListener('message', (event) => {
     const m = event.data || {};
+    // Only under the extension-host tests, which load the layout probe: report this page's layout.
+    if (m.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     switch (m.type) {
       case 'host-request': post(m.payload); break;
       // The view's "New Chat" action: a new conversation, alongside any still running.

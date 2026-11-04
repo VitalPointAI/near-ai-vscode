@@ -43,6 +43,16 @@ close the panel and can be steered by typing.
 
 Other changes:
 
+- **Panels now fit narrow widths.** The chat, Agent Activity, Compare Models,
+  MCP connections, Team Studio, Tools and the welcome page wrap, stack or hide
+  less important columns when you make them narrow, instead of scrolling
+  sideways. A hidden column's values show in a short line under the row's
+  name, and on a very narrow panel each table row becomes a small card. Code
+  and diffs still scroll sideways inside their own box, so lines are never
+  wrapped in a misleading way.
+- **Shorter MCP approval choices.** The approval menu for a tool server now
+  reads "Ask before changes", "Ask before every call" or "Trusted", with a
+  one-line explanation of the chosen setting under it.
 - **The chat asks you to connect NEAR AI first.** Until the project has a
   working profile (a saved NEAR AI key or local runtime that was checked
   and works), the empty chat shows only **Connect NEAR AI to start** with a

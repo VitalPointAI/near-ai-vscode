@@ -249,6 +249,8 @@
   $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
   window.addEventListener('message', (event) => {
     const message = event.data || {};
+    // Only under the extension-host tests, which load the layout probe: report this page's layout.
+    if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     if (message.type === 'directory' && message.directory) render(message.directory);
     if (message.type === 'error') { const node = el('p', 'error', message.text); node.setAttribute('role', 'alert'); $('policy').after(node); setTimeout(() => node.remove(), 8000); }
   });
