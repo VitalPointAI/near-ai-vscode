@@ -132,7 +132,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
   let busy = false;
   // The session followed for state changes; replaced when Team Mode restarts with a new one.
   let followed: TeamSession | undefined;
-  let followedSubscription: { dispose(): void } | undefined;
+  let followedSubscriptions: Array<{ dispose(): void }> = [];
   // The last online check, per team: what it said and when (monotonic).
   let shared: { teamId: string; view: SharedView; at: number } | undefined;
   // Refreshes run one after another; a refresh asked for while one waits to start joins it (and a recheck asked by either is kept).
@@ -141,10 +141,25 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
 
   function follow(session: TeamSession | undefined): void {
     if (session === followed) return;
-    followedSubscription?.dispose();
-    followedSubscription = undefined;
+    for (const subscription of followedSubscriptions) subscription.dispose();
+    followedSubscriptions = [];
     followed = session;
-    if (session !== undefined) followedSubscription = session.onStateChange(() => { void refresh(); });
+    if (session === undefined) return;
+    followedSubscriptions = [session.onStateChange(() => { void refresh(); }), session.onKeyInstalled(() => { void keyInstalled(session); })];
+  }
+
+  // 61-30: a team key was installed for this project, so it is now the project's profile. The page is asked once for a fresh profile status (chat.js
+  // posts refresh-status back and chat.ts answers with profile-status), so the Connect screen gives way to the chat and the Team section without a
+  // reload; then the section's own model follows.
+  async function keyInstalled(session: TeamSession): Promise<void> {
+    const target = webview;
+    if (disposed || target === undefined || session !== followed) return;
+    try {
+      await target.postMessage({ type: 'host-request', payload: { type: 'refresh-status' } });
+    } catch {
+      // A page that is gone gets the status when it is shown again.
+    }
+    await refresh();
   }
 
   const handleSubscription = deps.team.onDidChange(() => { void refresh(); });
@@ -162,6 +177,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
     const onTeam = me !== undefined && me.status !== 'invited';
     const canManage = !removed && myId !== undefined && onTeam && decideTeamAction(state, myId, { kind: 'member.invite' }).allowed;
     const linked = session.teamFile.near !== undefined;
+    const awaitingKey = linked && onTeam && !removed && myId !== state.team.ownerId ? await keyStillComing(session, me) : false;
     const nowSeconds = Math.floor(Date.now() / 1000);
     let pendingInvites = 0;
     let otherMembers = 0;
@@ -177,13 +193,22 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
       removed, canManage,
       waiting: canManage ? memberAttention(state, linked).length : 0,
       pendingInvites, otherMembers, linked, connection,
-      ...(connection === 'offline' || connection === 'paused' ? { connectionText: displayText(status.text) } : {})
+      ...(connection === 'offline' || connection === 'paused' ? { connectionText: displayText(status.text) } : {}),
+      ...(awaitingKey ? { awaitingKey: true } : {})
     };
     if (canManage) {
       const view = await sharedFor(session, projectRoot, run);
       if (view !== undefined) team.shared = view;
     }
     return team;
+  }
+
+  // A member of a team that pays through its organization waits for the team key a lead makes for them (D-21) until the key delivered to them is
+  // the one installed here. A record that cannot be read counts as not installed, so the person can look again.
+  async function keyStillComing(session: TeamSession, me: { nearApiKeyId?: string; nearKeyEvent?: string }): Promise<boolean> {
+    if (me.nearApiKeyId === undefined || me.nearKeyEvent === undefined) return true;
+    const { installedKeyId } = await import('../../team/teamKeyProfile');
+    return (await installedKeyId(session.storageDir()).catch(() => undefined)) !== me.nearApiKeyId;
   }
 
   // The online check for an owner or a lead: the cached answer, refreshed when asked, after a share-related action, or when the sidebar is shown
@@ -223,9 +248,17 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
       session = deps.team.session();
     }
     follow(session);
-    if (session === undefined) return await teamFileOnly(root);
+    if (session === undefined) return await withRequest(await teamFileOnly(root));
     const board = deps.boardSummary?.();
-    return { folderOpen: true, team: await teamInput(session, root, run), ...(board === undefined ? {} : { board }) };
+    return await withRequest({ folderOpen: true, team: await teamInput(session, root, run), ...(board === undefined ? {} : { board }) });
+  }
+
+  // A person not on the project's team may have asked to join it (61-29): only then is the handle asked, which reads VS Code's secure storage.
+  async function withRequest(built: TeamSectionInput): Promise<TeamSectionInput> {
+    const team = built.team;
+    if (team === undefined || team.removed || team.myRole !== undefined || team.pendingRole !== undefined) return built;
+    const pending = await Promise.resolve(deps.team.joinRequestPending()).catch(() => false);
+    return pending ? { ...built, joinRequestPending: true } : built;
   }
 
   // team.json is here but Team Mode did not start (the start failed): the team by name, unreachable, with Check the team first.

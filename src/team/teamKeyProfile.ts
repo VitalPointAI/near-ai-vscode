@@ -152,6 +152,11 @@ export async function installTeamKey(input: InstallTeamKeyInput): Promise<TeamKe
 }
 
 /** What this device remembers about the installed team key and the profile it replaced, or undefined when neither is known. */
+/** The key id of the team key installed for this project, from the team's storage folder (61-30: the sidebar tells whether a key waits). */
+export async function installedKeyId(storageDir: string): Promise<string | undefined> {
+  return idOrUndefined((await readJson(path.join(storageDir, KEY_FILE)))?.['keyId']);
+}
+
 export async function readInstalledKey(globalStorageDir: string, teamId: string): Promise<{ keyId?: string; previousProfileId?: string } | undefined> {
   const dir = teamStorageDir(globalStorageDir, teamId);
   const keyId = idOrUndefined((await readJson(path.join(dir, KEY_FILE)))?.['keyId']);

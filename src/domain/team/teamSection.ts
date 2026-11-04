@@ -4,8 +4,9 @@
 // someone, Join a team and Just me for now; Just me for now puts it away for the project and leaves one quiet line on the empty chat. A team that
 // exists does not nag. Pure: no vscode, no I/O, no clock. Every label and sentence comes from teamSectionText.ts.
 import {
-  TEAM_ACTION_HINTS, TEAM_ACTION_LABELS, TEAM_CONNECT_FALLBACK, TEAM_SECTION_HEADING, TEAM_SETUP_TITLES, TEAM_SOLO_LINE_LABELS, TEAM_STATUS, boardSummaryText, connectionStatus,
-  memberStatus, notOnTeamStatus, notReachableStatus, notSharedStatus, onlyYouStatus, peopleStatus, teamHeading, waitingBadge, waitingStatus
+  TEAM_ACTION_HINTS, TEAM_ACTION_LABELS, TEAM_CONNECT_FALLBACK, TEAM_CONNECT_HINTS, TEAM_CONNECT_LABELS, TEAM_SECTION_HEADING, TEAM_SETUP_TITLES, TEAM_SOLO_LINE_LABELS,
+  TEAM_STATUS, awaitingKeyStatus, boardSummaryText, connectNotOnTeamStatus, connectionStatus, memberStatus, notOnTeamStatus, notReachableStatus, notSharedStatus,
+  onlyYouStatus, ownKeyStatus, peopleStatus, requestWaitingStatus, teamHeading, waitingBadge, waitingStatus
 } from './teamSectionText';
 import type { Role } from './types';
 
@@ -113,13 +114,19 @@ function sectionModel(input: TeamSectionInput): TeamSectionModel {
   // Removed: only the plain sentence, no button and no board summary.
   if (team.removed) return { placement: 'section', heading, status: TEAM_STATUS.removed, compact: true, actions: [] };
 
-  const plan = teamPlan(team);
+  const pending = input.joinRequestPending === true;
+  const plan = teamPlan(team, pending);
   const unreachable = team.connection === 'offline' || team.connection === 'paused';
   // Offline or paused: Check the team becomes the next action and the status is the connection text; the rest stays offered.
   const primary: TeamActionId = unreachable ? 'check' : plan.primary;
   const others = unreachable ? [plan.primary, ...plan.others] : plan.others;
   const status = unreachable ? connectionStatus(team.connectionText, team.connection === 'paused' ? 'paused' : 'offline') : plan.status;
-  const actions = ordered(primary, others).map((action) => (action.id === 'members' && team.canManage && team.waiting > 0 ? { ...action, badge: waitingBadge(team.waiting) } : action));
+  const actions = ordered(primary, others).map((action) => {
+    if (action.id === 'members' && team.canManage && team.waiting > 0) return { ...action, badge: waitingBadge(team.waiting) };
+    // A request that waits is shown again by the same action.
+    if (action.id === 'ask' && pending) return { ...action, label: TEAM_CONNECT_LABELS.askPending, hint: TEAM_CONNECT_HINTS.askPending };
+    return action;
+  });
   const model: TeamSectionModel = { placement: 'section', heading, status, compact: plan.compact, actions };
   if (input.board !== undefined) {
     const { ready, blocked, mine } = input.board;
@@ -129,10 +136,29 @@ function sectionModel(input: TeamSectionInput): TeamSectionModel {
 }
 
 // The team part of the Connect screen (61-30, G-61-9): while no profile works, the team way in. The page draws it only then.
+// Every situation has a plain next step: with no team or a team this computer is not on, join or ask; a request that waits says so and shows
+// itself again; a member of a team that pays through its organization waits for the lead-made team key (D-21: no own key is asked for there) and
+// can look again; on a team without one each person brings their own key, so the Connect screen's own profile buttons are the way. Removed: none.
 function connectPart(input: TeamSectionInput): TeamConnect | undefined {
   const fallback = { ...TEAM_CONNECT_FALLBACK };
-  if (input.team === undefined) return { actions: plain(['join', 'ask']), fallback };
-  return undefined;
+  const team = input.team;
+  if (team === undefined) return { actions: plain(['join', 'ask']), fallback };
+  if (team.removed) return undefined;
+  const { name } = team;
+  if (team.myRole === undefined && team.pendingRole === undefined) {
+    if (input.joinRequestPending === true) {
+      return { status: requestWaitingStatus(name), actions: [{ id: 'ask', label: TEAM_CONNECT_LABELS.askPending, primary: false, hint: TEAM_CONNECT_HINTS.askPending }], fallback };
+    }
+    return { status: connectNotOnTeamStatus(name), actions: plain(['join', 'ask']), fallback };
+  }
+  if (team.awaitingKey === true) {
+    return {
+      status: awaitingKeyStatus(name, team.pendingRole === undefined),
+      actions: [{ id: 'check', label: TEAM_CONNECT_LABELS.check, primary: false, hint: TEAM_CONNECT_HINTS.check }], fallback
+    };
+  }
+  if (!team.linked) return { status: ownKeyStatus(name), actions: [], fallback };
+  return { actions: [], fallback };
 }
 
 // Connect buttons in the given order, none of them primary (the Connect screen's own main button is setting up a profile).
@@ -143,9 +169,11 @@ function plain(list: readonly TeamActionId[]): TeamSectionAction[] {
 interface TeamPlan { status: string; primary: TeamActionId; others: TeamActionId[]; compact: boolean }
 
 // What a live team offers this person, before the connection is taken into account.
-function teamPlan(team: NonNullable<TeamSectionInput['team']>): TeamPlan {
+function teamPlan(team: NonNullable<TeamSectionInput['team']>, requestPending: boolean): TeamPlan {
   const { name } = team;
-  if (team.myRole === undefined && team.pendingRole === undefined) return { status: notOnTeamStatus(name), primary: 'join', others: ['board'], compact: true };
+  if (team.myRole === undefined && team.pendingRole === undefined) {
+    return { status: requestPending ? requestWaitingStatus(name) : notOnTeamStatus(name), primary: 'join', others: ['ask', 'board'], compact: true };
+  }
   // Joined and waiting: nothing that changes the team, only the board to look at.
   if (team.pendingRole !== undefined && (team.myRole === undefined || !team.canManage)) return { status: waitingStatus(name), primary: 'board', others: [], compact: true };
   if (!team.canManage) return { status: memberStatus(name), primary: 'board', others: ['members'], compact: false };
