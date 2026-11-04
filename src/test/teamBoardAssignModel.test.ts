@@ -74,7 +74,7 @@ test('initials come from the first letters of up to two words of the flattened n
     return found;
   };
   member(dev.memberId).name = 'E2E Owner';
-  member(reviewer.memberId).name = '‮rae  van der\nberg';
+  member(reviewer.memberId).name = '\u202Erae  van der\nberg';
   world.accept(lead, 'item.assigned', { id: PLAN, memberId: dev.memberId });
   world.accept(lead, 'item.assigned', { id: 'plan:90-01', memberId: reviewer.memberId });
   const model = modelFor(world, lead.memberId);
@@ -290,11 +290,11 @@ test('the person list: exactly the members who may take the card, by name, with 
 test('the words: labels for the actions, and every assignment refusal ends "Nothing was changed."', () => {
   assert.deepEqual(ASSIGN_LABELS, { assign: 'Assign to...', unassign: 'Unassign', 'assign-me': 'Assign to me', 'unassign-me': 'Unassign me' });
   assert.equal(unassignLabel('Dana\n Smith'), 'Unassign Dana Smith');
-  const sentences = Object.values(ASSIGN_REFUSALS).map((value) => (typeof value === 'function' ? value('Lee‮\nx') : value));
+  const sentences = Object.values(ASSIGN_REFUSALS).map((value) => (typeof value === 'function' ? value('Lee\u202E\nx') : value));
   assert.ok(sentences.length >= 10);
   for (const sentence of sentences) {
     assert.match(sentence, /Nothing was changed\.$/, sentence);
-    assert.doesNotMatch(sentence, /[\u0000-\u001F–—‮]/, sentence);
+    assert.doesNotMatch(sentence, /[\u0000-\u001F\u2013\u2014\u202E]/, sentence);
   }
   assert.equal(ASSIGN_REFUSALS.alreadyAssigned('Dana'), 'This card is already assigned to Dana. Nothing was changed.');
 });
@@ -328,7 +328,7 @@ test('the card detail names the person, offers the same actions, and its history
   // Names are flattened, and a person who is no longer on the roster is "Someone".
   const member = world.state.members.get(dev.memberId);
   assert.ok(member);
-  member.name = 'Dana\n‮evil';
+  member.name = 'Dana\n\u202Eevil';
   assert.equal(detail(lead.memberId).history[0]?.text, 'Lee assigned this to Dana evil.');
   const entry = { eventId: 'e', type: 'item.assigned', author: lead.memberId, at: 'x', memberId: 'mbr-0123456789abcdef' };
   assert.equal(historySentence(entry, 'Lee', { origin: 'import' }), 'Lee assigned this to Someone.');
