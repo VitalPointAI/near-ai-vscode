@@ -232,6 +232,12 @@
         "icon": "$(sign-in)"
       },
       {
+        "command": "nearAi.team.askToJoin",
+        "title": "Ask to Join a Team",
+        "category": "NEAR AI",
+        "icon": "$(comment-discussion)"
+      },
+      {
         "command": "nearAi.team.manageMembers",
         "title": "Manage Team Members",
         "category": "NEAR AI",

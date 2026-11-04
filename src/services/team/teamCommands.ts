@@ -78,6 +78,7 @@ interface BoardHandle { openPanel(): void; controller: { sessionChanged(): void 
 // module has loaded, or once this computer's member was removed.
 // justMe (G-61-8): whether Just me for now was chosen for this project, read from VS Code's workspace state (false when there is none); setJustMe
 // keeps or clears it there and tells the listeners. Neither touches a team record, an event or a file.
+// joinRequestPending (G-61-9): whether this computer has a request to join this project's team waiting; false with no folder or no team.json.
 export interface TeamModeHandle {
   ready: Promise<TeamModeState>;
   session(): TeamSession | undefined;
@@ -312,6 +313,27 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     const state = context.workspaceState;
     if (state !== undefined && justMe() !== value) await state.update(JUST_ME_KEY, value ? true : undefined);
     changed();
+  }
+
+  // G-61-9: whether this computer's request to join this project's team is stored (61-30 shows Show my request then). With a running session
+  // only VS Code's secure storage is read; without one, the team.json check Team Mode already does, then that read. A stored request that cannot
+  // be read still counts as waiting, so the person can see and cancel it.
+  async function joinRequestPending(): Promise<boolean> {
+    const projectRoot = firstFolder();
+    if (projectRoot === undefined) return false;
+    try {
+      let teamId = slot.current()?.teamFile.teamId;
+      if (teamId === undefined) {
+        if (!(await teamFileExists(projectRoot))) return false;
+        teamId = (await (await import('../../team/teamFile')).readTeamFile(projectRoot))?.teamId;
+      }
+      if (teamId === undefined) return false;
+      const { JOIN_REQUEST_SECRET_PREFIX } = await import('../../team/joinRequest');
+      return (await context.secrets.get(`${JOIN_REQUEST_SECRET_PREFIX}${teamId}`)) !== undefined;
+    } catch (error) {
+      output.appendLine(`Whether a request to join waits could not be read: ${await describe(error)}`);
+      return false;
+    }
   }
 
   // Once the project has a team (created here or joined), the choice no longer applies, so it is cleared. A failure is written to the channel.
@@ -638,6 +660,6 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     },
     justMe,
     setJustMe,
-    joinRequestPending: async (): Promise<boolean> => false
+    joinRequestPending
   };
 }

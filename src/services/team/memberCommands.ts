@@ -82,7 +82,7 @@ export const ASK_TEXT = Object.freeze({
   cancelDetail: 'The request you sent stops working, even if it is accepted later. You can ask again at any time.',
   openFolder: 'Open your copy of the project first, then choose Ask to join in the NEAR AI sidebar.',
   noTeam: 'This project has no team to ask yet. If someone set one up, ask them to share their team setup, or ask them for an invite and choose Join a team in the NEAR AI sidebar.',
-  notOpened: 'The team of this project could not be opened on this computer, so no request was made. Choose Show details in the NEAR AI Team output for why.'
+  notOpened: 'The team of this project could not be opened on this computer, so no request was made. Choose Show details for why.'
 } as const);
 const ACCEPT_REQUEST_ROW = 'Accept a request';
 const ACCEPT_TITLE = 'Accept a request';
@@ -1014,7 +1014,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     if (deps.session() === undefined) await deps.startSession(projectRoot);
     const session = deps.session();
     if (session === undefined) {
-      deps.report('error', ASK_TEXT.notOpened);
+      await showDetailsOffer('error', ASK_TEXT.notOpened);
       return undefined;
     }
     const team = await display(teamFile.name);
