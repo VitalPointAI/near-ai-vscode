@@ -8,6 +8,7 @@ import type { AddressInfo } from 'node:net';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { NearAiTestApi } from '../../extension';
+import { connectCdp, interceptedDrag, mouseDrag, pressKey, webviewFrameRect, type CdpSession, type Point } from './cdp';
 import { captureScreen, readXwd } from './xwdPng';
 import { fillScreen } from './x11Window';
 
@@ -719,6 +720,13 @@ async function pngSize(file: string): Promise<{ width: number; height: number }>
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
 
+// ---- real drags in the board window (62-23, G-62-6) ------------------------------------------------------------------------------------------------
+// The board's own drag log (board.js, data-e2e pages only): what the browser's drag events did on the page.
+interface DragLogEntry { event: 'dragstart' | 'dragenter' | 'drop' | 'dragend'; column: string; lane: string; verdict: string }
+/** The bug the second client adds for the drags: a board item id (item: and 26 Crockford base-32 characters). */
+const DRAG_ITEM = `item:${'0'.repeat(22)}DRAG`;
+type DragPath = 'mouse' | 'intercepted';
+
 function boardTests(): Array<[string, () => Promise<void>]> {
   const board = new Observer();
   const extension = (): vscode.Extension<NearAiTestApi | undefined> => vscode.extensions.getExtension<NearAiTestApi | undefined>(EXTENSION_ID)!;
@@ -966,7 +974,82 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     return tests;
   };
 
-  return [
+  // ---- real drags (62-23) -----------------------------------------------------------------------------------------------------------------------
+  // The drags go through Chromium's own input: DevTools Protocol mouse events on the VS Code window (mouseDrag), or, only when those start no drag in
+  // this Electron, Chromium's intercepted drag delivered with Input.dispatchDragEvent (interceptedDrag). Nothing here makes an event inside the page.
+  let cdp: CdpSession | undefined;
+  let dragPath: DragPath | undefined;
+  let boardRemote = '';
+  /** Events on the coordination branch of the board project's online home (a local bare folder behind a test-only insteadOf rule, run.ts). */
+  const eventsOnRemote = (): number => Number(execFileSync('git', ['-C', boardRemote, 'rev-list', '--count', 'refs/heads/near-ai/coordination'], { encoding: 'utf8' }).trim());
+  const dragFacts = async (): Promise<{ log: DragLogEntry[]; count: number; live: string; facts: Message }> => {
+    const facts = await act({ action: 'facts' });
+    return { log: (facts.dragLog as DragLogEntry[] | undefined) ?? [], count: Number(facts.dragCount ?? 0), live: String(facts.live ?? ''), facts };
+  };
+  /** The drag log entries written since `before` (the page keeps the last 20). */
+  const since = (now: { log: DragLogEntry[]; count: number }, before: number): DragLogEntry[] => now.log.slice(Math.max(0, now.log.length - (now.count - before)));
+  const describeLog = (entries: DragLogEntry[]): string => entries.map((e) => `${e.event} ${e.lane}/${e.column} ${e.verdict}`).join('; ') || 'nothing';
+  // Where a card and a cell of its own row are on the VS Code window: the probe's page positions plus the webview frame's place in the window. The card
+  // is first brought into view (focus scrolls it there), then let go of. The drop point is the cell's middle across, at the card's own height (the
+  // cells of a row stretch to the row), kept inside the visible board region.
+  const aim = async (id: string, column: string, lane?: string): Promise<{ from: Point; to: Point; report: LayoutReport }> => {
+    await ask({ action: 'focus', itemId: id });
+    await act({ action: 'blur' });
+    const report = await ask({ action: 'rects' });
+    const c = report.cards.find((x) => x.id === id);
+    assert.ok(c !== undefined && c.width > 0 && c.height > 0, `${id} is drawn`);
+    const target = report.cells.find((x) => x.lane === (lane ?? c.lane) && x.column === column);
+    assert.ok(target !== undefined && target.width > 0, `the ${column} cell of the ${lane ?? c.lane} row is drawn`);
+    assert.ok(cdp !== undefined, 'the DevTools connection is open');
+    const frame = await webviewFrameRect(cdp, { width: report.width, height: report.height });
+    assert.ok(frame !== undefined, `the board's webview frame (${report.width} by ${report.height}) is found in the window`);
+    const r = report.region;
+    const inside = (y: number, top: number, height: number): number => Math.max(Math.max(top, r.top) + 8, Math.min(y, Math.min(top + height, r.top + r.height) - 8));
+    const from = { x: Math.round(frame.left + c.left + Math.min(60, c.width / 2)), y: Math.round(frame.top + c.top + Math.min(24, c.height / 2)) };
+    const to = { x: Math.round(frame.left + target.left + target.width / 2), y: Math.round(frame.top + inside(c.top + c.height / 2, target.top, target.height)) };
+    return { from, to, report };
+  };
+  /**
+   * One real drag from `from` to `to`. Mouse input first; when the board's drag log shows no dragstart from it within 2 s, the intercepted drag. The
+   * first drag that works fixes the path for the rest of the run. `whileOver` runs with the pointer over the target and the button held (mouse path).
+   */
+  const realDrag = async (from: Point, to: Point, options: { whileOver?: () => Promise<void> } = {}): Promise<{ path: DragPath; entries: DragLogEntry[] }> => {
+    assert.ok(cdp !== undefined, 'the DevTools connection is open');
+    const before = (await dragFacts()).count;
+    const started = async (): Promise<DragLogEntry[] | undefined> => {
+      const deadline = Date.now() + 2_000;
+      for (;;) {
+        const entries = since(await dragFacts(), before);
+        if (entries.some((e) => e.event === 'dragstart')) return entries;
+        if (Date.now() > deadline) return undefined;
+        await sleep(100);
+      }
+    };
+    if (dragPath !== 'intercepted') {
+      await mouseDrag(cdp, from, to, { steps: 24, pauseMs: 30, ...(options.whileOver === undefined ? {} : { whileOver: options.whileOver }) });
+      const entries = await started();
+      if (entries !== undefined) {
+        // Let the drop and dragend reach the log.
+        await until('the drag to end on the page', async () => (since(await dragFacts(), before).some((e) => e.event === 'dragend') ? true : undefined), 5_000)
+          .catch(() => undefined);
+        dragPath = 'mouse';
+        return { path: 'mouse', entries: since(await dragFacts(), before) };
+      }
+      if (dragPath === 'mouse') throw new Error(`The mouse drag started no drag this time. Drag log: ${describeLog(since(await dragFacts(), before))}`);
+      console.log(`(mouse input started no drag in this Electron; drag log since: ${describeLog(since(await dragFacts(), before))}; trying the intercepted drag)`);
+    }
+    const intercepted = await interceptedDrag(cdp, from, to, { timeoutMs: 5_000 });
+    const entries = since(await dragFacts(), before);
+    if (!intercepted || !entries.some((e) => e.event === 'dragstart')) {
+      throw new Error(`Neither real input path started a drag. Intercepted: ${intercepted}. Drag log: ${describeLog(entries)}`);
+    }
+    await until('the drag to end on the page', async () => (since(await dragFacts(), before).some((e) => e.event === 'dragend' || e.event === 'drop') ? true : undefined), 5_000)
+      .catch(() => undefined);
+    dragPath = 'intercepted';
+    return { path: 'intercepted', entries: since(await dragFacts(), before) };
+  };
+
+  const allBoardTests: Array<[string, () => Promise<void>]> = [
     ['activates in the board project, a git project holding this repository\'s committed roadmap', async () => {
       api = (await extension().activate())!;
       assert.ok(api?.team, 'the test API carries the team handle');
@@ -1070,8 +1153,81 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       assert.deepEqual(listed.map((e) => e.file).sort(), pngs, 'one index line per PNG');
       assert.ok(listed.every((e) => e.problems === 0), 'no frame with a problem');
       console.log(`(${pngs.length} frames in ${screens})`);
+    }],
+    // ---- real drags (62-23, G-62-6): dark, 1400 px, Group by Member, one editor group beside a second -------------------------------------------
+    ['drag set-up: dark at 1400 px grouped by member, a bug the owner\'s second client adds with scope and an estimate is Ready, and the window\'s DevTools endpoint answers', async () => {
+      const port = Number(process.env.NEAR_AI_E2E_CDP_PORT ?? '');
+      assert.ok(Number.isInteger(port) && port > 0, 'run.ts gives the board window a DevTools port');
+      boardRemote = execFileSync('git', ['-C', workspace, 'config', '--get-regexp', '^url\\..*\\.insteadof$'], { encoding: 'utf8' }).trim().split(/\s+/)[0].replace(/^url\./, '').replace(/\.insteadof$/i, '');
+      assert.ok(existsSync(boardRemote), 'the online home is the local bare folder');
+      await applyTheme(MATRIX_THEMES[0]);
+      const sized = await sizeTo(1400);
+      assert.ok(sized === undefined || sized.layout === 'kanban', 'the kanban');
+      const grouped = await act({ action: 'group', group: 'member' });
+      assert.equal(grouped.groupBy, 'member', 'grouped by member');
+      await act({ action: 'blur' });
+      await ask({ action: 'scroll', top: 0, left: 0 });
+
+      // The owner's second client (another computer with the same device key) adds the bug, as in the team scenario.
+      const session = api.team.handle.session();
+      assert.ok(session, 'a session is running');
+      const { TeamLog } = load<typeof import('../../team/eventLog')>('team/eventLog');
+      const { GitTransport } = load<typeof import('../../team/gitTransport')>('team/gitTransport');
+      const { teamMaterializer } = load<typeof import('../../domain/team/materialize')>('domain/team/materialize');
+      const { loadDeviceIdentity } = load<typeof import('../../team/identity')>('team/identity');
+      const { teamStorageDir } = load<typeof import('../../team/teamFile')>('team/teamFile');
+      const teamFile = session!.teamFile;
+      const anchor = { teamId: teamFile.teamId, eventId: teamFile.genesis.eventId, ownerDevice: { ...teamFile.genesis.ownerDevice } };
+      const mirrorRoot = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-board-second-'));
+      const transport = new GitTransport({
+        mirrorDir: path.join(teamStorageDir(mirrorRoot, teamFile.teamId), 'coordination.git'), projectRoot: workspace,
+        remote: teamFile.coordination.remote, ref: teamFile.coordination.ref, materializer: teamMaterializer(anchor), baseDelayMs: 1
+      });
+      const identity = await loadDeviceIdentity(api.team.secrets, teamFile.teamId);
+      assert.ok(identity, 'the owner device key is in SecretStorage');
+      const reader = new TeamLog({ anchor, transport });
+      await reader.sync();
+      const memberId = reader.state().deviceIndex.get(identity!.fingerprint);
+      assert.ok(memberId, 'the device is a member');
+      const second = new TeamLog({ anchor, transport, signer: { identity: identity!, memberId: memberId! } });
+      await second.sync();
+      const toBefore = board.toView.length;
+      const appended = await second.append(() => [{ type: 'item.created', body: { id: DRAG_ITEM, kind: 'bug', title: 'Drag me to Backlog', scope: ['src/team/**'], requirements: [], mustHaves: [], estimate: { tokens: 2000 } } }]);
+      assert.equal(appended.ok, true, appended.ok ? '' : appended.reason);
+      session!.nudge();
+      const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, DRAG_ITEM)?.column === 'ready', toBefore, 30_000);
+      assert.equal(cardOf(state, DRAG_ITEM)?.held, false, 'not on hold');
+      await until('the bug drawn in Ready', async () => ((await ask({ action: 'rects' })).cards.some((c) => c.id === DRAG_ITEM && c.column === 'ready' && c.draggable) ? true : undefined));
+      const drawn = (await ask({ action: 'rects' })).cards;
+      const kinds = (ids: string[]): string => ['plan', 'phase', 'item'].map((k) => `${ids.filter((id) => id.startsWith(`${k}:`)).length} ${k}`).join(', ');
+      console.log(`(${drawn.filter((c) => c.draggable).length} of ${drawn.length} drawn cards can be dragged by the owner: ${kinds(drawn.filter((c) => c.draggable).map((c) => c.id))}; not draggable: ${kinds(drawn.filter((c) => !c.draggable).map((c) => c.id))})`);
+
+      cdp = await connectCdp(port);
+      const version = await cdp.send<{ product?: string }>('Browser.getVersion').catch(() => ({ product: 'unknown' }));
+      console.log(`(DevTools endpoint on 127.0.0.1:${port}: ${version.product ?? 'unknown'})`);
+    }],
+    ['a real mouse drag of the Ready bug into Backlog of its own row puts it on hold: one move request, one more signed event, and the card drawn in Backlog', async () => {
+      const { from, to, report } = await aim(DRAG_ITEM, 'backlog');
+      const lane = report.cards.find((c) => c.id === DRAG_ITEM)!.lane;
+      const events = eventsOnRemote();
+      const fromBefore = board.fromView.length;
+      const toBefore = board.toView.length;
+      const { path: used, entries } = await realDrag(from, to);
+      console.log(`drag path: ${used}`);
+      console.log(`(drag log: ${describeLog(entries)})`);
+      const start = entries.findIndex((e) => e.event === 'dragstart');
+      assert.deepEqual(entries[start], { event: 'dragstart', column: 'ready', lane, verdict: 'started' }, `the browser's own dragstart (log: ${describeLog(entries)})`);
+      assert.deepEqual(entries.find((e) => e.event === 'drop'), { event: 'drop', column: 'backlog', lane, verdict: 'ok' }, `the drop lands on Backlog of the same row (log: ${describeLog(entries)})`);
+      const posted = await board.next('fromView', (message) => message.type === 'move', fromBefore);
+      assert.deepEqual(posted, { type: 'move', itemId: DRAG_ITEM, target: 'hold' });
+      const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, DRAG_ITEM)?.held === true, toBefore, 30_000);
+      assert.equal(cardOf(state, DRAG_ITEM)?.column, 'backlog', 'the next state shows the bug in Backlog');
+      await until('one more event on the coordination record', () => (eventsOnRemote() === events + 1 ? true : undefined), 20_000);
+      assert.equal(board.fromView.slice(fromBefore).filter((m) => m.type === 'move').length, 1, 'exactly one move request');
+      await until('the bug drawn in Backlog', async () => ((await ask({ action: 'rects' })).cards.some((c) => c.id === DRAG_ITEM && c.column === 'backlog') ? true : undefined));
     }]
   ];
+  return allBoardTests;
 }
 
 function plainTests(): Array<[string, () => Promise<void>]> {

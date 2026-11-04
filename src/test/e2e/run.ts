@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { runTests } from '@vscode/test-electron';
@@ -122,6 +123,19 @@ async function prepareBoardProject(extensionDevelopmentPath: string): Promise<st
   return workspace;
 }
 
+// A free TCP port on this computer for the board window's DevTools endpoint (62-23): asked from the system on 127.0.0.1, then let go for VS Code.
+function freeLocalPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      server.close(() => { if (port > 0) resolve(port); else reject(new Error('No free port on 127.0.0.1')); });
+    });
+  });
+}
+
 // Fresh user data for the board window: maximized (the test window ignores saved sizes), no start editor, and no saved board state (first open).
 async function boardUserData(): Promise<string> {
   const userData = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-board-'));
@@ -171,9 +185,13 @@ async function main(): Promise<void> {
     await rm(screens, { recursive: true, force: true });
     await mkdir(screens, { recursive: true });
     const fbdir = process.env.NEAR_AI_E2E_FBDIR;
+    // The board window alone gets a DevTools endpoint (62-23, T-62-71), so the suite can drag a card with real mouse input. Chromium binds it to
+    // 127.0.0.1, the port is a free one chosen now, and it closes with this VS Code. No other launch and no shipped file opens one.
+    const cdpPort = await freeLocalPort();
     // One CSS pixel per screen pixel, so the probe's measurements and the screenshots describe the same picture.
     await launch('board', workspace, await boardUserData(), {
-      args: ['--force-device-scale-factor=1'], env: { NEAR_AI_E2E_SCREENS: screens, ...(fbdir === undefined || fbdir === '' ? {} : { NEAR_AI_E2E_FBDIR: fbdir }) }
+      args: ['--force-device-scale-factor=1', `--remote-debugging-port=${cdpPort}`],
+      env: { NEAR_AI_E2E_SCREENS: screens, NEAR_AI_E2E_CDP_PORT: String(cdpPort), ...(fbdir === undefined || fbdir === '' ? {} : { NEAR_AI_E2E_FBDIR: fbdir }) }
     });
   }
 }

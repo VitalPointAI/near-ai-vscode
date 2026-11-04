@@ -200,13 +200,13 @@ test('62-23: under data-e2e the facts carry a drag log of dragstart, dragenter p
     { event: 'dragend', column: 'ready', lane: 'unassigned', verdict: 'dropped' }
   ], 'one dragenter per cell entered, however often the browser repeats it');
 
-  // A long drag keeps only the last 20 entries.
-  const dt2 = lift(h, 'plan:90-01');
-  for (let i = 0; i < 30; i += 1) h.fire(cell(h, i % 2 ? 'claimed' : 'backlog'), 'dragenter', { dataTransfer: dt2 });
-  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: Object.assign(dt2, { dropEffect: 'none' }) });
+  // A long drag keeps only the last 20 entries (plan:90-01 waits for the host now, so the Backlog card plan:90-02 is dragged).
+  const dt2 = lift(h, 'plan:90-02');
+  for (let i = 0; i < 30; i += 1) h.fire(cell(h, i % 2 ? 'claimed' : 'ready'), 'dragenter', { dataTransfer: dt2 });
+  h.fire(card(h, 'plan:90-02'), 'dragend', { dataTransfer: Object.assign(dt2, { dropEffect: 'none' }) });
   const log = factsOf(h, 8).dragLog as Array<Record<string, string>>;
   assert.equal(log.length, 20, 'the last 20 entries');
-  assert.deepEqual(log[log.length - 1], { event: 'dragend', column: 'ready', lane: 'unassigned', verdict: 'cancelled' });
+  assert.deepEqual(log[log.length - 1], { event: 'dragend', column: 'backlog', lane: 'unassigned', verdict: 'cancelled' });
 });
 
 test('62-23: without data-e2e no drag log is kept', async () => {
@@ -216,7 +216,8 @@ test('62-23: without data-e2e no drag log is kept', async () => {
   drop(h, cell(h, 'backlog'), dt);
   h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt });
   const api = h.window.NearAiBoard as { dragLog?: () => unknown[] };
-  assert.deepEqual(typeof api.dragLog === 'function' ? api.dragLog() : 'no dragLog in the board api', [], 'nothing is logged');
+  // The page's arrays belong to its own realm, so the log is copied out before comparing.
+  assert.deepEqual(typeof api.dragLog === 'function' ? JSON.parse(JSON.stringify(api.dragLog())) : 'no dragLog in the board api', [], 'nothing is logged');
   h.deliver({ type: 'e2e-probe', id: 9, action: 'facts' });
   assert.equal(h.posts.filter((p) => p.type === 'e2e-facts').length, 0, 'and the page answers no probe');
 });

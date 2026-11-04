@@ -93,6 +93,18 @@
     for (const n of area.querySelectorAll('.column')) if (offered.has(n.getAttribute('data-column'))) add(n, 'drag-active');
   }
 
+  // ---- the e2e drag log (62-23) ------------------------------------------------------------------------------------------------------------------
+  // What the browser's own drag events did, kept by board.js only on a page marked for the extension-host tests. One dragenter per cell entered.
+  let lastEntered;
+  function log(event, cell, verdictWord) {
+    if (!board.logDrag) return;
+    board.logDrag({ event, column: cell ? cell.getAttribute('data-column') || '' : '', lane: cell ? cell.getAttribute('data-lane') || '' : '', verdict: verdictWord });
+  }
+  function logCard(event, s, verdictWord) {
+    const c = board.cardData(s.id);
+    if (board.logDrag) board.logDrag({ event, column: c ? c.column : '', lane: s.lane, verdict: verdictWord });
+  }
+
   // ---- the drag --------------------------------------------------------------------------------------------------------------------------------
   area.addEventListener('dragstart', (e) => {
     const li = cardOfNode(e.target);
@@ -101,12 +113,16 @@
     const model = board.model();
     const c = board.cardData(id);
     const source = cellOf(li);
-    if (!model || !c || !source || !canDrag(c, model) || li.getAttribute('aria-busy') === 'true') { e.preventDefault(); return; }
+    if (!model || !c || !source || !canDrag(c, model) || li.getAttribute('aria-busy') === 'true') { log('dragstart', source, 'refused'); e.preventDefault(); return; }
     e.dataTransfer.setData(TYPE, id);
     e.dataTransfer.effectAllowed = 'move';
     session = { id, lane: source.getAttribute('data-lane'), state: 'active' };
+    lastEntered = undefined;
+    // No render moves the dragged card until the drag ends (62-23): Chromium cancels a drag whose source leaves the page.
+    board.setDragging(true);
     add(li, 'dragging');
     mark(session);
+    log('dragstart', source, 'started');
     if (!reduced()) lastRects = snapshot(model);
   });
 
@@ -117,7 +133,13 @@
     const v = verdict(target, session);
     if (v.kind === 'no') showHover(target, v.text); else hideHover();
   }
-  area.addEventListener('dragenter', (e) => { if (!accepts(e)) return; e.preventDefault(); hint(e); });
+  area.addEventListener('dragenter', (e) => {
+    const target = cellOf(e.target);
+    if (session && session.state === 'active' && target && target !== lastEntered) { lastEntered = target; log('dragenter', target, accepts(e) ? verdict(target, session).kind : 'ignored'); }
+    if (!accepts(e)) return;
+    e.preventDefault();
+    hint(e);
+  });
   area.addEventListener('dragover', (e) => {
     if (!accepts(e)) return;
     e.preventDefault();
@@ -134,15 +156,16 @@
 
   area.addEventListener('drop', (e) => {
     const s = session;
-    if (!s || s.state !== 'active' || !hasType(e)) return;
+    if (!s || s.state !== 'active' || !hasType(e)) { if (s) log('drop', cellOf(e.target), 'ignored'); return; }
     const target = cellOf(e.target);
-    if (!target || e.dataTransfer.getData(TYPE) !== s.id) return;
+    if (!target || e.dataTransfer.getData(TYPE) !== s.id) { log('drop', target, 'ignored'); return; }
     e.preventDefault();
     s.state = 'dropped';
     clearMarks();
     const li = board.cardElement(s.id);
     if (li) remove(li, 'dragging');
     const v = verdict(target, s);
+    log('drop', target, v.kind);
     if (v.kind === 'own') return;
     // A refused drop never posts and never moves anything: the card keeps its place and shows and announces the reason.
     if (v.kind === 'no') { board.showRefusal(s.id, columnLabel(v.column), v.text); return; }
@@ -151,10 +174,13 @@
     board.setPending(s.id, 'Moving to ' + columnLabel(v.column) + '...');
     board.post({ type: 'move', itemId: s.id, target: v.move.key });
   });
+  // The drag is over once it is dropped: a render held back during it may run now (a dragend that never reaches the board cannot freeze it).
+  area.addEventListener('drop', () => { if (session && session.state === 'dropped') board.setDragging(false); });
 
   /** A drag that ended without a drop (Escape, or dropped somewhere the board does not take): nothing changed, and the person is told so. */
   function cancel(s) {
     s.state = 'cancelled';
+    board.setDragging(false);
     const li = board.cardElement(s.id);
     if (li) remove(li, 'dragging');
     clearMarks();
@@ -164,11 +190,14 @@
   area.addEventListener('dragend', () => {
     const s = session;
     session = undefined;
+    lastEntered = undefined;
     if (!s) return;
+    logCard('dragend', s, s.state === 'active' ? 'cancelled' : s.state);
     if (s.state === 'active') { cancel(s); return; }
     const li = board.cardElement(s.id);
     if (li) remove(li, 'dragging');
     clearMarks();
+    board.setDragging(false);
   });
   // Browsers cancel a native drag on Escape themselves and then send dragend; this covers a host that reports the key instead.
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && session && session.state === 'active') cancel(session); });

@@ -53,6 +53,9 @@
   // The extension-host tests (and only they: the host adds data-e2e under NEAR_AI_E2E=1) ask the page what it drew and which errors it caught.
   const E2E = !!document.body && document.body.getAttribute('data-e2e') === '1';
   const pageErrors = [];
+  // 62-23: what the browser's own drag events did, for the real-window drag test only (the last 20 entries; nothing is kept without data-e2e).
+  const dragLog = [];
+  let dragLogged = 0;
   if (E2E) window.addEventListener('error', (e) => { pageErrors.push(String((e && e.message) || e)); });
 
   // ---- state kept across reloads (D-15) -----------------------------------------------------------------------------------------------------
@@ -79,6 +82,10 @@
   let dirty = false;
   let slowTimer;
   let colFocus = 0;
+  // 62-23: while drag.js reports a drag, no render moves, replaces or removes the dragged card (Chromium ends a drag whose source node leaves the
+  // page). A render asked for meanwhile is drawn once when the drag ends.
+  let dragging = false;
+  let heldRender = false;
   const pending = {};
   const refusals = {};
   const active = {};
@@ -752,6 +759,7 @@
   // ---- rendering and live updates ------------------------------------------------------------------------------------------------------------
   function render() {
     if (document.visibilityState === 'hidden') { dirty = true; return; }
+    if (dragging) { heldRender = true; return; }
     dirty = false;
     const a = document.activeElement;
     const was = a && a !== document.body && a.closest ? a.closest('.card') : null;
@@ -888,6 +896,13 @@
       persist(); render(); scheduleFilterAnnounce();
     },
     onRender(fn) { renderListeners.push(fn); },
+    /** drag.js says a drag started (true) or ended (false); the render held back during the drag runs once at its end. */
+    setDragging(on) {
+      dragging = !!on;
+      if (!dragging && heldRender) { heldRender = false; render(); }
+    },
+    logDrag(entry) { if (!E2E) return; dragLogged += 1; dragLog.push(entry); if (dragLog.length > 20) dragLog.splice(0, dragLog.length - 20); },
+    dragLog: () => dragLog.slice(),
     onMessage(type, fn) { (messageListeners[type] = messageListeners[type] || []).push(fn); },
     registerMenu(open) { menuOpener = open; },
     openMenu(id, opener) { if (menuOpener) menuOpener(id, opener); },
@@ -936,7 +951,7 @@
       type: 'e2e-facts', id: m.id, cardIds: nodesOf(document, '.card').map((n) => n.getAttribute('data-id')), draggable: nodesOf(document, '.card[draggable="true"]').length,
       focusedCard: focused ? focused.getAttribute('data-id') : '', focusedRole: a && a.getAttribute ? a.getAttribute('role') || '' : '',
       menuOpen: !!menu && !menu.hidden, menuItems: menu ? menu.querySelectorAll('[role="menuitem"]').length : 0, detailOpen: !detailEl.hidden, groupBy: ui.groupBy,
-      errors: pageErrors.slice()
+      dragLog: dragLog.slice(), dragCount: dragLogged, live: ($('live') && $('live').textContent) || '', errors: pageErrors.slice()
     });
   }
 
