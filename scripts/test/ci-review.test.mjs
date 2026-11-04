@@ -235,6 +235,75 @@ test('the reply is streamed: chunks are joined in order, and the request asks fo
   assert.equal(result.stdout.trim(), '## Recommendation: MERGE');
 });
 
+/** A server that streams `events` with `gapMs` between them, then optionally ends. */
+async function slowServer(events, gapMs, { end = true } = {}) {
+  return new Promise((resolve) => {
+    const s = createServer((request, response) => {
+      request.resume();
+      request.on('end', async () => {
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        for (const event of events) {
+          await new Promise((r) => setTimeout(r, gapMs));
+          if (response.destroyed) return;
+          response.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+        if (end) response.end('data: [DONE]\n\n');
+      });
+    });
+    s.listen(0, '127.0.0.1', () => { servers.push(s); resolve(s); });
+  });
+}
+
+test('a model that keeps streaming is not cut off, however long it thinks', async () => {
+  // Five gaps of 600 ms is longer than the 1 second quiet limit in all, but never quiet for 1 second.
+  const { dir } = gathered();
+  const promptPath = path.join(dir, 'prompt.md');
+  writeFileSync(promptPath, 'prompt');
+  const thinking = Array.from({ length: 4 }, () => ({ choices: [{ delta: { reasoning_content: 'hmm' } }] }));
+  const server = await slowServer([...thinking, { choices: [{ delta: { content: '## Recommendation: MERGE' }, finish_reason: 'stop' }] }], 600);
+  const result = await run('ci-review-call.mjs', [promptPath], {
+    REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_IDLE_SECONDS: '1', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '## Recommendation: MERGE');
+});
+
+test('a model that goes quiet is given up on with a plain reason, and retried', async () => {
+  const { dir } = gathered();
+  const promptPath = path.join(dir, 'prompt.md');
+  writeFileSync(promptPath, 'prompt');
+  const server = await slowServer([{ choices: [{ delta: { reasoning_content: 'hmm' } }] }], 10, { end: false });
+  const result = await run('ci-review-call.mjs', [promptPath], {
+    REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_IDLE_SECONDS: '1', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /attempt 1 failed: the model went quiet for 1 second/);
+  assert.match(result.stderr, /attempt 3 failed: the model went quiet/);
+});
+
+test('the overall cap stops a review that never finishes, without another attempt', async () => {
+  const { dir } = gathered();
+  const promptPath = path.join(dir, 'prompt.md');
+  writeFileSync(promptPath, 'prompt');
+  const thinking = Array.from({ length: 50 }, () => ({ choices: [{ delta: { reasoning_content: 'hmm' } }] }));
+  const server = await slowServer(thinking, 200);
+  const result = await run('ci-review-call.mjs', [promptPath], {
+    REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_IDLE_SECONDS: '5', REVIEW_TOTAL_SECONDS: '2', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /attempt 1 failed: the review took longer than 2 seconds/);
+  assert.doesNotMatch(result.stderr, /attempt 2/);
+});
+
+test('the quiet and overall limits must be whole seconds', async () => {
+  const { dir } = gathered();
+  const promptPath = path.join(dir, 'prompt.md');
+  writeFileSync(promptPath, 'prompt');
+  const bad = await run('ci-review-call.mjs', [promptPath], { REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_IDLE_SECONDS: '0' });
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /REVIEW_IDLE_SECONDS must be/);
+});
+
 test('a network failure names its cause instead of a bare fetch failed', async () => {
   const { dir } = gathered();
   const promptPath = path.join(dir, 'prompt.md');

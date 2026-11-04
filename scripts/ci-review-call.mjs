@@ -32,8 +32,28 @@ function isAllowedEndpoint(value) {
 }
 // Reasoning models think before they answer, and the thinking counts against max_tokens, so a large
 // pull request needs room (and time) for both. REVIEW_MAX_TOKENS can raise or lower the cap.
-const TIMEOUT_MS = 480_000;
 const DEFAULT_MAX_TOKENS = 32_000;
+// There is no fixed time limit while the model is working: a reasoning model can think for well over
+// ten minutes on a large pull request, and the stream shows it is alive. The call gives up only when
+// nothing arrives for IDLE seconds, or at the overall cap. Both can be changed for tests or a slow model.
+const DEFAULT_IDLE_SECONDS = 120;
+const DEFAULT_TOTAL_SECONDS = 1_500;
+
+function seconds(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 3_600) fail(`${name} must be a whole number of seconds from 1 to 3600.`);
+  return value;
+}
+
+/** "2 minutes", "25 minutes", "90 seconds": for messages a person reads. */
+function duration(total) {
+  return total % 60 === 0 ? `${total / 60} minute${total === 60 ? '' : 's'}` : `${total} second${total === 1 ? '' : 's'}`;
+}
+
+/** A failure that a retry cannot fix in the time left. */
+class FinalError extends Error {}
 
 function maxTokens() {
   const raw = process.env.REVIEW_MAX_TOKENS;
@@ -44,7 +64,7 @@ function maxTokens() {
 }
 
 /** Reads a streamed (server-sent events) reply, or a whole JSON reply from an endpoint that ignores `stream`. */
-async function readReply(response) {
+async function readReply(response, alive = () => {}) {
   const type = response.headers.get('content-type') ?? '';
   if (!type.includes('text/event-stream')) {
     const body = await response.json();
@@ -78,6 +98,7 @@ async function readReply(response) {
   progress.unref();
   try {
   for await (const chunk of response.body) {
+    alive();
     buffer += decoder.decode(chunk, { stream: true });
     let newline;
     while ((newline = buffer.indexOf('\n')) !== -1) {
@@ -99,7 +120,29 @@ function describe(error) {
   return detail && error.message === 'fetch failed' ? `fetch failed (${detail})` : error.message;
 }
 
-async function call(prompt, { baseUrl, apiKey, model }) {
+async function call(prompt, { baseUrl, apiKey, model, idleSeconds, totalSeconds }) {
+  const controller = new AbortController();
+  let stopped;
+  const stop = (error) => { stopped ??= error; controller.abort(error); };
+  let idle;
+  const alive = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => stop(new Error(`the model went quiet for ${duration(idleSeconds)} (nothing arrived)`)), idleSeconds * 1000);
+  };
+  const total = setTimeout(() => stop(new FinalError(`the review took longer than ${duration(totalSeconds)}, the most it is allowed`)), totalSeconds * 1000);
+  alive();
+  try {
+    return await ask(prompt, { baseUrl, apiKey, model }, controller.signal, alive);
+  } catch (error) {
+    // An abort surfaces as an AbortError or as our own reason, depending on where it landed.
+    throw stopped ?? error;
+  } finally {
+    clearTimeout(idle);
+    clearTimeout(total);
+  }
+}
+
+async function ask(prompt, { baseUrl, apiKey, model }, signal, alive) {
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
@@ -117,14 +160,15 @@ async function call(prompt, { baseUrl, apiKey, model }) {
     }),
     // Never follow a redirect with the key attached.
     redirect: 'error',
-    signal: AbortSignal.timeout(TIMEOUT_MS)
+    signal
   });
+  alive();
   if (!response.ok) {
     // Only the status code: an error body can echo the request, and CI logs are public.
     await response.body?.cancel().catch(() => {});
     throw new Error(`the model endpoint returned HTTP ${response.status}`);
   }
-  const { text, finishReason } = await readReply(response);
+  const { text, finishReason } = await readReply(response, alive);
   const choice = { finish_reason: finishReason };
   if (typeof text !== 'string' || !text.trim()) {
     // A reasoning model that spends its whole allowance thinking answers with nothing and says why.
@@ -145,16 +189,20 @@ try {
   if (!apiKey) fail('REVIEW_MODEL_API_KEY is not set; the review cannot ask a model.');
   if (!isAllowedEndpoint(baseUrl)) fail('REVIEW_MODEL_BASE_URL must be an https:// URL (http:// only for localhost); the key is not sent elsewhere.');
   if (!model) fail('REVIEW_MODEL is not set; say which model should review.');
+  const idleSeconds = seconds('REVIEW_IDLE_SECONDS', DEFAULT_IDLE_SECONDS);
+  const totalSeconds = seconds('REVIEW_TOTAL_SECONDS', DEFAULT_TOTAL_SECONDS);
 
   const prompt = readFileSync(promptPath, 'utf8');
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      process.stdout.write(`${await call(prompt, { baseUrl, apiKey, model })}\n`);
+      process.stdout.write(`${await call(prompt, { baseUrl, apiKey, model, idleSeconds, totalSeconds })}\n`);
       process.exit(0);
     } catch (error) {
       lastError = new Error(describe(error));
-      // A retry is worth it for a transient 5xx, a timeout, 408 or 429; a 401 will fail the same
+      // Another attempt after the overall cap would only take as long again.
+      if (error instanceof FinalError) { console.error(`attempt ${attempt} failed: ${lastError.message}`); break; }
+      // A retry is worth it for a transient 5xx, a model that went quiet, 408 or 429; a 401 will fail the same
       // way three times.
       console.error(`attempt ${attempt} failed: ${lastError.message}`);
       if (/HTTP 4\d\d/.test(lastError.message) && !/HTTP (408|429)\b/.test(lastError.message)) break;
