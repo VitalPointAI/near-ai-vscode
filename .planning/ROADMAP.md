@@ -254,6 +254,16 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 **Wave 16** *(owner decision 2026-11-04, assignees move their own cards; blocked on Wave 15 completion; each task waits until no debug session holds its files)*
 - [ ] 62-27-PLAN.md — Assignees move their own cards: item.move-own on write and read (done, block, unblock, hold, release, reopen; cancel stays with leads), per-card moves in the model and the page, the developer's real drags in code-server (BOARD-03)
 
+### Phase 62.1: Board timeline: milestones on one timeline with cards as dots in dependency order (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 62
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 62.1 to break down)
+
 ### Phase 63: Claims, leases, claim workspaces, LeaseGuard, duplicate checks
 
 **Goal** (updated 2026-11-02): In every project, a single developer's agents included, each task is worked in its own workspace that agents prepare behind the plain action "Start this task". No two people, and no two agents, can work the same item or the same files at the same time, agents are stopped from writing outside what they hold, and abandoned work is never lost. Claims between people use the coordination log once a second person joins.
