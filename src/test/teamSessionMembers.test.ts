@@ -457,7 +457,7 @@ test('a clone with no device key for the team is offered Join once, and the offe
   await inWorld({}, async (w) => {
     stub.messageAnswers.push('Join Team');
     const first = await startSession(w, 'owner', { secrets: new MemorySecrets() });
-    assert.deepEqual(infoMessages(), [`${TEAM_NAME} uses Team Mode and this computer has not joined it. Join it to work with the team.`]);
+    assert.deepEqual(infoMessages(), [`${TEAM_NAME} has a team and this computer has not joined it. Join it to work with the team.`]);
     assert.deepEqual(stub.notificationActions[0], ['Join Team']);
     await until(() => first.commands.length > 0, 'the Join command');
     assert.deepEqual(first.commands.map((command) => command.id), [sessionModule.JOIN_COMMAND]);

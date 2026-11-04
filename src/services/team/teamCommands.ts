@@ -16,6 +16,8 @@ export const OPEN_BOARD_COMMAND = 'nearAi.team.openBoard';
 export const IMPORT_PLANS_COMMAND = 'nearAi.team.importPlans';
 // G-61-3: shares exactly the team setup after one plain confirmation (src/services/team/shareFlow.ts).
 export const SHARE_COMMAND = 'nearAi.team.share';
+/** Declared only (61-26 RED). */
+export const JUST_ME_KEY = 'nearAi.team.justMe';
 // Every team action is a button in the Team section of the NEAR AI sidebar, so the person is pointed there rather than at a palette command.
 export const SOLO_TEXT = 'Team Mode is not on for this project. To turn it on, choose Turn on Team Mode in the Team section of the NEAR AI sidebar.';
 const OPEN_FOLDER_TEXT = 'Open your project folder first, then choose Turn on Team Mode in the Team section of the NEAR AI sidebar.';
@@ -73,6 +75,9 @@ export interface TeamModeHandle {
   session(): TeamSession | undefined;
   onDidChange(listener: () => void): { dispose(): void };
   boardSummary(): { ready: number; blocked: number; mine: number } | undefined;
+  /** Declared only (61-26 RED). */
+  justMe(): boolean;
+  setJustMe(value: boolean): Promise<void>;
 }
 // The extension passes connectNearAi, the same key setup the chat's Set up button runs. Tests point the NEAR calls at a fake server and replace the
 // browser sign-in and the key setup.
@@ -580,6 +585,8 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       const me = memberId === undefined ? undefined : state.members.get(memberId);
       if (me?.removedEvent !== undefined || session.boardStatus().kind === 'removed') return undefined;
       return summarize(state, memberId);
-    }
+    },
+    justMe: () => false,
+    setJustMe: async () => undefined
   };
 }

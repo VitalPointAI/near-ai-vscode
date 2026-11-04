@@ -1,6 +1,8 @@
 // The owner's plain-language rules as one shared scanner (teamPlainLanguage.test.ts reads it; later suites may too). Two lists:
-// - BANNED_TERMS: developer words a person must never need, plus the old name of the paying account ("NEAR organization", G-61-6). Checked in
-//   every literal a person reads; text written to the NEAR AI Team output channel (the optional details view) is allowed.
+// - BANNED_TERMS: developer words a person must never need, plus the old name of the paying account ("NEAR organization", G-61-6) and the old
+//   feature name "Team Mode" (G-61-8: even one person works with a team of agents, so nothing on screen says to turn a mode on). Checked in every
+//   literal a person reads; text written to the NEAR AI Team output channel (the optional details view) is allowed. Command Palette titles in
+//   package.json keep their names (Enable Team Mode and the others) as the advanced path people already know; they are not scanned here.
 // - NAMING_TERMS: the old names for the organization, its settings page, a member's key and the organization link. Checked in every literal of
 //   the Team Mode code, output channel text included, so the old naming cannot come back anywhere (owner, 2026-11-03).
 // No .test suffix, so the test glob does not run this file. It reads files only; it never writes.
@@ -17,6 +19,7 @@ const ORGANIZATION_TERMS = ['NEAR organization', 'NEAR organizations', 'NEAR org
 export const BANNED_TERMS: readonly string[] = [
   'branch', 'branches', 'commit', 'commits', 'committed', 'committing', 'push', 'pushed', 'pushing', 'pull', 'remote', 'worktree', 'glob', 'GSD',
   'repository', 'repo', 'clone', 'cloned', 'merge', 'merged', 'merging', 'rebase', 'team log', 'device key', 'pattern', 'integration branch',
+  'Team Mode',
   ...ORGANIZATION_TERMS
 ];
 

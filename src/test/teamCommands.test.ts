@@ -22,7 +22,16 @@ const commandsModule = require('../services/team/teamCommands') as typeof import
 test.after(() => { uninstall(); });
 const { ENABLE_COMMAND, PUSH_ACTION, SHARE_COMMAND, SHOW_DETAILS_ACTION, VERIFY_ACTION, VERIFY_LOG_COMMAND, createSessionSlot, registerTeamMode } = commandsModule;
 const { CONNECT_NEAR_AI_ACTION, NOT_CONNECTED_TEXT, STILL_NOT_CONNECTED_TEXT } = commandsModule;
-const { LOCAL_ONLY_TEXT, NOT_NOW_ACTION, NOT_SHAREABLE_TEXT, SOLO_TEXT, TURN_ON_ANYWAY_ACTION } = commandsModule;
+const { JUST_ME_KEY, LOCAL_ONLY_TEXT, NOT_NOW_ACTION, NOT_SHAREABLE_TEXT, SOLO_TEXT, TURN_ON_ANYWAY_ACTION } = commandsModule;
+
+// VS Code's workspace state for one project, kept in memory: the only place Just me for now is stored.
+class FakeMemento {
+  readonly values = new Map<string, unknown>();
+  readonly updates: Array<[string, unknown]> = [];
+  keys(): readonly string[] { return [...this.values.keys()]; }
+  get<T>(key: string, fallback?: T): T | undefined { return (this.values.has(key) ? this.values.get(key) : fallback) as T | undefined; }
+  async update(key: string, value: unknown): Promise<void> { this.updates.push([key, value]); if (value === undefined) this.values.delete(key); else this.values.set(key, value); }
+}
 // The address teammates would use. An insteadOf rule maps it back to the fixture's bare remote, so git still works on this computer.
 const PUBLIC_URL = 'https://example.invalid/team.git';
 
@@ -62,7 +71,7 @@ function resetStub(): void {
 // `connect` stands in for the extension's key setup (configureApiKey): it gets the project folder and may set NEAR AI up there.
 async function withProject(
   run: (project: Project) => Promise<void>,
-  options: { initialised?: boolean; folderOpen?: boolean; connect?: (root: string) => Promise<void>; home?: 'public' | 'local' } = {}
+  options: { initialised?: boolean; folderOpen?: boolean; connect?: (root: string) => Promise<void>; home?: 'public' | 'local'; workspaceState?: FakeMemento } = {}
 ): Promise<void> {
   resetStub();
   const fixture = await createTeamFixture({ clones: ['a'], initialised: options.initialised ?? true });
@@ -73,7 +82,8 @@ async function withProject(
   secrets.values.set(REFRESH_TOKEN_SECRET, canaries.refreshToken);
   secrets.values.set(REPORTING_TOKEN_KEY, canaries.reportingToken);
   const storage = fixture.storageDir('a');
-  const context = createFakeContext(storage, secrets);
+  const context: FakeContext & { workspaceState?: FakeMemento } = createFakeContext(storage, secrets);
+  if (options.workspaceState !== undefined) context.workspaceState = options.workspaceState;
   // By default the project's online home is an address teammates can reach; `home: 'local'` keeps the fixture's folder path as origin.
   if (options.home !== 'local') {
     gitIn(root, ['config', `url.${fixture.remote}.insteadOf`, PUBLIC_URL]);
@@ -138,14 +148,14 @@ test('Enable asks for team name, owner name and email with defaults, creates tea
     assert.equal(gitIn(p.root, ['log', '-1', '--format=%s']), 'chore(team): enable NEAR AI Team Mode');
     assert.equal(gitIn(p.root, ['show', '--name-only', '--format=', 'HEAD']), TEAM_FILE_REL);
 
-    const doneIndex = stub.notifications.findIndex((entry) => entry.message.startsWith('Team Mode is on for Command team'));
+    const doneIndex = stub.notifications.findIndex((entry) => entry.message.startsWith('Your team for Command team is ready'));
     const done = stub.notifications[doneIndex];
     assert.ok(done !== undefined, 'the confirmation is shown');
     assert.equal(done.level, 'info');
     assert.deepEqual([PUSH_ACTION, VERIFY_ACTION], ['Share with my team', 'Check the team']);
     assert.deepEqual(stub.notificationActions[doneIndex], [PUSH_ACTION, VERIFY_ACTION]);
     // J-10: plain words in the notification; the git detail is in the channel only.
-    assert.equal(done.message, 'Team Mode is on for Command team. Share it so teammates can see the team.');
+    assert.equal(done.message, 'Your team for Command team is ready. Share it so teammates can see the team.');
     assert.ok(outputLines().includes('team.json is committed on main. Sharing puts only team.json on main at origin.'));
     assert.equal(remoteMain(p.fixture), mainBefore, 'the code branch was not pushed because Push was not clicked');
     assert.deepEqual(stub.configUpdates, [], 'settings were never written');
@@ -309,7 +319,7 @@ test('Enable where NEAR AI is still not connected after the key setup says so pl
     await p.enable(['Never asked', 'Lead Owner', ''], [CONNECT_NEAR_AI_ACTION]);
     assert.equal(p.connects, 1);
     assert.equal(stub.inputRequests.length, 0, 'no question was asked');
-    assert.equal(STILL_NOT_CONNECTED_TEXT, 'NEAR AI was not connected, so Team Mode was not turned on and nothing was changed.');
+    assert.equal(STILL_NOT_CONNECTED_TEXT, 'NEAR AI was not connected, so your team was not set up and nothing was changed.');
     assert.deepEqual(messages(), [NOT_CONNECTED_TEXT, STILL_NOT_CONNECTED_TEXT]);
     assert.equal(await teamJsonExists(p.root), false);
     assert.deepEqual([...p.secrets.values.keys()].sort(), before, 'no key was stored');
@@ -339,7 +349,7 @@ test('Enable with the project kept only on this computer warns first in a modal;
     assert.equal(stub.notificationOptions[0]?.modal, true);
     assert.ok((stub.notificationOptions[0]?.detail ?? '').includes('for example on GitHub'), 'the detail says what to do');
     assert.deepEqual(stub.notificationActions[0], [TURN_ON_ANYWAY_ACTION, NOT_NOW_ACTION]);
-    assert.deepEqual([TURN_ON_ANYWAY_ACTION, NOT_NOW_ACTION], ['Turn on anyway', 'Not now']);
+    assert.deepEqual([TURN_ON_ANYWAY_ACTION, NOT_NOW_ACTION], ['Set up anyway', 'Not now']);
     assert.equal(stub.inputRequests.length, 0, 'no question was asked');
     assert.equal(stub.notifications.length, 1, 'nothing else was shown');
     assert.equal(await teamJsonExists(p.root), false);
@@ -349,14 +359,14 @@ test('Enable with the project kept only on this computer warns first in a modal;
   }, { home: 'local' });
 });
 
-test('Turn on anyway carries on; the final message says Team Mode is on for this person until the project is online, without a share button', async () => {
+test('Set up anyway carries on; the final message says the team is for this person until the project is online, without a share button', async () => {
   await withProject(async (p) => {
     await p.enable(['Local team', 'Lead Owner', ''], [TURN_ON_ANYWAY_ACTION]);
     assert.equal(stub.inputRequests.length, 3, 'the questions followed');
-    assert.equal(p.handle.session()?.teamFile.name, 'Local team', 'Team Mode is on');
-    const done = stub.notifications.findIndex((entry) => entry.message.startsWith('Team Mode is on for Local team'));
+    assert.equal(p.handle.session()?.teamFile.name, 'Local team', 'the team is set up');
+    const done = stub.notifications.findIndex((entry) => entry.message.startsWith('Your team for Local team is ready'));
     assert.ok(done >= 0);
-    assert.equal(stub.notifications[done]?.message, 'Team Mode is on for Local team, for you only until the project is online where teammates can reach it.');
+    assert.equal(stub.notifications[done]?.message, 'Your team for Local team is ready, for you only until the project is online where teammates can reach it.');
     assert.deepEqual(stub.notificationActions[done], [VERIFY_ACTION], 'no share button');
   }, { home: 'local' });
 });
@@ -402,14 +412,14 @@ test('the handle tells listeners when Team Mode turns on, when a turn-on attempt
   });
 });
 
-test('SOLO_TEXT points at the Turn on Team Mode button in the Team section, not a palette command', () => {
-  assert.equal(SOLO_TEXT, 'Team Mode is not on for this project. To turn it on, choose Turn on Team Mode in the Team section of the NEAR AI sidebar.');
+test('SOLO_TEXT points at the Invite someone button in the NEAR AI sidebar, not a palette command, and does not name the old feature', () => {
+  assert.equal(SOLO_TEXT, 'This project has no team yet. To work with other people, choose Invite someone in the NEAR AI sidebar.');
 });
 
 test('with no folder open Enable asks the user to open the project folder', async () => {
   await withProject(async (p) => {
     await p.enable([]);
-    assert.deepEqual(stub.notifications.map((entry) => [entry.level, entry.message]), [['error', 'Open your project folder first, then choose Turn on Team Mode in the Team section of the NEAR AI sidebar.']]);
+    assert.deepEqual(stub.notifications.map((entry) => [entry.level, entry.message]), [['error', 'Open your project folder first, then choose Invite someone in the NEAR AI sidebar.']]);
     assert.equal(stub.inputRequests.length, 0);
   }, { folderOpen: false });
 });
@@ -420,12 +430,12 @@ test('a failing commit-msg hook shows a plain warning with Show details and keep
     await p.enable(['Hook team', 'Lead Owner', '']);
     const warning = stub.notifications.find((entry) => entry.level === 'warn');
     assert.ok(warning !== undefined, 'a warning is shown');
-    assert.equal(warning.message, 'Team Mode is on, but saving it in this project did not finish. Choose Show details for the one step that is left.');
+    assert.equal(warning.message, 'Your team is set up, but saving it in this project did not finish. Choose Show details for the one step that is left.');
     assert.deepEqual(stub.notificationActions[stub.notifications.indexOf(warning)], [SHOW_DETAILS_ACTION]);
     const detail = outputLines().find((line) => line.includes('hook rejected this commit message'));
     assert.ok(detail !== undefined, 'the channel has the git reason');
     assert.ok(detail.includes(`git add -f ${TEAM_FILE_REL}`), 'and the exact command to finish');
-    assert.equal(stub.notifications.some((entry) => entry.message.startsWith('Team Mode is on for')), false, 'no success message');
+    assert.equal(stub.notifications.some((entry) => entry.message.startsWith('Your team for')), false, 'no success message');
     assert.equal(p.handle.session()?.teamFile.name, 'Hook team', 'the team exists, so its session still runs');
   });
 });
@@ -491,6 +501,60 @@ test('SEC-01 canary: after Enable and Verify no secret or device key reaches the
     assert.deepEqual(await scanGitObjects(path.join(storageDir, 'coordination.git'), needles), [], 'coordination mirror');
     assert.deepEqual(await scanGitObjects(p.fixture.remote, needles), [], 'bare remote');
     assert.deepEqual(await scanGitObjects(path.join(p.root, '.git'), needles, { includeConfig: false }), [], 'project repository objects');
+  });
+});
+
+// ---- Just me for now (61-26, G-61-8) ------------------------------------------------------------------------------------------------------
+
+test('Just me for now is kept per project in VS Code workspace state under one key, tells the listeners, and writes nothing else', async () => {
+  const memento = new FakeMemento();
+  await withProject(async (p) => {
+    assert.equal(JUST_ME_KEY, 'nearAi.team.justMe');
+    assert.equal(p.handle.justMe(), false, 'not chosen yet');
+    let heard = 0;
+    p.handle.onDidChange(() => { heard += 1; });
+    const headBefore = gitIn(p.root, ['rev-parse', 'HEAD']);
+    await p.handle.setJustMe(true);
+    assert.equal(p.handle.justMe(), true);
+    assert.deepEqual(memento.updates, [[JUST_ME_KEY, true]], 'one workspace state write under the one key');
+    assert.equal(heard, 1, 'the sidebar is told');
+    assert.equal(gitIn(p.root, ['status', '--porcelain']), '', 'no file in the project changed');
+    assert.equal(gitIn(p.root, ['rev-parse', 'HEAD']), headBefore, 'nothing was saved in the project history');
+    assert.equal(existsSync(p.storage), false, 'no extension storage');
+    assert.equal(await teamJsonExists(p.root), false, 'no team record');
+    assert.equal(stub.outputChannels.length, 0, 'no channel');
+    assert.deepEqual(stub.notifications, [], 'nothing shown');
+    await p.handle.setJustMe(false);
+    assert.equal(p.handle.justMe(), false);
+    assert.equal(memento.values.has(JUST_ME_KEY), false, 'clearing removes the value');
+  }, { workspaceState: memento });
+});
+
+test('without VS Code workspace state Just me for now reads as not chosen and choosing it fails nothing', async () => {
+  await withProject(async (p) => {
+    assert.equal(p.handle.justMe(), false);
+    await p.handle.setJustMe(true);
+    assert.equal(p.handle.justMe(), false, 'nowhere to keep it, so it reads as not chosen');
+  });
+});
+
+test('a team starting for this project clears Just me for now', async () => {
+  const memento = new FakeMemento();
+  await withProject(async (p) => {
+    await p.handle.setJustMe(true);
+    await p.enable(['Started team', 'Lead Owner', '']);
+    assert.equal(p.handle.session()?.teamFile.name, 'Started team');
+    assert.equal(p.handle.justMe(), false, 'the project has a team now');
+    assert.equal(memento.values.has(JUST_ME_KEY), false);
+  }, { workspaceState: memento });
+});
+
+test('no sentence a person sees from these commands names the old feature', async () => {
+  await withProject(async (p) => {
+    await p.enable(['Words team', 'Lead Owner', '']);
+    await p.verify();
+    const shown = JSON.stringify({ notifications: stub.notifications, actions: stub.notificationActions, inputs: stub.inputRequests.map((request) => [request.title, request.prompt]), progress: stub.progress });
+    assert.doesNotMatch(shown, /team\s+mode/i, shown);
   });
 });
 

@@ -28,15 +28,22 @@ type Model = import('../domain/team/teamSection').TeamSectionModel;
 type Role = import('../domain/team/types').Role;
 type SharedView = import('../domain/team/teamSection').SharedView;
 
-// A Team Mode handle with no session (a project without a team, or Team Mode not started), whose change listeners the test can fire.
-function soloHandle(): TeamModeHandle & { fire(): void; listeners: number } {
+// A Team Mode handle with no session (a project without a team, or Team Mode not started), whose change listeners the test can fire. Just me for
+// now is kept in memory here, as the real handle keeps it in VS Code's workspace state, and setJustMe tells the listeners.
+function soloHandle(): TeamModeHandle & { fire(): void; listeners: number; justMeCalls: boolean[] } {
   const listeners = new Set<() => void>();
+  const justMeCalls: boolean[] = [];
+  let justMe = false;
+  const fire = (): void => { for (const listener of [...listeners]) listener(); };
   return {
     ready: Promise.resolve('solo'),
     session: () => undefined,
     onDidChange(listener: () => void) { listeners.add(listener); return { dispose: () => { listeners.delete(listener); } }; },
     boardSummary: () => undefined,
-    fire() { for (const listener of [...listeners]) listener(); },
+    justMe: () => justMe,
+    async setJustMe(value: boolean) { justMeCalls.push(value); justMe = value; fire(); },
+    fire,
+    justMeCalls,
     get listeners() { return listeners.size; }
   };
 }
@@ -61,7 +68,7 @@ const lastState = (record: RecordedWebview): Model | null | undefined => states(
 
 // ---- Task 1: the tracer ------------------------------------------------------------------------------------------------------------------
 
-test('tracer: a project with no team gets Turn on Team Mode (primary) then Join a team, and clicking Turn on Team Mode runs Enable', async () => {
+test('tracer: a project with no team gets Invite someone (primary), Join a team and Just me for now, and Invite someone runs the invite', async () => {
   const project = soloProject();
   const commands: string[] = [];
   const host = createTeamSectionHost({
@@ -74,15 +81,68 @@ test('tracer: a project with no team gets Turn on Team Mode (primary) then Join 
     await host.refresh();
     const first = states(record)[0];
     assert.ok(first, 'a team-state was posted on attach');
-    assert.deepEqual(first.actions.map((action) => [action.id, action.primary]), [['turn-on', true], ['join', false]]);
-    assert.equal(first.compact, true);
+    assert.deepEqual(first.actions.map((action) => [action.id, action.primary]), [['invite', true], ['join', false], ['solo', false]]);
+    assert.equal(first.heading, 'Working with your agents');
+    assert.equal(first.placement, 'section');
     const before = states(record).length;
-    await record.receive({ type: 'team-action', action: 'turn-on' });
-    assert.deepEqual(commands, ['nearAi.team.enable'], 'Enable ran once');
+    await record.receive({ type: 'team-action', action: 'invite' });
+    assert.deepEqual(commands, [INVITE_COMMAND], 'the invite ran once');
     assert.equal(states(record).length, before + 1, 'a fresh team-state follows the command');
   } finally {
     host.dispose();
     project.cleanup();
+  }
+});
+
+// Lists every file under a folder, so a test can see that nothing was written.
+function filesIn(dir: string): string[] {
+  const { readdirSync } = require('node:fs') as typeof import('node:fs');
+  return (readdirSync(dir, { recursive: true }) as string[]).map(String).sort();
+}
+
+test('Just me for now keeps the choice through the handle only: no command, no file, no event, and the next model is the quiet empty-chat line', async () => {
+  const project = soloProject();
+  const commands: string[] = [];
+  const handle = soloHandle();
+  const host = createTeamSectionHost({ team: handle, firstFolder: () => project.root, testSeams: false, executeCommand: async (command: string) => { commands.push(command); return undefined; } });
+  try {
+    const { webview, record } = webviewView();
+    host.attach(webview);
+    await host.refresh();
+    const files = filesIn(project.root);
+    assert.deepEqual(parseTeamSectionMessage({ type: 'team-action', action: 'solo' }), { type: 'team-action', action: 'solo' });
+    await record.receive({ type: 'team-action', action: 'solo' });
+    await host.refresh();
+    assert.deepEqual(handle.justMeCalls, [true], 'the choice went to the handle once');
+    assert.deepEqual(commands, [], 'no command ran');
+    assert.deepEqual(filesIn(project.root), files, 'no file was written in the project');
+    const model = lastState(record);
+    assert.equal(model?.placement, 'empty-chat-line');
+    assert.equal(model?.status, text.TEAM_STATUS.justMe);
+    assert.deepEqual(model?.actions.map((action) => [action.id, action.label]), [['invite', 'Invite people'], ['join', 'Join a team']]);
+    // The quiet line's links run the same commands as the section's buttons.
+    await record.receive({ type: 'team-action', action: 'join' });
+    assert.deepEqual(commands, [JOIN_COMMAND]);
+  } finally {
+    host.dispose();
+    project.cleanup();
+  }
+});
+
+test('Just me for now is ignored once the project has a team, and turn-on is no longer an action the page can post', async () => {
+  assert.equal(parseTeamSectionMessage({ type: 'team-action', action: 'turn-on' }), undefined, 'turn-on is refused');
+  assert.equal(parseTeamSectionMessage({ type: 'team-action', action: 'solo', extra: 1 }), undefined);
+  const fake = fakeSession({ me: 'owner', members: LEAD_TEAM });
+  const t = fakeHost(fake.session);
+  try {
+    t.host.attach(t.webview);
+    await t.host.refresh();
+    await t.handle.setJustMe(true);
+    await t.host.refresh();
+    assert.equal(lastState(t.record)?.placement, 'section', 'a team project draws its section');
+    assert.deepEqual(t.commands, []);
+  } finally {
+    t.cleanup();
   }
 });
 
@@ -195,13 +255,17 @@ function fakeSession(options: FakeOptions): { session: TeamSession; fire(): void
 
 function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire(): void; setSession(session: TeamSession | undefined): void } {
   let current = initial;
+  let justMe = false;
   const listeners = new Set<() => void>();
+  const fire = (): void => { for (const listener of [...listeners]) listener(); };
   return {
     ready: Promise.resolve(current === undefined ? 'solo' : 'team'),
     session: () => current,
     onDidChange(listener: () => void) { listeners.add(listener); return { dispose: () => { listeners.delete(listener); } }; },
     boardSummary: () => undefined,
-    fire() { for (const listener of [...listeners]) listener(); },
+    justMe: () => justMe,
+    async setJustMe(value: boolean) { justMe = value; fire(); },
+    fire,
     setSession(session: TeamSession | undefined) { current = session; }
   };
 }
@@ -255,7 +319,7 @@ test('an offline session puts Check the team first and says what the connection 
     assert.equal(model?.status, 'Offline: the team could not be reached.');
     assert.equal(model?.actions[0]?.id, 'check');
     assert.equal(model?.actions[0]?.primary, true);
-    assert.ok(model?.actions.some((action) => action.id === 'invite'), 'the rest is still offered');
+    assert.ok(model?.actions.some((action) => action.id === 'members'), 'the rest is still offered');
   } finally {
     t.cleanup();
   }
@@ -289,7 +353,7 @@ test('the online check runs only for the owner or a lead: a developer never call
   }
 });
 
-test('the online check runs at most once a minute when the sidebar is shown, and right after a share, invite, link, turn-on or join', async () => {
+test('the online check runs at most once a minute when the sidebar is shown, and right after a share, invite, link or join', async () => {
   const fake = fakeSession({ me: 'owner', members: LEAD_TEAM });
   let visible = true;
   const t = fakeHost(fake.session);
@@ -316,13 +380,13 @@ test('the online check runs at most once a minute when the sidebar is shown, and
     await t.host.refresh();
     assert.equal(t.checks.length, 2, 'again once a minute has passed');
     // Actions that change what is online are followed by a check at once; the others are not.
-    for (const action of ['share', 'invite', 'link', 'turn-on', 'join']) {
+    for (const action of ['share', 'invite', 'link', 'join']) {
       const before: number = t.checks.length;
       await t.record.receive({ type: 'team-action', action });
       await t.host.refresh();
       assert.equal(t.checks.length, before + 1, `${action} is followed by a check`);
     }
-    for (const action of ['members', 'board', 'check']) {
+    for (const action of ['members', 'board', 'check', 'solo']) {
       const before: number = t.checks.length;
       await t.record.receive({ type: 'team-action', action });
       await t.host.refresh();
@@ -343,7 +407,7 @@ test('the section follows Team Mode: a handle change, a session update and a res
   try {
     t.host.attach(t.webview);
     await t.host.refresh();
-    assert.deepEqual(lastState(t.record)?.actions.map((action) => action.id), ['turn-on', 'join'], 'no session yet: no team');
+    assert.deepEqual(lastState(t.record)?.actions.map((action) => action.id), ['invite', 'join', 'solo'], 'no session yet: no team');
     t.handle.setSession(first.session);
     t.handle.fire();
     await t.host.refresh();
@@ -510,7 +574,8 @@ test('a real lead and joiner: Share first, then Invite; the joiner waits; the le
     await leadHost.refresh({ recheckShared: true });
     model = lastState(leadView.record);
     assert.equal(model?.actions[0]?.id, 'invite', `shared: ${JSON.stringify(model)}`);
-    assert.ok(model?.actions.some((action) => action.id === 'link'), 'an unlinked team offers Link your organization');
+    assert.equal(model?.status, text.onlyYouStatus(0));
+    assert.equal(model?.actions.some((action) => action.id === 'link'), false, 'linking is offered by the invite and in Members, not as a button here');
 
     // The lead invites a developer; the bundle comes back from the clipboard.
     stub.inputAnswers.push('Dana', 'dana@example.invalid', '5');
@@ -550,6 +615,7 @@ test('a real lead and joiner: Share first, then Invite; the joiner waits; the le
     model = lastState(leadView.record);
     const members = model?.actions.find((action) => action.id === 'members');
     assert.equal(members?.badge, '1 waiting', JSON.stringify(model));
+    assert.deepEqual(model?.actions.map((action) => action.id), ['members', 'board'], 'once someone joined the section stays quiet');
     assert.match(model?.status ?? '', /1 person is waiting for you in Members/);
 
     stub.quickPickAnswers.push('Dana D, developer, waiting for confirmation', 'Confirm');
@@ -611,8 +677,10 @@ test('under NEAR_AI_E2E=1 the probe asks the page what it drew, may ask it to cl
       assert.ok(teamSectionTap.probe !== undefined, 'the probe is offered');
       await teamSectionTap.probe({ id: 3 });
       assert.deepEqual(record.posted.at(-1), { type: 'team-e2e', id: 3 });
-      await record.receive({ type: 'team-e2e-facts', id: 3, heading: 'Team', status: 'Work on this project', actions: [{ id: 'turn-on', label: 'Turn on Team Mode' }] });
-      assert.deepEqual(teamSectionTap.facts, [{ id: 3, heading: 'Team', status: 'Work on this project', actions: [{ id: 'turn-on', label: 'Turn on Team Mode' }] }]);
+      await record.receive({ type: 'team-e2e-facts', id: 3, heading: 'Working with your agents', status: 'Want people to work with you too?', actions: [{ id: 'invite', label: 'Invite someone' }] });
+      assert.deepEqual(teamSectionTap.facts, [{ id: 3, heading: 'Working with your agents', status: 'Want people to work with you too?', actions: [{ id: 'invite', label: 'Invite someone' }] }]);
+      await teamSectionTap.probe({ id: 5, click: 'solo' });
+      assert.deepEqual(record.posted.at(-1), { type: 'team-e2e', id: 5, click: 'solo' }, 'the probe may click Just me for now');
       await teamSectionTap.probe({ id: 4, click: 'invite' });
       assert.deepEqual(record.posted.at(-1), { type: 'team-e2e', id: 4, click: 'invite' });
       assert.deepEqual(commands, [], 'the probe itself runs nothing: the page clicks its own button, which posts team-action');

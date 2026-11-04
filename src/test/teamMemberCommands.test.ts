@@ -862,6 +862,7 @@ test('Manage Team Members lists the NEAR line first, then members with their sta
     clearUi();
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.deepEqual(lastList(), [
+      'Invite someone',
       'NEAR AI sign-in: lead',
       'Lead Owner, owner',
       'Dana D, developer, waiting for confirmation',
@@ -879,13 +880,131 @@ test('Manage Team Members in a team without NEAR starts with the plain no-organi
   await withTeam(async (t) => {
     await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
     await t.run(MANAGE_MEMBERS_COMMAND);
-    assert.equal(lastList()[0], NO_ORG_NOTICE);
+    assert.equal(lastList()[1], NO_ORG_NOTICE, 'after Invite someone, which the owner sees first');
     stub.quickPickAnswers.push('Dana D, developer, waiting for confirmation', 'Confirm');
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.ok(shownMessages().some((message) => message.startsWith('Dana D is now a developer.')), shownMessages().join(' | '));
     assert.equal(shownMessages().some((message) => /spend cap|capped|limit/i.test(message.replace(NO_ORG_NOTICE, ''))), false, 'no cap is claimed without a NEAR organization');
     assert.equal(t.handle.session()?.state().members.get(await readMemberId(t, 'Dana D'))?.role, 'developer');
   });
+});
+
+// ---- 61-26 (G-61-8): Invite someone from Members, and inviting from a project with no team -----------------------------------------------------
+
+test('Members lists Invite someone first for the owner and leads, and choosing it runs the invite', async () => {
+  await withTeam(async (t) => {
+    stub.quickPickAnswers.push('Invite someone', NOT_NOW_CHOICE, 'Developer', '7 days');
+    stub.inputAnswers.push('Gus', 'gus@example.invalid', '5');
+    stub.setMessageResponder(copyWhenOffered);
+    await t.run(MANAGE_MEMBERS_COMMAND);
+    stub.setMessageResponder(undefined);
+    assert.equal(stub.quickPickRequests[0]?.labels[0], 'Invite someone', 'the first row of Members');
+    assert.equal(stub.clipboardWrites.length, 1, `the invite was made (${shownMessages().join(' | ')})`);
+    const invited = [...(t.handle.session()?.state().members.values() ?? [])].filter((member) => member.status === 'invited').map((member) => member.name);
+    assert.deepEqual(invited, ['Gus'], 'member.invited is in the log');
+  });
+});
+
+test('Members has no Invite someone row for a member who does not run the team', async () => {
+  await withTeam(async (t) => {
+    const dana = await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
+    const j = await openJoiner(t, { pull: false, secrets: dana.secrets });
+    try {
+      await j.run(MANAGE_MEMBERS_COMMAND);
+      assert.ok(lastList().length > 0, 'the list was shown');
+      assert.equal(lastList().includes('Invite someone'), false);
+    } finally {
+      await closeWindow(j);
+      stub.setWorkspaceFolders([t.root]);
+    }
+  });
+});
+
+interface Solo { fixture: TeamFixture; root: string; storage: string; context: FakeContext; handle: ReturnType<typeof registerTeamMode>; run(command: string): Promise<void> }
+
+// A project with no team yet, with its online home at a public-looking address (or kept on this computer with `home: 'local'`).
+async function withNoTeam(work: (solo: Solo) => Promise<void>, options: { home?: 'public' | 'local' } = {}): Promise<void> {
+  resetStub();
+  const fixture = await createTeamFixture({ clones: ['a'], initialised: true });
+  const root = fixture.clones['a'] as string;
+  const storage = fixture.storageDir('a');
+  const context = createFakeContext(storage, new MemorySecrets());
+  let handle: ReturnType<typeof registerTeamMode> | undefined;
+  try {
+    if (options.home !== 'local') {
+      gitIn(root, ['config', `url.${fixture.remote}.insteadOf`, PUBLIC_URL]);
+      gitIn(root, ['remote', 'set-url', 'origin', PUBLIC_URL]);
+    }
+    stub.setWorkspaceFolders([root]);
+    handle = registerTeamMode(context as never);
+    assert.equal(await handle.ready, 'solo');
+    const own = new Map(stub.commands);
+    const run = async (command: string): Promise<void> => {
+      const handler = own.get(command);
+      assert.ok(handler !== undefined, `${command} is registered`);
+      await handler();
+    };
+    await work({ fixture, root, storage, context, handle, run });
+  } finally {
+    await closeWindow({ context, handle });
+    await removeFixture(fixture);
+  }
+}
+
+const shareThenCopy = (_text: string, actions: string[]): string | undefined => (actions.includes('Share and continue') ? 'Share and continue' : actions.includes('Copy invite') ? 'Copy invite' : undefined);
+
+test('Invite someone in a project with no team sets the team up on the way and carries on into the invite in the same command', async () => {
+  await withNoTeam(async (s) => {
+    stub.inputAnswers.push('Solo team', 'Lead Owner', 'Ana', 'ana@example.invalid', '5');
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Developer', '7 days');
+    stub.setMessageResponder(shareThenCopy);
+    await s.run(INVITE_COMMAND);
+    stub.setMessageResponder(undefined);
+    // The only new questions are the team name and your name, both filled in already, titled Invite someone; no email question.
+    const first = stub.inputRequests.slice(0, 2);
+    assert.deepEqual(first.map((request) => [request.title, request.prompt]), [['Invite someone', 'Team name'], ['Invite someone', 'Your name as teammates will see it']]);
+    assert.equal(first[0]?.value, 'a', 'the team name is the folder name');
+    assert.equal(first[1]?.value, 'Team Test', 'your name is the name this computer already uses');
+    assert.equal(stub.inputRequests.some((request) => /email is kept only/i.test(request.prompt ?? '')), false, 'no email question for the lead');
+    assert.deepEqual(stub.inputRequests.slice(2).map((request) => request.prompt?.split('.')[0]), ['Name of the person you are inviting', 'Their email address', 'Allocation in US dollars']);
+    // The team exists, its setup was shared with the invite's one confirmation, and the invite was made and shown once.
+    assert.equal(s.handle.session()?.teamFile.name, 'Solo team', 'the team session runs');
+    assert.equal(JSON.parse(gitIn(s.fixture.remote, ['show', `refs/heads/main:${TEAM_FILE_REL}`])).name, 'Solo team', 'the team setup is online');
+    const invited = [...(s.handle.session()?.state().members.values() ?? [])].filter((member) => member.status === 'invited').map((member) => member.name);
+    assert.deepEqual(invited, ['Ana'], 'member.invited is in the log');
+    assert.equal(stub.clipboardWrites.length, 1, 'the invite was copied');
+    assert.ok(modalsShown().some((modal) => modal.message === 'Invite ready for Ana'), 'the invite modal was shown');
+    // No separate message that the team is on interrupts, and nothing on screen names the old feature.
+    assert.equal(shownMessages().some((message) => /^Your team for|is ready\.|Team Mode is on/.test(message)), false, shownMessages().join(' | '));
+    assert.doesNotMatch(everythingShown(), /team\s+mode/i);
+  });
+});
+
+test('dismissing the team name while inviting from a project with no team stops with nothing changed', async () => {
+  await withNoTeam(async (s) => {
+    const head = gitIn(s.root, ['rev-parse', 'HEAD']);
+    stub.inputAnswers.push(undefined as unknown as string);
+    await s.run(INVITE_COMMAND);
+    assert.equal(await readTeamFile(s.root), undefined, 'no team record');
+    assert.equal(s.handle.session(), undefined, 'no team session');
+    assert.equal(gitIn(s.root, ['rev-parse', 'HEAD']), head, 'nothing saved in the project');
+    assert.equal(stub.inputRequests.length, 1, 'only the team name was asked');
+    assert.equal(stub.clipboardWrites.length, 0);
+    assert.equal(existsSync(path.join(s.storage, 'team')), false, 'no team storage');
+  });
+});
+
+test('inviting from a project kept only on this computer warns first, as turning a team on always did; Not now changes nothing', async () => {
+  await withNoTeam(async (s) => {
+    const { LOCAL_ONLY_TEXT, NOT_NOW_ACTION } = commandsModule;
+    stub.messageAnswers.push(NOT_NOW_ACTION);
+    await s.run(INVITE_COMMAND);
+    assert.equal(stub.notifications[0]?.message, LOCAL_ONLY_TEXT);
+    assert.equal(stub.notificationOptions[0]?.modal, true);
+    assert.equal(stub.inputRequests.length, 0, 'no question was asked');
+    assert.equal(await readTeamFile(s.root), undefined);
+    assert.equal(s.handle.session(), undefined);
+  }, { home: 'local' });
 });
 
 async function readMemberId(t: Team, name: string): Promise<string> {

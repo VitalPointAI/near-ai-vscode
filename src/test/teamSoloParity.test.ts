@@ -203,7 +203,7 @@ test('Verify Team Log in a solo project only explains how to turn Team Mode on',
     timers.restore();
     assert.deepEqual(stub.notifications, [{ level: 'info', message: SOLO_TEXT }]);
     assert.deepEqual(stub.notificationActions, [[]], 'the explanation has no buttons');
-    assert.equal(SOLO_TEXT, 'Team Mode is not on for this project. To turn it on, choose Turn on Team Mode in the Team section of the NEAR AI sidebar.');
+    assert.equal(SOLO_TEXT, 'This project has no team yet. To work with other people, choose Invite someone in the NEAR AI sidebar.');
     assert.deepEqual(timers.setTimeoutCalls, []);
     assert.equal(timers.setIntervalCalls, 0);
     assert.equal(stub.statusBarItems.length, 0);
@@ -275,7 +275,7 @@ test('solo project: the sidebar Team section costs one fs.stat and no timer, cha
     assert.deepEqual(loadedTeamModules().filter((file) => !allowed.includes(file)), [], 'no other compiled team module was loaded');
     const posted = made.record.posted as Array<{ type: string; model: { actions: Array<{ id: string }> } | null }>;
     assert.deepEqual(posted.map((message) => message.type), ['team-state']);
-    assert.deepEqual(posted[0]?.model?.actions.map((action) => action.id), ['turn-on', 'join']);
+    assert.deepEqual(posted[0]?.model?.actions.map((action) => action.id), ['invite', 'join', 'solo']);
   } finally {
     timers.restore();
     fsCalls.restore();
@@ -311,7 +311,7 @@ test('solo project: the Team Mode handle has no boardSummary, and activation plu
     assert.deepEqual(loadedTeamModules().filter((file) => !allowed.includes(file)), [], 'no other compiled team module was loaded');
     const posted = made.record.posted as Array<{ type: string; model: { board?: unknown; actions: Array<{ id: string }> } | null }>;
     assert.equal(posted.at(-1)?.model?.board, undefined, 'no board line');
-    assert.deepEqual(posted.at(-1)?.model?.actions.map((action) => action.id), ['turn-on', 'join']);
+    assert.deepEqual(posted.at(-1)?.model?.actions.map((action) => action.id), ['invite', 'join', 'solo']);
   } finally {
     host.dispose();
     for (const subscription of context.subscriptions) subscription.dispose();
