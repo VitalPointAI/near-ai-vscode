@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-30-PLAN.md
-last_updated: "2026-11-04T22:01:33.757Z"
+stopped_at: Completed 61-31-PLAN.md
+last_updated: "2026-11-04T22:22:16.057Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: ff4a71de88a712d3bf316d74129e442649d75cdb
+state_head: 932e9c354ce57f4ef6e08088579b5837794358d2
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 69
+  completed_plans: 70
   percent: 11
 ---
 
@@ -123,6 +123,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 61 P28 | 25min | 3 tasks | 5 files |
 | Phase 61 P29 | 21min | 3 tasks | 9 files |
 | Phase 61 P30 | 25min | 3 tasks | 13 files |
+| Phase 61 P31 | 58min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -279,6 +280,8 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-28: Ask to join is an invite in reverse: the requester's computer keeps the code in secure storage and sends a self-signed request with only the derived public key; a lead's accept writes a normal member.invited through the invite path (preset member id and key, no bundle); the requester joins by itself with the existing proof; no log format change
 - [Phase 61]: 61-29: Ask to join runs its automatic steps (the requester's completion, the accepting computer's confirm) only after the session start finished; the accepting computer confirms only members named in accepted-requests.json, once per join, and never prompts for a sign-in
 - [Phase 61]: 61-30: the sidebar Connect screen offers Join a team and Ask to join while no profile works (a block of its own on this branch, one .team-connect group inside PR #7's #welcome-connect after the merge); a linked team's key becomes the profile by itself (refresh-status on onKeyInstalled); an unlinked join asks Paste your own key, Use a saved profile or Later
+- [Phase 61]: 61-31: Use a saved profile's pick and messages go through teamPrompts (savedProfileUi.ts) so a join can use a saved profile in a real window; production calls unchanged
+- [Phase 61]: 61-31: the invite e2e runs a third window (team-ask) after the invitee's closes, with team-accept in the lead's window; at most two windows at once
 
 ### Pending Todos
 
@@ -300,8 +303,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T22:01:33.345Z
-Stopped at: Completed 61-30-PLAN.md
+Last session: 2026-11-04T22:22:15.635Z
+Stopped at: Completed 61-31-PLAN.md
 Resume file: None
 
 ## Notes
