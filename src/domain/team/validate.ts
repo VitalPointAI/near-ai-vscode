@@ -458,6 +458,12 @@ const BODY_VALIDATORS: Record<ImplementedEventType, BodyValidator> = {
     ?? validateText(body.reason, 'body.reason', REASON_MAX),
   'item.unblocked': (body) => checkKeys(body, 'body', ['id'])
     ?? validateItemRef(body),
+  // G-62-5: an assignment names the item and the member, nothing else; the unassign names only the item.
+  'item.assigned': (body) => checkKeys(body, 'body', ['id', 'memberId'])
+    ?? validateItemRef(body)
+    ?? validateId(body.memberId, MEMBER_ID_PATTERN, 'body.memberId'),
+  'item.unassigned': (body) => checkKeys(body, 'body', ['id'])
+    ?? validateItemRef(body),
   'item.cancelled': (body) => checkKeys(body, 'body', ['id', 'reason'])
     ?? validateItemRef(body)
     ?? validateText(body.reason, 'body.reason', REASON_MAX),

@@ -210,5 +210,9 @@ export function actionForEvent(event: ImplementedTeamEvent, state?: Pick<TeamSta
     case 'item.cancelled':
     case 'item.reopened':
       return { kind: 'item.move' };
+    // G-62-5: putting a person on a card, or taking them off, is the spec 6.3 "assign or reassign others" row: owner and lead.
+    case 'item.assigned':
+    case 'item.unassigned':
+      return { kind: 'item.assign' };
   }
 }

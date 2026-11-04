@@ -219,6 +219,8 @@ function referenceProblem(state: TeamState, event: ImplementedTeamEvent): string
     case 'item.unblocked':
     case 'item.cancelled':
     case 'item.reopened':
+    case 'item.assigned':
+    case 'item.unassigned':
       return transitionProblem(state, event);
     case 'snapshot.written': {
       // The hash is computed before the transition and only when such an event arrives, about once per 500 events.
@@ -473,6 +475,13 @@ function applyTransition(state: TeamState, event: ImplementedTeamEvent, commitTi
       return;
     case 'item.reopened':
       settle(itemOf(state, event.body.id), 'backlog', event.at);
+      return;
+    // G-62-5: an assignment replaces any earlier one and an unassign removes it. Neither is a state change, so stateSince stays where it is.
+    case 'item.assigned':
+      itemOf(state, event.body.id).assignee = event.body.memberId;
+      return;
+    case 'item.unassigned':
+      delete itemOf(state, event.body.id).assignee;
       return;
     case 'policy.changed':
       state.team.policy = applyPolicyChanges(state.team.policy, event.body.changes);

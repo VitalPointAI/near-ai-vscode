@@ -1,6 +1,9 @@
 // Work items (spec 6.4, D-04, D-10 to D-14): id shapes and the one pure function that decides whether an item event may move an item.
 // The same transitionProblem runs when an event is written (the transport replays the batch through the materialiser) and when it is read,
 // so a refusal on one side is a rejection on the other. Pure: no I/O, no clock, no vscode.
+// permissions.ts imports isOwnDraft from here and this file asks it the item.claim question. Both modules only call each other at run time,
+// never while loading, so the cycle is safe in either load order.
+import { decideTeamAction } from './permissions';
 import { TEAM_REJECTION_REASONS } from './types';
 import type { ImplementedTeamEvent, ItemChanges, ItemKind, TeamState, WorkItem } from './types';
 
@@ -117,10 +120,35 @@ function estimateProblem(item: WorkItem): string | undefined {
   return isTerminal(item) ? R.itemTerminal : undefined;
 }
 
+// G-62-5: the kinds a person can be put on. Plans and phases come from the import, bugs, chores and spikes from the board; milestones and
+// tasks are graph nodes nobody works on directly, and review items wait for the phase that makes them.
+const ASSIGNABLE_KINDS: readonly ItemKind[] = ['plan', 'phase', 'bug', 'chore', 'spike'];
+
+export type AssignmentView = Pick<TeamState, 'items' | 'members' | 'team'>;
+
+// A current, confirmed member who may claim this kind of item: not removed, not an unused invitation, not waiting for a lead to confirm a role,
+// and allowed the item.claim decision for the kind (owner, lead or developer for every assignable kind today). It follows the claim row, so a
+// change there changes who can be assigned.
+export function mayBeAssigned(state: Pick<TeamState, 'members' | 'team'>, memberId: string, itemKind: ItemKind): boolean {
+  const member = state.members.get(memberId);
+  if (member === undefined || member.removedEvent !== undefined || member.status === 'invited' || member.pendingRole !== undefined) return false;
+  return decideTeamAction(state, memberId, { kind: 'item.claim', itemKind }).allowed;
+}
+
+// The order is fixed so every client gives the same reason: the item, its kind, its state, the person, then a repeat of the same person (refused
+// so the log never carries a no-op). Assignment is not a state change, so a held or blocked card can be assigned.
+function assignProblem(state: AssignmentView, item: WorkItem, memberId: string): string | undefined {
+  if (!ASSIGNABLE_KINDS.includes(item.kind)) return R.itemNotAssignable;
+  if (isTerminal(item)) return R.itemTerminal;
+  if (!mayBeAssigned(state, memberId, item.kind)) return R.assigneeNotEligible;
+  return item.assignee === memberId ? R.itemAlreadyAssigned : undefined;
+}
+
 // The rejection reason an item event earns at its log position, or undefined when it may apply. Events that are not item events pass.
 // No rule here can put an item into claimed, in-progress, in-review or integrating (D-13): the only states these events set are
 // backlog, done and cancelled, and every move that needs a claim or an integration waits for the phase that owns it.
-export function transitionProblem(state: Pick<TeamState, 'items'>, event: ImplementedTeamEvent): string | undefined {
+// The state carries the members and the team as well as the items, because an assignment names a person (G-62-5); both callers hold a full state.
+export function transitionProblem(state: AssignmentView, event: ImplementedTeamEvent): string | undefined {
   switch (event.type) {
     case 'item.imported': return importProblem(state, event.body);
     case 'item.created': return state.items.has(event.body.id) ? R.itemExists : undefined;
@@ -130,6 +158,9 @@ export function transitionProblem(state: Pick<TeamState, 'items'>, event: Implem
     case 'item.unblocked': return withItem(state, event.body.id, (item) => (item.blocked === undefined ? R.itemNotBlocked : undefined));
     case 'item.cancelled': return withItem(state, event.body.id, (item) => (isTerminal(item) ? R.itemTerminal : undefined));
     case 'item.reopened': return withItem(state, event.body.id, (item) => (isTerminal(item) ? undefined : R.itemState));
+    case 'item.assigned': return withItem(state, event.body.id, (item) => assignProblem(state, item, event.body.memberId));
+    // Taking a person off is allowed in any state, so a finished or cancelled card can still be cleared.
+    case 'item.unassigned': return withItem(state, event.body.id, (item) => (item.assignee === undefined ? R.itemNotAssigned : undefined));
     default: return undefined;
   }
 }

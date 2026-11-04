@@ -488,11 +488,15 @@ const FROZEN_BODIES: Array<[string, unknown, string]> = [
     '{"id":"item:01ARZ3NDEKTSV4RRFFQ69G5FAV","reason":"waiting for the API key"}'],
   ['item.unblocked', { id: 'item:01ARZ3NDEKTSV4RRFFQ69G5FAV' }, '{"id":"item:01ARZ3NDEKTSV4RRFFQ69G5FAV"}'],
   ['item.cancelled', { id: 'plan:62-01', reason: 'no longer in the roadmap' }, '{"id":"plan:62-01","reason":"no longer in the roadmap"}'],
-  ['item.reopened', { id: 'plan:62-01' }, '{"id":"plan:62-01"}']
+  ['item.reopened', { id: 'plan:62-01' }, '{"id":"plan:62-01"}'],
+  // G-62-5 (62-15) added the two assignment events; their bodies are frozen here the same way.
+  ['item.assigned', { id: 'plan:62-01', memberId: 'mbr-0123456789abcdef' }, '{"id":"plan:62-01","memberId":"mbr-0123456789abcdef"}'],
+  ['item.unassigned', { id: 'plan:62-01' }, '{"id":"plan:62-01"}']
 ];
 
 test('the canonical body of one recorded example per item event type is frozen', () => {
-  assert.equal(FROZEN_BODIES.length, 8);
+  // Ten since 62-15 (was eight): item.assigned and item.unassigned joined the work events.
+  assert.equal(FROZEN_BODIES.length, 10);
   for (const [type, body, recorded] of FROZEN_BODIES) {
     assert.equal(validateBody(type, body), undefined, `${type} example is valid`);
     assert.equal(canonicalize(body), recorded, type);
@@ -501,13 +505,15 @@ test('the canonical body of one recorded example per item event type is frozen',
 
 test('the stored WorkItem key set is frozen', () => {
   // Required<WorkItem> makes the compiler refuse this literal when a key is added to or dropped from the type, so the list below cannot drift silently.
+  // 62-15 added assignee on purpose (G-62-5): it is optional and left out when empty, so no older state changes its hash (teamAssignHashes.test.ts).
   const full: Required<WorkItem> = {
     id: 'plan:62-01', kind: 'plan', title: 'T', parentId: 'phase:62', gsd: { phase: '62' }, dependsOn: [], scope: [], requirements: [], mustHaves: [],
     estimate: { tokens: 1 }, state: 'backlog', blocked: { reason: 'r', by: 'mbr-0123456789abcdef', since: '2026-01-01T00:00:00.000Z' }, claimId: 'clm-1', tags: [],
-    ringFenceNanoUsd: 0, origin: 'import', stateSince: '2026-01-01T00:00:00.000Z', createdBy: 'mbr-0123456789abcdef', description: 'd', hold: true, summary: true, active: true, source: 'a'.repeat(40)
+    ringFenceNanoUsd: 0, origin: 'import', stateSince: '2026-01-01T00:00:00.000Z', createdBy: 'mbr-0123456789abcdef', description: 'd', hold: true, summary: true, active: true, source: 'a'.repeat(40),
+    assignee: 'mbr-0123456789abcdef'
   };
   assert.deepEqual(Object.keys(full).sort(), [
-    'active', 'blocked', 'claimId', 'createdBy', 'dependsOn', 'description', 'estimate', 'gsd', 'hold', 'id', 'kind', 'mustHaves', 'origin', 'parentId',
+    'active', 'assignee', 'blocked', 'claimId', 'createdBy', 'dependsOn', 'description', 'estimate', 'gsd', 'hold', 'id', 'kind', 'mustHaves', 'origin', 'parentId',
     'requirements', 'ringFenceNanoUsd', 'scope', 'source', 'state', 'stateSince', 'summary', 'tags', 'title'
   ]);
 });

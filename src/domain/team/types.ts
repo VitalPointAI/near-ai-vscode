@@ -10,8 +10,9 @@ export type ItemState = 'backlog' | 'ready' | 'claimed' | 'in-progress' | 'in-re
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
-// Spec 5.2, all 55 types (spec order plus member.key-sealed, added in Phase 61): roster(10) work(8) claims(9) leases(5) integration(7) budget(8) collaboration(4) control(4)
-export const TEAM_EVENT_TYPES = ['team.created', 'member.invited', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'member.key-sealed', 'item.imported', 'item.created', 'item.updated', 'item.estimated', 'item.blocked', 'item.unblocked', 'item.cancelled', 'item.reopened', 'claim.offered', 'claim.accepted', 'claim.declined', 'claim.taken', 'claim.heartbeat', 'claim.released', 'claim.handed-off', 'claim.expired', 'claim.progress', 'lease.granted', 'lease.extended', 'lease.requested', 'lease.released', 'lease.expired', 'integration.queued', 'integration.started', 'integration.verified', 'integration.failed', 'review.requested', 'review.submitted', 'integration.merged', 'budget.set', 'allocation.granted', 'allocation.revoked', 'allocation.requested', 'allocation.decided', 'spend.summary', 'spend.reconciled', 'budget.alert', 'comment.added', 'mention', 'handoff.note', 'decision.recorded', 'team.stop', 'team.resume', 'policy.changed', 'snapshot.written'] as const;
+// Spec 5.2, all 57 types (spec order plus member.key-sealed, added in Phase 61, and item.assigned and item.unassigned, added in Phase 62 for G-62-5):
+// roster(10) work(10) claims(9) leases(5) integration(7) budget(8) collaboration(4) control(4)
+export const TEAM_EVENT_TYPES = ['team.created', 'member.invited', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'member.key-sealed', 'item.imported', 'item.created', 'item.updated', 'item.estimated', 'item.blocked', 'item.unblocked', 'item.cancelled', 'item.reopened', 'item.assigned', 'item.unassigned', 'claim.offered', 'claim.accepted', 'claim.declined', 'claim.taken', 'claim.heartbeat', 'claim.released', 'claim.handed-off', 'claim.expired', 'claim.progress', 'lease.granted', 'lease.extended', 'lease.requested', 'lease.released', 'lease.expired', 'integration.queued', 'integration.started', 'integration.verified', 'integration.failed', 'review.requested', 'review.submitted', 'integration.merged', 'budget.set', 'allocation.granted', 'allocation.revoked', 'allocation.requested', 'allocation.decided', 'spend.summary', 'spend.reconciled', 'budget.alert', 'comment.added', 'mention', 'handoff.note', 'decision.recorded', 'team.stop', 'team.resume', 'policy.changed', 'snapshot.written'] as const;
 export type TeamEventType = typeof TEAM_EVENT_TYPES[number];
 
 export interface DeviceRef { fingerprint: string; publicKey: string }            // dev-<32 hex>, base64url of 32 raw bytes
@@ -57,10 +58,14 @@ export interface ItemBlockedBody { id: string; reason: string }
 export interface ItemUnblockedBody { id: string }
 export interface ItemCancelledBody { id: string; reason: string }
 export interface ItemReopenedBody { id: string }
-export interface ImplementedEventBodies { 'team.created': TeamCreatedBody; 'member.invited': MemberInvitedBody; 'member.joined': MemberJoinedBody; 'member.role-changed': MemberRoleChangedBody; 'member.removed': MemberRemovedBody; 'device.added': DeviceAddedBody; 'device.revoked': DeviceRevokedBody; 'member.availability': MemberAvailabilityBody; 'member.skills': MemberSkillsBody; 'member.key-sealed': MemberKeySealedBody; 'item.imported': ItemImportedBody; 'item.created': ItemCreatedBody; 'item.updated': ItemUpdatedBody; 'item.estimated': ItemEstimatedBody; 'item.blocked': ItemBlockedBody; 'item.unblocked': ItemUnblockedBody; 'item.cancelled': ItemCancelledBody; 'item.reopened': ItemReopenedBody; 'policy.changed': PolicyChangedBody; 'snapshot.written': SnapshotWrittenBody }
+// G-62-5: assignment is a pointer to a person, not a lock. memberId follows the member id rule; there is no reason, no time and no other key.
+// Claims (item.claimId and the claim events, Phase 63) stay separate, and a later claim rule may read the assignee.
+export interface ItemAssignedBody { id: string; memberId: string }
+export interface ItemUnassignedBody { id: string }
+export interface ImplementedEventBodies { 'team.created': TeamCreatedBody; 'member.invited': MemberInvitedBody; 'member.joined': MemberJoinedBody; 'member.role-changed': MemberRoleChangedBody; 'member.removed': MemberRemovedBody; 'device.added': DeviceAddedBody; 'device.revoked': DeviceRevokedBody; 'member.availability': MemberAvailabilityBody; 'member.skills': MemberSkillsBody; 'member.key-sealed': MemberKeySealedBody; 'item.imported': ItemImportedBody; 'item.created': ItemCreatedBody; 'item.updated': ItemUpdatedBody; 'item.estimated': ItemEstimatedBody; 'item.blocked': ItemBlockedBody; 'item.unblocked': ItemUnblockedBody; 'item.cancelled': ItemCancelledBody; 'item.reopened': ItemReopenedBody; 'item.assigned': ItemAssignedBody; 'item.unassigned': ItemUnassignedBody; 'policy.changed': PolicyChangedBody; 'snapshot.written': SnapshotWrittenBody }
 export type ImplementedEventType = keyof ImplementedEventBodies;
-// The 20 types this version reads: the 12 of Phases 60 and 61 plus the eight work events of Phase 62. The other 35 stay unsupported until their phase.
-export const IMPLEMENTED_EVENT_TYPES: readonly ImplementedEventType[] = ['team.created', 'member.invited', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'member.key-sealed', 'item.imported', 'item.created', 'item.updated', 'item.estimated', 'item.blocked', 'item.unblocked', 'item.cancelled', 'item.reopened', 'policy.changed', 'snapshot.written'];
+// The 22 types this version reads: the 12 of Phases 60 and 61 plus the ten work events of Phase 62. The other 35 stay unsupported until their phase.
+export const IMPLEMENTED_EVENT_TYPES: readonly ImplementedEventType[] = ['team.created', 'member.invited', 'member.joined', 'member.role-changed', 'member.removed', 'device.added', 'device.revoked', 'member.availability', 'member.skills', 'member.key-sealed', 'item.imported', 'item.created', 'item.updated', 'item.estimated', 'item.blocked', 'item.unblocked', 'item.cancelled', 'item.reopened', 'item.assigned', 'item.unassigned', 'policy.changed', 'snapshot.written'];
 export type TeamEventBodyMap = ImplementedEventBodies & { [K in Exclude<TeamEventType, ImplementedEventType>]: JsonObject };
 // prev is the id of the accepted log head the author built on ('' for team.created). A reader requires it to equal the head at this position.
 export interface TeamEvent<T extends TeamEventType = TeamEventType> { v: 1; id: string; teamId: string; type: T; lamport: number; at: string; author: string; device: string; prev: string; body: TeamEventBodyMap[T]; sig: string }
@@ -92,11 +97,13 @@ export interface SpendSummary { inputTokens: number; cachedInputTokens: number; 
 // The stored key set enters the state hash once items exist, so it is as permanent as the event bodies and a test pins it. Optional keys are
 // left out when absent. stateSince is the display-only `at` of the event that last changed the stored state or the hold flag; it orders nothing.
 // origin says who owns the content: import (the GSD importer) or board (created on the board by createdBy). hold, summary and active are only ever true.
+// assignee is the member id a lead put on the card with item.assigned (G-62-5), left out when nobody is assigned so older states hash as before.
 export interface WorkItem {
   id: string; kind: ItemKind; title: string; parentId?: string; gsd?: ItemGsdRef; dependsOn: string[]; scope: string[]; requirements: string[]; mustHaves: string[];
   estimate?: { tokens: number; nanoUsd?: number; confidence?: 'low' | 'medium' | 'high' }; state: ItemState; blocked?: { reason: string; by: string; since: string };
   claimId?: string; tags: string[]; ringFenceNanoUsd?: number;
   origin: ItemOrigin; stateSince: string; createdBy?: string; description?: string; hold?: true; summary?: true; active?: true; source?: string;
+  assignee?: string;
 }
 export interface Claim { id: string; itemId: string; memberId: string; branch: string; base: string; leaseIds: string[]; startedAt: string; lastHeartbeatAt: string; status: 'active' | 'in-review' | 'integrating' | 'released' | 'expired' | 'handed-off' | 'merged'; spend: SpendSummary }
 export interface Lease { id: string; claimId?: string; holder: string; kind: 'paths' | 'resource'; paths?: string[]; resource?: string; grantedAt: string; ttlMinutes: number; parentLeaseId?: string }
@@ -142,6 +149,8 @@ export const TEAM_REJECTION_REASONS = {
   itemExists: 'item already exists', itemMissing: 'referenced item does not exist', itemParent: 'parent item does not exist or has the wrong kind',
   itemState: 'item cannot make that move from its current state', itemBlocked: 'item is blocked', itemNotBlocked: 'item is not blocked',
   itemTerminal: 'item is already done or cancelled', itemField: 'that change is not allowed on this item',
+  itemNotAssignable: 'only plans, phases and board items can be assigned', assigneeNotEligible: 'that person cannot be assigned this item',
+  itemAlreadyAssigned: 'item is already assigned to that person', itemNotAssigned: 'item is not assigned to anyone',
   logRefused: "This coordination log does not belong to this project's team",
   logRewritten: "The team's coordination log was rewritten on the remote; Team Mode is paused"
 } as const;
