@@ -866,6 +866,23 @@ test('G-62-7: a folded column holds no card, only a hidden count in every lane; 
   assert.equal(h.$$('.cell.collapsed .card').length, 0);
 });
 
+// 62-22 screenshot matrix: in the light theme the selected Group by choice showed its word in the caption grey on the button fill; in high contrast the
+// button fill is see-through, so nothing marked the choice or a pressed filter; the detail's state line ran its parts together ("BacklogPhase 63").
+test('62-22: the selected Group by choice and a pressed filter are readable in every theme, and the detail head spaces its parts', () => {
+  assert.doesNotMatch(BOARD_CSS, /\.group-by \.label/, 'the caption colour does not reach the words inside the choices');
+  assert.match(BOARD_CSS, /\.group-by > \.label/);
+  for (const kind of ['high-contrast', 'high-contrast-light']) {
+    for (const selector of ['\\.segmented button\\[aria-checked="true"\\]', 'button\\.chip\\[aria-pressed="true"\\]']) {
+      assert.match(BOARD_CSS, new RegExp(`body\\.vscode-${kind} ${selector}[^{]*\\{[^}]*outline: 2px solid var\\(--vscode-contrastActiveBorder\\)`), `${kind}: ${selector} is marked`);
+    }
+  }
+  assert.match(BOARD_CSS, /@media \(forced-colors: active\)[\s\S]*?\.segmented button\[aria-checked="true"\], button\.chip\[aria-pressed="true"\] \{[^}]*outline: 2px solid currentColor/);
+  const rows = cssRule('#detail .detail-state, #detail .detail-badges, #detail .detail-actions');
+  assert.match(rows, /display: flex/);
+  assert.match(rows, /gap: 4px 8px/);
+  assert.match(cssRule('#detail li.dep > .icon'), /margin-right: 4px/);
+});
+
 test('G-62-7: board.css wraps card text between words and resets the card button to the card\'s own look', () => {
   assert.doesNotMatch(BOARD_CSS, /overflow-wrap:\s*anywhere/, 'no mid-word breaks anywhere on the board');
   assert.doesNotMatch(BOARD_CSS, /font-size:\s*0\s*;/, 'nothing is hidden by a zero font size');
