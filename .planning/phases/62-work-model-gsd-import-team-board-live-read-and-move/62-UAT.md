@@ -138,3 +138,34 @@ blocked: 1
   artifacts: [media/board/board.css, media/board/board.js]
   missing: ["collapsed cells render no cards (only name and count)", "word-boundary wrapping for titles", "card-main resets button styles", "screenshot check of card readability"]
   debug_session: ""
+
+## Re-test on 0.6.3 (owner, 2026-11-04)
+
+Passed: 62-UAT 1 (board opens only on purpose), 2, 4, 7 (themes, zoom), 10 (lead assigns, teammate sees it), self-assign. Issues:
+- truth: "Every column whose header shows a count draws those cards when open: Backlog (5) shows its 5 cards and the Unassigned lane (45) shows its cards in code-server, including after upgrading from an earlier preview's saved board state"
+  status: failed
+  reason: "User reported (0.6.3, code-server): I don't see any cards under Backlog which says it has 5. Only five cards are showing under unassigned even though it says it has 45 and Done has 40"
+  severity: blocker
+  test: 9
+  root_cause: ""
+  artifacts: [media/board/board.js, media/board/board.css, src/domain/team/board.ts]
+  missing: ["diagnosis in code-server (saved UI state from 0.6.0-0.6.2? folding defaults? cell rendering)"]
+  debug_session: ""
+- truth: "Real mouse drag works in code-server in a browser (Brave/Chromium), not only in VS Code's own window"
+  status: failed
+  reason: "User reported (0.6.3, code-server): 12. fail - no drag and drop working"
+  severity: blocker
+  test: 6
+  root_cause: ""
+  artifacts: [media/board/drag.js, media/board/board.js]
+  missing: ["reproduce in a browser against code-server", "browser e2e for drag"]
+  debug_session: ""
+- truth: "A member can unassign themselves only from cards they assigned to themselves; a card a lead assigned to them stays until a lead (or the owner) changes it"
+  status: failed
+  reason: "User reported: Bob shouldn't be able to unassign himself from cards that Alice assigned him - only those he assigns himself."
+  severity: major
+  test: 5
+  root_cause: "62-25 maps item.unassigned by the current assignee to item.assign-self without checking who made the assignment"
+  artifacts: [src/domain/team/permissions.ts, src/domain/team/materialize.ts, src/domain/team/board.ts]
+  missing: ["assignedBy (who made the current assignment) in materialized item state", "unassign-me only when assignedBy === author"]
+  debug_session: ""

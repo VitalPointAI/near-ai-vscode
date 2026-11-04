@@ -153,3 +153,16 @@ blocked: 1
   artifacts: [src/domain/team/teamSection.ts, src/domain/team/teamSectionText.ts, media/chat/team.js, src/services/team/teamSectionHost.ts, src/services/team/teamCommands.ts]
   missing: ["Just me for now dismiss (per project, workspaceState)", "quiet invite-later line on the empty chat", "Invite someone that enables then invites in one flow", "Invite people as a setup step once main (PR #7 registry) is merged"]
   debug_session: ""
+
+## Re-test on 0.6.3 (owner, 2026-11-04)
+
+Passed: Connect-first screen, Working with your agents, Just me for now and the quiet line, Invite someone in one flow, Join from an existing copy, confirm from Members, no "Team Mode"/"NEAR organization" wording. Issues:
+- truth: "A person can join a team without setting up their own NEAR AI profile: the Connect screen offers Join a team; when the team has linked its organization, joining delivers the team key (with the lead's spending limit) as their profile automatically; when it has not, the screen says plainly that they need their own key or a saved profile. A person without an invite can Ask to join: a short request they send to the lead, who accepts it in Members (an invite in reverse); once accepted they are on the team and receive the team key if there is one. A person can also choose a saved profile they set up before (another project) instead of entering a key again."
+  status: failed
+  reason: "User reported (0.6.3, step 3): we need to cater to a situation where someone doesn't want to setup their own profile and instead wants to join a team that already has a profile... ask for an invite to the team and if accepted, receive the profile information as well as automatically become part of the team. Alternatively, they may be wanting to use an existing profile they've setup before."
+  severity: major
+  test: 10
+  root_cause: "Connect panel offers only own-key setup; join requires a working profile; no join-request flow; profiles are per project with no reuse"
+  artifacts: [media/chat/readiness.js, media/chat/setup.js, src/services/team/memberCommands.ts, src/team/join.ts, src/team/teamKeyProfile.ts, src/services/profileStore.ts]
+  missing: ["Join a team on the Connect screen", "team key becomes the profile on join (org-linked)", "Ask to join request/accept flow", "use a saved profile from another project"]
+  debug_session: ""
