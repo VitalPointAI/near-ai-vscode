@@ -35,7 +35,7 @@ export interface AssignCandidate { memberId: string; name: string; roleLabel: st
 export type BoardStatus = { kind: 'live' | 'syncing' | 'offline' | 'paused' | 'removed'; text: string; lastUpdated?: string };
 export interface BoardModelOptions { nowMs: number; status: BoardStatus; viewerId?: string; canWrite: boolean; readOnlyReason?: string }
 export interface BoardProgress { percent: number; done: number; total: number; text: string }
-export interface BoardColumnInfo { key: BoardColumn; label: string; caption?: string; count: number }
+export interface BoardColumnInfo { key: BoardColumn; label: string; caption?: string; count: number; foldedByDefault: boolean }
 export interface BoardMilestone { id: string; title: string; active: boolean; progress: BoardProgress }
 export interface BoardPhase { id: string; title: string; milestoneId?: string }
 export interface BoardLane { key: string; label: string; count: number; collapsedByDefault: boolean; milestoneId?: string; progress?: BoardProgress }
@@ -521,7 +521,7 @@ export function buildBoardModel(state: TeamState, options: BoardModelOptions): B
   const shown = cards.filter((card) => visibleUnder(card, selected));
   const columns: BoardColumnInfo[] = BOARD_COLUMNS.map((key) => {
     const caption = COLUMN_CAPTIONS[key];
-    return { key, label: COLUMN_LABELS[key], ...(caption === undefined ? {} : { caption }), count: shown.filter((card) => card.column === key).length };
+    return { key, label: COLUMN_LABELS[key], ...(caption === undefined ? {} : { caption }), count: shown.filter((card) => card.column === key).length, foldedByDefault: false };
   });
   const milestones: BoardMilestone[] = milestonesOf(state).map((item) => ({ id: item.id, title: flattenName(item.title, 200), active: item.active === true, progress: progressView(state.items, item.id) }));
   const phases: BoardPhase[] = phasesOf(state).map((item) => ({ id: item.id, title: phaseLabel(item), ...(item.parentId === undefined ? {} : { milestoneId: item.parentId }) }));
