@@ -274,8 +274,8 @@ const RELEASABLE_CLAIM_STATUSES: readonly string[] = ['active', 'in-review', 'in
 
 // D-19, TEAM-03: everything a removed member held goes back to the team in this one transition, so every client computes the same release.
 // Claims keep their branch name, base and spend; their items return to ready; the member's leases and allocations are dropped (the unspent
-// amount returns to the pool); released claims leave the integration queue. Map iteration is insertion order, so the result is deterministic.
-// Merged, handed-off, expired and already released claims are history and stay as they are.
+// amount returns to the pool); released claims leave the integration queue; every card assigned to the member loses its assignee (G-62-5).
+// Map iteration is insertion order, so the result is deterministic. Merged, handed-off, expired and already released claims are history and stay as they are.
 function releaseHeldWork(state: TeamState, memberId: string): void {
   const releasedIds = new Set<string>();
   for (const claim of state.claims.values()) {
@@ -287,6 +287,9 @@ function releaseHeldWork(state: TeamState, memberId: string): void {
       item.state = 'ready';
       delete item.claimId;
     }
+  }
+  for (const item of state.items.values()) {
+    if (item.assignee === memberId) delete item.assignee;
   }
   for (const [leaseId, lease] of state.leases) {
     if (lease.holder === memberId || (lease.claimId !== undefined && releasedIds.has(lease.claimId))) state.leases.delete(leaseId);
@@ -677,7 +680,7 @@ const ITEM_STATES: readonly ItemState[] = ['backlog', 'ready', 'claimed', 'in-pr
 const BOARD_KINDS: readonly ItemKind[] = ['bug', 'chore', 'spike'];
 const PARENT_KIND_OF: Readonly<Record<string, ItemKind>> = { phase: 'milestone', plan: 'phase', task: 'plan' };
 const ITEM_REQUIRED = ['id', 'kind', 'title', 'dependsOn', 'scope', 'requirements', 'mustHaves', 'state', 'tags', 'origin', 'stateSince'];
-const ITEM_OPTIONAL = ['parentId', 'gsd', 'estimate', 'blocked', 'createdBy', 'description', 'hold', 'summary', 'active', 'source'];
+const ITEM_OPTIONAL = ['parentId', 'gsd', 'estimate', 'blocked', 'createdBy', 'description', 'hold', 'summary', 'active', 'source', 'assignee'];
 
 // A field validator answers with a problem text or nothing; a snapshot only needs to know there was one, and where.
 function sound(problem: string | undefined, path: string): void {
@@ -753,6 +756,7 @@ function parseWorkItem(value: unknown, path: string): WorkItem {
     sound(validateSource(raw.source, `${path}.source`), `${path}.source`);
     item.source = raw.source as string;
   }
+  if (present('assignee')) item.assignee = patterned(raw.assignee, `${path}.assignee`, MEMBER_ID_PATTERN);
   return item;
 }
 
@@ -879,6 +883,16 @@ function checkAnchorBinding(state: TeamState, anchor: GenesisAnchor): void {
   if ([...state.members.values()].filter((member) => member.role === 'owner').length !== 1) bad('members');
 }
 
+// G-62-5: the log only ever assigns a current, joined member, and removal clears the member's cards, so an assignee must name a member on the
+// roster who is neither removed nor an unused invitation. A role change does not clear an assignment, so the role itself is not checked here.
+function checkAssignees(state: TeamState): void {
+  for (const item of state.items.values()) {
+    if (item.assignee === undefined) continue;
+    const member = state.members.get(item.assignee);
+    if (member === undefined || member.removedEvent !== undefined || member.status === 'invited') bad(`items.${item.id}.assignee`);
+  }
+}
+
 function checkIndex(state: TeamState): void {
   let devices = 0;
   for (const member of state.members.values()) {
@@ -906,6 +920,7 @@ export function deserialiseState(value: JsonObject, anchor: GenesisAnchor): Team
   for (const [fingerprint, memberId] of items(root.deviceIndex, 'deviceIndex', parsePair)) state.deviceIndex.set(fingerprint, memberId);
   // Work items are read strictly. Later phases fill the others; until then a snapshot must carry them empty and at their defaults.
   state.items = parseItems(root.items);
+  checkAssignees(state);
   emptyList(root.claims, 'claims');
   emptyList(root.leases, 'leases');
   emptyList(root.allocations, 'allocations');
