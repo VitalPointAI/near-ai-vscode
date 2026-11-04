@@ -175,7 +175,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Moves are permission-checked and follow only permitted transitions; an illegal drop snaps back and says why. (BOARD-03)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
 
-**Plans**: 19/25 plans executed in 14 waves (Waves 7 to 14 are the fix pass for the owner's 62-UAT findings, 2026-11-03; they run after Phase 61's fix pass, 61-22)
+**Plans**: 20/25 plans executed in 14 waves (Waves 7 to 14 are the fix pass for the owner's 62-UAT findings, 2026-11-03; they run after Phase 61's fix pass, 61-22)
 **UI hint**: yes
 **Owner amendments (2026-11-03)**: the board opens only in its own editor tab and the sidebar Team section shows a summary; a lead assigns cards and any member who is not an observer assigns themselves (signed item.assigned and item.unassigned, claims stay in Phase 63); planless phases show as Backlog cards; Done folds by default; cards stay readable (folded columns hold no cards, titles wrap between words); layout and drag are proven in a real window on a hidden virtual screen with real screenshots the owner reviews (recorded in 62-CONTEXT.md and 62-UI-SPEC.md by 62-17).
 
@@ -215,7 +215,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [x] 62-25-PLAN.md — Self-assignment: any member who is not an observer assigns and unassigns themselves, checked on write and read, no event or hash change (owner decision 2026-11-03) (BOARD-02, BOARD-03)
 
 **Wave 9** *(blocked on Wave 8 completion)*
-- [ ] 62-19-PLAN.md — Board model: assignee on cards and member rows, planAssign and the person list, planless phases as Backlog cards, folded defaults (BOARD-01, BOARD-03)
+- [x] 62-19-PLAN.md — Board model: assignee on cards and member rows, planAssign and the person list, planless phases as Backlog cards, folded defaults (BOARD-01, BOARD-03)
 
 **Wave 10** *(blocked on Wave 9 completion)*
 - [ ] 62-20-PLAN.md — Assign and unassign from Move to... and the card detail, native person list, the person on the card, seen within one poll (BOARD-02, BOARD-03)
@@ -328,7 +328,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 25/25 | In Progress (61-25 planned) | - |
-| 62. Work model, GSD import, Team Board | v0.6.0 | 19/25 | In Progress (fix pass planned) | - |
+| 62. Work model, GSD import, Team Board | v0.6.0 | 20/25 | In Progress (fix pass planned) | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
 | 65. Integration merge train | v0.6.0 | 0/TBD | Not started | - |

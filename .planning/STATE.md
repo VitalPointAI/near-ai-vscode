@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-25-PLAN.md
-last_updated: "2026-11-04T02:18:14.397Z"
+stopped_at: Completed 62-19-PLAN.md
+last_updated: "2026-11-04T02:51:18.651Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 29e254f6dd08b36397bdb16f811cf752dbb1cebf
+state_head: a062dca7f59d2cfc955f537ee3f7b314931ba320
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 62
-  completed_plans: 56
+  completed_plans: 57
   percent: 13
 ---
 
@@ -110,6 +110,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P17 | 27min | 3 tasks | 11 files |
 | Phase 62 P18 | 18min | 2 tasks | 8 files |
 | Phase 62 P25 | 12min | 3 tasks | 5 files |
+| Phase 62 P19 | 28min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -238,6 +239,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-25: A member's own assignment of a free card, or taking themselves off their own card, is item.assign-self (owner, lead, developer, reviewer); everything else stays item.assign, so a teammate's card changes hands only when they unassign or a lead reassigns (owner decision 2026-11-03, G-62-5)
 - [Phase 62]: 62-25: mayBeAssigned is a current, confirmed, non-observer member (reviewers can hold an assignment); work.ts no longer imports permissions.ts
 - [Phase 62]: 62-25: No event body, WorkItem key or pinned hash changed; actionForEvent with no state still answers item.assign
+- [Phase 62]: 62-19: planAssign checks the viewer, then transitionProblem, then decideTeamAction on actionForEvent's action (item.assign or item.assign-self); a test signs and applies 60 cases and the board and log agree
+- [Phase 62]: 62-19: a phase with no plans is a board-only Backlog card (isPhaseCard); isCard, readiness, planMove and hashes unchanged; columnMove gives it one phase sentence
+- [Phase 62]: 62-19: columns carry foldedByDefault (later four, Done, Cancelled); a lane starts collapsed only when its shown cards are all Done or Cancelled; the All cards lane never folds
 
 ### Pending Todos
 
@@ -259,8 +263,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T02:18:14.067Z
-Stopped at: Completed 62-25-PLAN.md
+Last session: 2026-11-04T02:51:18.337Z
+Stopped at: Completed 62-19-PLAN.md
 Resume file: None
 
 ## Notes
