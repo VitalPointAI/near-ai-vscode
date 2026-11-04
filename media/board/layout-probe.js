@@ -107,7 +107,7 @@
     const kanban = layout === 'kanban';
     const width = num(window.innerWidth);
     const height = num(window.innerHeight);
-    const page = { scrollWidth: num(scroller.scrollWidth), clientWidth: num(scroller.clientWidth || doc.clientWidth), scrollY: num(window.scrollY || scroller.scrollTop) };
+    const page = { scrollWidth: num(scroller.scrollWidth), clientWidth: num(scroller.clientWidth || doc.clientWidth), scrollHeight: num(scroller.scrollHeight), clientHeight: num(scroller.clientHeight || doc.clientHeight), scrollY: num(window.scrollY || scroller.scrollTop) };
 
     const tbEl = document.getElementById('toolbar');
     const tbStyle = styleOf(tbEl);
@@ -197,7 +197,217 @@
 
     const data = { width, height, layout, theme: themeOf(), page, outside, toolbar, region, headRow, heads, lanes, cells, cards, openWork };
     if (focused) data.focused = focused;
+    if (rootEl && rootEl.getAttribute('data-view') === 'timeline') data.timeline = collectTimeline(data);
     return data;
+  }
+
+  // ---- reading the timeline (62.1-07, 62.1-UI-SPEC "Selectors and data attributes for tests") ------------------------------------------------
+  // Every element is found by the spec's fixed selectors; a dot, a milestone or a +n is matched by comparing its data attributes, never by a
+  // selector built from the host's text. Parts that are not drawn yet are null or empty lists, so the report always has the same shape.
+  const intAttr = (n, name) => { const v = Number(n.getAttribute(name)); return isFinite(v) ? v : -1; };
+  const one = (scope, selector) => (scope && typeof scope.querySelector === 'function' ? scope.querySelector(selector) : null);
+  const visibleEl = (n) => !!n && n.hidden !== true && !up(n, '[hidden]') && isRendered(n) && read(styleOf(n), 'visibility') !== 'hidden' && read(styleOf(n), 'display') !== 'none';
+  function editorFontSize() {
+    const s = styleOf(document.documentElement);
+    const v = s && typeof s.getPropertyValue === 'function' ? parseFloat(s.getPropertyValue('--vscode-editor-font-size')) : NaN;
+    if (isFinite(v) && v > 0) return v;
+    const b = size(styleOf(document.body));
+    return b && b > 0 ? b : null;
+  }
+  // The first background up the tree that is fully opaque: the colour the text is really drawn on. Empty when the page reports none.
+  function backdrop(n) {
+    for (let p = n; p && p.nodeType === 1; p = p.parentNode) {
+      const bg = read(styleOf(p), 'backgroundColor');
+      if (bg && alphaOf(bg) >= 1) return bg;
+    }
+    return '';
+  }
+  // How far a text box's content is wider than the box, and whether the cut is intentional (an ellipsis and a title with the full text).
+  function cutOf(n) {
+    const by = n && typeof n.scrollWidth === 'number' && typeof n.clientWidth === 'number' && n.clientWidth > 0 ? num(n.scrollWidth - n.clientWidth) : 0;
+    return { by: Math.max(0, by), ellipsis: read(styleOf(n), 'textOverflow') === 'ellipsis', title: !!(n && typeof n.getAttribute === 'function' && n.getAttribute('title')) };
+  }
+  function textItem(n) {
+    const s = styleOf(n);
+    return { box: rectOf(n), text: textOf(n).slice(0, 80), cut: cutOf(n), color: read(s, 'color'), background: backdrop(n), fontSize: size(s) };
+  }
+  // The elements inside a container that hold text of their own (not inside an icon), each measured as a text item.
+  function leafTexts(container) {
+    if (!container) return [];
+    return all(container, '*').filter((n) => !up(n, 'svg') && visibleEl(n) && Array.from(n.childNodes || []).some((c) => c.nodeType === 3 && String(c.textContent || '').trim() !== '')).slice(0, 40).map(textItem);
+  }
+  function buttonsIn(container) {
+    return all(container, 'button').filter(visibleEl).slice(0, 20).map((b) => { const r = rectOf(b); return { name: b.getAttribute('aria-label') || textOf(b).slice(0, 40) || describe(b), width: r.width, height: r.height }; });
+  }
+  // The paint of an icon shape: its colour, or empty when it paints nothing.
+  const paintOf = (n, key) => { const v = read(styleOf(n), key); return v && v !== 'none' && alphaOf(v) > 0 ? v : ''; };
+  // A dot's mark: its box, the colour of its main shape (stroke for a ring, fill for a filled mark) and its glyph's colour on what it sits on.
+  function markOf(svg, canvasBg) {
+    if (!svg) return null;
+    const shapes = all(svg, 'circle, rect, ellipse, path, polygon, polyline, line');
+    const body = shapes[0];
+    const stroke = body ? paintOf(body, 'stroke') : '';
+    const fill = body ? paintOf(body, 'fill') : '';
+    const out = { box: rectOf(svg), color: stroke || fill };
+    const glyphEl = one(svg, '.tl-glyph') || (shapes.length > 1 ? shapes[shapes.length - 1] : null);
+    if (glyphEl && glyphEl !== body) {
+      const g = paintOf(glyphEl, 'fill') || paintOf(glyphEl, 'stroke');
+      if (g) out.glyph = { color: g, background: fill && alphaOf(fill) >= 1 ? fill : canvasBg };
+    }
+    return out;
+  }
+  function dotLabel(id) {
+    const c = board && typeof board.cardData === 'function' ? board.cardData(id) : undefined;
+    if (c && c.displayId) return c.kind === 'plan' ? 'plan ' + c.displayId : String(c.displayId);
+    return id;
+  }
+  const milestoneOf = (n) => { const m = up(n, '.tl-milestone'); return m ? m.getAttribute('data-milestone') || '' : ''; };
+  // A path's two ends in page pixels (through its screen matrix), or null where the browser cannot say.
+  function endsOf(path) {
+    if (typeof path.getTotalLength !== 'function' || typeof path.getPointAtLength !== 'function') return null;
+    const total = path.getTotalLength();
+    const m = typeof path.getScreenCTM === 'function' ? path.getScreenCTM() : null;
+    const at = (len) => { const p = path.getPointAtLength(len); return m ? { x: num(m.a * p.x + m.c * p.y + m.e), y: num(m.b * p.x + m.d * p.y + m.f) } : { x: num(p.x), y: num(p.y) }; };
+    return { start: at(0), end: at(total) };
+  }
+
+  /** The timeline as drawn now: plain numbers and strings in page pixels (62.1-UI-SPEC "Real-window probe rules"). */
+  function collectTimeline(data) {
+    const rootEl = document.getElementById('root');
+    const scrollEl = one(document.getElementById('board'), '.tl-scroll');
+    const canvasEl = one(scrollEl, '.tl-canvas');
+    const canvasBg = backdrop(canvasEl || scrollEl);
+    const model = board && typeof board.model === 'function' ? board.model() : undefined;
+    const tlModel = model && model.timeline ? model.timeline : undefined;
+    const saved = board && typeof board.uiState === 'function' ? board.uiState() : undefined;
+    const zoomText = parseFloat(textOf(one(document.getElementById('tl-zoom'), 'output')));
+    const horizontalRadio = one(document.getElementById('direction-switch'), 'button[data-direction="horizontal"]');
+
+    const dots = all(scrollEl, 'button.tl-dot').map((b) => {
+      const id = b.getAttribute('data-id') || '';
+      const chipEl = one(b, '.tl-initials');
+      const idEl = one(b, '.tl-id');
+      const out = { id, label: dotLabel(id), milestone: milestoneOf(b), step: intAttr(b, 'data-step'), slot: intAttr(b, 'data-slot'), state: b.getAttribute('data-state') || '', rendered: isRendered(b), box: rectOf(b), mark: markOf(one(b, '.tl-mark'), canvasBg) };
+      if (chipEl && visibleEl(chipEl)) out.chip = textItem(chipEl);
+      if (idEl && visibleEl(idEl)) out.idLabel = textItem(idEl);
+      return out;
+    });
+    const drawn = {};
+    for (const d of dots) drawn[d.id] = d;
+    const more = all(scrollEl, '.tl-more').filter(visibleEl).map((n) => Object.assign(rectOf(n), { milestone: milestoneOf(n), step: intAttr(n, 'data-step'), text: textOf(n).slice(0, 20) }));
+    const tiles = all(scrollEl, '.tl-folded').filter(visibleEl).map((n) => Object.assign(rectOf(n), { milestone: milestoneOf(n), text: textOf(n).slice(0, 80), cut: cutOf(n) }));
+    const phaseLabels = all(scrollEl, '.tl-phase-label').filter((n) => visibleEl(n) && textOf(n) !== '').map((n) => {
+      const ph = up(n, '.tl-phase');
+      const item = textItem(n);
+      return Object.assign({ id: ph ? ph.getAttribute('data-phase') || '' : '', milestone: milestoneOf(n) }, item, { percent: /%/.test(item.text) });
+    });
+    const headers = [];
+    const percents = [];
+    for (const h of all(scrollEl, '.tl-ms-head').filter(visibleEl)) {
+      const s = styleOf(h);
+      const titleEl = one(h, '.tl-ms-title') || one(h, 'h2');
+      const background = read(s, 'backgroundColor');
+      const milestone = milestoneOf(h);
+      headers.push({ id: milestone, title: textOf(titleEl).slice(0, 60), box: rectOf(h), sticky: read(s, 'position') === 'sticky', alpha: alphaOf(background), background, cut: cutOf(titleEl) });
+      for (const [what, selector] of [['band percent', '.tl-ms-percent'], ['band progress', '.progress-text']]) {
+        const n = one(h, selector);
+        if (n && visibleEl(n)) percents.push(Object.assign({ milestone, what }, textItem(n)));
+      }
+    }
+    // Where a line ends when its card is not drawn as a dot: the +n button of its step, or its milestone's folded tile.
+    const modelDots = {};
+    for (const d of tlModel && Array.isArray(tlModel.dots) ? tlModel.dots : []) modelDots[d.cardId] = d;
+    function anchorOf(id) {
+      const d = modelDots[id];
+      if (!d) return null;
+      const band = all(scrollEl, '.tl-milestone').find((m) => m.getAttribute('data-milestone') === String(d.milestoneId));
+      if (!band) return null;
+      const stack = all(band, '.tl-more').find((m) => intAttr(m, 'data-step') === d.step && visibleEl(m));
+      const tile = one(band, '.tl-folded');
+      return stack ? rectOf(stack) : tile && visibleEl(tile) ? rectOf(tile) : null;
+    }
+    const lines = all(one(scrollEl, 'svg.tl-lines'), 'path[data-from][data-to]').map((p) => {
+      const from = p.getAttribute('data-from') || '';
+      const to = p.getAttribute('data-to') || '';
+      const ends = endsOf(p);
+      const out = { from, to, start: ends ? ends.start : null, end: ends ? ends.end : null };
+      if (!drawn[from]) out.fromBox = anchorOf(from);
+      if (!drawn[to]) out.toBox = anchorOf(to);
+      return out;
+    });
+
+    const lineEl = one(scrollEl, '.tl-now-line');
+    const pillEl = one(scrollEl, '.tl-now-pill');
+    let now = null;
+    if ((lineEl && visibleEl(lineEl)) || (pillEl && visibleEl(pillEl))) {
+      const pillBg = read(styleOf(pillEl), 'backgroundColor');
+      const texts = leafTexts(pillEl);
+      now = {
+        milestone: tlModel && tlModel.now ? String(tlModel.now.milestoneId) : '', step: tlModel && tlModel.now ? tlModel.now.step : -1,
+        line: lineEl && visibleEl(lineEl) ? rectOf(lineEl) : null, pill: pillEl && visibleEl(pillEl) ? rectOf(pillEl) : null,
+        alpha: alphaOf(pillBg), background: pillBg, text: textOf(pillEl).slice(0, 160), texts,
+        lineColor: paintOf(lineEl, 'backgroundColor') || paintOf(lineEl, 'stroke') || paintOf(lineEl, 'borderLeftColor') || paintOf(lineEl, 'borderTopColor')
+      };
+    }
+    const overallEl = document.getElementById('tl-overall');
+    const overall = overallEl && visibleEl(overallEl) ? { box: rectOf(overallEl), text: textOf(overallEl).slice(0, 40), texts: leafTexts(overallEl), ring: rectOf(one(overallEl, 'svg')) } : null;
+    const legendEl = document.getElementById('tl-legend');
+    const legend = legendEl && visibleEl(legendEl) ? { box: rectOf(legendEl), alpha: alphaOf(read(styleOf(legendEl), 'backgroundColor')), background: read(styleOf(legendEl), 'backgroundColor') } : null;
+    const expanded = dots.find((d) => { const b = all(scrollEl, 'button.tl-dot').find((n) => n.getAttribute('data-id') === d.id); return b && b.getAttribute('aria-expanded') === 'true'; });
+    const active = document.activeElement;
+    const focusedBtn = up(active, 'button.tl-dot');
+    const focusedDot = focusedBtn ? focusedBtn.getAttribute('data-id') || null : null;
+    let hovered = null;
+    try { const n = one(scrollEl, 'button.tl-dot:hover'); hovered = n ? n.getAttribute('data-id') : null; } catch (error) { hovered = null; }
+    function layer(n, dotId) {
+      if (!n || !visibleEl(n)) return null;
+      const background = read(styleOf(n), 'backgroundColor');
+      return { box: rectOf(n), alpha: alphaOf(background), background, dotId: n.getAttribute('data-id') || dotId || null, texts: leafTexts(n), buttons: buttonsIn(n) };
+    }
+    const preview = layer(document.getElementById('tl-preview'), hovered || focusedDot);
+    const card = layer(document.getElementById('tl-card'), expanded ? expanded.id : null);
+    if (card) {
+      const t = document.getElementById('tl-card-title');
+      const ts = styleOf(t);
+      const clamp = read(ts, 'webkitLineClamp') || read(ts, 'WebkitLineClamp');
+      card.titleClamped = !!t && ((clamp !== '' && clamp !== 'none' && clamp !== '0') || (typeof t.scrollHeight === 'number' && typeof t.clientHeight === 'number' && t.clientHeight > 0 && t.scrollHeight > t.clientHeight + TOL));
+    }
+    const q = (scope, selector) => { const n = one(scope, selector); return n && visibleEl(n) ? rectOf(n) : null; };
+    const viewSw = document.getElementById('view-switch');
+    const dirSw = document.getElementById('direction-switch');
+    const zoomEl = document.getElementById('tl-zoom');
+    const controls = {
+      view: { columns: q(viewSw, 'button[data-view="columns"]'), timeline: q(viewSw, 'button[data-view="timeline"]') },
+      direction: { horizontal: q(dirSw, 'button[data-direction="horizontal"]'), vertical: q(dirSw, 'button[data-direction="vertical"]') },
+      zoomOut: q(zoomEl, '[data-zoom="out"]'), zoomIn: q(zoomEl, '[data-zoom="in"]'), fit: q(zoomEl, '[data-zoom="fit"]'),
+      now: q(document, '#tl-now'), legend: q(document, '#tl-legend-btn')
+    };
+    // Other elements in the board region that scroll on their own (the expanded card may: it is capped and scrolls inside).
+    const otherScrollers = [];
+    const boardEl = document.getElementById('board');
+    if (typeof window.getComputedStyle === 'function') {
+      for (const n of all(boardEl, '*')) {
+        if (otherScrollers.length >= OUTSIDE_LIMIT) break;
+        if (n === scrollEl || up(n, '#tl-card')) continue;
+        const s = styleOf(n);
+        const scrolls = (k) => /auto|scroll/.test(read(s, k));
+        if ((scrolls('overflowX') && n.scrollWidth > n.clientWidth + TOL) || (scrolls('overflowY') && n.scrollHeight > n.clientHeight + TOL)) otherScrollers.push({ what: describe(n) });
+      }
+    }
+
+    const t = {
+      view: 'timeline', direction: (rootEl && rootEl.getAttribute('data-direction')) || 'horizontal',
+      horizontalDisabled: !!horizontalRadio && horizontalRadio.getAttribute('aria-disabled') === 'true',
+      zoom: saved && typeof saved.zoom === 'number' ? saved.zoom : isFinite(zoomText) ? zoomText : 100,
+      editorFontSize: editorFontSize(),
+      canvas: { box: canvasEl ? rectOf(canvasEl) : null, background: canvasBg },
+      scroller: scrollEl
+        ? { rect: rectOf(scrollEl), scrollTop: num(scrollEl.scrollTop), scrollLeft: num(scrollEl.scrollLeft), scrollWidth: num(scrollEl.scrollWidth), scrollHeight: num(scrollEl.scrollHeight), clientWidth: num(scrollEl.clientWidth), clientHeight: num(scrollEl.clientHeight) }
+        : null,
+      otherScrollers, dots, more, tiles, phaseLabels, headers, percents, lines, now, overall, legend, preview, card, focusedDot, controls
+    };
+    t.firstScreen = firstScreenOf(Object.assign({}, data, { timeline: t }));
+    return t;
   }
 
   // ---- checking the measurements (pure) --------------------------------------------------------------------------------------------------------
@@ -252,11 +462,84 @@
     return '';
   }
 
+  // One rule may name many things; after PER_RULE sentences the rest is counted, so a broken page gives a readable list.
+  const ruleOf = (problems) => () => { let n = 0; let more = 0; return { add(text) { if (n < PER_RULE) { problems.push(text); n += 1; } else more += 1; }, end(what) { if (more) problems.push('And ' + more + ' more ' + what + '.'); } }; };
+
+  // ---- checking the timeline (pure; 62.1-UI-SPEC "Real-window probe rules" 1 to 10, amendment rules 11 and 12) -------------------------------
+  const cap = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+  const penetration = (a, b) => Math.min(overX(a, b), overY(a, b));
+  const hasBox = (b) => !!b && typeof b.left === 'number' && typeof b.top === 'number' && b.right - b.left >= TOL && b.bottom - b.top >= TOL;
+  // The scroller's visible rectangle (its client area) below a toolbar that stays put, in page pixels.
+  function timelineView(data) {
+    const t = data.timeline;
+    const s = t && t.scroller;
+    const r = s && s.rect ? s.rect : { left: 0, top: 0, right: data.width, bottom: data.height };
+    const w = s && s.clientWidth > 0 ? s.clientWidth : r.right - r.left;
+    const h = s && s.clientHeight > 0 ? s.clientHeight : r.bottom - r.top;
+    const toolbarBottom = data.toolbar && stuck(data.toolbar) ? data.toolbar.bottom : 0;
+    return { left: Math.max(0, r.left), top: Math.max(0, r.top, toolbarBottom), right: Math.min(data.width || Infinity, r.left + w), bottom: Math.min(data.height || Infinity, r.top + h) };
+  }
+  // A sticky milestone header that is held at the scroller's edge right now: it hides on purpose what passes under it.
+  function pinned(data, h) {
+    const t = data.timeline;
+    const s = t && t.scroller;
+    if (!h.sticky || !s || !hasBox(h.box)) return false;
+    const v = timelineView(data);
+    return (s.scrollTop > TOL && Math.abs(h.box.top - v.top) <= TOL) || (s.scrollLeft > TOL && Math.abs(h.box.left - v.left) <= TOL);
+  }
+  const inside = (b, v, margin) => hasBox(b) && b.left >= v.left + margin - TOL && b.top >= v.top + margin - TOL && b.right <= v.right - margin + TOL && b.bottom <= v.bottom - margin + TOL;
+  /** First-screen facts (62.1-UI-SPEC amendment, probe rule 7): the Now pill and a dot of the Now step lie fully in the visible scroller. */
+  function firstScreenOf(data) {
+    const t = data.timeline || {};
+    const v = timelineView(data);
+    const now = t.now;
+    return {
+      nowVisible: !!(now && now.pill && inside(now.pill, v, 0)),
+      nowStepDotVisible: !!now && (t.dots || []).some((d) => d.milestone === now.milestone && d.step === now.step && d.rendered !== false && inside(d.box, v, 0))
+    };
+  }
+
+  /** Every broken timeline rule as one plain sentence, added to problems. */
+  function checkTimeline(data, problems) {
+    const t = data.timeline;
+    const rule = ruleOf(problems);
+    const dots = (t.dots || []).filter((d) => d.rendered !== false && hasBox(d.box));
+    const headers = t.headers || [];
+    const phaseLabels = (t.phaseLabels || []).filter((p) => hasBox(p.box));
+    const more = (t.more || []).filter(hasBox);
+
+    // Rule 1, no overlap: dot hit boxes, initials chips, display ID labels, phase labels, +n buttons and milestone headers. A dot's own chip and
+    // label sit inside its box, and a header held at the scroller's edge covers what scrolls under it on purpose (rule 6 guards the focused dot).
+    const ORDER = ['head', 'phase', 'more', 'chip', 'idLabel', 'dot'];
+    const items = [];
+    for (const h of headers) if (hasBox(h.box)) items.push({ owner: 'head:' + h.id, kind: 'head', name: 'milestone header ' + h.title, short: h.title, box: h.box, pinned: pinned(data, h) });
+    for (const p of phaseLabels) items.push({ owner: 'phase:' + p.id, kind: 'phase', name: 'phase label "' + p.text + '"', short: '"' + p.text + '"', box: p.box });
+    for (const m of more) items.push({ owner: 'more:' + m.milestone + ':' + m.step, kind: 'more', name: 'the ' + m.text + ' button at step ' + (m.step + 1), box: m });
+    // A chip or ID label inside its own dot box is judged with that box; one that sticks out of it is judged on its own.
+    const within = (b, o) => b.left >= o.left - TOL && b.top >= o.top - TOL && b.right <= o.right + TOL && b.bottom <= o.bottom + TOL;
+    for (const d of dots) {
+      if (d.chip && hasBox(d.chip.box) && !within(d.chip.box, d.box)) items.push({ owner: 'dot:' + d.id, kind: 'chip', name: 'the initials of ' + d.label, box: d.chip.box });
+      if (d.idLabel && hasBox(d.idLabel.box) && !within(d.idLabel.box, d.box)) items.push({ owner: 'dot:' + d.id, kind: 'idLabel', name: 'the ID label of ' + d.label, box: d.idLabel.box });
+      items.push({ owner: 'dot:' + d.id, kind: 'dot', name: 'dot ' + d.label, short: d.label, box: d.box });
+    }
+    const PLURAL = { head: 'Milestone headers', phase: 'Phase labels', dot: 'Dots' };
+    const overlaps = rule();
+    for (let i = 0; i < items.length; i += 1) for (let j = i + 1; j < items.length; j += 1) {
+      const a = items[i];
+      const b = items[j];
+      if (a.owner === b.owner || ((a.pinned || b.pinned) && a.kind !== b.kind)) continue;
+      const by = penetration(a.box, b.box);
+      if (!(by > TOL)) continue;
+      const [x, y] = ORDER.indexOf(a.kind) <= ORDER.indexOf(b.kind) ? [a, b] : [b, a];
+      overlaps.add(x.kind === y.kind && PLURAL[x.kind] ? PLURAL[x.kind] + ' ' + x.short + ' and ' + y.short + ' overlap by ' + r0(by) + ' px' : cap(x.name) + ' and ' + y.name + ' overlap by ' + r0(by) + ' px');
+    }
+    overlaps.end('overlaps on the timeline');
+  }
+
   /** Every broken rule as one plain sentence; an empty list for a clean board. */
   function check(data) {
     const problems = [];
-    // One rule may name many things; after PER_RULE sentences the rest is counted, so a broken board gives a readable list.
-    const rule = () => { let n = 0; let more = 0; return { add(text) { if (n < PER_RULE) { problems.push(text); n += 1; } else more += 1; }, end(what) { if (more) problems.push('And ' + more + ' more ' + what + '.'); } }; };
+    const rule = ruleOf(problems);
     const kanban = data.layout === 'kanban';
     const page = data.page || { scrollWidth: 0, clientWidth: 0, scrollY: 0 };
     const region = data.region;
@@ -388,7 +671,8 @@
 
     const focus = focusProblem(data);
     if (focus) problems.push(focus);
-    const firstScreen = !(region && region.scrollTop > TOL) && !(page.scrollY > TOL);
+    // In the Timeline view there are no card boxes; the timeline's first-screen facts are in its own report (62.1-UI-SPEC probe rule 7).
+    const firstScreen = !data.timeline && !(region && region.scrollTop > TOL) && !(page.scrollY > TOL);
     if (firstScreen && data.openWork > 0 && visibleCount(data) === 0) {
       problems.push('No card is fully visible on the first screen, but ' + data.openWork + (data.openWork === 1 ? ' Backlog or Ready card exists' : ' Backlog or Ready cards exist'));
     }
@@ -421,6 +705,7 @@
     split.end('cards with split words');
     centred.end('centred card buttons');
     painted.end('card buttons in button colours');
+    if (data.timeline) checkTimeline(data, problems);
     return problems;
   }
 
@@ -441,6 +726,8 @@
       visibleCards: visibleCount(data)
     };
     if (data.focused) out.focused = { id: data.focused.id, top: data.focused.top, bottom: data.focused.bottom, visible: !focusProblem(data) };
+    // 62.1-07: what the real-window timeline tests aim with and assert. Only in the Timeline view; in Columns the report keeps its 62-16 keys.
+    if (data.timeline) out.timeline = JSON.parse(JSON.stringify(data.timeline));
     return out;
   }
 
@@ -456,6 +743,12 @@
   }
 
   function scrollBoard(top, left) {
+    const tl = one(document.getElementById('board'), '.tl-scroll');
+    if (tl && (document.getElementById('root') || document.body).getAttribute('data-view') === 'timeline') {
+      if (typeof top === 'number') tl.scrollTop = top;
+      if (typeof left === 'number') tl.scrollLeft = left;
+      return;
+    }
     const kanban = (document.getElementById('root') || document.body).getAttribute('data-layout') !== 'list';
     const regionEl = kanban ? document.querySelector('.board-scroll') : document.getElementById('board');
     if (!regionEl) return;
@@ -467,11 +760,13 @@
     if (typeof left === 'number') regionEl.scrollLeft = left;
   }
 
+  const timelineShown = () => (document.getElementById('root') || document.body).getAttribute('data-view') === 'timeline';
   /** Runs the asked action (scroll, focus, measure or rects), waits two frames, then measures. rects skips the rules and the word measuring. */
   function measure(action) {
     const a = typeof action === 'string' ? { action } : (action && typeof action === 'object' ? action : {});
     const kind = typeof a.action === 'string' ? a.action : 'measure';
     if (kind === 'scroll') scrollBoard(a.top, a.left);
+    else if (kind === 'focus' && typeof a.itemId === 'string' && timelineShown()) { const b = all(document.getElementById('board'), 'button.tl-dot').find((n) => n.getAttribute('data-id') === a.itemId); if (b) b.focus(); }
     else if (kind === 'focus' && typeof a.itemId === 'string' && board && typeof board.focusCard === 'function') board.focusCard(a.itemId);
     return frame().then(frame).then(() => {
       const data = collect(kind !== 'rects');
@@ -479,7 +774,7 @@
     });
   }
 
-  window.NearAiBoardLayout = Object.freeze({ collect, check, measure, wordsIn });
+  window.NearAiBoardLayout = Object.freeze({ collect, check, measure, wordsIn, firstScreenOf });
 
   if (!board || typeof board.onMessage !== 'function' || typeof board.post !== 'function') return;
   board.onMessage('e2e-layout', (m) => {
