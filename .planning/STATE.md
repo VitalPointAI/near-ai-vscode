@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-21-PLAN.md
-last_updated: "2026-11-04T04:15:10.446Z"
+stopped_at: Completed 62-22-PLAN.md
+last_updated: "2026-11-04T11:15:35.690Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: c3e6cc87c8b842c27c0ca3772af7912d9d5cd249
+state_head: 9e0767465e82c5552400b28b583aa5688535e53b
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 62
-  completed_plans: 59
+  completed_plans: 60
   percent: 13
 ---
 
@@ -113,6 +113,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P19 | 28min | 3 tasks | 6 files |
 | Phase 62 P20 | 22 min | 3 tasks | 13 files |
 | Phase 62 P21 | 57 min | 3 tasks | 10 files |
+| Phase 62 P22 | 75min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -251,6 +252,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-21: the kanban is a 100vh column with toolbar and banner bands and one .board-scroll; a sticky opaque header row and every lane share --board-columns (256 px open, 40 px folded) written by board.js
 - [Phase 62]: 62-21: folded columns render no cards (a hidden count only); card text uses break-word; .card-main resets every global button property; the probe treats a break after a hyphen as wrapping between words
 - [Phase 62]: 62-21: folds come from foldedByDefault; saved UI state is version 2 and the older board's collapse and filter choices are dropped once; phase:63 is reachable by scrolling only, ordering planless phases first is left to the owner or 62-22/62-24
+- [Phase 62]: 62-22: the e2e gives the test window the whole Xvfb screen with a raw X11 ConfigureWindow (VS Code skips saved state for test windows, maximize needs a window manager); full editor width 1862 px
+- [Phase 62]: 62-22: the screenshot matrix uses VS Code's own default themes per kind (Dark 2026, Light 2026, Default High Contrast, Default High Contrast Light) and blurs before each measurement; the probe's focus rule is unchanged
+- [Phase 62]: 62-22: high contrast marks the chosen Group by and pressed filters with a contrastActiveBorder outline; .group-by > .label keeps the caption grey off the choices
 
 ### Pending Todos
 
@@ -272,8 +276,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T04:15:10.086Z
-Stopped at: Completed 62-21-PLAN.md
+Last session: 2026-11-04T11:15:35.356Z
+Stopped at: Completed 62-22-PLAN.md
 Resume file: None
 
 ## Notes
