@@ -5,12 +5,12 @@ import type { ImplementedTeamEvent, ItemKind, Role, TeamState } from './types';
 import { isOwnDraft } from './work';
 
 export type TeamActionKind = 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'member.remove' | 'member.change-role'
-  | 'item.create' | 'item.edit' | 'item.estimate' | 'item.move' | 'item.claim' | 'item.assign' | 'item.assign-self' | 'lease.manual' | 'review.submit'
+  | 'item.create' | 'item.edit' | 'item.estimate' | 'item.move' | 'item.move-own' | 'item.claim' | 'item.assign' | 'item.assign-self' | 'lease.manual' | 'review.submit'
   | 'merge.approve-out-of-scope' | 'lease.integrator' | 'budget.set' | 'allocation.grant' | 'allocation.revoke' | 'allocation.request'
   | 'team.stop' | 'team.resume' | 'policy.change' | 'device.add' | 'device.revoke' | 'member.availability' | 'member.skills' | 'snapshot.write' | 'member.key-deliver';
 
 export type TeamAction =
-  | { kind: 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'item.assign' | 'item.assign-self' | 'item.move' | 'lease.manual' | 'merge.approve-out-of-scope' | 'lease.integrator' | 'allocation.request' | 'team.stop' | 'team.resume' | 'policy.change' | 'member.availability' | 'snapshot.write' }
+  | { kind: 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'item.assign' | 'item.assign-self' | 'item.move' | 'item.move-own' | 'lease.manual' | 'merge.approve-out-of-scope' | 'lease.integrator' | 'allocation.request' | 'team.stop' | 'team.resume' | 'policy.change' | 'member.availability' | 'snapshot.write' }
   | { kind: 'member.remove'; targetId: string }
   | { kind: 'member.key-deliver'; targetId: string }
   | { kind: 'member.change-role'; targetId: string; role: Role }
@@ -48,6 +48,9 @@ export const PERMISSION_MATRIX: Readonly<Record<TeamActionKind, Row>> = Object.f
   // Lifecycle moves (hold, release, mark done, block, unblock, cancel, reopen) and import: not in the spec 6.3 table, which has no transition row;
   // D-12 names the owner and leads for every move this phase, and the claimant joins in Phase 63.
   'item.move': MANAGERS,
+  // Owner decision 2026-11-04 (G-62-5, 62-27): the card's current assignee, whoever assigned it, makes the board moves on that card (mark done,
+  // block and unblock, hold and release, reopen from Done). Cancel and bringing back a cancelled card stay on item.move. actionForEvent picks it.
+  'item.move-own': EVERYONE_ACTIVE,
   'item.claim': row(true, true, true, 'review-items', false),
   'item.assign': MANAGERS,
   // Owner decision 2026-11-03 (G-62-5, 62-25): any confirmed member who is not an observer puts themselves on an unassigned card and takes
@@ -83,6 +86,7 @@ export const ACTION_LABELS: Readonly<Record<TeamActionKind, string>> = Object.fr
   'item.edit': 'editing items',
   'item.estimate': 'estimating items',
   'item.move': 'moving items',
+  'item.move-own': 'moving cards assigned to them',
   'item.claim': 'claiming items',
   'item.assign': 'assigning items to others',
   'item.assign-self': 'assigning items to themselves',
@@ -189,6 +193,11 @@ export function actionForEvent(event: ImplementedTeamEvent, state?: Pick<TeamSta
   const ownDraft = (itemId: string): boolean => state !== undefined && isOwnDraft(state, itemId, event.author);
   // The card's assignee before the event; null when there is no state to ask, so the self path is never taken without one.
   const assigneeBefore = (itemId: string): string | undefined | null => (state === undefined ? null : state.items.get(itemId)?.assignee);
+  // A move on the card is the author's own when the author is its assignee before the event (62-27); without a state it is item.move, the stricter one.
+  const moveBy = (itemId: string): TeamAction => {
+    const assignee = state?.items.get(itemId)?.assignee;
+    return { kind: assignee !== undefined && assignee === event.author ? 'item.move-own' : 'item.move' };
+  };
   switch (event.type) {
     case 'team.created':
     case 'member.joined':
@@ -208,14 +217,18 @@ export function actionForEvent(event: ImplementedTeamEvent, state?: Pick<TeamSta
     case 'item.updated': {
       const changes = event.body.changes;
       const isMove = Object.prototype.hasOwnProperty.call(changes, 'hold') || Object.prototype.hasOwnProperty.call(changes, 'state');
-      return isMove ? { kind: 'item.move' } : { kind: 'item.edit', ownDraft: ownDraft(event.body.id) };
+      return isMove ? moveBy(event.body.id) : { kind: 'item.edit', ownDraft: ownDraft(event.body.id) };
     }
     case 'item.estimated': return { kind: 'item.estimate', ownDraft: ownDraft(event.body.id) };
+    // Owner decision 2026-11-04 (62-27): the assignee's own moves are item.move-own. A cancel is always item.move, and so is a reopen of
+    // anything but a finished card, so a cancelled card comes back only through the owner or a lead.
     case 'item.blocked':
     case 'item.unblocked':
+      return moveBy(event.body.id);
     case 'item.cancelled':
-    case 'item.reopened':
       return { kind: 'item.move' };
+    case 'item.reopened':
+      return state?.items.get(event.body.id)?.state === 'done' ? moveBy(event.body.id) : { kind: 'item.move' };
     // G-62-5: putting a person on a card, or taking them off, is the spec 6.3 "assign or reassign others" row: owner and lead.
     // Owner decision 2026-11-03 (62-25): a member's own assignment is item.assign-self, but only when it takes nothing from a teammate. Assigning
     // yourself counts when the card has no assignee, or is already yours (the rules then refuse the repeat with itemAlreadyAssigned); taking

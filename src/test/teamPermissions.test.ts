@@ -54,6 +54,8 @@ const rows: Row[] = [
   { name: 'item.estimate own draft', kind: 'item.estimate', build: () => ({ kind: 'item.estimate', ownDraft: true }), expect: [T, T, T, F, F] },
   { name: 'item.estimate not own draft', kind: 'item.estimate', build: () => ({ kind: 'item.estimate', ownDraft: false }), expect: [T, T, F, F, F] },
   { name: 'item.move', kind: 'item.move', build: () => ({ kind: 'item.move' }), expect: [T, T, F, F, F] },
+  // Owner decision 2026-11-04 (G-62-5, 62-27): the card's assignee moves it; actionForEvent sends only the assignee's own moves here.
+  { name: 'item.move-own', kind: 'item.move-own', build: () => ({ kind: 'item.move-own' }), expect: [T, T, T, T, F] },
   { name: 'item.claim task', kind: 'item.claim', build: () => ({ kind: 'item.claim', itemKind: 'task' }), expect: [T, T, T, F, F] },
   { name: 'item.claim review item', kind: 'item.claim', build: () => ({ kind: 'item.claim', itemKind: 'review' }), expect: [T, T, T, T, F] },
   { name: 'item.assign', kind: 'item.assign', build: () => ({ kind: 'item.assign' }), expect: [T, T, F, F, F] },
@@ -103,8 +105,9 @@ for (const row of rows) {
 
 test('the table covers every kind in the matrix and the matrix has five roles per kind', () => {
   const kinds = Object.keys(PERMISSION_MATRIX);
-  // 30 since 62-25 (was 29): item.assign-self joined for the owner decision of 2026-11-03.
-  assert.equal(kinds.length, 30);
+  // 30 since 62-25 (was 29): item.assign-self joined for the owner decision of 2026-11-03. 31 since 62-27: item.move-own joined for the owner
+  // decision of 2026-11-04 (assignees move their own cards).
+  assert.equal(kinds.length, 31);
   for (const kind of kinds) {
     assert.deepEqual(Object.keys(PERMISSION_MATRIX[kind as TeamActionKind]).sort(), [...ROLES].sort(), kind);
     assert.ok(rows.some((row) => row.kind === kind), `no table row for ${kind}`);
@@ -273,6 +276,50 @@ test('the self-assignment row is labelled for the person, and an observer is ref
   assert.equal(ACTION_LABELS['item.assign-self'], 'assigning items to themselves');
   assert.equal(decideTeamAction(view(), IDS.observer, { kind: 'item.assign-self' }).reason, 'the observer role does not allow assigning items to themselves');
   assert.equal(decideTeamAction(view(), IDS.developer, { kind: 'item.assign' }).reason, 'the developer role does not allow assigning items to others');
+});
+
+test('the own-move row is labelled for the person, and an observer is refused with it', () => {
+  assert.equal(ACTION_LABELS['item.move-own'], 'moving cards assigned to them');
+  assert.equal(decideTeamAction(view(), IDS.observer, { kind: 'item.move-own' }).reason, 'the observer role does not allow moving cards assigned to them');
+  assert.equal(decideTeamAction(view(), IDS.developer, { kind: 'item.move' }).reason, 'the developer role does not allow moving items');
+});
+
+// Owner decision 2026-11-04 (62-27): the assignee's own moves map to item.move-own; a cancel, a reopen of a card that is not done, a move by
+// anyone else and any move without a state stay item.move.
+test('actionForEvent sends the assignee\'s own moves to item.move-own, keeps cancel and a cancelled reopen on item.move, and needs a state to do so', () => {
+  const MINE = 'plan:62-01';
+  const DONE = 'plan:62-02';
+  const GONE = 'plan:62-03';
+  const LEADS = 'plan:62-04';
+  const FREE = 'plan:62-05';
+  const card = (id: string, assignee: string | undefined, state: WorkItem['state'] = 'ready'): WorkItem => ({
+    ...boardItem(id, IDS.lead, state), kind: 'plan', origin: 'import', ...(assignee === undefined ? {} : { assignee, assignedBy: IDS.lead })
+  });
+  const state = { items: new Map([
+    [MINE, card(MINE, IDS.developer)], [DONE, card(DONE, IDS.developer, 'done')], [GONE, card(GONE, IDS.developer, 'cancelled')],
+    [LEADS, card(LEADS, IDS.lead)], [FREE, card(FREE, undefined)]
+  ]) };
+  const at = (type: string, body: Record<string, unknown>, author: string = IDS.developer): ImplementedTeamEvent => ({ ...ENVELOPE, author, type, body } as unknown as ImplementedTeamEvent);
+  const OWN: TeamAction = { kind: 'item.move-own' };
+  const MOVE: TeamAction = { kind: 'item.move' };
+  const moves = (id: string): Array<[string, ImplementedTeamEvent]> => [
+    ['hold', at('item.updated', { id, changes: { hold: true } })],
+    ['release', at('item.updated', { id, changes: { hold: false } })],
+    ['done', at('item.updated', { id, changes: { state: 'done' } })],
+    ['block', at('item.blocked', { id, reason: 'r' })],
+    ['unblock', at('item.unblocked', { id })]
+  ];
+  for (const [name, event] of moves(MINE)) assert.deepEqual(actionForEvent(event, state), OWN, `the developer's ${name} of their card`);
+  for (const [name, event] of moves(LEADS)) assert.deepEqual(actionForEvent(event, state), MOVE, `the developer's ${name} of the lead's card`);
+  for (const [name, event] of moves(FREE)) assert.deepEqual(actionForEvent(event, state), MOVE, `the developer's ${name} of a free card`);
+  for (const [name, event] of moves(MINE)) assert.deepEqual(actionForEvent(event), MOVE, `${name} without a state`);
+  assert.deepEqual(actionForEvent(at('item.reopened', { id: DONE }), state), OWN, 'the developer reopens their finished card');
+  assert.deepEqual(actionForEvent(at('item.reopened', { id: GONE }), state), MOVE, 'the developer brings back their cancelled card');
+  assert.deepEqual(actionForEvent(at('item.reopened', { id: DONE })), MOVE, 'reopen without a state');
+  assert.deepEqual(actionForEvent(at('item.cancelled', { id: MINE, reason: 'r' }), state), MOVE, 'the developer cancels their card');
+  assert.deepEqual(actionForEvent(at('item.blocked', { id: LEADS, reason: 'r' }, IDS.lead), state), OWN, 'a lead\'s own card is their own move too');
+  assert.deepEqual(actionForEvent(at('item.blocked', { id: MINE, reason: 'r' }, IDS.lead), state), MOVE, 'a lead moving the developer\'s card asks item.move');
+  assert.deepEqual(actionForEvent(at('item.updated', { id: MINE, changes: { title: 'T' } }), state), { kind: 'item.edit', ownDraft: false }, 'an edit is not a move');
 });
 
 test('actionForEvent sends a member\'s own assignment to item.assign-self and everything else to item.assign, and needs a state to do so', () => {

@@ -163,22 +163,21 @@ test('a lead gives the developer a plan, the developer blocks, unblocks, finishe
     await lead.log.sync();
     assert.deepEqual(lead.log.state().head, remoteHead, 'nothing reached the remote');
 
-    // The same three events, validly signed by the developer's device and pushed straight to the coordination branch, are rejected by both clones.
+    // The same three events, validly signed by the developer's device and pushed straight to the coordination branch one at a time, are rejected
+    // by both clones. A rejected event does not move the head, so each forgery names the same head.
     const before = withoutRejections(lead.log.state());
-    const forgedIds: string[] = [];
     for (const [id, move] of refusedMoves) {
       const intent = moveIntent(id, move) as unknown as { type: never; body: never };
       const forged = signed(actorOf(developer, rig.dev.secrets), { teamId, lamport: remoteHead.lamport + 1, prev: remoteHead.eventId, type: intent.type, body: intent.body });
       rawPush(rootOf(rig, 'b'), forged, `raw: a developer tries to ${move} ${id}`);
-      forgedIds.push(forged.id);
-      remoteHead = { lamport: remoteHead.lamport + 1, eventId: forged.id } as typeof remoteHead;
-    }
-    for (const opened of [lead, developer]) {
-      const result = await opened.log.sync();
-      assert.deepEqual(result.accepted, []);
-      assert.deepEqual(result.rejected.map((rejection) => rejection.eventId), forgedIds);
-      for (const rejection of result.rejected) assert.equal(rejection.reason, DEVELOPER_MAY_NOT);
-      assert.equal(withoutRejections(opened.log.state()), before, 'nothing changed');
+      for (const opened of [lead, developer]) {
+        const result = await opened.log.sync();
+        assert.deepEqual(result.accepted, [], `${move} ${id}`);
+        assert.deepEqual(result.rejected.map((rejection) => rejection.eventId), [forged.id], `${move} ${id}`);
+        assert.equal(result.rejected[0]?.reason, DEVELOPER_MAY_NOT, `${move} ${id}`);
+        assert.equal(withoutRejections(opened.log.state()), before, 'nothing changed');
+      }
+      remoteHead = lead.log.state().head;
     }
 
     // The lead cancels the developer's card; the developer cannot bring it back, on write or by forging; the lead can.
