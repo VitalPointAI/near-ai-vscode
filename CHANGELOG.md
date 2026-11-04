@@ -53,6 +53,16 @@ Other changes:
 - **Shorter MCP approval choices.** The approval menu for a tool server now
   reads "Ask before changes", "Ask before every call" or "Trusted", with a
   one-line explanation of the chosen setting under it.
+- **No more false "repeated the same action" stops for changing folder.** An
+  agent that runs `cd <folder>` (or `pwd`) on its own between its real commands
+  is no longer stopped for repeating itself. Changing folder does nothing new on
+  its own, so the loop guard now ignores it and only counts commands that do
+  work. A `cd` to a folder that does not exist still counts, so an agent
+  stuck on it is caught.
+- **Stuck agents repeating a failing shell command are now caught.** Shell
+  errors carried a random temporary file name, so each repeat looked new and
+  the loop guard never stepped in. That name is now ignored when results are
+  compared.
 - **The chat asks you to connect NEAR AI first.** Until the project has a
   working profile (a saved NEAR AI key or local runtime that was checked
   and works), the empty chat shows only **Connect NEAR AI to start** with a

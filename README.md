@@ -141,7 +141,8 @@ as a row in the chat.
 - **Stuck agents are caught, productive ones are not.** An agent counts as
   repeating itself only when it runs the same action and gets the same result
   each time; a command run again after a change, or one whose output changed,
-  never counts. A repeating agent is first nudged, then warned that its result
+  never counts, and neither does simply changing folder (`cd`) or printing it
+  (`pwd`). A repeating agent is first nudged, then warned that its result
   has not changed and told to change approach, and stopped only if it keeps
   going. When a run stops short, the chat says why ("Stopped: the agent kept
   repeating ... with the same result." or "Stopped after reaching the turn
