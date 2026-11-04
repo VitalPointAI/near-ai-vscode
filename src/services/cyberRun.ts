@@ -179,6 +179,9 @@ export async function startCyberRun(input: CyberRunInput): Promise<CyberRunResul
       evidenceHash: fields.evidenceHash ?? ''
     });
 
+  /** True once the Stop control is engaged or the run's signal is aborted. */
+  const isStopped = () => Boolean(input.stopped?.() || input.signal.aborted);
+
   const askRole = async (role: StepRole, user: string): Promise<AskRoleResult> => {
     const history = records.length > COMPACTION_WINDOW ? compactSteps(records, COMPACTION_WINDOW) : records;
     const context = history.map((entry) => `- [${entry.action}] ${entry.target}: ${entry.result}${entry.evidenceHashes.length ? ` (evidence ${entry.evidenceHashes.join(', ')})` : ''}`).join('\n');
@@ -191,7 +194,15 @@ export async function startCyberRun(input: CyberRunInput): Promise<CyberRunResul
       `Evidence so far: ${findings.length} finding(s)`,
       context ? `Steps so far (${history.length}):\n${context}` : 'No steps yet.'
     ].join('\n');
-    return input.driver.askRole(role, [{ role: 'system', content: ROLE_PROMPTS[role] }, { role: 'user', content: `${summary}\n\n${user}` }], input.signal);
+    // A stopped run asks the model nothing more, and a call cut short by the stop is a stop, not an
+    // error: either way the run ends through stopRun below, which keeps its findings.
+    if (isStopped()) throw new RunStopped(role);
+    try {
+      return await input.driver.askRole(role, [{ role: 'system', content: ROLE_PROMPTS[role] }, { role: 'user', content: `${summary}\n\n${user}` }], input.signal);
+    } catch (error) {
+      if (isStopped()) throw new RunStopped(role);
+      throw error;
+    }
   };
 
   /**
@@ -205,6 +216,14 @@ export async function startCyberRun(input: CyberRunInput): Promise<CyberRunResul
       const drained = pending.shift()!;
       findings.push(drained);
       emit({ type: 'finding', finding: drained, verified: Boolean(drained.reproductionCommand) });
+    }
+  };
+
+  /** Drains the tools' findings and writes each into the chain. Every exit path calls this. */
+  const persistFindings = async () => {
+    drainExternal();
+    for (const finding of findings) {
+      await record({ tool: 'finding', arguments: finding.checkId, result: findingResult(finding), modelReasoning: finding.remediation || hardeningAdvice(finding.checkId), evidenceHash: finding.evidenceHash });
     }
   };
 
@@ -231,161 +250,183 @@ export async function startCyberRun(input: CyberRunInput): Promise<CyberRunResul
     await askOne('critic', findings.length ? `Judge these ${findings.length} finding(s): ${findings.map((finding) => finding.title).join('; ')}` : 'There are no findings to judge; say so.');
   };
 
-  // (2) Planner, then (3) the operator loop. A plan is one step per model reply, so the run asks
-  // the planner again until the depth profile's checks are covered, the planner stops, or the step
-  // budget is spent. Without the loop a "quick" scan ran exactly one probe and called itself done.
-  emit({ type: 'notice', text: 'Asking the planner which check to run first. The model may think for a while; the timeline fills in as steps complete.' });
-  const depthChecks = profileChecks(input.depth ?? 'quick');
-  const maxSteps = Math.max(1, Math.min(MAX_PLAN_STEPS, depthChecks.length * 2));
-  const plan = await askRole('planner', planPrompt(depthChecks, []));
-  if (plan.kind === 'incompatible') {
-    note('planner', plan.reason);
-    await record({ tool: 'planner', arguments: '', result: 'incompatible', modelReasoning: plan.reason });
-    return done('incompatible', { reason: `incompatible: ${incompatibility.join(' ')}`, ledgerOk: await input.ledger.verify(runId) });
-  }
-  let planned: Step[] = plan.steps;
+  try {
+    // (2) Planner, then (3) the operator loop. A plan is one step per model reply, so the run asks
+    // the planner again until the depth profile's checks are covered, the planner stops, or the step
+    // budget is spent. Without the loop a "quick" scan ran exactly one probe and called itself done.
+    emit({ type: 'notice', text: 'Asking the planner which check to run first. The model may think for a while; the timeline fills in as steps complete.' });
+    const depthChecks = profileChecks(input.depth ?? 'quick');
+    const maxSteps = Math.max(1, Math.min(MAX_PLAN_STEPS, depthChecks.length * 2));
+    // The first plan is asked for the full check list. Passing [] read as 'every check has run', so
+    // the planner's first answer was a done step that was then refused as an unknown tool.
+    const plan = await askRole('planner', planPrompt(depthChecks, depthChecks));
+    if (plan.kind === 'incompatible') {
+      note('planner', plan.reason);
+      await record({ tool: 'planner', arguments: '', result: 'incompatible', modelReasoning: plan.reason });
+      await persistFindings();
+      return done('incompatible', { reason: `incompatible: ${incompatibility.join(' ')}`, ledgerOk: await input.ledger.verify(runId) });
+    }
+    let planned: Step[] = plan.steps;
 
-  /**
-   * The operator role names the tool and arguments for the planner's step. When it cannot follow the
-   * protocol the planner's step is executed as given, and the incompatibility is already recorded.
-   */
-  const operatorStep = async (plannedStep: Step): Promise<Step> => {
-    const answer = await askOne('operator', `Execute this step: ${JSON.stringify(plannedStep)}`);
-    return answer ?? plannedStep;
-  };
+    /**
+     * The operator role names the tool and arguments for the planner's step. When it cannot follow the
+     * protocol the planner's step is executed as given, and the incompatibility is already recorded.
+     */
+    const operatorStep = async (plannedStep: Step): Promise<Step> => {
+      const answer = await askOne('operator', `Execute this step: ${JSON.stringify(plannedStep)}`);
+      return answer ?? plannedStep;
+    };
 
-  // (3) Operator: each planned step is handed to the operator role, which names the tool and args it
-  // will run; execution then passes the production permission path below. When the step list is
-  // exhausted the planner is asked for the next step, so a run covers what its profile promises.
-  const ran: string[] = [];
-  for (let position = 0; position < maxSteps; position += 1) {
-    if (position === planned.length) {
-      const covered = coveredChecks(ran, depthChecks);
-      if (covered === depthChecks.length) break;
-      emit({ type: 'notice', text: `Planning the next check (${covered} of ${depthChecks.length} covered).` });
-      // `ran` holds tool names; the profile lists check ids. Comparing them directly never excluded
-      // anything, so the planner was told "recon still needed" after recon had already run and chose
-      // it again until the step budget ran out.
-      const done = new Set(ran.map((tool) => CHECK_FOR_TOOL[tool]).filter((check): check is string => Boolean(check)));
-      const outstanding = depthChecks.filter((check) => !done.has(check));
-      const next = await askRole('planner', planPrompt(depthChecks, outstanding));
-      if (next.kind === 'incompatible') { note('planner', next.reason); break; }
-      // A planner that says it is done ends the run instead of being asked again.
-      if (!next.steps.length || next.steps[0].tool === 'done') break;
-      planned = [...planned, ...next.steps];
-    }
-    const plannedStep = planned[position];
-    const step = await operatorStep(plannedStep);
-    ran.push(step.tool);
-    if (input.stopped?.() || input.signal.aborted) {
-      await record({ tool: 'stop', arguments: step.id, result: 'stopped before the step ran', modelReasoning: 'the stop control was engaged' });
-      return done('stopped', { reason: 'stopped', ledgerOk: await input.ledger.verify(runId) });
-    }
-    const budget = input.budget?.();
-    if (budget && !budget.ok) {
-      await record({ tool: 'budget', arguments: step.id, result: `${budget.reason} Not reached: ${budget.shortfall.unreachedHosts.join(', ')}; ${budget.shortfall.unreachedChecks.join(', ')}`, modelReasoning: 'the wall-clock budget was reached' });
-      return done('stopped', { reason: budget.reason, ledgerOk: await input.ledger.verify(runId) });
-    }
-    const rate = input.limiter?.acquire();
-    if (rate && !rate.ok) {
-      await record({ tool: 'rate-limit', arguments: step.id, result: rate.reason, modelReasoning: 'the rate limit refused the step' });
-      return done('stopped', { reason: rate.reason, ledgerOk: await input.ledger.verify(runId) });
-    }
+    // (3) Operator: each planned step is handed to the operator role, which names the tool and args it
+    // will run; execution then passes the production permission path below. When the step list is
+    // exhausted the planner is asked for the next step, so a run covers what its profile promises.
+    const ran: string[] = [];
+    for (let position = 0; position < maxSteps; position += 1) {
+      if (position === planned.length) {
+        const covered = coveredChecks(ran, depthChecks);
+        if (covered === depthChecks.length) break;
+        emit({ type: 'notice', text: `Planning the next check (${covered} of ${depthChecks.length} covered).` });
+        // `ran` holds tool names; the profile lists check ids. Comparing them directly never excluded
+        // anything, so the planner was told "recon still needed" after recon had already run and chose
+        // it again until the step budget ran out.
+        const done = new Set(ran.map((tool) => CHECK_FOR_TOOL[tool]).filter((check): check is string => Boolean(check)));
+        const outstanding = depthChecks.filter((check) => !done.has(check));
+        const next = await askRole('planner', planPrompt(depthChecks, outstanding));
+        if (next.kind === 'incompatible') { note('planner', next.reason); break; }
+        // A planner that says it is done ends the run instead of being asked again.
+        if (!next.steps.length || next.steps[0].tool === 'done') break;
+        planned = [...planned, ...next.steps];
+      }
+      const plannedStep = planned[position];
+      const step = await operatorStep(plannedStep);
+      ran.push(step.tool);
+      if (input.stopped?.() || input.signal.aborted) {
+        await record({ tool: 'stop', arguments: step.id, result: 'stopped before the step ran', modelReasoning: 'the stop control was engaged' });
+        await persistFindings();
+        return done('stopped', { reason: 'stopped', ledgerOk: await input.ledger.verify(runId) });
+      }
+      const budget = input.budget?.();
+      if (budget && !budget.ok) {
+        await record({ tool: 'budget', arguments: step.id, result: `${budget.reason} Not reached: ${budget.shortfall.unreachedHosts.join(', ')}; ${budget.shortfall.unreachedChecks.join(', ')}`, modelReasoning: 'the wall-clock budget was reached' });
+        await persistFindings();
+        return done('stopped', { reason: budget.reason, ledgerOk: await input.ledger.verify(runId) });
+      }
+      const rate = input.limiter?.acquire();
+      if (rate && !rate.ok) {
+        await record({ tool: 'rate-limit', arguments: step.id, result: rate.reason, modelReasoning: 'the rate limit refused the step' });
+        await persistFindings();
+        return done('stopped', { reason: rate.reason, ledgerOk: await input.ledger.verify(runId) });
+      }
 
-    const target = step.target;
-    if (!inScope(target)) {
-      const reason = `"${target}" is outside the resolved scope of engagement ${input.engagement.id}`;
-      emit({ type: 'notice', text: reason });
-      await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${reason}`, modelReasoning: step.expectedResult });
-      continue;
-    }
-
-    const hostTool = TOOL_CATALOGUE.some((entry) => entry.name === step.tool) && input.hostTools ? step.tool : undefined;
-    const selected = input.tools.find((candidate) => candidate.tool.name === step.tool);
-    if (!selected && !hostTool) {
-      const reason = `no tool named "${step.tool}" is attached to this run`;
-      emit({ type: 'notice', text: reason });
-      await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${reason}`, modelReasoning: step.expectedResult });
-      continue;
-    }
-
-    // A host tool runs under 'shell' exactly like an exploit step (D-04, D-12).
-    const capability = selected?.capability ?? 'shell';
-    const intrusive: IntrusiveStep | undefined = capability === 'shell' ? { engagementId: input.engagement.id, target } : undefined;
-    const command = capability === 'shell' ? [step.tool, ...step.args].join(' ') : undefined;
-    let decision = decidePermission(capability, command, input.policy, rules, input.grants, undefined, intrusive);
-    if (decision.decision === 'allow' && intrusive && !intrusiveGrantDecision(input.grants, intrusive)) decision = { decision: 'ask' };
-    if (decision.decision === 'ask') {
-      const reply = await input.requestApproval(step);
-      if (reply.decision === 'deny') {
-        const reason = `the user declined the step${reply.reason ? `: ${reply.reason}` : ''}`;
+      const target = step.target;
+      if (!inScope(target)) {
+        const reason = `"${target}" is outside the resolved scope of engagement ${input.engagement.id}`;
         emit({ type: 'notice', text: reason });
         await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${reason}`, modelReasoning: step.expectedResult });
         continue;
       }
-      decision = { decision: 'allow' };
-    }
-    if (decision.decision === 'deny') {
-      emit({ type: 'notice', text: decision.reason });
-      await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${decision.reason}`, modelReasoning: step.expectedResult });
-      continue;
-    }
 
-    emit({ type: 'step-started', step });
-    const started = now().getTime();
-    let output: string;
-    let finding: Finding | undefined;
-    // The host-tool tree's evidence hash, when this step ran one, so the finding can carry it.
-    let ranHostTool: { evidenceHash: string } | undefined;
-    try {
-      if (hostTool && input.hostTools) {
-        // The tool's own stdout bytes are stored verbatim and hashed; only the text below is trimmed.
-        const host = await runHostTool({ runId, tool: hostTool, target, timeoutMs: step.safetyFlags.maxDurationMs, signal: input.signal }, input.hostTools);
-        ranHostTool = { evidenceHash: host.evidenceHash };
-        output = host.status === 'absent' ? host.stdoutText : `${host.stdoutText}\n\n[${hostTool} ${host.status}; exit ${host.provenance.exitCode ?? 'n/a'}; evidence ${host.evidenceHash.slice(0, 12)}…]`;
-        await record({ tool: step.tool, arguments: JSON.stringify({ argv: host.provenance.argv, version: host.provenance.version, exitCode: host.provenance.exitCode, durationMs: host.provenance.durationMs, format: host.provenance.format, jsonFlagVerified: host.provenance.jsonFlagVerified }), result: output, modelReasoning: step.expectedResult, evidenceHash: host.evidenceHash });
-        records.push({ id: step.id, action: step.action, target: step.target, result: output.slice(0, 1_000), reasoning: step.expectedResult, evidenceHashes: [host.evidenceHash], compacted: false });
-        emit({ type: 'step-finished', step, result: output.slice(0, 1_000), evidenceHash: host.evidenceHash });
-        transcript.push(`$ ${host.provenance.argv.join(' ')}\n${output.slice(0, 600)}`);
-        if (host.status === 'absent') emit({ type: 'notice', text: `${hostTool} is not installed: ${host.stdoutText}` });
+      const hostTool = TOOL_CATALOGUE.some((entry) => entry.name === step.tool) && input.hostTools ? step.tool : undefined;
+      const selected = input.tools.find((candidate) => candidate.tool.name === step.tool);
+      if (!selected && !hostTool) {
+        const reason = `no tool named "${step.tool}" is attached to this run`;
+        emit({ type: 'notice', text: reason });
+        await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${reason}`, modelReasoning: step.expectedResult });
         continue;
       }
-      const toolInput = selected!.input ? selected!.input(step) : toolInputFor(step.tool, step);
-      const parsed = selected!.tool.parse(toolInput);
-      output = await selected!.tool.run(parsed, runContext(input));
-      finding = selected!.findings?.()[0] ?? extractFinding(selected!, output, step);
-    } catch (error) {
-      output = error instanceof HostToolError ? `refused: ${error.message}` : `error: ${(error as Error).message}`;
+
+      // A host tool runs under 'shell' exactly like an exploit step (D-04, D-12).
+      const capability = selected?.capability ?? 'shell';
+      const intrusive: IntrusiveStep | undefined = capability === 'shell' ? { engagementId: input.engagement.id, target } : undefined;
+      const command = capability === 'shell' ? [step.tool, ...step.args].join(' ') : undefined;
+      let decision = decidePermission(capability, command, input.policy, rules, input.grants, undefined, intrusive);
+      if (decision.decision === 'allow' && intrusive && !intrusiveGrantDecision(input.grants, intrusive)) decision = { decision: 'ask' };
+      if (decision.decision === 'ask') {
+        const reply = await input.requestApproval(step);
+        if (reply.decision === 'deny') {
+          const reason = `the user declined the step${reply.reason ? `: ${reply.reason}` : ''}`;
+          emit({ type: 'notice', text: reason });
+          await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${reason}`, modelReasoning: step.expectedResult });
+          continue;
+        }
+        decision = { decision: 'allow' };
+      }
+      if (decision.decision === 'deny') {
+        emit({ type: 'notice', text: decision.reason });
+        await record({ tool: step.tool, arguments: step.args.join(' '), result: `refused: ${decision.reason}`, modelReasoning: step.expectedResult });
+        continue;
+      }
+
+      emit({ type: 'step-started', step });
+      const started = now().getTime();
+      let output: string;
+      let finding: Finding | undefined;
+      // The host-tool tree's evidence hash, when this step ran one, so the finding can carry it.
+      let ranHostTool: { evidenceHash: string } | undefined;
+      try {
+        if (hostTool && input.hostTools) {
+          // The tool's own stdout bytes are stored verbatim and hashed; only the text below is trimmed.
+          const host = await runHostTool({ runId, tool: hostTool, target, timeoutMs: step.safetyFlags.maxDurationMs, signal: input.signal }, input.hostTools);
+          ranHostTool = { evidenceHash: host.evidenceHash };
+          output = host.status === 'absent' ? host.stdoutText : `${host.stdoutText}\n\n[${hostTool} ${host.status}; exit ${host.provenance.exitCode ?? 'n/a'}; evidence ${host.evidenceHash.slice(0, 12)}…]`;
+          await record({ tool: step.tool, arguments: JSON.stringify({ argv: host.provenance.argv, version: host.provenance.version, exitCode: host.provenance.exitCode, durationMs: host.provenance.durationMs, format: host.provenance.format, jsonFlagVerified: host.provenance.jsonFlagVerified }), result: output, modelReasoning: step.expectedResult, evidenceHash: host.evidenceHash });
+          records.push({ id: step.id, action: step.action, target: step.target, result: output.slice(0, 1_000), reasoning: step.expectedResult, evidenceHashes: [host.evidenceHash], compacted: false });
+          emit({ type: 'step-finished', step, result: output.slice(0, 1_000), evidenceHash: host.evidenceHash });
+          transcript.push(`$ ${host.provenance.argv.join(' ')}\n${output.slice(0, 600)}`);
+          if (host.status === 'absent') emit({ type: 'notice', text: `${hostTool} is not installed: ${host.stdoutText}` });
+          continue;
+        }
+        const toolInput = selected!.input ? selected!.input(step) : toolInputFor(step.tool, step);
+        const parsed = selected!.tool.parse(toolInput);
+        output = await selected!.tool.run(parsed, runContext(input));
+        finding = selected!.findings?.()[0] ?? extractFinding(selected!, output, step);
+      } catch (error) {
+        output = error instanceof HostToolError ? `refused: ${error.message}` : `error: ${(error as Error).message}`;
+      }
+      const durationMs = now().getTime() - started;
+      const evidenceHash = await input.evidence.put(runId, `[${step.tool}] ${step.target}\n${output}`);
+      records.push({ id: step.id, action: step.action, target: step.target, result: output.slice(0, 1_000), reasoning: step.expectedResult, evidenceHashes: [evidenceHash], compacted: false });
+      await record({ tool: step.tool, arguments: JSON.stringify({ args: step.args, durationMs }), result: output, modelReasoning: step.expectedResult, evidenceHash });
+      emit({ type: 'step-finished', step, result: output.slice(0, 1_000), evidenceHash });
+      transcript.push(`$ ${step.tool} ${step.args.join(' ')}\n${output.slice(0, 600)}`);
+
+      drainExternal();
+      if (finding) {
+        const withEvidence: Finding = { ...finding, evidenceHash: ranHostTool?.evidenceHash ?? evidenceHash };
+        findings.push(withEvidence);
+        emit({ type: 'finding', finding: withEvidence, verified: Boolean(withEvidence.reproductionCommand) });
+      }
     }
-    const durationMs = now().getTime() - started;
-    const evidenceHash = await input.evidence.put(runId, `[${step.tool}] ${step.target}\n${output}`);
-    records.push({ id: step.id, action: step.action, target: step.target, result: output.slice(0, 1_000), reasoning: step.expectedResult, evidenceHashes: [evidenceHash], compacted: false });
-    await record({ tool: step.tool, arguments: JSON.stringify({ args: step.args, durationMs }), result: output, modelReasoning: step.expectedResult, evidenceHash });
-    emit({ type: 'step-finished', step, result: output.slice(0, 1_000), evidenceHash });
-    transcript.push(`$ ${step.tool} ${step.args.join(' ')}\n${output.slice(0, 600)}`);
 
     drainExternal();
-    if (finding) {
-      const withEvidence: Finding = { ...finding, evidenceHash: ranHostTool?.evidenceHash ?? evidenceHash };
-      findings.push(withEvidence);
-      emit({ type: 'finding', finding: withEvidence, verified: Boolean(withEvidence.reproductionCommand) });
-    }
+    // (4) Critic: a model call, plus the deterministic verification every finding passes (CYBER-05).
+    await critiqueFindings();
+
+    // (5) Reporter, then persist each finding into the chain so replay can reproduce them.
+    const report = await askRole('reporter', `Write the PTES summary for these ${findings.length} finding(s).`);
+    if (report.kind === 'incompatible') note('reporter', report.reason);
+    else transcript.push(`report: ${report.steps[0]?.expectedResult ?? ''}`);
+    await persistFindings();
+
+    const ledgerOk = await input.ledger.verify(runId);
+    if (!ledgerOk) emit({ type: 'notice', text: 'The ledger chain did not verify after this run.' });
+    findings.sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.title.localeCompare(b.title));
+    return done(incompatibility.length ? 'incompatible' : 'completed', { ...(incompatibility.length ? { reason: `incompatible: ${incompatibility.join(' ')}` } : {}), ledgerOk });
+  } catch (error) {
+    if (!(error instanceof RunStopped)) throw error;
+    // Stopped while a model was being asked (the Stop control aborts the signal, so the call
+    // rejects): record the stop and keep every finding reached so far, as the in-loop stop does.
+    await record({ tool: 'stop', arguments: error.role, result: `stopped while asking the ${error.role}`, modelReasoning: 'the stop control was engaged' });
+    await persistFindings();
+    return done('stopped', { reason: 'stopped', ledgerOk: await input.ledger.verify(runId) });
   }
+}
 
-  drainExternal();
-  // (4) Critic: a model call, plus the deterministic verification every finding passes (CYBER-05).
-  await critiqueFindings();
-
-  // (5) Reporter, then persist each finding into the chain so replay can reproduce them.
-  const report = await askRole('reporter', `Write the PTES summary for these ${findings.length} finding(s).`);
-  if (report.kind === 'incompatible') note('reporter', report.reason);
-  else transcript.push(`report: ${report.steps[0]?.expectedResult ?? ''}`);
-  for (const finding of findings) await record({ tool: 'finding', arguments: finding.checkId, result: findingResult(finding), modelReasoning: finding.remediation || hardeningAdvice(finding.checkId), evidenceHash: finding.evidenceHash });
-
-  const ledgerOk = await input.ledger.verify(runId);
-  if (!ledgerOk) emit({ type: 'notice', text: 'The ledger chain did not verify after this run.' });
-  findings.sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.title.localeCompare(b.title));
-  return done(incompatibility.length ? 'incompatible' : 'completed', { ...(incompatibility.length ? { reason: `incompatible: ${incompatibility.join(' ')}` } : {}), ledgerOk });
+/** Thrown by askRole when the run was stopped before or during a model call. */
+class RunStopped extends Error {
+  constructor(readonly role: StepRole) {
+    super(`stopped while asking the ${role}`);
+  }
 }
 
 /** How many recent steps a role sees verbatim before compaction trims the rest (D-19). */

@@ -33,7 +33,9 @@ function scriptedClient(plan: () => Step[], prompts: string[]): CompletionClient
   let steps: Step[] | undefined;
   let index = 0;
   return {
-    completeOnce: async (_model, messages) => {
+    completeOnce: async (_model, messages, options) => {
+      // Like the real client: an aborted signal rejects the call.
+      if (options?.signal?.aborted) throw Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
       const system = messages.find((message) => message.role === 'system')?.content ?? '';
       prompts.push(messages.map((message) => message.content).join('\n'));
       if (!steps) steps = plan();
@@ -184,10 +186,67 @@ test('a check that already ran is never asked for again, and findings reach the 
     // recon legitimately ('do not repeat a check that already ran').
     // After recon ran, no mid-run prompt may list it as outstanding. The planner is asked for a
     // second step only once a check is covered, so every 'still needs' prompt here is post-recon.
+    // The FIRST prompt legitimately lists every check; only later prompts must drop the ones done.
     const stillNeedsRecon = prompts.filter((prompt) => /still needs:[^.]*\brecon\b/.test(prompt));
-    assert.deepEqual(stillNeedsRecon, [], 'no mid-run prompt asked for recon again');
+    assert.equal(stillNeedsRecon.length, 1, 'recon was outstanding only on the opening prompt');
     // And the follow-up prompts did name the checks that genuinely remained.
     assert.ok(prompts.some((prompt) => /still needs:[^.]*\b(http-headers|tls)\b/.test(prompt)), 'the outstanding checks were named');
+  } finally {
+    await box.dispose();
+  }
+});
+
+test('a run stopped before its last step still chains the findings it found', async () => {
+  // The stopped, budget and rate-limit exits used to return before the persistence loop, so a
+  // stopped run's findings were absent from the ledger and invisible to replay.
+  const box = await harness((t) => [stepOn('s1', 'CyberHttpProbe', t.httpUrl),
+    stepOn('s2', 'CyberTlsProbe', t.tlsUrl),
+    stepOn('s3', 'CyberFingerprintProbe', t.httpUrl, 'recon')]);
+  let stopped = false;
+  try {
+    const result = await startCyberRunInPanel(
+      { ...box.assembly, grants: new RunGrants(), tools: box.assembly.tools(box.engagement), externalFindings: box.collected, currentAcceptance: box.assembly.currentAcceptance, stopped: () => stopped },
+      {
+        engagement: box.engagement, mode: 'defensive', depth: 'quick', signal: new AbortController().signal,
+        // Stop after the first step, so later steps never run.
+        onEvent: (event) => { if (event.type === 'step-finished') stopped = true; }
+      }
+    );
+    const replay = await box.assembly.ledger.replay(result.runId);
+    assert.equal(result.outcome, 'stopped');
+    assert.ok(result.findings.length >= 1, 'the stopped run kept what it found');
+    assert.equal(replay.findings.length, result.findings.length, 'and every one of them is in the chain');
+    assert.equal(replay.chainOk, true);
+  } finally {
+    await box.dispose();
+  }
+});
+
+test('the Stop button (an aborted signal) mid-run still chains the findings it found', async () => {
+  // Stop aborts the run's signal, so the next model call rejects with AbortError before the
+  // in-loop stop check. That rejection used to escape the run, and every finding was lost.
+  const box = await harness((t) => [stepOn('s1', 'CyberHttpProbe', t.httpUrl),
+    stepOn('s2', 'CyberTlsProbe', t.tlsUrl),
+    stepOn('s3', 'CyberFingerprintProbe', t.httpUrl, 'recon')]);
+  const controller = new AbortController();
+  const announced: string[] = [];
+  try {
+    const result = await startCyberRunInPanel(
+      { ...box.assembly, grants: new RunGrants(), tools: box.assembly.tools(box.engagement), externalFindings: box.collected, currentAcceptance: box.assembly.currentAcceptance, stopped: () => false },
+      {
+        engagement: box.engagement, mode: 'defensive', depth: 'quick', signal: controller.signal,
+        onEvent: (event) => {
+          if (event.type === 'finding') announced.push(event.finding.checkId);
+          if (event.type === 'step-finished') controller.abort();
+        }
+      }
+    );
+    assert.equal(result.outcome, 'stopped');
+    assert.ok(announced.length >= 1, 'the first step announced findings before the stop');
+    assert.equal(result.findings.length, announced.length, 'every announced finding is kept');
+    const replay = await box.assembly.ledger.replay(result.runId);
+    assert.equal(replay.findings.length, result.findings.length, 'and every one of them is in the chain');
+    assert.equal(replay.chainOk, true);
   } finally {
     await box.dispose();
   }

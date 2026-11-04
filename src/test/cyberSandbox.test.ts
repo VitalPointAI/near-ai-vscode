@@ -12,6 +12,7 @@ import { checkBudget, postExploitAllowed, RateLimiter } from '../domain/cyberLim
 import {
   chooseTier,
   detectRuntime,
+  runnerWithTimeout,
   SandboxError,
   startSandbox,
   verifyCleanup,
@@ -249,4 +250,47 @@ test('a start that produces no container id is reported as a failed start', asyn
     startSandbox('container', { runner: silentRunner }),
     (error: Error) => error instanceof SandboxError && /did not start container/.test(error.message)
   );
+});
+
+test('a payload runner is built with its own deadline, not the version check\'s three seconds', () => {
+  // The runner every production `docker exec` used had a 3-second deadline, so a payload taking
+  // longer was killed and reported as a failed exploit. This asserts the deadline itself: injecting
+  // a runner into the sandbox bypasses the very code path that had the bug.
+  const payload = runnerWithTimeout(90_000, 1024) as unknown as { timeoutMs: number };
+  const version = runnerWithTimeout(3_000, 1024) as unknown as { timeoutMs: number };
+  assert.equal(payload.timeoutMs, 90_000);
+  assert.equal(version.timeoutMs, 3_000);
+  assert.notEqual(payload.timeoutMs, version.timeoutMs, 'a payload must not inherit the version check deadline');
+});
+
+test('a payload runner honours the stop signal and reports it as a stop, not a failed command', async () => {
+  // Without this, raising the deadline from 3 s to 120 s also raised the stop bound to 120 s.
+  const controller = new AbortController();
+  const run = runnerWithTimeout(60_000, 1024);
+  const pending = run('sh', ['-c', 'sleep 30'], controller.signal);
+  setTimeout(() => controller.abort(), 50);
+  await assert.rejects(pending, /stop control stopped the sandbox command/);
+});
+
+test('the container sandbox passes the stop signal to its payload runner', async () => {
+  const seen: Array<AbortSignal | undefined> = [];
+  const sandbox = await startSandbox('container', {
+    image: 'alpine:3.20',
+    execTimeoutMs: 90_000,
+    runner: async (command, args, signal) => {
+      if (args[0] === '--version') return `${command} version 1.0.0`;
+      if (args[0] === 'run') return 'a'.repeat(12);
+      if (args[0] === 'exec') { seen.push(signal); return '0\npayload output'; }
+      return '';
+    }
+  });
+  try {
+    const controller = new AbortController();
+    const result = await sandbox.exec(['sh', '-c', 'sleep 5'], controller.signal);
+    assert.equal(result.exitCode, 0);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0], controller.signal, 'the exec received the run signal');
+  } finally {
+    await sandbox.stop();
+  }
 });

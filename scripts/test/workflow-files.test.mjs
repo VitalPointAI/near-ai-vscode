@@ -107,3 +107,46 @@ test('the release workflow does not claim protections that depend on settings no
   assert.match(header, /organization owners/);
   assert.match(header, /once the tag rulesets .* are applied/is);
 });
+
+test('the agent review workflow posts and approves only as near-ai-reviewer, from main', async () => {
+  const { REVIEW_ACCOUNT } = await import('../lib/workflow.mjs');
+  assert.equal(REVIEW_ACCOUNT, 'near-ai-reviewer');
+  const text = read('agent-review.yml');
+  const all = jobs(text);
+  assert.deepEqual([...all.keys()], ['review', 'owner-approval', 'approve']);
+  assert.match(block(text, 'permissions'), /permissions:\s*\n\s*contents: read\s*$/, 'the GITHUB_TOKEN only reads');
+  for (const id of ['review', 'approve']) {
+    const job = all.get(id);
+    assert.match(job, /environment: agent-review\n/, `${id} runs in the agent-review environment`);
+    assert.match(job, /GH_TOKEN: \$\{\{ secrets\.NEAR_AI_REVIEW_TOKEN \}\}/, `${id} acts as the reviewer identity`);
+    assert.match(job, /GH_REPO: \$\{\{ github\.repository \}\}/, `${id} names the repository for gh`);
+    assert.match(job, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/, `${id} runs the scripts from main`);
+  }
+  const review = all.get('review');
+  assert.match(review, /REVIEW_MODEL_API_KEY: \$\{\{ secrets\.REVIEW_MODEL_API_KEY \}\}/);
+  assert.match(review, /REVIEW_MODEL: \$\{\{ vars\.REVIEW_MODEL \}\}/);
+  assert.match(review, /REVIEW_MODEL_BASE_URL: \$\{\{ vars\.REVIEW_MODEL_BASE_URL \}\}/);
+  assert.match(review, /\^\[0-9\]\+\$/, 'a dispatched PR number is validated');
+  assert.match(review, /--expected-head "\$EXPECTED_HEAD"/, 'a PR whose head moved after CI is skipped');
+  // The gate holds no secrets and is the owner's click.
+  const gate = all.get('owner-approval');
+  assert.match(gate, /environment: agent-review-gates/);
+  assert.match(gate, /needs\.review\.outputs\.gate == 'true'/);
+  assert.doesNotMatch(gate, /secrets\./, 'agent-review-gates holds no secrets');
+  assert.match(gate, /permissions: \{\}/);
+  // The approval needs the review's own success, and the owner's for a gate change.
+  const approve = all.get('approve');
+  assert.match(approve, /needs: \[review, owner-approval\]/);
+  assert.match(approve, /needs\.review\.outputs\.state == 'success'/);
+  assert.match(approve, /needs\.review\.outputs\.gate != 'true' \|\| needs\.owner-approval\.result == 'success'/);
+  assert.match(approve, /ci-review-run\.mjs approve "\$PR" --sha "\$SHA"/);
+  assert.doesNotMatch(approve, /\|\| echo/, 'a failed approval is not masked');
+  // No expression is expanded inside a run script, where it could inject shell.
+  for (const [id, job] of all) {
+    for (const step of steps(job)) {
+      // In these steps `run:` is the last key, so the script is everything after it.
+      const run = /\n\s+run: ?\|?([\s\S]*)$/.exec(step)?.[1] ?? '';
+      assert.doesNotMatch(run, /\$\{\{/, `${id}: no \${{ }} inside a run script`);
+    }
+  }
+});

@@ -9,7 +9,7 @@
 // the head of hotfix/<x.y.z>, package.json there is <x.y.z>, CHANGELOG.md has a "## <x.y.z>"
 // section, and the newest CI run on that exact commit (a push or a run started by hand, not a
 // pull request run) finished with every CI job green. A hotfix head also needs
-// the owner's agent-review status on that commit.
+// the reviewer identity's (near-ai-reviewer, REVIEW_ACCOUNT) agent-review status on that commit.
 import { fail, gh, parseArgs, resolveRepo } from './lib/gh.mjs';
 import { tagRelease } from './lib/release.mjs';
 import { VERSION_PATTERN } from './lib/workflow.mjs';

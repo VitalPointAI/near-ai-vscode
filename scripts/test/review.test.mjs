@@ -8,14 +8,15 @@ import { afterEach, test } from 'node:test';
 import { setRunner } from '../lib/gh.mjs';
 import { gatherReview, submitReview } from '../lib/review.mjs';
 import { evaluateCommit } from '../lib/workflow.mjs';
-import { OWNER, REPO, fakeGitHub, greenCommit, openPr } from './fake-github.mjs';
+import { OWNER, REPO, REVIEWER, fakeGitHub, greenCommit, openPr } from './fake-github.mjs';
 
 const HEAD = '1'.repeat(40);
 const quiet = { log: () => {} };
 afterEach(() => setRunner());
 
 function install(state) {
-  const fake = fakeGitHub({ prs: { 7: openPr(7, 'fix/thing', HEAD) }, commits: { [HEAD]: greenCommit() }, ...state });
+  // submit runs as the reviewer identity, as it does in .github/workflows/agent-review.yml.
+  const fake = fakeGitHub({ login: REVIEWER, prs: { 7: openPr(7, 'fix/thing', HEAD) }, commits: { [HEAD]: greenCommit() }, ...state });
   setRunner(fake.runner);
   return fake;
 }
@@ -37,12 +38,12 @@ test('submit sets agent-review to pending, then posts the comment, then sets the
 });
 
 test('a failed comment leaves agent-review pending, never an older success', () => {
-  // The commit already carries the owner's success from an earlier review; the re-review found a
+  // The commit already carries the reviewer's success from an earlier review; the re-review found a
   // blocker but its comment fails to post.
   const fake = install({ commentFails: true });
   assert.throws(() => submitReview(REPO, '7', BLOCKED, quiet), /could not be posted, so agent-review is left pending/);
   assert.deepEqual(posts(fake), ['status pending', 'comment']);
-  const gate = evaluateCommit(fake.world.commits[HEAD], { reviewer: OWNER });
+  const gate = evaluateCommit(fake.world.commits[HEAD], { reviewer: REVIEWER });
   assert.equal(gate.ok, false);
   assert.match(gate.problems.join('\n'), /"agent-review" is pending/);
 });
@@ -53,9 +54,23 @@ test('a status that cannot be set stops the submit before anything is posted', (
   assert.deepEqual(posts(fake).filter((p) => p === 'comment'), []);
 });
 
+test('submit posts as near-ai-reviewer, and the gates accept that status', () => {
+  const fake = install({});
+  assert.equal(submitReview(REPO, '7', PASS, quiet).state, 'success');
+  assert.ok(fake.world.commits[HEAD].statuses.every((status) => status.creator === REVIEWER));
+  assert.equal(evaluateCommit(fake.world.commits[HEAD], { reviewer: REVIEWER }).ok, true);
+});
+
+test('submit refuses the owner\'s account (the authoring agents), posting nothing', () => {
+  // The authoring agents run gh as the owner; a status they post would be self-certification.
+  const fake = install({ login: OWNER, commits: { [HEAD]: greenCommit({ review: false }) } });
+  assert.throws(() => submitReview(REPO, '7', PASS, quiet), /gh runs as ALuhning.*only from near-ai-reviewer; nothing was posted.*gh workflow run agent-review\.yml -f pr=7/);
+  assert.deepEqual(posts(fake), []);
+});
+
 test('submit refuses, posting nothing, when gh runs as another account', () => {
   const fake = install({ login: 'Em-kale' });
-  assert.throws(() => submitReview(REPO, '7', PASS, quiet), /gh runs as Em-kale.*only from ALuhning; nothing was posted/);
+  assert.throws(() => submitReview(REPO, '7', PASS, quiet), /gh runs as Em-kale.*only from near-ai-reviewer; nothing was posted/);
   assert.deepEqual(posts(fake), []);
   const logs = [];
   assert.equal(submitReview(REPO, '7', PASS, { log: (m) => logs.push(m), dryRun: true }).state, 'success');

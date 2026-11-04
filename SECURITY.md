@@ -337,17 +337,45 @@ The checksum shows that the VSIX published is the one the build job made; it doe
 the build itself. The build job installs dependencies with their install scripts and runs the
 tests, so a compromised dependency could change the VSIX before its checksum is taken.
 
-AI agents do much of this work, and today they act through the owner's GitHub account, which
-is a repository and organization admin. So the review result (`agent-review`), the Marketplace
-approval and the repository settings are not barriers an agent session cannot cross: an agent
-running as the owner could technically set that status, approve the deployment or change the
-settings. These steps are kept by policy: the agents are instructed never to take them, the
-scripts they use never do, and the approval is given by the owner in person. The planned
-hardening is a separate, non-admin GitHub identity for the agents that cannot approve
-deployments, with only that identity's `agent-review` trusted.
+AI agents do much of this work, and they act through the owner's GitHub account, which is a
+repository and organization admin. The Marketplace approval and the repository settings are
+therefore kept by policy: the agents are instructed never to take those steps, the scripts they
+use never do, and the approval is given by the owner in person.
+
+The review result is not taken from the owner's account. It comes from a separate reviewer
+identity, `near-ai-reviewer`, through `.github/workflows/agent-review.yml`:
+
+- **Who reviews.** After CI passes on a pull request, the workflow, run from `main` (never the
+  pull request's own copy), sends the pull request to a review model and posts the result as the
+  `agent-review` status and a review comment, as `near-ai-reviewer`. The merge and release gates
+  trust `agent-review` only from that account, and the review script refuses to post as any
+  other, so an agent running as the owner cannot certify its own work.
+- **Where the token lives.** `near-ai-reviewer`'s token and the review model's key are secrets of
+  the `agent-review` environment, which deploys only from protected branches. No machine that
+  authors code holds them. This is a repository setting: a repository admin could still change
+  the environment's branch policy, so it protects against mistakes and against a PR, not against
+  an admin account acting on purpose. `can_admins_bypass: false` only stops an admin skipping a
+  required reviewer.
+- **What leaves the repository.** For each pull request, its title, description, branch name,
+  CI results, list of changed files and diff (capped in size) are sent to the review model's
+  endpoint: NEAR AI Cloud (`https://cloud-api.near.ai/v1`) unless the `REVIEW_MODEL_BASE_URL`
+  variable names another; the key is sent only over https. For this public repository that
+  content is already public.
+- **What a model verdict is worth.** The verdict is a model's judgement, and the pull request's
+  own content can try to influence it. The prompt marks everything the author wrote as untrusted
+  data, and the gate fails mechanically on an open BLOCKER, a missing or second verdict, a verdict
+  for another commit, or a PASS that does not recommend merging. It cannot catch a model that is
+  simply persuaded; that is why changes to the gates need the owner.
+- **What it approves on its own.** When the review passes, `near-ai-reviewer` approves the pull
+  request, pinned to the reviewed commit, which satisfies the one approval branch protection
+  requires. A pull request that changes the gates (the workflows, the review, merge and release
+  scripts, `SECURITY.md`, the agent commands) or whose diff was too large to review whole is not
+  approved automatically: the approval waits for the owner to approve the run in the
+  `agent-review-gates` environment, whose only reviewer is the owner and which holds no secrets.
 
 GitHub enforces these rules through repository settings (branch protection on `main`, a ruleset
-that keeps release tags from being moved or deleted, and a protected `marketplace` environment).
+that keeps release tags from being moved or deleted, and the protected `marketplace`,
+`agent-review` and `agent-review-gates` environments).
 They are listed, with the commands that apply them, in
 [docs/development-workflow.md](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs/development-workflow.md)
 (section 8), which also describes the whole process. A rule is in force only once its setting is
