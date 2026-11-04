@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-31-PLAN.md
-last_updated: "2026-11-04T22:22:16.057Z"
+stopped_at: Completed 62.1-01-PLAN.md
+last_updated: "2026-11-04T22:55:02.487Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 932e9c354ce57f4ef6e08088579b5837794358d2
+state_head: f677caba421a603fe66f50580217f4ed22c3b76a
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 70
+  completed_plans: 71
   percent: 11
 ---
 
@@ -124,6 +124,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 61 P29 | 21min | 3 tasks | 9 files |
 | Phase 61 P30 | 25min | 3 tasks | 13 files |
 | Phase 61 P31 | 58min | 3 tasks | 6 files |
+| Phase 62.1 P01 | 29min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -282,6 +283,9 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-30: the sidebar Connect screen offers Join a team and Ask to join while no profile works (a block of its own on this branch, one .team-connect group inside PR #7's #welcome-connect after the merge); a linked team's key becomes the profile by itself (refresh-status on onKeyInstalled); an unlinked join asks Paste your own key, Use a saved profile or Later
 - [Phase 61]: 61-31: Use a saved profile's pick and messages go through teamPrompts (savedProfileUi.ts) so a join can use a saved profile in a real window; production calls unchanged
 - [Phase 61]: 61-31: the invite e2e runs a third window (team-ask) after the invitee's closes, with team-accept in the lead's window; at most two windows at once
+- [Phase 62.1]: 62.1-01: a dependency on any phase item (roadmap Depends on, a plan naming a phase, or a planless phase card) orders the card after every card of that phase with no edge; waitsFor names the phase
+- [Phase 62.1]: 62.1-01: phase dependencies are zero-weight gate vertices and loops are an iterative Tarjan SCC laid out as a number-order chain, so hostile graphs never recurse or blow up
+- [Phase 62.1]: 62.1-01: the layout-failure output line names only the error kind and file and line, never the message, and is written once until the timeline draws again
 
 ### Pending Todos
 
@@ -303,8 +307,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T22:22:15.635Z
-Stopped at: Completed 61-31-PLAN.md
+Last session: 2026-11-04T22:55:02.053Z
+Stopped at: Completed 62.1-01-PLAN.md
 Resume file: None
 
 ## Notes
