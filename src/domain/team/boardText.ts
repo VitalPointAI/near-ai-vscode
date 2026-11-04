@@ -1,7 +1,7 @@
 // Every authored string of the Team Board model, in one place so a reviewer can read the words the board speaks (62-UI-SPEC "Refusal copy",
 // "Offered moves", "Kanban", "Card Face"). Plain language, sentence case, no em-dashes or en-dashes; a test greps every export. Teammate and plan
 // text is never copy: names and reasons from the log pass flattenName before they reach a sentence. Pure: no I/O, no clock, no vscode.
-import type { MoveKey } from './board';
+import type { AssignAction, MoveKey } from './board';
 import type { HistoryEntry } from './itemHistory';
 import type { ItemOrigin } from './types';
 import type { BoardColumn, NotReadyReason } from './work';
@@ -22,6 +22,37 @@ export const MOVE_LABELS: Readonly<Record<MoveKey, string>> = Object.freeze({
 });
 
 const NOTHING_MOVED = 'Nothing was moved.';
+const NOTHING_CHANGED = 'Nothing was changed.';
+
+// G-62-5: the assignment actions (62-19). The owner and leads get Assign to... (the person list) and Unassign {name}; any other member who is not
+// an observer gets Assign to me and Unassign me (owner decision 2026-11-03, 62-25).
+export const ASSIGN_LABELS: Readonly<Record<AssignAction, string>> = Object.freeze({
+  assign: 'Assign to...', unassign: 'Unassign', 'assign-me': 'Assign to me', 'unassign-me': 'Unassign me'
+});
+
+/** "Unassign Dana": the Unassign action with the name of the person on the card. */
+export function unassignLabel(name: string): string {
+  return `${ASSIGN_LABELS.unassign} ${flattenName(name)}`;
+}
+
+export const ROLE_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  owner: 'Owner', lead: 'Lead', developer: 'Developer', reviewer: 'Reviewer', observer: 'Observer'
+});
+
+// One sentence for each reason an assignment is refused. Each ends "Nothing was changed." because an assignment is not a move.
+export const ASSIGN_REFUSALS = Object.freeze({
+  missing: `This card is no longer on the board. ${NOTHING_CHANGED}`,
+  notAssignable: `Only plans, phases and items added on the board can be assigned to a person. ${NOTHING_CHANGED}`,
+  finished: `This card is already done or cancelled, so nobody can be put on it. ${NOTHING_CHANGED}`,
+  notEligible: `This person cannot take cards. Only confirmed team members who are not observers can be assigned. ${NOTHING_CHANGED}`,
+  alreadyAssigned: (name: string): string => `This card is already assigned to ${flattenName(name)}. ${NOTHING_CHANGED}`,
+  notAssigned: `This card is not assigned to anyone. ${NOTHING_CHANGED}`,
+  selfOnly: `You can assign a card only to yourself. A lead can assign it to someone else. ${NOTHING_CHANGED}`,
+  takenBy: (name: string): string => `This card is assigned to ${flattenName(name)}. ${flattenName(name)} or a lead can change that. ${NOTHING_CHANGED}`,
+  selfOffOnly: `You can only take yourself off a card. Ask a lead to change it. ${NOTHING_CHANGED}`,
+  notWorker: `Only team members who work on cards can take one. A lead can change your role. ${NOTHING_CHANGED}`,
+  notNow: `This card cannot be assigned right now. ${NOTHING_CHANGED}`
+});
 
 // The existing READ_ONLY_TEXT of the team session, repeated here because the domain may not import the host.
 export const NO_DEVICE_KEY_TEXT = 'This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.';
@@ -241,7 +272,8 @@ function joinWords(words: readonly string[]): string {
   return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1] as string}`;
 }
 
-export interface HistoryContext { origin: ItemOrigin; hold?: 'on' | 'off' }
+// assigneeName is the person an item.assigned put on the card or an item.unassigned took off ('' or absent when unknown: "Someone").
+export interface HistoryContext { origin: ItemOrigin; hold?: 'on' | 'off'; assigneeName?: string }
 
 // One plain sentence for a history row: "Dana blocked this: waiting for the API key." Imported items are changed by the importer, so their content
 // edits read "Import updated the estimate." The hold direction is not stored on an entry, so the caller works it out and passes it in.

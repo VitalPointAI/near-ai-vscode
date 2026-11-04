@@ -25,6 +25,12 @@ export type MoveIntent =
   | { type: 'item.updated'; body: ItemUpdatedBody } | { type: 'item.blocked'; body: ItemBlockedBody } | { type: 'item.unblocked'; body: ItemUnblockedBody }
   | { type: 'item.cancelled'; body: ItemCancelledBody } | { type: 'item.reopened'; body: ItemReopenedBody };
 export type MoveResult = { ok: true; intent: MoveIntent } | { ok: false; reason: string };
+// G-62-5 (62-19): assign and unassign for the owner and leads (the person list), assign-me and unassign-me for any other member who is not an
+// observer (62-25). memberId undefined in planAssign means unassign.
+export type AssignAction = 'assign' | 'unassign' | 'assign-me' | 'unassign-me';
+export type AssignIntent = { type: 'item.assigned'; body: { id: string; memberId: string } } | { type: 'item.unassigned'; body: { id: string } };
+export type AssignResult = { ok: true; intent: AssignIntent } | { ok: false; reason: string };
+export interface AssignCandidate { memberId: string; name: string; roleLabel: string; current: boolean }
 
 export type BoardStatus = { kind: 'live' | 'syncing' | 'offline' | 'paused' | 'removed'; text: string; lastUpdated?: string };
 export interface BoardModelOptions { nowMs: number; status: BoardStatus; viewerId?: string; canWrite: boolean; readOnlyReason?: string }
@@ -41,6 +47,7 @@ export interface BoardCard {
   createdByName?: string; moves: CardMove[]; refusals: Partial<Record<BoardColumn, string>>; a11yLabel: string;
   /** G-62-5: the person on the card (62-15's item.assigned), with the name flattened and up to two initials for the card face. */
   assignee?: { id: string; name: string; initials: string };
+  assignActions: AssignAction[];
   /** The Backlog rule on the card face (J-02): set only for a card added on the board that sits in Backlog without its parts or its size. */
   backlogRule?: string;
 }
@@ -56,6 +63,7 @@ export interface CardDetail {
   dependencies: Array<{ id: string; label: string; stateLabel?: string; done: boolean; onBoard: boolean }>;
   files: string[]; tasks: { done: number; total: number; summary: string; items: Array<{ id: string; title: string; done: boolean }> };
   notReady: string[]; editable: boolean; history: Array<{ at: string; text: string }>; historyNote?: string;
+  assignee?: { id: string; name: string }; assignActions: AssignAction[];
 }
 
 const R = TEAM_REJECTION_REASONS;
@@ -158,6 +166,18 @@ export function availableMoves(state: TeamState, viewerId: string | undefined, i
     });
   }
   return moves;
+}
+
+export function planAssign(_state: TeamState, _viewerId: string | undefined, _itemId: string, _memberId: string | undefined): AssignResult {
+  return { ok: false, reason: '' };
+}
+
+export function availableAssignActions(_state: TeamState, _viewerId: string | undefined, _itemId: string): AssignAction[] {
+  return [];
+}
+
+export function assignCandidates(_state: TeamState, _viewerId: string | undefined, _itemId: string): AssignCandidate[] {
+  return [];
 }
 
 const CLAIM_COLUMNS: readonly BoardColumn[] = ['claimed', 'in-progress', 'in-review', 'integrating'];
@@ -298,7 +318,7 @@ function cardOf(state: TeamState, options: BoardModelOptions, gate: string | und
     lane: { member: assignee?.id ?? 'unassigned', phase: phase ?? 'board', milestone: milestoneId ?? 'board' }, requirements: [...item.requirements],
     mine: isMine(item, options.viewerId),
     held: item.hold === true, doneInGsd, dependencyCount: item.dependsOn.length, estimateText: estimateText(item.estimate?.tokens), ageText: age,
-    moves: gate === undefined ? availableMoves(state, options.viewerId, item.id) : [], refusals,
+    moves: gate === undefined ? availableMoves(state, options.viewerId, item.id) : [], refusals, assignActions: [],
     a11yLabel: cardLabel({
       isPlan: item.kind === 'plan', displayId: displayIdOf(item), title: flattenName(item.title, 200), stateLabel: COLUMN_LABELS[column], ...(blocked === undefined ? {} : { blockedReason: blocked.reason }),
       held: item.hold === true, doneInGsd, cancelled: column === 'cancelled', dependencyCount: item.dependsOn.length, ...(item.estimate === undefined ? {} : { estimateTokens: item.estimate.tokens }), age,
@@ -542,7 +562,7 @@ export function buildCardDetail(state: TeamState, itemId: string, options: { vie
     itemId, displayId: displayIdOf(item), title: flattenName(item.title, 200), kind: item.kind, kindLabel: KIND_WORDS[item.kind] ?? item.kind, column, stateLabel: COLUMN_LABELS[column],
     held: item.hold === true, doneInGsd, facts, mustHaves: item.mustHaves.map((text) => flattenName(text, 600)), requirements: [...item.requirements],
     dependencies: dependencyRows(state, item), files: item.scope.map((entry) => flattenName(entry, 200)), tasks: taskRows(state, item),
-    notReady: column === 'backlog' ? notReadySentences(reasons, waiting) : [], editable,
+    notReady: column === 'backlog' ? notReadySentences(reasons, waiting) : [], editable, assignActions: [],
     history: entries.map((entry) => {
       const direction = directions.get(entry.eventId);
       return { at: entry.at, text: historySentence(entry, state.members.get(entry.author)?.name ?? '', { origin: item.origin, ...(direction === undefined ? {} : { hold: direction }) }) };
