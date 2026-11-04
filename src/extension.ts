@@ -149,7 +149,7 @@ async function saveCheckpoint(): Promise<void> {
 }
 
 /** NEAR AI: Set Up. Exported for the host tests of what follows a successful setup. */
-export async function configureApiKey(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
+export async function configureApiKey(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider, options: { offerNextStep?: boolean } = {}): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI keys and profiles are scoped to a project.'); return; }
   const kind = await vscode.window.showQuickPick([
@@ -201,13 +201,18 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
       new ProfileStore(root, auth).configure({ profileId: deriveProfileId(root, `${displayName}${suffix}`), displayName: `${displayName}${suffix}`, organization: organization.trim() || displayName, baseUrl: input.baseUrl, authMode: 'apiKey', provider: kind.provider, ...('localBaseUrl' in input && input.localBaseUrl ? { localBaseUrl: input.localBaseUrl } : {}) }, input.apiKey, input.localApiKey));
     clearProviderCache();
     if (profile.validation.status === 'valid') {
+      // The chat reloads and comes into view; its welcome shows the next steps (the "no team yet" card).
       await sidebar.refresh();
-      // What to do next: set up the project team first (or review it), then the other setup steps.
+      // A caller with its own next steps (turning on Team Mode) gets only the ready message.
+      if (options.offerNextStep === false) {
+        void vscode.window.showInformationMessage(`NEAR AI is ready for “${profile.displayName}”. Pick a model and start chatting.`);
+        return;
+      }
       await offerNextStep({ secrets: context.secrets, chatVisible: () => sidebar.visible }, profile.displayName);
       return;
     }
     const retry = await vscode.window.showErrorMessage(`Setup couldn't connect: ${profile.validation.error ?? 'validation failed'}`, 'Try again', ...(usesCloud ? ['Open NEAR AI Cloud'] : []));
-    if (retry === 'Try again') await configureApiKey(context, auth, sidebar);
+    if (retry === 'Try again') await configureApiKey(context, auth, sidebar, options);
     if (retry === 'Open NEAR AI Cloud') await openApiKeyPortal();
   } catch (error) {
     void vscode.window.showErrorMessage(redactSecrets(error instanceof Error ? error.message : String(error)));

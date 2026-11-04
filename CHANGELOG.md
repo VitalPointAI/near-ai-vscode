@@ -13,13 +13,16 @@
   without reloading. The new command **NEAR AI: Set Up a New Profile**
   starts the same setup, and the chat's sign-in message now offers the same
   two buttons.
-- **After you connect NEAR AI, the extension suggests what to do next.**
-  If the project has no team yet, it starts with setting up your project
-  team. You can also set a spending limit, turn on web search, or go
-  straight to the chat. Steps you have done are marked done. If the project
-  already has a team, you get a short message with **Review project team**
-  and **More setup steps**. To see these steps again, run **NEAR AI:
-  Project Setup** or use Project setup on the Tools tab.
+- **After you connect NEAR AI, the extension suggests what to do next in
+  the chat.** The chat comes into view, and nothing opens over your work.
+  If the project has no team yet, the chat starts with setting up your
+  project team, and a short message says your next steps are in the chat.
+  If the project already has a team, the message offers **Review project
+  team** and **More setup steps**.
+- **NEAR AI: Project Setup** lists every setup step: your project team, a
+  spending limit, web search, or going straight to the chat. Steps you have
+  done are marked done. It is also on the Tools tab, and the chat's card
+  links to it.
 - **The empty chat shows a small card while the project has no team**, with
   a button to set one up and an **All setup steps** link. **Not now** hides
   the card for this project only.

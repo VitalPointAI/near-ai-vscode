@@ -37,18 +37,22 @@ export async function showSetupMenu(host: SetupMenuHost, options: { title?: stri
 }
 
 /**
- * After a profile is set up and its key checked: a project without a team gets the setup menu;
- * a project with one gets the ready message, with ways to review its team or see the other steps.
+ * After a profile is set up and its key checked (the chat is already refreshed and on screen).
+ * Nothing opens over the editor: the next steps are in the chat (its "no team yet" card), and a
+ * short notification says so. A project that has a team gets ways to review it or see the other
+ * steps, as buttons on that notification. `host` is kept for callers that pass it.
+ * The notification is not waited for, so setup finishes at once.
  */
-export async function offerNextStep(host: SetupMenuHost, profileName: string): Promise<void> {
+export async function offerNextStep(_host: SetupMenuHost, profileName: string): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (root && !await projectHasTeam(root)) {
-    await showSetupMenu(host, { title: `NEAR AI is ready for “${profileName}”. What next?` });
+    void vscode.window.showInformationMessage(`NEAR AI is ready for “${profileName}”. Your next steps are in the NEAR AI chat.`);
     return;
   }
-  const choice = await vscode.window.showInformationMessage(`NEAR AI is ready for “${profileName}”. Pick a model and start chatting.`, REVIEW_PROJECT_TEAM, MORE_SETUP_STEPS);
-  if (choice === REVIEW_PROJECT_TEAM) await vscode.commands.executeCommand('nearAi.manageTeams');
-  if (choice === MORE_SETUP_STEPS) await vscode.commands.executeCommand(PROJECT_SETUP_COMMAND);
+  void vscode.window.showInformationMessage(`NEAR AI is ready for “${profileName}”. Pick a model and start chatting.`, REVIEW_PROJECT_TEAM, MORE_SETUP_STEPS).then(async (choice) => {
+    if (choice === REVIEW_PROJECT_TEAM) await vscode.commands.executeCommand('nearAi.manageTeams');
+    if (choice === MORE_SETUP_STEPS) await vscode.commands.executeCommand(PROJECT_SETUP_COMMAND);
+  });
 }
 
 /** Registers NEAR AI: Project Setup, and the web search fact its step reads. */

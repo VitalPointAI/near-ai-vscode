@@ -300,7 +300,7 @@ test('the menu marks web search done once a provider is set up', async () => {
 });
 
 // The real NEAR AI: Set Up flow, from "Where should models run?" to what comes after the key is checked.
-async function runSetUp(root: string): Promise<void> {
+async function runSetUp(root: string, options?: { offerNextStep?: boolean }): Promise<void> {
   const { configureApiKey } = load<typeof import('../extension')>('../extension');
   const { AuthService } = load<typeof import('../services/auth')>('../services/auth');
   vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }];
@@ -309,36 +309,26 @@ async function runSetUp(root: string): Promise<void> {
   let refreshed = 0;
   // Local runtime: project name, organization, runtime address, runtime key.
   inputBoxes = ['Demo', '', 'http://127.0.0.1:11434/v1', ''];
-  const first = quickPick;
-  let asked = 0;
-  quickPick = (items) => (asked++ === 0 ? items.find((item) => item.provider === 'local') : first(items));
+  quickPick = (items) => items.find((item) => item.provider === 'local');
   try {
-    await configureApiKey({ ...context, secrets: new MemorySecrets() } as never, new AuthService(new MemorySecrets()), { refresh: async () => { refreshed += 1; } } as never);
+    await configureApiKey({ ...context, secrets: new MemorySecrets() } as never, new AuthService(new MemorySecrets()), { refresh: async () => { refreshed += 1; } } as never, options);
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.equal(refreshed, 1, 'the sidebar reloads before the next step is offered');
+  assert.equal(refreshed, 1, 'the chat reloads and comes into view, showing the next steps');
+  // Let a button choice on the (not awaited) notification run.
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
-test('after setup in a project without a team, the next step menu opens and runs the choice', async () => {
-  reset();
-  quickPick = (items) => items[0];
-  await runSetUp(await emptyProject());
-  const next = picks.at(-1)!;
-  assert.equal(next.options.title, 'NEAR AI is ready for “Demo (local)”. What next?');
-  assert.equal(next.options.ignoreFocusOut, true);
-  assert.deepEqual(next.items.map((item) => item.label), ['$(organization) Set up your project team (recommended)', '$(shield) Set a spending limit', '$(globe) Turn on web search', '$(comment-discussion) Start chatting']);
-  assert.deepEqual(executed, [['nearAi.setupProjectTeam']]);
-  assert.equal(infos.length, 0, 'no bare "ready" message on top of the menu');
-});
-
-test('after setup, closing the next step menu just opens the chat', async () => {
+test('after setup in a project without a team, nothing opens over the editor: the next steps are in the chat', async () => {
   reset();
   await runSetUp(await emptyProject());
-  assert.deepEqual(executed, [['nearAi.openChat']]);
+  assert.equal(picks.length, 1, 'only "Where should models run?" was asked; no What next? menu');
+  assert.deepEqual(infos, [{ text: 'NEAR AI is ready for “Demo (local)”. Your next steps are in the NEAR AI chat.', items: [] }]);
+  assert.deepEqual(executed, [], 'no command runs by itself');
 });
 
-test('after setup in a project that has a team, a short ready message offers to review it', async () => {
+test('after setup in a project that has a team, a short ready message offers to review it or see the other steps', async () => {
   reset();
   const root = await emptyProject();
   await withTeam(root, 'team.md');
@@ -350,13 +340,21 @@ test('after setup in a project that has a team, a short ready message offers to 
   reset();
   infoChoice = 'More setup steps';
   await runSetUp(root);
-  assert.deepEqual(executed, [['nearAi.projectSetup']]);
+  assert.deepEqual(executed, [['nearAi.projectSetup']], 'the menu opens only when asked for');
   reset();
   await runSetUp(root);
   assert.deepEqual(executed, [], 'dismissing the message does nothing more');
 });
 
-test('NEAR AI: Set Up a New Profile runs the key setup straight away, then suggests the next step', async () => {
+test('a caller with its own next steps (offerNextStep: false) gets only the ready message', async () => {
+  reset();
+  await runSetUp(await emptyProject(), { offerNextStep: false });
+  assert.equal(picks.length, 1);
+  assert.deepEqual(infos, [{ text: 'NEAR AI is ready for “Demo (local)”. Pick a model and start chatting.', items: [] }]);
+  assert.deepEqual(executed, []);
+});
+
+test('NEAR AI: Set Up a New Profile runs the key setup straight away, then points to the chat', async () => {
   reset();
   const root = await emptyProject();
   const { configureApiKey } = load<typeof import('../extension')>('../extension');
@@ -373,8 +371,9 @@ test('NEAR AI: Set Up a New Profile runs the key setup straight away, then sugge
     globalThis.fetch = originalFetch;
   }
   assert.equal(picks[0].options.placeHolder, 'Where should models run?', 'the key setup, not the welcome page');
-  assert.equal(picks[1].options.title, 'NEAR AI is ready for “Demo (local)”. What next?');
-  assert.deepEqual(executed, [['nearAi.setupProjectTeam']]);
+  assert.equal(picks.length, 1, 'no What next? menu: the next steps are in the chat');
+  assert.deepEqual(infos.map((info) => info.text), ['NEAR AI is ready for “Demo (local)”. Your next steps are in the NEAR AI chat.']);
+  assert.deepEqual(executed, []);
   const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === 'nearAi.newProfile'), { command: 'nearAi.newProfile', title: 'Set Up a New Profile…', category: 'NEAR AI' });
   const { PAGE_COMMANDS } = load<typeof import('../services/toolsDirectory')>('../services/toolsDirectory');
