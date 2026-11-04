@@ -11,9 +11,32 @@ import type { BoardHarness, FakeNode } from './helpers/fakeDom';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 
-function sidebar(): BoardHarness {
+type Status = 'pending' | 'valid' | 'stale' | 'invalid';
+
+/** A profile-status value with one profile, active, whose key check has `status` (61-25: the Team section needs a working profile). */
+function profileValue(status: Status, active = true): Record<string, unknown> {
+  return {
+    projectScope: 'project', activeProfileId: active ? 'mine' : undefined, configured: active,
+    profiles: [{ profileId: 'mine', displayName: 'Mine', organization: 'Org', provider: 'near-ai', baseUrl: 'https://example.invalid', authMode: 'apiKey', validation: { status } }]
+  };
+}
+
+const READY = { type: 'profile-status', value: profileValue('valid') };
+
+/** The sidebar page with the readiness rule and the Team section loaded, a message box (#input) and no profile-status yet. */
+function bare(): BoardHarness {
   const h = createBoardHarness({ scripts: 'chat', teamSection: true, nearChat: true });
-  h.load(['team.js']);
+  const input = h.document.createElement('textarea');
+  input.id = 'input';
+  h.document.body.append(input);
+  h.load(['readiness.js', 'team.js']);
+  return h;
+}
+
+/** The sidebar page once the project's profile works, so the Team section draws what the host sends. */
+function sidebar(): BoardHarness {
+  const h = bare();
+  h.deliver(READY);
   return h;
 }
 
@@ -87,6 +110,90 @@ test('chat.js exposes its post function once as window.nearChat, right after acq
   assert.equal(lines[0].line, 'window.nearChat = Object.freeze({ post });');
   const api = chat.findIndex((line) => line.includes('acquireVsCodeApi()'));
   assert.equal(lines[0].index, api + 1, 'directly after acquireVsCodeApi');
+});
+
+// ---- no Team section until a profile works (61-25, G-61-7) -----------------------------------------------------------------------------------
+
+test('tracer: no Team section before a profile works; it appears by itself once the profile works and hides again when it stops', () => {
+  const h = bare();
+  const noTeam = model({ folderOpen: true });
+  h.deliver({ type: 'team-state', model: noTeam });
+  assert.equal(section(h).hidden, true, 'a model before any profile-status is not shown');
+  assert.equal(buttons(h).length, 0, 'nothing is drawn');
+  h.deliver({ type: 'profile-status', value: { projectScope: 'project', activeProfileId: undefined, configured: false, profiles: [] } });
+  assert.equal(section(h).hidden, true, 'no saved profile keeps it hidden');
+  h.deliver({ type: 'profile-status', value: profileValue('valid', false) });
+  assert.equal(section(h).hidden, true, 'working profiles but none chosen keeps it hidden');
+  h.deliver(READY);
+  assert.equal(section(h).hidden, false, 'shown without another team-state');
+  assert.deepEqual(buttons(h).map((button) => button.textContent), ['Turn on Team Mode', 'Join a team']);
+  h.deliver({ type: 'profile-status', value: profileValue('stale') });
+  assert.equal(section(h).hidden, true, 'a profile that needs checking hides it again');
+  h.deliver({ type: 'profile-status', value: profileValue('valid') });
+  assert.equal(section(h).hidden, false);
+  h.click(buttons(h)[0]);
+  assert.deepEqual(h.posts, [{ type: 'team-action', action: 'turn-on' }]);
+});
+
+test('when the section hides with focus on one of its buttons, focus moves to the message box; focus elsewhere is left alone', () => {
+  const h = sidebar();
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  buttons(h)[0].focus();
+  assert.equal(h.focused().getAttribute('data-action'), 'turn-on');
+  h.deliver({ type: 'profile-status', value: profileValue('pending') });
+  assert.equal(section(h).hidden, true);
+  assert.equal(h.focused().id, 'input', 'focus is in the message box');
+  h.deliver(READY);
+  const other = h.document.createElement('button');
+  h.document.body.append(other);
+  other.focus();
+  h.deliver({ type: 'profile-status', value: profileValue('invalid') });
+  assert.equal(h.focused(), other, 'focus outside the section stays where it is');
+});
+
+test('a team-state that arrives while the profile does not work is kept and drawn when it does', () => {
+  const h = bare();
+  h.deliver({ type: 'profile-status', value: profileValue('pending') });
+  const owner = model({ folderOpen: true, team: team() });
+  h.deliver({ type: 'team-state', model: owner });
+  assert.equal(section(h).hidden, true);
+  h.deliver(READY);
+  assert.equal(section(h).hidden, false);
+  assert.deepEqual(buttons(h).map((button) => button.getAttribute('data-action')), ['invite', 'members', 'board', 'link']);
+  h.deliver({ type: 'team-state', model: null });
+  h.deliver(READY);
+  assert.equal(section(h).hidden, true, 'a null model stays hidden even with a working profile');
+});
+
+test('while hidden the probe reports hidden and the profile state, and a click probe is refused with hidden and posts no team-action', () => {
+  const h = bare();
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  h.deliver({ type: 'team-e2e', id: 1 });
+  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 1, heading: '', status: '', actions: [], hidden: true, profile: null }], 'nothing known yet');
+  h.posts.length = 0;
+  h.deliver({ type: 'profile-status', value: { projectScope: 'No workspace', activeProfileId: undefined, configured: false, profiles: [] } });
+  h.deliver({ type: 'team-e2e', id: 2, click: 'turn-on' });
+  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 2, heading: '', status: '', actions: [], hidden: true, profile: 'connect', error: 'hidden' }]);
+  h.posts.length = 0;
+  h.deliver(READY);
+  h.deliver({ type: 'team-e2e', id: 3 });
+  assert.equal(h.posts.length, 1);
+  const shown: Record<string, any> = h.posts[0];
+  assert.equal(shown.hidden, false);
+  assert.equal(shown.profile, 'ready');
+  assert.deepEqual(shown.actions.map((action: { id: string }) => action.id), ['turn-on', 'join']);
+});
+
+test('without the readiness module the section counts as not ready and stays hidden', () => {
+  const h = createBoardHarness({ scripts: 'chat', teamSection: true, nearChat: true });
+  h.load(['team.js']);
+  h.deliver({ type: 'profile-status', value: profileValue('valid') });
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  assert.equal(section(h).hidden, true);
+});
+
+test('team.js reads readiness only through window.nearReadiness', () => {
+  assert.ok(readFileSync(path.join(ROOT, 'media', 'chat', 'team.js'), 'utf8').includes('window.nearReadiness'));
 });
 
 // ---- page details (Task 3) -------------------------------------------------------------------------------------------------------------------
@@ -168,7 +275,7 @@ test('the e2e probe answers what is drawn, clicks a drawn button through the nor
   h.deliver({ type: 'team-state', model: lead });
   h.deliver({ type: 'team-e2e', id: 7 });
   assert.deepEqual(h.posts, [{
-    type: 'team-e2e-facts', id: 7, heading: lead.heading, status: lead.status,
+    type: 'team-e2e-facts', id: 7, heading: lead.heading, status: lead.status, hidden: false, profile: 'ready',
     actions: [{ id: 'invite', label: 'Invite someone' }, { id: 'members', label: 'Members', badge: '2 waiting' }, { id: 'board', label: 'Open board' }, { id: 'link', label: 'Link your organization' }]
   }]);
   h.posts.length = 0;
