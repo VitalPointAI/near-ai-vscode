@@ -1,6 +1,7 @@
 // The sidebar Team section host (G-61-5): feeds the Team section model (src/domain/team/teamSection.ts) to the NEAR AI chat sidebar and runs the
 // Team Mode command mapped to a clicked button, so every team step is a button. The page is untrusted: only {type:'team-action', action} with an
-// action from the fixed list runs anything, and it runs only the command TEAM_ACTION_COMMANDS maps that action to.
+// action from the fixed list runs anything, and it runs only the command TEAM_ACTION_COMMANDS maps that action to. The one action without a command,
+// 'solo' (Just me for now, G-61-8), only keeps the choice through the Team Mode handle in VS Code's workspace state for this project.
 // Solo activation stays cheap: this module statically imports only vscode types, Node built-ins and types. In a project without team.json a refresh
 // costs one fs.stat and loads only the model modules; no timer, storage, output channel or git call. No user text lives here: every label and
 // sentence comes from teamSectionText.ts through the model.
@@ -34,18 +35,18 @@ export interface TeamSectionHost extends vscode.Disposable {
   refresh(options?: { recheckShared?: boolean }): Promise<void>;
 }
 
-export type TeamSectionMessage = { type: 'team-action'; action: Exclude<TeamActionId, 'solo'> } | { type: 'team-e2e-facts'; id: number; facts: Record<string, unknown> };
+export type TeamSectionMessage = { type: 'team-action'; action: TeamActionId } | { type: 'team-e2e-facts'; id: number; facts: Record<string, unknown> };
 
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 // The online check (a network call) runs at most once a minute, on a monotonic clock, unless an action that changes what is online just finished.
 const SHARED_RECHECK_MS = 60_000;
 const RECHECK_AFTER: ReadonlySet<TeamActionId> = new Set<TeamActionId>(['share', 'invite', 'link', 'join']);
 
-// The action ids the page may post that run a command. A Record keyed by those ids, so the compiler fails when the model's list and this one differ;
-// the model module itself is loaded only by dynamic import (solo rule).
+// The action ids the page may post. A Record keyed by TeamActionId, so the compiler fails when the model's list and this one differ; the model module
+// itself is loaded only by dynamic import (solo rule). Every id but 'solo' runs the command TEAM_ACTION_COMMANDS maps it to.
 type CommandActionId = Exclude<TeamActionId, 'solo'>;
-const KNOWN_ACTIONS: Readonly<Record<CommandActionId, true>> = Object.freeze({
-  join: true, share: true, invite: true, members: true, board: true, link: true, check: true
+const KNOWN_ACTIONS: Readonly<Record<TeamActionId, true>> = Object.freeze({
+  invite: true, join: true, solo: true, share: true, members: true, board: true, link: true, check: true
 });
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -59,7 +60,7 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
   return own.length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 
-function isKnownAction(value: unknown): value is CommandActionId {
+function isKnownAction(value: unknown): value is TeamActionId {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(KNOWN_ACTIONS, value);
 }
 
@@ -214,7 +215,8 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
       // The only work in a project without a team: one stat.
       if (!(await teamFileExists(root))) {
         follow(undefined);
-        return { folderOpen: true };
+        // Just me for now is read from VS Code's workspace state only here, when the sidebar asks for a project without a team.
+        return deps.team.justMe() ? { folderOpen: true, justMe: true } : { folderOpen: true };
       }
       // A team project whose session is still starting: wait for it, so the section does not show a passing state.
       await deps.team.ready;
@@ -264,7 +266,26 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
     return entry.done;
   }
 
-  async function act(action: CommandActionId): Promise<void> {
+  async function act(action: TeamActionId): Promise<void> {
+    if (action === 'solo') {
+      await justMe();
+      return;
+    }
+    await runCommand(action);
+  }
+
+  // Just me for now: the choice is kept through the handle (which tells the listeners, so the section refreshes). No command, file or event.
+  async function justMe(): Promise<void> {
+    try {
+      // A choice that could not be kept leaves the section as it was; the next refresh shows what is true.
+      await Promise.resolve(deps.team.setJustMe(true)).catch(() => undefined);
+    } finally {
+      busy = false;
+    }
+    await refresh();
+  }
+
+  async function runCommand(action: CommandActionId): Promise<void> {
     try {
       const { TEAM_ACTION_COMMANDS } = await import('../../domain/team/teamSection');
       // Every Team Mode command reports its own failure to the person (teamCommands' guarded); the section shows the state either way.
@@ -280,7 +301,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
     const target = webview;
     if (target === undefined || typeof request.id !== 'number' || !Number.isFinite(request.id)) return;
     // Any drawn action may be clicked, Just me for now included; the page clicks only what it drew.
-    if (request.click !== undefined && !isKnownAction(request.click) && request.click !== 'solo') return;
+    if (request.click !== undefined && !isKnownAction(request.click)) return;
     await target.postMessage({ type: 'team-e2e', id: request.id, ...(request.click === undefined ? {} : { click: request.click }) });
   }
   if (testSeams) teamSectionTap.probe = probe;

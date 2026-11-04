@@ -829,7 +829,7 @@ export class TeamSession {
       return;
     }
     const run = this.deps.runCommand;
-    this.offer('info', `${displayText(this.teamFile.name)} uses Team Mode and this computer has not joined it. Join it to work with the team.`, [
+    this.offer('info', `${displayText(this.teamFile.name)} has a team and this computer has not joined it. Join it to work with the team.`, [
       { label: JOIN_ACTION, run: () => run(JOIN_COMMAND) }
     ]);
   }

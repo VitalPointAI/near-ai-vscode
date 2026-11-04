@@ -70,6 +70,8 @@ const RESET_ACTION = 'Remove unfinished keys';
 const CONTINUE_WITHOUT_NEAR_ACTION = 'Continue without signing in';
 const REMOVE_ACTION = 'Remove';
 const CANCEL_INVITATION_ACTION = 'Cancel invitation';
+// The first row of Manage Team Members for the owner and leads; it runs the invite.
+const INVITE_ROW = 'Invite someone';
 // UI review issue 1: what each long flow is doing, in plain words. The steps come from the vscode-free flows as codes.
 const INVITE_STEP_TEXT: Record<'log' | 'near', string> = { log: 'Saving the invitation to the team record', near: 'Sending the invitation to your organization' };
 const JOIN_STEP_TEXT: Record<'check' | 'keys' | 'log' | 'near' | 'key', string> = {
@@ -132,6 +134,9 @@ export interface MemberCommandDeps {
   session(): TeamSession | undefined;
   startSession(projectRoot: string): Promise<'solo' | 'team' | 'error'>;
   restartSession(projectRoot: string): Promise<void>;
+  // G-61-8: Invite someone in a project with no team sets the team up first (the Enable flow in invite mode: the same connect, online-home and
+  // existing-team checks, the team name and your name filled in, no closing message). True when the team's session runs afterwards.
+  startTeam(): Promise<boolean>;
   nearBaseUrl?: string;
   fetch?: FetchLike;
   // Tests replace the browser sign-in.
@@ -552,6 +557,11 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   }
 
   async function invite(): Promise<void> {
+    // A project with no team yet: inviting sets the team up on the way and then carries straight on into the invite (G-61-8).
+    const root = deps.firstFolder();
+    if (root !== undefined && !(await teamFileExists(root))) {
+      if (!(await deps.startTeam())) return;
+    }
     const found = await requireTeam();
     if (found === undefined) return;
     const { projectRoot } = found;
@@ -1018,7 +1028,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   }
 
   type Row = vscode.QuickPickItem & {
-    row: { kind: 'near' } | { kind: 'member'; id: string; attention: string | undefined } | { kind: 'invitation'; id: string; status: string } | { kind: 'cleanup'; item: CleanupItem };
+    row: { kind: 'invite' } | { kind: 'near' } | { kind: 'member'; id: string; attention: string | undefined } | { kind: 'invitation'; id: string; status: string } | { kind: 'cleanup'; item: CleanupItem };
   };
 
   async function buildRows(ctx: ManageContext): Promise<Row[]> {
@@ -1026,6 +1036,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const state = ctx.session.state();
     const linked = ctx.teamFile.near !== undefined;
     const rows: Row[] = [];
+    // The owner and leads invite more people from here, so inviting stays a button once the sidebar section is quiet (G-61-8).
+    if (ctx.canManage) rows.push({ label: INVITE_ROW, row: { kind: 'invite' } });
     const kept = linked ? await keptSession(ctx.teamFile.teamId) : undefined;
     if (!linked) rows.push({ label: (await import('../../team/join')).NO_ORG_NOTICE, row: { kind: 'near' } });
     else rows.push({ label: kept === undefined ? 'NEAR AI sign-in: not signed in' : `NEAR AI sign-in: ${await display(kept.label)}`, row: { kind: 'near' } });
@@ -1069,6 +1081,10 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const state = ctx.session.state();
     const allowed = (action: Parameters<typeof decideTeamAction>[2]): boolean => decideTeamAction(state, myId, action).allowed;
     const row = picked.row;
+    if (row.kind === 'invite') {
+      await invite();
+      return;
+    }
     type Choice = vscode.QuickPickItem & { run(): Promise<void> };
     const choices: Choice[] = [];
     const add = (label: string, description: string, run: () => Promise<void>): void => { choices.push({ label, description, run }); };

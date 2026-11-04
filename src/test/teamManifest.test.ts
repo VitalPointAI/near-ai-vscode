@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -130,7 +130,7 @@ test('registerTeamMode registers every contributed nearAi.team command', async (
   assert.equal(stub.commands.size, 0, 'disposing the context unregisters the commands');
 });
 
-test('in a project without a team, every membership command except Join answers with how to turn Team Mode on and does nothing else', async () => {
+test('in a project without a team, every membership command except Join and Invite answers with how to start a team and does nothing else', async () => {
   const base = mkdtempSync(path.join(tmpdir(), 'near-ai-manifest-solo-'));
   const root = path.join(base, 'project');
   mkdirSync(path.join(root, '.planning', '.near-ai'), { recursive: true });
@@ -142,11 +142,18 @@ test('in a project without a team, every membership command except Join answers 
     const context = createFakeContext(path.join(base, 'storage'), {});
     const handle = commandsModule.registerTeamMode(context as never);
     assert.equal(await handle.ready, 'solo');
-    for (const id of ['nearAi.team.invite', 'nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear', 'nearAi.team.share']) {
+    for (const id of ['nearAi.team.manageMembers', 'nearAi.team.linkNearOrganization', 'nearAi.team.signOutNear', 'nearAi.team.share']) {
       stub.notifications.length = 0;
       await (stub.commands.get(id) as () => Promise<void>)();
       assert.deepEqual(stub.notifications.map((entry) => entry.message), [commandsModule.SOLO_TEXT], id);
     }
+    // G-61-8 (owner, 2026-11-03): Invite someone sets the team up on the way. This folder is not a project kept online, so the setup stops with
+    // its own plain reason, before any question, and nothing is created.
+    stub.notifications.length = 0;
+    await (stub.commands.get('nearAi.team.invite') as () => Promise<void>)();
+    assert.equal(stub.notifications.length, 1, 'one plain reason');
+    assert.match(stub.notifications[0]?.message ?? '', /not shared online yet/);
+    assert.equal(existsSync(path.join(root, '.planning', '.near-ai', 'team.json')), false, 'no team was created');
     assert.equal(stub.inputRequests.length + stub.quickPickRequests.length, 0, 'no question was asked');
     assert.equal(handle.session(), undefined);
     for (const subscription of context.subscriptions) subscription.dispose();
