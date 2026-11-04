@@ -402,7 +402,8 @@ test('all eight columns and groups always show, with the captions of the columns
   assert.deepEqual(later.map((key) => h.$(`.column[data-column="${key}"] .col-btn`)!.getAttribute('aria-expanded')), ['false', 'false', 'false', 'false']);
   assert.equal(text(h.$('.later-note')), 'Claimed, In progress, In review and Shipping are folded for now. They fill in when those steps arrive in a later update.');
   assert.equal(h.$('.later-note')!.hidden, false);
-  assert.equal(text(h.$('.cell[data-column="claimed"][data-lane="unassigned"]')), '0 cards, column collapsed');
+  // G-62-7 (62-21): a folded cell holds only its count, hidden for screen readers.
+  assert.equal(text(h.$('.cell[data-column="claimed"][data-lane="unassigned"] .sr-only')), '0 cards, column folded');
   assert.equal(h.$('.column[data-column="integrating"] svg path')!.getAttribute('d'), 'M6 3.5L10.5 8L6 12.5', 'a folded column shows the closed chevron');
   assert.deepEqual(Array.from(h.$('.column[data-column="integrating"] .col-btn')!.querySelectorAll('svg')[1]!.querySelectorAll('path')).map((p) => p.getAttribute('d')), ['M1.5 8.5L4.5 11.5L10.5 4.5', 'M7.5 11.5L13.5 4.5'], 'Shipping has the check-all icon, not a git icon');
   h.$('.column[data-column="claimed"] .col-btn')!.click();
@@ -779,6 +780,60 @@ test('G-62-2 and G-62-4: board.css gives a solid toolbar band, one board scrolle
   assert.match(cssRule('.cell'), /min-height:\s*64px/);
   assert.match(cssRule('.lane-grid'), /align-items:\s*stretch/, 'cells are as tall as their row');
   assert.match(cssRule('.lane-title'), /position:\s*sticky[\s\S]*left:\s*0/, 'lane titles stay on the left while the board scrolls sideways');
+});
+
+// Owner decision 2026-11-03 (G-62-7, plan 62-21): every card is readable. A folded column never holds a card, only its count for screen readers; titles
+// wrap between words; the card's main button looks like the card, not like a button.
+test('G-62-7: a folded column holds no card, only a hidden count in every lane; opening it brings the cards back and focus never lands in a folded cell', async () => {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const h = start({ width: 1200 });
+  h.deliver({ type: 'state', model });
+  const inReady = model.cards.filter((c) => c.column === 'ready' && c.lane.member === 'unassigned' && (c.milestoneId === undefined || c.milestoneId === model.selectedMilestone));
+  assert.ok(inReady.some((c) => c.id === 'plan:90-01'), 'the standard board has plan 90-01 in Ready');
+  assert.ok(h.$('.cell[data-column="ready"][data-lane="unassigned"]')!.contains(card(h, 'plan:90-01')));
+
+  h.$('.column[data-column="ready"] .col-btn')!.click();
+  const folded = h.$$('.cell[data-column="ready"]');
+  assert.ok(folded.length > 0, 'every lane still has a Ready cell');
+  for (const cell of folded) {
+    assert.equal(cell.querySelectorAll('.card').length, 0, 'no card inside a folded cell');
+    assert.notEqual(cell.tagName.toLowerCase(), 'ul', 'no card list inside a folded cell');
+    const hidden = cell.querySelectorAll('.sr-only');
+    assert.equal(hidden.length, 1, 'one hidden count');
+    assert.equal(cell.children.length, 1, 'and nothing else');
+  }
+  const count = inReady.length;
+  assert.equal(text(h.$('.cell[data-column="ready"][data-lane="unassigned"] .sr-only')), `${count} ${count === 1 ? 'card' : 'cards'}, column folded`);
+  assert.equal(h.$('.card[data-id="plan:90-01"]'), null, 'the card of a folded column is left out of the page, not hidden');
+  assert.equal(api(h).focusCard('plan:90-01'), false, 'a card of a folded column cannot take focus');
+  const active = h.document.activeElement as FakeNode | null;
+  assert.ok(!active || !active.closest || !active.closest('.cell.collapsed'), 'focus is not inside a folded cell');
+
+  h.$('.column[data-column="ready"] .col-btn')!.click();
+  assert.ok(h.$('ul.cell[data-column="ready"][data-lane="unassigned"]')!.contains(card(h, 'plan:90-01')), 'opening the column puts the card back');
+  h.$('.column[data-column="ready"] .col-btn')!.click();
+  assert.equal(h.$('.card[data-id="plan:90-01"]'), null, 'folding it again removes the card');
+  assert.equal(h.$$('.cell.collapsed .card').length, 0);
+});
+
+test('G-62-7: board.css wraps card text between words and resets the card button to the card\'s own look', () => {
+  assert.doesNotMatch(BOARD_CSS, /overflow-wrap:\s*anywhere/, 'no mid-word breaks anywhere on the board');
+  assert.doesNotMatch(BOARD_CSS, /font-size:\s*0\s*;/, 'nothing is hidden by a zero font size');
+  const text = cssRule('.card-title, .card-meta, .card-rule, .pending-line, .refusal-line');
+  assert.match(text, /overflow-wrap:\s*break-word/, 'a long unbroken path still wraps instead of overflowing');
+  assert.match(text, /word-break:\s*normal/, 'words break only between words');
+  const main = cssRule('.card-main');
+  const property = (body: string): string[] => body.split(';').map((d) => (d.split(':')[0] ?? '').trim()).filter((name) => name !== '');
+  // Every property the global button rule sets is set again on the card button, so nothing of the button look is left over.
+  for (const name of property(cssRule('button'))) assert.ok(property(main).includes(name), `.card-main resets ${name}`);
+  assert.match(main, /text-align:\s*left/);
+  assert.match(main, /justify-content:\s*flex-start/);
+  assert.match(main, /color:\s*inherit/);
+  assert.match(main, /font-weight:\s*inherit/);
+  assert.match(main, /background:\s*none/);
+  assert.match(main, /border:\s*0/);
+  assert.match(main, /white-space:\s*normal/);
 });
 
 // Owner decision 2026-11-03 (G-62-1): the board lives only in its own editor tab, so the page has no button or message that opens the board.
