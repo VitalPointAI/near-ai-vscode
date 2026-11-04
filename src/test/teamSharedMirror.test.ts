@@ -5,20 +5,27 @@
 //   would) must never make the append land an event with a stale position, apply an entry twice or pause;
 // - a second transport on the same mirror folder (another process; here the same folder reached by another path, which no in-process lock can
 //   see) must wait for the first operation to end before it runs any git step of its own.
+// The cross-process lock is then checked against a real second process that holds it, crashes holding it, or stops refreshing it.
 // Found by teamConcurrency's shared-mirror test under load: two events with lamport 11 (debug session team-shared-mirror-duplicate-lamport).
 import assert from 'node:assert/strict';
-import { symlink } from 'node:fs/promises';
+import { fork } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import * as path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import { createOwner, createTeamFixture, gitIn, testGenesis } from './helpers/teamHarness';
 import type { TeamFixture, TestOwner } from './helpers/teamHarness';
 import { teamMaterializer } from '../domain/team/materialize';
 import type { GenesisAnchor, TeamState } from '../domain/team/types';
 import { TeamLog } from '../team/eventLog';
 import type { EventIntent, TeamSigner } from '../team/eventLog';
-import { DEFAULT_COORDINATION_REF, GitTransport, INCOMING_REF, LOCAL_REF } from '../team/gitTransport';
+import { DEFAULT_COORDINATION_REF, GitTransport, INCOMING_REF, LOCAL_REF, MIRROR_BUSY_APPEND_REASON, MIRROR_BUSY_SYNC_REASON } from '../team/gitTransport';
 import type { GitTransportOptions } from '../team/gitTransport';
 import { newTeamId } from '../team/identity';
+import { MIRROR_LOCK_FILE } from '../team/mirrorProcessLock';
+import type { LockChildMessage } from './helpers/mirrorLockChild';
 import { runGit } from '../team/runGit';
 import type { GitRunner } from '../team/runGit';
 import type { AppendResult } from '../team/transport';
@@ -222,4 +229,212 @@ test('two transports on one mirror folder that no in-process lock connects take 
   } finally {
     await fixture.cleanup();
   }
+});
+
+// ---- The cross-process lock, against a real second process.
+
+// Holders still running when the file ends (a test that failed before its own cleanup) are killed, so a failure never leaves the file waiting.
+const liveHolders = new Set<LockHolder>();
+after(() => { for (const holder of liveHolders) holder.kill(); });
+
+// A second process that holds the mirror's lock until told to release it, or is killed holding it.
+class LockHolder {
+  private readonly child: ChildProcess;
+  private readonly received: LockChildMessage[] = [];
+  private readonly waiters = new Set<() => void>();
+  private ended = false;
+  public readonly exited: Promise<void>;
+
+  public constructor(mirrorDir: string) {
+    this.child = fork(path.join(__dirname, 'helpers', 'mirrorLockChild.js'), [mirrorDir], { execArgv: [], stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    this.child.on('message', (message: LockChildMessage) => { this.received.push(message); this.wake(); });
+    liveHolders.add(this);
+    this.exited = new Promise<void>((resolve) => { this.child.on('exit', () => { this.ended = true; liveHolders.delete(this); this.wake(); resolve(); }); });
+  }
+
+  public get pid(): number {
+    return this.child.pid as number;
+  }
+
+  private wake(): void {
+    const waiting = [...this.waiters];
+    this.waiters.clear();
+    for (const resolve of waiting) resolve();
+  }
+
+  public async expect(type: LockChildMessage['type']): Promise<void> {
+    for (;;) {
+      if (this.received.some((message) => message.type === type)) return;
+      const error = this.received.find((message) => message.type === 'error');
+      if (error !== undefined && error.type === 'error') throw new Error(`the lock holder failed: ${error.message}`);
+      if (this.ended) throw new Error(`the lock holder ended before it sent ${type}`);
+      await new Promise<void>((resolve) => { this.waiters.add(resolve); });
+    }
+  }
+
+  public release(): void {
+    this.child.send({ type: 'release' });
+  }
+
+  public kill(): void {
+    if (!this.ended) this.child.kill('SIGKILL');
+  }
+}
+
+async function withSharedMirror(run: (fixture: TeamFixture, team: Team, mirror: string) => Promise<void>): Promise<void> {
+  const fixture = await createTeamFixture({ clones: ['owner', 'second'] });
+  try {
+    const team = await seedTeam(fixture);
+    const mirror = path.join(fixture.storageDir('shared'), 'coordination.git');
+    await transportAt(fixture, 'owner', mirror, team.anchor).fetch();
+    await run(fixture, team, mirror);
+  } finally {
+    await fixture.cleanup();
+  }
+}
+
+function lockFile(mirror: string): string {
+  return path.join(mirror, MIRROR_LOCK_FILE);
+}
+
+const shortPause = (ms: number): Promise<void> => new Promise<void>((resolve) => { setTimeout(resolve, Math.min(ms, 10)); });
+
+test('another process holding the mirror makes an append wait and write nothing until it lets go, and the lock of a process that crashed is taken over at once', { timeout: 120_000 }, async () => {
+  await withSharedMirror(async (fixture, team, mirror) => {
+    const holder = new LockHolder(mirror);
+    try {
+      await holder.expect('held');
+      const pauses: number[] = [];
+      let waiting: () => void = () => undefined;
+      const waits = new Promise<void>((resolve) => { waiting = resolve; });
+      const log = new TeamLog({
+        anchor: team.anchor, signer: team.signer,
+        transport: transportAt(fixture, 'owner', mirror, team.anchor, { sleep: async (ms) => { pauses.push(ms); waiting(); await shortPause(ms); } })
+      });
+      let settled = false;
+      const appended = log.append(() => [INTENT]).then((result) => { settled = true; return result; });
+      await Promise.race([waits, appended]);
+      assert.equal(settled, false, 'the append waits while the other process holds the mirror');
+      assert.deepEqual(remoteLamports(fixture), [1, 2], 'nothing is written while it waits');
+      holder.release();
+      await holder.expect('released');
+      const result = await appended;
+      assert.equal(result.ok, true, describeResult(result));
+      assert.deepEqual(remoteLamports(fixture), [1, 2, 3]);
+      assert.equal(existsSync(lockFile(mirror)), false, 'the lock is removed when the append ends');
+
+      // A process that crashes holding the lock leaves its file behind; its process id is gone, so the next operation takes it over at once.
+      const crashed = new LockHolder(mirror);
+      await crashed.expect('held');
+      crashed.kill();
+      await crashed.exited;
+      assert.equal(existsSync(lockFile(mirror)), true, 'the crashed process left its lock');
+      pauses.length = 0;
+      const after = await log.append(() => [INTENT]);
+      assert.equal(after.ok, true, describeResult(after));
+      assert.deepEqual(pauses, [], 'the lock of a process that ended is taken over without waiting');
+      assert.deepEqual(remoteLamports(fixture), [1, 2, 3, 4]);
+      assert.equal(existsSync(lockFile(mirror)), false);
+    } finally {
+      holder.kill();
+      await holder.exited;
+    }
+  });
+});
+
+test('a lock its holder stopped refreshing is taken over after the stale time, while a holder that keeps working keeps its lock fresh', { timeout: 120_000, skip: process.platform === 'win32' }, async () => {
+  await withSharedMirror(async (fixture, team, mirror) => {
+    // A live process (the test runner that started this file) whose lock file was last refreshed ten minutes ago.
+    await writeFile(lockFile(mirror), `${JSON.stringify({ pid: process.ppid, host: hostname(), token: 'ab'.repeat(12) })}\n`, 'utf8');
+    const old = new Date(Date.now() - 10 * 60_000);
+    await utimes(lockFile(mirror), old, old);
+    const pauses: number[] = [];
+    const taker = transportAt(fixture, 'owner', mirror, team.anchor, { sleep: async (ms) => { pauses.push(ms); await shortPause(ms); } });
+    await taker.fetch();
+    assert.equal(taker.status().state, 'ok');
+    assert.deepEqual(pauses, [], 'a lock not refreshed for longer than the stale time is taken over without waiting');
+    assert.equal(existsSync(lockFile(mirror)), false);
+
+    // A holder that works for three times the stale time refreshes its lock, so a second process waits instead of taking it over.
+    const timings = { staleMs: 400, refreshMs: 20 };
+    const order: string[] = [];
+    const alias = path.join(fixture.storageDir('shared'), 'alias.git');
+    await symlink(mirror, alias, 'dir');
+    let secondStarted: Promise<void> = Promise.resolve();
+    let started = false;
+    const second = transportAt(fixture, 'second', alias, team.anchor, {
+      lockTimings: timings, sleep: shortPause,
+      git: async (args, options) => { order.push('second'); return runGit(args, options); }
+    });
+    const first = transportAt(fixture, 'owner', mirror, team.anchor, {
+      lockTimings: timings,
+      git: async (args, options) => {
+        order.push('first');
+        const result = await runGit(args, options);
+        if (!started) {
+          started = true;
+          secondStarted = second.fetch().then(() => undefined);
+          await new Promise<void>((resolve) => { setTimeout(resolve, 3 * timings.staleMs); });
+        }
+        return result;
+      }
+    });
+    await first.fetch();
+    await secondStarted;
+    assert.equal(first.status().state, 'ok');
+    assert.equal(second.status().state, 'ok');
+    assert.ok(order.includes('second'), 'the second process ran once the first was done');
+    assert.ok(order.indexOf('second') > order.lastIndexOf('first'), `the second process waited for the first: ${order.join(' ')}`);
+  });
+});
+
+test('a waiter gives up after the wait limit: its sync says another window is syncing, its append writes nothing, and the holder keeps its lock', { timeout: 120_000 }, async () => {
+  await withSharedMirror(async (fixture, team, mirror) => {
+    const holder = new LockHolder(mirror);
+    try {
+      await holder.expect('held');
+      const log = new TeamLog({ anchor: team.anchor, signer: team.signer, transport: transportAt(fixture, 'owner', mirror, team.anchor, { lockTimings: { waitMs: 100 }, sleep: shortPause }) });
+      const synced = await log.sync();
+      assert.deepEqual(synced.entries, []);
+      assert.deepEqual(log.status(), { state: 'offline', reason: MIRROR_BUSY_SYNC_REASON });
+      const result = await log.append(() => [INTENT]);
+      assert.deepEqual(result, { ok: false, kind: 'busy', reason: MIRROR_BUSY_APPEND_REASON, attempts: 0 });
+      assert.deepEqual(remoteLamports(fixture), [1, 2], 'nothing was written');
+      const text = await readFile(lockFile(mirror), 'utf8');
+      assert.equal((JSON.parse(text) as { pid: number }).pid, holder.pid, 'the holder keeps its lock');
+
+      holder.release();
+      await holder.expect('released');
+      const later = await log.sync();
+      assert.equal(later.status.state, 'ok');
+      assert.equal((await log.append(() => [INTENT])).ok, true);
+      assert.deepEqual(remoteLamports(fixture), [1, 2, 3]);
+    } finally {
+      holder.kill();
+      await holder.exited;
+    }
+  });
+});
+
+test('an operation whose lock another process took over meanwhile leaves the new holder\'s lock in place when it ends', { timeout: 60_000 }, async () => {
+  await withSharedMirror(async (fixture, team, mirror) => {
+    const other = `${JSON.stringify({ pid: process.ppid, host: hostname(), token: 'cd'.repeat(12) })}\n`;
+    let replaced = false;
+    const transport = transportAt(fixture, 'owner', mirror, team.anchor, {
+      git: async (args, options) => {
+        if (!replaced) {
+          replaced = true;
+          await writeFile(lockFile(mirror), other, 'utf8');
+        }
+        return runGit(args, options);
+      }
+    });
+    await transport.fetch();
+    assert.equal(transport.status().state, 'ok');
+    assert.equal(await readFile(lockFile(mirror), 'utf8'), other, 'the other process\'s lock is not removed');
+    await rm(lockFile(mirror));
+    await transport.fetch();
+    assert.equal(transport.status().state, 'ok');
+    assert.equal(existsSync(lockFile(mirror)), false);
+  });
 });
