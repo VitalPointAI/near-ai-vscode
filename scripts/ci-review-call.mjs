@@ -63,8 +63,20 @@ async function readReply(response) {
     try { event = JSON.parse(data); } catch { return; }
     const choice = event?.choices?.[0];
     if (typeof choice?.delta?.content === 'string') text += choice.delta.content;
+    const reasoning = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
+    if (typeof reasoning === 'string') thinking += reasoning.length;
     if (choice?.finish_reason) finishReason = choice.finish_reason;
   };
+  // Progress on stderr every 30 seconds, so a person (or a CI log) can see the model is working.
+  // Only counts, never content: the reply is printed once, at the end.
+  let thinking = 0;
+  const started = Date.now();
+  const progress = setInterval(() => {
+    const seconds = Math.round((Date.now() - started) / 1000);
+    console.error(text ? `still writing the review: ${text.length} characters after ${seconds}s` : `still thinking: ${thinking} characters of reasoning after ${seconds}s`);
+  }, 30_000);
+  progress.unref();
+  try {
   for await (const chunk of response.body) {
     buffer += decoder.decode(chunk, { stream: true });
     let newline;
@@ -74,6 +86,9 @@ async function readReply(response) {
     }
   }
   if (buffer) take(buffer);
+  } finally {
+    clearInterval(progress);
+  }
   return { text, finishReason };
 }
 
