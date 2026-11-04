@@ -66,7 +66,14 @@ export type TeamModeState = 'solo' | 'team' | 'error';
 // What registerTeamMode keeps of the board, which is loaded only once a session runs (a solo project never loads it).
 interface BoardHandle { openPanel(): void; controller: { sessionChanged(): void } }
 // onDidChange: called when Team Mode starts, restarts or stops, and when a turn-on attempt ends, so the sidebar's Team section can refresh.
-export interface TeamModeHandle { ready: Promise<TeamModeState>; session(): TeamSession | undefined; onDidChange(listener: () => void): { dispose(): void } }
+// boardSummary (G-62-1): the board's Ready, Blocked and Mine numbers for the sidebar's one line; undefined while no session runs, before the board
+// module has loaded, or once this computer's member was removed.
+export interface TeamModeHandle {
+  ready: Promise<TeamModeState>;
+  session(): TeamSession | undefined;
+  onDidChange(listener: () => void): { dispose(): void };
+  boardSummary(): { ready: number; blocked: number; mine: number } | undefined;
+}
 // The extension passes connectNearAi, the same key setup the chat's Set up button runs. Tests point the NEAR calls at a fake server and replace the
 // browser sign-in and the key setup.
 export interface TeamModeOptions {
@@ -155,6 +162,8 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   let disposed = false;
   let projectRootForSlot: string | undefined;
   let board: BoardHandle | undefined;
+  // The pure summary function, loaded with the board once a session runs, so a project without a team never loads the board model.
+  let summarize: typeof import('../../domain/team/board').boardSummary | undefined;
   let contextKeySet = false;
   const changeListeners = new Set<() => void>();
 
@@ -262,7 +271,8 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     if (disposed || slot.current() === undefined) return;
     try {
       if (board === undefined) {
-        const { registerTeamBoard } = await import('./boardView');
+        const [{ registerTeamBoard }, { boardSummary }] = await Promise.all([import('./boardView'), import('../../domain/team/board')]);
+        summarize ??= boardSummary;
         board ??= registerTeamBoard(context, { session: () => slot.current(), output });
       }
       board.controller.sessionChanged();
@@ -561,6 +571,15 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     onDidChange(listener: () => void): { dispose(): void } {
       changeListeners.add(listener);
       return { dispose: (): void => { changeListeners.delete(listener); } };
+    },
+    boardSummary(): { ready: number; blocked: number; mine: number } | undefined {
+      const session = slot.current();
+      if (session === undefined || summarize === undefined || session.isRemoved()) return undefined;
+      const state = session.state();
+      const memberId = session.memberId();
+      const me = memberId === undefined ? undefined : state.members.get(memberId);
+      if (me?.removedEvent !== undefined || session.boardStatus().kind === 'removed') return undefined;
+      return summarize(state, memberId);
     }
   };
 }

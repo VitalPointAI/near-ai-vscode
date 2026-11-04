@@ -35,6 +35,7 @@ function soloHandle(): TeamModeHandle & { fire(): void; listeners: number } {
     ready: Promise.resolve('solo'),
     session: () => undefined,
     onDidChange(listener: () => void) { listeners.add(listener); return { dispose: () => { listeners.delete(listener); } }; },
+    boardSummary: () => undefined,
     fire() { for (const listener of [...listeners]) listener(); },
     get listeners() { return listeners.size; }
   };
@@ -199,6 +200,7 @@ function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire()
     ready: Promise.resolve(current === undefined ? 'solo' : 'team'),
     session: () => current,
     onDidChange(listener: () => void) { listeners.add(listener); return { dispose: () => { listeners.delete(listener); } }; },
+    boardSummary: () => undefined,
     fire() { for (const listener of [...listeners]) listener(); },
     setSession(session: TeamSession | undefined) { current = session; }
   };

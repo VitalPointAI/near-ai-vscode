@@ -397,6 +397,20 @@ export function buildBoardModel(state: TeamState, options: BoardModelOptions): B
   };
 }
 
+// G-62-1: the sidebar's one-line summary. Built from the board model itself so the numbers can never disagree with the board: Ready and Blocked are
+// the board's counts for the current milestone, and Mine is what the Mine filter keeps there, less Done and Cancelled. The options below are never
+// read by the counts (no clock, no status text), and canWrite false skips the per-card move checks, which the counts do not need.
+export function boardSummary(state: TeamState, viewerId: string | undefined): { ready: number; blocked: number; mine: number } {
+  const model = buildBoardModel(state, { nowMs: 0, status: { kind: 'live', text: '' }, canWrite: false, ...(viewerId === undefined ? {} : { viewerId }) });
+  const unfinished = (card: BoardCard): boolean => card.column !== 'done' && card.column !== 'cancelled';
+  const shown = model.cards.filter((card) => visibleUnder(card, model.selectedMilestone) && unfinished(card));
+  return {
+    ready: model.counts.ready,
+    blocked: shown.filter((card) => card.blocked !== undefined).length,
+    mine: shown.filter((card) => card.mine).length
+  };
+}
+
 // ---- card detail -----------------------------------------------------------------------------------------------------------------------------
 
 // "62-01" for a plan, "Phase 62" for a phase: what a dependency row calls an id, whether or not the item is still on the board.

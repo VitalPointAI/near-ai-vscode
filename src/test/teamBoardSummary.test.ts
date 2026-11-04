@@ -30,17 +30,8 @@ const EXTENSION_ROOT = path.resolve(__dirname, '..', '..');
 // The fixture's plan:90-01 has a summary, so it is Done; plan:90-02 is the one that is Ready.
 const READY_PLAN = 'plan:90-02';
 
-// The function under test, read loosely so a missing export fails an assertion rather than the build.
-function summaryOf(state: TeamState, viewerId: string | undefined): Summary {
-  const fn = (boardModule as unknown as { boardSummary?: (state: TeamState, viewerId: string | undefined) => Summary }).boardSummary;
-  assert.equal(typeof fn, 'function', 'board.ts exports boardSummary');
-  return (fn as (state: TeamState, viewerId: string | undefined) => Summary)(state, viewerId);
-}
-function handleSummary(handle: TeamModeHandle): Summary | undefined {
-  const fn = (handle as unknown as { boardSummary?: () => Summary | undefined }).boardSummary;
-  assert.equal(typeof fn, 'function', 'the Team Mode handle has boardSummary()');
-  return (fn as () => Summary | undefined).call(handle);
-}
+const summaryOf = (state: TeamState, viewerId: string | undefined): Summary => boardModule.boardSummary(state, viewerId);
+const handleSummary = (handle: TeamModeHandle): Summary | undefined => handle.boardSummary();
 
 // What the board itself shows for this viewer: Ready and Blocked as the board counts them for the current milestone, and the cards the Mine filter
 // keeps (card.mine) in that milestone that are not Done or Cancelled.
