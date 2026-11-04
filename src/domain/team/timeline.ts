@@ -2,6 +2,9 @@
 // them, and every card of the board model is one dot at its dependency depth inside its milestone. Parallel cards share a step and stack in phase
 // then plan order. Pure: no vscode, no I/O and no clock; the same state gives the same timeline on every client.
 import { BOARD_LANE_LABEL } from './boardText';
+import {
+  milestoneHeading, noPercentText, percentDoneText, percentLabel, percentShort, cardsFinishedText, phaseHeading, phaseLabels, tileName, tileText
+} from './timelineText';
 import { compareParts, comparePlans } from './board';
 import type { BoardCard, BoardModel } from './board';
 import type { TeamState, WorkItem } from './types';
@@ -196,7 +199,21 @@ function layout(state: TeamState, nodes: readonly Node[]): Layout {
   return { step, inCycle, waitsFor, missing };
 }
 
-function phasesOfBand(model: BoardModel, dots: readonly TimelineDot[]): TimelinePhase[] {
+// Percent complete (D-14), the one rule every percent on the timeline uses: the whole number part of 100 x finished / counted, counted being every
+// card that is not Cancelled and finished every card in Done. A planless phase card sits in Backlog, so it counts and is unfinished, and rounding
+// down means 99.6 shows 99 until the last card is done: the number never overstates progress (T-62.1-05). Integers only.
+function percentOf(cards: readonly BoardCard[]): TimelinePercent {
+  const counted = cards.filter((card) => card.column !== 'cancelled').length;
+  const finished = cards.filter((card) => card.column === 'done').length;
+  if (counted === 0) {
+    const text = noPercentText(cards.length > 0);
+    return { finished, counted, text, label: text };
+  }
+  const percent = Math.floor((finished * 100) / counted);
+  return { finished, counted, percent, text: percentDoneText(percent), label: percentLabel(finished, counted, percent) };
+}
+
+function phasesOfBand(model: BoardModel, dots: readonly TimelineDot[], cardOf: ReadonlyMap<string, BoardCard>): TimelinePhase[] {
   const spans = new Map<string, { first: number; last: number }>();
   for (const dot of dots) {
     if (dot.phaseId === undefined) continue;
@@ -210,7 +227,13 @@ function phasesOfBand(model: BoardModel, dots: readonly TimelineDot[]): Timeline
   const titles = new Map(model.phases.map((entry) => [entry.id, entry.title]));
   return [...spans.entries()].map(([id, span]) => {
     const number = id.slice('phase:'.length);
-    return { id, label: titles.get(id) ?? `Phase ${number}`, number, firstStep: span.first, lastStep: span.last, labels: [], heading: '' };
+    const label = titles.get(id) ?? `Phase ${number}`;
+    const cards = dots.filter((dot) => dot.phaseId === id).map((dot) => cardOf.get(dot.cardId)).filter((card): card is BoardCard => card !== undefined);
+    const percent = percentOf(cards);
+    return {
+      id, label, number, firstStep: span.first, lastStep: span.last, percent,
+      labels: phaseLabels(label, number, percent.percent), heading: phaseHeading(label, percent.percent, percent.finished, percent.counted, percent.text)
+    };
   }).sort((a, b) => a.firstStep - b.firstStep || compareParts(a.number, b.number) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
@@ -229,6 +252,7 @@ export function buildTimeline(state: TeamState, model: BoardModel, _options: { v
   if (nodes.some((node) => node.band === BOARD_BAND_ID)) bands.push(BOARD_BAND_ID);
   const dots: TimelineDot[] = [];
   const milestones: TimelineMilestone[] = [];
+  const cardOf = new Map(model.cards.map((card) => [card.id, card]));
   for (const band of bands) {
     const inBand = nodes.filter((node) => node.band === band).sort((a, b) => (placed.step[a.order] as number) - (placed.step[b.order] as number) || a.order - b.order);
     const bandDots: TimelineDot[] = [];
@@ -248,11 +272,17 @@ export function buildTimeline(state: TeamState, model: BoardModel, _options: { v
     dots.push(...bandDots);
     const milestone = model.milestones.find((entry) => entry.id === band);
     const finished = inBand.length > 0 && inBand.every((node) => closed(node.card));
+    const title = milestone?.title ?? BOARD_LANE_LABEL;
+    const active = milestone?.active ?? false;
+    const cancelled = inBand.filter((node) => node.card.column === 'cancelled').length;
+    const percent = percentOf(inBand.map((node) => node.card));
     milestones.push({
-      id: band, title: milestone?.title ?? BOARD_LANE_LABEL, active: milestone?.active ?? false, finished, foldedByDefault: finished,
+      id: band, title, active, finished, foldedByDefault: finished,
       steps: inBand.length === 0 ? 0 : last + 1, cycle: bandDots.some((dot) => dot.inCycle), cardCount: inBand.length,
-      cancelled: inBand.filter((node) => node.card.column === 'cancelled').length, phases: phasesOfBand(model, bandDots),
-      heading: '', percentText: '', progressText: '', tileText: '', tileName: ''
+      cancelled, phases: phasesOfBand(model, bandDots, cardOf), percent,
+      heading: milestoneHeading(title, active, percent.percent, percent.text), percentText: percentShort(percent.percent),
+      progressText: percent.percent === undefined ? percent.text : cardsFinishedText(percent.finished, percent.counted),
+      tileText: tileText(percent.finished, cancelled), tileName: tileName(title, inBand.length)
     });
   }
 
@@ -273,5 +303,5 @@ export function buildTimeline(state: TeamState, model: BoardModel, _options: { v
     const dot = dotOf.get(edge.from);
     if (dot !== undefined) dot.neededBy += 1;
   }
-  return { milestones, dots, edges };
+  return { milestones, dots, edges, percent: percentOf(model.cards) };
 }

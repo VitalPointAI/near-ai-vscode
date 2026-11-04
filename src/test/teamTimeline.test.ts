@@ -272,7 +272,9 @@ test('each phase with a dot has its label, number and step span, ordered by firs
     plan('10-01'), plan('9-01', ['plan:10-01']), plan('11-01'), plan('11-02', ['plan:9-01'])
   ]);
   const timeline = timelineOf(world.state, undefined);
-  assert.deepEqual(timeline.milestones[0]?.phases, [
+  // The layout fields of each phase (62.1-02 adds the percent, labels and heading, asserted in teamTimelineNow.test.ts).
+  const spans = timeline.milestones[0]?.phases.map(({ id, label, number, firstStep, lastStep }) => ({ id, label, number, firstStep, lastStep }));
+  assert.deepEqual(spans, [
     { id: 'phase:10', label: 'Phase 10: Work 10', number: '10', firstStep: 0, lastStep: 0 },
     { id: 'phase:11', label: 'Phase 11: Work 11', number: '11', firstStep: 0, lastStep: 2 },
     { id: 'phase:9', label: 'Phase 9: Work 9', number: '9', firstStep: 1, lastStep: 1 },
