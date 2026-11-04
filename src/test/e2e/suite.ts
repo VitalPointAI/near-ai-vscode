@@ -952,7 +952,7 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     await act({ action: 'blur' });
     await ask({ action: 'scroll', top: 0, left: 0 });
   };
-  // Grouped by phase at 1400 px in a theme, photographed, then back to Group by Member.
+  // Grouped by phase at 1400 px in a theme (dark since 62-22, light since 62-24), photographed, then back to Group by Member.
   const byPhase = (theme: MatrixTheme): [string, () => Promise<void>] => [
     `${theme.name} at 1400 px grouped by phase: nothing wrong, every card readable, and board-${theme.name}-1400-by-phase.png is saved`, async () => {
       const before = await settled('before Group by Phase', (r) => r.layout === 'kanban');
@@ -1041,12 +1041,73 @@ function boardTests(): Array<[string, () => Promise<void>]> {
         assert.equal(closed.menuOpen, false, 'Escape closes the menu');
         await act({ action: 'blur' });
       }],
-      byPhase(theme)
+      byPhase(theme),
+      // 62-24: the views of the realistic board the owner asked to see.
+      [`dark at 1400 px with Move to... open on Dana's bug: Assign to... and Unassign Dana are offered, nothing wrong, and board-dark-1400-menu-assign.png is saved`, async () => {
+        const before = await settled('before the assign menu', (r) => r.layout === 'kanban');
+        if (Math.abs(before.width - 1400) > WIDTH_SLACK) { if (photographing) throw new Error(`The board is ${before.width} px, not 1400`); return; }
+        await ask({ action: 'focus', itemId: SEED.bug });
+        await act({ action: 'focus', itemId: SEED.bug });
+        const facts = await act({ action: 'key', key: 'm' });
+        assert.equal(facts.menuOpen, true, 'M opens the Move to... menu');
+        const texts = facts.menuTexts as string[];
+        assert.ok(texts.includes('Assign to...') && texts.includes('Unassign Dana'), `Assign to... and Unassign Dana are offered (${texts.join(', ')})`);
+        const report = await settled('the assign menu open', (r) => r.layout === 'kanban');
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        await photograph('board-dark-1400-menu-assign.png', 'menu-assign', 1400, report);
+        const closed = await act({ action: 'key', key: 'Escape' });
+        assert.equal(closed.menuOpen, false, 'Escape closes the menu');
+        await act({ action: 'blur' });
+        await ask({ action: 'scroll', top: 0, left: 0 });
+      }],
+      [`dark at 1400 px with the bug's detail open: Assigned to Dana, on hold, with its history sentences, nothing wrong, and board-dark-1400-detail-assigned.png is saved`, async () => {
+        const before = await settled('before the bug\'s detail', (r) => r.layout === 'kanban');
+        if (Math.abs(before.width - 1400) > WIDTH_SLACK) { if (photographing) throw new Error(`The board is ${before.width} px, not 1400`); return; }
+        await ask({ action: 'focus', itemId: SEED.bug });
+        await act({ action: 'blur' });
+        const toBefore = board.toView.length;
+        const facts = await act({ action: 'open', itemId: SEED.bug });
+        assert.equal(facts.detailOpen, true, 'the detail is open');
+        const detail = await board.next('toView', (message) => message.type === 'detail' && message.itemId === SEED.bug, toBefore);
+        assert.equal((detail.assignee as { name: string } | undefined)?.name, 'Dana', 'Assigned to Dana');
+        assert.equal(detail.held, true, 'on hold');
+        const history = (detail.history as Array<{ text: string }>).map((h) => h.text);
+        console.log(`(the bug's history: ${history.join(' | ')})`);
+        assert.ok(history.some((t) => t.includes('Dana')), 'the history says who was assigned');
+        const report = await settled('the bug\'s detail open', (r) => r.layout === 'kanban');
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        await photograph('board-dark-1400-detail-assigned.png', 'detail-assigned', 1400, report);
+        const closed = await act({ action: 'key', key: 'Escape' });
+        assert.equal(closed.detailOpen, false, 'Escape closes the detail');
+        await act({ action: 'blur' });
+        await ask({ action: 'scroll', top: 0, left: 0 });
+      }],
+      [`dark at 1400 px with Mine pressed: only the owner's own cards, nothing wrong, and board-dark-1400-mine.png is saved`, async () => {
+        const before = await settled('before Mine', (r) => r.layout === 'kanban');
+        if (Math.abs(before.width - 1400) > WIDTH_SLACK) { if (photographing) throw new Error(`The board is ${before.width} px, not 1400`); return; }
+        const facts = await act({ action: 'filter', filter: 'mine' });
+        try {
+          assert.equal((facts.filters as { mine: boolean }).mine, true, 'Mine is pressed');
+          const model = latestModel();
+          const drawn = facts.cardIds as string[];
+          assert.ok(drawn.length > 0, 'the owner has cards of their own');
+          assert.ok(drawn.every((id) => model.cards.find((c) => c.id === id)?.mine === true), `only the owner's own cards are drawn (${drawn.join(', ')})`);
+          const report = await settled('Mine pressed', (r) => r.layout === 'kanban' && r.cards.length === drawn.length);
+          assert.deepEqual(report.problems, [], problemsOf(report));
+          await photograph('board-dark-1400-mine.png', 'mine', 1400, report);
+        } finally {
+          const off = await act({ action: 'filter', filter: 'mine' });
+          assert.equal((off.filters as { mine: boolean }).mine, false, 'Mine is let go');
+        }
+        await settled('Mine let go', (r) => r.cards.length === before.cards.length);
+      }]
     );
+    if (theme.name === 'light') tests.push(byPhase(theme));
     tests.push([`${theme.name}: every frame of the row was taken`, async () => {
       const frames = index.filter((e) => e.theme === theme.name).map((e) => e.file);
       console.log(`(theme ${theme.name}: ${frames.length} frames${frames.length ? `: ${frames.join(', ')}` : ''})`);
-      if (photographing) assert.equal(frames.length, 5 + (scrolledPhoto ? 1 : 0) + (theme.name === 'dark' ? 3 : 0), 'frames in this theme');
+      // Every theme: four widths and Done open. Dark and light: scrolled. Dark: detail, menu, by phase, menu-assign, detail-assigned, mine. Light: by phase.
+      if (photographing) assert.equal(frames.length, 5 + (scrolledPhoto ? 1 : 0) + (theme.name === 'dark' ? 6 : theme.name === 'light' ? 1 : 0), 'frames in this theme');
     }]);
     return tests;
   };
@@ -1730,6 +1791,22 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       cdp?.close();
       cdp = undefined;
       inviteKit().assertPlain();
+    }],
+    ['the final screenshot index: one line per PNG, every board frame with no problem, four themes, and a note on what to look at in each', async () => {
+      if (!photographing) return;
+      const listed = JSON.parse(await readFile(path.join(screens, 'index.json'), 'utf8')) as ScreenEntry[];
+      const pngs = (await readdir(screens)).filter((f) => f.endsWith('.png')).sort();
+      assert.deepEqual(listed.map((e) => e.file).sort(), pngs, 'one index line per PNG');
+      const bad = listed.filter((e) => e.view !== 'drag-over' && e.view !== 'sidebar' && e.problems !== 0);
+      assert.deepEqual(bad.map((e) => e.file), [], 'every board frame was taken after a reading with no problem');
+      assert.equal(new Set(listed.map((e) => e.theme)).size, 4, 'four themes');
+      assert.ok(listed.every((e) => typeof e.lookFor === 'string' && e.lookFor.length > 0), 'each frame says what to look at');
+      for (const want of ['board-dark-1400-mine.png', 'board-dark-1400-detail-assigned.png', 'board-dark-1400-menu-assign.png', 'board-light-1400-by-phase.png', 'sidebar-dark.png', 'drag-refused-dark-1400.png']) {
+        assert.ok(pngs.includes(want), `${want} is saved`);
+      }
+      assert.ok(pngs.length >= 31, `${pngs.length} frames`);
+      const overFrame = listed.find((e) => e.view === 'drag-over');
+      console.log(`(final set: ${pngs.length} frames in ${screens}${overFrame ? `; the mid-drag frame had ${overFrame.problems} probe problems` : ''})`);
     }]
   ];
   return allBoardTests;
