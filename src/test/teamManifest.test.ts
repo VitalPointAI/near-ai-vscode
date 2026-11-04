@@ -84,16 +84,18 @@ test('package.json contributes Open Team Board and Import Plans to Team Board wi
   assert.equal(commandsModule.OPEN_BOARD_COMMAND, barModule.OPEN_BOARD_COMMAND, 'the status bar click lands on the registered command');
 });
 
-test('the Team Board view sits in the NEAR AI container after the chat view and shows only while Team Mode is on', () => {
+// Owner decision 2026-11-03 (G-62-1, amends D-15 and AD-22): the full board opens only in its own editor tab, so the NEAR AI container holds
+// the chat view alone and nothing in the manifest names a sidebar board view. This replaces the test that asserted the sidebar view.
+test('the NEAR AI container lists only the chat view, and no contribution names a sidebar Team Board view (G-62-1)', () => {
   const views = manifest.contributes.views['nearAiSecondaryViewContainer'] ?? [];
-  const chat = views.findIndex((entry) => entry.id === 'nearAiChatView');
-  const board = views.findIndex((entry) => entry.id === 'nearAiTeamBoardView');
-  assert.ok(chat >= 0 && board > chat, 'the board view follows the chat view');
-  assert.deepEqual([views[board]?.type, views[board]?.name, views[board]?.when], ['webview', 'Team Board', 'nearAi.teamMode']);
-  assert.equal(views[chat]?.when, undefined, 'the chat view is not gated');
-  const boardModule = require('../services/team/boardView') as typeof import('../services/team/boardView');
-  assert.equal(boardModule.BOARD_VIEW_ID, 'nearAiTeamBoardView');
-  assert.equal(boardModule.BOARD_PANEL_TYPE, 'nearAiTeamBoard');
+  assert.deepEqual(views.map((entry) => entry.id), ['nearAiChatView'], 'the chat view is the only view in the NEAR AI container');
+  assert.equal(views[0]?.when, undefined, 'the chat view is not gated');
+  assert.equal(JSON.stringify(manifest.contributes).includes('nearAiTeamBoardView'), false, 'no view, menu, command or key names the old board view');
+  const raw = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { activationEvents?: string[] };
+  assert.equal((raw.activationEvents ?? []).some((event) => event.includes('nearAiTeamBoardView')), false, 'no activation event names it either');
+  const boardModule = require('../services/team/boardView') as Record<string, unknown>;
+  assert.equal('BOARD_VIEW_ID' in boardModule, false, 'the host exports no sidebar view id');
+  assert.equal(boardModule.BOARD_PANEL_TYPE, 'nearAiTeamBoard', 'the editor tab keeps its type');
 });
 
 test('nearAi.team.pollSeconds is a number 5..3600, default 15, application scope, with a plain description', () => {

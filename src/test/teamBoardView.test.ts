@@ -1,4 +1,4 @@
-// The Team Board host (Phase 62 plan 08): the panel and the view provider on a real team session over real clones, the page protocol, the nonce CSP,
+// The Team Board host (Phase 62 plan 08): the editor panel on a real team session over real clones, the page protocol, the nonce CSP,
 // the message parser, throttled posting and the native prompts of a move. Timers of the session and of the board's own throttle fire by hand; git,
 // the log and the roster are real. Lazy requires keep every vscode import behind the stub.
 import assert from 'node:assert/strict';
@@ -23,7 +23,8 @@ test.after(() => { uninstall(); });
 
 const { TeamSession, projectAuditSink } = sessionModule;
 const { createTeamStatusBar } = barModule;
-const { BOARD_PANEL_TYPE, BOARD_SCRIPTS, BOARD_STYLES, BOARD_VIEW_ID, boardHtml, boardTap, parseBoardMessage, registerTeamBoard } = boardModule;
+const { BOARD_PANEL_TYPE, BOARD_SCRIPTS, BOARD_STYLES, boardHtml, boardTap, parseBoardMessage, registerTeamBoard } = boardModule;
+type BoardSurface = import('../services/team/boardView').BoardSurface;
 type Session = Awaited<ReturnType<typeof TeamSession.start>>;
 type SessionDeps = Parameters<typeof TeamSession.start>[0];
 
@@ -79,6 +80,18 @@ function openBoard(session: Session, timers: LiveTimers, lines: string[]): { pan
   const panel = stub.webviewPanels[stub.webviewPanels.length - 1];
   assert.ok(panel !== undefined, 'a panel was created');
   return { panel, board };
+}
+
+// The board has one editor tab, but the controller serves any number of pages. These tests attach a second, hand-made page to check that a hidden
+// page gets nothing and that the session hears "hidden" only when no page can be seen.
+function secondPage(board: ReturnType<typeof registerTeamBoard>): RecordedWebview {
+  const { view, record } = stub.createWebviewView();
+  const page = view as { webview: BoardSurface['webview']; visible: boolean; onDidChangeVisibility(listener: () => void): { dispose(): void }; onDidDispose(listener: () => void): { dispose(): void } };
+  board.controller.attach({
+    kind: 'panel', webview: page.webview, isVisible: () => page.visible,
+    onDidChangeVisibility: (listener) => page.onDidChangeVisibility(() => { listener(page.visible); }), onDidDispose: (listener) => page.onDidDispose(listener)
+  });
+  return record;
 }
 
 function resetStub(): void {
@@ -163,28 +176,32 @@ test('the panel is one editor tab: a second Open reveals it, and it asks for scr
   });
 });
 
-test('the sidebar view provider is registered once under the view id with no retained context, and serves the same page', async () => {
+// Owner decision 2026-11-03 (G-62-1, amends D-15 and AD-22): the full board opens only in its own editor tab, and nothing opens by itself. This
+// replaces the test that asserted the sidebar view provider: no view provider is ever registered, and no page exists until someone asks.
+test('no view provider is ever registered, and a lead session that syncs and imports opens nothing until the board is asked for (G-62-1)', async () => {
   resetStub();
   await withLiveTeam(async (rig) => {
-    await importFixture(rig);
-    const a = await startSession(rig, 'owner');
+    const lead = await startSession(rig, rig.lead);
     const context = createFakeContext(path.join(EXTENSION_ROOT, 'does-not-exist'), {});
-    const board = registerTeamBoard(context as never, { session: () => a.session, output: { appendLine: (line) => { a.lines.push(line); }, show: () => undefined }, timers: new LiveTimers() });
+    const board = registerTeamBoard(context as never, { session: () => lead.session, output: { appendLine: (line) => { lead.lines.push(line); }, show: () => undefined }, timers: new LiveTimers() });
     try {
-      assert.equal(stub.viewProviders.length, 1);
-      const registered = stub.viewProviders[0];
-      assert.equal(registered?.viewType, BOARD_VIEW_ID);
-      assert.equal(registered?.options, undefined, 'no retainContextWhenHidden option is passed');
-      const { view, record } = stub.createWebviewView();
-      registered?.provider.resolveWebviewView(view);
-      assert.equal(record.options.enableScripts, true);
-      assert.deepEqual(record.options.localResourceRoots?.map((root) => root.fsPath), [MEDIA_BOARD]);
-      assert.ok(record.html.includes('script-src'), 'the view has the page');
-      await record.receive({ type: 'ready' });
-      assert.equal(cardOf(states(record)[0], READY_PLAN)?.column, 'ready');
+      assert.equal(stub.viewProviders.length, 0, 'no sidebar view provider');
+      assert.equal(stub.webviewPanels.length, 0, 'no panel when the board is registered');
+      await importFixture(rig);
+      lead.timers.fire();
+      await until(() => lead.session.state().items.get(READY_PLAN) !== undefined, 'the poll to bring the imported plans');
+      assert.equal(stub.webviewPanels.length, 0, 'still no panel after the session synced the import');
+      assert.equal(stub.viewProviders.length, 0, 'and still no view provider');
+      board.openPanel();
+      assert.equal(stub.webviewPanels.length, 1, 'asking opens one panel');
+      assert.equal(stub.webviewPanels[0]?.viewType, BOARD_PANEL_TYPE);
+      board.openPanel();
+      assert.equal(stub.webviewPanels.length, 1, 'asking again opens no second panel');
+      assert.equal(stub.webviewPanels[0]?.revealCalls, 1, 'it reveals the first');
+      assert.equal(stub.viewProviders.length, 0);
     } finally {
       board.controller.dispose();
-      a.session.dispose();
+      lead.session.dispose();
     }
   });
 });
@@ -193,8 +210,10 @@ test('the page has one nonce CSP, one script tag per client file in order and no
   const uri = stub.vscode as { Uri: { file(path: string): { fsPath: string } } };
   const media = uri.Uri.file(MEDIA_BOARD);
   const webview = { cspSource: 'CSP_SOURCE', asWebviewUri: (value: { fsPath: string }) => ({ toString: () => `webview://${value.fsPath}` }) };
-  for (const surface of ['view', 'panel'] as const) {
-    const html = boardHtml(webview as never, media as never, 'NONCE', surface);
+  // The page is written for one place, the editor tab, so boardHtml takes no surface and the body carries no surface attribute (G-62-1).
+  const page = boardHtml as unknown as (webview: unknown, media: unknown, nonce: string, testSeams?: boolean) => string;
+  for (const testSeams of [false, true]) {
+    const html = page(webview, media, 'NONCE', testSeams);
     assert.equal(html.match(/<meta http-equiv="Content-Security-Policy"/g)?.length, 1, 'one CSP meta');
     const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)?.[1];
     assert.equal(csp, "default-src 'none'; style-src CSP_SOURCE; script-src 'nonce-NONCE';");
@@ -215,11 +234,12 @@ test('the page has one nonce CSP, one script tag per client file in order and no
     assert.equal(/https?:/.test(html), false, 'no remote address');
     assert.equal(html.includes('font-src'), false, 'icons are inline SVG, so no font source');
     assert.ok(html.includes('id="root"') && html.includes('id="live"'), 'the root and the live region the client expects');
-    assert.ok(html.includes(`data-surface="${surface}"`));
+    assert.equal(html.includes('data-surface'), false, 'no surface attribute on the body');
+    assert.equal(html.includes('data-e2e="1"'), testSeams, 'the test mark only when asked for');
   }
 });
 
-test('host-request reaches the visible surfaces and nothing that is hidden, and exists only under the extension-host tests (IN-05)', async () => {
+test('host-request reaches the visible pages and nothing that is hidden, and exists only under the extension-host tests (IN-05)', async () => {
   resetStub();
   await withLiveTeam(async (rig) => {
     await importFixture(rig);
@@ -234,13 +254,12 @@ test('host-request reaches the visible surfaces and nothing that is hidden, and 
     const panel = stub.webviewPanels[stub.webviewPanels.length - 1] as RecordedWebviewPanel;
     try {
       assert.equal(panel.html.includes('data-e2e="1"'), true, 'the test board marks its page');
-      const { view, record } = stub.createWebviewView();
-      stub.viewProviders[0]?.provider.resolveWebviewView(view);
+      const record = secondPage(board);
       record.setVisible(false);
       assert.ok(boardTap.request !== undefined, 'the controller offers the request hook');
       await boardTap.request?.({ type: 'retry' });
       assert.deepEqual(panel.posted.filter((message) => (message as { type?: string }).type === 'host-request'), [{ type: 'host-request', payload: { type: 'retry' } }]);
-      assert.equal(record.posted.length, 0, 'the hidden view got nothing');
+      assert.equal(record.posted.length, 0, 'the hidden page got nothing');
       assert.equal(record.postedWhileHidden, 0);
       panel.setVisible(false);
       await boardTap.request?.({ type: 'retry' });
@@ -631,13 +650,12 @@ test('a hidden surface gets nothing, the session is told only when no surface is
     const { panel, board } = openBoard(a.session, ui, a.lines);
     try {
       await panel.receive({ type: 'ready' });
-      const { view, record } = stub.createWebviewView();
-      stub.viewProviders[0]?.provider.resolveWebviewView(view);
+      const record = secondPage(board);
       await record.receive({ type: 'ready' });
       assert.deepEqual(calls, [true], 'told once that the board can be seen');
 
       panel.setVisible(false);
-      assert.deepEqual(calls, [true], 'the sidebar view is still visible');
+      assert.deepEqual(calls, [true], 'the second page is still visible');
       record.setVisible(false);
       assert.deepEqual(calls, [true, false], 'told when nothing can be seen');
 
@@ -808,7 +826,7 @@ const commandsModule = require('../services/team/teamCommands') as typeof import
 const importModule = require('../team/importPlans') as typeof import('../team/importPlans');
 const setContexts = (): Array<{ command: string; args: unknown[] }> => stub.externalCommands.filter((entry) => entry.command === 'setContext');
 
-test('team project: the board comes up once the session starts, Open Team Board opens one panel and reveals it again, and the context key follows the window', async () => {
+test('team project: nothing opens when the session starts, Open Team Board opens one panel and reveals it again, and the context key follows the window', async () => {
   resetStub();
   await withLiveTeam(async (rig) => {
     stub.setWorkspaceFolders([rootOf(rig, 'a')]);
@@ -817,7 +835,8 @@ test('team project: the board comes up once the session starts, Open Team Board 
     try {
       assert.equal(await handle.ready, 'team');
       assert.deepEqual(setContexts(), [{ command: 'setContext', args: ['nearAi.teamMode', true] }], 'the context key is set once the session runs');
-      assert.equal(stub.viewProviders.length, 1, 'the view provider is registered once');
+      // Owner decision 2026-11-03 (G-62-1): no sidebar board view, and nothing opens by itself when the session starts.
+      assert.equal(stub.viewProviders.length, 0, 'no view provider is registered');
       assert.equal(stub.webviewPanels.length, 0, 'no panel until someone asks');
 
       await stub.commands.get(commandsModule.OPEN_BOARD_COMMAND)?.();
@@ -826,7 +845,7 @@ test('team project: the board comes up once the session starts, Open Team Board 
       await stub.commands.get(commandsModule.OPEN_BOARD_COMMAND)?.();
       assert.equal(stub.webviewPanels.length, 1, 'a second run reveals the open panel');
       assert.equal(stub.webviewPanels[0]?.revealCalls, 1);
-      assert.equal(stub.viewProviders.length, 1, 'still one provider');
+      assert.equal(stub.viewProviders.length, 0, 'still no view provider');
       assert.equal(setContexts().length, 1, 'the key was not set again');
       assert.deepEqual(stub.notifications.filter((entry) => /solo|Team Mode is not on/.test(entry.message)), [], 'no solo explanation appeared');
 
