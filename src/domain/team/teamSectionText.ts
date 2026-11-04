@@ -2,56 +2,54 @@
 // finds it by its *Text.ts name. Plain words, sentence case, no git words, no en or em dash; the paying account is "your organization". Team names
 // arrive already made display-safe by the host. Pure: no I/O, no clock, no vscode.
 
-export const TEAM_SECTION_HEADING = 'Team';
+// The heading with no team (G-61-8): even one person works with a team of agents, so the section speaks of that, not of turning a feature on.
+export const TEAM_SECTION_HEADING = 'Working with your agents';
 
 // The button labels, one per action id of teamSection.ts.
 export const TEAM_ACTION_LABELS = Object.freeze({
-  'turn-on': 'Turn on Team Mode',
-  join: 'Join a team',
-  share: 'Share',
   invite: 'Invite someone',
+  join: 'Join a team',
+  solo: 'Just me for now',
+  share: 'Share',
   members: 'Members',
   board: 'Open board',
   link: 'Link your organization',
   check: 'Check the team'
 });
 
+// The two links of the quiet line on the empty chat after Just me for now. Join a team stays, because an invite tells the person to choose it.
+export const TEAM_SOLO_LINE_LABELS = Object.freeze({
+  invite: 'Invite people',
+  join: 'Join a team'
+});
+
 // A short explanation per button, shown as its tooltip.
 export const TEAM_ACTION_HINTS = Object.freeze({
-  'turn-on': 'Start a team for this project so other people can work on it with you.',
+  invite: 'Invite a person to work on this project with you. If the project has no team yet, it is set up on the way.',
   join: 'Join a team with the invite someone sent you.',
+  solo: 'Put this away for this project. You can still invite people any time from the empty chat.',
   share: 'Put the team setup online so the people you invite can join.',
-  invite: 'Make an invite for a person, with the role they will have.',
-  members: 'See who is on the team and confirm the people who joined.',
+  members: 'See who is on the team, invite more people and confirm the people who joined.',
   board: 'Open the team board in an editor tab.',
   link: 'Link your organization so it pays for the team\'s AI use.',
   check: 'Check the team record and try to reach the team again.'
 });
 
-// The two links of the quiet empty-chat line after Just me for now (61-26): declared, filled in by the GREEN step.
-export const TEAM_SOLO_LINE_LABELS: Readonly<Record<string, string>> = Object.freeze({});
-
-/** Declared only (61-26 RED). */
-export function onlyYouStatus(_pendingInvites: number): string { return ''; }
-
-/** Declared only (61-26 RED). */
-export function peopleStatus(_name: string, _otherMembers: number, _waiting: number): string { return ''; }
-
-// The setup step titles (SETUP-01 can register these later).
+// The setup step titles (SETUP-01 registers these once main is merged in). Inviting sets the team up, so there is no separate turn-on step.
 export const TEAM_SETUP_TITLES = Object.freeze({
-  'team.turn-on': 'Turn on Team Mode',
+  'team.invite': 'Invite people',
   'team.share': 'Share the team setup',
-  'team.invite': 'Invite someone',
   'team.link': 'Link your organization'
 });
 
 // Sentences that do not depend on the team.
 export const TEAM_STATUS = Object.freeze({
-  noTeam: 'Work on this project with other people. Turn on Team Mode to start a team, or join one with an invite.',
+  noTeam: 'Want people to work with you too?',
+  justMe: 'Working solo with your agents. Invite people any time.',
+  onlyYou: 'Only you so far.',
   removed: 'You were removed from this team. Ask the team owner or a lead if you need to join again.',
   offline: 'The team cannot be reached right now.',
-  paused: 'Team updates are paused for now.',
-  justMe: ''
+  paused: 'Team updates are paused for now.'
 });
 
 function plural(count: number, one: string, many: string): string {
@@ -88,13 +86,17 @@ export function notReachableStatus(name: string): string {
   return `Your teammates cannot reach this project yet, so they cannot join ${name}. Choose Share to see what to do.`;
 }
 
-/** The owner or a lead of a team that is ready for people; waiting is how many people need them in Members (to confirm, or for a key). */
-export function managerStatus(name: string, otherMembers: number, pendingInvites: number, waiting: number = 0): string {
-  const who = otherMembers === 0
-    ? `${name} is ready. Invite someone to work with you.`
-    : `${name} has ${otherMembers} ${plural(otherMembers, 'other member', 'other members')}. Invite someone to add more.`;
-  const invites = pendingInvites === 0 ? who : `${who} ${pendingInvites} ${plural(pendingInvites, 'invite is', 'invites are')} not used yet.`;
-  return waiting === 0 ? invites : `${invites} ${waiting} ${plural(waiting, 'person is', 'people are')} waiting for you in Members.`;
+/** The owner or a lead of a team nobody else has joined yet: only them, and the people invited who have not joined. */
+export function onlyYouStatus(pendingInvites: number): string {
+  if (pendingInvites === 0) return TEAM_STATUS.onlyYou;
+  return `${TEAM_STATUS.onlyYou} ${pendingInvites} ${plural(pendingInvites, 'person you invited has', 'people you invited have')} not joined yet.`;
+}
+
+/** The owner or a lead once someone joined: how many people are on the team, and how many wait for them in Members (to confirm, or for a key). */
+export function peopleStatus(name: string, otherMembers: number, waiting: number): string {
+  const people = otherMembers + 1;
+  const who = `${people} ${plural(people, 'person is', 'people are')} on ${name}.`;
+  return waiting === 0 ? who : `${who} ${waiting} ${plural(waiting, 'person is', 'people are')} waiting for you in Members.`;
 }
 
 /** The status when the team cannot be reached or updates are paused: the connection text, as one sentence. */

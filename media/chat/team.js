@@ -4,11 +4,14 @@
 // they: the host sends the probe only under NEAR_AI_E2E=1) ask with {type:'team-e2e', id, click?} what is drawn, and may click a drawn button.
 // The section is drawn only while the project has a working NEAR AI profile (61-25, G-61-7): readiness.js (window.nearReadiness) is the one rule,
 // read from the profile-status messages the host sends. Until then the latest model is kept but nothing team-related can be seen or clicked.
+// After Just me for now (61-26, G-61-8) the model's placement is empty-chat-line: the section is hidden and its status and actions are one quiet line
+// (p.team-solo) inside #welcome, the empty chat's welcome that chat.js hides during a conversation, so the line is never shown there.
 (function () {
   'use strict';
 
   // The only action ids a click may post, the same list as TEAM_ACTION_IDS in src/domain/team/teamSection.ts (a test keeps the two equal).
-  const ACTIONS = Object.freeze(['turn-on', 'join', 'share', 'invite', 'members', 'board', 'link', 'check']);
+  const ACTIONS = Object.freeze(['invite', 'join', 'solo', 'share', 'members', 'board', 'link', 'check']);
+  const LINE_PLACEMENT = 'empty-chat-line';
   const NOT_SHOWN = 'That action is not shown in the Team section.';
   // The probe's answer to a click while the whole section is hidden.
   const HIDDEN = 'hidden';
@@ -25,6 +28,8 @@
   let drawn = new Map();
   // The latest model from the host, drawn while the profile works.
   let latest = null;
+  // The quiet empty-chat line: its paragraph, text and link buttons by action id; null while it is not drawn.
+  let line = null;
 
   function profileState() {
     const state = readiness ? readiness.current() : undefined;
@@ -41,9 +46,16 @@
     if (input && typeof input.focus === 'function') input.focus();
   }
 
-  // Draws the latest model while the profile works, and hides the section otherwise.
+  // Draws the latest model while the profile works, and hides the section and the line otherwise.
   function show() {
-    if (profileState() === 'ready' && latest) render(latest);
+    const ready = profileState() === 'ready';
+    if (ready && latest && latest.placement === LINE_PLACEMENT) {
+      render(null);
+      drawLine(latest);
+      return;
+    }
+    removeLine();
+    if (ready && latest) render(latest);
     else if (latest) conceal();
     else render(null);
   }
@@ -105,6 +117,59 @@
     entry.primary = primary;
   }
 
+  // The quiet line inside the empty chat's welcome: the status text, then each action as a link-styled button with the same closure-bound click.
+  function drawLine(model) {
+    const welcome = document.getElementById('welcome');
+    if (!welcome) {
+      removeLine();
+      return;
+    }
+    if (line === null) {
+      const node = document.createElement('p');
+      node.className = 'team-solo';
+      line = { node, text: text('span', 'team-solo-text', ''), drawn: new Map() };
+    }
+    if (line.node.parentNode !== welcome) welcome.append(line.node);
+    line.text.textContent = typeof model.status === 'string' ? model.status : '';
+    const next = new Map();
+    const list = Array.isArray(model.actions) ? model.actions : [];
+    for (const action of list) {
+      if (!action || typeof action !== 'object') continue;
+      const at = ACTIONS.indexOf(action.id);
+      if (at === -1 || next.has(ACTIONS[at])) continue;
+      const entry = line.drawn.get(ACTIONS[at]) || makeButton(ACTIONS[at]);
+      update(entry, action);
+      entry.button.className = 'link team-solo-action';
+      entry.button.removeAttribute('aria-describedby');
+      next.set(entry.id, entry);
+    }
+    const children = [line.text];
+    for (const entry of next.values()) children.push(' ', entry.button);
+    const focused = document.activeElement;
+    line.node.replaceChildren(...children);
+    const kept = [...next.values()].find((entry) => entry.button === focused);
+    if (kept) kept.button.focus();
+    line.drawn = next;
+  }
+
+  function removeLine() {
+    if (line === null) return;
+    const focused = document.activeElement;
+    const hadFocus = Boolean(focused) && line.node.contains(focused);
+    line.node.remove();
+    line = null;
+    if (!hadFocus) return;
+    const input = document.getElementById('input');
+    if (input && typeof input.focus === 'function') input.focus();
+  }
+
+  // Whether a node is on the page and none of its ancestors is hidden (the welcome is hidden during a conversation).
+  function shown(node) {
+    if (!node.isConnected) return false;
+    for (let at = node; at; at = at.parentNode) if (at.hidden === true) return false;
+    return true;
+  }
+
   function render(model) {
     if (!model || typeof model !== 'object') {
       if (!section.hidden) conceal();
@@ -153,9 +218,17 @@
     section.hidden = false;
   }
 
+  // What the quiet empty-chat line shows, or null when it is not drawn.
+  function describeLine() {
+    if (line === null || !line.node.isConnected) return null;
+    const actions = [];
+    for (const entry of line.drawn.values()) actions.push({ id: entry.id, label: entry.label.textContent });
+    return { text: line.text.textContent, actions };
+  }
+
   // What the section shows, read from the drawn elements.
   function describe() {
-    if (parts === null || section.hidden) return { heading: '', status: '', actions: [], hidden: true, profile: profileState() };
+    if (parts === null || section.hidden) return { heading: '', status: '', actions: [], hidden: true, profile: profileState(), soloLine: describeLine() };
     const actions = [];
     for (const button of Array.from(parts.row.children)) {
       const entry = [...drawn.values()].find((candidate) => candidate.button === button);
@@ -164,16 +237,20 @@
       if (entry.badge.parentNode === button && entry.badge.textContent) fact.badge = entry.badge.textContent;
       actions.push(fact);
     }
-    return { heading: parts.heading.textContent, status: parts.status.textContent, actions, hidden: false, profile: profileState() };
+    return { heading: parts.heading.textContent, status: parts.status.textContent, actions, hidden: false, profile: profileState(), soloLine: describeLine() };
   }
 
   function probe(message) {
     if (typeof message.id !== 'number' || !Number.isFinite(message.id)) return;
     let error;
     if (message.click !== undefined) {
-      const entry = typeof message.click === 'string' && !section.hidden ? drawn.get(message.click) : undefined;
-      if (section.hidden) error = HIDDEN;
-      else if (entry && entry.button.isConnected) entry.button.click();
+      const id = typeof message.click === 'string' ? message.click : undefined;
+      const entry = id !== undefined && !section.hidden ? drawn.get(id) : undefined;
+      // An action of the quiet line is clicked only while a person could see it (not during a conversation).
+      const inLine = id !== undefined && line !== null ? line.drawn.get(id) : undefined;
+      if (entry && entry.button.isConnected) entry.button.click();
+      else if (inLine && shown(inLine.button)) inLine.button.click();
+      else if (section.hidden) error = HIDDEN;
       else error = NOT_SHOWN;
     }
     const facts = Object.assign({ type: 'team-e2e-facts', id: message.id }, describe());

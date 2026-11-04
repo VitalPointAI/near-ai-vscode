@@ -34,17 +34,18 @@ export interface TeamSectionHost extends vscode.Disposable {
   refresh(options?: { recheckShared?: boolean }): Promise<void>;
 }
 
-export type TeamSectionMessage = { type: 'team-action'; action: TeamActionId } | { type: 'team-e2e-facts'; id: number; facts: Record<string, unknown> };
+export type TeamSectionMessage = { type: 'team-action'; action: Exclude<TeamActionId, 'solo'> } | { type: 'team-e2e-facts'; id: number; facts: Record<string, unknown> };
 
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 // The online check (a network call) runs at most once a minute, on a monotonic clock, unless an action that changes what is online just finished.
 const SHARED_RECHECK_MS = 60_000;
-const RECHECK_AFTER: ReadonlySet<TeamActionId> = new Set<TeamActionId>(['share', 'invite', 'link', 'turn-on', 'join']);
+const RECHECK_AFTER: ReadonlySet<TeamActionId> = new Set<TeamActionId>(['share', 'invite', 'link', 'join']);
 
-// The action ids the page may post. A Record keyed by TeamActionId, so the compiler fails when the model's list and this one differ; the model module
-// itself is loaded only by dynamic import (solo rule).
-const KNOWN_ACTIONS: Readonly<Record<TeamActionId, true>> = Object.freeze({
-  'turn-on': true, join: true, share: true, invite: true, members: true, board: true, link: true, check: true
+// The action ids the page may post that run a command. A Record keyed by those ids, so the compiler fails when the model's list and this one differ;
+// the model module itself is loaded only by dynamic import (solo rule).
+type CommandActionId = Exclude<TeamActionId, 'solo'>;
+const KNOWN_ACTIONS: Readonly<Record<CommandActionId, true>> = Object.freeze({
+  join: true, share: true, invite: true, members: true, board: true, link: true, check: true
 });
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -58,7 +59,7 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
   return own.length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 
-function isKnownAction(value: unknown): value is TeamActionId {
+function isKnownAction(value: unknown): value is CommandActionId {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(KNOWN_ACTIONS, value);
 }
 
@@ -84,7 +85,7 @@ export function parseTeamSectionMessage(value: unknown): TeamSectionMessage | un
  * to click one of its own drawn buttons (which then posts team-action through the normal path). The page's answers land in `facts`. In production
  * `probe` is never set and the page's answers are dropped.
  */
-export const teamSectionTap: { probe?: (request: { id: number; click?: TeamActionId }) => Promise<void>; facts: Array<Record<string, unknown>> } = { facts: [] };
+export const teamSectionTap: { probe?: (request: { id: number; click?: string }) => Promise<void>; facts: Array<Record<string, unknown>> } = { facts: [] };
 
 function isMissing(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
@@ -263,7 +264,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
     return entry.done;
   }
 
-  async function act(action: TeamActionId): Promise<void> {
+  async function act(action: CommandActionId): Promise<void> {
     try {
       const { TEAM_ACTION_COMMANDS } = await import('../../domain/team/teamSection');
       // Every Team Mode command reports its own failure to the person (teamCommands' guarded); the section shows the state either way.
@@ -275,10 +276,11 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
   }
 
   // The probe posts to the attached page and never runs anything itself.
-  async function probe(request: { id: number; click?: TeamActionId }): Promise<void> {
+  async function probe(request: { id: number; click?: string }): Promise<void> {
     const target = webview;
     if (target === undefined || typeof request.id !== 'number' || !Number.isFinite(request.id)) return;
-    if (request.click !== undefined && !isKnownAction(request.click)) return;
+    // Any drawn action may be clicked, Just me for now included; the page clicks only what it drew.
+    if (request.click !== undefined && !isKnownAction(request.click) && request.click !== 'solo') return;
     await target.postMessage({ type: 'team-e2e', id: request.id, ...(request.click === undefined ? {} : { click: request.click }) });
   }
   if (testSeams) teamSectionTap.probe = probe;
