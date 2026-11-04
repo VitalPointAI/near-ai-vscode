@@ -122,3 +122,5 @@ Amends the assignment added after the hands-on check (G-62-5, D-18) and the 62-1
 
 *Phase: 62-work-model-gsd-import-team-board-live-read-and-move*
 *Context gathered: 2026-11-02*
+
+- Owner confirmed (2026-11-03): self-assignment applies only to an unassigned card; a card held by a teammate changes hands only when that teammate unassigns themselves or a lead reassigns it ("planned version"). The 62-25 checkpoint takes confirm-recorded.
