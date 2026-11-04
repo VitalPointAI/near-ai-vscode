@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-16-PLAN.md
-last_updated: "2026-11-04T00:53:42.448Z"
+stopped_at: Completed 61-25-PLAN.md
+last_updated: "2026-11-04T01:12:52.799Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: b22ca29164065582e4020b686638419ecfd872a2
+state_head: 356e1770c8d9883f2448f7eb93b3e5194ad0809e
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 61
-  completed_plans: 52
+  total_plans: 62
+  completed_plans: 53
   percent: 13
 ---
 
@@ -106,6 +106,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P22 | 17min | 3 tasks | 5 files |
 | Phase 62 P15 | 20min | 3 tasks | 12 files |
 | Phase 62 P16 | 18 min | 3 tasks | 8 files |
+| Phase 61 P25 | 9 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -222,6 +223,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-16: the layout probe answers through NearAiBoard.post and onMessage, waits two frames each bounded by 50 ms, and scrolls the page when the board region is not a vertical scroller
 - [Phase 62]: 62-16: the DevTools client connects only to a ws://127.0.0.1 or localhost debugger address and sends only Input domain commands
 - [Phase 62]: 62-16: readXwd checks every size field against the file length and caps each side at 16384 px before allocating
+- [Phase 61]: 61-25: one readiness rule in the page (media/chat/readiness.js, PR #7's welcomeState case for case) gates the Team section and the planning-file links on profile-status; no host file check
+- [Phase 61]: 61-25: before the first profile-status the state is unknown and counts as not ready; the section keeps the latest model and draws it by itself once the profile works
+- [Phase 61]: 61-25: merge note: keep readiness.js as the rule, setup.js delegates to nearReadiness.welcomeState or keeps a copy checked by the parity test; readiness.js before setup.js and chat.js
 
 ### Pending Todos
 
@@ -243,8 +247,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T00:53:42.153Z
-Stopped at: Completed 62-16-PLAN.md
+Last session: 2026-11-04T01:12:52.476Z
+Stopped at: Completed 61-25-PLAN.md
 Resume file: None
 
 ## Notes
