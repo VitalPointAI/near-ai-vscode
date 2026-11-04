@@ -30,7 +30,18 @@ function isAllowedEndpoint(value) {
     return false;
   }
 }
-const TIMEOUT_MS = 180_000;
+// Reasoning models think before they answer, and the thinking counts against max_tokens, so a large
+// pull request needs room (and time) for both. REVIEW_MAX_TOKENS can raise or lower the cap.
+const TIMEOUT_MS = 480_000;
+const DEFAULT_MAX_TOKENS = 32_000;
+
+function maxTokens() {
+  const raw = process.env.REVIEW_MAX_TOKENS;
+  if (raw === undefined || raw === '') return DEFAULT_MAX_TOKENS;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1_000 || value > 400_000) fail('REVIEW_MAX_TOKENS must be a whole number from 1000 to 400000.');
+  return value;
+}
 
 async function call(prompt, { baseUrl, apiKey, model }) {
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
@@ -38,8 +49,7 @@ async function call(prompt, { baseUrl, apiKey, model }) {
     headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      // Enough for a long finding list plus the diff's context; the reply is a list, not an essay.
-      max_tokens: 4_000,
+      max_tokens: maxTokens(),
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: prompt }
@@ -55,8 +65,13 @@ async function call(prompt, { baseUrl, apiKey, model }) {
     throw new Error(`the model endpoint returned HTTP ${response.status}`);
   }
   const body = await response.json();
-  const text = body?.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || !text.trim()) throw new Error('the model returned an empty reply');
+  const choice = body?.choices?.[0];
+  const text = choice?.message?.content;
+  if (typeof text !== 'string' || !text.trim()) {
+    // A reasoning model that spends its whole allowance thinking answers with nothing and says why.
+    if (choice?.finish_reason === 'length') throw new Error('the model ran out of room before it answered (it stopped at its token limit); raise REVIEW_MAX_TOKENS');
+    throw new Error('the model returned an empty reply');
+  }
   return text.trim();
 }
 

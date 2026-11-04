@@ -176,6 +176,34 @@ test('an empty reply is an error, not an empty review', async () => {
   assert.match(result.stderr, /empty reply/);
 });
 
+test('a reasoning model gets room to think: a large token cap by default, and a reply cut off at the limit says so', async () => {
+  const { dir } = gathered();
+  const promptPath = path.join(dir, 'prompt.md');
+  writeFileSync(promptPath, 'prompt');
+  let sent;
+  const server = await new Promise((resolve) => {
+    const s = createServer((request, response) => {
+      let raw = '';
+      request.on('data', (chunk) => { raw += chunk; });
+      request.on('end', () => {
+        sent = JSON.parse(raw);
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: '' } }] }));
+      });
+    });
+    s.listen(0, '127.0.0.1', () => { servers.push(s); resolve(s); });
+  });
+  const result = await run('ci-review-call.mjs', [promptPath], {
+    REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
+  });
+  assert.notEqual(result.status, 0);
+  assert.ok(sent.max_tokens >= 32_000, `max_tokens ${sent.max_tokens}`);
+  assert.match(result.stderr, /ran out of room before it answered/);
+  const bad = await run('ci-review-call.mjs', [promptPath], { REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MAX_TOKENS: '12abc', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}` });
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /REVIEW_MAX_TOKENS must be/);
+});
+
 test('a reply in the new shape keeps its recommendation and still passes the gate', async () => {
   // The owner reads the recommendation block, and the gate reads the verdict. Both must survive.
   const { dir, head } = gathered();
