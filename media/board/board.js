@@ -19,6 +19,10 @@
   // The saved choices' version. Choices saved by the older board (no version) folded Backlog work away, so they are dropped once (G-62-3).
   const UI_VERSION = 2;
   const GROUP_BY = ['member', 'phase', 'milestone', 'none'];
+  // 62.1-03 (D-04, TD-2): the board's two views. Columns is the kanban (or the list under 520 px); Timeline is drawn by timeline.js.
+  const VIEWS = ['columns', 'timeline'];
+  const VIEW_LABELS = { columns: 'Columns', timeline: 'Timeline' };
+  const VIEW_SAID = { columns: 'Showing columns.', timeline: 'Showing the timeline.' };
   const GROUP_LABELS = { member: 'Member', phase: 'Phase', milestone: 'Milestone', none: 'None' };
   const COLUMN_ICONS = { backlog: 'circle-outline', ready: 'play-circle', claimed: 'person', 'in-progress': 'sync', 'in-review': 'eye', integrating: 'check-all', done: 'pass', cancelled: 'circle-slash' };
   const T = {
@@ -67,11 +71,12 @@
     groupBy: GROUP_BY.indexOf(saved.groupBy) >= 0 ? saved.groupBy : 'member',
     filters: Object.assign({ mine: false, ready: false, blocked: false, requirement: '', phase: '' }, saved.filters || {}),
     collapsedColumns: saved.collapsedColumns || {}, collapsedLanes: saved.collapsedLanes || {}, openGroups: saved.openGroups || {},
-    selected: typeof saved.selected === 'string' ? saved.selected : '', milestone: typeof saved.milestone === 'string' ? saved.milestone : '', filtersOpen: saved.filtersOpen === true
+    selected: typeof saved.selected === 'string' ? saved.selected : '', milestone: typeof saved.milestone === 'string' ? saved.milestone : '', filtersOpen: saved.filtersOpen === true,
+    view: VIEWS.indexOf(saved.view) >= 0 ? saved.view : 'columns'
   };
   // The item form's unsent draft (form.js) lives in the same stored state: the page may acquire the VS Code API only once, so the form borrows it here.
   let formDraft = saved.draft && typeof saved.draft === 'object' ? saved.draft : undefined;
-  const persist = () => vscode.setState({ version: UI_VERSION, groupBy: ui.groupBy, filters: ui.filters, collapsedColumns: ui.collapsedColumns, collapsedLanes: ui.collapsedLanes, openGroups: ui.openGroups, selected: ui.selected, milestone: ui.milestone, filtersOpen: ui.filtersOpen, ...(formDraft ? { draft: formDraft } : {}) });
+  const persist = () => vscode.setState({ version: UI_VERSION, groupBy: ui.groupBy, filters: ui.filters, collapsedColumns: ui.collapsedColumns, collapsedLanes: ui.collapsedLanes, openGroups: ui.openGroups, selected: ui.selected, milestone: ui.milestone, filtersOpen: ui.filtersOpen, view: ui.view, ...(formDraft ? { draft: formDraft } : {}) });
 
   // ---- runtime state (not persisted) ---------------------------------------------------------------------------------------------------------
   let model;
@@ -102,6 +107,8 @@
   const renderListeners = [];
   const messageListeners = {};
   let menuOpener, detailOpener, formOpener;
+  // The views other scripts draw (62.1-03: timeline.js registers 'timeline'): name -> { render(container, shownCards), focus?(), leave?() }.
+  const registeredViews = {};
 
   // ---- small helpers -------------------------------------------------------------------------------------------------------------------------
   const $ = (id) => document.getElementById(id);
@@ -149,7 +156,9 @@
     if (!model) return 'all';
     return ui.milestone === 'all' || model.milestones.some((m) => m.id === ui.milestone) ? ui.milestone : model.selectedMilestone;
   }
-  const inMilestone = (c) => { const sel = milestoneId(); return sel === 'all' || c.milestoneId === sel || c.milestoneId === undefined; };
+  // The timeline shows every milestone on one axis (D-02), so the Milestone choice applies to Columns only.
+  const timelineOn = () => ui.view === 'timeline' && !!registeredViews.timeline;
+  const inMilestone = (c) => { if (timelineOn()) return true; const sel = milestoneId(); return sel === 'all' || c.milestoneId === sel || c.milestoneId === undefined; };
   function matches(c) {
     const f = ui.filters;
     const req = f.requirement.trim().toLowerCase();
@@ -194,6 +203,22 @@
   const newBtn = button('primary', T.newItem, () => { if (newBtn.getAttribute('aria-disabled') !== 'true') api.openForm(); }, 'add');
   actions.append(importBtn, newBtn);
   const controls = el('div', 'controls');
+  // 62.1-03 (D-04, TD-2): the View switch, the same segmented control and keys as Group by, first in row 2 in every layout and both views.
+  const viewSeg = el('div', 'segmented'); viewSeg.id = 'view-switch'; viewSeg.setAttribute('role', 'radiogroup'); viewSeg.setAttribute('aria-label', 'View');
+  const viewRadios = VIEWS.map((key) => {
+    const r = button('', VIEW_LABELS[key], () => setView(key));
+    r.setAttribute('role', 'radio'); r.dataset.view = key;
+    return r;
+  });
+  viewSeg.append(...viewRadios);
+  viewSeg.addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const next = VIEWS[(VIEWS.indexOf(ui.view) + step + VIEWS.length) % VIEWS.length];
+    setView(next);
+    viewRadios[VIEWS.indexOf(next)].focus();
+  });
   const summary = el('p', 'summary-line');
   const msWrap = el('div', 'field');
   const msLabel = el('label', '', 'Milestone'); msLabel.setAttribute('for', 'ms-select');
@@ -239,7 +264,7 @@
   reqWrap.append(reqLabel, reqInput, reqList);
   const clearBtn = button('link', T.clear, () => clearFilters());
   filtersEl.append(chips.mine, chips.ready, chips.blocked, phaseWrap, reqWrap, clearBtn);
-  controls.append(summary, msWrap, msSummary, groupWrap, filtersBtn, filtersEl);
+  controls.append(viewSeg, summary, msWrap, msSummary, groupWrap, filtersBtn, filtersEl);
   tb.append(titleRow, controls, actions);
   root.append(tb, bannerEl, board, detailEl, hints);
 
@@ -273,6 +298,15 @@
     return [folded(LATER).length ? T.laterNote : '', finished.length ? T.finishedNote(finished.join(' and ')) : ''].filter(Boolean).join(' ');
   }
   function setGroupBy(key) { ui.groupBy = key; persist(); render(); }
+  function setView(key) {
+    if (VIEWS.indexOf(key) < 0 || key === ui.view) return;
+    const old = registeredViews[ui.view];
+    ui.view = key;
+    persist();
+    if (old && typeof old.leave === 'function') old.leave();
+    render();
+    announce(VIEW_SAID[key]);
+  }
   function clearFilters() {
     ui.filters = { mine: false, ready: false, blocked: false, requirement: '', phase: '' };
     persist(); render(); scheduleFilterAnnounce();
@@ -286,6 +320,7 @@
   // ---- layout ------------------------------------------------------------------------------------------------------------------------------------
   function applyLayout() {
     root.setAttribute('data-layout', layout);
+    attr(root, 'data-view', timelineOn() ? 'timeline' : 'columns');
     if (layout === 'list') { place(tb, [titleRow, actions, bannerEl, controls]); place(root, [tb, board, detailEl, hints]); } else { place(tb, [titleRow, controls, actions]); place(root, [tb, bannerEl, board, detailEl, hints]); }
   }
   function setLayout(width) {
@@ -333,6 +368,7 @@
     if (m) { setText(msText, m.title + ': ' + m.progress.text); setProgress(msBar, m.progress, m.title + ' progress'); msBar.box.hidden = m.progress.total === 0; }
     // group by (kanban only)
     groupWrap.hidden = layout !== 'kanban';
+    viewRadios.forEach((r) => { const on = r.dataset.view === ui.view; attr(r, 'aria-checked', on ? 'true' : 'false'); attr(r, 'tabindex', on ? 0 : -1); });
     radios.forEach((r) => { const on = r.dataset.group === ui.groupBy; attr(r, 'aria-checked', on ? 'true' : 'false'); attr(r, 'tabindex', on ? 0 : -1); });
     // filters
     filtersBtn.hidden = layout !== 'list';
@@ -436,6 +472,9 @@
       place(board, [stateView('filtered', T.noMatch, ui.filters.mine ? T.mineBody : T.clearBody, [button('link', T.clear, clearFilters)])]);
       return;
     }
+    // 62.1-03: in the Timeline view the registered view draws the shown cards into the board region; the toolbar, banners, live region, detail
+    // drawer and menu stay the board's.
+    if (timelineOn()) { registeredViews.timeline.render(board, shown); return; }
     if (layout === 'kanban') { renderKanban(shown); place(board, [views.kanban]); } else { renderList(shown); place(board, [views.list]); }
   }
 
@@ -894,6 +933,12 @@
   }
   const api = {
     post, announce, icon, layout: () => layout, model: () => model, cardData, cardElement: (id) => cardEls.get(id), groupBy: () => ui.groupBy,
+    /** 62.1-03: a script draws a whole view of the board; the board hands it the shown cards when that view is chosen. */
+    registerView(name, view) { if (VIEWS.indexOf(name) >= 0 && name !== 'columns' && view && typeof view.render === 'function') { registeredViews[name] = view; if (ui.view === name) render(); } },
+    view: () => ui.view,
+    setView,
+    /** The card the person selected (it stays selected across the views). */
+    selected: () => ui.selected,
     focusCard: (id) => { const li = cardEls.get(id); return !!li && li.isConnected && focusEl(li); },
     setPending(id, text) { delete refusals[id]; pending[id] = text; refreshCard(id); },
     showRefusal(id, columnLabel, reason, action) {

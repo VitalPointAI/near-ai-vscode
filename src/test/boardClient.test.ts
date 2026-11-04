@@ -250,7 +250,8 @@ test('group by switches the lanes; a phase lane shows its progress, a phase lane
   h.deliver({ type: 'state', model });
   assert.deepEqual(h.$$('.lane').map((l) => l.getAttribute('data-lane')), ['unassigned']);
   assert.equal(radio(h, 'Member').getAttribute('aria-checked'), 'true');
-  assert.equal(h.$('[role="radiogroup"]')!.getAttribute('aria-label'), 'Group by');
+  // 62.1-03 (D-04, TD-2): the View switch is now the first radio group of row 2, so the Group by group is found by its own field.
+  assert.equal(h.$('.group-by [role="radiogroup"]')!.getAttribute('aria-label'), 'Group by');
 
   radio(h, 'Phase').click();
   assert.equal(radio(h, 'Phase').getAttribute('aria-checked'), 'true');

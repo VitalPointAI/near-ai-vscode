@@ -104,6 +104,7 @@ const required = [
   'extension/media/board/drag.js',
   'extension/media/board/detail.js',
   'extension/media/board/form.js',
+  'extension/media/board/timeline.js',
   'extension/media/board/board.css',
   'extension/resources/benchmark/execution/execute-plan/task.json',
   'extension/resources/benchmark/execution/issue-fix/hidden/report.test.js',

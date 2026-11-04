@@ -24,8 +24,8 @@ import { teamPrompts } from './teamPrompts';
 import { safeReason } from './teamStatusBar';
 
 export const BOARD_PANEL_TYPE = 'nearAiTeamBoard';
-// Load order of the client; plans 62-09 to 62-13 create the files.
-export const BOARD_SCRIPTS = ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js'] as const;
+// Load order of the client; plans 62-09 to 62-13 create the files, and 62.1-03 adds the timeline view, which plugs in last.
+export const BOARD_SCRIPTS = ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js', 'timeline.js'] as const;
 // Test-only page scripts (62-21, T-62-68): appended after the client files only on a page made for the extension-host tests (NEAR_AI_E2E=1). The layout
 // probe (62-16) is not packaged (.vscodeignore and the release check), so the e2e loads it from the source tree.
 export const BOARD_TEST_SCRIPTS = ['layout-probe.js'] as const;
