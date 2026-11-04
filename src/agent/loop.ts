@@ -397,12 +397,15 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const warnAt = guard.warnAt ?? Math.round((guard.nudgeAt + guard.stopAt) / 2);
     calls.forEach((call, index) => {
       const key = loopActionKey(call);
+      // The call's own result, or the one in its position. With none, the content is empty, so a
+      // navigation call has no "[exit code 0]" and is counted: a missing result never hides a loop.
+      const content = String(results.find((message) => message.role === 'tool' && message.tool_call_id === call.id)?.content ?? results[index]?.content ?? '');
       // Moving to a folder or asking where you are changes nothing and always gives the same
       // result, so a successful one is never progress or a loop by itself (the shell keeps the
       // folder anyway). A failing one (a missing folder) still counts, so repeating it is caught.
-      const content = String(results.find((message) => message.role === 'tool' && message.tool_call_id === call.id)?.content ?? results[index]?.content ?? '');
+      // An agent that only ever changes folder is still bounded by the turn limit.
       if (isNavigationOnly(key) && /\[exit code 0\]\s*$/.test(content)) return;
-      const result = resultSignature(String(results.find((message) => message.role === 'tool' && message.tool_call_id === call.id)?.content ?? results[index]?.content ?? ''));
+      const result = resultSignature(content);
       for (let at = this.recent.length - 1; at >= 0; at -= 1) if (this.recent[at].key === key && this.recent[at].result !== result) this.recent.splice(at, 1);
       this.recent.push({ key, result });
     });
@@ -566,6 +569,9 @@ export function loopActionKey(call: ToolCall): string {
 }
 
 // The folder may be quoted, but must not run anything: no `$(…)`, backticks, redirects or subshells.
+// Matched against a loop key, not the raw tool call: loopActionKey has already parsed the JSON
+// arguments into "Bash <command>" and normalizeShellCommand has removed any leading `cd <dir> &&`
+// (or `;`), so `cd /a/b && pwd` arrives here as "Bash pwd".
 const NAVIGATION_ONLY = /^Bash (?:cd(?:\s+(?:"[^"$`]*"|'[^']*'|[^\s;&|$`<>()]+))?|pwd)\s*;?$/;
 
 /** Whether a loop key is only a change of folder (`cd <dir>`, a bare `cd`) or `pwd`, which the loop guard ignores. */

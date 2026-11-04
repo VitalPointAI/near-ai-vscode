@@ -89,6 +89,17 @@ test('only changing folder or printing it counts as navigation; anything that do
   for (const command of ['cd /a/b', 'cd "/a b"', "cd '/a b'", 'cd', 'pwd', 'cd /a/b && pwd', 'cd /a ;']) assert.equal(isNavigationOnly(loopActionKey(call('n', 'Bash', { command }))), true, command);
   for (const command of ['cd /a && npm test', 'cat missing-file.txt', 'cd /a || exit 1', 'pwd && ls', 'cd /a\nnpm test', 'cd "$(npm test)"', 'cd $(make build)', 'cd `touch x`', 'cd /a>out.txt', 'cd (x)', 'cd "/a`id`"']) assert.equal(isNavigationOnly(loopActionKey(call('w', 'Bash', { command }))), false, command);
   assert.equal(isNavigationOnly(loopActionKey(call('r', 'Read', { file_path: 'cd' }))), false, 'other tools never count as navigation');
+  // A tool call exactly as the model sends it: the arguments are a JSON string, not an object.
+  const raw: ToolCall = { id: 'raw', type: 'function', function: { name: 'Bash', arguments: '{"command":"cd /a/b && pwd"}' } };
+  assert.equal(loopActionKey(raw), 'Bash pwd', 'the key is built from the parsed command, with the leading cd removed');
+  assert.equal(isNavigationOnly(loopActionKey(raw)), true);
+});
+
+test('an agent that only ever changes folder is never stopped as a loop, and still ends at the turn limit', async () => {
+  const { result, turns } = await runScript((turn) => [call(`c${turn}`, 'Bash', { command: 'cd .' })]);
+  assert.equal(result.outcome, 'max-turns');
+  assert.deepEqual(result.stop, { kind: 'turn-limit', turns: 60 });
+  assert.equal(turns, 60);
 });
 
 test('the same command whose output keeps changing is not a loop', async () => {
