@@ -171,7 +171,10 @@ async function main(): Promise<void> {
     await rm(screens, { recursive: true, force: true });
     await mkdir(screens, { recursive: true });
     const fbdir = process.env.NEAR_AI_E2E_FBDIR;
-    await launch('board', workspace, await boardUserData(), { env: { NEAR_AI_E2E_SCREENS: screens, ...(fbdir === undefined || fbdir === '' ? {} : { NEAR_AI_E2E_FBDIR: fbdir }) } });
+    // One CSS pixel per screen pixel, so the probe's measurements and the screenshots describe the same picture.
+    await launch('board', workspace, await boardUserData(), {
+      args: ['--force-device-scale-factor=1'], env: { NEAR_AI_E2E_SCREENS: screens, ...(fbdir === undefined || fbdir === '' ? {} : { NEAR_AI_E2E_FBDIR: fbdir }) }
+    });
   }
 }
 

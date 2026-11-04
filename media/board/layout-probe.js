@@ -54,10 +54,13 @@
     return textOf(li.querySelector('.did')) || id;
   }
 
-  /** The words of a title with where each starts (RED stub, 62-21: every run of non-space characters). */
+  /**
+   * The words of a title with where each starts. A hyphen-joined word counts as its parts, each keeping its hyphen ("two-lead" is "two-" and "lead"):
+   * Chromium may end a line right after a hyphen, as the Unicode line breaking rules allow, and that keeps whole parts on each line (62-21).
+   */
   function wordsIn(text) {
     const out = [];
-    const pattern = /\S+/g;
+    const pattern = /[^\s-]+-*|-+/g;
     let m;
     while ((m = pattern.exec(String(text))) !== null) out.push({ text: m[0], index: m.index });
     return out;
@@ -71,11 +74,9 @@
     if (!node || node.nodeType !== 3) return out;
     const value = String(node.nodeValue === undefined || node.nodeValue === null ? node.textContent : node.nodeValue);
     const range = document.createRange();
-    const pattern = /\S+/g;
-    let m;
-    while ((m = pattern.exec(value)) !== null && out.length < WORD_LIMIT) {
+    for (const m of wordsIn(value).slice(0, WORD_LIMIT)) {
       range.setStart(node, m.index);
-      range.setEnd(node, m.index + m[0].length);
+      range.setEnd(node, m.index + m.text.length);
       const tops = [];
       let width = 0;
       for (const r of Array.from(range.getClientRects())) {
@@ -83,7 +84,7 @@
         width += r.width;
         if (!tops.some((t) => Math.abs(t - r.top) < 2)) tops.push(r.top);
       }
-      out.push({ text: m[0].slice(0, 40), lines: tops.length, width: num(width) });
+      out.push({ text: m.text.slice(0, 40), lines: tops.length, width: num(width) });
     }
     if (typeof range.detach === 'function') range.detach();
     return out;

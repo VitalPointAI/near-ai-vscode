@@ -8,6 +8,9 @@
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const BREAKPOINT = 520;
   const CELL_CAP = 30;
+  // G-62-4 (62-21): one column layout for the header row and every lane, written on the board region as --board-columns.
+  const OPEN_WIDTH = '256px';
+  const FOLDED_WIDTH = '40px';
   const LATER = ['claimed', 'in-progress', 'in-review', 'integrating'];
   const GROUPS_OPEN = ['backlog', 'ready'];
   // The four columns later updates fill start folded in the kanban (UI review warning 5); a person who opens one keeps it open.
@@ -506,6 +509,7 @@
     const cols = model.columns;
     if (colFocus >= cols.length) colFocus = 0;
     place(heads, cols.map((c, i) => headEl(c, shown.filter((x) => x.column === c.key).length, i)));
+    setVar(views.kanban, '--board-columns', cols.map((c) => (columnCollapsed(c.key) ? FOLDED_WIDTH : OPEN_WIDTH)).join(' '));
     laterNote.hidden = !LATER.some((key) => cols.some((c) => c.key === key) && columnCollapsed(key));
     const sel = milestoneId();
     const lanes = (model.lanes[ui.groupBy] || []).filter((l) => {
@@ -545,6 +549,13 @@
     return h.box;
   }
   const headNodes = () => nodesOf(heads, '.col-btn');
+  function setVar(node, name, value) { if (node.style.getPropertyValue(name) !== value) node.style.setProperty(name, value); }
+  // The header row's height is the board region's scroll padding, so a card scrolled into view (focus, arrow keys) is never left under the sticky headers.
+  function syncHeadHeight() {
+    if (layout !== 'kanban' || typeof heads.getBoundingClientRect !== 'function') return;
+    const r = heads.getBoundingClientRect();
+    setVar(views.kanban, '--board-head-height', Math.ceil((r && r.height) || 0) + 'px');
+  }
   heads.addEventListener('keydown', (e) => {
     const list = headNodes();
     const at = list.indexOf(document.activeElement);
@@ -729,6 +740,7 @@
     renderMain();
     if (model) { for (const id of [...cardEls.keys()]) if (!model.cards.some((c) => c.id === id)) { cardEls.get(id).remove(); cardEls.delete(id); parts.delete(id); sigs.delete(id); } }
     applyRoving();
+    syncHeadHeight();
     if (info && (document.activeElement === document.body || !document.activeElement.isConnected)) {
       const p = parts.get(info.id);
       const li = cardEls.get(info.id);
@@ -903,7 +915,10 @@
     post({ type: 'visible', value: visible });
     if (visible && dirty) render();
   });
-  if (typeof ResizeObserver === 'function') new ResizeObserver((entries) => { const e = entries[entries.length - 1]; if (e && e.contentRect) setLayout(e.contentRect.width); }).observe(root);
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver((entries) => { const e = entries[entries.length - 1]; if (e && e.contentRect) setLayout(e.contentRect.width); }).observe(root);
+    new ResizeObserver(() => syncHeadHeight()).observe(heads);
+  }
 
   render();
   startSlowTimer();

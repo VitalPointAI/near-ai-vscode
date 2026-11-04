@@ -14,8 +14,8 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.2; }
 h1.title { font-size: 1.5em; }
 :focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 
-/* toolbar */
-#toolbar { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "title actions" "controls controls"; gap: 8px 12px; align-items: center; padding: 12px 0; background: inherit; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
+/* toolbar: a band with a solid fill above the board, never a layer over the cards (G-62-2, owner decision 2026-11-03) */
+#toolbar { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "title actions" "controls controls"; gap: 8px 12px; align-items: center; padding: 12px 0; background: var(--vscode-editor-background); border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
 .title-row { grid-area: title; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .actions { grid-area: actions; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .controls { grid-area: controls; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
@@ -60,24 +60,35 @@ button.chip[aria-pressed="true"], .segmented button[aria-checked="true"] { backg
 .progress .bar { display: block; height: 100%; background: var(--vscode-progressBar-background); }
 .progress-text { font-size: 0.85em; color: var(--vscode-descriptionForeground); }
 
-/* kanban */
-.board-scroll { overflow-x: auto; padding-top: 12px; padding-bottom: 32px; }
-.colheads, .lane-grid { display: flex; gap: 12px; width: max-content; }
-.column, .cell { flex: 0 0 256px; width: 256px; min-width: 0; }
-.column.collapsed, .cell.collapsed { flex-basis: 40px; width: 40px; }
+/* kanban (G-62-2, G-62-4): the page itself does not scroll. The toolbar and banners are bands at the top, and the board region below them is the one
+   scroller, both ways. Inside it come the later-columns note, the column header row (sticky at its top, opaque, above the cells) and the lanes. The header
+   row and every lane grid share one column layout, --board-columns, which board.js writes from the column order and folds. */
+body:has(> #root[data-layout="kanban"]) { padding-bottom: 0; }
+#root[data-layout="kanban"] { display: flex; flex-direction: column; height: 100vh; }
+#root[data-layout="kanban"] > #toolbar, #root[data-layout="kanban"] > #banner { flex: none; }
+#root[data-layout="kanban"] > #board { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.board-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 32px; scroll-padding-top: var(--board-head-height, 0px); container-type: inline-size; background: var(--vscode-editor-background); }
+.colheads { position: sticky; top: 0; z-index: 2; padding-top: 12px; background: var(--vscode-editor-background); }
+.colheads, .lane-grid { display: grid; grid-template-columns: var(--board-columns, repeat(8, 256px)); gap: 12px; width: max-content; }
+.column, .cell { min-width: 0; }
 .column { padding: 8px; border-radius: 4px; background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background)); }
 .col-btn { width: 100%; justify-content: flex-start; background: none; font-size: 1.2em; font-weight: 600; line-height: 1.2; padding: 0 4px; }
 .col-count { margin-left: auto; font-variant-numeric: tabular-nums; }
 .column .caption, .caption { display: block; font-size: 0.85em; line-height: 1.4; color: var(--vscode-descriptionForeground); }
-.column.collapsed .col-name, .column.collapsed .col-count { writing-mode: vertical-rl; }
+/* A folded column header is 40 px: its icons and its name and count stack in one narrow column, the words turned on their side. */
+.column.collapsed { padding: 8px 4px; }
+.column.collapsed .col-btn { flex-direction: column; align-items: center; gap: 8px; padding: 4px 0; font-size: 1em; }
+.column.collapsed .col-name, .column.collapsed .col-count { margin: 0; writing-mode: vertical-rl; }
+.lanes { width: max-content; min-width: 100%; }
 .lane { margin-top: 24px; }
-.lane-title { display: block; }
+/* Lane titles and the later-columns note stay on the left, as wide as the visible board, while the board scrolls sideways. */
+.lane-title { display: block; position: sticky; left: 0; z-index: 1; width: 100cqw; }
 .lane-head, .group-head { width: 100%; justify-content: flex-start; padding: 4px 8px; background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background)); font-size: 1.2em; font-weight: 600; line-height: 1.2; text-align: left; }
 .lane-count, .group-count { font-weight: 400; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
 .lane-progress { display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
-.lane-grid { margin-top: 12px; align-items: flex-start; }
-.cell { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; min-height: 24px; }
-.cell.collapsed { overflow: hidden; font-size: 0; }
+.lane-grid { margin-top: 12px; align-items: stretch; }
+.cell { position: relative; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; min-height: 64px; }
+.cell.collapsed { overflow: hidden; font-size: 0; border-radius: 4px; background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background)); }
 
 /* cards */
 .card { position: relative; display: flex; flex-direction: column; gap: 4px; list-style: none; padding: 8px 12px; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px; background: var(--vscode-editorWidget-background); }
@@ -100,7 +111,8 @@ button.chip[aria-pressed="true"], .segmented button[aria-checked="true"] { backg
 .assignee-initials { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 2px; box-sizing: border-box; font-size: 0.8em; line-height: 1; border: 1px solid currentColor; border-radius: 50%; }
 .badge-blocked { color: var(--vscode-editorWarning-foreground); }
 .badge-info { color: var(--vscode-editorInfo-foreground); }
-.move-btn { align-self: flex-start; }
+/* The Move to... button also carries the icon class, whose 16 px box is for the svg; the button sizes to its icon and words. */
+.move-btn { align-self: flex-start; width: auto; height: auto; }
 .card-msg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 0.85em; }
 .pending-line { color: var(--vscode-descriptionForeground); }
 .refusal-line { color: var(--vscode-errorForeground); flex: 1 1 10em; }
@@ -151,7 +163,7 @@ button.chip[aria-pressed="true"], .segmented button[aria-checked="true"] { backg
 #item-form .readiness { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; padding: 8px 12px; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-left: 4px solid var(--vscode-editorInfo-foreground, currentColor); border-radius: 4px; color: var(--vscode-foreground); }
 #item-form .files-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 /* UI review warning 5: one plain line says why four columns start folded. */
-.later-note { margin: 0 0 8px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+.later-note { position: sticky; left: 0; width: 100cqw; margin: 0; padding-top: 12px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
 #item-form .hint, #item-form .counter { font-size: 0.85em; color: var(--vscode-descriptionForeground); }
 #item-form .error { font-size: 0.85em; color: var(--vscode-errorForeground); }
 #item-form [aria-invalid="true"] { border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }
