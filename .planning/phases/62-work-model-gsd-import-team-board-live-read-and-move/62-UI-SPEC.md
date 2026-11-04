@@ -681,3 +681,60 @@ Messages (host validates every one, unknown shapes are ignored): webview to host
 - [x] Dimension 7 Inventory Provenance: PASS (section omitted: `Tool: none`)
 
 **Approval:** approved 2026-11-02 (gsd-ui-checker, after revision 1; non-blocking FLAGs on Color (link underline, now added) and Spacing (12px md kept as a declared exception))
+
+---
+
+## Amendments (2026-11-03)
+
+Added after the owner's hands-on check (62-UAT.md; the decisions are in 62-CONTEXT.md, "Owner amendments (2026-11-03, after the hands-on check)"). The text above stays as the record of the first design. Where it differs from this section, this section is the contract. Each item names the plan that builds it.
+
+### Surfaces (updates the table at the top)
+
+| Surface | Host | Layout | Entry point | Plan |
+|---------|------|--------|-------------|------|
+| Team Board editor tab (the only board) | `createWebviewPanel('nearAiTeamBoard', 'Team Board')`, one at a time, `reveal()` when open | Kanban with swimlanes; the compact list only when the tab itself is under 520px | Open board in the sidebar Team section, the Team status bar line, `NEAR AI: Open Team Board` | 62-17 |
+| Team section board summary | The sidebar Team section inside the chat view (61-17, 61-21) | One line: how many cards are ready, blocked and mine, next to Open board | Shown in a team while a NEAR AI profile works | 62-18 |
+| Team status bar line | `vscode.StatusBarItem` (unchanged) | One line of text with codicon | Always shown while a team session runs | unchanged |
+| Native prompts (host side) | As before, plus a native person list for Assign to... | Native VS Code UI | Block, cancel, mark done, import, assign | 62-20 |
+
+- There is no sidebar Team Board view: `nearAiTeamBoardView` is gone from the manifest and the host. Nothing opens by itself when Team Mode turns on or a session starts. (62-17)
+- The page has no `Open Team Board` button and no message that asks the host to open the board; the host ignores such a message. The body carries no surface mark and always takes the editor background. (62-17)
+- The "Compact list" section above describes the list layout of a narrow editor tab only; its header no longer has `Open Team Board`. (62-17)
+- AD-22 now reads: `Open Team Board`, the status bar line and Open board in the Team section all open the one editor tab, or reveal it when it is open. There is no sidebar view to open from the activity container. (62-17)
+
+### Card face: the assignee
+
+- Row 3 of the card face starts with the assignee chip (initials) and the person's name when the card is assigned, and shows nothing when it is not. This replaces "assignee initials chip (Phase 63, hidden until claimed)". (62-19 model, 62-20 page)
+- Member lanes use the assignee; cards nobody is assigned to stay in `Unassigned`. This replaces "before Phase 63 every card is in one lane labelled Unassigned". (62-19)
+
+### What starts folded
+
+- On a fresh board Backlog and Ready are open; Claimed, In progress, In review, Shipping, Done and Cancelled start folded. A lane starts collapsed only when it holds no card outside Done and Cancelled, so active and upcoming work is on the first screen. This replaces "A lane with no plans starts collapsed" and the first-run look described under Kanban. (62-19 model, 62-21 page)
+- A phase with no plans shows as a Backlog card. (62-19)
+
+### Layout rule (kanban)
+
+- **Toolbar band:** the toolbar and banners are bands with a solid editor background, never see-through. The page itself does not scroll in the kanban. (62-21)
+- **One board scroller:** the board region below the toolbar is the only element that scrolls, in both directions, so cards never pass under the toolbar. (62-21)
+- **Sticky column header row:** the column header row sits at the top of the board region, stays there while the board scrolls, and has a solid background above the cells. The header row and every lane share one column grid, so headers and cells always line up. (62-21)
+- **Cells as tall as their row:** every cell in a lane row is as tall as the row, and nothing in one lane spills into the next. (62-21, checked by the 62-16 layout probe and proven across widths and themes by 62-22)
+- In the list layout the page scrolls normally and the toolbar is not sticky. (62-21)
+
+### Readable cards
+
+- A folded column holds no cards: its stub shows only the column name and count. (62-21)
+- Titles wrap between words, never inside a word. (62-21)
+- The card's main button keeps card styling: left aligned, theme text colour, no button background. (62-21, proven by 62-22)
+
+### Move to... menu
+
+- After the moves and a separator, the owner and leads see `Assign to...` (a native list of the people who may take the card) and `Unassign {name}`. Any other member who is not an observer sees `Assign to me` on an unassigned card and `Unassign me` on a card assigned to them, with no list. A card that can only be assigned still shows `Move to...`; only cards with moves are draggable. (62-20, rules from 62-25)
+
+### Card detail
+
+- The Facts list gains `Assigned to` with the person and their role, or `Nobody yet`. The owner and leads see `Assign...` on an unassigned card, and `Change person...` and `Unassign` on an assigned one; other members who are not observers see `Assign to me` or `Unassign me`. Each does the same as the menu item. (62-20)
+
+### Drag and drop, and verification
+
+- The pointer path must work in a real VS Code window and in code-server, proven by an e2e that drags with real mouse input; `Move to...` stays the keyboard path. (62-23)
+- Real screenshots of the board on a hidden virtual screen, checked by the layout probe, go to the owner for review before the phase is accepted. (62-22, 62-24)
