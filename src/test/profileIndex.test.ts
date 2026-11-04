@@ -2,12 +2,13 @@
 // profiles lives in VS Code's global state as metadata only; the copy uses the original project's stored key by reference.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AuthService, SecretStorageLike } from '../services/auth';
-import { initProfileIndex, listSavedProfiles } from '../services/profileIndex';
+import { initProfileIndex, listSavedProfiles, runUseSavedProfile, SavedProfileUi } from '../services/profileIndex';
 import { ProfileStore } from '../services/profileStore';
 import { createNearAiProvider } from '../services/providerFactory';
 
@@ -170,4 +171,109 @@ test('a saved profile is used only when it comes from the list and from another 
     await assert.rejects(() => beta.useSavedProfile({ ...entry, projectId: `project-${'0'.repeat(32)}` }), /no longer available/);
     assert.deepEqual(await beta.list(), [], 'nothing was copied');
   } finally { await w.cleanup(); }
+});
+
+// Task 3: the choice in Select Profile and the Use a Saved Profile command. The flow takes the window's pickers and messages as plain
+// functions, so it is tested here without VS Code; extension.ts hands it the real ones.
+interface RecordedUi extends SavedProfileUi {
+  picks: Array<{ items: Array<{ label: string; description: string; detail: string }>; title: string; placeHolder: string }>;
+  progressTitles: string[];
+  infos: Array<{ message: string; actions: string[] }>;
+  errors: Array<{ message: string; actions: string[] }>;
+}
+
+function recordingUi(answers: { pick?: (labels: string[]) => number | undefined; info?: string; error?: string } = {}): RecordedUi {
+  const ui: RecordedUi = {
+    picks: [], progressTitles: [], infos: [], errors: [],
+    pick: async (items, options) => {
+      ui.picks.push({ items: items.map(({ label, description, detail }) => ({ label, description, detail })), title: options.title, placeHolder: options.placeHolder });
+      const index = (answers.pick ?? (() => 0))(items.map((item) => item.label));
+      return index === undefined ? undefined : items[index];
+    },
+    progress: async (title, task) => { ui.progressTitles.push(title); return task(); },
+    info: async (message, ...actions) => { ui.infos.push({ message, actions }); return answers.info; },
+    error: async (message, ...actions) => { ui.errors.push({ message, actions }); return answers.error; }
+  };
+  return ui;
+}
+
+test('Use a Saved Profile lists each saved profile by name and folder with its check status, uses the chosen one and says it is ready', async () => {
+  const w = await world();
+  try {
+    await setUpAlpha(w);
+    const beta = w.store(w.rootB);
+    const ui = recordingUi();
+    let refreshed = 0;
+    let setUp = 0;
+    const outcome = await runUseSavedProfile(ui, { projectId: beta.projectScopeId, use: (entry) => beta.useSavedProfile(entry), setUpNew: async () => { setUp += 1; }, refresh: async () => { refreshed += 1; } });
+    assert.equal(outcome, 'ready');
+    assert.equal(ui.picks.length, 1);
+    assert.deepEqual(ui.picks[0].items.map((item) => [item.label, item.description]), [['Alpha Cloud', 'from alpha-site']]);
+    assert.match(ui.picks[0].items[0].detail, /checked/i, 'the check status is shown');
+    assert.deepEqual(ui.progressTitles, ['Checking your NEAR AI key']);
+    assert.deepEqual(ui.infos, [{ message: 'Alpha Cloud is ready for this project.', actions: [] }]);
+    assert.deepEqual(ui.errors, []);
+    assert.equal(refreshed, 1, 'the sidebar is refreshed');
+    assert.equal(setUp, 0);
+    assert.equal((await beta.getActiveProfile())?.displayName, 'Alpha Cloud');
+    assert.equal(JSON.stringify(ui).includes(w.canary), false, 'no message or picker item shows the key');
+  } finally { await w.cleanup(); }
+});
+
+test('with no saved profiles, Use a Saved Profile says so plainly and offers Set up a new profile', async () => {
+  const w = await world();
+  try {
+    const beta = w.store(w.rootB);
+    const ui = recordingUi({ info: 'Set up a new profile' });
+    let setUp = 0;
+    const outcome = await runUseSavedProfile(ui, { projectId: beta.projectScopeId, use: (entry) => beta.useSavedProfile(entry), setUpNew: async () => { setUp += 1; }, refresh: async () => undefined });
+    assert.equal(outcome, 'none');
+    assert.deepEqual(ui.picks, [], 'there is nothing to pick');
+    assert.equal(ui.infos.length, 1);
+    assert.match(ui.infos[0].message, /no saved profiles/i);
+    assert.deepEqual(ui.infos[0].actions, ['Set up a new profile']);
+    assert.equal(setUp, 1, 'the button runs the profile setup');
+  } finally { await w.cleanup(); }
+});
+
+test('a saved profile that does not pass the check says why and offers Set up a new profile', async () => {
+  const w = await world();
+  try {
+    const alpha = await setUpAlpha(w);
+    // The key is gone from secure storage while the list still names the profile.
+    await w.auth.removeScopedCredentials(alpha.getScope('profile-alpha-cloud'));
+    const beta = w.store(w.rootB);
+    const ui = recordingUi({ error: 'Set up a new profile' });
+    let setUp = 0;
+    let refreshed = 0;
+    const outcome = await runUseSavedProfile(ui, { projectId: beta.projectScopeId, use: (entry) => beta.useSavedProfile(entry), setUpNew: async () => { setUp += 1; }, refresh: async () => { refreshed += 1; } });
+    assert.equal(outcome, 'failed');
+    assert.equal(ui.errors.length, 1);
+    assert.match(ui.errors[0].message, /The saved profile this one uses was removed/);
+    assert.equal(ui.errors[0].actions.includes('Set up a new profile'), true);
+    assert.equal(setUp, 1);
+    assert.equal(refreshed, 1, 'the sidebar still shows the current state');
+    assert.equal(await beta.getActiveSelection(), undefined, 'a profile that did not pass is not made active');
+  } finally { await w.cleanup(); }
+});
+
+test('activation sets up the saved-profile list first, and Select Profile and Use a Saved Profile offer the choice', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const extension = readFileSync(path.join(root, 'src', 'extension.ts'), 'utf8');
+  const activate = extension.slice(extension.indexOf('export function activate('));
+  const init = activate.indexOf('initProfileIndex(context.globalState)');
+  assert.notEqual(init, -1, 'activate sets up the list with VS Code\'s global state');
+  for (const later of ['new NearAiPanelViewProvider(', 'closeInterruptedRuns(', 'registerCommand(']) {
+    const at = activate.indexOf(later);
+    assert.equal(at === -1 || init < at, true, `the list is set up before ${later}`);
+  }
+  assert.match(extension, /registerCommand\('nearAi\.useSavedProfile'/, 'the command is registered');
+  assert.match(extension, /Use a profile from another project/, 'Select Profile offers the choice');
+  const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
+  const contributed = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.useSavedProfile');
+  assert.deepEqual(contributed && { title: contributed.title, category: contributed.category }, { title: 'Use a Saved Profile', category: 'NEAR AI' });
+  const source = readFileSync(path.join(root, 'src', 'services', 'profileIndex.ts'), 'utf8');
+  assert.doesNotMatch(source, /from 'vscode'/, 'the list module needs no VS Code at run time');
+  assert.doesNotMatch(source + extension.slice(extension.indexOf('async function useSavedProfile')), /[\u2013\u2014]/, 'no em or en dash in the new texts');
+  assert.doesNotMatch(source, /NEAR organization/, 'the paying account is your organization');
 });
