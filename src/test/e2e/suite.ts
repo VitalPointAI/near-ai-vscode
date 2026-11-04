@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { NearAiTestApi } from '../../extension';
 import { captureScreen, readXwd } from './xwdPng';
+import { fillScreen } from './x11Window';
 
 // Runs inside the extension host. Messages are observed on both sides of the real sidebar webview,
 // so every request below goes host → webview script → host, as a user's click would.
@@ -691,7 +692,17 @@ interface LayoutReport {
   cells: Array<{ lane: string; column: string; left: number; top: number; width: number; height: number }>;
   cards: Array<{ id: string; column: string; lane: string; left: number; top: number; width: number; height: number; draggable: boolean }>;
   visibleCards: number;
+  focused?: { id: string; top: number; bottom: number; visible: boolean };
 }
+// The screenshot matrix (62-22): four widths, four themes, and a few extra views.
+type MatrixWidth = 480 | 900 | 1400 | 'full';
+const MATRIX_WIDTHS: MatrixWidth[] = [480, 900, 1400, 'full'];
+/** How near the asked width the board's group must come. */
+const WIDTH_SLACK = 40;
+/** One line of screens/index.json: a frame the owner can open, and what the probe measured just before it was taken. */
+interface ScreenEntry { file: string; theme: string; askedWidth: MatrixWidth; reachedWidth: number; layout: string; view: string; problems: number }
+/** The probe's theme (the page's body class) as the screenshot names write it. */
+const themeName = (probeTheme: string): string => ({ dark: 'dark', light: 'light', 'high-contrast': 'hc', 'high-contrast-light': 'hc-light' } as Record<string, string>)[probeTheme] ?? (probeTheme || 'dark');
 interface BoardModelView { selectedMilestone: string; cards: Array<{ id: string; kind: string; column: string; milestoneId?: string }> }
 
 /** A PNG's own width and height, from its IHDR chunk. */
@@ -740,34 +751,68 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     await tap.probe!({ id, action: 'column', column });
     await board.next('fromView', (message) => message.type === 'e2e-facts' && message.id === id, before);
   };
-  // Splits the editor area in two and sizes the board's group to about `target` px. VS Code applies group sizes only when the layout changes shape (so
-  // it goes back to one group first), and the board's group can come out on either side (so the sizes follow the side the reading shows it on).
-  const listWidth = async (target: number): Promise<LayoutReport> => {
-    let fraction = Math.min(0.9, target / editorWidth);
+  const fbdir = process.env.NEAR_AI_E2E_FBDIR ?? '';
+  const screens = process.env.NEAR_AI_E2E_SCREENS ?? '';
+  const photographing = fbdir !== '' && screens !== '';
+  const index: ScreenEntry[] = [];
+  const one = async (): Promise<void> => {
+    await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+  };
+  // Sizes the board's group to the asked width: the whole editor area for 'full', else within WIDTH_SLACK px of the target beside a second group, in
+  // up to 4 logged tries. VS Code applies group sizes only when the layout changes shape (so each try goes back to one group first), and the board's
+  // group can come out on either side (so the sizes follow the side the reading shows it on). A width the window cannot reach fails with the measured
+  // room on a screenshot run, and is logged as not measured otherwise (the default xvfb-run screen is smaller).
+  const sizeTo = async (asked: MatrixWidth): Promise<LayoutReport | undefined> => {
+    if (asked === 'full') {
+      await one();
+      return settled('one group', (r) => r.width >= editorWidth - 10);
+    }
+    let fraction = Math.min(0.9, asked / editorWidth);
     let boardFirst = true;
     let last: LayoutReport | undefined;
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      await one();
       await settled('one group', (r) => r.width >= editorWidth - 10).catch(() => undefined);
       await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: boardFirst ? [{ size: fraction }, { size: 1 - fraction }] : [{ size: 1 - fraction }, { size: fraction }] });
       const report = await settled('two groups', (r) => r.width < editorWidth - 10).catch(() => undefined);
+      console.log(`(width ${asked}: try ${attempt} with ${Math.round(fraction * 100)} percent ${boardFirst ? 'first' : 'second'} reached ${report === undefined ? 'no steady reading' : `${report.width} px, ${report.layout}`})`);
       if (report === undefined) continue;
       last = report;
-      if (report.width < 520 && report.width >= 320) return report;
+      if (Math.abs(report.width - asked) <= WIDTH_SLACK) return report;
       if (Math.abs(report.width - (1 - fraction) * editorWidth) < Math.abs(report.width - fraction * editorWidth)) { boardFirst = !boardFirst; continue; }
-      fraction = Math.max(0.05, Math.min(0.9, fraction * target / report.width));
+      fraction = Math.max(0.05, Math.min(0.95, fraction * asked / report.width));
     }
-    throw new Error(`The board's group could not be sized under 520 px (last reading ${last === undefined ? 'none' : `${last.width} px`})`);
+    const room = `the editor area is ${editorWidth} px and the last try reached ${last === undefined ? 'no steady reading' : `${last.width} px`}`;
+    if (photographing) throw new Error(`The board's group could not be sized to ${asked} px within ${WIDTH_SLACK} px: ${room}`);
+    console.log(`(width ${asked} not measured: ${room})`);
+    return undefined;
   };
   // The whole hidden screen as a PNG in the screens folder, when the run gave the framebuffer folder (NEAR_AI_E2E_FBDIR); it must be the screen's size.
-  const screenshot = async (name: string): Promise<void> => {
-    const fbdir = process.env.NEAR_AI_E2E_FBDIR;
-    const screens = process.env.NEAR_AI_E2E_SCREENS;
-    if (fbdir === undefined || fbdir === '' || screens === undefined || screens === '') { console.log(`(no screenshot ${name}: the run has no framebuffer folder)`); return; }
-    const out = path.join(screens, name);
+  // A frame is taken only after a reading with no problem (T-62-79): the owner never reviews a frame the probe did not check, and screens/index.json
+  // says what the probe measured for each one. VS Code's notification toasts sit outside the page, so they are cleared first.
+  const photograph = async (file: string, view: string, asked: MatrixWidth, report: LayoutReport): Promise<void> => {
+    if (report.problems.length > 0) throw new Error(`No screenshot ${file}: the last reading found ${report.problems.length} problems`);
+    if (!photographing) { console.log(`(no screenshot ${file}: the run has no framebuffer folder)`); return; }
+    await vscode.commands.executeCommand('notifications.clearAll');
+    await vscode.commands.executeCommand('notifications.hideToasts');
+    await sleep(400);
+    const out = path.join(screens, file);
     await captureScreen(fbdir, out);
     const screen = readXwd(await readFile(path.join(fbdir, 'Xvfb_screen0')));
-    assert.deepEqual(await pngSize(out), { width: screen.width, height: screen.height }, `${name} is the whole screen`);
+    assert.deepEqual(await pngSize(out), { width: screen.width, height: screen.height }, `${file} is the whole screen`);
+    index.push({ file, theme: themeName(report.theme), askedWidth: asked, reachedWidth: report.width, layout: report.layout, view, problems: report.problems.length });
+    await writeFile(path.join(screens, 'index.json'), `${JSON.stringify(index, null, 2)}\n`, 'utf8');
+  };
+  // One width of a theme's row: sized, back at the top, settled, measured with no problem, photographed.
+  const top = async (asked: MatrixWidth): Promise<LayoutReport | undefined> => {
+    const sized = await sizeTo(asked);
+    if (sized === undefined) return undefined;
+    await ask({ action: 'scroll', top: 0, left: 0 });
+    const report = await settled(`${asked} px at the top`, (r) => r.width === sized.width);
+    assert.equal(report.layout, asked === 480 ? 'list' : 'kanban', `the board at ${report.width} px`);
+    assert.deepEqual(report.problems, [], problemsOf(report));
+    await photograph(`board-${themeName(report.theme)}-${asked}.png`, 'top', asked, report);
+    return report;
   };
 
   return [
@@ -808,11 +853,24 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       // The page draws the imported cards.
       await until('the imported cards on the page', async () => ((await ask({ action: 'rects' })).cards.length > 0 ? true : undefined));
     }],
-    ['the editor area has the whole window: no side bars, no panel and one editor group', async () => {
+    ['the window fills the hidden screen, and the editor area has the whole window: no side bars, no panel and one editor group', async () => {
       for (const command of ['workbench.action.closeSidebar', 'workbench.action.closeAuxiliaryBar', 'workbench.action.closePanel']) await vscode.commands.executeCommand(command);
       await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
-      const report = await settled('the editor area alone', (r) => r.layout === 'kanban');
+      const before = await settled('the editor area alone', (r) => r.layout === 'kanban');
+      // Under Xvfb there is no window manager, so VS Code's maximized setting does nothing and the window keeps its 1440 by 900 default (62-21). The
+      // run gives it the whole screen itself; on a screenshot run that is required, otherwise the run measures what the window has.
+      try {
+        const filled = await fillScreen();
+        console.log(`(the window ${filled.before.width} by ${filled.before.height} at ${filled.before.x},${filled.before.y} now fills the ${filled.screen.width} by ${filled.screen.height} hidden screen: ${filled.after.width} by ${filled.after.height})`);
+        assert.deepEqual(filled.after, { x: 0, y: 0, width: filled.screen.width, height: filled.screen.height }, 'the window has the whole screen');
+      } catch (error) {
+        if (photographing) throw error;
+        console.log(`(the window keeps its size: ${String((error as Error).message ?? error)})`);
+      }
+      const report = before.width >= 1000 && !photographing ? await settled('the editor area alone', (r) => r.layout === 'kanban')
+        : await settled('the editor area of the whole screen', (r) => r.layout === 'kanban' && r.width > before.width);
       editorWidth = report.width;
+      console.log(`(the editor area is ${editorWidth} by ${report.height} px; it was ${before.width} by ${before.height} px)`);
       assert.ok(editorWidth >= 1000, `the board is ${editorWidth} px wide`);
     }],
     ['first open, before anything changes the view: Backlog and Ready open, the later four, Done and Cancelled folded, Unassigned open, Backlog work in full view and the first planless phase reachable without a click', async () => {
@@ -840,12 +898,12 @@ function boardTests(): Array<[string, () => Promise<void>]> {
         await ask({ action: 'scroll', top: 0, left: 0 });
       }
     }],
-    ['at the full editor width the layout probe finds nothing wrong, and the screen is saved as board-dark-full.png', async () => {
-      const report = await settled('the full editor width', (r) => r.layout === 'kanban');
-      await screenshot(`board-${report.theme || 'dark'}-full.png`);
-      assert.equal(report.layout, 'kanban');
-      assert.deepEqual(report.problems, [], problemsOf(report));
-    }],
+    // The dark row of the matrix (62-22, G-62-2, G-62-4, G-62-7): the list under 520 px, then 900, 1400 and the full editor width, each measured at
+    // the top with no problem and photographed. It ends on one editor group at the full width.
+    ...MATRIX_WIDTHS.map((asked): [string, () => Promise<void>] => [`dark at ${asked === 'full' ? 'the full editor width' : `${asked} px`}: the layout probe finds nothing wrong at the top, and the screen is saved as board-dark-${asked}.png`, async () => {
+      const report = await top(asked);
+      if (report !== undefined) assert.equal(report.theme, 'dark', 'the dark theme');
+    }]),
     ['after scrolling down and sideways the toolbar and the column header row stay solid on top and cover no card', async () => {
       const report = await ask({ action: 'scroll', top: 600, left: 300 });
       assert.deepEqual(report.problems, [], problemsOf(report));
@@ -858,15 +916,6 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       const report = await settled('Done open', (r) => r.heads.some((head) => head.column === 'done' && !head.folded));
       assert.ok(report.cards.some((c) => c.column === 'done'), 'the Done cards are drawn');
       assert.deepEqual(report.problems, [], problemsOf(report));
-    }],
-    ['at a list width under 520 px beside a second editor group the probe finds nothing wrong, and the screen is saved as board-dark-480.png', async () => {
-      const report = await listWidth(480);
-      await screenshot(`board-${report.theme || 'dark'}-480.png`);
-      assert.equal(report.layout, 'list');
-      assert.ok(report.width < 520, `the board is ${report.width} px wide`);
-      assert.deepEqual(report.problems, [], problemsOf(report));
-      await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
-      await settled('one group again', (r) => r.layout === 'kanban');
     }]
   ];
 }
