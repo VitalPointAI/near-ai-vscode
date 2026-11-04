@@ -192,8 +192,26 @@ class Connection {
  * corner and gives it the whole screen, then reads its size back from the server.
  */
 export async function fillScreen(options: { display?: string; xauthority?: string; socketPath?: string } = {}): Promise<FillResult> {
-  // RED stub (62-22): nothing is sized yet.
-  void options; void Connection;
-  const none = { x: 0, y: 0, width: 0, height: 0 };
-  return { screen: { width: 0, height: 0 }, window: 0, before: none, after: none };
+  const number = localDisplay(options.display ?? process.env.DISPLAY);
+  const authFile = options.xauthority ?? process.env.XAUTHORITY;
+  const auth = authFile === undefined || authFile === '' ? undefined : cookieFor(parseXauthority(await readFile(authFile)), number);
+  const socketPath = options.socketPath ?? `/tmp/.X11-unix/X${number}`;
+  const x = await Connection.open(socketPath).catch(() => Connection.open(`\0/tmp/.X11-unix/X${number}`));
+  try {
+    const screen = await x.setup(auth);
+    const children = parseQueryTree(await x.batch([queryTreeRequest(screen.root)]));
+    let best: { window: number; box: Box } | undefined;
+    for (const window of children) {
+      const attributes = parseAttributes(await x.batch([getWindowAttributesRequest(window)]));
+      if (!attributes.viewable || attributes.overrideRedirect || !attributes.inputOutput) continue;
+      const box = parseGeometry(await x.batch([getGeometryRequest(window)]));
+      if (best === undefined || box.width * box.height > best.box.width * best.box.height) best = { window, box };
+    }
+    if (best === undefined) throw new Error(`The hidden screen shows no window to size (${children.length} top-level windows, none shown)`);
+    const target = { x: 0, y: 0, width: screen.width, height: screen.height };
+    const after = parseGeometry(await x.batch([configureWindowRequest(best.window, target), getGeometryRequest(best.window)]));
+    return { screen: { width: screen.width, height: screen.height }, window: best.window, before: best.box, after };
+  } finally {
+    x.close();
+  }
 }
