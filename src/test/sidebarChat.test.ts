@@ -72,6 +72,15 @@ test('the sidebar has the Team section between the attention line and the conver
   assert.equal(scripts[teamScript]?.nonce, scripts[chat]?.nonce, 'the same nonce');
 });
 
+test('the sidebar loads readiness.js with the page nonce after composer.js and before chat.js and team.js', () => {
+  const { sidebarHtml } = withVscodeStub(() => require('../services/panelView') as typeof import('../services/panelView'));
+  const html = sidebarHtml({ cspSource: 'vscode-webview://test', asWebviewUri: (uri) => uri }, { path: '/ext/media/chat' } as never);
+  const nonce = /script-src 'nonce-([^']+)'/.exec(html)?.[1];
+  const scripts = [...html.matchAll(/<script nonce="([^"]+)" src="([^"]+)"><\/script>/g)].map((match) => ({ nonce: match[1], file: (match[2] ?? '').split('/').pop() }));
+  assert.deepEqual(scripts.map((script) => script.file), ['markdown.js', 'pending.js', 'composer.js', 'readiness.js', 'chat.js', 'team.js']);
+  assert.ok(scripts.every((script) => script.nonce === nonce), 'every script has the page nonce');
+});
+
 test('new sidebar intents are strictly validated', () => {
   assert.deepEqual(parseChatWebviewMessage({ type: 'new-chat' }), { type: 'new-chat' });
   assert.deepEqual(parseChatWebviewMessage({ type: 'open-tools' }), { type: 'open-tools' });

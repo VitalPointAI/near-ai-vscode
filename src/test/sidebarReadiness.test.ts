@@ -2,6 +2,7 @@
 // profile works, and the page tracker that writes the state on body data-profile and tells the Team section. PR #7's Connect NEAR AI panel
 // (media/chat/setup.js, 0.4.14) uses the same rule; the parity check below turns on by itself when main is merged into Team Mode.
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import { createBoardHarness } from './helpers/fakeDom';
@@ -114,4 +115,64 @@ test('the tracker keeps only the state name: no page state is stored and no prof
   assert.equal(h.state, undefined, 'nothing stored with setState');
   const attributes = JSON.stringify(h.document.body.getAttribute('data-profile'));
   assert.ok(!attributes.includes('Profile a'));
+});
+
+// ---- the planning-file links, the page files and the PR #7 parity seam (Task 2) -------------------------------------------------------------
+
+const chatCss = (): string => readFileSync(path.join(ROOT, 'media', 'chat', 'chat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const readinessJs = (): string => readFileSync(path.join(ROOT, 'media', 'chat', 'readiness.js'), 'utf8');
+
+test('the planning-file links are hidden by CSS until body data-profile is ready', () => {
+  const rules = [...chatCss().matchAll(/([^{}]+)\{([^}]*)\}/g)].map((match) => ({ selector: match[1].trim().replace(/\s+/g, ' '), body: match[2].trim() }));
+  const gate = rules.filter((rule) => rule.selector.includes('data-profile'));
+  assert.deepEqual(gate, [{ selector: 'body:not([data-profile="ready"]) #project-links', body: 'display: none;' }], 'exactly one rule, for the links only');
+});
+
+test('body data-profile is absent before the first profile-status, connect or choose while the profile does not work, and ready once it does', () => {
+  const h = page();
+  const links = h.document.createElement('nav');
+  links.id = 'project-links';
+  h.document.body.append(links);
+  const shown = (): boolean => h.document.body.getAttribute('data-profile') === 'ready';
+  assert.equal(h.document.body.getAttribute('data-profile'), null);
+  assert.equal(shown(), false, 'the links are hidden before anything is known');
+  h.deliver({ type: 'profile-status', value: value([]) });
+  assert.equal(h.document.body.getAttribute('data-profile'), 'connect');
+  h.deliver({ type: 'profile-status', value: value([profile('a', 'invalid')], 'a') });
+  assert.equal(h.document.body.getAttribute('data-profile'), 'choose');
+  assert.equal(shown(), false);
+  h.deliver({ type: 'profile-status', value: READY });
+  assert.equal(shown(), true, 'the links can show once the profile works');
+});
+
+test('readiness.js is on the release content list', () => {
+  const release = readFileSync(path.join(ROOT, 'scripts', 'verify-release-content.mjs'), 'utf8');
+  assert.ok(release.includes("'extension/media/chat/readiness.js'"));
+});
+
+test('readiness.js builds no markup, evaluates no code, reaches no network and never stores page state', () => {
+  const sinks = [/\.innerHTML\b/, /\.outerHTML\b/, /\binsertAdjacentHTML\b/, /\bdocument\.write\b/, /\bsrcdoc\b/, /\beval\s*\(/, /\bnew\s+Function\b/, /\bFunction\s*\(/, /\bfetch\s*\(/, /\bXMLHttpRequest\b/, /\bWebSocket\b/, /\bEventSource\b/, /\bsendBeacon\b/, /\bimportScripts\b/, /\bsetState\b/, /\bacquireVsCodeApi\b/, /\blocalStorage\b/, /\bsessionStorage\b/];
+  const source = readinessJs();
+  for (const sink of sinks) assert.ok(!sink.test(source), `readiness.js uses ${sink}`);
+});
+
+test('readiness.js has no en or em dash and no colour literal, and is one strict-mode IIFE', () => {
+  const source = readinessJs();
+  assert.ok(!/[–—]/.test(source), 'no dash character');
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(source), 'no hex colour');
+  assert.ok(!/\b(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch)\s*\(/i.test(source), 'no colour function');
+  const code = source.split('\n').filter((line) => !/^\s*(\/\/.*)?$/.test(line));
+  assert.match(code[0] ?? '', /^\(function \(root\) \{$/);
+  assert.equal(code[1]?.trim(), "'use strict';");
+  assert.equal(code[code.length - 1], "})(typeof window === 'undefined' ? globalThis : window);");
+});
+
+const SETUP_JS = path.join(ROOT, 'media', 'chat', 'setup.js');
+const PARITY_SKIP = existsSync(SETUP_JS) ? false : 'media/chat/setup.js arrives with 0.4.14 (PR #7); this parity check turns on when main is merged into Team Mode';
+
+test('PR #7 parity: setup.js welcomeState gives the same state as readiness.js on every case', { skip: PARITY_SKIP }, () => {
+  const setup = require(SETUP_JS) as { welcomeState(value: unknown): string };
+  const { welcomeState } = readiness();
+  const cases = [...RULE_TABLE.map((row) => row.value), { noWorkspace: true }];
+  for (const entry of cases) assert.equal(setup.welcomeState(entry), welcomeState(entry), JSON.stringify(entry) ?? 'undefined');
 });
