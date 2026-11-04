@@ -539,7 +539,10 @@
     setText(laterNote, note);
     laterNote.hidden = note === '';
     const sel = milestoneId();
+    const inView = cardsInMilestone();
     const lanes = (model.lanes[ui.groupBy] || []).filter((l) => {
+      // The model has a lane for every person with a card in any milestone; a person's lane shows when they have a card in the milestone shown.
+      if (ui.groupBy === 'member' && l.key !== 'unassigned' && !inView.some((c) => c.lane.member === l.key)) return false;
       if (ui.groupBy === 'phase' && l.milestoneId && sel !== 'all' && l.milestoneId !== sel) return false;
       if (ui.groupBy === 'milestone' && sel !== 'all' && l.key !== sel && l.key !== 'board') return false;
       return l.key !== 'board' || shown.some((c) => c.lane[ui.groupBy] === 'board');
@@ -616,7 +619,10 @@
     const noHead = ui.groupBy === 'none';
     attr(l.el, 'aria-labelledby', noHead ? null : l.titleBox.id);
     attr(l.el, 'aria-label', noHead ? lane.label : null);
-    l.head.replaceChildren(icon(collapsed ? 'chevron-right' : 'chevron-down'), el('span', 'lane-label', lane.label), el('span', 'lane-count', '(' + laneCards.length + ')'));
+    // 0.6.3 re-test: the lane counts the cards of its folded columns too, and says so, so "(45)" over five drawn cards is never a riddle.
+    const inFolded = laneCards.filter((c) => columnCollapsed(c.column)).length;
+    const count = '(' + laneCards.length + (inFolded > 0 ? ', ' + inFolded + ' in folded columns' : '') + ')';
+    l.head.replaceChildren(icon(collapsed ? 'chevron-right' : 'chevron-down'), el('span', 'lane-label', lane.label), el('span', 'lane-count', count));
     attr(l.head, 'aria-expanded', collapsed ? 'false' : 'true');
     const showProgress = !noHead && lane.progress;
     if (showProgress) {
@@ -638,11 +644,19 @@
     if (!node) {
       node = el(kind === 'f' ? 'ul' : 'div', 'cell' + (kind === 'x' ? ' collapsed' : ''));
       node.setAttribute('data-column', col.key); node.setAttribute('data-lane', lane.key);
-      // G-62-7: a folded column's cell is its own node and never receives a card; it holds only the count, for screen readers.
+      // G-62-7: a folded column's cell is its own node and never receives a card; it holds the count for screen readers and, when the column has cards
+      // in this lane, their number for the eye (0.6.3 re-test: the row's count included them and nothing on screen said where they were).
       if (kind === 'x') node.appendChild(el('span', 'sr-only'));
       cellEls.set(key, node);
     }
-    if (kind === 'x') setText(node.firstChild, plural(cards.length, 'card', 'cards') + ', column folded');
+    if (kind === 'x') {
+      setText(node.firstChild, plural(cards.length, 'card', 'cards') + ', column folded');
+      let shownCount = node.children[1];
+      if (cards.length > 0) {
+        if (!shownCount) { shownCount = el('span', 'folded-count'); shownCount.setAttribute('aria-hidden', 'true'); node.appendChild(shownCount); }
+        setText(shownCount, String(cards.length));
+      } else if (shownCount) shownCount.remove();
+    }
     else if (kind === 'e') { if (!node.children.length) node.appendChild(el('span', 'sr-only', 'No cards')); } else {
       attr(node, 'aria-label', lane.label + ', ' + col.label);
       place(node, cardList(cards, ui.groupBy + '|' + lane.key + '|' + col.key, lane.label + ', ' + col.label));

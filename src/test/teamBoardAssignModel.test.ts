@@ -105,6 +105,26 @@ test('member lanes: one per person with a shown card, sorted by name, the viewer
   assert.equal(unassigned?.count, all.cards.filter((entry) => entry.assignee === undefined).length);
 });
 
+// 0.6.3 re-test (debug session board-codeserver-cards-and-drag): the page can show another milestone or all of them, so a lane per person with a card
+// in any milestone; the count and the collapse rule read the selected milestone, and the page leaves out a lane with no card in the milestone it shows.
+test('member lanes: a person whose cards are all in another milestone still has a lane, counted and folded by the selected milestone', async () => {
+  const world = await standard();
+  const { importedBody } = await import('./helpers/teamBoardWorld');
+  const { owner, lead, dev } = world;
+  world.accept(owner, 'item.imported', importedBody({ id: 'milestone:v0.8.0', kind: 'milestone', title: 'Version 0.8.0' }));
+  world.accept(owner, 'item.imported', importedBody({ id: 'phase:80', kind: 'phase', title: 'Old work', parentId: 'milestone:v0.8.0' }));
+  world.accept(owner, 'item.imported', importedBody({ id: 'plan:80-01', kind: 'plan', title: 'Old slice', parentId: 'phase:80', scope: ['src/o/**'], estimate: { tokens: 1000 } }));
+  world.accept(lead, 'item.assigned', { id: 'plan:80-01', memberId: dev.memberId });
+  const model = modelFor(world, owner.memberId);
+  assert.equal(model.selectedMilestone, 'milestone:v0.9.0');
+  assert.equal(card(model, 'plan:80-01').lane.member, dev.memberId);
+  const lane = model.lanes.member.find((entry) => entry.key === dev.memberId);
+  assert.ok(lane, 'Dana has a lane although her only card is in v0.8.0');
+  assert.equal(lane.count, 0, 'counted for the selected milestone');
+  assert.equal(lane.collapsedByDefault, false, 'her open card in the other milestone keeps her lane open');
+  assert.deepEqual(model.lanes.member.map((entry) => entry.key), [dev.memberId, 'unassigned']);
+});
+
 test('Mine: cards assigned to me, or cards I added that nobody is assigned to', async () => {
   const world = await standard();
   const { lead, dev } = world;

@@ -995,6 +995,10 @@ test('0.6.3 re-test: every card a column header counts is drawn in a lane, whate
   const model = modelOf(world, world.owner.memberId);
   const h = start({ width: 1400 });
   h.deliver({ type: 'state', model });
+  const memberRows = (): string[] => h.$$('.lane').map((l) => l.getAttribute('data-lane') ?? '');
+  assert.deepEqual(memberRows(), ['unassigned'], 'Dana has no card in v0.9.0, so her row is not drawn there');
+  h.setValue(h.$('#ms-select')!, 'milestone:v0.8.0', 'change');
+  assert.deepEqual(memberRows(), [world.dev.memberId, 'unassigned'], 'in v0.8.0 her row holds her card');
   for (const milestone of ['milestone:v0.9.0', 'milestone:v0.8.0', 'all']) {
     h.setValue(h.$('#ms-select')!, milestone, 'change');
     for (const group of ['Member', 'Phase', 'Milestone', 'None']) {

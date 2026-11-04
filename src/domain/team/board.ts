@@ -516,25 +516,36 @@ function phasesOf(state: TeamState): WorkItem[] {
   return [...state.items.values()].filter((item) => item.kind === 'phase').sort((a, b) => compareParts(phaseNumber(a), phaseNumber(b)) || (a.id < b.id ? -1 : 1));
 }
 
-// G-62-5 (owner decision 2026-11-03, "the member lane uses the assignee"): one lane per person with a shown card, sorted by the name the board
-// shows (then by id, so two people with one name still sort the same on every client), the viewer's own marked, and Unassigned always last.
+// G-62-5 (owner decision 2026-11-03, "the member lane uses the assignee"): one lane per person with a card, sorted by the name the board shows (then
+// by id, so two people with one name still sort the same on every client), the viewer's own marked, and Unassigned always last.
 // G-62-3 (owner decision 2026-11-03): a lane starts collapsed only when it holds no shown card outside Done and Cancelled, so a lane of finished work
 // folds and a lane with active or upcoming work (a phase card included) opens.
+// 0.6.3 re-test (debug session board-codeserver-cards-and-drag): the page may show another milestone or all of them, so a person whose cards are all in
+// another milestone still gets a lane; without it the column headers counted those cards and no lane drew them. The count and the collapse rule
+// read the selected milestone's cards when the person has any there, and the page leaves out a lane with no card in the milestone it shows.
 function onlyFinished(cards: readonly BoardCard[]): boolean {
   return !cards.some((card) => card.column !== 'done' && card.column !== 'cancelled');
 }
 
-function memberLanes(shown: readonly BoardCard[], viewerId: string | undefined): BoardLane[] {
-  const people = new Map<string, { name: string; cards: BoardCard[] }>();
-  for (const card of shown) {
+function memberLanes(cards: readonly BoardCard[], shown: readonly BoardCard[], viewerId: string | undefined): BoardLane[] {
+  const visible = new Set(shown.map((card) => card.id));
+  const people = new Map<string, { name: string; cards: BoardCard[]; shown: BoardCard[] }>();
+  for (const card of cards) {
     if (card.assignee === undefined) continue;
-    const entry = people.get(card.assignee.id);
-    if (entry === undefined) people.set(card.assignee.id, { name: card.assignee.name, cards: [card] });
-    else entry.cards.push(card);
+    let entry = people.get(card.assignee.id);
+    if (entry === undefined) {
+      entry = { name: card.assignee.name, cards: [], shown: [] };
+      people.set(card.assignee.id, entry);
+    }
+    entry.cards.push(card);
+    if (visible.has(card.id)) entry.shown.push(card);
   }
   const lanes: BoardLane[] = [...people.entries()]
     .sort(([aId, a], [bId, b]) => (a.name < b.name ? -1 : a.name > b.name ? 1 : aId < bId ? -1 : aId > bId ? 1 : 0))
-    .map(([id, entry]) => ({ key: id, label: id === viewerId ? `${entry.name}${YOU_SUFFIX}` : entry.name, count: entry.cards.length, collapsedByDefault: onlyFinished(entry.cards) }));
+    .map(([id, entry]) => ({
+      key: id, label: id === viewerId ? `${entry.name}${YOU_SUFFIX}` : entry.name, count: entry.shown.length,
+      collapsedByDefault: onlyFinished(entry.shown.length > 0 ? entry.shown : entry.cards)
+    }));
   const unassigned = shown.filter((card) => card.assignee === undefined);
   lanes.push({ key: 'unassigned', label: UNASSIGNED_LABEL, count: unassigned.length, collapsedByDefault: onlyFinished(unassigned) });
   return lanes;
@@ -560,7 +571,7 @@ function lanesOf(state: TeamState, cards: readonly BoardCard[], shown: readonly 
     return { key: item.id, label: flattenName(item.title, 200), count: held.length, collapsedByDefault: onlyFinished(held), milestoneId: item.id, progress: progressView(state.items, item.id) };
   });
   return {
-    member: memberLanes(shown, viewerId),
+    member: memberLanes(cards, shown, viewerId),
     phase: [...phase, ...boardLane((card) => card.lane.phase)],
     milestone: [...milestone, ...boardLane((card) => card.lane.milestone)],
     // The one lane of an ungrouped board never starts collapsed: folding it would show an empty board.

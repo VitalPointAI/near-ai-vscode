@@ -70,7 +70,9 @@ body:has(> #root[data-layout="kanban"]) { padding-bottom: 0; }
 #root[data-layout="kanban"] > #toolbar, #root[data-layout="kanban"] > #banner { flex: none; }
 #root[data-layout="kanban"] > #board { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .board-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 32px; scroll-padding-top: var(--board-head-height, 0px); container-type: inline-size; background: var(--vscode-editor-background); }
-.colheads { position: sticky; top: 0; z-index: 2; padding-top: 12px; min-width: 100%; background: var(--vscode-editor-background); }
+/* align-items: start keeps an open header as tall as its own words: stretched to the turned names of the folded ones it read as an empty column
+   (0.6.3 re-test). */
+.colheads { position: sticky; top: 0; z-index: 2; padding-top: 12px; min-width: 100%; align-items: start; background: var(--vscode-editor-background); }
 .colheads, .lane-grid { display: grid; grid-template-columns: var(--board-columns, repeat(8, 256px)); gap: 12px; width: max-content; }
 .column, .cell { min-width: 0; }
 .column { padding: 8px; border-radius: 4px; background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background)); }
@@ -92,6 +94,8 @@ body:has(> #root[data-layout="kanban"]) { padding-bottom: 0; }
 .cell { position: relative; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; min-height: 64px; }
 /* A folded cell is an empty strip under its folded header: board.js puts no card in it, only the count for screen readers (G-62-7). */
 .cell.collapsed { border-radius: 4px; background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background)); }
+/* The number of cards a folded column holds in this row (0.6.3 re-test); screen readers get the sentence in the sr-only count instead. */
+.cell.collapsed .folded-count { display: block; padding-top: 8px; text-align: center; font-size: 0.85em; line-height: 1.4; color: var(--vscode-descriptionForeground); }
 
 /* cards */
 .card { position: relative; display: flex; flex-direction: column; gap: 4px; list-style: none; padding: 8px 12px; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px; background: var(--vscode-editorWidget-background); }
