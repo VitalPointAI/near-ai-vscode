@@ -130,6 +130,24 @@ test('the e2e probe opens a card\'s detail and picks a Group by choice as a pers
   assert.deepEqual(facts().at(-1)!.errors, [], 'an unknown card presses nothing and throws nothing');
 });
 
+test('the e2e probe lets go of a card\'s focus as a click on empty space would, so a later scroll measures no stale focus (62-22)', async () => {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const h = createBoardHarness({ width: 1400 });
+  h.document.body.setAttribute('data-e2e', '1');
+  h.load(['board.js', 'menu.js']);
+  h.deliver({ type: 'state', model });
+  const last = (): Record<string, unknown> => h.posts.filter((p) => p.type === 'e2e-facts').at(-1) as Record<string, unknown>;
+  h.deliver({ type: 'e2e-probe', id: 1, action: 'focus', itemId: 'plan:90-01' });
+  assert.equal(last().focusedCard, 'plan:90-01', 'the card has focus');
+  h.deliver({ type: 'e2e-probe', id: 2, action: 'blur' });
+  assert.equal(last().id, 2);
+  assert.equal(last().focusedCard, '', 'no card has focus after the blur');
+  assert.deepEqual(last().errors, []);
+  h.deliver({ type: 'e2e-probe', id: 3, action: 'blur' });
+  assert.deepEqual(last().errors, [], 'a blur with nothing focused throws nothing');
+});
+
 test('a title with markup and icon syntax is drawn as that exact text and creates no element', async () => {
   const world = await standard();
   const hostile = '<img src=x onerror=alert(1)> $(alert) <b>bold</b>';

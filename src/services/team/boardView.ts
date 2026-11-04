@@ -111,11 +111,11 @@ export interface BoardLayoutRequest { id: number; action: 'measure' | 'scroll' |
 
 /**
  * Extension-host tests only (NEAR_AI_E2E=1): asks the real page to report what it drew. The page acts (focus a card, press a key on the focused element,
- * press a column header, click a card as a person would, pick a Group by choice)
+ * press a column header, click a card as a person would, pick a Group by choice, let go of focus)
  * and answers with an 'e2e-facts' message (card count and ids, focus, whether the Move menu is open, page errors caught). The host never reads that
  * answer; the tests see it through `fromView`. The page honours this only when the host marked it with data-e2e, which happens only in the tests.
  */
-export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key' | 'column' | 'open' | 'group'; itemId?: string; key?: string; column?: string; group?: string }
+export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key' | 'column' | 'open' | 'group' | 'blur'; itemId?: string; key?: string; column?: string; group?: string }
 
 // ---- what the page may say -------------------------------------------------------------------------------------------------------------------
 
