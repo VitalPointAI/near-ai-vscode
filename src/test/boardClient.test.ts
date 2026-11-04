@@ -107,6 +107,29 @@ test('the e2e probe answers only on a page the host marked for the extension-hos
   assert.deepEqual(facts[0]!.errors, []);
 });
 
+test('the e2e probe opens a card\'s detail and picks a Group by choice as a person\'s click would, and reports both (62-22)', async () => {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const h = createBoardHarness({ width: 1400 });
+  h.document.body.setAttribute('data-e2e', '1');
+  h.load(['board.js', 'menu.js', 'detail.js']);
+  h.deliver({ type: 'state', model });
+  const facts = (): Array<Record<string, unknown>> => h.posts.filter((p) => p.type === 'e2e-facts') as Array<Record<string, unknown>>;
+  h.deliver({ type: 'e2e-probe', id: 1, action: 'facts' });
+  assert.equal(facts().at(-1)!.detailOpen, false, 'no detail before the click');
+  assert.equal(facts().at(-1)!.groupBy, 'member', 'grouped by member at first');
+  h.deliver({ type: 'e2e-probe', id: 2, action: 'open', itemId: 'plan:90-01' });
+  assert.ok(h.posts.some((p) => p.type === 'detail' && p.itemId === 'plan:90-01'), 'the page asks for the card\'s detail');
+  assert.equal(facts().at(-1)!.id, 2);
+  assert.equal(facts().at(-1)!.detailOpen, true, 'the detail is open');
+  h.deliver({ type: 'e2e-probe', id: 3, action: 'group', group: 'phase' });
+  assert.equal(facts().at(-1)!.groupBy, 'phase', 'grouped by phase after the click');
+  h.deliver({ type: 'e2e-probe', id: 4, action: 'group', group: '<img src=x>' });
+  assert.equal(facts().at(-1)!.groupBy, 'phase', 'an unknown choice presses nothing');
+  h.deliver({ type: 'e2e-probe', id: 5, action: 'open', itemId: 'plan:does-not-exist' });
+  assert.deepEqual(facts().at(-1)!.errors, [], 'an unknown card presses nothing and throws nothing');
+});
+
 test('a title with markup and icon syntax is drawn as that exact text and creates no element', async () => {
   const world = await standard();
   const hostile = '<img src=x onerror=alert(1)> $(alert) <b>bold</b>';
