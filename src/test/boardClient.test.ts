@@ -912,10 +912,14 @@ test('G-62-7: a folded column holds no card, only a hidden count in every lane; 
     assert.notEqual(cell.tagName.toLowerCase(), 'ul', 'no card list inside a folded cell');
     const hidden = cell.querySelectorAll('.sr-only');
     assert.equal(hidden.length, 1, 'one hidden count');
-    assert.equal(cell.children.length, 1, 'and nothing else');
+    // 0.6.3 re-test (debug session board-codeserver-cards-and-drag): a folded cell that holds cards also shows their number, so a lane's count is
+    // never made of cards nobody can see; it holds nothing else.
+    const shown = cell.querySelectorAll('.folded-count');
+    assert.equal(cell.children.length, 1 + shown.length, 'and nothing else');
   }
   const count = inReady.length;
   assert.equal(text(h.$('.cell[data-column="ready"][data-lane="unassigned"] .sr-only')), `${count} ${count === 1 ? 'card' : 'cards'}, column folded`);
+  assert.equal(text(h.$('.cell[data-column="ready"][data-lane="unassigned"] .folded-count')), String(count), 'the folded Ready cell shows how many cards it holds');
   assert.equal(h.$('.card[data-id="plan:90-01"]'), null, 'the card of a folded column is left out of the page, not hidden');
   assert.equal(api(h).focusCard('plan:90-01'), false, 'a card of a folded column cannot take focus');
   const active = h.document.activeElement as FakeNode | null;
@@ -926,6 +930,89 @@ test('G-62-7: a folded column holds no card, only a hidden count in every lane; 
   h.$('.column[data-column="ready"] .col-btn')!.click();
   assert.equal(h.$('.card[data-id="plan:90-01"]'), null, 'folding it again removes the card');
   assert.equal(h.$$('.cell.collapsed .card').length, 0);
+});
+
+// The owner's 0.6.3 re-test board in code-server (debug session board-codeserver-cards-and-drag): the scratch project carries this repository's v0.6.0
+// roadmap, so one finished phase holds only done plans and the next phase has no plans yet. Backlog then holds only a phase card, Done (folded) holds
+// every plan, and everything is unassigned: the owner saw "Backlog 5", "Unassigned (45)" and "Done 40" with only five cards in sight.
+async function retestBoard(): Promise<BoardWorld> {
+  const world = await boardWorld();
+  const { importedBody } = await import('./helpers/teamBoardWorld');
+  world.accept(world.owner, 'item.imported', importedBody({ id: 'milestone:v0.6.0', kind: 'milestone', title: 'Team Mode', active: true }));
+  world.accept(world.owner, 'item.imported', importedBody({ id: 'phase:60', kind: 'phase', title: 'Team core', parentId: 'milestone:v0.6.0' }));
+  for (const n of ['01', '02', '03']) {
+    world.accept(world.owner, 'item.imported', importedBody({ id: `plan:60-${n}`, kind: 'plan', title: `Core slice ${n}`, parentId: 'phase:60', state: 'done', summary: true, gsd: { phase: '60', plan: n, wave: 1 } }));
+  }
+  world.accept(world.owner, 'item.imported', importedBody({ id: 'phase:63', kind: 'phase', title: 'Claims', parentId: 'milestone:v0.6.0' }));
+  return world;
+}
+
+/** What the page shows for one column across the drawn lanes: cards in open cells plus the visible counts of folded cells and collapsed lanes' cells. */
+function accountedFor(h: BoardHarness, column: string): { drawn: number; folded: number } {
+  let drawn = 0;
+  let folded = 0;
+  for (const cell of h.$$(`.lanes .cell[data-column="${column}"]`)) {
+    if (cell.className.includes('collapsed')) folded += Number(text(cell.querySelector('.folded-count')) || 0);
+    else drawn += cell.querySelectorAll('.card').length;
+  }
+  return { drawn, folded };
+}
+const headCount = (h: BoardHarness, column: string): number => Number(text(h.$(`.column[data-column="${column}"] .col-count`)));
+
+test('0.6.3 re-test: on a board whose only open card is a phase card, the lane count names the cards in folded columns and the folded cell shows its number', async () => {
+  const world = await retestBoard();
+  const model = modelOf(world, world.owner.memberId);
+  const h = start({ width: 1400 });
+  h.deliver({ type: 'state', model });
+  assert.equal(headCount(h, 'backlog'), 1);
+  assert.equal(headCount(h, 'done'), 3);
+  assert.ok(h.$('.cell[data-column="backlog"][data-lane="unassigned"]')!.contains(card(h, 'phase:63')), 'the phase card is drawn in Backlog of the Unassigned row');
+  assert.equal(text(h.$('.lane[data-lane="unassigned"] .lane-count')), '(4, 3 in folded columns)', 'the lane says where the cards it counts but does not draw are');
+  const done = h.$('.cell[data-column="done"][data-lane="unassigned"]')!;
+  assert.equal(done.querySelectorAll('.card').length, 0, 'still no card inside the folded cell');
+  const shown = done.querySelector('.folded-count')!;
+  assert.ok(shown, 'the folded Done cell shows a count');
+  assert.equal(text(shown), '3');
+  assert.equal(shown.getAttribute('aria-hidden'), 'true', 'the number is for the eye; screen readers get the sentence');
+  assert.equal(text(done.querySelector('.sr-only')), '3 cards, column folded');
+  assert.equal(h.$('.cell[data-column="cancelled"][data-lane="unassigned"] .folded-count'), null, 'a folded cell with no card shows no number');
+  for (const column of model.columns.map((c) => c.key)) {
+    const { drawn, folded } = accountedFor(h, column);
+    assert.equal(drawn + folded, headCount(h, column), `every card the ${column} header counts is drawn or shown as a folded count`);
+  }
+
+  h.$('.column[data-column="done"] .col-btn')!.click();
+  assert.equal(text(h.$('.lane[data-lane="unassigned"] .lane-count')), '(4)', 'with Done open nothing is folded away');
+  assert.equal(h.$('.cell[data-column="done"][data-lane="unassigned"]')!.querySelectorAll('.card').length, 3);
+  assert.equal(h.$('.cell[data-column="done"][data-lane="unassigned"] .folded-count'), null);
+  assert.equal(text(h.$('.cell[data-column="claimed"][data-lane="unassigned"] .sr-only')), '0 cards, column folded');
+});
+
+test('0.6.3 re-test: every card a column header counts is drawn in a lane, whatever the grouping and the milestone chosen', async () => {
+  const world = await secondMilestone();
+  // Dana's only card is in the other milestone, so the model (built for the active milestone) has no lane for her.
+  world.accept(world.owner, 'item.assigned', { id: 'plan:80-01', memberId: world.dev.memberId });
+  const model = modelOf(world, world.owner.memberId);
+  const h = start({ width: 1400 });
+  h.deliver({ type: 'state', model });
+  for (const milestone of ['milestone:v0.9.0', 'milestone:v0.8.0', 'all']) {
+    h.setValue(h.$('#ms-select')!, milestone, 'change');
+    for (const group of ['Member', 'Phase', 'Milestone', 'None']) {
+      radio(h, group).click();
+      for (const column of ['backlog', 'ready']) {
+        const { drawn, folded } = accountedFor(h, column);
+        const hiddenLanes = h.$$('.lane').filter((l) => l.querySelector('.lane-grid')!.hidden).map((l) => l.getAttribute('data-lane'));
+        assert.equal(drawn + folded, headCount(h, column), `${group} on ${milestone}: the ${column} header counts ${headCount(h, column)}, the lanes draw ${drawn} (collapsed lanes: ${hiddenLanes.join(', ') || 'none'})`);
+      }
+    }
+  }
+});
+
+test('0.6.3 re-test: board.css keeps an open column header as tall as its own words, and the folded count is quiet text in theme colours', () => {
+  assert.match(cssRule('.colheads'), /align-items:\s*start/, 'an open header is not stretched into an empty box as tall as the turned names of the folded ones');
+  const count = cssRule('.cell.collapsed .folded-count');
+  assert.match(count, /color:\s*var\(--vscode-descriptionForeground\)/);
+  assert.match(count, /text-align:\s*center/);
 });
 
 // 62-22 screenshot matrix: in the light theme the selected Group by choice showed its word in the caption grey on the button fill; in high contrast the
