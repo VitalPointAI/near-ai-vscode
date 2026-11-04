@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import { SecretLeakError, assertNoSecrets } from '../domain/team/secrets';
 import { INVITABLE_ROLES, ROLES } from '../domain/team/types';
 import type { NearLink, Role, TeamFile, TeamState } from '../domain/team/types';
-import { MEMBER_ID_PATTERN, validateName } from '../domain/team/validate';
+import { MEMBER_ID_PATTERN, PUBLIC_KEY_PATTERN, validateName } from '../domain/team/validate';
 import { CleanupChecklist } from './cleanupChecklist';
 import type { CleanupItem } from './cleanupChecklist';
 import { NoDeviceKeyError } from './eventLog';
@@ -133,7 +133,7 @@ async function configuredRemoteUrl(projectRoot: string, remote: string, git: Git
   return result.code === 0 ? gitText(result) : '';
 }
 
-function failureOf(result: Extract<AppendResult, { ok: false }>): InviteResult {
+function failureOf(result: Extract<AppendResult, { ok: false }>): Extract<InviteResult, { ok: false }> {
   const message = redactGitMessage(result.reason);
   switch (result.kind) {
     case 'offline':
@@ -209,12 +209,24 @@ interface IssuePlan { name: string; role: Exclude<Role, 'owner'>; allocationNano
 // Decides, from the freshest state, what the new invitation is. A re-issue also names the invitation it replaces.
 type PlanOf = (state: TeamState) => ({ conflict: string } | (IssuePlan & { replaces?: string }));
 
-async function issue(input: InviteInput | ReissueInput, email: string, plan: PlanOf, reissue: boolean): Promise<InviteResult> {
+/** A member id and invitation key chosen by someone else: an accepted request to join, whose code never leaves the requester's computer (G-61-9). */
+export interface PresetInvitation { memberId: string; invitePublicKey: string }
+
+type Issued =
+  | (Omit<Extract<InviteResult, { ok: true }>, 'bundle'> & { bundle?: string; invitedEvent: string })
+  | Extract<InviteResult, { ok: false }>;
+
+async function issue(input: InviteInput | ReissueInput, email: string, plan: PlanOf, reissue: boolean, preset?: PresetInvitation): Promise<Issued> {
   const git = input.git ?? runGit;
   const teamId = input.teamFile.teamId;
-  const raw = await configuredRemoteUrl(input.projectRoot, input.teamFile.coordination.remote, git);
-  const cleaned = cleanRepoUrl(raw);
-  if (!cleaned.ok) return { ok: false, code: 'remote-url', message: cleaned.reason };
+  // An accepted request hands nothing back, so it needs no address for the teammate to clone from.
+  let repoUrl = '';
+  if (preset === undefined) {
+    const raw = await configuredRemoteUrl(input.projectRoot, input.teamFile.coordination.remote, git);
+    const cleaned = cleanRepoUrl(raw);
+    if (!cleaned.ok) return { ok: false, code: 'remote-url', message: cleaned.reason };
+    repoUrl = cleaned.url;
+  }
 
   // CR-01: the organization a lead is invited to, and the link the bundle names, come only from a link this computer trusts.
   const storageDir = teamStorageDir(input.globalStorageDir, teamId);
@@ -226,10 +238,11 @@ async function issue(input: InviteInput | ReissueInput, email: string, plan: Pla
     throw error;
   }
 
-  const memberId = newMemberId();
-  const code = generateInviteCode();
+  const memberId = preset?.memberId ?? newMemberId();
+  // With a preset there is no code here at all: only the requester's computer has it.
+  const code = preset === undefined ? generateInviteCode() : undefined;
   try {
-    const invitePublicKey = deriveInviteKey(code.bytes, teamId, memberId).publicKey;
+    const invitePublicKey = code === undefined ? (preset as PresetInvitation).invitePublicKey : deriveInviteKey(code.bytes, teamId, memberId).publicKey;
     let chosen: IssuePlan | undefined;
     let replaced: string | undefined;
     let appended: AppendResult;
@@ -237,6 +250,8 @@ async function issue(input: InviteInput | ReissueInput, email: string, plan: Pla
     try {
       // The builder runs again after every lost race, so the plan is always read from the state the event will sit on.
       appended = await input.log.append((state) => {
+        // Read from the freshest state: a request accepted twice, or on two computers at once, finds its member id already on the list.
+        if (preset !== undefined && state.members.has(memberId)) return { conflict: ALREADY_ON_LIST };
         const decided = plan(state);
         if ('conflict' in decided) return decided;
         chosen = { name: decided.name, role: decided.role, allocationNanoUsd: decided.allocationNanoUsd };
@@ -266,8 +281,8 @@ async function issue(input: InviteInput | ReissueInput, email: string, plan: Pla
       // The invitation is already in the log. Losing the display cache costs only the name and email shown beside it, so the bundle is still returned.
       notices.push(`The invitation was sent, but this computer could not save it to the local invitation list: ${redactGitMessage(error instanceof Error ? error.message : String(error))}`);
     }
-    const bundle = encodeInviteBundle({
-      v: 1, repo: cleaned.url, team: teamId, ref: input.teamFile.coordination.ref, member: memberId, code: code.text,
+    const bundle = code === undefined ? undefined : encodeInviteBundle({
+      v: 1, repo: repoUrl, team: teamId, ref: input.teamFile.coordination.ref, member: memberId, code: code.text,
       ...(near === undefined ? {} : { near: { organizationId: near.organizationId, workspaceId: near.workspaceId } })
     });
     // CR-02: the replaced invitation's unsent NEAR invitation must never be sent later, so its item is closed now.
@@ -277,20 +292,52 @@ async function issue(input: InviteInput | ReissueInput, email: string, plan: Pla
     }
     const step = await inviteToNear(input, near, { memberId, name, email, role, reissue }, storageDir);
     if (step.notice !== undefined) notices.push(step.notice);
-    const result: InviteResult = { ok: true, memberId, bundle, nearInvitation: step.nearInvitation };
+    const result: Issued = { ok: true, memberId, invitedEvent: invitedEvent.id, nearInvitation: step.nearInvitation, ...(bundle === undefined ? {} : { bundle }) };
     if (notices.length > 0) result.notice = notices.join(' ');
     return result;
   } finally {
     // D-05: once the bundle is built the clear code is not needed again. The string copy in the bundle is the only one left.
-    code.bytes.fill(0);
+    code?.bytes.fill(0);
   }
+}
+
+// What inviteMember and reissueInvite hand back: always a bundle, never the event id kept for an accepted request.
+function asInvite(issued: Issued): InviteResult {
+  if (!issued.ok) return issued;
+  const { bundle, invitedEvent: _invitedEvent, ...rest } = issued;
+  if (bundle === undefined) return refuse('The invitation was saved but its invite text could not be made.');
+  return { ...rest, bundle };
+}
+
+const ALREADY_ON_LIST = 'This request was already accepted, or its id is already on the team list, so nothing was changed.';
+
+export type RequestInviteResult =
+  | { ok: true; memberId: string; invitedEvent: string; nearInvitation: 'sent' | 'already-member' | 'queued' | 'not-applicable'; notice?: string }
+  | { ok: false; code: 'refused' | 'conflict' | 'offline'; message: string };
+
+/**
+ * The invitation for an accepted request to join (G-61-9): the same checks, log write, local invitation list and invitation to your
+ * organization as inviteMember, with the request's member id and invitation key instead of a new code. No invite text is made.
+ */
+export async function acceptRequestInvite(input: InviteInput, preset: PresetInvitation): Promise<RequestInviteResult> {
+  const problem = checkInput(input);
+  if (problem !== undefined) return refuse(problem);
+  if (!MEMBER_ID_PATTERN.test(preset.memberId) || !PUBLIC_KEY_PATTERN.test(preset.invitePublicKey)) return refuse('This request is damaged or was changed after it was made. Ask the person to send it again.');
+  if (input.log.state().members.has(preset.memberId)) return refuse(ALREADY_ON_LIST);
+  const plan: IssuePlan = { name: input.name.trim(), role: input.role, allocationNanoUsd: input.allocationNanoUsd };
+  const issued = await issue(input, input.email.trim(), () => plan, false, preset);
+  if (issued.ok) {
+    const { bundle: _bundle, ...rest } = issued;
+    return rest;
+  }
+  return issued.code === 'remote-url' ? refuse(issued.message) : { ok: false, code: issued.code, message: issued.message };
 }
 
 export async function inviteMember(input: InviteInput): Promise<InviteResult> {
   const problem = checkInput(input);
   if (problem !== undefined) return refuse(problem);
   const plan: IssuePlan = { name: input.name.trim(), role: input.role, allocationNanoUsd: input.allocationNanoUsd };
-  return issue(input, input.email.trim(), () => plan, false);
+  return asInvite(await issue(input, input.email.trim(), () => plan, false));
 }
 
 // D-10: a lost bundle, an expired invitation or a wrong lifetime is fixed by replacing the invitation. member.removed for the old id and
@@ -303,14 +350,14 @@ export async function reissueInvite(input: ReissueInput): Promise<InviteResult> 
   const ttl = checkTtl(input.ttlSeconds);
   if (ttl !== undefined) return refuse(ttl);
   const teamId = input.teamFile.teamId;
-  return issue(input, email, (state) => {
+  return asInvite(await issue(input, email, (state) => {
     const old = state.members.get(input.oldMemberId);
     if (old === undefined || old.status !== 'invited' || old.removedEvent !== undefined) return { conflict: 'That invitation is no longer pending, so it cannot be re-issued.' };
     if (!old.emailHashes.includes(emailHash(teamId, email))) return { conflict: 'That email address is not the one this invitation was made for.' };
     const role = old.pendingRole ?? 'observer';
     if (role === 'owner') return { conflict: 'That invitation is not for a role that can be invited.' };
     return { name: old.name, role, allocationNanoUsd: old.allocationNanoUsd ?? 0, replaces: old.id };
-  }, true);
+  }, true));
 }
 
 // ---- the unsent NEAR invitation of a lead (CR-02) -------------------------------------------------------------------------------------
