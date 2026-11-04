@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62.1-01-PLAN.md
-last_updated: "2026-11-04T22:55:02.487Z"
+stopped_at: Completed 62.1-02-PLAN.md
+last_updated: "2026-11-04T23:13:44.574Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: f677caba421a603fe66f50580217f4ed22c3b76a
+state_head: 7fd1494cd59060c0d4d1d19798ac55cd7c7b1af4
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 71
+  completed_plans: 72
   percent: 11
 ---
 
@@ -125,6 +125,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 61 P30 | 25min | 3 tasks | 13 files |
 | Phase 61 P31 | 58min | 3 tasks | 6 files |
 | Phase 62.1 P01 | 29min | 3 tasks | 7 files |
+| Phase 62.1 P02 | 13min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -286,6 +287,10 @@ Recent decisions affecting current work:
 - [Phase 62.1]: 62.1-01: a dependency on any phase item (roadmap Depends on, a plan naming a phase, or a planless phase card) orders the card after every card of that phase with no edge; waitsFor names the phase
 - [Phase 62.1]: 62.1-01: phase dependencies are zero-weight gate vertices and loops are an iterative Tarjan SCC laid out as a number-order chain, so hostile graphs never recurse or blow up
 - [Phase 62.1]: 62.1-01: the layout-failure output line names only the error kind and file and line, never the message, and is written once until the timeline draws again
+- [Phase 62.1]: 62.1-02: one percentOf for toolbar, bands and phases: Math.floor(100 x Done / not Cancelled), no percent when nothing is counted (No cards yet / Every card here was cancelled)
+- [Phase 62.1]: 62.1-02: Now counts and percent cover the whole frontier band; all done stands after the last step of the last band with cards with the overall exact count
+- [Phase 62.1]: 62.1-02: the dot name keeps the card's a11yLabel and says the assignee once; the viewer's own sentence is replaced only right after cardLabelHead, never inside a title
+- [Phase 62.1]: 62.1-02: Waits for lists waitsFor then missing ids (3 then and k more), a whole phase counted as one; phase links carry the board's phase label
 
 ### Pending Todos
 
@@ -307,8 +312,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T22:55:02.053Z
-Stopped at: Completed 62.1-01-PLAN.md
+Last session: 2026-11-04T23:13:44.143Z
+Stopped at: Completed 62.1-02-PLAN.md
 Resume file: None
 
 ## Notes
