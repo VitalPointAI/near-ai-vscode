@@ -5,17 +5,17 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-24-PLAN.md (owner review of the screenshots and the code-server repeat of 62-UAT 1 to 8 and 61-UAT 9 pending)
-last_updated: "2026-11-04T13:09:06.839Z"
+stopped_at: Completed 62-26-PLAN.md
+last_updated: "2026-11-04T19:54:21.859Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: ff2982c82a10af75dd65359b02ee2d85d4789af1
+state_head: 0151d3bd627a999c6ef24a102f65f8361e2069ab
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 1
-  total_plans: 63
-  completed_plans: 63
-  percent: 13
+  total_plans: 79
+  completed_plans: 64
+  percent: 11
 ---
 
 # Project State
@@ -34,7 +34,7 @@ Plan: 14 of 14
 Status: Phase complete — ready for verification
 Last activity: 2026-11-02 — Phase 62 execution started
 
-Progress: [█░░░░░░░░░] 13%
+Progress: [█░░░░░░░░░] 11%
 
 ## Performance Metrics
 
@@ -117,6 +117,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P23 | 30min | 2 tasks | 8 files |
 | Phase 61 P26 | 25 min | 3 tasks | 17 files |
 | Phase 62 P24 | 46min | 3 tasks | 12 files |
+| Phase 62 P26 | 18 min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -267,6 +268,7 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-26: 'Team Mode' is banned in people-facing Team literals; palette titles keep their names; the online-home button is 'Set up anyway'
 - [Phase 62]: 62-24: the board e2e makes teammates with the real invite, join and confirm flows in the extension host, with an in-memory key store (not the test harness, which would change V8's WebAssembly limit for the host) and folders removed in run()'s finally
 - [Phase 62]: 62-24: the full e2e runs before the screenshot run, because every board launch empties .vscode-test/screens
+- [Phase 62]: 62-26: WorkItem.assignedBy records who made the current assignment; a member's unassign is item.assign-self only when they are assignee and assigner (owner decision 2026-11-04); no event body or pinned hash moved
 
 ### Pending Todos
 
@@ -288,8 +290,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T13:09:06.433Z
-Stopped at: Completed 62-24-PLAN.md (owner review of the screenshots and the code-server repeat of 62-UAT 1 to 8 and 61-UAT 9 pending)
+Last session: 2026-11-04T19:54:21.440Z
+Stopped at: Completed 62-26-PLAN.md
 Resume file: None
 
 ## Notes
