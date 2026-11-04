@@ -7,6 +7,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { MOVE_KEYS, assignCandidates, availableMoves, buildBoardModel, buildCardDetail, planAssign, planMove } from '../../domain/team/board';
 import type { AssignCandidate, AssignIntent, BoardModel, MoveKey } from '../../domain/team/board';
+import { buildTimeline } from '../../domain/team/timeline';
 import { ASSIGN_REFUSALS, REFUSALS, SOMEONE, flattenName, staleRefusal, stripFormatControls } from '../../domain/team/boardText';
 import { decideTeamAction } from '../../domain/team/permissions';
 import { SecretLeakError, findSecrets } from '../../domain/team/secrets';
@@ -457,10 +458,14 @@ export class BoardController {
     const open = status.kind === 'live' || status.kind === 'syncing';
     const readOnlyReason = status.kind === 'offline' ? REFUSALS.offline : status.kind === 'paused' ? PAUSED_TEXT : undefined;
     const viewerId = session.memberId();
-    return buildBoardModel(session.state(), {
+    const state = session.state();
+    const model = buildBoardModel(state, {
       nowMs: (this.deps.nowMs ?? Date.now)(), status, canWrite: session.canWrite() && open,
       ...(viewerId === undefined ? {} : { viewerId }), ...(readOnlyReason === undefined ? {} : { readOnlyReason })
     });
+    // 62.1 (D-02, D-03): the timeline of the same state and viewer travels with every board state, so the page draws both views from one model.
+    model.timeline = buildTimeline(state, model, viewerId === undefined ? {} : { viewerId });
+    return model;
   }
 
   // Sends the current model to every visible surface whose last send differs (or to `only`, when it is visible and differs).

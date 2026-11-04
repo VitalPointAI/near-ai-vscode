@@ -497,7 +497,7 @@ function phaseCardOf(state: TeamState, options: BoardModelOptions, item: WorkIte
 // ---- ordering and numbers --------------------------------------------------------------------------------------------------------------------
 
 // "9" before "10" before "10.1": each dot-separated part is compared as an integer when both are digits, and a shorter number comes first.
-function compareParts(a: string, b: string): number {
+export function compareParts(a: string, b: string): number {
   const left = a.split('.');
   const right = b.split('.');
   for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
@@ -523,7 +523,8 @@ function gsdParts(item: WorkItem): { phase: string; plan: string } {
   return item.kind === 'phase' ? { phase: phaseNumber(item), plan: '' } : planParts(item);
 }
 
-function comparePlans(a: WorkItem, b: WorkItem): number {
+/** Number order of plans and phase cards: phase, then plan number, then id. Exported for the timeline's tie-break (62.1 D-03). */
+export function comparePlans(a: WorkItem, b: WorkItem): number {
   const left = gsdParts(a);
   const right = gsdParts(b);
   return compareParts(left.phase, right.phase) || compareParts(left.plan, right.plan) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
