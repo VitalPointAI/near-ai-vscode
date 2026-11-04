@@ -351,8 +351,11 @@ identity, `near-ai-reviewer`, through `.github/workflows/agent-review.yml`:
   trust `agent-review` only from that account, and the review script refuses to post as any
   other, so an agent running as the owner cannot certify its own work.
 - **Where the token lives.** `near-ai-reviewer`'s token and the review model's key are secrets of
-  the `agent-review` environment, which deploys only from protected branches and which admins
-  cannot bypass. No machine that authors code holds them.
+  the `agent-review` environment, which deploys only from protected branches. No machine that
+  authors code holds them. This is a repository setting: a repository admin could still change
+  the environment's branch policy, so it protects against mistakes and against a PR, not against
+  an admin account acting on purpose. `can_admins_bypass: false` only stops an admin skipping a
+  required reviewer.
 - **What leaves the repository.** For each pull request, its title, description, branch name,
   CI results, list of changed files and diff (capped in size) are sent to the review model's
   endpoint: NEAR AI Cloud (`https://cloud-api.near.ai/v1`) unless the `REVIEW_MODEL_BASE_URL`

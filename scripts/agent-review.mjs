@@ -5,7 +5,7 @@
 // the authoring agents run as the owner's account and never post it.
 //
 // `gather` only reads and works from any account. `submit` is what the workflow (and the one-time
-// scripts/bootstrap-agent-review.sh) runs; to review a PR by hand, trigger the workflow:
+// scripts/bootstrap-agent-review.mjs) runs; to review a PR by hand, trigger the workflow:
 //   gh workflow run agent-review.yml -f pr=<n>
 //
 //   node scripts/agent-review.mjs gather <pr> [--out <dir>] [--repo owner/name]

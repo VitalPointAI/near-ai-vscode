@@ -22,7 +22,8 @@
 #   approve         (environment agent-review) approves the reviewed commit, only when the review
 #                   passed, the head has not moved, and, for a gate change, the owner approved.
 #
-# Both environments deploy only from protected branches and admins cannot bypass them.
+# Both environments deploy only from protected branches. can_admins_bypass is false, which stops an
+# admin skipping agent-review-gates' required reviewer; an admin can still change these settings.
 #
 # GitHub runs workflow_run and workflow_dispatch only from the default branch, so the PR that adds
 # this file (#12) cannot be reviewed by it; it is bootstrapped once by the owner with

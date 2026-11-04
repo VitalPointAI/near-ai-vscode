@@ -404,8 +404,11 @@ asking. It runs on `workflow_run` after CI succeeds for a PR, and on `workflow_d
   the base repository on the default branch, and the jobs check out `main`, so the PR cannot
   change the review scripts or the prompt it is judged by.
 - **The token is out of reach.** `NEAR_AI_REVIEW_TOKEN` and `REVIEW_MODEL_API_KEY` exist only in
-  the `agent-review` environment, which deploys only from protected branches and which admins
-  cannot bypass, and never in a PR's checkout or on an authoring machine.
+  the `agent-review` environment, which deploys only from protected branches, and never in a PR's
+  checkout or on an authoring machine. That is a repository setting, so it holds against the
+  authoring agents only as long as nobody changes it: an admin account can widen the environment's
+  branch policy. `can_admins_bypass: false` stops an admin skipping a required reviewer, nothing
+  more. Check the settings with the commands in section 7.
 - **The PR is data, not instructions.** Everything the author controls (title, branch,
   description, file names, diff) is wrapped in blocks marked with a random nonce, which the content
   cannot close, and the model is told it is data to review and never instructions. The diff is
@@ -413,8 +416,9 @@ asking. It runs on `workflow_run` after CI succeeds for a PR, and on `workflow_d
   PR waits for the owner like a gate change.
 - **The verdict is checked mechanically.** The reply is judged by the same `parseReview` and
   `reviewDecision` as any review file: an open BLOCKER, a missing or second verdict, a verdict for
-  another commit, a missing `## Recommendation:` heading, or a PASS whose recommendation is not
-  MERGE all fail the gate.
+  another commit, or a PASS whose recommendation is not MERGE all fail the gate. The workflow also
+  requires the `## Recommendation:` heading (`requireRecommendation`); a hand-run
+  `agent-review.mjs submit` does not.
 - **Gate changes need the owner.** A PR that touches a path in `GATE_PATHS`
   (`scripts/lib/workflow.mjs`: `.github/`, `scripts/lib/`, the review, merge, release and
   secret-scan scripts, `scripts/ci-review-*.mjs`, `SECURITY.md`, `.claude/commands/`) is reviewed
@@ -525,10 +529,10 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
 - Merging: squash only, branches deleted after merge. The squash commit's subject is the PR
   title followed by ` (#<number>)`.
 - Private vulnerability reporting turned on, so SECURITY.md's reporting link works.
-- Environment `agent-review`: deployments only from protected branches, admins cannot bypass
-  it, with the `NEAR_AI_REVIEW_TOKEN` and `REVIEW_MODEL_API_KEY` secrets and the `REVIEW_MODEL`
+- Environment `agent-review`: deployments only from protected branches, `can_admins_bypass:
+  false`, with the `NEAR_AI_REVIEW_TOKEN` and `REVIEW_MODEL_API_KEY` secrets and the `REVIEW_MODEL`
   and `REVIEW_MODEL_BASE_URL` variables. Environment `agent-review-gates`: the owner as the
-  required reviewer, protected branches only, admins cannot bypass it, no secrets. Commands in
+  required reviewer (an admin cannot skip it), protected branches only, no secrets. Commands in
   section 7, "The review runs automatically".
 - Environment `marketplace`: the owner as the required reviewer, deployments only from `v*.*.*`
   tags, admins cannot bypass it (`can_admins_bypass: false`), and the `VSCE_PAT` secret stored
@@ -549,7 +553,7 @@ gh api -X PUT "repos/$repo/branches/main/protection" --input - <<'JSON'
    {"context": "audit", "app_id": 15368}, {"context": "secret-scan", "app_id": 15368},
    {"context": "agent-review"}]},
  "enforce_admins": true,
- "required_pull_request_reviews": {"required_approving_review_count": 1},
+ "required_pull_request_reviews": {"required_approving_review_count": 1, "dismiss_stale_reviews": true},
  "restrictions": null,
  "required_linear_history": true,
  "allow_force_pushes": false,
