@@ -28,6 +28,8 @@ export const SIGN_OUT_NEAR_COMMAND = 'nearAi.team.signOutNear';
 // argument { complete: true } is the team session's automatic completion once the request was accepted; teamManifest.test.ts pins the copy in
 // teamSession.ts.
 export const ASK_TO_JOIN_COMMAND = 'nearAi.team.askToJoin';
+// NEAR AI's own command for a profile set up in another project (src/extension.ts); Join Team runs it when the person chooses Use a saved profile.
+export const USE_SAVED_PROFILE_COMMAND = 'nearAi.useSavedProfile';
 
 // Plain-language pass: people share and get the project; the extension runs git. Git words stay in the output channel.
 const SHOW_DETAILS_ACTION = 'Show details';
@@ -791,6 +793,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     if (displayName === undefined) return;
 
     const nearBaseUrl = await baseUrl();
+    // 61-30: in a team without an organization the person chooses here how they get a working profile; a linked team never asks (D-21).
+    let ownKey: 'paste' | 'saved' | 'later' | undefined;
     const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Joining ${teamName}` }, (progress) => joinTeam({
       onStep: (code) => { progress.report({ message: JOIN_STEP_TEXT[code] }); },
       projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamFile, bundle, ...(near === undefined ? {} : { near }),
@@ -801,10 +805,14 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
         title: 'Join Team', password: true, placeHolder: 'The link from the invitation email',
         prompt: 'NEAR AI found no invitation for the NEAR AI account you used. Paste the link from the email inviting you to the organization, or leave this empty to skip it.'
       }),
-      pasteOwnKey: () => ask({
-        title: 'Join Team', password: true, placeHolder: 'Your NEAR AI API key',
-        prompt: 'This team has no organization linked, so your lead cannot send you a team key. Paste your own NEAR AI API key to start working, or leave this empty to add one later from the NEAR AI settings.'
-      })
+      pasteOwnKey: async () => {
+        ownKey = await askOwnKey();
+        if (ownKey !== 'paste') return undefined;
+        return await ask({
+          title: 'Join Team', password: true, placeHolder: 'Your NEAR AI API key',
+          prompt: 'This team has no organization linked, so your lead cannot send you a team key. Paste your own NEAR AI API key to start working, or leave this empty to add one later from the NEAR AI settings.'
+        });
+      }
     }));
 
     if (!result.ok) {
@@ -816,18 +824,50 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       return;
     }
     await deps.restartSession(projectRoot);
-    let said = `You joined ${teamName} as ${article(result.role)}.`;
-    if (result.pendingRole !== undefined) {
-      said += result.key === 'awaiting-lead' ? ' Your lead confirms you and sends your team key.' : ` Your lead confirms you as ${article(result.pendingRole)}.`;
-    } else if (result.key === 'awaiting-lead') {
-      said += ' Your lead sends your team key.';
-    } else if (result.key === 'installed') {
-      said += ' Your team key is installed for this project.';
-    }
-    deps.report('info', said);
+    deps.report('info', `You joined ${teamName} as ${article(result.role)}.${nextAfterJoin(result)}`);
     if (result.nearInvitation === 'accepted') deps.report('info', 'You joined your organization, the account that pays for your team\'s AI.');
     else if (result.nearInvitation === 'already-member') deps.report('info', 'You are already in your organization.');
-    for (const notice of result.notices) deps.report('info', await safe(notice));
+    // A person who chose a saved profile or Later gets the next step below instead of the advice to add a key in the settings.
+    const { NO_KEY_NOTICE } = await import('../../team/join');
+    for (const notice of result.notices) if (!(notice === NO_KEY_NOTICE && (ownKey === 'saved' || ownKey === 'later'))) deps.report('info', await safe(notice));
+    if (ownKey === 'saved') await useSavedProfileAfterJoin(projectRoot);
+    else if (ownKey === 'later') deps.report('info', JOIN_TEXT.ownKeyLater);
+  }
+
+  // The one question of a team without an organization (61-30): the person's own key, a profile saved in another project, or later. Closing the
+  // pick is Later.
+  async function askOwnKey(): Promise<'paste' | 'saved' | 'later'> {
+    const choice = await pick([
+      { label: JOIN_TEXT.pasteOwnKey, description: 'NEAR AI checks it, and it stays in VS Code\'s secure storage' },
+      { label: JOIN_TEXT.useSavedProfile, description: 'A profile you set up in another project' },
+      { label: JOIN_TEXT.later, description: 'Join now and add a key when you are ready' }
+    ], { title: 'Join Team', placeHolder: JOIN_TEXT.noOrgPick });
+    if (choice?.label === JOIN_TEXT.pasteOwnKey) return 'paste';
+    if (choice?.label === JOIN_TEXT.useSavedProfile) return 'saved';
+    return 'later';
+  }
+
+  // Use a saved profile runs NEAR AI's own saved-profile choice once the join is done, then says whether the project is ready.
+  async function useSavedProfileAfterJoin(projectRoot: string): Promise<void> {
+    try {
+      await vscode.commands.executeCommand(USE_SAVED_PROFILE_COMMAND);
+    } catch (error) {
+      deps.output.appendLine(`The saved profile choice could not open: ${await describe(error)}`);
+    }
+    deps.report('info', await profileWorks(projectRoot) ? JOIN_TEXT.savedReady : JOIN_TEXT.ownKeyLater);
+  }
+
+  // Whether this project's selected profile works (its key was checked), read from the project's profile list only.
+  async function profileWorks(projectRoot: string): Promise<boolean> {
+    try {
+      const [{ ProfileStore }, { AuthService }] = await Promise.all([import('../profileStore'), import('../auth')]);
+      const metadata = await new ProfileStore(projectRoot, new AuthService(deps.context.secrets)).exportMetadata();
+      const active = metadata.profiles.find((profile) => profile.profileId === metadata.activeProfileId);
+      return active?.validation.status === 'valid';
+    } catch (error) {
+      deps.output.appendLine(`The profile of this project could not be read: ${await describe(error)}`);
+      return false;
+    }
   }
 
   // The unfinished-join reset (61-09): the old keys are removed only when the team list, freshly read, does not show this computer.
@@ -858,12 +898,13 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
 
   // ---- Ask to Join a Team (G-61-9) ---------------------------------------------------------------------------------------------------------
 
-  // What comes next after a join, in the same words as Join Team.
+  // What comes next after a join, the same for Join Team and Ask to Join a Team. In a team that pays through its organization the lead-made team key
+  // becomes this project's profile by itself (61-30).
   function nextAfterJoin(result: { role: Role; pendingRole?: Role; key: string }): string {
     if (result.pendingRole !== undefined) {
-      return result.key === 'awaiting-lead' ? ' Your lead confirms you and sends your team key.' : ` Your lead confirms you as ${article(result.pendingRole)}.`;
+      return result.key === 'awaiting-lead' ? ' Once a lead confirms you, your team key becomes this project\'s profile.' : ` Your lead confirms you as ${article(result.pendingRole)}.`;
     }
-    if (result.key === 'awaiting-lead') return ' Your lead sends your team key.';
+    if (result.key === 'awaiting-lead') return ' Once a lead sends your team key, it becomes this project\'s profile.';
     if (result.key === 'installed') return ' Your team key is installed for this project.';
     return '';
   }

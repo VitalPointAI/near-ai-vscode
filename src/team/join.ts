@@ -31,6 +31,8 @@ import { TeamFileError, TrustPinError, checkNearPin, checkTrustPin, readTeamFile
 import { installTeamKey } from './teamKeyProfile';
 
 export const NO_ORG_NOTICE = 'No organization linked, so everyone uses their own key and spending is not capped.';
+/** Said when a person in a team without an organization joined without adding a key; the sidebar's Join a team replaces it with its own next step. */
+export const NO_KEY_NOTICE = 'No API key was added. Add your own NEAR AI API key from the NEAR AI settings to start working.';
 
 const R = TEAM_REJECTION_REASONS;
 
@@ -306,7 +308,7 @@ const KEY_SHAPE = /^[\x21-\x7e]{8,512}$/;
 
 async function installPastedKey(input: JoinInput, teamId: string): Promise<{ key: 'installed' | 'skipped'; notices: string[] }> {
   const notices = [NO_ORG_NOTICE];
-  if (input.pasteOwnKey === undefined) return { key: 'skipped', notices: [...notices, 'No API key was added. Add your own NEAR AI API key from the NEAR AI settings to start working.'] };
+  if (input.pasteOwnKey === undefined) return { key: 'skipped', notices: [...notices, NO_KEY_NOTICE] };
   let pasted: string | undefined;
   try {
     pasted = await input.pasteOwnKey();
@@ -314,7 +316,7 @@ async function installPastedKey(input: JoinInput, teamId: string): Promise<{ key
     return { key: 'skipped', notices: [...notices, `Your API key could not be read: ${describe(error)}`] };
   }
   const trimmed = pasted?.trim() ?? '';
-  if (trimmed === '') return { key: 'skipped', notices: [...notices, 'No API key was added. Add your own NEAR AI API key from the NEAR AI settings to start working.'] };
+  if (trimmed === '') return { key: 'skipped', notices: [...notices, NO_KEY_NOTICE] };
   if (!KEY_SHAPE.test(trimmed)) return { key: 'skipped', notices: [...notices, 'That does not look like an API key, so it was not used. Add your own NEAR AI API key from the NEAR AI settings.'] };
   // D-12 as amended by D-21: check_api_key only, no organization or workspace check, one try because a key that already exists needs no activation wait.
   const installed = await installTeamKey({

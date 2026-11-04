@@ -31,7 +31,7 @@ const memberModule = require('../services/team/memberCommands') as typeof import
 test.after(() => { uninstall(); });
 const { ENABLE_COMMAND, SHARE_COMMAND, registerTeamMode } = commandsModule;
 const {
-  INVITE_COMMAND, JOIN_COMMAND, LINK_EXPLANATION, LINK_NEAR_COMMAND, LINK_NOW_CHOICE, MANAGE_MEMBERS_COMMAND, NOT_NOW_CHOICE, SIGN_OUT_NEAR_COMMAND, parseUsdToNanoUsd
+  INVITE_COMMAND, JOIN_COMMAND, JOIN_TEXT, LINK_EXPLANATION, LINK_NEAR_COMMAND, LINK_NOW_CHOICE, MANAGE_MEMBERS_COMMAND, NOT_NOW_CHOICE, SIGN_OUT_NEAR_COMMAND, parseUsdToNanoUsd
 } = memberModule;
 
 const EM_DASH = '—';
@@ -507,7 +507,8 @@ test('Join inside the matching project joins as an observer, says what comes nex
     assert.equal(stub.inputRequests[1]?.value, 'Team Test', 'the display name defaults to git user.name');
     assert.equal(t.signIns.count, signInsBefore, 'a developer never signs in to NEAR');
     assert.equal(t.fake?.requests.length, requestsBefore, 'and the join made no NEAR request');
-    assert.ok(stub.notifications.some((entry) => entry.message === 'You joined Invite team as an observer. Your lead confirms you and sends your team key.'), stub.notifications.map((entry) => entry.message).join(' | '));
+    // 61-30: the lead-made team key becomes this project's profile by itself once a lead confirms the person.
+    assert.ok(stub.notifications.some((entry) => entry.message === 'You joined Invite team as an observer. Once a lead confirms you, your team key becomes this project\'s profile.'), stub.notifications.map((entry) => entry.message).join(' | '));
     const memberId = parseInviteBundle(bundleText).member;
     assert.equal(j.handle.session()?.memberId(), memberId, 'the restarted session signs with the new device key');
     // UI review issue 1: Join says each step.
@@ -525,6 +526,8 @@ test('Join in a team without a NEAR organization asks for the member\'s own key 
     gitIn(t.root, ['push', '-q', 'origin', 'main']);
     const j = await openJoiner(t);
     stub.inputAnswers.push(bundleText, 'Dana D');
+    // 61-30: the masked box comes after the pick of your own key, a saved profile or later.
+    stub.quickPickAnswers.push(JOIN_TEXT.pasteOwnKey);
     await j.run(JOIN_COMMAND);
     const keyPrompt = stub.inputRequests[2];
     assert.equal(keyPrompt?.password, true, 'the key is masked');
