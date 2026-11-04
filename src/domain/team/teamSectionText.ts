@@ -131,3 +131,36 @@ export const TEAM_CONNECT_FALLBACK = Object.freeze({
   setupLabel: 'Set up a new profile',
   savedLabel: 'Use a saved profile'
 });
+
+// The team buttons of the Connect screen whose words differ from the Team section's: a request that waits, and looking for the team key again.
+export const TEAM_CONNECT_LABELS = Object.freeze({
+  askPending: 'Show my request',
+  check: 'Check again'
+});
+
+export const TEAM_CONNECT_HINTS = Object.freeze({
+  askPending: 'See your request to join again, copy it or cancel it.',
+  check: 'Look for your team key again now.'
+});
+
+/** The Connect screen in a project whose team this computer is not on. */
+export function connectNotOnTeamStatus(name: string): string {
+  return `This project has the team ${name}. Join it with the invite you were sent, or ask to join.`;
+}
+
+/** This computer asked to join and the request waits. */
+export function requestWaitingStatus(name: string): string {
+  return `Your request to join ${name} is waiting for a lead. This computer joins by itself once they accept it.`;
+}
+
+/** Joined a team that pays through its organization; the team key is not here yet. confirmed: a lead confirmed the person already. */
+export function awaitingKeyStatus(name: string, confirmed: boolean): string {
+  return confirmed
+    ? `You are on ${name}. Your team key arrives once a lead sends it, and NEAR AI then uses it here.`
+    : `You joined ${name}. Your team key arrives once a lead confirms you, and NEAR AI then uses it here.`;
+}
+
+/** On a team without an organization: each person brings their own key. */
+export function ownKeyStatus(name: string): string {
+  return `${name} has no organization linked, so each person uses their own key. Set up a new profile with your key or use a saved profile.`;
+}

@@ -37,6 +37,8 @@ export interface TeamSectionInput {
   folderOpen: boolean;
   /** Just me for now was chosen for this project (VS Code's workspace state); it matters only while the project has no team. */
   justMe?: boolean;
+  /** This computer's request to join the project's team waits for a lead (61-29, handle.joinRequestPending). */
+  joinRequestPending?: boolean;
   team?: {
     /** Display-safe text, already passed through displayText by the host. */
     name: string;
@@ -60,6 +62,8 @@ export interface TeamSectionInput {
     connectionText?: string;
     /** Managers only; undefined while not checked yet. */
     shared?: SharedView;
+    /** Linked, on the team and not the owner, and the team key delivered to this member is not installed here yet (or none was delivered). */
+    awaitingKey?: boolean;
   };
   board?: TeamBoardSummary;
 }

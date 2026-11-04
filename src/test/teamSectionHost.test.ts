@@ -231,12 +231,21 @@ test('extension.ts builds the host from the Team Mode handle and gives it to the
 
 // ---- Task 2: the team states from the running session ------------------------------------------------------------------------------------
 
-interface FakeMember { id: string; name: string; role: Role; pendingRole?: Role; status?: 'invited'; removedEvent?: string; invitedEvent?: string; invite?: { commitTime: number; ttlSeconds: number } }
-interface FakeOptions { me?: string; members: FakeMember[]; name?: string; ownerId?: string; linked?: boolean; removed?: boolean; status?: { kind: 'live' | 'syncing' | 'offline' | 'paused' | 'removed'; text: string } }
+interface FakeMember {
+  id: string; name: string; role: Role; pendingRole?: Role; status?: 'invited'; removedEvent?: string; invitedEvent?: string; invite?: { commitTime: number; ttlSeconds: number };
+  nearApiKeyId?: string; nearKeyEvent?: string;
+}
+interface FakeOptions {
+  me?: string; members: FakeMember[]; name?: string; ownerId?: string; linked?: boolean; removed?: boolean; status?: { kind: 'live' | 'syncing' | 'offline' | 'paused' | 'removed'; text: string };
+  /** This team's storage folder on this computer (where key.json says which team key is installed); the default is a folder that does not exist. */
+  storageDir?: string;
+}
 
-// A session as the host reads it: the team state, this computer's member id, the removed flag, the connection chip and state change listeners.
-function fakeSession(options: FakeOptions): { session: TeamSession; fire(): void; listeners(): number } {
+// A session as the host reads it: the team state, this computer's member id, the removed flag, the connection chip, state change listeners, the
+// team storage folder and the listeners told when a team key was installed (61-29).
+function fakeSession(options: FakeOptions): { session: TeamSession; fire(): void; listeners(): number; fireKey(): void; keyListeners(): number } {
   const listeners = new Set<() => void>();
+  const keyListeners = new Set<() => void>();
   const name = options.name ?? 'Harbor';
   const members = new Map(options.members.map((member) => [member.id, { devices: [], emailHashes: [], skills: [], availability: 'available', wipLimit: 2, joinedAt: '', joinedEvent: 'e0', ...member }]));
   const teamFile = {
@@ -250,13 +259,19 @@ function fakeSession(options: FakeOptions): { session: TeamSession; fire(): void
     memberId: () => options.me,
     isRemoved: () => options.removed === true,
     boardStatus: () => options.status ?? { kind: 'live', text: 'Live' },
-    onStateChange(listener: () => void) { listeners.add(listener); return { dispose: () => { listeners.delete(listener); } }; }
+    onStateChange(listener: () => void) { listeners.add(listener); return { dispose: () => { listeners.delete(listener); } }; },
+    onKeyInstalled(listener: () => void) { keyListeners.add(listener); return { dispose: () => { keyListeners.delete(listener); } }; },
+    storageDir: () => options.storageDir ?? path.join(tmpdir(), 'near-ai-section-no-storage', 'team-1')
   };
-  return { session: session as unknown as TeamSession, fire: () => { for (const listener of [...listeners]) listener(); }, listeners: () => listeners.size };
+  return {
+    session: session as unknown as TeamSession, fire: () => { for (const listener of [...listeners]) listener(); }, listeners: () => listeners.size,
+    fireKey: () => { for (const listener of [...keyListeners]) listener(); }, keyListeners: () => keyListeners.size
+  };
 }
 
-function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire(): void; setSession(session: TeamSession | undefined): void } {
+function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire(): void; setSession(session: TeamSession | undefined): void; setRequestPending(value: boolean): void } {
   let current = initial;
+  let requestPending = false;
   let justMe = false;
   const listeners = new Set<() => void>();
   const fire = (): void => { for (const listener of [...listeners]) listener(); };
@@ -267,10 +282,11 @@ function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire()
     boardSummary: () => undefined,
     justMe: () => justMe,
     async setJustMe(value: boolean) { justMe = value; fire(); },
-    // 61-29: whether this computer's request to join waits; these fakes never have one.
-    joinRequestPending: async () => false,
+    // 61-29: whether this computer's request to join waits; false unless the test says otherwise.
+    joinRequestPending: async () => requestPending,
     fire,
-    setSession(session: TeamSession | undefined) { current = session; }
+    setSession(session: TeamSession | undefined) { current = session; },
+    setRequestPending(value: boolean) { requestPending = value; }
   };
 }
 
@@ -713,4 +729,136 @@ test('under NEAR_AI_E2E=1 the probe asks the page what it drew, may ask it to cl
   });
   assert.equal(parseTeamSectionMessage({ type: 'team-e2e-facts', id: 2, status: 'x' })?.type, 'team-e2e-facts');
   assert.equal(parseTeamSectionMessage({ type: 'team-e2e', id: 2 }), undefined, 'the host never takes its own probe back');
+});
+
+// ---- the Connect screen inputs and the refresh when the team key arrives (61-30) ----------------------------------------------------------
+
+const connectOf = (record: RecordedWebview): { status?: string; actions: Array<[string, string]> } | undefined => {
+  const connect = lastState(record)?.connect;
+  return connect === undefined ? undefined : { ...(connect.status === undefined ? {} : { status: connect.status }), actions: connect.actions.map((action) => [action.id, action.label]) };
+};
+
+test('a waiting request to join comes from the handle: the Connect screen shows Show my request and says the request waits', async () => {
+  const t = fakeHost(fakeSession({ me: undefined, members: LEAD_TEAM }).session);
+  try {
+    t.host.attach(t.webview);
+    await t.host.refresh();
+    assert.deepEqual(connectOf(t.record), { status: text.connectNotOnTeamStatus('Harbor'), actions: [['join', 'Join a team'], ['ask', 'Ask to join']] });
+    t.handle.setRequestPending(true);
+    await t.host.refresh();
+    assert.deepEqual(connectOf(t.record), { status: text.requestWaitingStatus('Harbor'), actions: [['ask', 'Show my request']] });
+    await t.record.receive({ type: 'team-action', action: 'ask' });
+    assert.deepEqual(t.commands, ['nearAi.team.askToJoin'], 'Show my request runs Ask to Join a Team');
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('a member of a team that pays through its organization waits for the team key until the delivered key is the one installed here', async () => {
+  const storage = mkdtempSync(path.join(tmpdir(), 'near-ai-section-storage-'));
+  const { writeFileSync } = require('node:fs') as typeof import('node:fs');
+  try {
+    const pending: FakeMember[] = LEAD_TEAM.map((member) => (member.id === 'dev' ? { ...member, pendingRole: 'developer' as Role } : member));
+    const joined = fakeHost(fakeSession({ me: 'dev', members: pending, linked: true, storageDir: storage }).session);
+    try {
+      joined.host.attach(joined.webview);
+      await joined.host.refresh();
+      assert.deepEqual(connectOf(joined.record), { status: text.awaitingKeyStatus('Harbor', false), actions: [['check', 'Check again']] }, 'no key delivered yet');
+    } finally {
+      joined.cleanup();
+    }
+    const delivered: FakeMember[] = LEAD_TEAM.map((member) => (member.id === 'dev' ? { ...member, nearApiKeyId: 'key-2', nearKeyEvent: 'e7' } : member));
+    const t = fakeHost(fakeSession({ me: 'dev', members: delivered, linked: true, storageDir: storage }).session);
+    try {
+      t.host.attach(t.webview);
+      await t.host.refresh();
+      assert.deepEqual(connectOf(t.record), { status: text.awaitingKeyStatus('Harbor', true), actions: [['check', 'Check again']] }, 'delivered, not installed');
+      writeFileSync(path.join(storage, 'key.json'), JSON.stringify({ keyId: 'key-1' }));
+      await t.host.refresh();
+      assert.deepEqual(connectOf(t.record)?.actions, [['check', 'Check again']], 'an older key installed: still waiting');
+      writeFileSync(path.join(storage, 'key.json'), JSON.stringify({ keyId: 'key-2' }));
+      await t.host.refresh();
+      assert.deepEqual(connectOf(t.record), { actions: [] }, 'the delivered key is installed: nothing to wait for');
+      await t.record.receive({ type: 'team-action', action: 'check' });
+      assert.deepEqual(t.commands, ['nearAi.team.verifyLog'], 'Check again runs the team check');
+    } finally {
+      t.cleanup();
+    }
+    // The owner never waits for a team key from a lead.
+    const owner = fakeHost(fakeSession({ me: 'owner', members: LEAD_TEAM, linked: true, storageDir: storage }).session);
+    try {
+      owner.host.attach(owner.webview);
+      await owner.host.refresh();
+      assert.equal(connectOf(owner.record)?.status, undefined);
+      assert.deepEqual(connectOf(owner.record)?.actions, []);
+    } finally {
+      owner.cleanup();
+    }
+  } finally {
+    rmSync(storage, { recursive: true, force: true });
+  }
+});
+
+test('a member of a team without an organization reads that each person uses their own key; a removed member gets no Connect part', async () => {
+  const t = fakeHost(fakeSession({ me: 'dev', members: LEAD_TEAM, linked: false }).session);
+  try {
+    t.host.attach(t.webview);
+    await t.host.refresh();
+    assert.deepEqual(connectOf(t.record), { status: text.ownKeyStatus('Harbor'), actions: [] });
+  } finally {
+    t.cleanup();
+  }
+  const removed = fakeHost(fakeSession({ me: 'dev', members: LEAD_TEAM.map((member) => (member.id === 'dev' ? { ...member, removedEvent: 'e9' } : member)), removed: true }).session);
+  try {
+    removed.host.attach(removed.webview);
+    await removed.host.refresh();
+    assert.equal(lastState(removed.record)?.connect, undefined);
+  } finally {
+    removed.cleanup();
+  }
+});
+
+test('when the team key is installed the host asks the page for a fresh profile status once, then posts the new team state; a new session is followed', async () => {
+  const first = fakeSession({ me: 'dev', members: LEAD_TEAM, linked: true });
+  const t = fakeHost(first.session);
+  try {
+    t.host.attach(t.webview);
+    await t.host.refresh();
+    assert.equal(first.keyListeners(), 1, 'the session is followed for installed keys');
+    t.record.posted.length = 0;
+    first.fireKey();
+    await t.host.refresh();
+    const order = t.record.posted.map((message) => (message as { type: string }).type);
+    assert.deepEqual(order.slice(0, 2), ['host-request', 'team-state'], 'refresh-status first, then the team state');
+    const requests = t.record.posted.filter((message) => (message as { type: string }).type === 'host-request');
+    assert.deepEqual(requests, [{ type: 'host-request', payload: { type: 'refresh-status' } }], 'asked once');
+    // A restart brings a new session: the old one is let go and the new one followed.
+    const second = fakeSession({ me: 'dev', members: LEAD_TEAM, linked: true });
+    t.handle.setSession(second.session);
+    t.handle.fire();
+    await t.host.refresh();
+    assert.equal(first.keyListeners(), 0, 'the old session is no longer followed');
+    assert.equal(second.keyListeners(), 1);
+    t.record.posted.length = 0;
+    first.fireKey();
+    await t.host.refresh();
+    assert.equal(t.record.posted.filter((message) => (message as { type: string }).type === 'host-request').length, 0, 'the old session asks nothing');
+  } finally {
+    t.cleanup();
+  }
+  assert.equal(first.keyListeners() + 0, 0);
+});
+
+test('with no page attached an installed key asks nothing, and disposing the host lets the session go', async () => {
+  const fake = fakeSession({ me: 'dev', members: LEAD_TEAM, linked: true });
+  const t = fakeHost(fake.session);
+  const attached = t.host.attach(t.webview);
+  await t.host.refresh();
+  attached.dispose();
+  t.record.posted.length = 0;
+  fake.fireKey();
+  await t.host.refresh();
+  assert.deepEqual(t.record.posted, [], 'nothing posted to a page that is gone');
+  t.cleanup();
+  assert.equal(fake.keyListeners(), 0);
 });

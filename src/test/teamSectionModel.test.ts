@@ -41,7 +41,7 @@ const CASES: Case[] = [
   },
   {
     name: 'a team this computer is not on', input: { folderOpen: true, team: lead({ myRole: undefined, canManage: false, shared: undefined }) },
-    heading: text.teamHeading('Harbor'), status: text.notOnTeamStatus('Harbor'), primary: 'join', actions: ['join', 'board']
+    heading: text.teamHeading('Harbor'), status: text.notOnTeamStatus('Harbor'), primary: 'join', actions: ['join', 'ask', 'board']
   },
   {
     name: 'joined and waiting for a lead', input: { folderOpen: true, team: developer({ myRole: undefined, pendingRole: 'developer' }) },
@@ -298,4 +298,82 @@ test('tracer: with no team the Connect screen offers Join a team and Ask to join
   assert.deepEqual(connectIds(model({ folderOpen: true, justMe: true })), ['join', 'ask']);
   // The section itself with a working profile is unchanged (61-26).
   assert.deepEqual(ids(m), ['invite', 'join', 'solo']);
+});
+
+// Each situation before a profile works has a plain next step (61-30 Task 2).
+interface ConnectCase { name: string; input: TeamSectionInput; status?: string; actions: Array<[string, string]> }
+
+const CONNECT_CASES: ConnectCase[] = [
+  { name: 'no team', input: { folderOpen: true }, actions: [['join', 'Join a team'], ['ask', 'Ask to join']] },
+  {
+    name: 'a team this computer is not on', input: { folderOpen: true, team: lead({ myRole: undefined, canManage: false, shared: undefined }) },
+    status: text.connectNotOnTeamStatus('Harbor'), actions: [['join', 'Join a team'], ['ask', 'Ask to join']]
+  },
+  {
+    name: 'a request to join waits', input: { folderOpen: true, joinRequestPending: true, team: lead({ myRole: undefined, canManage: false, shared: undefined }) },
+    status: text.requestWaitingStatus('Harbor'), actions: [['ask', 'Show my request']]
+  },
+  {
+    name: 'joined a team that pays through its organization, no team key yet', input: { folderOpen: true, team: developer({ myRole: undefined, pendingRole: 'developer', linked: true, awaitingKey: true }) },
+    status: text.awaitingKeyStatus('Harbor', false), actions: [['check', 'Check again']]
+  },
+  {
+    name: 'confirmed on a team that pays through its organization, no team key yet', input: { folderOpen: true, team: developer({ linked: true, awaitingKey: true }) },
+    status: text.awaitingKeyStatus('Harbor', true), actions: [['check', 'Check again']]
+  },
+  {
+    name: 'on a team without an organization', input: { folderOpen: true, team: developer({ linked: false }) },
+    status: text.ownKeyStatus('Harbor'), actions: []
+  },
+  {
+    name: 'joined and waiting on a team without an organization', input: { folderOpen: true, team: developer({ myRole: undefined, pendingRole: 'developer', linked: false }) },
+    status: text.ownKeyStatus('Harbor'), actions: []
+  },
+  {
+    name: 'on a team that pays through its organization with the team key here', input: { folderOpen: true, team: developer({ linked: true, awaitingKey: false }) },
+    actions: []
+  }
+];
+
+test('every situation before a profile works gives its plain sentence and its team buttons on the Connect screen', () => {
+  for (const entry of CONNECT_CASES) {
+    const connect = model(entry.input).connect;
+    assert.ok(connect !== undefined, `${entry.name}: a connect part`);
+    assert.equal(connect.status, entry.status, `${entry.name}: status`);
+    assert.deepEqual(connect.actions.map((action) => [action.id, action.label]), entry.actions, `${entry.name}: actions`);
+    assert.ok(connect.actions.every((action) => !action.primary), `${entry.name}: setting up a profile stays the main button`);
+    assert.deepEqual(connect.fallback, { ...text.TEAM_CONNECT_FALLBACK }, `${entry.name}: the fallback words`);
+  }
+  assert.equal(model({ folderOpen: true, team: developer({ removed: true }) }).connect, undefined, 'removed: no connect part');
+  assert.equal(teamSectionModel({ folderOpen: false }), undefined, 'no folder: nothing');
+});
+
+test('the Connect screen sentences say what happens next in plain words', () => {
+  assert.match(text.connectNotOnTeamStatus('Harbor'), /Harbor/);
+  assert.match(text.connectNotOnTeamStatus('Harbor'), /invite/);
+  assert.match(text.connectNotOnTeamStatus('Harbor'), /ask to join/i);
+  assert.match(text.requestWaitingStatus('Harbor'), /waiting for a lead/);
+  assert.match(text.requestWaitingStatus('Harbor'), /joins by itself/);
+  assert.match(text.awaitingKeyStatus('Harbor', false), /team key arrives once a lead confirms you/);
+  assert.match(text.awaitingKeyStatus('Harbor', false), /NEAR AI then uses it here/);
+  assert.match(text.awaitingKeyStatus('Harbor', true), /team key arrives once a lead sends it/);
+  assert.match(text.ownKeyStatus('Harbor'), /no organization linked, so each person uses their own key/);
+  assert.match(text.ownKeyStatus('Harbor'), /saved profile/);
+  const said = [
+    text.connectNotOnTeamStatus('Harbor'), text.requestWaitingStatus('Harbor'), text.awaitingKeyStatus('Harbor', false), text.awaitingKeyStatus('Harbor', true),
+    text.ownKeyStatus('Harbor'), ...Object.values(text.TEAM_CONNECT_LABELS), ...Object.values(text.TEAM_CONNECT_HINTS), ...Object.values(text.TEAM_CONNECT_FALLBACK)
+  ];
+  for (const sentence of said) {
+    assert.ok(!/[\u2013\u2014]/.test(sentence), `"${sentence}" has a dash`);
+    assert.ok(!bannedPattern.test(sentence), `"${sentence}" has a developer word`);
+    assert.ok(!/NEAR organi[sz]ation/i.test(sentence), `"${sentence}" names the paying account wrongly`);
+  }
+});
+
+test('with a working profile a team this computer is not on offers Join a team first, then Ask to join and Open board; a waiting request shows itself', () => {
+  const notOn = model({ folderOpen: true, team: lead({ myRole: undefined, canManage: false, shared: undefined }) });
+  assert.deepEqual(notOn.actions.map((action) => [action.id, action.label, action.primary]), [['join', 'Join a team', true], ['ask', 'Ask to join', false], ['board', 'Open board', false]]);
+  const waiting = model({ folderOpen: true, joinRequestPending: true, team: lead({ myRole: undefined, canManage: false, shared: undefined }) });
+  assert.deepEqual(waiting.actions.map((action) => [action.id, action.label]), [['join', 'Join a team'], ['ask', 'Show my request'], ['board', 'Open board']]);
+  assert.equal(waiting.status, text.requestWaitingStatus('Harbor'));
 });
