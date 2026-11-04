@@ -302,6 +302,22 @@ test('phases whose steps interleave go on two rail rows in horizontal and two ba
   assert.equal(v.bands[0]!.phases.find((p) => p.id === 'phase:3')!.bar.x, nearest, 'the first phase takes the column nearest the axis');
 });
 
+test('two phases that start on the same step: in vertical the later label moves down a line inside its own segment, or shows nothing when there is no room', () => {
+  // Phase 10 runs steps 0 to 3, phase 11 steps 0 to 2, phase 12 only step 0.
+  const t = timelineOf([band('m:same', [['10', 0, 1], ['11', 0, 1], ['12', 0, 1], ['10', 1, 1], ['11', 2, 1], ['10', 3, 1]])]);
+  sweep('same start', () => t);
+  const v = geometry(t, { direction: 'vertical', zoom: 100, width: 1400 });
+  const byId = Object.fromEntries(v.bands[0]!.phases.map((p) => [p.id, p]));
+  const [ten, eleven, twelve] = [byId['phase:10']!, byId['phase:11']!, byId['phase:12']!];
+  assert.equal(ten.label.y, ten.bar.y, 'the first label is at the top of its segment');
+  assert.equal(eleven.label.y, bottom(ten.label) + 4, 'the next one moves down to the next free line');
+  assert.ok(bottom(eleven.label) <= bottom(eleven.bar), 'inside its own segment');
+  assert.equal(twelve.label.hidden, true, 'a one-step segment with no free line shows no label');
+  assert.equal(new Set([ten.bar.x, eleven.bar.x, twelve.bar.x]).size, 3, 'three overlapping spans, three bar columns');
+  const h = geometry(t, { direction: 'horizontal', zoom: 100, width: 1400 });
+  assert.deepEqual(h.bands[0]!.phases.map((p) => p.row).sort(), [0, 1, 2], 'and three rail rows in horizontal');
+});
+
 test('a band with a loop, a folded finished milestone, an empty milestone and the board band last, in one project', () => {
   sweep('mixed', mixed);
   const h = geometry(mixed(), { direction: 'horizontal', zoom: 100, width: 1400 });
