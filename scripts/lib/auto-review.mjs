@@ -20,13 +20,15 @@ import { AGENT_REVIEW_CONTEXT, REVIEW_ACCOUNT, gateFileChanges } from './workflo
 const SCRIPTS = path.resolve(import.meta.dirname, '..');
 
 /** Runs one of this repository's scripts with node and resolves its standard output. */
-export function runScript(script, args, { env = process.env } = {}) {
+export function runScript(script, args, { env = process.env, progress = process.stderr } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(SCRIPTS, script), ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    // Passed through as it arrives, so a person sees "still thinking..." and each failed attempt while
+    // the model works. The scripts write only counts and plain reasons there, never the prompt or a key.
+    child.stderr.on('data', (chunk) => { stderr += chunk; progress?.write(chunk); });
     child.on('error', reject);
     child.on('close', (status) => (status === 0 ? resolve(stdout) : reject(new Error(`${script} failed: ${stderr.trim() || `exit ${status}`}`))));
   });
