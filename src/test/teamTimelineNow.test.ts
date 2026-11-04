@@ -172,3 +172,126 @@ test('a finished milestone\'s folded tile says how many are done and cancelled, 
   assert.equal(clean.tileText, 'Finished: 30 done');
   assert.equal(clean.tileName, 'Show Version 0.4 line, finished, 30 cards');
 });
+
+// ---- the Now step (D-13) ---------------------------------------------------------------------------------------------------------------------
+
+const ready: Partial<Body> = { scope: ['src/a/**'], estimate: { tokens: 1000 } };
+
+test('mid-way: Now is the earliest step with an unfinished card, names its phase, counts the band and says it in one sentence', async () => {
+  // Steps 0 and 1 done; step 2 holds a Ready plan and a held one; steps 3 and 4 wait. Five steps, six cards, two finished.
+  const world = await worldOf([
+    milestone('v1', 'Version 1', true), phase('1', 'v1', 'First work'),
+    plan('1-01', done), plan('1-02', { ...done, dependsOn: ['plan:1-01'] }), plan('1-03', { ...ready, dependsOn: ['plan:1-02'] }),
+    plan('1-04', { ...ready, dependsOn: ['plan:1-02'] }), plan('1-05', { dependsOn: ['plan:1-03'] }), plan('1-06', { dependsOn: ['plan:1-05'] })
+  ]);
+  world.accept(world.owner, 'item.updated', { id: 'plan:1-04', changes: { hold: true } });
+  const timeline = timelineOf(world.state, world.lead.memberId);
+  assert.equal(bandOf(timeline, 'milestone:v1').steps, 5);
+  assert.deepEqual(timeline.now, {
+    milestoneId: 'milestone:v1', step: 2, stepCount: 5, phaseId: 'phase:1', allDone: false, inProgress: 0, ready: 1, percent: 33,
+    title: 'Now: Phase 1, step 3 of 5', detail: '0 in progress, 1 ready · 33% of this milestone done',
+    sentence: 'Now: Phase 1, step 3 of 5. 0 in progress, 1 ready. 33% of this milestone done.'
+  });
+});
+
+test('in progress counts Claimed, In progress, In review and Shipping across the band; nothing finished puts Now at step 1', async () => {
+  const world = await worldOf([
+    milestone('v1', 'Version 1', true), phase('1', 'v1', 'First work'),
+    plan('1-01', ready), plan('1-02', ready), plan('1-03', ready), plan('1-04', ready), plan('1-05', ready), plan('1-06', { dependsOn: ['plan:1-01'] })
+  ]);
+  const start = timelineOf(world.state, world.lead.memberId);
+  assert.equal(start.now?.step, 0);
+  assert.equal(start.now?.title, 'Now: Phase 1, step 1 of 2');
+  assert.equal(start.now?.inProgress, 0);
+  assert.equal(start.now?.ready, 5);
+  assert.equal(start.now?.detail, '0 in progress, 5 ready · 0% of this milestone done');
+
+  setState(world.state, 'plan:1-01', 'claimed');
+  setState(world.state, 'plan:1-02', 'in-progress');
+  setState(world.state, 'plan:1-03', 'in-review');
+  setState(world.state, 'plan:1-04', 'integrating');
+  const started = timelineOf(world.state, world.lead.memberId);
+  assert.equal(started.now?.inProgress, 4);
+  assert.equal(started.now?.ready, 1);
+  assert.equal(started.now?.step, 0, 'started is not finished');
+  assert.equal(started.now?.sentence, 'Now: Phase 1, step 1 of 2. 4 in progress, 1 ready. 0% of this milestone done.');
+});
+
+test('work running ahead of an unfinished earlier step does not move Now, and its counts include the cards ahead', async () => {
+  const world = await worldOf([
+    milestone('v1', 'Version 1', true), phase('1', 'v1', 'First work'),
+    plan('1-01', done), plan('1-02', { dependsOn: ['plan:1-01'] }), plan('1-03', { ...done, dependsOn: ['plan:1-02'] }), plan('1-04', { dependsOn: ['plan:1-03'] })
+  ]);
+  setState(world.state, 'plan:1-04', 'in-progress');
+  const timeline = timelineOf(world.state, world.lead.memberId);
+  assert.equal(timeline.now?.step, 1, 'Now stays at the unfinished step 2 of 4');
+  assert.equal(timeline.now?.stepCount, 4);
+  assert.equal(timeline.now?.inProgress, 1, 'the card ahead is counted');
+  assert.equal(timeline.now?.percent, 50);
+  assert.equal(timeline.now?.title, 'Now: Phase 1, step 2 of 4');
+});
+
+test('several phases at the Now step: the phase named is that of the first unfinished dot in slot order', async () => {
+  const world = await worldOf([
+    milestone('v1', 'Version 1', true), phase('1', 'v1', 'One'), phase('2', 'v1', 'Two'), phase('3', 'v1', 'Three'),
+    plan('1-01', done), plan('2-01'), plan('3-01')
+  ]);
+  const timeline = timelineOf(world.state, world.lead.memberId);
+  assert.equal(timeline.now?.step, 0);
+  assert.equal(timeline.now?.phaseId, 'phase:2');
+  assert.equal(timeline.now?.title, 'Now: Phase 2, step 1 of 1');
+});
+
+test('Now is in the first band with unfinished work, in milestone order and then the cards added on the board', async () => {
+  const world = await worldOf([
+    milestone('v1', 'Version 1'), phase('1', 'v1', 'Old'), plan('1-01', done), plan('1-02'),
+    milestone('v2', 'Version 2', true), phase('2', 'v2', 'New'), plan('2-01', done), plan('2-02', { dependsOn: ['plan:2-01'] })
+  ]);
+  cancel(world, 'plan:1-02');
+  const second = timelineOf(world.state, world.lead.memberId);
+  assert.equal(second.now?.milestoneId, 'milestone:v2', 'v1 is finished (done and cancelled), so Now is in v2');
+  assert.equal(second.now?.step, 1);
+  assert.equal(second.now?.title, 'Now: Phase 2, step 2 of 2');
+
+  world.accept(world.owner, 'item.updated', { id: 'plan:2-02', changes: { state: 'done' } });
+  world.accept(world.dev, 'item.created', { id: `item:${'0'.repeat(22)}AAAA`, kind: 'chore', title: 'Tidy', scope: [], requirements: [], mustHaves: [] });
+  const board = timelineOf(world.state, world.lead.memberId);
+  assert.equal(board.now?.milestoneId, 'board');
+  assert.equal(board.now?.phaseId, undefined);
+  assert.equal(board.now?.title, 'Now: Added on the board, step 1 of 1');
+  assert.equal(board.now?.detail, '0 in progress, 0 ready · 0% of the cards added on the board done');
+});
+
+test('all done: Now stands after the last step of the last band with cards and says so with the exact count', async () => {
+  const world = await worldOf([
+    milestone('v1', 'Version 1'), phase('1', 'v1', 'Old'), plan('1-01', done),
+    milestone('v2', 'Version 2', true), phase('2', 'v2', 'New'), plan('2-01', done), plan('2-02', { ...done, dependsOn: ['plan:2-01'] }),
+    milestone('v3', 'Version 3')
+  ]);
+  const timeline = timelineOf(world.state, world.lead.memberId);
+  assert.deepEqual(timeline.now, {
+    milestoneId: 'milestone:v2', step: 2, stepCount: 2, phaseId: 'phase:2', allDone: true, inProgress: 0, ready: 0, percent: 100,
+    title: 'Now: all the planned work is done', detail: '3 of 3 cards finished, 100%', sentence: 'Now: all the planned work is done. 3 of 3 cards finished, 100%.'
+  });
+});
+
+test('no cards at all: there is no Now, also when milestones exist', async () => {
+  const empty = await boardWorld();
+  assert.equal(timelineOf(empty.state, empty.lead.memberId).now, undefined);
+  const world = await worldOf([milestone('v1', 'Version 1', true), milestone('v2', 'Version 2')]);
+  assert.equal(timelineOf(world.state, world.lead.memberId).now, undefined);
+});
+
+test('determinism: the same items imported in different orders give the same Now', async () => {
+  const parents = [milestone('v1', 'Version 1', true), phase('1', 'v1', 'One'), phase('2', 'v1', 'Two')];
+  const plans = [plan('1-01', done), plan('1-02', { dependsOn: ['plan:1-01'] }), plan('2-01', ready), plan('2-02', { ...ready, dependsOn: ['plan:2-01'] }), plan('1-03', ready)];
+  const orders = [plans, [...plans].reverse(), [plans[2], plans[0], plans[4], plans[1], plans[3]] as Body[]];
+  const nows = [];
+  for (const order of orders) {
+    const world = await worldOf([...parents, ...order]);
+    nows.push(timelineOf(world.state, world.lead.memberId).now);
+  }
+  assert.ok(nows[0] !== undefined);
+  assert.deepEqual(nows[1], nows[0]);
+  assert.deepEqual(nows[2], nows[0]);
+});
