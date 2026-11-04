@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-18-PLAN.md
-last_updated: "2026-11-04T02:02:55.152Z"
+stopped_at: Completed 62-25-PLAN.md
+last_updated: "2026-11-04T02:18:14.397Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: bc0e7432d1ab1fc12b1d3859f31b3d7f89ad4b37
+state_head: 29e254f6dd08b36397bdb16f811cf752dbb1cebf
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 62
-  completed_plans: 55
+  completed_plans: 56
   percent: 13
 ---
 
@@ -109,6 +109,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P25 | 9 min | 3 tasks | 9 files |
 | Phase 62 P17 | 27min | 3 tasks | 11 files |
 | Phase 62 P18 | 18min | 2 tasks | 8 files |
+| Phase 62 P25 | 12min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -234,6 +235,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-18: The sidebar board summary (ready, blocked, mine) is built from buildBoardModel, so it always matches the board; TeamModeHandle.boardSummary() is undefined with no session, before the board module loads, or for a removed member (G-62-1)
 - [Phase 62]: 62-18: The board domain module loads with the board view only after a session starts; a project without a team loads neither
 - [Phase 62]: 62-18: The intermittent teamSession paused-line failure was a product bug: git's reason carries the connect time, which moved the dedupe key; sameFailureKey drops time and byte figures from the key only
+- [Phase 62]: 62-25: A member's own assignment of a free card, or taking themselves off their own card, is item.assign-self (owner, lead, developer, reviewer); everything else stays item.assign, so a teammate's card changes hands only when they unassign or a lead reassigns (owner decision 2026-11-03, G-62-5)
+- [Phase 62]: 62-25: mayBeAssigned is a current, confirmed, non-observer member (reviewers can hold an assignment); work.ts no longer imports permissions.ts
+- [Phase 62]: 62-25: No event body, WorkItem key or pinned hash changed; actionForEvent with no state still answers item.assign
 
 ### Pending Todos
 
@@ -255,8 +259,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T02:02:54.846Z
-Stopped at: Completed 62-18-PLAN.md
+Last session: 2026-11-04T02:18:14.067Z
+Stopped at: Completed 62-25-PLAN.md
 Resume file: None
 
 ## Notes
