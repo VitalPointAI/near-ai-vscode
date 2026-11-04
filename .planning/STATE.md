@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-27-PLAN.md
-last_updated: "2026-11-04T20:48:06.068Z"
+stopped_at: Completed 61-28-PLAN.md
+last_updated: "2026-11-04T21:07:25.232Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 8d3f00d741b224f6e3fe3bd4142c8ecb076f0309
+state_head: 5fb71ae5b80e1caf1a1eb521a1e7abb2caa3f003
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 66
+  completed_plans: 67
   percent: 11
 ---
 
@@ -120,6 +120,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 62 P26 | 18 min | 3 tasks | 14 files |
 | Phase 62 P27 | 31min | 3 tasks | 17 files |
 | Phase 61 P27 | 16 min | 3 tasks | 7 files |
+| Phase 61 P28 | 25min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -273,6 +274,7 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-26: WorkItem.assignedBy records who made the current assignment; a member's unassign is item.assign-self only when they are assignee and assigner (owner decision 2026-11-04); no event body or pinned hash moved
 - [Phase 62]: 62-27: the card's assignee moves it (item.move-own: hold, release, done, block, unblock, reopen from Done); cancel and reopening a cancelled card stay item.move (owner and leads); the board, page and drag decide per card through actionForEvent
 - [Phase 61]: 61-27: a profile from another project is reused by reference to its stored key; the reference is followed only through a global-state link written when the person chooses it, and a copy never writes or removes the original key
+- [Phase 61]: 61-28: Ask to join is an invite in reverse: the requester's computer keeps the code in secure storage and sends a self-signed request with only the derived public key; a lead's accept writes a normal member.invited through the invite path (preset member id and key, no bundle); the requester joins by itself with the existing proof; no log format change
 
 ### Pending Todos
 
@@ -294,8 +296,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T20:48:05.599Z
-Stopped at: Completed 61-27-PLAN.md
+Last session: 2026-11-04T21:07:24.827Z
+Stopped at: Completed 61-28-PLAN.md
 Resume file: None
 
 ## Notes
