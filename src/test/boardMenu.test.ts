@@ -354,3 +354,51 @@ test('menu labels wrap inside 320 px and come only from the model plus the card 
   const strings = [...MENU_JS.matchAll(/'([^'\\]*)'/g)].map((m) => m[1]);
   assert.ok(strings.includes('Move '));
 });
+
+// ---- 62-20: assignment in the Move to... menu (G-62-5, owner decision 2026-11-03) ------------------------------------------------------------
+
+const assigns = (h: BoardHarness): Array<Record<string, any>> => h.posts.filter((p) => p.type === 'assign' || p.type === 'unassign');
+
+test('tracer: a lead sees Assign to... after the moves and a separator; choosing it posts assign once and shows Choosing a person...', async () => {
+  const { h, model } = await ownerBoard();
+  const ready = cardOf(model, 'plan:90-01');
+  assert.deepEqual(ready.assignActions, ['assign'], 'the owner may put a person on a ready plan');
+  open(h, 'plan:90-01');
+  // The moves first, exactly as offered, then a separator and the assignment item.
+  assert.deepEqual(items(h).map((i) => text(i)), [...ready.moves.map((m) => m.label), 'Assign to...']);
+  const kids = Array.from(menu(h).children);
+  const at = kids.findIndex((k) => text(k) === 'Assign to...');
+  assert.equal(kids[at - 1]!.getAttribute('role'), 'separator', 'a separator comes before the assignment items');
+
+  const assign = items(h).find((i) => text(i) === 'Assign to...')!;
+  assign.focus();
+  h.press(assign, 'Enter');
+  assert.ok(!isOpen(h), 'choosing closes the menu');
+  assert.deepEqual(assigns(h), [{ type: 'assign', itemId: 'plan:90-01' }], 'one request, with only the card id');
+  assert.deepEqual(moves(h), [], 'no move is posted');
+  assert.equal(text(card(h, 'plan:90-01').querySelector('.pending-line')), 'Choosing a person...');
+  assert.equal(card(h, 'plan:90-01').getAttribute('aria-busy'), 'true');
+});
+
+test('an assignment refusal is drawn on the card and announced once; an empty refusal (a closed list) clears the pending line silently', async () => {
+  const { h } = await ownerBoard();
+  const reason = 'Lee already changed this card. The board now shows the latest. Nothing was moved.';
+  open(h, 'plan:90-01');
+  items(h).find((i) => text(i) === 'Assign to...')!.click();
+  h.deliver({ type: 'refused', itemId: 'plan:90-01', reason });
+  assert.equal(text(card(h, 'plan:90-01').querySelector('.refusal-line')), reason);
+  assert.equal(card(h, 'plan:90-01').querySelector('.pending-line'), null);
+  h.advance(200);
+  assert.deepEqual(h.announcements.filter((a) => a.startsWith("Can't")), [`Can't assign plan 90-01. ${reason}`]);
+  assert.equal(h.focused(), moveBtn(h, 'plan:90-01'), 'focus is back on Move to...');
+
+  open(h, 'plan:90-01');
+  items(h).find((i) => text(i) === 'Assign to...')!.click();
+  assert.equal(text(card(h, 'plan:90-01').querySelector('.pending-line')), 'Choosing a person...');
+  const before = h.announcements.length;
+  h.deliver({ type: 'refused', itemId: 'plan:90-01', reason: '' });
+  h.advance(500);
+  assert.equal(card(h, 'plan:90-01').querySelector('.pending-line'), null);
+  assert.equal(card(h, 'plan:90-01').querySelector('.refusal-line'), null);
+  assert.equal(h.announcements.length, before, 'nothing is announced');
+});
