@@ -66,7 +66,14 @@ export const JOIN_TEXT = Object.freeze({
   offline: 'Your copy of the project could not be brought up to date, because the online home of the project could not be reached. Check your internet connection, then choose Try again. Nothing was changed.',
   cloneNeeded: 'This invite is for a project that is not open here. Choose Get the project to download it, open it, then choose Join a team in the NEAR AI sidebar and paste the invite again.',
   freshCopy: 'Get a fresh copy',
-  tryAgain: 'Try again'
+  tryAgain: 'Try again',
+  // 61-30: a team without an organization asks for the person's own key or a saved profile in the same flow.
+  noOrgPick: 'This team has no organization linked, so each person uses their own key.',
+  pasteOwnKey: 'Paste your own key',
+  useSavedProfile: 'Use a saved profile',
+  later: 'Later',
+  savedReady: 'This project is ready. NEAR AI uses your saved profile here.',
+  ownKeyLater: 'When you are ready, the NEAR AI sidebar offers Set up a new profile for your own key and Use a saved profile.'
 } as const);
 // G-61-9: what Ask to Join a Team says. The request holds no secret (the code it was made from never leaves this computer), so it may be shown
 // and copied again; the check code lets both people see they hold the same request.

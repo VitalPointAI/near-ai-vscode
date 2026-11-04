@@ -12,7 +12,8 @@ import test from 'node:test';
 import { pushCodeBranch } from '../team/enable';
 import { parseInviteBundle } from '../team/inviteBundle';
 import { readTeamFile } from '../team/teamFile';
-import { closeRig, codeOf, createRig, enable, invite, rootOf, teamIdOf } from './helpers/teamFlowRig';
+import { teamProfileId } from '../team/teamKeyProfile';
+import { activeProfileOf, closeRig, codeOf, createRig, enable, givePersonalProfile, invite, link, rootOf, teamIdOf } from './helpers/teamFlowRig';
 import type { Rig } from './helpers/teamFlowRig';
 import { gitIn } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
@@ -51,11 +52,13 @@ interface Window { root: string | undefined; storage: string; context: FakeConte
 
 // The owner turns Team Mode on in clone a, publishes main (unless told not to) and invites a developer. Clone b points at the same public address
 // and is behind and clean.
-async function withInvite(work: (rig: Rig, bundle: string) => Promise<void>, options: { publish?: boolean } = {}): Promise<void> {
+// With linked, the team is linked to the fake organization before main is published (61-30), so the invite carries the link.
+async function withInvite(work: (rig: Rig, bundle: string) => Promise<void>, options: { publish?: boolean; linked?: boolean } = {}): Promise<void> {
   clearUi();
-  const rig = await createRig({ linked: false });
+  const rig = await createRig({ linked: options.linked === true });
   try {
     await enable(rig);
+    if (options.linked === true) await link(rig);
     if (options.publish !== false) {
       const pushed = await pushCodeBranch(rootOf(rig, 'a'), 'origin', 'main');
       assert.equal(pushed.ok, true, pushed.ok ? '' : pushed.message);
@@ -315,4 +318,104 @@ test('a different project or no open folder offers Get the project, and the sent
     assertPrivate(other, bundle);
     await closeWindow(other);
   });
+});
+
+// ---- the key in the same flow (61-30, G-61-9) ------------------------------------------------------------------------------------------------
+// Joining a team without an organization offers the person's own key or a saved profile right in the flow, after one plain sentence; joining a
+// team that pays through its organization asks for no key (D-21). The command needs no profile, so it works from the Connect screen.
+
+const OWN_KEY_PICK = 'This team has no organization linked, so each person uses their own key.';
+const ownKeyPicks = (): typeof stub.quickPickRequests => stub.quickPickRequests.filter((request) => request.placeHolder === OWN_KEY_PICK);
+
+test('a team without an organization: one pick offers Paste your own key, Use a saved profile and Later; Paste your own key keeps the masked box and the check', async () => {
+  await withInvite(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    const w = await openWindow(rig, b);
+    assert.equal(await activeProfileOf(rig, rig.dev), undefined, 'no profile in this project: joined from the Connect screen');
+    const ownKey = rig.dev.ownKey as string;
+    stub.inputAnswers.push(bundle, 'Dana D', ownKey);
+    stub.quickPickAnswers.push(JOIN_TEXT.pasteOwnKey);
+    await w.run();
+    const picks = ownKeyPicks();
+    assert.equal(picks.length, 1, 'asked once, after the name');
+    assert.equal(picks[0]?.title, 'Join Team');
+    assert.deepEqual(picks[0]?.labels, ['Paste your own key', 'Use a saved profile', 'Later']);
+    const box = stub.inputRequests[2];
+    assert.equal(box?.password, true, 'the key box is masked');
+    assert.match(box?.prompt ?? '', /Paste your own NEAR AI API key/);
+    assert.equal(await activeProfileOf(rig, rig.dev), teamProfileId(teamIdOf(rig)), 'the checked key is this project\'s profile');
+    assert.ok(!messages().some((said) => said.startsWith('No API key was added')), messages().join(' | '));
+    assert.equal(JSON.stringify([stub.notifications, outputLines()]).includes(ownKey), false, 'the key is never shown or written');
+    assert.deepEqual(stub.externalCommands.filter((entry) => entry.command === 'nearAi.useSavedProfile'), []);
+    assertPrivate(w, bundle);
+    await closeWindow(w);
+  });
+});
+
+test('Use a saved profile runs NEAR AI\'s saved-profile choice after joining and says the project is ready once that profile works', async () => {
+  await withInvite(async (rig, bundle) => {
+    const w = await openWindow(rig, rootOf(rig, 'b'));
+    let used = 0;
+    stub.commands.set('nearAi.useSavedProfile', async () => { used += 1; await givePersonalProfile(rig, rig.dev); });
+    stub.inputAnswers.push(bundle, 'Dana D');
+    stub.quickPickAnswers.push(JOIN_TEXT.useSavedProfile);
+    await w.run();
+    assert.equal(used, 1, 'the saved-profile choice ran once');
+    assert.equal(stub.inputRequests.length, 2, 'no key box: only the invite and the name');
+    assert.equal(w.handle.session()?.memberId(), parseInviteBundle(bundle).member, 'joined');
+    assert.ok(messages().includes(JOIN_TEXT.savedReady), messages().join(' | '));
+    assert.ok(!messages().some((said) => said.startsWith('No API key was added')), 'no stale advice');
+    assert.ok(!messages().includes(JOIN_TEXT.ownKeyLater));
+    assertPrivate(w, bundle);
+    await closeWindow(w);
+  });
+});
+
+test('a saved-profile choice that is closed without a working profile ends with the sentence that the sidebar offers both any time', async () => {
+  await withInvite(async (rig, bundle) => {
+    const w = await openWindow(rig, rootOf(rig, 'b'));
+    stub.inputAnswers.push(bundle, 'Dana D');
+    stub.quickPickAnswers.push(JOIN_TEXT.useSavedProfile);
+    await w.run();
+    assert.deepEqual(stub.externalCommands.filter((entry) => entry.command === 'nearAi.useSavedProfile').length, 1, 'the saved-profile choice was opened');
+    assert.ok(messages().includes(JOIN_TEXT.ownKeyLater), messages().join(' | '));
+    assert.ok(!messages().includes(JOIN_TEXT.savedReady));
+    await closeWindow(w);
+  });
+});
+
+test('Later, or closing the pick, joins with a plain sentence that the sidebar offers your own key or a saved profile any time', async () => {
+  for (const answer of [JOIN_TEXT.later, undefined]) {
+    await withInvite(async (rig, bundle) => {
+      const w = await openWindow(rig, rootOf(rig, 'b'));
+      stub.inputAnswers.push(bundle, 'Dana D');
+      stub.quickPickAnswers.push(answer);
+      await w.run();
+      assert.equal(ownKeyPicks().length, 1);
+      assert.equal(stub.inputRequests.length, 2, `${String(answer)}: no key box`);
+      assert.equal(w.handle.session()?.memberId(), parseInviteBundle(bundle).member, `${String(answer)}: joined`);
+      assert.ok(messages().includes(JOIN_TEXT.ownKeyLater), messages().join(' | '));
+      assert.ok(!messages().some((said) => said.startsWith('No API key was added')));
+      assert.deepEqual(stub.externalCommands.filter((entry) => entry.command === 'nearAi.useSavedProfile'), [], 'nothing else runs');
+      assert.match(JOIN_TEXT.ownKeyLater, /Set up a new profile/);
+      assert.match(JOIN_TEXT.ownKeyLater, /Use a saved profile/);
+      await closeWindow(w);
+    });
+  }
+});
+
+test('a team that pays through its organization asks for no key, and says the team key becomes this project\'s profile once a lead confirms them', async () => {
+  await withInvite(async (rig, bundle) => {
+    const w = await openWindow(rig, rootOf(rig, 'b'));
+    assert.equal(await activeProfileOf(rig, rig.dev), undefined, 'no profile in this project');
+    stub.inputAnswers.push(bundle, 'Dana D');
+    await w.run();
+    assert.equal(ownKeyPicks().length, 0, 'no key question');
+    assert.equal(stub.inputRequests.length, 2, 'only the invite and the name');
+    assert.equal(w.handle.session()?.memberId(), parseInviteBundle(bundle).member, 'joined');
+    const said = messages().find((message) => message.startsWith('You joined Flow team'));
+    assert.equal(said, 'You joined Flow team as an observer. Once a lead confirms you, your team key becomes this project\'s profile.', messages().join(' | '));
+    assertPrivate(w, bundle);
+    await closeWindow(w);
+  }, { linked: true });
 });
