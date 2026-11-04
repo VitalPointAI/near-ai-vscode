@@ -25,8 +25,9 @@ import { safeReason } from './teamStatusBar';
 export const BOARD_PANEL_TYPE = 'nearAiTeamBoard';
 // Load order of the client; plans 62-09 to 62-13 create the files.
 export const BOARD_SCRIPTS = ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js'] as const;
-// RED stub (62-21 Task 1): the test-only page scripts arrive in the GREEN commit.
-export const BOARD_TEST_SCRIPTS: readonly string[] = [];
+// Test-only page scripts (62-21, T-62-68): appended after the client files only on a page made for the extension-host tests (NEAR_AI_E2E=1). The layout
+// probe (62-16) is not packaged (.vscodeignore and the release check), so the e2e loads it from the source tree.
+export const BOARD_TEST_SCRIPTS = ['layout-probe.js'] as const;
 export const BOARD_STYLES = ['board.css'] as const;
 
 const PANEL_TITLE = 'Team Board';
@@ -102,6 +103,10 @@ const CARD_STATE_REFUSALS: ReadonlySet<string> = new Set([
  */
 export const boardTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void; request?: (payload: unknown) => Promise<void>; probe?: (probe: BoardProbe) => Promise<void>; layout?: (request: BoardLayoutRequest) => Promise<void> } = {};
 
+/**
+ * Extension-host tests only (NEAR_AI_E2E=1, 62-21): asks the real page's layout probe (media/board/layout-probe.js) to scroll, focus or just measure, and
+ * the page answers with one 'e2e-layout-report' the tests see through `fromView`. Like `probe`, the hook exists only under the test seams.
+ */
 export interface BoardLayoutRequest { id: number; action: 'measure' | 'scroll' | 'focus' | 'rects'; top?: number; left?: number; itemId?: string }
 
 /**
@@ -288,7 +293,8 @@ export function parseBoardMessage(value: unknown): BoardMessage | undefined {
 export function boardHtml(webview: { cspSource: string; asWebviewUri(uri: vscode.Uri): vscode.Uri }, media: vscode.Uri, nonce: string, testSeams = false): string {
   const asset = (file: string): string => webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
   const styles = BOARD_STYLES.map((file) => `<link rel="stylesheet" href="${asset(file)}">`).join('\n');
-  const scripts = BOARD_SCRIPTS.map((file) => `<script nonce="${nonce}" src="${asset(file)}"></script>`).join('\n');
+  const files: readonly string[] = testSeams ? [...BOARD_SCRIPTS, ...BOARD_TEST_SCRIPTS] : BOARD_SCRIPTS;
+  const scripts = files.map((file) => `<script nonce="${nonce}" src="${asset(file)}"></script>`).join('\n');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 ${styles}
@@ -363,6 +369,7 @@ export class BoardController {
     if (deps.testSeams === true) {
       boardTap.request = (payload) => this.request(payload);
       boardTap.probe = (probe) => this.probe(probe);
+      boardTap.layout = (request) => this.layout(request);
     }
   }
 
@@ -399,6 +406,7 @@ export class BoardController {
     this.timer = undefined;
     boardTap.request = undefined;
     boardTap.probe = undefined;
+    boardTap.layout = undefined;
   }
 
   // ---- visibility ---------------------------------------------------------------------------------------------------------------------------
@@ -489,6 +497,10 @@ export class BoardController {
 
   private async probe(probe: BoardProbe): Promise<void> {
     for (const state of this.surfaces) if (state.visible) this.post(state, { type: 'e2e-probe', ...probe });
+  }
+
+  private async layout(request: BoardLayoutRequest): Promise<void> {
+    for (const state of this.surfaces) if (state.visible) this.post(state, { type: 'e2e-layout', ...request });
   }
 
   // ---- what the page says -------------------------------------------------------------------------------------------------------------------
