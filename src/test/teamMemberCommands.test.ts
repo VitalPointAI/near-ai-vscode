@@ -863,6 +863,8 @@ test('Manage Team Members lists the NEAR line first, then members with their sta
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.deepEqual(lastList(), [
       'Invite someone',
+      // G-61-9 (61-29): accepting a request to join sits right after inviting.
+      'Accept a request',
       'NEAR AI sign-in: lead',
       'Lead Owner, owner',
       'Dana D, developer, waiting for confirmation',
@@ -880,7 +882,8 @@ test('Manage Team Members in a team without NEAR starts with the plain no-organi
   await withTeam(async (t) => {
     await joinMember(t, { name: 'Dana', email: 'dana@example.invalid', role: 'Developer', displayName: 'Dana D' });
     await t.run(MANAGE_MEMBERS_COMMAND);
-    assert.equal(lastList()[1], NO_ORG_NOTICE, 'after Invite someone, which the owner sees first');
+    assert.deepEqual(lastList().slice(0, 2), ['Invite someone', 'Accept a request'], 'the owner sees Invite someone and Accept a request first (61-29)');
+    assert.equal(lastList()[2], NO_ORG_NOTICE, 'then the organization line');
     stub.quickPickAnswers.push('Dana D, developer, waiting for confirmation', 'Confirm');
     await t.run(MANAGE_MEMBERS_COMMAND);
     assert.ok(shownMessages().some((message) => message.startsWith('Dana D is now a developer.')), shownMessages().join(' | '));
@@ -913,6 +916,7 @@ test('Members has no Invite someone row for a member who does not run the team',
       await j.run(MANAGE_MEMBERS_COMMAND);
       assert.ok(lastList().length > 0, 'the list was shown');
       assert.equal(lastList().includes('Invite someone'), false);
+      assert.equal(lastList().includes('Accept a request'), false, 'nor Accept a request (61-29)');
     } finally {
       await closeWindow(j);
       stub.setWorkspaceFolders([t.root]);

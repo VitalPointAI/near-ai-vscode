@@ -1,4 +1,5 @@
-// The membership commands (TEAM-02, TEAM-03): Invite to Team, Join Team, Manage Team Members, Link Your Organization and Sign Out of NEAR AI for This Team.
+// The membership commands (TEAM-02, TEAM-03): Invite to Team, Join Team, Ask to Join a Team, Manage Team Members, Link Your Organization and Sign Out of
+// NEAR AI for This Team.
 // Each is a thin adapter: it asks plain questions, calls the vscode-free flows in src/team, and says what happened and what to do next. Nothing here
 // logs, stores or shows a code, key, token or repository address: the invite bundle appears once in a modal and on the clipboard when the lead
 // chooses Copy invite, and pasted bundles and keys go through password inputs.
@@ -23,6 +24,10 @@ export const JOIN_COMMAND = 'nearAi.team.join';
 export const MANAGE_MEMBERS_COMMAND = 'nearAi.team.manageMembers';
 export const LINK_NEAR_COMMAND = 'nearAi.team.linkNearOrganization';
 export const SIGN_OUT_NEAR_COMMAND = 'nearAi.team.signOutNear';
+// G-61-9 (owner design 2026-11-04 item 2): a person with a copy of the project but no invite asks to join; a lead accepts the request in Members. The
+// argument { complete: true } is the team session's automatic completion once the request was accepted; teamManifest.test.ts pins the copy in
+// teamSession.ts.
+export const ASK_TO_JOIN_COMMAND = 'nearAi.team.askToJoin';
 
 // Plain-language pass: people share and get the project; the extension runs git. Git words stay in the output channel.
 const SHOW_DETAILS_ACTION = 'Show details';
@@ -63,6 +68,27 @@ export const JOIN_TEXT = Object.freeze({
   freshCopy: 'Get a fresh copy',
   tryAgain: 'Try again'
 } as const);
+// G-61-9: what Ask to Join a Team says. The request holds no secret (the code it was made from never leaves this computer), so it may be shown
+// and copied again; the check code lets both people see they hold the same request.
+export const ASK_TEXT = Object.freeze({
+  title: 'Ask to Join a Team',
+  copy: 'Copy request',
+  cancel: 'Cancel my request',
+  cancelConfirm: 'Cancel request',
+  askAgain: 'Ask again',
+  howToSend: 'Send it to the person who runs the team, in a chat or an email. They open Members in the Team section of their NEAR AI sidebar, choose Accept a request and paste it. They see the same check code, so tell it to them to show the request is yours. This computer joins the team by itself once they accept, the next time NEAR AI is open here.',
+  copied: 'Request copied. Send it to the person who runs the team.',
+  notCopied: 'Your request was not copied. Choose Ask to join in the NEAR AI sidebar to see it again.',
+  cancelDetail: 'The request you sent stops working, even if it is accepted later. You can ask again at any time.',
+  openFolder: 'Open your copy of the project first, then choose Ask to join in the NEAR AI sidebar.',
+  noTeam: 'This project has no team to ask yet. If someone set one up, ask them to share their team setup, or ask them for an invite and choose Join a team in the NEAR AI sidebar.',
+  notOpened: 'The team of this project could not be opened on this computer, so no request was made. Choose Show details in the NEAR AI Team output for why.'
+} as const);
+const ACCEPT_REQUEST_ROW = 'Accept a request';
+const ACCEPT_TITLE = 'Accept a request';
+const ACCEPT_CONTINUE = 'Continue';
+const REQUEST_PREFIX = 'near-ai-join-request-v1.';
+type Completion = 'none' | 'not-yet' | 'joined' | 'expired' | 'cancelled' | 'used' | 'failed';
 const SIGN_IN_ACTION = 'Sign in';
 const WITHOUT_NEAR_ACTION = 'Invite without signing in';
 const REPLACE_LINK_ACTION = 'Replace link';
@@ -141,6 +167,8 @@ export interface MemberCommandDeps {
   fetch?: FetchLike;
   // Tests replace the browser sign-in.
   signIn?: (teamId: string) => Promise<SessionTokens | undefined>;
+  // Tests move the clock to see an invitation made from a request run out (milliseconds, as Date.now).
+  now?: () => number;
 }
 
 function isMissing(error: unknown): boolean {
@@ -519,11 +547,32 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   }
 
   // The four lifetimes of D-08, seven days first so Enter picks the recommended one. Returns seconds.
-  async function askLifetime(): Promise<number | undefined> {
+  async function askLifetime(title = 'Invite to Team'): Promise<number | undefined> {
     const { INVITE_TTL_CHOICES, DEFAULT_INVITE_TTL_SECONDS } = await import('../../domain/team/invite');
     const lifetimes = [...INVITE_TTL_CHOICES].sort((left, right) => (left === DEFAULT_INVITE_TTL_SECONDS ? -1 : right === DEFAULT_INVITE_TTL_SECONDS ? 1 : left - right))
       .map((ttlSeconds) => ({ label: ttlSeconds === 86_400 ? '24 hours' : `${ttlSeconds / 86_400} days`, ...(ttlSeconds === DEFAULT_INVITE_TTL_SECONDS ? { description: 'Recommended' } : {}), ttlSeconds }));
-    return (await pick(lifetimes, { title: 'Invite to Team', placeHolder: 'How long the invite works before it expires' }))?.ttlSeconds;
+    return (await pick(lifetimes, { title, placeHolder: 'How long the invite works before it expires' }))?.ttlSeconds;
+  }
+
+  // The role an invite or an accepted request gives, after confirmation. The owner role is never offered.
+  async function askRole(title: string, name: string): Promise<Exclude<Role, 'owner'> | undefined> {
+    const roleChoice = await pick<vscode.QuickPickItem & { role: Exclude<Role, 'owner'> }>([
+      { label: 'Developer', description: 'Builds and claims work', role: 'developer' },
+      { label: 'Reviewer', description: 'Reviews work', role: 'reviewer' },
+      { label: 'Observer', description: 'Can read the team but not change it', role: 'observer' },
+      { label: 'Lead', description: 'Can also invite, confirm and remove people', role: 'lead' }
+    ], { title, placeHolder: `Role for ${await display(name)}` });
+    return roleChoice?.role;
+  }
+
+  // The allocation in integer nano-USD; 'bad' when the answer is not dollars and cents (the input box refuses that already, so this is a last check).
+  async function askAllocation(title: string): Promise<number | 'bad' | undefined> {
+    const amount = await ask({
+      title, prompt: 'Allocation in US dollars. For example 5 or 12.50.', value: '0',
+      validateInput: (value) => (parseUsdToNanoUsd(value) === undefined ? 'Enter dollars and cents, for example 5 or 12.50.' : undefined)
+    });
+    if (amount === undefined) return undefined;
+    return parseUsdToNanoUsd(amount) ?? 'bad';
   }
 
   // D-05, G-61-5: the bundle is shown once, in a modal whose detail is the invite, a blank line and how to send it, with Copy invite. Closing it
@@ -613,20 +662,12 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       validateInput: (value) => (validEmail(value.trim()) ? undefined : 'Enter a full email address such as name@example.com.')
     });
     if (email === undefined) return;
-    const roleChoice = await pick<vscode.QuickPickItem & { role: Exclude<Role, 'owner'> }>([
-      { label: 'Developer', description: 'Builds and claims work', role: 'developer' },
-      { label: 'Reviewer', description: 'Reviews work', role: 'reviewer' },
-      { label: 'Observer', description: 'Can read the team but not change it', role: 'observer' },
-      { label: 'Lead', description: 'Can also invite, confirm and remove people', role: 'lead' }
-    ], { title: 'Invite to Team', placeHolder: `Role for ${await display(name)}` });
-    if (roleChoice === undefined) return;
-    const amount = await ask({
-      title: 'Invite to Team', prompt: 'Allocation in US dollars. For example 5 or 12.50.', value: '0',
-      validateInput: (value) => (parseUsdToNanoUsd(value) === undefined ? 'Enter dollars and cents, for example 5 or 12.50.' : undefined)
-    });
-    if (amount === undefined) return;
-    const allocationNanoUsd = parseUsdToNanoUsd(amount);
-    if (allocationNanoUsd === undefined) {
+    const role = await askRole('Invite to Team', name);
+    if (role === undefined) return;
+    const roleChoice = { role };
+    const allocationNanoUsd = await askAllocation('Invite to Team');
+    if (allocationNanoUsd === undefined) return;
+    if (allocationNanoUsd === 'bad') {
       deps.report('error', 'That amount is not dollars and cents, so no invite was made. Enter a number such as 5 or 12.50.');
       return;
     }
@@ -808,6 +849,230 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     deps.report('info', 'The unfinished keys were removed from this computer. Ask your lead to re-issue your invitation from "NEAR AI: Manage Team Members", then run "NEAR AI: Join Team" again with the new invite.');
   }
 
+  // ---- Ask to Join a Team (G-61-9) ---------------------------------------------------------------------------------------------------------
+
+  // What comes next after a join, in the same words as Join Team.
+  function nextAfterJoin(result: { role: Role; pendingRole?: Role; key: string }): string {
+    if (result.pendingRole !== undefined) {
+      return result.key === 'awaiting-lead' ? ' Your lead confirms you and sends your team key.' : ` Your lead confirms you as ${article(result.pendingRole)}.`;
+    }
+    if (result.key === 'awaiting-lead') return ' Your lead sends your team key.';
+    if (result.key === 'installed') return ' Your team key is installed for this project.';
+    return '';
+  }
+
+  // The requester's computer joins by itself once its request was accepted (the session runs this on a sync, and Ask to join runs it when the
+  // invitation is already there). One completion runs at a time; a second caller waits for the one in flight. Nothing here asks a question: a
+  // lead's invitation to your organization and an own API key are left for later with a plain notice. Returns what happened, so the session
+  // remembers an expired or cancelled request and does not report it again.
+  let completing: Promise<Completion> | undefined;
+  function completeRequest(): Promise<Completion> {
+    if (completing !== undefined) return completing;
+    const run = runCompletion().finally(() => { if (completing === run) completing = undefined; });
+    completing = run;
+    return run;
+  }
+
+  async function runCompletion(): Promise<Completion> {
+    const projectRoot = deps.firstFolder();
+    const session = deps.session();
+    if (projectRoot === undefined || session === undefined || session.isRemoved() || session.memberId() !== undefined) return 'none';
+    const teamFile = session.teamFile;
+    const team = await display(teamFile.name);
+    const { completeJoinRequest } = await import('../../team/joinRequest');
+    const nearBaseUrl = await baseUrl();
+    const outcome = await withSteps(`Joining ${team}`, false, (step) => completeJoinRequest({
+      projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamFile, secrets: deps.context.secrets, state: session.state(), nearBaseUrl,
+      ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }), ...(deps.now === undefined ? {} : { now: deps.now }),
+      onStep: (code) => { step(JOIN_STEP_TEXT[code]); }
+    }));
+    switch (outcome.kind) {
+      case 'joined': {
+        await deps.restartSession(projectRoot);
+        const result = outcome.result;
+        deps.report('info', `You are on ${team} now.${nextAfterJoin(result)}`);
+        if (result.nearInvitation === 'accepted') deps.report('info', 'You joined your organization, the account that pays for your team\'s AI.');
+        else if (result.nearInvitation === 'already-member') deps.report('info', 'You are already in your organization.');
+        for (const notice of result.notices) deps.report('info', await safe(notice));
+        return 'joined';
+      }
+      case 'expired':
+      case 'cancelled': {
+        const text = outcome.kind === 'expired'
+          ? `Your request to join ${team} ran out before this computer could join. Choose Ask again to send a new request.`
+          : `Your request to join ${team} was cancelled by the team. Choose Ask again to send a new request.`;
+        deps.output.appendLine(text);
+        offerAskAgain(text, teamFile.teamId);
+        return outcome.kind;
+      }
+      case 'used':
+        deps.report('warn', await safe(outcome.message));
+        return 'used';
+      case 'failed':
+        deps.report('warn', `This computer could not join ${team} yet. ${await safe(outcome.message)}`);
+        return 'failed';
+      default:
+        return outcome.kind;
+    }
+  }
+
+  // Shown without waiting, so a session sync never waits for the person. Ask again forgets the old request (its code with it) and asks anew.
+  function offerAskAgain(text: string, teamId: string): void {
+    Promise.resolve(teamPrompts.message('warn', text, undefined, ASK_TEXT.askAgain))
+      .then(async (choice) => {
+        if (choice !== ASK_TEXT.askAgain) return;
+        await (await import('../../team/joinRequest')).cancelJoinRequest(deps.context.secrets, teamId);
+        await guarded(ASK_TEXT.title, async () => { await askToJoin(); })();
+      })
+      .catch(async (error: unknown) => { deps.output.appendLine(`Asking to join again did not finish: ${await describe(error)}`); });
+  }
+
+  // The request in a modal: the text, its check code and how to hand it over, with Copy request (and Cancel my request when it is already waiting).
+  async function showRequest(team: string, teamId: string, request: { text: string; checkCode: string }, waiting: boolean): Promise<void> {
+    const detail = `${request.text}\n\nCheck code: ${request.checkCode}\n\n${ASK_TEXT.howToSend}`;
+    const message = waiting ? `Your request to join ${team} is waiting for the person who runs the team to accept it` : `Your request to join ${team}`;
+    const choice = await teamPrompts.message('info', message, { modal: true, detail }, ASK_TEXT.copy, ...(waiting ? [ASK_TEXT.cancel] : []));
+    if (choice === ASK_TEXT.copy) {
+      await vscode.env.clipboard.writeText(request.text);
+      deps.announce('info', ASK_TEXT.copied);
+    } else if (choice === ASK_TEXT.cancel) {
+      await cancelRequest(team, teamId);
+    } else {
+      deps.announce('info', ASK_TEXT.notCopied);
+    }
+  }
+
+  async function cancelRequest(team: string, teamId: string): Promise<void> {
+    const confirmed = await teamPrompts.message('warn', `Cancel your request to join ${team}?`, { modal: true, detail: ASK_TEXT.cancelDetail }, ASK_TEXT.cancelConfirm);
+    if (confirmed !== ASK_TEXT.cancelConfirm) {
+      deps.announce('info', `Your request to join ${team} was not changed.`);
+      return;
+    }
+    await (await import('../../team/joinRequest')).cancelJoinRequest(deps.context.secrets, teamId);
+    deps.announce('info', `Your request to join ${team} was cancelled. You can ask again at any time.`);
+  }
+
+  // Get a fresh copy: the clone dialog, given the project's online address only when it holds no password or token.
+  async function freshCopy(projectRoot: string): Promise<void> {
+    const { cleanRepoUrl } = await import('../../team/inviteBundle');
+    const { configuredRemoteUrl } = await import('../../team/projectHome');
+    const cleaned = cleanRepoUrl(await configuredRemoteUrl(projectRoot, 'origin'));
+    await vscode.commands.executeCommand('git.clone', ...(cleaned.ok ? [cleaned.url] : []));
+  }
+
+  // A copy without team.json is brought up to date first, under Join's rules and with Join's words, but with no team id: any team found online
+  // qualifies (61-28). Returns the team file found, or undefined after saying why there is none.
+  async function catchUpForAsk(projectRoot: string): Promise<TeamFile | undefined> {
+    const { catchUpCopy } = await import('../../team/joinCatchUp');
+    const { configuredRemoteUrl } = await import('../../team/projectHome');
+    const { readTeamFile } = await import('../../team/teamFile');
+    if ((await configuredRemoteUrl(projectRoot, 'origin')).trim() === '') {
+      deps.announce('info', ASK_TEXT.noTeam);
+      return undefined;
+    }
+    for (;;) {
+      const caught = await withSteps(ASK_TEXT.title, false, async (step) => {
+        step(JOIN_TEXT.updateStep);
+        return catchUpCopy({ projectRoot, remote: 'origin' });
+      });
+      if (caught.ok) {
+        if (caught.updated) deps.report('info', JOIN_TEXT.updated);
+        break;
+      }
+      deps.output.appendLine(`Bringing the project up to date did not finish (${caught.reason})${caught.detail === undefined ? '.' : `: ${await safe(caught.detail)}`}`);
+      if (caught.reason === 'not-shared') {
+        deps.announce('info', ASK_TEXT.noTeam);
+        return undefined;
+      }
+      if (caught.reason === 'offline') {
+        if (await teamPrompts.message('warn', JOIN_TEXT.offline, undefined, JOIN_TEXT.tryAgain) === JOIN_TEXT.tryAgain) continue;
+        return undefined;
+      }
+      const text = caught.reason === 'other-version' ? JOIN_TEXT.otherVersion : JOIN_TEXT.localChanges;
+      if (await teamPrompts.message('warn', text, undefined, JOIN_TEXT.freshCopy) === JOIN_TEXT.freshCopy) await freshCopy(projectRoot);
+      return undefined;
+    }
+    const teamFile = await readTeamFile(projectRoot);
+    if (teamFile === undefined) deps.announce('info', ASK_TEXT.noTeam);
+    return teamFile;
+  }
+
+  function isCompletion(argument: unknown): boolean {
+    return typeof argument === 'object' && argument !== null && (argument as { complete?: unknown }).complete === true;
+  }
+
+  async function askToJoin(argument?: unknown): Promise<Completion | undefined> {
+    if (isCompletion(argument)) return completeRequest();
+    const projectRoot = deps.firstFolder();
+    if (projectRoot === undefined) {
+      deps.announce('info', ASK_TEXT.openFolder);
+      return undefined;
+    }
+    const { readTeamFile } = await import('../../team/teamFile');
+    const teamFile = await readTeamFile(projectRoot) ?? await catchUpForAsk(projectRoot);
+    if (teamFile === undefined) return undefined;
+    if (deps.session() === undefined) await deps.startSession(projectRoot);
+    const session = deps.session();
+    if (session === undefined) {
+      deps.report('error', ASK_TEXT.notOpened);
+      return undefined;
+    }
+    const team = await display(teamFile.name);
+    if (session.isRemoved()) {
+      deps.report('info', 'You were removed from this team on this computer, so you cannot ask to join it from here.');
+      return undefined;
+    }
+    if (session.memberId() !== undefined) {
+      deps.announce('info', `This computer is already on ${team}. There is nothing to ask.`);
+      return undefined;
+    }
+    const requests = await import('../../team/joinRequest');
+    let pending: Awaited<ReturnType<typeof requests.readPendingRequest>>;
+    try {
+      pending = await requests.readPendingRequest(deps.context.secrets, teamFile.teamId);
+    } catch (error) {
+      if (!(error instanceof requests.JoinRequestError)) throw error;
+      if (await teamPrompts.message('warn', error.message, undefined, ASK_TEXT.cancel) === ASK_TEXT.cancel) await cancelRequest(team, teamFile.teamId);
+      return undefined;
+    }
+    if (pending !== undefined) {
+      // Already accepted: join now instead of showing the request again.
+      if (session.state().members.get(pending.memberId)?.invitedEvent !== undefined) return completeRequest();
+      await showRequest(team, teamFile.teamId, pending, true);
+      return undefined;
+    }
+
+    const { validateName } = await import('../../domain/team/validate');
+    let suggested = '';
+    try {
+      suggested = (await (await import('../../team/enable')).enableDefaults(projectRoot)).ownerName;
+    } catch (error) {
+      deps.output.appendLine(`The name from your git settings could not be read: ${await describe(error)}`);
+    }
+    const name = await ask({
+      title: ASK_TEXT.title, prompt: 'Your name as the team will see it', value: suggested,
+      validateInput: (value) => (validateName(value.trim(), 'name') === undefined ? undefined : 'Enter a name of 1 to 80 characters on one line.')
+    });
+    if (name === undefined) return undefined;
+    const email = await ask({
+      title: ASK_TEXT.title, prompt: 'Your email address, so the person who runs the team knows the request is yours. You can leave it empty.', placeHolder: 'name@example.com (optional)',
+      validateInput: (value) => (value.trim() === '' || validEmail(value.trim()) ? undefined : 'Enter a full email address such as name@example.com, or leave it empty.')
+    });
+    if (email === undefined) return undefined;
+    let made: Awaited<ReturnType<typeof requests.createJoinRequest>>;
+    try {
+      made = await requests.createJoinRequest({ secrets: deps.context.secrets, teamFile, name, ...(email === '' ? {} : { email }) });
+    } catch (error) {
+      if (error instanceof requests.JoinRequestError) {
+        deps.report('error', error.message);
+        return undefined;
+      }
+      throw error;
+    }
+    await showRequest(team, teamFile.teamId, made, false);
+    return undefined;
+  }
+
   // ---- Manage Team Members (D-11, D-16, D-17, D-18, D-25, D-27) ---------------------------------------------------------------------
 
   interface ManageContext { projectRoot: string; session: TeamSession; teamFile: TeamFile; checklist: CleanupChecklist; canManage: boolean }
@@ -976,6 +1241,80 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     ctx.session.nudge();
   }
 
+  // G-61-9: the lead pastes a request to join, checks the name, email and check code with the person, and accepts it with the role, allowance
+  // and lifetime of an invite. Nothing is written before the last answer; the request is checked again when it is accepted (61-28).
+  async function acceptRequest(ctx: ManageContext): Promise<void> {
+    const pasted = await ask({
+      title: ACCEPT_TITLE, prompt: 'Paste the request to join that the person sent you.', placeHolder: 'Paste the request here',
+      validateInput: (value) => (value.trim() === '' || value.trim().startsWith(REQUEST_PREFIX) ? undefined : 'This does not look like a request to join. Paste the whole request exactly as it was sent.')
+    });
+    if (pasted === undefined || pasted === '') return;
+    const requests = await import('../../team/joinRequest');
+    let request: ReturnType<typeof requests.parseJoinRequest>;
+    try {
+      request = requests.parseJoinRequest(pasted);
+    } catch (error) {
+      if (error instanceof requests.JoinRequestError) {
+        deps.report('error', error.message);
+        return;
+      }
+      throw error;
+    }
+    if (request.team !== ctx.teamFile.teamId) {
+      deps.report('error', 'This request is for a different team than the one open in this project. Nothing was changed.');
+      return;
+    }
+    if (ctx.session.state().members.has(request.member)) {
+      deps.report('info', 'This request was already accepted. Nothing was changed.');
+      return;
+    }
+    const name = await display(request.name);
+    const team = await display(ctx.teamFile.name);
+    const detail = `Email: ${request.email === undefined ? 'none given' : await display(request.email)}\nCheck code: ${requests.requestCheckCode(request)}\n\n`
+      + `Check the code with ${name}, for example in a call or a chat you trust, before you go on. Accept only a request you know came from them.`;
+    if (await teamPrompts.message('info', `Accept ${name}'s request to join ${team}?`, { modal: true, detail }, ACCEPT_CONTINUE) !== ACCEPT_CONTINUE) {
+      deps.announce('info', `${name}'s request was not accepted. Nothing was changed.`);
+      return;
+    }
+    const email = request.email ?? await ask({
+      title: ACCEPT_TITLE, prompt: `${name}'s email address. The team record keeps only a scrambled code (a salted hash) of it.`, placeHolder: 'name@example.com',
+      validateInput: (value) => (validEmail(value.trim()) ? undefined : 'Enter a full email address such as name@example.com.')
+    });
+    if (email === undefined) return;
+    const role = await askRole(ACCEPT_TITLE, request.name);
+    if (role === undefined) return;
+    const allocationNanoUsd = await askAllocation(ACCEPT_TITLE);
+    if (allocationNanoUsd === undefined) return;
+    if (allocationNanoUsd === 'bad') {
+      deps.report('error', 'That amount is not dollars and cents, so the request was not accepted. Enter a number such as 5 or 12.50.');
+      return;
+    }
+    const ttlSeconds = await askLifetime(ACCEPT_TITLE);
+    if (ttlSeconds === undefined) return;
+    let org: NearOrgClient | undefined;
+    if (ctx.teamFile.near !== undefined && role === 'lead') {
+      const chosen = await orgForLeadInvite(ctx.teamFile.teamId, name);
+      if (chosen === 'cancelled') {
+        deps.report('info', `${name}'s request was not accepted. Nothing was changed.`);
+        return;
+      }
+      org = chosen;
+    }
+    const result = await withSteps(`Accepting ${name}'s request`, false, (step) => requests.acceptJoinRequest({
+      projectRoot: ctx.projectRoot, globalStorageDir: deps.context.globalStorageUri.fsPath, teamFile: ctx.teamFile, log: ctx.session.currentLog(),
+      request, email, role, allocationNanoUsd, ttlSeconds, ...(org === undefined ? {} : { org }), onStep: (code) => { step(INVITE_STEP_TEXT[code]); }
+    }));
+    if (!result.ok) {
+      deps.report('error', await safe(result.message));
+      return;
+    }
+    deps.report('info', `Accepted ${name}'s request. Their computer joins ${team} by itself the next time NEAR AI is open there, and this computer confirms them as ${article(role)} when it sees them join.`);
+    if (result.nearInvitation === 'sent') deps.report('info', `${name} was also invited to your organization as an admin. They accept it when they join.`);
+    else if (result.nearInvitation === 'already-member') deps.report('info', `${name} is already in your organization.`);
+    if (result.notice !== undefined) deps.report('info', await safe(result.notice));
+    ctx.session.nudge();
+  }
+
   async function retryItem(ctx: ManageContext, item: CleanupItem): Promise<void> {
     const name = await display(item.memberName);
     const what = `${STEP_TEXT[item.step]} for ${name}`;
@@ -1028,7 +1367,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   }
 
   type Row = vscode.QuickPickItem & {
-    row: { kind: 'invite' } | { kind: 'near' } | { kind: 'member'; id: string; attention: string | undefined } | { kind: 'invitation'; id: string; status: string } | { kind: 'cleanup'; item: CleanupItem };
+    row: { kind: 'invite' } | { kind: 'accept' } | { kind: 'near' } | { kind: 'member'; id: string; attention: string | undefined } | { kind: 'invitation'; id: string; status: string } | { kind: 'cleanup'; item: CleanupItem };
   };
 
   async function buildRows(ctx: ManageContext): Promise<Row[]> {
@@ -1037,7 +1376,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const linked = ctx.teamFile.near !== undefined;
     const rows: Row[] = [];
     // The owner and leads invite more people from here, so inviting stays a button once the sidebar section is quiet (G-61-8).
-    if (ctx.canManage) rows.push({ label: INVITE_ROW, row: { kind: 'invite' } });
+    // G-61-9: right after it, accepting a request to join from someone who asked without an invite.
+    if (ctx.canManage) rows.push({ label: INVITE_ROW, row: { kind: 'invite' } }, { label: ACCEPT_REQUEST_ROW, description: 'Someone asked to join: paste their request', row: { kind: 'accept' } });
     const kept = linked ? await keptSession(ctx.teamFile.teamId) : undefined;
     if (!linked) rows.push({ label: (await import('../../team/join')).NO_ORG_NOTICE, row: { kind: 'near' } });
     else rows.push({ label: kept === undefined ? 'NEAR AI sign-in: not signed in' : `NEAR AI sign-in: ${await display(kept.label)}`, row: { kind: 'near' } });
@@ -1083,6 +1423,10 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const row = picked.row;
     if (row.kind === 'invite') {
       await invite();
+      return;
+    }
+    if (row.kind === 'accept') {
+      await acceptRequest(ctx);
       return;
     }
     type Choice = vscode.QuickPickItem & { run(): Promise<void> };
@@ -1177,6 +1521,15 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   return [
     vscode.commands.registerCommand(INVITE_COMMAND, guarded('Invite to Team', invite)),
     vscode.commands.registerCommand(JOIN_COMMAND, guarded('Join Team', join)),
+    // Its answer (what a completion did) goes back to the session that ran it, so this one is wrapped here rather than by guarded.
+    vscode.commands.registerCommand(ASK_TO_JOIN_COMMAND, async (argument?: unknown): Promise<Completion | undefined> => {
+      try {
+        return await askToJoin(argument);
+      } catch (error) {
+        deps.report('error', `${ASK_TEXT.title} did not finish: ${await describe(error)}`);
+        return undefined;
+      }
+    }),
     vscode.commands.registerCommand(MANAGE_MEMBERS_COMMAND, guarded('Manage Team Members', manage)),
     vscode.commands.registerCommand(LINK_NEAR_COMMAND, guarded('Link Your Organization', linkCommand)),
     vscode.commands.registerCommand(SIGN_OUT_NEAR_COMMAND, guarded('Sign Out of NEAR AI for This Team', signOutCommand))

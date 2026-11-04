@@ -28,6 +28,7 @@ import { SNAPSHOT_ALREADY_WRITTEN, TeamLog } from '../../team/eventLog';
 import type { TeamSigner, VerifyReport } from '../../team/eventLog';
 import { GitTransport } from '../../team/gitTransport';
 import { loadDeviceIdentity } from '../../team/identity';
+import { readPendingRequest } from '../../team/joinRequest';
 import { installDeliveredKey } from '../../team/keyDelivery';
 import type { DeviceIdentity } from '../../team/identity';
 import { importPlans as runImportPlans, importResultText, readImportState } from '../../team/importPlans';
@@ -50,6 +51,8 @@ export const UPDATE_EXTENSION_TEXT = 'Some events need a newer version of NEAR A
 export const READ_ONLY_TEXT = 'This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.';
 export const JOIN_COMMAND = 'nearAi.team.join';
 export const MANAGE_MEMBERS_COMMAND = 'nearAi.team.manageMembers';
+// G-61-9: run with { complete: true } once this computer's request to join was accepted. A copy of memberCommands.ts's id; teamManifest.test.ts pins it.
+export const ASK_TO_JOIN_COMMAND = 'nearAi.team.askToJoin';
 export const NOTIFIED_FILE = 'notified.json';
 export const JOIN_ACTION = 'Join Team';
 export const PERSONAL_KEY_WARNING = 'This team project is using your personal AI key, so the spend cap your lead set does not apply. Runs are marked as personal-key runs.';
@@ -218,6 +221,12 @@ export class TeamSession {
   private importAnnounced = false;
   private lastStatus: TransportStatus | undefined;
   private lastGoodAt: string | undefined;
+  // The automatic steps of Ask to join run a command, and a command may need this session to be running (and may restart it). So they wait until
+  // start() has finished; a step seen during the first sync is noted here and start() asks for a sync right after.
+  private started = false;
+  private autoDeferred = false;
+  private completing = false;
+  private completionRetry: { key: string; at: number } | undefined;
 
   private constructor(deps: TeamSessionDeps, storage: string, identity: DeviceIdentity | undefined) {
     this.deps = deps;
@@ -278,7 +287,9 @@ export class TeamSession {
     // The scheduler runs the first sync as soon as it starts, so start waits for that run instead of syncing twice.
     session.scheduler.start();
     await session.firstRun;
+    session.started = true;
     if (identity === undefined && identityProblem === undefined) await session.offerJoin();
+    if (session.autoDeferred) session.nudge();
     return session;
   }
 
@@ -739,6 +750,7 @@ export class TeamSession {
         await this.installKey(me);
         await this.warnPersonalKey();
       }
+      if (this.identity === undefined) await this.completeRequest(state);
       if (me !== undefined && me.removedEvent === undefined && this.signing && (me.role === 'owner' || me.role === 'lead')) {
         const items = memberAttention(state, this.teamFile.near !== undefined);
         extras.pending = items.filter((item) => item.kind === 'confirm').length;
@@ -817,6 +829,43 @@ export class TeamSession {
   private say(level: 'info' | 'warn', message: string): void {
     const shown = level === 'info' ? this.deps.notify.info(message) : this.deps.notify.warn(message);
     Promise.resolve(shown).catch((error: unknown) => { this.line(`A Team Mode message could not be shown: ${describeError(error)}`); });
+  }
+
+  // G-61-9: this computer asked to join and its request is now an invitation on the team list, so it joins by itself through the Ask to Join
+  // command (which restarts this session as a member). One run at a time. An expired, cancelled or used invitation is reported once, remembered
+  // by its events like the other shown-once messages; anything else is tried again on a sync at least five minutes later.
+  private async completeRequest(state: TeamState): Promise<void> {
+    const run = this.deps.runCommand;
+    if (run === undefined || this.removed || this.disposed || this.completing) return;
+    let memberId: string | undefined;
+    try {
+      memberId = (await readPendingRequest(this.deps.secrets, this.teamFile.teamId))?.memberId;
+      this.clearIssue('join-request');
+    } catch (error) {
+      this.reportIssue('join-request', `The request to join saved on this computer could not be read: ${describeError(error)}`);
+      return;
+    }
+    const member = memberId === undefined ? undefined : state.members.get(memberId);
+    if (member?.invitedEvent === undefined) return;
+    const key = `join-request:${member.id}:${member.invitedEvent}:${member.removedEvent ?? ''}`;
+    if ((await this.loadNotified()).has(key)) return;
+    const now = this.deps.timers?.now() ?? Date.now();
+    if (this.completionRetry !== undefined && this.completionRetry.key === key && now < this.completionRetry.at) return;
+    if (!this.started) {
+      this.autoDeferred = true;
+      return;
+    }
+    this.completing = true;
+    let outcome: unknown;
+    try {
+      outcome = await run(ASK_TO_JOIN_COMMAND, { complete: true });
+    } catch (error) {
+      this.line(`Joining by itself after the request was accepted did not finish: ${describeError(error)}`);
+    } finally {
+      this.completing = false;
+    }
+    if (outcome === 'expired' || outcome === 'cancelled' || outcome === 'used') await this.firstTime(key);
+    else if (outcome !== 'joined' && outcome !== 'none') this.completionRetry = { key, at: now + INSTALL_RETRY_MS };
   }
 
   // D-07 and Phase 60 D-22: the project has a team this computer is not in. Offered once per storage folder, only where a command can run.

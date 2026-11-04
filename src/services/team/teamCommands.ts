@@ -93,6 +93,8 @@ export interface TeamModeOptions {
   fetch?: FetchLike;
   signIn?: (teamId: string) => Promise<SessionTokens | undefined>;
   connectNearAi?: () => Promise<void>;
+  // Tests move the clock to see an invitation made from a request to join run out (milliseconds, as Date.now).
+  now?: () => number;
 }
 
 type Level = 'info' | 'warn' | 'error';
@@ -604,7 +606,8 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       startTeam: () => enable('invite'),
       ...(options.nearBaseUrl === undefined ? {} : { nearBaseUrl: options.nearBaseUrl }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-      ...(options.signIn === undefined ? {} : { signIn: options.signIn })
+      ...(options.signIn === undefined ? {} : { signIn: options.signIn }),
+      ...(options.now === undefined ? {} : { now: options.now })
     }),
     { dispose: (): void => { disposed = true; slot.clear(); if (contextKeySet) setContextKey(false); changed(); changeListeners.clear(); } }
   );
