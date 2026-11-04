@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-26-PLAN.md
-last_updated: "2026-11-04T12:17:05.132Z"
+stopped_at: Completed 62-24-PLAN.md (owner review of the screenshots and the code-server repeat of 62-UAT 1 to 8 and 61-UAT 9 pending)
+last_updated: "2026-11-04T13:09:06.839Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 60de416c6585c363be708a5d2fd1878a45cb9708
+state_head: ff2982c82a10af75dd65359b02ee2d85d4789af1
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 63
-  completed_plans: 62
+  completed_plans: 63
   percent: 13
 ---
 
@@ -116,6 +116,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P22 | 75min | 2 tasks | 7 files |
 | Phase 62 P23 | 30min | 2 tasks | 8 files |
 | Phase 61 P26 | 25 min | 3 tasks | 17 files |
+| Phase 62 P24 | 46min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -264,6 +265,8 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-26: Invite someone in a project with no team runs Enable in invite mode (team name and your name prefilled, no email, no closing message), then the invite and its one share confirmation
 - [Phase 61]: 61-26: once someone else joined, the owner or lead section shows only Members (waiting badge) and Open board; Invite someone is the first row of Members; no Link button in the section
 - [Phase 61]: 61-26: 'Team Mode' is banned in people-facing Team literals; palette titles keep their names; the online-home button is 'Set up anyway'
+- [Phase 62]: 62-24: the board e2e makes teammates with the real invite, join and confirm flows in the extension host, with an in-memory key store (not the test harness, which would change V8's WebAssembly limit for the host) and folders removed in run()'s finally
+- [Phase 62]: 62-24: the full e2e runs before the screenshot run, because every board launch empties .vscode-test/screens
 
 ### Pending Todos
 
@@ -285,8 +288,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T12:17:04.782Z
-Stopped at: Completed 61-26-PLAN.md
+Last session: 2026-11-04T13:09:06.433Z
+Stopped at: Completed 62-24-PLAN.md (owner review of the screenshots and the code-server repeat of 62-UAT 1 to 8 and 61-UAT 9 pending)
 Resume file: None
 
 ## Notes
