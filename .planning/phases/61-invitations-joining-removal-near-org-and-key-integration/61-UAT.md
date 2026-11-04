@@ -52,6 +52,12 @@ result: issue
 reported: "it's also not clear what these NEAR organizations are..." and "we should just call it the organization, company or whatever. NEAR AI is the model/AI provider - everything else is ours."
 severity: major
 
+### 8. With no working profile, only profile setup is offered
+expected: one button to set up the profile before anything else happens.
+result: issue
+reported: "Still seeing this in the chat window when a profile hasn't been set - no profile or setup required should trigger one button to set up the profile before anything else happens." (0.6.1 preview: Team section with Turn on Team Mode / Join a team, plus the welcome cards, planning links and 'No models - set up a profile')
+severity: major
+
 ### 7. Real NEAR organization check (key cap, removal, revoke) and opt-in live tests
 expected: see 61-VERIFICATION.md human_verification 1 and 2.
 result: blocked
@@ -60,9 +66,9 @@ reason: stopped before reaching it; resume after the fix pass.
 
 ## Summary
 
-total: 7
+total: 8
 passed: 0
-issues: 6
+issues: 7
 pending: 0
 skipped: 0
 blocked: 1
@@ -122,4 +128,13 @@ blocked: 1
   root_cause: "UI text names 'NEAR organization' and never explains it"
   artifacts: [src/services/team/memberCommands.ts, src/team/join.ts, package.json]
   missing: ["renamed command titles and messages", "one-line explanation", "'NEAR organization' added to the plain-language banned-term test"]
+  debug_session: ""
+- truth: "While the project has no working NEAR AI profile (none, or the selected one needs its key re-checked, or no folder is open), the sidebar shows only the profile setup: the Team section, welcome cards and planning-file links are hidden; the Team section and the 0.4.14 Connect NEAR AI panel (PR #7) use the same profile rule so they never disagree"
+  status: failed
+  reason: "User reported: no profile or setup required should trigger one button to set up the profile before anything else happens"
+  severity: major
+  test: 8
+  root_cause: "teamSectionHost/teamSection model ignore profile state; the Connect panel from PR #7 is not on this branch (Team Mode is based on 0.4.13)"
+  artifacts: [src/services/team/teamSectionHost.ts, src/domain/team/teamSection.ts, media/chat/team.js, src/services/panelView.ts]
+  missing: ["profile-gated Team section", "shared profile-readiness rule with PR #7 welcomeState after main is merged in"]
   debug_session: ""
