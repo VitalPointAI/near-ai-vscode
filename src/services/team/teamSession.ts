@@ -173,6 +173,13 @@ export function projectAuditSink(projectRoot: string, makeStore: (root: string) 
   };
 }
 
+// git's words for a failed connection carry how long it took or how much arrived ("Failed to connect to 127.0.0.1 port 1 after 0 ms",
+// "Operation timed out after 30001 milliseconds with 0 out of 0 bytes received"). Those figures move with the machine's load, so they are left out
+// when deciding whether a failure is new: otherwise a remote that stays down would be written again on every poll whose timing differs.
+export function sameFailureKey(reason: string): string {
+  return reason.replace(/\bwith \d+ out of \d+ bytes\b/gi, 'with # out of # bytes').replace(/\b\d+(?:\.\d+)?\s*(?:ms|milliseconds?|seconds?|bytes?)\b/gi, '#');
+}
+
 export class TeamSession {
   public readonly teamFile: TeamFile;
   private readonly deps: TeamSessionDeps;
@@ -495,10 +502,12 @@ export class TeamSession {
     this.deps.output.appendLine(safeReason(text));
   }
 
-  // The same failure is written once until it changes or clears, so a remote that stays down does not fill the channel every poll.
+  // The same failure is written once until it changes or clears, so a remote that stays down does not fill the channel every poll. Two reasons that
+  // differ only in a time or byte figure are the same failure (see sameFailureKey).
   private reportIssue(category: string, text: string): void {
-    if (this.reportedIssues.get(category) === text) return;
-    this.reportedIssues.set(category, text);
+    const key = sameFailureKey(text);
+    if (this.reportedIssues.get(category) === key) return;
+    this.reportedIssues.set(category, key);
     this.line(text);
   }
 
@@ -582,7 +591,7 @@ export class TeamSession {
     this.lastStatus = status;
     if (status.state === 'ok') this.lastGoodAt = new Date().toISOString();
     this.deps.statusBar.update(status, this.teamFile.name, extras);
-    const key = `${status.state}:${status.reason ?? ''}`;
+    const key = `${status.state}:${sameFailureKey(status.reason ?? '')}`;
     if (key === this.lastStatusKey) return;
     const recovered = this.lastStatusKey !== undefined && status.state === 'ok';
     this.lastStatusKey = key;
@@ -784,7 +793,7 @@ export class TeamSession {
       const text = `The team key for ${this.teamFile.name} could not be installed: ${safeReason(result.message)}`;
       const before = this.reportedIssues.get('key-install');
       this.reportIssue('key-install', text);
-      if (before !== text) this.say('warn', `The team key for ${team} could not be installed: ${displayText(result.message, 300)}`);
+      if (before !== sameFailureKey(text)) this.say('warn', `The team key for ${team} could not be installed: ${displayText(result.message, 300)}`);
     } else {
       this.installFailed = undefined;
     }

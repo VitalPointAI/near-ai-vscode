@@ -35,7 +35,7 @@ const sessionModule = require('../services/team/teamSession') as typeof import('
 const barModule = require('../services/team/teamStatusBar') as typeof import('../services/team/teamStatusBar');
 test.after(() => { uninstall(); });
 
-const { TeamSession, UPDATE_EXTENSION_TEXT, READ_ONLY_TEXT, createVscodeTeamSession, focusTransitions, formatVerifyReport, projectAuditSink, TEAM_OUTPUT_CHANNEL } = sessionModule;
+const { TeamSession, UPDATE_EXTENSION_TEXT, READ_ONLY_TEXT, createVscodeTeamSession, focusTransitions, formatVerifyReport, projectAuditSink, sameFailureKey, TEAM_OUTPUT_CHANNEL } = sessionModule;
 const { PAUSED_REWRITTEN_TEXT, PAUSED_UNREACHABLE_TEXT, createTeamStatusBar } = barModule;
 const statusTextFor = (status: TransportStatus): { text: string; plain: string; tooltip: string } => barModule.statusText(status, TEAM_NAME);
 type Session = Awaited<ReturnType<typeof TeamSession.start>>;
@@ -447,6 +447,16 @@ test('a remote that stays down is written once even when git reports a different
     await until(() => lastItem().text === `$(organization) Team: ${TEAM_NAME}`, 'the status bar to recover');
     assert.ok(started.lines.includes('Team sync is working again.'));
   });
+});
+
+test('sameFailureKey leaves out only the time and byte figures of a git failure', () => {
+  const refused = (ms: number): string => `fatal: unable to access 'http://127.0.0.1:1/team.git/': Failed to connect to 127.0.0.1 port 1 after ${ms} ms: Could not connect to server`;
+  assert.equal(sameFailureKey(refused(0)), sameFailureKey(refused(213)));
+  const timedOut = (ms: number, got: number, of: number): string => `fatal: unable to access 'https://example.invalid/t.git/': Operation timed out after ${ms} milliseconds with ${got} out of ${of} bytes received`;
+  assert.equal(sameFailureKey(timedOut(30001, 0, 0)), sameFailureKey(timedOut(30044, 512, 2048)));
+  assert.notEqual(sameFailureKey(refused(0)), sameFailureKey(refused(0).replace('port 1 ', 'port 2 ')), 'another port is another failure');
+  assert.notEqual(sameFailureKey(refused(0)), sameFailureKey(timedOut(1, 0, 0)), 'another kind of failure is new');
+  assert.equal(sameFailureKey('fatal: could not read Username for \'https://example.invalid\''), 'fatal: could not read Username for \'https://example.invalid\'', 'a reason with no figures is unchanged');
 });
 
 test('a rewritten coordination branch shows the log rewritten state with the D-33 sentence', async () => {
