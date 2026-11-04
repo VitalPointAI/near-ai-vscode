@@ -238,7 +238,9 @@ test('the Mine filter has its own empty body and a filtered-out board shows Clea
   h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
   chip(h, 'Mine').click();
   assert.equal(text(h.$('.state-head')), 'No cards match these filters');
-  assert.equal(text(h.$('.state-body')), 'Nothing is yours yet. Cards you create or claim show up here.');
+  // Owner decision 2026-11-03 (G-62-5, 62-20): Mine is the cards assigned to you or that you added, so its words say so.
+  assert.equal(text(h.$('.state-body')), 'Nothing is yours yet. Cards assigned to you or that you add show up here.');
+  assert.equal(chip(h, 'Mine').getAttribute('title'), 'Cards assigned to you or that you added');
   buttonNamed(h, 'Clear filters')!.click();
   // Owner decision 2026-11-03 (G-62-3, plan 62-19): the standard board's planless phase:91 is now a Backlog card.
   assert.equal(h.$$('.card').length, 4);
@@ -768,4 +770,81 @@ test('J-02: the card face says the Backlog rule in normal text and the accessibl
   const plan = model.cards.find((c) => c.id === 'plan:90-01')!;
   assert.equal(main(h, 'plan:90-01').querySelector('.card-rule'), null);
   assert.equal(main(h, 'plan:90-01').getAttribute('aria-label'), plan.a11yLabel);
+});
+
+// ---- 62-20: the person on the card face and Move to... for cards that can only be assigned (G-62-5, owner decision 2026-11-03) ----------------------
+
+function startWith(files: string[]): BoardHarness {
+  const h = createBoardHarness({ width: 800 });
+  h.load(files);
+  return h;
+}
+
+test('an assigned card shows the initials chip and the name first in its meta row; a card nobody has shows no chip', async () => {
+  const world = await standard();
+  world.accept(world.lead, 'item.assigned', { id: 'plan:90-01', memberId: world.dev.memberId });
+  const model = modelOf(world, world.owner.memberId);
+  const h = start();
+  h.deliver({ type: 'state', model });
+  const meta = main(h, 'plan:90-01').querySelector('.card-meta')!;
+  const first = meta.children[0]!;
+  assert.ok(first.classList.contains('assignee'), 'the chip comes first in the meta row');
+  const initials = first.querySelector('.assignee-initials')!;
+  assert.equal(text(initials), 'D');
+  assert.equal(initials.getAttribute('aria-hidden'), 'true', 'the initials are not read out; the name is');
+  assert.equal(text(first.querySelector('.assignee-name')), 'Dana');
+  assert.match(main(h, 'plan:90-01').getAttribute('aria-label') ?? '', /Assigned to Dana\./);
+  assert.equal(main(h, 'plan:90-02').querySelector('.assignee'), null, 'nobody has plan:90-02, so it has no chip');
+
+  // The chip follows the card: taken off, it goes; a hostile name is drawn as text.
+  world.accept(world.lead, 'item.unassigned', { id: 'plan:90-01' });
+  h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
+  assert.equal(main(h, 'plan:90-01').querySelector('.assignee'), null);
+  const hostile = withCards(model, (cards) => { cards.find((c) => c.id === 'plan:90-01')!.assignee = { id: 'member:x', name: '<b>Eve</b>', initials: '<B' }; });
+  h.deliver({ type: 'state', model: hostile });
+  assert.equal(text(main(h, 'plan:90-01').querySelector('.assignee-name')), '<b>Eve</b>');
+  assert.equal(main(h, 'plan:90-01').querySelectorAll('b').length, 0, 'no element was made from the name');
+});
+
+test('a phase card that can only be assigned shows Move to..., is not draggable, and M opens a menu with only the assignment item', async () => {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const phase = model.cards.find((c) => c.id === 'phase:91')!;
+  assert.deepEqual(phase.moves, [], 'a phase card has no moves');
+  assert.deepEqual(phase.assignActions, ['assign']);
+  const h = startWith(['board.js', 'menu.js', 'drag.js']);
+  h.deliver({ type: 'state', model });
+  const button = card(h, 'phase:91').querySelector('.move-btn')!;
+  assert.equal(button.hidden, false, 'Move to... shows for a card that can only be assigned');
+  assert.equal(card(h, 'phase:91').getAttribute('draggable'), null, 'only cards with moves are draggable');
+  assert.equal(card(h, 'plan:90-01').getAttribute('draggable'), 'true', 'a card with moves still is');
+  main(h, 'phase:91').focus();
+  h.press(main(h, 'phase:91'), 'M');
+  const items = Array.from(h.$('#menu')!.querySelectorAll('[role="menuitem"]')).map((i) => text(i));
+  assert.deepEqual(items, ['Assign to...']);
+
+  const dev = startWith(['board.js', 'menu.js', 'drag.js']);
+  const devModel = modelOf(world, world.dev.memberId);
+  assert.deepEqual(devModel.cards.find((c) => c.id === 'phase:91')!.assignActions, ['assign-me']);
+  dev.deliver({ type: 'state', model: devModel });
+  assert.equal(card(dev, 'phase:91').querySelector('.move-btn')!.hidden, false);
+  assert.equal(card(dev, 'phase:91').getAttribute('draggable'), null);
+  main(dev, 'phase:91').focus();
+  dev.press(main(dev, 'phase:91'), 'M');
+  assert.deepEqual(Array.from(dev.$('#menu')!.querySelectorAll('[role="menuitem"]')).map((i) => text(i)), ['Assign to me']);
+
+  const none = withCards(model, (cards) => { cards.find((c) => c.id === 'phase:91')!.assignActions = []; });
+  const empty = startWith(['board.js', 'menu.js', 'drag.js']);
+  empty.deliver({ type: 'state', model: none });
+  assert.equal(card(empty, 'phase:91').querySelector('.move-btn')!.hidden, true, 'neither moves nor assignment: no Move to...');
+});
+
+test('board.css: the assignee chip is round and small, uses only theme variables and keeps a 1px border in high contrast and forced colours', () => {
+  const css = readFileSync(path.join(MEDIA, 'board.css'), 'utf8');
+  assert.match(css, /\.assignee-initials \{[^}]*border: 1px solid currentColor/);
+  assert.match(css, /\.assignee-initials \{[^}]*border-radius: 50%/);
+  assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/, 'no colour literal');
+  const forced = css.slice(css.indexOf('@media (forced-colors: active)'));
+  assert.match(forced, /\.assignee-initials/, 'the chip keeps its border in forced colours');
+  assert.match(css, /body\.vscode-high-contrast \.assignee-initials[^{]*\{[^}]*border: 1px solid var\(--vscode-contrastBorder\)/, 'and in high contrast');
 });

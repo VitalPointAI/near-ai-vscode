@@ -15,12 +15,14 @@ import { BRANCH_MISSING_REASON } from '../team/transport';
 import { openLog, rootOf, storageOf } from './helpers/teamFlowRig';
 import type { Participant, Rig } from './helpers/teamFlowRig';
 import { LiveTimers, turn, until, withLiveTeam } from './helpers/teamLiveRig';
-import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
+import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
+import type { RecordedWebviewPanel } from './helpers/vscodeStub';
 
 const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const sessionModule = require('../services/team/teamSession') as typeof import('../services/team/teamSession');
 const barModule = require('../services/team/teamStatusBar') as typeof import('../services/team/teamStatusBar');
+const boardModule = require('../services/team/boardView') as typeof import('../services/team/boardView');
 test.after(() => { uninstall(); });
 
 const { TeamSession, projectAuditSink } = sessionModule;
@@ -341,4 +343,65 @@ test('a session with no items shows the team text with the icon and a label; onc
       b.session.dispose();
     }
   }, { planning: true });
+});
+
+// ---- 62-20: an assignment reaches a teammate's open board on its next poll (G-62-5, owner decision 2026-11-03) --------------------------------------
+
+interface AssignedCard { id: string; assignee?: { id: string; name: string }; lane: { member: string } }
+const boardCard = (panel: RecordedWebviewPanel, id: string): AssignedCard | undefined => {
+  const last = [...panel.posted].reverse().find((message) => (message as { type?: string }).type === 'state') as { model: { cards: AssignedCard[] } } | undefined;
+  return last?.model.cards.find((card) => card.id === id);
+};
+
+function openBoardOf(started: Started): { panel: RecordedWebviewPanel; dispose(): void; ui: LiveTimers } {
+  const ui = new LiveTimers();
+  const board = boardModule.registerTeamBoard(createFakeContext(path.resolve(__dirname, '..', '..', 'does-not-exist'), {}) as never, {
+    session: () => started.session, output: { appendLine: (line) => { started.lines.push(line); }, show: () => undefined }, timers: ui
+  });
+  board.openPanel();
+  const panel = stub.webviewPanels[stub.webviewPanels.length - 1];
+  assert.ok(panel !== undefined);
+  return { panel, ui, dispose: () => { board.controller.dispose(); } };
+}
+
+test('member A (lead) assigns a card to member B (developer), and B\'s open board shows it after exactly one poll interval and not before', async () => {
+  await withLiveTeam(async (rig) => {
+    await importFixture(rig);
+    const a = await startSession(rig, rig.lead);
+    const b = await startSession(rig, rig.dev);
+    const boardA = openBoardOf(a);
+    const boardB = openBoardOf(b);
+    try {
+      await boardA.panel.receive({ type: 'ready' });
+      await boardB.panel.receive({ type: 'ready' });
+      assert.equal(boardCard(boardB.panel, BLOCKED_PLAN)?.assignee, undefined);
+      const posted = boardB.panel.posted.length;
+
+      stub.quickPickAnswers.push('Dana Developer');
+      await boardA.panel.receive({ type: 'assign', itemId: BLOCKED_PLAN });
+      assert.equal(boardCard(boardA.panel, BLOCKED_PLAN)?.assignee?.id, rig.dev.memberId, 'A sees it at once');
+
+      // B has not polled: its board has nothing new, and no extra timer was made.
+      for (let index = 0; index < 5; index += 1) await turn();
+      assert.equal(boardB.panel.posted.length, posted, 'not before the poll');
+      assert.equal(boardCard(boardB.panel, BLOCKED_PLAN)?.assignee, undefined);
+      assert.deepEqual(b.timers.delays(), [POLL_MS]);
+
+      b.timers.fire();
+      await until(() => (b.session.state().items.get(BLOCKED_PLAN) as { assignee?: string } | undefined)?.assignee !== undefined, 'the assignment to arrive');
+      // The board posts on the session's change, at once or after its own short throttle; never by a reload.
+      await until(() => boardCard(boardB.panel, BLOCKED_PLAN)?.assignee !== undefined || boardB.ui.live.length > 0, 'the board to post or arm its throttle');
+      if (boardCard(boardB.panel, BLOCKED_PLAN)?.assignee === undefined) boardB.ui.fire();
+      await until(() => boardCard(boardB.panel, BLOCKED_PLAN)?.assignee !== undefined, 'B\'s board to show the assignment');
+      const seen = boardCard(boardB.panel, BLOCKED_PLAN);
+      assert.deepEqual(seen?.assignee, { id: rig.dev.memberId, name: 'Dana Developer', initials: 'DD' });
+      assert.equal(seen?.lane.member, rig.dev.memberId, 'in her lane');
+      assert.equal(boardB.panel.html.length > 0 && stub.webviewPanels.includes(boardB.panel), true, 'the same page got it, with no reload');
+    } finally {
+      boardA.dispose();
+      boardB.dispose();
+      a.session.dispose();
+      b.session.dispose();
+    }
+  });
 });
