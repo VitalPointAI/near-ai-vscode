@@ -90,8 +90,12 @@ const required = [
   'extension/vendor/manifest.json',
   'extension/vendor/mcp/mcp-client.cjs',
   'extension/vendor/mcp/LICENSES.txt',
+  'extension/media/shared/base.css',
   'extension/media/activity/activity.js',
+  'extension/media/activity/activity.css',
   'extension/media/mcp/mcp.js',
+  'extension/media/mcp/mcp.css',
+  'extension/media/onboarding/onboarding.css',
   'extension/media/tools/tools.js',
   'extension/media/tools/tools.css',
   'extension/media/teams/teams.js',
@@ -136,7 +140,8 @@ const forbiddenPatterns = [
   /(?:^|\/)[^/]+\.ts$/,
   /^extension\/(?:tsconfig\.json|package-lock\.json|\.gitignore)$/,
   /^extension\/resources\/benchmark\/.*\/reference(?:\/|$)/,
-  /^extension\/\.git(?:-real)?(?:\/|$)/
+  /^extension\/\.git(?:-real)?(?:\/|$)/,
+  /^extension\/media\/shared\/layout-probe\.js$/
 ];
 const forbidden = entries.filter((entry) => forbiddenPatterns.some((pattern) => pattern.test(entry)));
 if (forbidden.length > 0) fail(`development or source artifacts are present: ${forbidden.join(', ')}`);

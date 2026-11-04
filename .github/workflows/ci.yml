@@ -80,7 +80,7 @@ jobs:
       - run: npm ci
       - run: npm run compile
       - name: Run the extension in a real VS Code
-        run: env -u ELECTRON_RUN_AS_NODE xvfb-run -a node dist/test/e2e/run.js
+        run: env -u ELECTRON_RUN_AS_NODE xvfb-run -a -s "-screen 0 1920x1080x24" node dist/test/e2e/run.js
 
   release-content:
     name: release-content

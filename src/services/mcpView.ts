@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { McpApproval, McpServerConfig, validateServerUrl } from '../mcp/client';
 import { McpRegistry, SERVER_ID } from './mcpRegistry';
 
@@ -37,18 +38,20 @@ function slug(name: string, taken: string[]): string {
 export function openMcpConnections(context: vscode.ExtensionContext): void {
   if (panel) { panel.reveal(); return; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'mcp');
-  const view = vscode.window.createWebviewPanel('nearAiMcp', 'MCP Connections', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
+  const shared = sharedMedia(context.extensionUri);
+  const view = vscode.window.createWebviewPanel('nearAiMcp', 'MCP Connections', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media, shared] });
   panel = view;
   view.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   const nonce = randomBytes(16).toString('base64');
   const asset = (file: string) => view.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
   view.webview.html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';">
-<link rel="stylesheet" href="${asset('mcp.css')}"><title>MCP Connections</title></head><body>
+<link rel="stylesheet" href="${view.webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString()}"><link rel="stylesheet" href="${asset('mcp.css')}"><title>MCP Connections</title></head><body>
 <header><h1>MCP connections</h1><p class="hint">Servers you add are available to every project once you switch them on for it. URLs, header values, and environment values are stored in VS Code's encrypted secret storage and never shown here. Tool arguments are sent to the server; its results are treated as outside content.</p><button id="add" type="button">Add server</button></header>
 <section id="form" hidden aria-labelledby="form-title"></section>
 <section aria-labelledby="servers-title"><h2 id="servers-title">Servers</h2><div id="servers" aria-live="polite"></div><p id="empty" class="hint">No MCP servers yet. Add one with its URL (for a remote server) or its command (for one that runs on this computer).</p></section>
-<script nonce="${nonce}" src="${asset('mcp.js')}"></script></body></html>`;
+${layoutProbeTag(nonce, layoutProbeAsset(view.webview, shared))}<script nonce="${nonce}" src="${asset('mcp.js')}"></script></body></html>`;
+  registerLayoutProbe('mcp', view.webview);
   const mcp = mcpRegistry(context);
   const send = async (saved = false) => { void view.webview.postMessage({ type: 'state', servers: await mcp.status(), project: vscode.workspace.workspaceFolders?.[0]?.name ?? '', saved }); };
   const listener = mcp.onDidChange(() => { if (view.visible) void send(); });

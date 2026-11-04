@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { estimateComparisonCost, latestResults, planComparison, reusedRows, runIdFor, savedModel, type SavedRun } from '../benchmark/results';
 import { runComparison } from '../benchmark/runner';
 import { ComparisonStore } from '../benchmark/store';
@@ -67,11 +68,13 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
 export function openModelComparison(context: vscode.ExtensionContext, auth: AuthService): vscode.WebviewPanel {
   if (panel) { panel.reveal(); return panel; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'compare');
-  const view = vscode.window.createWebviewPanel('nearAiCompareModels', 'Compare Models', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media], retainContextWhenHidden: true });
+  const shared = sharedMedia(context.extensionUri);
+  const view = vscode.window.createWebviewPanel('nearAiCompareModels', 'Compare Models', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media, shared], retainContextWhenHidden: true });
   panel = view;
   view.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   const asset = (file: string) => view.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
-  view.webview.html = comparisonPageHtml({ cspSource: view.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('compare.js'), style: asset('compare.css') });
+  view.webview.html = comparisonPageHtml({ cspSource: view.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('compare.js'), style: asset('compare.css'), base: view.webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString(), probe: layoutProbeAsset(view.webview, shared) });
+  registerLayoutProbe('compare', view.webview);
   post = (message) => { comparisonTap.toView?.(message); void view.webview.postMessage(message); };
   let shown: SavedRun | undefined;
   const refresh = async () => {
