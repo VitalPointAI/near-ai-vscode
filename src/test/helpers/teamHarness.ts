@@ -71,7 +71,9 @@ export async function createTeamFixture(options: { clones: string[]; initialised
     remote,
     clones,
     storageDir: (name: string) => path.join(root, 'storage', name),
-    cleanup: () => rm(root, { recursive: true, force: true })
+    // A sync a test nudged at its end can still be writing into a mirror while the folder goes (ENOTEMPTY, seen in teamBoardView's T-62-49 test
+    // during 62.1-01): Node retries the removal a few times, as the member-command and section tests already do by hand.
+    cleanup: () => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   };
 }
 

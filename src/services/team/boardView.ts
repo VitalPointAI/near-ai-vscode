@@ -325,6 +325,8 @@ export interface BoardDeps {
   testSeams?: boolean;
   /** Test seam: the limits on page requests (T-62-49). The extension passes nothing. */
   requestLimits?: BoardRequestLimits;
+  /** Test seam (62.1-01): the timeline layout, so a test can make it throw. The extension never passes it. */
+  buildTimeline?: typeof buildTimeline;
 }
 
 interface SurfaceState {
@@ -347,6 +349,25 @@ function describe(error: unknown): string {
   return safeReason(error instanceof Error ? error.message : String(error));
 }
 
+// 62.1-01 (T-62.1-02): why the timeline could not be drawn, for the NEAR AI Team output. The message is left out because a layout error could quote
+// a card's title; the kind of error and the file and line it came from are enough to find it.
+function timelineReason(error: unknown): string {
+  if (!(error instanceof Error)) return 'an unexpected value was thrown';
+  const head = `${error.name}: ${error.message}`;
+  const stack = error.stack ?? '';
+  const frames = stack.startsWith(head) ? stack.slice(head.length).split('\n').map((line) => line.trim()).filter((line) => line.startsWith('at ')) : [];
+  const where = frames.length === 0 ? null : /([A-Za-z0-9_.-]+\.js):(\d+):\d+\)?$/.exec(frames[0] as string);
+  return safeReason(where === null ? error.name : `${error.name} in ${where[1]} line ${where[2]}`);
+}
+
+// D-01: the local date a done card was marked done, or undefined when the history does not hold that event (an imported done plan) or its time is
+// unreadable. Mark done is the only state change an item.updated makes.
+function finishedTextOf(session: TeamSession, itemId: string): string | undefined {
+  const marked = session.itemHistory(itemId).find((entry) => entry.type === 'item.updated' && entry.changed?.includes('state') === true);
+  const at = marked === undefined ? Number.NaN : Date.parse(marked.at);
+  return Number.isNaN(at) ? undefined : new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 export class BoardController {
   private readonly deps: BoardDeps;
   private readonly timers: BoardTimers;
@@ -358,6 +379,8 @@ export class BoardController {
   private lastPostAt: number | undefined;
   private combinedVisible: boolean | undefined;
   private disposed = false;
+  // 62.1-01: the layout failure is written once until the timeline draws again, so live updates do not repeat the same line.
+  private timelineFailed = false;
   // T-62-49: requests from the page that are running now, when an import or retry last started, and the item write bucket.
   private readonly running = new Set<'import' | 'retry' | 'check' | 'folders' | 'write'>();
   private readonly lastStarted = new Map<'import' | 'retry' | 'check', number>();
@@ -463,8 +486,21 @@ export class BoardController {
       nowMs: (this.deps.nowMs ?? Date.now)(), status, canWrite: session.canWrite() && open,
       ...(viewerId === undefined ? {} : { viewerId }), ...(readOnlyReason === undefined ? {} : { readOnlyReason })
     });
+    for (const card of model.cards) {
+      if (card.column !== 'done') continue;
+      const finished = finishedTextOf(session, card.id);
+      if (finished !== undefined) card.finishedText = finished;
+    }
     // 62.1 (D-02, D-03): the timeline of the same state and viewer travels with every board state, so the page draws both views from one model.
-    model.timeline = buildTimeline(state, model, viewerId === undefined ? {} : { viewerId });
+    // A layout that throws never takes the board down (T-62.1-03): the state goes without it, flagged, and Columns keeps working.
+    try {
+      model.timeline = (this.deps.buildTimeline ?? buildTimeline)(state, model, viewerId === undefined ? {} : { viewerId });
+      this.timelineFailed = false;
+    } catch (error) {
+      model.timelineProblem = true;
+      if (!this.timelineFailed) this.deps.output.appendLine(`Team Board: the timeline could not be drawn: ${timelineReason(error)}`);
+      this.timelineFailed = true;
+    }
     return model;
   }
 
