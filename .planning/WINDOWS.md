@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 15
+open_count: 13
 waived_count: 0
-fixed_count: 1
+fixed_count: 3
 total_count: 16
-last_updated: 2026-11-04T22:53:03.223Z
+last_updated: 2026-11-04T23:11:59.103Z
 ---
 
 # Broken Windows Ledger
@@ -29,8 +29,8 @@ last_updated: 2026-11-04T22:53:03.223Z
 | 12 | 62 | stub | src/services/team/boardView.ts | 25 | BOARD_SCRIPTS and BOARD_STYLES name media/board files that plans 62-09 to 62-13 create; until then the board page loads empty | open |  | 2026-11-02T20:08:58.850Z |  |
 | 13 | 61 | stub | src/services/team/memberCommands.ts | 646 | Join: one interim sentence for every not-ready catch-up reason; 61-20 gives each reason its own sentence and button | fixed |  | 2026-11-03T22:09:39.300Z | 2026-11-03T23:02:54.367Z |
 | 14 | 62 | deviation | src/test/e2e/suite.ts |  | 62-21: the first planless phase (phase:63) is not on the first screen; 62-19 orders a column by phase then plan, so it is reachable by scrolling the board only. Owner or 62-22/62-24 to decide: planless phases first, compact cards, or accept | open |  | 2026-11-04T04:15:22.916Z |  |
-| 15 | 62.1 | stub | src/domain/team/timeline.ts | 227 | Dot label is the card's a11yLabel placeholder until 62.1-02 writes the timeline sentence | open |  | 2026-11-04T22:53:03.099Z |  |
-| 16 | 62.1 | stub | src/domain/team/timeline.ts | 23 | BoardTimeline.now and the percent fields are declared but not filled until 62.1-02 (D-13, D-14) | open |  | 2026-11-04T22:53:03.223Z |  |
+| 15 | 62.1 | stub | src/domain/team/timeline.ts | 227 | Dot label is the card's a11yLabel placeholder until 62.1-02 writes the timeline sentence | fixed |  | 2026-11-04T22:53:03.099Z | 2026-11-04T23:11:58.978Z |
+| 16 | 62.1 | stub | src/domain/team/timeline.ts | 23 | BoardTimeline.now and the percent fields are declared but not filled until 62.1-02 (D-13, D-14) | fixed |  | 2026-11-04T22:53:03.223Z | 2026-11-04T23:11:59.103Z |
 
 ````json
 [
@@ -223,10 +223,10 @@ last_updated: 2026-11-04T22:53:03.223Z
     "file": "src/domain/team/timeline.ts",
     "line": 227,
     "description": "Dot label is the card's a11yLabel placeholder until 62.1-02 writes the timeline sentence",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-11-04T22:53:03.099Z",
-    "resolved_at": null,
+    "resolved_at": "2026-11-04T23:11:58.978Z",
     "milestone": "v0.6.0"
   },
   {
@@ -236,10 +236,10 @@ last_updated: 2026-11-04T22:53:03.223Z
     "file": "src/domain/team/timeline.ts",
     "line": 23,
     "description": "BoardTimeline.now and the percent fields are declared but not filled until 62.1-02 (D-13, D-14)",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-11-04T22:53:03.223Z",
-    "resolved_at": null,
+    "resolved_at": "2026-11-04T23:11:59.103Z",
     "milestone": "v0.6.0"
   }
 ]
