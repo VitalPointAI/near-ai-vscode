@@ -22,3 +22,6 @@ resources/benchmark/**/reference/**
 
 # Live model-eval results (NEAR_LIVE_EVAL_OUT)
 eval-*.json
+
+# Test-only page script: the board layout probe the extension-host tests load under NEAR_AI_E2E=1 (the release check fails if it ships).
+media/board/layout-probe.js

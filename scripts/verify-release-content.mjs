@@ -142,7 +142,9 @@ const forbiddenPatterns = [
   /(?:^|\/)[^/]+\.ts$/,
   /^extension\/(?:tsconfig\.json|package-lock\.json|\.gitignore)$/,
   /^extension\/resources\/benchmark\/.*\/reference(?:\/|$)/,
-  /^extension\/\.git(?:-real)?(?:\/|$)/
+  /^extension\/\.git(?:-real)?(?:\/|$)/,
+  // The board layout probe is test-only page code (Phase 62 plan 16); the extension-host tests load it from the source tree.
+  /^extension\/media\/board\/layout-probe\.js$/
 ];
 const forbidden = entries.filter((entry) => forbiddenPatterns.some((pattern) => pattern.test(entry)));
 if (forbidden.length > 0) fail(`development or source artifacts are present: ${forbidden.join(', ')}`);

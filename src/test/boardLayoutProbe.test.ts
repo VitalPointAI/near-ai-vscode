@@ -188,6 +188,14 @@ test('readability rules: a card in a folded column, no size or a zero font size,
   assert.deepEqual(check((() => { const d = clean(); d.cards[2].main.background = CARD_BG; return d; })()), [], 'the card\'s own background is fine');
 });
 
+// The probe waits two animation frames (each a fake timer) with a promise step between them, so time and the microtask queue take turns a few times.
+async function settle(h: BoardHarness): Promise<void> {
+  for (let turn = 0; turn < 4; turn += 1) {
+    h.advance(60);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 test('the page answers e2e-layout with exactly one e2e-layout-report carrying the documented keys, only when the host marked it for the tests', async () => {
   const world = await boardWorld();
   seedStandardBoard(world);
@@ -201,10 +209,7 @@ test('the page answers e2e-layout with exactly one e2e-layout-report carrying th
   h.deliver({ type: 'state', model });
   const before = h.posts.length;
   h.deliver({ type: 'e2e-layout', id: 4, action: 'measure' });
-  h.advance(100);
-  await new Promise((resolve) => setImmediate(resolve));
-  h.advance(100);
-  await new Promise((resolve) => setImmediate(resolve));
+  await settle(h);
   const answers = h.posts.slice(before).filter((p) => p.type === 'e2e-layout-report');
   assert.equal(answers.length, 1, 'exactly one answer');
   assert.equal(answers[0].id, 4);
@@ -228,8 +233,7 @@ test('the page answers e2e-layout with exactly one e2e-layout-report carrying th
   // A second question gets its own single answer, and a focus request names the focused card.
   const mark = h.posts.length;
   h.deliver({ type: 'e2e-layout', id: 5, action: 'focus', itemId: 'plan:90-01' });
-  h.advance(100);
-  await new Promise((resolve) => setImmediate(resolve));
+  await settle(h);
   const second = h.posts.slice(mark).filter((p) => p.type === 'e2e-layout-report');
   assert.equal(second.length, 1);
   assert.equal(second[0].id, 5);
@@ -240,8 +244,7 @@ test('the page answers e2e-layout with exactly one e2e-layout-report carrying th
   plain.deliver({ type: 'state', model });
   const mark2 = plain.posts.length;
   plain.deliver({ type: 'e2e-layout', id: 6, action: 'measure' });
-  plain.advance(100);
-  await new Promise((resolve) => setImmediate(resolve));
+  await settle(plain);
   assert.equal(plain.posts.slice(mark2).filter((p) => p.type === 'e2e-layout-report').length, 0, 'no answer without data-e2e');
 });
 
