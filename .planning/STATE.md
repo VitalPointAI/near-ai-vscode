@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-15-PLAN.md
-last_updated: "2026-11-04T00:32:26.137Z"
+stopped_at: Completed 62-16-PLAN.md
+last_updated: "2026-11-04T00:53:42.448Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 1dded760a86310d1f516a838cfc8464bcd60245c
+state_head: b22ca29164065582e4020b686638419ecfd872a2
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 60
-  completed_plans: 51
+  total_plans: 61
+  completed_plans: 52
   percent: 13
 ---
 
@@ -105,6 +105,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 61 P23 | 11min | 2 tasks | 4 files |
 | Phase 61 P22 | 17min | 3 tasks | 5 files |
 | Phase 62 P15 | 20min | 3 tasks | 12 files |
+| Phase 62 P16 | 18 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -218,6 +219,9 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-22: the self-import tests derive finished plans from the SUMMARYs committed at HEAD
 - [Phase 62]: 62-15: item.assigned { id, memberId } and item.unassigned { id } (owner and lead, item.assign row); assignable kinds plan, phase, bug, chore, spike; assignee must be a current confirmed member allowed item.claim for the kind; WorkItem.assignee left out when empty, cleared on member removal; three pre-change hashes pinned unchanged (Task 1 auto-selected confirm-recorded)
 - [Phase 62]: 62-15: a snapshot assignee must name a current, joined member on the roster; ItemHistory names the assignee for both events from its own record of accepted events
+- [Phase 62]: 62-16: the layout probe answers through NearAiBoard.post and onMessage, waits two frames each bounded by 50 ms, and scrolls the page when the board region is not a vertical scroller
+- [Phase 62]: 62-16: the DevTools client connects only to a ws://127.0.0.1 or localhost debugger address and sends only Input domain commands
+- [Phase 62]: 62-16: readXwd checks every size field against the file length and caps each side at 16384 px before allocating
 
 ### Pending Todos
 
@@ -239,8 +243,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T00:32:25.850Z
-Stopped at: Completed 62-15-PLAN.md
+Last session: 2026-11-04T00:53:42.153Z
+Stopped at: Completed 62-16-PLAN.md
 Resume file: None
 
 ## Notes
