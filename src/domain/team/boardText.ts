@@ -273,6 +273,10 @@ function joinWords(words: readonly string[]): string {
 }
 
 // assigneeName is the person an item.assigned put on the card or an item.unassigned took off ('' or absent when unknown: "Someone").
+function personName(name: string | undefined): string {
+  return name === undefined || name === '' ? SOMEONE : flattenName(name);
+}
+
 export interface HistoryContext { origin: ItemOrigin; hold?: 'on' | 'off'; assigneeName?: string }
 
 // One plain sentence for a history row: "Dana blocked this: waiting for the API key." Imported items are changed by the importer, so their content
@@ -288,6 +292,9 @@ export function historySentence(entry: HistoryEntry, authorName: string, context
     case 'item.unblocked': return `${name} unblocked this.`;
     case 'item.cancelled': return reason === '' ? `${name} cancelled this.` : `${name} cancelled this: ${sentence(reason)}`;
     case 'item.reopened': return `${name} reopened this.`;
+    // G-62-5: who was put on the card or taken off it, from HistoryEntry.memberId (62-15); a person doing it to themselves says so.
+    case 'item.assigned': return entry.memberId !== undefined && entry.memberId === entry.author ? `${name} assigned this to themselves.` : `${name} assigned this to ${personName(context.assigneeName)}.`;
+    case 'item.unassigned': return entry.memberId !== undefined && entry.memberId === entry.author ? `${name} unassigned themselves.` : `${name} unassigned ${personName(context.assigneeName)}.`;
     case 'item.updated': {
       const changed = entry.changed ?? [];
       if (changed.includes('state')) return `${name} marked this done.`;

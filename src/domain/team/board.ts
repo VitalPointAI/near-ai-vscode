@@ -2,19 +2,19 @@
 // The menu, the drop targets and the write path all ask planMove, so the board offers only what the log would accept, and the host re-runs the same
 // function on fresh state inside the append. Pure: no vscode, no I/O, no clock reads (nowMs is a parameter used for display text only).
 import {
-  ALL_CARDS_LABEL, BACKLOG_RULE_CARD_TEXT, BOARD_LANE_LABEL, COLUMN_CAPTIONS, COLUMN_LABELS, HISTORY_LIMIT_TEXT, KIND_WORDS, MOVE_LABELS, NO_PLANS_TEXT, READ_ONLY_BANNERS, REFUSALS, SOMEONE, SOURCE_BOARD_TEXT,
+  ASSIGN_REFUSALS, ROLE_LABELS, ALL_CARDS_LABEL, BACKLOG_RULE_CARD_TEXT, BOARD_LANE_LABEL, COLUMN_CAPTIONS, COLUMN_LABELS, HISTORY_LIMIT_TEXT, KIND_WORDS, MOVE_LABELS, NO_PLANS_TEXT, READ_ONLY_BANNERS, REFUSALS, SOMEONE, SOURCE_BOARD_TEXT,
   SOURCE_IMPORT_TEXT, UNASSIGNED_LABEL, YOU_SUFFIX, ageText, cardLabel, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences, stripFormatControls
 } from './boardText';
 import { MAX_HISTORY_PER_ITEM } from './itemHistory';
 import type { HistoryEntry } from './itemHistory';
-import { decideTeamAction } from './permissions';
+import { actionForEvent, decideTeamAction } from './permissions';
 import { findSecrets } from './secrets';
 import type {
   ImplementedTeamEvent, ItemBlockedBody, ItemCancelledBody, ItemKind, ItemReopenedBody, ItemUnblockedBody, ItemUpdatedBody, Role, TeamState, WorkItem
 } from './types';
 import { TEAM_REJECTION_REASONS } from './types';
 import { REASON_MAX } from './validate';
-import { BOARD_COLUMNS, effectiveColumn, isCard, isOwnDraft, progressOf, readiness, transitionProblem } from './work';
+import { BOARD_COLUMNS, effectiveColumn, isCard, isOwnDraft, mayBeAssigned, progressOf, readiness, transitionProblem } from './work';
 import type { BoardColumn } from './work';
 
 export const MOVE_KEYS = ['done', 'cancel', 'hold', 'release', 'reopen', 'block', 'unblock'] as const;
@@ -97,10 +97,15 @@ function intentFor(itemId: string, move: MoveKey, reason: string): MoveIntent {
   }
 }
 
-// The state machine of 62-01 answers on a synthetic envelope: transitionProblem reads only the type and the body.
-function transitionFor(state: TeamState, viewerId: string, intent: MoveIntent): string | undefined {
+// The state machine of 62-01 answers on a synthetic envelope: transitionProblem and actionForEvent read only the type, the author and the body.
+// The probe is never written: only the intent is.
+function probeEvent(state: TeamState, viewerId: string, intent: MoveIntent | AssignIntent): ImplementedTeamEvent {
   const event = { v: 1, id: 'evt-probe', teamId: state.team.id, type: intent.type, lamport: 0, at: '', author: viewerId, device: '', prev: '', body: intent.body, sig: '' };
-  return transitionProblem(state, event as unknown as ImplementedTeamEvent);
+  return event as unknown as ImplementedTeamEvent;
+}
+
+function transitionFor(state: TeamState, viewerId: string, intent: MoveIntent | AssignIntent): string | undefined {
+  return transitionProblem(state, probeEvent(state, viewerId, intent));
 }
 
 // A transition reason in the board's own words, by the move that ran into it.
@@ -168,16 +173,82 @@ export function availableMoves(state: TeamState, viewerId: string | undefined, i
   return moves;
 }
 
-export function planAssign(_state: TeamState, _viewerId: string | undefined, _itemId: string, _memberId: string | undefined): AssignResult {
-  return { ok: false, reason: '' };
+// ---- planAssign (G-62-5, 62-19) ---------------------------------------------------------------------------------------------------------------
+
+// A 62-15 rejection reason in the board's own words.
+function assignRefusal(state: TeamState, problem: string, item: WorkItem): string {
+  switch (problem) {
+    case R.itemMissing: return ASSIGN_REFUSALS.missing;
+    case R.itemNotAssignable: return ASSIGN_REFUSALS.notAssignable;
+    case R.itemTerminal: return ASSIGN_REFUSALS.finished;
+    case R.assigneeNotEligible: return ASSIGN_REFUSALS.notEligible;
+    case R.itemAlreadyAssigned: return ASSIGN_REFUSALS.alreadyAssigned(memberName(state, item.assignee));
+    case R.itemNotAssigned: return ASSIGN_REFUSALS.notAssigned;
+    default: return ASSIGN_REFUSALS.notNow;
+  }
 }
 
-export function availableAssignActions(_state: TeamState, _viewerId: string | undefined, _itemId: string): AssignAction[] {
-  return [];
+// Why a member who works on cards, but may not assign others, cannot make this change (62-25): only themselves, and only a free card or their own.
+function selfRefusal(state: TeamState, viewerId: string, item: WorkItem, memberId: string | undefined): string {
+  if (memberId === undefined) return ASSIGN_REFUSALS.selfOffOnly;
+  if (memberId !== viewerId) return ASSIGN_REFUSALS.selfOnly;
+  return item.assignee !== undefined && item.assignee !== viewerId ? ASSIGN_REFUSALS.takenBy(memberName(state, item.assignee)) : ASSIGN_REFUSALS.notWorker;
 }
 
-export function assignCandidates(_state: TeamState, _viewerId: string | undefined, _itemId: string): AssignCandidate[] {
-  return [];
+// The one function that decides an assignment: the exact intent to append, or one plain refusal (owner decision 2026-11-03). It asks the same two
+// questions the log asks, on the same state: transitionProblem for the card and the person (62-15), then decideTeamAction with the action
+// actionForEvent gives this very event (item.assign, or item.assign-self for a member's own assignment, 62-25), so the board and the log never
+// disagree. Who the viewer is comes first, so an observer or a joined member still waiting for a lead hears why before any rule about the card.
+// memberId undefined means unassign.
+export function planAssign(state: TeamState, viewerId: string | undefined, itemId: string, memberId: string | undefined): AssignResult {
+  if (viewerId === undefined) return { ok: false, reason: REFUSALS.noDeviceKey };
+  const viewer = state.members.get(viewerId);
+  if (viewer?.removedEvent !== undefined) return { ok: false, reason: REFUSALS.removed };
+  if (viewer === undefined || !mayBeAssigned(state, viewerId)) return { ok: false, reason: ASSIGN_REFUSALS.notWorker };
+  const item = state.items.get(itemId);
+  if (item === undefined) return { ok: false, reason: ASSIGN_REFUSALS.missing };
+  const intent: AssignIntent = memberId === undefined ? { type: 'item.unassigned', body: { id: itemId } } : { type: 'item.assigned', body: { id: itemId, memberId } };
+  const event = probeEvent(state, viewerId, intent);
+  const problem = transitionProblem(state, event);
+  if (problem !== undefined) return { ok: false, reason: assignRefusal(state, problem, item) };
+  const action = actionForEvent(event, state);
+  if (action === undefined || !decideTeamAction(state, viewerId, action).allowed) return { ok: false, reason: selfRefusal(state, viewerId, item, memberId) };
+  return { ok: true, intent };
+}
+
+function mayAssignOthers(state: TeamState, viewerId: string): boolean {
+  return decideTeamAction(state, viewerId, { kind: 'item.assign' }).allowed;
+}
+
+// The assignment actions this viewer may take on this item now, in menu order: Assign to... and Unassign for the owner and leads, Assign to me
+// and Unassign me for any other member who is not an observer. Each is offered only when planAssign would succeed.
+export function availableAssignActions(state: TeamState, viewerId: string | undefined, itemId: string): AssignAction[] {
+  if (viewerId === undefined) return [];
+  const item = state.items.get(itemId);
+  if (item === undefined) return [];
+  const actions: AssignAction[] = [];
+  if (mayAssignOthers(state, viewerId)) {
+    if ([...state.members.keys()].some((memberId) => planAssign(state, viewerId, itemId, memberId).ok)) actions.push('assign');
+    if (planAssign(state, viewerId, itemId, undefined).ok) actions.push('unassign');
+    return actions;
+  }
+  if (planAssign(state, viewerId, itemId, viewerId).ok) actions.push('assign-me');
+  if (item.assignee === viewerId && planAssign(state, viewerId, itemId, undefined).ok) actions.push('unassign-me');
+  return actions;
+}
+
+// The person list behind Assign to...: every member this viewer may put on the card now, plus the current assignee (marked), sorted by the name the
+// board shows. Empty unless Assign to... is offered, so a member who may only assign themselves never sees it.
+export function assignCandidates(state: TeamState, viewerId: string | undefined, itemId: string): AssignCandidate[] {
+  if (!availableAssignActions(state, viewerId, itemId).includes('assign')) return [];
+  const item = state.items.get(itemId);
+  const candidates: AssignCandidate[] = [];
+  for (const member of state.members.values()) {
+    const current = item?.assignee === member.id;
+    if (!(current && mayBeAssigned(state, member.id)) && !planAssign(state, viewerId, itemId, member.id).ok) continue;
+    candidates.push({ memberId: member.id, name: flattenName(member.name), roleLabel: ROLE_LABELS[member.role] ?? member.role, current });
+  }
+  return candidates.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.memberId < b.memberId ? -1 : a.memberId > b.memberId ? 1 : 0));
 }
 
 const CLAIM_COLUMNS: readonly BoardColumn[] = ['claimed', 'in-progress', 'in-review', 'integrating'];
@@ -318,7 +389,9 @@ function cardOf(state: TeamState, options: BoardModelOptions, gate: string | und
     lane: { member: assignee?.id ?? 'unassigned', phase: phase ?? 'board', milestone: milestoneId ?? 'board' }, requirements: [...item.requirements],
     mine: isMine(item, options.viewerId),
     held: item.hold === true, doneInGsd, dependencyCount: item.dependsOn.length, estimateText: estimateText(item.estimate?.tokens), ageText: age,
-    moves: gate === undefined ? availableMoves(state, options.viewerId, item.id) : [], refusals, assignActions: [],
+    moves: gate === undefined ? availableMoves(state, options.viewerId, item.id) : [], refusals,
+    // Assignment has its own permission (62-25), so the move gate does not hide it; only a team that cannot be reached does.
+    assignActions: options.canWrite ? availableAssignActions(state, options.viewerId, item.id) : [],
     a11yLabel: cardLabel({
       isPlan: item.kind === 'plan', displayId: displayIdOf(item), title: flattenName(item.title, 200), stateLabel: COLUMN_LABELS[column], ...(blocked === undefined ? {} : { blockedReason: blocked.reason }),
       held: item.hold === true, doneInGsd, cancelled: column === 'cancelled', dependencyCount: item.dependsOn.length, ...(item.estimate === undefined ? {} : { estimateTokens: item.estimate.tokens }), age,
@@ -562,12 +635,17 @@ export function buildCardDetail(state: TeamState, itemId: string, options: { vie
     itemId, displayId: displayIdOf(item), title: flattenName(item.title, 200), kind: item.kind, kindLabel: KIND_WORDS[item.kind] ?? item.kind, column, stateLabel: COLUMN_LABELS[column],
     held: item.hold === true, doneInGsd, facts, mustHaves: item.mustHaves.map((text) => flattenName(text, 600)), requirements: [...item.requirements],
     dependencies: dependencyRows(state, item), files: item.scope.map((entry) => flattenName(entry, 200)), tasks: taskRows(state, item),
-    notReady: column === 'backlog' ? notReadySentences(reasons, waiting) : [], editable, assignActions: [],
+    notReady: column === 'backlog' ? notReadySentences(reasons, waiting) : [], editable, assignActions: availableAssignActions(state, viewerId, itemId),
     history: entries.map((entry) => {
       const direction = directions.get(entry.eventId);
-      return { at: entry.at, text: historySentence(entry, state.members.get(entry.author)?.name ?? '', { origin: item.origin, ...(direction === undefined ? {} : { hold: direction }) }) };
+      const assigneeName = entry.memberId === undefined ? undefined : state.members.get(entry.memberId)?.name ?? '';
+      return {
+        at: entry.at,
+        text: historySentence(entry, state.members.get(entry.author)?.name ?? '', { origin: item.origin, ...(direction === undefined ? {} : { hold: direction }), ...(assigneeName === undefined ? {} : { assigneeName }) })
+      };
     })
   };
+  if (item.assignee !== undefined) detail.assignee = { id: item.assignee, name: memberName(state, item.assignee) };
   if (item.estimate !== undefined) detail.estimateTokens = item.estimate.tokens;
   if (item.description !== undefined) detail.description = stripFormatControls(item.description);
   if (blocked !== undefined) detail.blocked = blocked;
