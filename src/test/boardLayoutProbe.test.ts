@@ -226,7 +226,7 @@ test('the page answers e2e-layout with exactly one e2e-layout-report carrying th
   assert.equal(answers[0].id, 4);
   const report = answers[0].report as Record<string, unknown>;
   assert.deepEqual(Object.keys(report).filter((k) => k !== 'focused').sort(),
-    ['cards', 'cells', 'heads', 'height', 'lanes', 'layout', 'problems', 'region', 'theme', 'toolbar', 'visibleCards', 'width'].sort());
+    ['cards', 'cells', 'headRow', 'heads', 'height', 'lanes', 'layout', 'problems', 'region', 'theme', 'toolbar', 'visibleCards', 'width'].sort());
   assert.ok(Array.isArray(report.problems));
   assert.equal(report.layout, 'kanban');
   assert.deepEqual(Object.keys(report.toolbar as object).sort(), ['background', 'height', 'position']);
@@ -257,6 +257,23 @@ test('the page answers e2e-layout with exactly one e2e-layout-report carrying th
   plain.deliver({ type: 'e2e-layout', id: 6, action: 'measure' });
   await settle(plain);
   assert.equal(plain.posts.slice(mark2).filter((p) => p.type === 'e2e-layout-report').length, 0, 'no answer without data-e2e');
+});
+
+test('62-24: every report, a quick rects one included, says where the sticky header row is, so a real drag aims below what it hides', async () => {
+  const world = await boardWorld();
+  seedStandardBoard(world);
+  const model = buildBoardModel(world.state, { nowMs: NOW, status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: world.owner.memberId });
+  const h = page(true);
+  h.deliver({ type: 'state', model });
+  for (const [id, action] of [[7, 'rects'], [8, 'measure']] as const) {
+    const mark = h.posts.length;
+    h.deliver({ type: 'e2e-layout', id, action });
+    await settle(h);
+    const report = h.posts.slice(mark).find((p) => p.type === 'e2e-layout-report')!.report as Record<string, any>;
+    assert.equal(report.layout, 'kanban');
+    assert.deepEqual(Object.keys(report.headRow).sort(), ['bottom', 'top'], `${action}: the header row's top and bottom`);
+    assert.ok(report.headRow.bottom >= report.headRow.top, `${action}: a header row with a height`);
+  }
 });
 
 test('the probe keeps the page rules: one strict IIFE, no markup sink, eval, network, colour literal, dash or second VS Code API', () => {
