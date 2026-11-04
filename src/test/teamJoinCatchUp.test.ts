@@ -325,3 +325,39 @@ test('when the lead linked the organization but did not publish it, the join is 
     auditCalls(recorded.calls, second.bundle);
   }, { linked: true });
 });
+
+// ---- 61-28: a copy asking to join has no invite, so no team id to look for ----------------------------------------------------------------
+
+test('without a team id, a behind clean copy whose online version has team.json is brought up to date with the same safe git calls', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    assert.equal(await readTeamFile(b), undefined);
+    const recorded = recorder();
+    const caught = await catchUpCopy({ projectRoot: b, remote: 'origin', git: recorded.git });
+    assert.deepEqual(caught, { ok: true, updated: true, branch: 'main' });
+    assert.equal(gitIn(b, ['rev-parse', 'HEAD']), remoteMain(rig));
+    assert.equal((await readTeamFile(b))?.teamId, teamIdOf(rig));
+    auditCalls(recorded.calls, bundle);
+  });
+});
+
+test('without a team id, a copy whose online version has no team.json is not updated (not-shared) and nothing changes', async () => {
+  await withTeam(async (rig, bundle) => {
+    const b = rootOf(rig, 'b');
+    const before = snapshot(b);
+    const recorded = recorder();
+    assert.deepEqual(await catchUpCopy({ projectRoot: b, remote: 'origin', git: recorded.git }), { ok: false, reason: 'not-shared' });
+    assert.deepEqual(snapshot(b), before, 'nothing in the copy changed');
+    auditCalls(recorded.calls, bundle);
+  }, { publish: false });
+});
+
+test('without a team id, a copy with local changes is refused exactly as Join refuses it', async () => {
+  await withTeam(async (rig) => {
+    const b = rootOf(rig, 'b');
+    await fs.writeFile(path.join(b, 'README.md'), 'edited before asking to join\n', 'utf8');
+    const before = snapshot(b);
+    assert.deepEqual(await catchUpCopy({ projectRoot: b, remote: 'origin' }), { ok: false, reason: 'local-changes' });
+    assert.deepEqual(snapshot(b), before, 'the edit and everything else stay as they were');
+  });
+});

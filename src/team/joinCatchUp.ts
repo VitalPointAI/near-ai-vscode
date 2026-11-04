@@ -89,7 +89,7 @@ export async function findSameProjectRemote(projectRoot: string, bundleRepo: str
   return matches.includes('origin') ? 'origin' : matches[0];
 }
 
-interface Context { projectRoot: string; remote: string; teamId: string; git: GitRunner; net: GitRunner; url: string }
+interface Context { projectRoot: string; remote: string; teamId: string | undefined; git: GitRunner; net: GitRunner; url: string }
 
 // Redacts a git message and removes the configured address in every form it could be printed in.
 function detailOf(context: Context, result: GitResult): string {
@@ -155,7 +155,7 @@ async function versionRefusal(context: Context, branch: string): Promise<CatchUp
 
 // Brings the current branch of this copy up to the online version of the same branch, fetched from the named remote only. Every check runs
 // before anything in the copy changes; the only change is a fast-forward (merge --ff-only). Nothing is reset, stashed or checked out.
-export async function catchUpCopy(input: { projectRoot: string; remote: string; teamId: string; git?: GitRunner }): Promise<CatchUpResult> {
+export async function catchUpCopy(input: { projectRoot: string; remote: string; teamId?: string; git?: GitRunner }): Promise<CatchUpResult> {
   const git = input.git ?? runGit;
   const { projectRoot, remote, teamId } = input;
   if (!REMOTE_NAME_PATTERN.test(remote)) throw new Error('The remote name is not a valid git remote name.');
