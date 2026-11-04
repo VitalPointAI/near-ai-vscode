@@ -62,9 +62,16 @@ test('the prompt carries the PR, the checks, the diff, and the reply format', as
   assert.match(prompt, /# Pull request #11: A change/);
   assert.match(prompt, /What it does\./);
   assert.match(prompt, /\+ added a line/, 'the diff is included');
-  assert.match(prompt, /Reply with a markdown list of findings/);
+  assert.match(prompt, /A markdown list with nothing around it/);
   assert.match(prompt, new RegExp(`Head-SHA: ${head}`), 'the head is pre-filled, so the model cannot invent one');
-  assert.match(prompt, /\[BLOCKER\], \[MAJOR\], \[MINOR\] or \[NIT\]/);
+  // The tag vocabulary is stated, however the line wraps.
+  for (const tag of ['[BLOCKER]', '[MAJOR]', '[MINOR]', '[NIT]']) assert.ok(prompt.includes(tag), `the prompt names ${tag}`);
+  // The owner reads the recommendation first, so the prompt asks for it first.
+  assert.match(prompt, /## Recommendation: MERGE/);
+  assert.match(prompt, /### What changes for you/);
+  assert.match(prompt, /### Impacts and constraints/);
+  assert.match(prompt, /### Not covered by this review/);
+  assert.match(prompt, /no file names, no severity tags, no code/);
 });
 
 test('the prompt shows the CI results, so the model judges a green tree', async () => {
@@ -139,4 +146,71 @@ test('an empty reply is an error, not an empty review', async () => {
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /empty reply/);
+});
+
+test('a reply in the new shape keeps its recommendation and still passes the gate', async () => {
+  // The owner reads the recommendation block, and the gate reads the verdict. Both must survive.
+  const { dir, head } = gathered();
+  writeFileSync(path.join(dir, 'prompt.md'), 'prompt');
+  const reply = [
+    '## Recommendation: MERGE',
+    '',
+    'Adds a payload deadline. Merge it.',
+    '',
+    '### What changes for you',
+    '',
+    '- A long step now finishes instead of failing at three seconds.',
+    '',
+    '### Impacts and constraints',
+    '',
+    '- No new setup required.',
+    '',
+    '### Not covered by this review',
+    '',
+    '- No live target was scanned.',
+    '',
+    '- [NIT] src/a.ts:1 a small thing',
+    '',
+    'Verdict: PASS',
+    `Head-SHA: ${head}`
+  ].join('\n');
+  const server = await fakeModel(reply);
+  const result = await run('ci-review-call.mjs', [path.join(dir, 'prompt.md')], {
+    REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const review = parseReview(result.stdout);
+  assert.equal(review.verdict, 'PASS');
+  assert.equal(reviewDecision(review, head).state, 'success');
+
+  // The approval body carries the block, so the owner sees it where they act on it.
+  const start = result.stdout.search(/^#{2,3}\s*Recommendation:/m);
+  const findings = result.stdout.search(/^- \[(?:BLOCKER|MAJOR|MINOR|NIT)\]/m);
+  const block = result.stdout.slice(start, findings === -1 ? undefined : findings).trim();
+  assert.match(block, /## Recommendation: MERGE/);
+  assert.match(block, /What changes for you/);
+  assert.doesNotMatch(block, /\[NIT\]/, 'the findings stay out of the recommendation block');
+});
+
+test('a DO NOT MERGE recommendation with an open blocker fails the gate', async () => {
+  const { dir, head } = gathered();
+  writeFileSync(path.join(dir, 'prompt.md'), 'prompt');
+  const reply = [
+    '## Recommendation: DO NOT MERGE',
+    '',
+    'Breaks the sandbox.',
+    '',
+    '- [BLOCKER] src/a.ts:2 payload runs on the host',
+    '',
+    'Verdict: FAIL',
+    `Head-SHA: ${head}`
+  ].join('\n');
+  const server = await fakeModel(reply);
+  const out = (await run('ci-review-call.mjs', [path.join(dir, 'prompt.md')], {
+    REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
+  })).stdout;
+  const decision = reviewDecision(parseReview(out), head);
+  assert.equal(decision.state, 'failure');
+  assert.match(decision.reasons.join(' '), /verdict is FAIL/);
 });

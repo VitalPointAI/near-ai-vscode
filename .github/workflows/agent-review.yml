@@ -94,6 +94,7 @@ jobs:
           SCRATCH: ${{ runner.temp }}
         run: |
           set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/.agent-review"
           for pr in ${{ steps.targets.outputs.numbers }}; do
             out="${SCRATCH}/agent-review-${pr}"
             mkdir -p "$out"
@@ -108,7 +109,20 @@ jobs:
             node scripts/ci-review-call.mjs "${out}/prompt.md" > "${out}/review.md"
 
             node scripts/agent-review.mjs submit "$pr" --review "${out}/review.md"
+
+            # Kept for the approval job, which is separate and runs without the gathered artifacts.
+            cp "${out}/review.md" "${GITHUB_WORKSPACE}/.agent-review/${pr}.md"
           done
+
+      # Hand the reviews to the approval job, which cannot see this job's files.
+      - name: Keep the reviews for the approval job
+        if: steps.targets.outputs.numbers != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-reviews
+          path: .agent-review
+          retention-days: 1
+          if-no-files-found: warn
 
       - name: Say so when there was nothing to review
         if: steps.targets.outputs.numbers == ''
@@ -124,6 +138,13 @@ jobs:
     timeout-minutes: 5
     environment: agent-review
     steps:
+      - name: Fetch the reviews the review job wrote
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: agent-reviews
+          path: .agent-review
+        continue-on-error: true
+
       - name: Approve every PR whose agent-review passed
         env:
           GH_TOKEN: ${{ secrets.NEAR_AI_REVIEW_TOKEN }}
@@ -148,7 +169,26 @@ jobs:
               echo "#${pr}: agent-review is ${state}, not approving"
               continue
             fi
+
+            # Carry the reviewer's own recommendation into the approval, so the owner reads it in the
+            # place they act on it rather than hunting for the review comment.
+            body="Approved by the agent review gate: agent-review passed on this commit."
+            review=".agent-review/${pr}.md"
+            if [ -f "$review" ]; then
+              body=$(node -e '
+                const fs = require("node:fs");
+                const text = fs.readFileSync(process.argv[1], "utf8");
+                const start = text.search(/^#{2,3}\s*Recommendation:/m);
+                const end = text.search(/^Verdict:/m);
+                const block = start === -1 ? "" : text.slice(start, end === -1 ? undefined : end).trim();
+                process.stdout.write(
+                  (block || "Approved by the agent review gate.") +
+                  "\n\n---\n\`agent-review\` passed on this commit. Findings are in the review comment."
+                );
+              ' "$review")
+            fi
+
             # --approve is a no-op when the reviewer already approved this commit.
-            gh pr review "$pr" --approve --body "Approved by the agent review gate: \`agent-review\` passed on this commit. See the review comment above." \
+            gh pr review "$pr" --approve --body "$body" \
               || echo "#${pr}: approval not created (already approved, or the PR is closed)"
           done
