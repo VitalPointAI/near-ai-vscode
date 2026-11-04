@@ -1,7 +1,7 @@
 // Drag and drop in the kanban (Phase 62 plan 11): media/board/drag.js run with media/board/board.js in node:vm against the fake DOM. Models come from the
 // real buildBoardModel over a signed in-memory log. The page only sends a request; the host decides, so every test checks what is posted and what is shown.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import { buildBoardModel } from '../domain/team/board';
@@ -146,6 +146,103 @@ test('drag.js has no markup sink and no em or en dash in it, and uses the board 
   assert.doesNotMatch(DRAG_JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   assert.doesNotMatch(DRAG_JS, /[—–]/);
   assert.match(DRAG_JS, /application\/x-near-ai-card/);
+});
+
+// ---- 62-23: what a real drag in a real window needs --------------------------------------------------------------------------------------------
+
+test('62-23: a state that arrives during a drag never removes, moves or replaces the dragged card; the render after dragend draws it', async () => {
+  const { h, world } = await ownerBoard();
+  const li = card(h, 'plan:90-01');
+  const dt = lift(h, 'plan:90-01');
+  // A teammate puts the card on hold while this person is still dragging it.
+  h.deliver({ type: 'state', model: await holdState(world) });
+  assert.equal(card(h, 'plan:90-01'), li, 'the very same element is still the card');
+  assert.equal(li.isConnected, true, 'it is still in the page');
+  assert.ok(cell(h, 'ready').contains(li), 'it stays in Ready while the drag lasts');
+  assert.ok(classes(li).includes('dragging'), 'and still looks dragged');
+  h.fire(li, 'dragend', { dataTransfer: Object.assign(dt, { dropEffect: 'none' }) });
+  assert.ok(cell(h, 'backlog').contains(card(h, 'plan:90-01')), 'the render after the drag draws it in Backlog');
+  assert.equal(classes(card(h, 'plan:90-01')).includes('dragging'), false);
+});
+
+/** A board page the host marked for the extension-host tests (data-e2e), with the drag script. */
+async function e2eBoard(): Promise<{ h: BoardHarness; model: BoardModel }> {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const h = createBoardHarness({ width: 800 });
+  h.document.body.setAttribute('data-e2e', '1');
+  h.load(['board.js', 'drag.js']);
+  h.deliver({ type: 'state', model });
+  return { h, model };
+}
+const factsOf = (h: BoardHarness, id: number): Record<string, any> => {
+  h.deliver({ type: 'e2e-probe', id, action: 'facts' });
+  const found = h.posts.find((p) => p.type === 'e2e-facts' && p.id === id);
+  assert.ok(found, 'the page answers the probe');
+  return found;
+};
+
+test('62-23: under data-e2e the facts carry a drag log of dragstart, dragenter per cell, the drop with its verdict and dragend', async () => {
+  const { h } = await e2eBoard();
+  const dt = lift(h, 'plan:90-01');
+  h.fire(cell(h, 'claimed'), 'dragenter', { dataTransfer: dt });
+  over(h, cell(h, 'claimed'), dt);
+  h.fire(cell(h, 'backlog'), 'dragenter', { dataTransfer: dt });
+  h.fire(cell(h, 'backlog'), 'dragenter', { dataTransfer: dt });
+  over(h, cell(h, 'backlog'), dt);
+  drop(h, cell(h, 'backlog'), dt);
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: Object.assign(dt, { dropEffect: 'move' }) });
+  assert.deepEqual(factsOf(h, 7).dragLog, [
+    { event: 'dragstart', column: 'ready', lane: 'unassigned', verdict: 'started' },
+    { event: 'dragenter', column: 'claimed', lane: 'unassigned', verdict: 'no' },
+    { event: 'dragenter', column: 'backlog', lane: 'unassigned', verdict: 'ok' },
+    { event: 'drop', column: 'backlog', lane: 'unassigned', verdict: 'ok' },
+    { event: 'dragend', column: 'ready', lane: 'unassigned', verdict: 'dropped' }
+  ], 'one dragenter per cell entered, however often the browser repeats it');
+
+  // A long drag keeps only the last 20 entries.
+  const dt2 = lift(h, 'plan:90-01');
+  for (let i = 0; i < 30; i += 1) h.fire(cell(h, i % 2 ? 'claimed' : 'backlog'), 'dragenter', { dataTransfer: dt2 });
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: Object.assign(dt2, { dropEffect: 'none' }) });
+  const log = factsOf(h, 8).dragLog as Array<Record<string, string>>;
+  assert.equal(log.length, 20, 'the last 20 entries');
+  assert.deepEqual(log[log.length - 1], { event: 'dragend', column: 'ready', lane: 'unassigned', verdict: 'cancelled' });
+});
+
+test('62-23: without data-e2e no drag log is kept', async () => {
+  const { h } = await ownerBoard();
+  const dt = lift(h, 'plan:90-01');
+  h.fire(cell(h, 'backlog'), 'dragenter', { dataTransfer: dt });
+  drop(h, cell(h, 'backlog'), dt);
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt });
+  const api = h.window.NearAiBoard as { dragLog?: () => unknown[] };
+  assert.deepEqual(typeof api.dragLog === 'function' ? api.dragLog() : 'no dragLog in the board api', [], 'nothing is logged');
+  h.deliver({ type: 'e2e-probe', id: 9, action: 'facts' });
+  assert.equal(h.posts.filter((p) => p.type === 'e2e-facts').length, 0, 'and the page answers no probe');
+});
+
+test('62-23: only the board e2e launch opens a DevTools port, on a free port of this computer, and no shipped file mentions remote debugging', () => {
+  const root = path.resolve(__dirname, '../..');
+  const run = readFileSync(path.join(root, 'src/test/e2e/run.ts'), 'utf8');
+  const board = run.indexOf("if (only.has('board'))");
+  assert.ok(board > 0, 'run.ts has the board launch');
+  const end = run.indexOf('\n  }\n', board);
+  const uses = [...run.matchAll(/remote-debugging-port/g)].map((m) => m.index!);
+  assert.ok(uses.length >= 1, 'the board launch passes --remote-debugging-port');
+  assert.ok(uses.every((at) => at > board && at < end), 'and no other launch does');
+  assert.match(run, /listen\(0, '127\.0\.0\.1'/, 'the port is a free one on 127.0.0.1');
+  assert.match(run.slice(board, end), /NEAR_AI_E2E_CDP_PORT/, 'the suite is told the port');
+  const shipped: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const full = path.join(dir, name);
+      if (statSync(full).isDirectory()) { if (full !== path.join(root, 'src/test')) walk(full); } else if (/\.(ts|js|json|css|html)$/.test(name)) shipped.push(full);
+    }
+  };
+  walk(path.join(root, 'src'));
+  walk(path.join(root, 'media'));
+  shipped.push(path.join(root, 'package.json'));
+  assert.deepEqual(shipped.filter((file) => /remote-debugging/.test(readFileSync(file, 'utf8'))).map((file) => path.relative(root, file)), [], 'no production file opens a DevTools port');
 });
 
 // ---- Task 2: snap back with reasons, other rows, cancel, foreign drops, the list and motion ---------------------------------------------------
