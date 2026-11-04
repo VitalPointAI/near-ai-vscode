@@ -396,11 +396,12 @@ test('all eight columns and groups always show, with the captions of the columns
   h.deliver({ type: 'state', model });
   const captions = h.$$('.column').map((c) => text(c.querySelector('.caption')));
   assert.deepEqual(captions, ['Waiting, on hold or not ready.', 'Ready to be claimed.', 'Claiming arrives in a later update.', 'Starting work arrives with claims.', 'Review arrives in a later update.', 'Adding finished work to the project arrives in a later update.', '', '']);
-  // UI review warning 5: the four columns later updates fill start folded, with one plain note that says why; Done and Cancelled start open.
+  // UI review warning 5: the four columns later updates fill start folded, with one plain note that says why. Owner decision 2026-11-03 (G-62-3, plan
+  // 62-21): Done and Cancelled start folded too, and the note says so.
   const later = ['claimed', 'in-progress', 'in-review', 'integrating'];
-  assert.deepEqual(h.$$('.column').filter((c) => c.className.includes('collapsed')).map((c) => c.getAttribute('data-column')), later);
+  assert.deepEqual(h.$$('.column').filter((c) => c.className.includes('collapsed')).map((c) => c.getAttribute('data-column')), [...later, 'done', 'cancelled']);
   assert.deepEqual(later.map((key) => h.$(`.column[data-column="${key}"] .col-btn`)!.getAttribute('aria-expanded')), ['false', 'false', 'false', 'false']);
-  assert.equal(text(h.$('.later-note')), 'Claimed, In progress, In review and Shipping are folded for now. They fill in when those steps arrive in a later update.');
+  assert.equal(text(h.$('.later-note')), 'Claimed, In progress, In review and Shipping are folded for now. They fill in when those steps arrive in a later update. Done and Cancelled are folded to keep finished work out of the way.');
   assert.equal(h.$('.later-note')!.hidden, false);
   // G-62-7 (62-21): a folded cell holds only its count, hidden for screen readers.
   assert.equal(text(h.$('.cell[data-column="claimed"][data-lane="unassigned"] .sr-only')), '0 cards, column folded');
@@ -410,7 +411,12 @@ test('all eight columns and groups always show, with the captions of the columns
   assert.equal(h.$('.column[data-column="claimed"] .col-btn')!.getAttribute('aria-expanded'), 'true', 'a folded column opens on request');
   assert.equal(text(h.$('.cell[data-column="claimed"][data-lane="unassigned"]')), 'No cards');
   for (const key of later.slice(1)) h.$(`.column[data-column="${key}"] .col-btn`)!.click();
-  assert.equal(h.$('.later-note')!.hidden, true, 'the note goes once none of the four is folded');
+  assert.equal(text(h.$('.later-note')), 'Done and Cancelled are folded to keep finished work out of the way.', 'once none of the four is folded the note speaks only of finished work');
+  h.$('.column[data-column="cancelled"] .col-btn')!.click();
+  assert.equal(h.$('.column[data-column="cancelled"] .col-btn')!.getAttribute('aria-expanded'), 'true');
+  assert.equal(text(h.$('.later-note')), 'Done is folded to keep finished work out of the way.');
+  h.$('.column[data-column="done"] .col-btn')!.click();
+  assert.equal(h.$('.later-note')!.hidden, true, 'the note goes once nothing it speaks of is folded');
   h.$('.column[data-column="cancelled"] .col-btn')!.click();
   assert.equal(h.$('.column[data-column="cancelled"] .col-btn')!.getAttribute('aria-expanded'), 'false');
   assert.ok(h.$('.column[data-column="cancelled"]')!.className.includes('collapsed'));
@@ -834,6 +840,64 @@ test('G-62-7: board.css wraps card text between words and resets the card button
   assert.match(main, /background:\s*none/);
   assert.match(main, /border:\s*0/);
   assert.match(main, /white-space:\s*normal/);
+});
+
+// Owner decision 2026-11-03 (G-62-3, plan 62-21, refines D-13): the board opens on active work. The model says which columns start folded
+// (foldedByDefault) and which lanes start collapsed (collapsedByDefault); the client follows it. Saved choices carry a version, so the older board's
+// collapse and filter choices are dropped once.
+test('G-62-3: with nothing saved the kanban folds exactly the columns the model folds, lanes follow the model, and the list opens Backlog and Ready', async () => {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const h = start({ width: 1200 });
+  h.deliver({ type: 'state', model });
+  const folded = (harness: BoardHarness): string[] => harness.$$('.column').filter((c) => c.className.includes('collapsed')).map((c) => c.getAttribute('data-column') ?? '');
+  assert.deepEqual(folded(h), model.columns.filter((c) => c.foldedByDefault).map((c) => c.key));
+  assert.deepEqual(folded(h), ['claimed', 'in-progress', 'in-review', 'integrating', 'done', 'cancelled']);
+  for (const lane of h.$$('.lane')) {
+    const info = model.lanes.member.find((l) => l.key === lane.getAttribute('data-lane'))!;
+    assert.equal(lane.querySelector('.lane-head')!.getAttribute('aria-expanded'), info.collapsedByDefault ? 'false' : 'true', `lane ${info.key}`);
+  }
+  assert.equal(text(h.$('.later-note')), 'Claimed, In progress, In review and Shipping are folded for now. They fill in when those steps arrive in a later update. Done and Cancelled are folded to keep finished work out of the way.');
+  assert.doesNotMatch(text(h.$('.later-note')), /[—–]/);
+  // The client takes the folds from the model, not from a list of its own.
+  const changed = JSON.parse(JSON.stringify(model)) as BoardModel;
+  for (const c of changed.columns) c.foldedByDefault = c.key === 'backlog';
+  const other = start({ width: 1200 });
+  other.deliver({ type: 'state', model: changed });
+  assert.deepEqual(folded(other), ['backlog']);
+  assert.equal(other.$('.later-note')!.hidden, true, 'no note when no later or finished column is folded');
+  h.setWidth(400);
+  assert.deepEqual(h.$$('.group[data-column]').filter((g) => g.querySelector('.group-head')!.getAttribute('aria-expanded') === 'true').map((g) => g.getAttribute('data-column')), ['backlog', 'ready']);
+});
+
+test('G-62-3: Done opened is kept across a reload; choices saved by the older board are dropped once, then new choices are kept', async () => {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const h = start({ width: 1200 });
+  h.deliver({ type: 'state', model });
+  h.$('.column[data-column="done"] .col-btn')!.click();
+  const saved = h.state as Record<string, unknown>;
+  assert.equal(typeof saved.version, 'number', 'the saved state carries its version');
+  const again = start({ width: 1200, state: h.state });
+  again.deliver({ type: 'state', model });
+  assert.equal(again.$('.column[data-column="done"] .col-btn')!.getAttribute('aria-expanded'), 'true', 'Done stays open after a reload');
+
+  // The older board saved no version: its collapsed Unassigned lane, opened Done column and Mine filter are dropped; the grouping and a draft stay.
+  const older = { groupBy: 'phase', filters: { mine: true, ready: false, blocked: false, requirement: '', phase: '' }, collapsedColumns: { done: false, backlog: true }, collapsedLanes: { 'member:unassigned': true }, openGroups: { done: true }, draft: { title: 'Half written' } };
+  const o = start({ width: 1200, state: older });
+  o.deliver({ type: 'state', model });
+  assert.equal(radio(o, 'Phase').getAttribute('aria-checked'), 'true', 'the grouping is kept');
+  radio(o, 'Member').click();
+  assert.equal(o.$('.lane[data-lane="unassigned"] .lane-head')!.getAttribute('aria-expanded'), 'true', 'Unassigned is open again');
+  assert.equal(o.$('.column[data-column="done"] .col-btn')!.getAttribute('aria-expanded'), 'false', 'Done is folded again');
+  assert.equal(o.$('.column[data-column="backlog"] .col-btn')!.getAttribute('aria-expanded'), 'true', 'Backlog is open again');
+  assert.equal(chip(o, 'Mine').getAttribute('aria-pressed'), 'false', 'the old Mine filter is dropped');
+  assert.deepEqual(api(o).getDraft(), { title: 'Half written' }, 'an unsent draft is never thrown away');
+  // Dropped once: a choice made now is saved with the version and kept.
+  o.$('.lane[data-lane="unassigned"] .lane-head')!.click();
+  const third = start({ width: 1200, state: o.state });
+  third.deliver({ type: 'state', model });
+  assert.equal(third.$('.lane[data-lane="unassigned"] .lane-head')!.getAttribute('aria-expanded'), 'false', 'a new collapse is kept');
 });
 
 // Owner decision 2026-11-03 (G-62-1): the board lives only in its own editor tab, so the page has no button or message that opens the board.
