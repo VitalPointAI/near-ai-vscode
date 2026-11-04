@@ -237,7 +237,10 @@
       if (entry.badge.parentNode === button && entry.badge.textContent) fact.badge = entry.badge.textContent;
       actions.push(fact);
     }
-    return { heading: parts.heading.textContent, status: parts.status.textContent, actions, hidden: false, profile: profileState(), soloLine: describeLine() };
+    const facts = { heading: parts.heading.textContent, status: parts.status.textContent, actions, hidden: false, profile: profileState(), soloLine: describeLine() };
+    // The board line, only while it is drawn.
+    if (parts.board.parentNode === section && parts.board.textContent) facts.board = parts.board.textContent;
+    return facts;
   }
 
   function probe(message) {

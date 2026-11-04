@@ -353,8 +353,14 @@ test('a board summary is one line inside the section, and a later model without 
   const lines = h.$$('#team .team-board');
   assert.equal(lines.length, 1);
   assert.equal(lines[0].textContent, withBoard.board?.text);
+  h.deliver({ type: 'team-e2e', id: 11 });
+  const drawnFacts: Record<string, unknown> | undefined = h.posts.at(-1);
+  assert.equal(drawnFacts?.board, withBoard.board?.text, 'the probe reports the board line while it is drawn');
   h.deliver({ type: 'team-state', model: model({ folderOpen: true, team: team({ myRole: 'developer', canManage: false, shared: undefined }) }) });
   assert.equal(h.$$('#team .team-board').length, 0);
+  h.deliver({ type: 'team-e2e', id: 12 });
+  const goneFacts: Record<string, unknown> = h.posts.at(-1) ?? {};
+  assert.equal('board' in goneFacts, false, 'and nothing once it is gone');
 });
 
 test('compact draws the actions in one row under the status with the heading hidden; full also shows the heading', () => {

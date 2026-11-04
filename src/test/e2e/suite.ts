@@ -338,9 +338,13 @@ function teamTests(): Array<[string, () => Promise<void>]> {
 // team-join. The online home is a local bare folder behind a test-only insteadOf rule on a public-looking address (run.ts). Every prompt is answered
 // by a script through promptTap and recorded; the invite text passes from the lead's window to the invitee's in a handoff folder.
 
-type TeamActionName = 'turn-on' | 'join' | 'share' | 'invite' | 'members' | 'board' | 'link' | 'check';
+type TeamActionName = 'invite' | 'join' | 'solo' | 'share' | 'members' | 'board' | 'link' | 'check';
 // hidden and profile (61-25): whether the whole section is hidden, and the readiness state the page last read from profile-status (null before any).
-interface SectionFacts { id: number; heading: string; status: string; actions: Array<{ id: TeamActionName; label: string; badge?: string }>; hidden?: boolean; profile?: string | null; error?: string }
+// soloLine (61-26): the quiet line on the empty chat after Just me for now, or null; board: the board line while it is drawn.
+interface SectionFacts {
+  id: number; heading: string; status: string; actions: Array<{ id: TeamActionName; label: string; badge?: string }>; hidden?: boolean; profile?: string | null;
+  soloLine?: { text: string; actions: Array<{ id: TeamActionName; label: string }> } | null; board?: string; error?: string;
+}
 type PromptRecordView = import('../../services/team/teamPrompts').PromptRecord;
 type PromptStepView = import('../../services/team/teamPrompts').PromptStep;
 
@@ -485,7 +489,7 @@ function inviteKit() {
   async function assertHiddenWithoutProfile(): Promise<void> {
     const hidden = await facts('nothing before a profile works', (seen) => seen.hidden === true && seen.profile === 'connect');
     assert.deepEqual(hidden.actions, [], 'no team button can be seen');
-    const refused = await probe('turn-on');
+    const refused = await probe('invite');
     assert.equal(refused.error, 'hidden', 'a hidden button cannot be clicked');
   }
 
@@ -498,54 +502,32 @@ function teamLeadTests(): Array<[string, () => Promise<void>]> {
   const kit = inviteKit();
   let api: NearAiTestApi;
   return [
-    ['before a NEAR AI profile works the Team section is hidden; once a local profile is connected it shows Turn on Team Mode without a reload', async () => {
+    ['before a NEAR AI profile works the Team section is hidden; once a local profile is connected it shows Working with your agents without a reload', async () => {
       api = await kit.activate();
       await kit.assertHiddenWithoutProfile();
       await kit.connectProfile(api);
       const shown = await kit.facts('the section once the profile works', (facts) => facts.hidden === false && facts.actions.length > 0);
       assert.equal(shown.profile, 'ready');
-      assert.equal(shown.actions[0]?.id, 'turn-on', 'Turn on Team Mode is the primary action');
-      assert.ok(ids(shown).includes('join'), 'Join a team is offered');
+      assert.equal(shown.heading, 'Working with your agents');
+      assert.deepEqual(ids(shown), ['invite', 'join', 'solo'], 'Invite someone first, then Join a team and Just me for now');
+      assert.equal(shown.soloLine, null, 'no quiet line while the section is shown');
     }],
-    ['the lead\'s project has no team yet, and the Team section offers Turn on Team Mode first and Join a team', async () => {
+    ['the lead\'s project has no team yet, and the Team section asks whether people should work with you too', async () => {
       api = await kit.activate();
       assert.equal(await api.team.handle.ready, 'solo', 'no team yet');
-      const shown = await kit.facts('Turn on Team Mode', (facts) => facts.actions.length > 0);
-      assert.equal(shown.actions[0]?.id, 'turn-on', 'Turn on Team Mode is the primary action');
-      assert.ok(ids(shown).includes('join'), 'Join a team is offered');
+      const shown = await kit.facts('Invite someone', (facts) => facts.actions.length > 0);
+      assert.equal(shown.actions[0]?.id, 'invite', 'Invite someone is the primary action');
+      assert.equal(shown.status, 'Want people to work with you too?');
+      assert.doesNotMatch(JSON.stringify(shown), /team\s+mode/i, 'the old feature name is not on screen');
     }],
-    ['Turn on Team Mode in the section asks the team name, your name and email once, and turns Team Mode on; Share comes next', async () => {
-      await kit.click('turn-on', [
-        { match: 'Team name', answer: 'E2E team' },
-        { match: 'Your name as teammates will see it', answer: 'E2E Lead' },
-        { match: 'Your email (optional)', answer: '' },
-        { match: 'Team Mode is on for', answer: undefined }
-      ]);
-      const done = await kit.finished('the Team Mode is on message', (record) => record.text.startsWith('Team Mode is on for E2E team'));
-      assert.equal(done.modal, false, 'the result is a plain message');
-      assert.ok(existsSync(path.join(workspace, '.planning', '.near-ai', 'team.json')), 'team.json exists');
-      const session = await until('the team session to run', () => api.team.handle.session());
-      assert.equal(session.teamFile.name, 'E2E team');
-      // The setup is not online yet, so Share takes the place of Invite someone until it is (61-17).
-      const shown = await kit.facts('Share first', (facts) => facts.actions[0]?.id === 'share');
-      assert.equal(ids(shown).includes('invite'), false, 'Invite someone waits until the setup is shared');
-      assert.match(shown.status, /not shared yet/);
-      assert.equal(kit.remoteTeamFile(), undefined, 'nothing of the team is on the online home\'s main version yet');
-    }],
-    ['Share in the section puts the team setup online after one confirmation, and Invite someone comes next', async () => {
-      await kit.click('share', [{ match: 'Share your team setup so teammates can join?', answer: 'Share' }]);
-      await kit.finished('the shared message', (record) => record.text === 'Your team setup is online. Teammates can now join.');
-      const confirmations = kit.prompts().shown.filter((record) => record.modal && record.text.includes('Share your team setup'));
-      assert.equal(confirmations.length, 1, 'one confirmation');
-      assert.equal(kit.remoteTeamFile()?.teamId, api.team.handle.session()!.teamFile.teamId, 'main online holds the lead\'s team.json');
-      const shown = await kit.facts('Invite someone first', (facts) => facts.actions[0]?.id === 'invite');
-      assert.ok(ids(shown).includes('members'), 'Members is offered');
-    }],
-    ['Invite someone in the section asks about the organization, who and what role, and shows the invite once with Copy invite', async () => {
+    ['Invite someone from no team sets the team up on the way, shares it with the invite\'s one confirmation and shows the invite once with Copy invite', async () => {
       const clipboardBefore = await vscode.env.clipboard.readText();
       try {
         await kit.click('invite', [
+          { match: 'Team name', answer: 'E2E team' },
+          { match: 'Your name as teammates will see it', answer: 'E2E Lead' },
           { match: 'Not now, everyone uses their own key', answer: 'Not now' },
+          { match: 'Before you invite anyone', answer: 'Share and continue' },
           { match: 'Name of the person you are inviting', answer: 'E2E Joiner' },
           { match: 'Their email address', answer: 'joiner@example.invalid' },
           { match: 'Role for', answer: 'Developer' },
@@ -554,14 +536,26 @@ function teamLeadTests(): Array<[string, () => Promise<void>]> {
           { match: 'Invite ready for E2E Joiner', answer: 'Copy invite' }
         ]);
         await kit.finished('the copied message', (record) => record.text.startsWith('Invite for E2E Joiner copied'));
-        const shown = kit.prompts().shown.filter((record) => record.detail?.startsWith(INVITE_PREFIX) === true);
-        assert.equal(shown.length, 1, 'the invite is shown exactly once');
-        const [modal] = shown;
+        const shown = kit.prompts().shown;
+        // The only new questions are the team name and your name, both filled in already, in the invite's own flow; no email, no closing message.
+        const setup = shown.filter((record) => record.text.startsWith('Team name') || record.text.startsWith('Your name as teammates will see it'));
+        assert.equal(setup.length, 2, `the team name and your name were asked once each: ${JSON.stringify(shown.map((record) => record.text))}`);
+        assert.equal(shown.some((record) => /Your email/.test(record.text) || /Your email/.test(record.detail ?? '')), false, 'no email question');
+        assert.equal(shown.some((record) => /^Your team for|is ready\./.test(record.text)), false, 'no separate message that the team is ready');
+        const confirmations = shown.filter((record) => record.modal && record.text.startsWith('Before you invite anyone'));
+        assert.equal(confirmations.length, 1, 'one share confirmation');
+        assert.ok(existsSync(path.join(workspace, '.planning', '.near-ai', 'team.json')), 'team.json exists');
+        const session = await until('the team session to run', () => api.team.handle.session());
+        assert.equal(session.teamFile.name, 'E2E team');
+        assert.equal(kit.remoteTeamFile()?.teamId, session.teamFile.teamId, 'main online holds the lead\'s team.json');
+        const invites = shown.filter((record) => record.detail?.startsWith(INVITE_PREFIX) === true);
+        assert.equal(invites.length, 1, 'the invite is shown exactly once');
+        const [modal] = invites;
         assert.equal(modal!.modal, true);
         assert.deepEqual(modal!.choices, ['Copy invite']);
         assert.equal(modal!.answer, 'Copy invite');
         const bundle = modal!.detail!.split('\n')[0]!;
-        assert.equal(kit.prompts().shown.filter((record) => JSON.stringify(record).includes(bundle)).length, 1, 'the invite is in no other prompt');
+        assert.equal(shown.filter((record) => JSON.stringify(record).includes(bundle)).length, 1, 'the invite is in no other prompt');
         assert.equal(await vscode.env.clipboard.readText(), bundle, 'the clipboard holds the invite');
         // Written whole, then renamed, so the invitee's window never reads half an invite.
         await writeFile(path.join(kit.handoff, 'bundle.part'), bundle, { encoding: 'utf8', mode: 0o600 });
@@ -569,11 +563,13 @@ function teamLeadTests(): Array<[string, () => Promise<void>]> {
       } finally {
         await vscode.env.clipboard.writeText(clipboardBefore);
       }
-      assert.equal(kit.remoteTeamFile()?.teamId, api.team.handle.session()!.teamFile.teamId, 'main online still holds the lead\'s team.json');
-      const shown = await kit.facts('one invite not used yet', (facts) => facts.actions[0]?.id === 'invite' && /1 invite is not used yet/.test(facts.status));
-      assert.ok(shown, 'Invite someone stays first, and the status counts the invite');
     }],
-    ['every prompt of the lead\'s window was answered and spoke plain words', async () => {
+    ['with nobody joined yet the section offers Invite someone, Members and Open board, and counts the invite', async () => {
+      const shown = await kit.facts('one person invited and not joined yet', (facts) => facts.actions[0]?.id === 'invite' && /1 person you invited has not joined yet/.test(facts.status));
+      assert.deepEqual(ids(shown), ['invite', 'members', 'board'], 'no Share, no link, no turn-on');
+      assert.equal(shown.heading, 'Team: E2E team');
+    }],
+    ['every prompt of the lead\'s window was answered and spoke plain words, without the old feature name', async () => {
       kit.assertPlain();
     }]
   ];
@@ -593,11 +589,23 @@ function teamJoinTests(): Array<[string, () => Promise<void>]> {
       assert.equal(shown.profile, 'ready');
       assert.equal(execFileSync('git', ['-C', workspace, 'status', '--porcelain'], { encoding: 'utf8' }).trim(), '', 'the profile files are ignored, so the copy is still clean');
     }],
-    ['the invitee\'s copy has no team yet, and the Team section offers Join a team', async () => {
+    ['the invitee\'s copy has no team yet, and the Team section offers Join a team and Just me for now', async () => {
       api = await kit.activate();
       assert.equal(await api.team.handle.ready, 'solo', 'no team.json in this copy yet');
       const shown = await kit.facts('Join a team', (facts) => ids(facts).includes('join'));
       assert.equal(shown.error, undefined);
+      assert.equal(shown.heading, 'Working with your agents');
+      assert.ok(ids(shown).includes('solo'), 'Just me for now is offered');
+    }],
+    ['Just me for now puts the section away and leaves one quiet line on the empty chat with Invite people and Join a team', async () => {
+      await kit.click('solo', []);
+      const quiet = await kit.facts('the quiet empty-chat line', (facts) => facts.hidden === true && facts.soloLine !== null && facts.soloLine !== undefined);
+      assert.deepEqual(quiet.actions, [], 'no section button can be seen');
+      assert.equal(quiet.soloLine?.text, 'Working solo with your agents. Invite people any time.');
+      assert.deepEqual(quiet.soloLine?.actions.map((action) => [action.id, action.label]), [['invite', 'Invite people'], ['join', 'Join a team']]);
+      assert.equal(api.team.handle.justMe(), true, 'kept for this project');
+      assert.equal(execFileSync('git', ['-C', workspace, 'status', '--porcelain'], { encoding: 'utf8' }).trim(), '', 'no file in the copy changed');
+      assert.equal(kit.prompts().shown.length, 0, 'nothing was asked or said');
     }],
     ['the lead\'s invite arrives, and this copy is now behind the online home', async () => {
       // The lead's window runs at the same time and leaves the invite in the handoff folder once it has shared the setup and made the invite.
@@ -608,7 +616,9 @@ function teamJoinTests(): Array<[string, () => Promise<void>]> {
       assert.notEqual(head(workspace, 'HEAD'), head(kit.remote, 'main'), 'the copy is behind the online home');
       assert.equal(existsSync(path.join(workspace, '.planning', '.near-ai', 'team.json')), false, 'the copy has no team.json yet');
     }],
-    ['Join a team with the pasted invite brings the copy up to date by itself and joins as an observer waiting for a lead', async () => {
+    ['Join a team from the quiet line with the pasted invite brings the copy up to date by itself and joins as an observer waiting for a lead', async () => {
+      const before = await kit.facts('Join a team in the quiet line', (facts) => facts.soloLine?.actions.some((action) => action.id === 'join') === true);
+      assert.equal(before.hidden, true, 'the join starts from the line, not from the section');
       await kit.click('join', [
         { match: 'Paste the invite your lead sent you', answer: bundle },
         { match: 'Your name as teammates will see it', answer: 'E2E Joiner' },
@@ -630,8 +640,11 @@ function teamJoinTests(): Array<[string, () => Promise<void>]> {
       assert.equal(member.role, 'observer');
       assert.equal(member.pendingRole, 'developer');
     }],
-    ['the Team section then says a lead confirms them, with nothing to invite', async () => {
+    ['the Team section then says a lead confirms them, with nothing to invite, and the quiet line is gone for good', async () => {
       const shown = await kit.facts('waiting for a lead', (facts) => /A lead confirms you/.test(facts.status));
+      assert.equal(shown.hidden, false, 'the team\'s section is back');
+      assert.equal(shown.soloLine, null, 'no quiet line once the project has a team');
+      assert.equal(api.team.handle.justMe(), false, 'joining a team cleared Just me for now');
       assert.equal(ids(shown).includes('invite'), false, 'no Invite someone');
       assert.equal(ids(shown).includes('join'), false, 'no Join a team any more');
     }],
@@ -656,6 +669,8 @@ function teamConfirmTests(): Array<[string, () => Promise<void>]> {
       const shown = await kit.facts('Members with 1 waiting', (facts) => facts.actions.find((action) => action.id === 'members')?.badge === '1 waiting',
         OTHER_WINDOW_MS, () => { api.team.handle.session()?.nudge(); });
       assert.match(shown.status, /1 person is waiting for you in Members/);
+      // Once someone joined the section stays quiet: Members first with the waiting badge, then the board; inviting more people is in Members.
+      assert.deepEqual(ids(shown), ['members', 'board']);
     }],
     ['Members in the section confirms E2E Joiner as a developer', async () => {
       await kit.click('members', [
@@ -673,7 +688,17 @@ function teamConfirmTests(): Array<[string, () => Promise<void>]> {
         const members = facts.actions.find((action) => action.id === 'members');
         return members !== undefined && members.badge === undefined;
       });
-      assert.match(shown.status, /1 other member/);
+      assert.match(shown.status, /2 people are on E2E team/);
+      assert.deepEqual(ids(shown), ['members', 'board'], 'Members first and Open board, no Invite someone');
+      // The board summary is supplied by the running board (G-62-1), so its one line is drawn in the section.
+      const withBoard = await kit.facts('the board line', (facts) => typeof facts.board === 'string' && facts.board.length > 0);
+      assert.match(withBoard.board ?? '', /^On the board: \d+ ready, \d+ blocked, \d+ (is|are) yours\.$/);
+    }],
+    ['Members in the section lists Invite someone first for the lead, so inviting more people stays a button', async () => {
+      await kit.click('members', [{ match: 'Manage Team Members', answer: undefined }]);
+      const list = await until('the Members list', () => kit.prompts().shown.find((record) => record.kind === 'pick' && record.text.startsWith('Manage Team Members')));
+      assert.equal(list.choices[0], 'Invite someone');
+      await until('every scripted step to be used', () => kit.prompts().script?.length === 0);
     }],
     ['every prompt of the confirmation was answered and spoke plain words', async () => {
       kit.assertPlain();
