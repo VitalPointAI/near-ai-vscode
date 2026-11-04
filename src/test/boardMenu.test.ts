@@ -416,3 +416,47 @@ test('an assignment refusal is drawn on the card and announced once; an empty re
   assert.equal(card(h, 'plan:90-01').querySelector('.refusal-line'), null);
   assert.equal(h.announcements.length, before, 'nothing is announced');
 });
+
+test('an assigned card offers Unassign {name}, which posts unassign with only the card id', async () => {
+  const world = await standard();
+  world.accept(world.lead, 'item.assigned', { id: 'plan:90-01', memberId: world.dev.memberId });
+  const model = modelOf(world, world.owner.memberId);
+  const assigned = cardOf(model, 'plan:90-01');
+  assert.deepEqual(assigned.assignActions, ['assign', 'unassign']);
+  const h = start();
+  h.deliver({ type: 'state', model });
+  open(h, 'plan:90-01');
+  assert.deepEqual(items(h).map((i) => text(i)).slice(-2), ['Assign to...', 'Unassign Dana']);
+  items(h).find((i) => text(i) === 'Unassign Dana')!.click();
+  assert.deepEqual(assigns(h), [{ type: 'unassign', itemId: 'plan:90-01' }]);
+  assert.equal(text(card(h, 'plan:90-01').querySelector('.pending-line')), 'Saving...');
+  // The state that shows the change ends the wait and says what happened.
+  world.accept(world.owner, 'item.unassigned', { id: 'plan:90-01' });
+  h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
+  assert.equal(card(h, 'plan:90-01').querySelector('.pending-line'), null);
+  h.advance(200);
+  assert.ok(h.announcements.includes('Unassigned plan 90-01.'), h.announcements.join(' | '));
+});
+
+test('a developer sees only Assign to me on a free card and Unassign me on their own, with no person list (62-25)', async () => {
+  const world = await standard();
+  const free = modelOf(world, world.dev.memberId);
+  assert.deepEqual(cardOf(free, 'plan:90-01').moves, [], 'a developer has no moves');
+  const h = start();
+  h.deliver({ type: 'state', model: free });
+  assert.equal(moveBtn(h, 'plan:90-01').hidden, false, 'Move to... is there for Assign to me');
+  open(h, 'plan:90-01');
+  assert.deepEqual(items(h).map((i) => text(i)), ['Assign to me']);
+  assert.equal(menu(h).querySelectorAll('[role="separator"]').length, 0, 'no separator without moves before it');
+  items(h)[0]!.click();
+  assert.deepEqual(assigns(h), [{ type: 'assign', itemId: 'plan:90-01' }]);
+  assert.equal(text(card(h, 'plan:90-01').querySelector('.pending-line')), 'Saving...');
+
+  world.accept(world.dev, 'item.assigned', { id: 'plan:90-01', memberId: world.dev.memberId });
+  h.deliver({ type: 'state', model: modelOf(world, world.dev.memberId) });
+  assert.equal(card(h, 'plan:90-01').querySelector('.pending-line'), null);
+  open(h, 'plan:90-01');
+  assert.deepEqual(items(h).map((i) => text(i)), ['Unassign me']);
+  items(h)[0]!.click();
+  assert.deepEqual(assigns(h), [{ type: 'assign', itemId: 'plan:90-01' }, { type: 'unassign', itemId: 'plan:90-01' }]);
+});

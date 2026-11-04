@@ -396,3 +396,80 @@ test('hostile text is drawn as text and long must-haves wrap in full', async () 
   assert.equal(drawer(h).querySelectorAll('img, b, i, a, u, script').length, 0, 'no element was created from the text');
   assert.match(text(drawer(h)), /Blocked by <b>Dana<\/b>: <u>why<\/u>/);
 });
+
+// ---- 62-20: who has the card, and the assignment buttons (G-62-5, owner decision 2026-11-03) ---------------------------------------------------
+
+const factPairs = (h: BoardHarness): string[][] => {
+  const facts = sectionOf(h, 'Facts');
+  return Array.from(facts.querySelectorAll('dt')).map((dt, index) => [text(dt), text(facts.querySelectorAll('dd')[index])]);
+};
+const headButtons = (h: BoardHarness): string[] => Array.from(drawer(h).querySelector('.detail-actions')!.querySelectorAll('button')).filter((b) => !b.hidden).map((b) => text(b));
+const assignPosts = (h: BoardHarness): Array<Record<string, any>> => h.posts.filter((p) => p.type === 'assign' || p.type === 'unassign');
+
+test('the facts say who has the card and their role, or Nobody yet; a lead sees Assign... on a free card, Change person... and Unassign on an assigned one', async () => {
+  const world = await standard();
+  const { h } = await drawn(800, 'owner', world);
+  openBy(h, 'plan:90-01', messageOf(world, 'plan:90-01'));
+  assert.deepEqual(factPairs(h)[0], ['Assigned to', 'Nobody yet'], 'the first fact says nobody has it');
+  assert.ok(headButtons(h).includes('Assign...'), headButtons(h).join(' | '));
+  assert.equal(headButtons(h).includes('Unassign'), false);
+  buttonNamed(drawer(h).querySelector('.detail-actions')!, 'Assign...')!.click();
+  assert.deepEqual(assignPosts(h), [{ type: 'assign', itemId: 'plan:90-01' }], 'the same request as the menu');
+  h.press(h.focused(), 'Escape');
+
+  world.accept(world.lead, 'item.assigned', { id: 'plan:90-01', memberId: world.dev.memberId });
+  h.deliver({ type: 'state', model: modelOf(world, 'owner') });
+  openBy(h, 'plan:90-01', messageOf(world, 'plan:90-01'));
+  assert.deepEqual(factPairs(h)[0], ['Assigned to', 'Dana (Developer)']);
+  const head = headButtons(h);
+  assert.ok(head.includes('Change person...') && head.includes('Unassign'), head.join(' | '));
+  assert.equal(head.includes('Assign...'), false);
+  buttonNamed(drawer(h).querySelector('.detail-actions')!, 'Change person...')!.click();
+  buttonNamed(drawer(h).querySelector('.detail-actions')!, 'Unassign')!.click();
+  assert.deepEqual(assignPosts(h).slice(1), [{ type: 'assign', itemId: 'plan:90-01' }, { type: 'unassign', itemId: 'plan:90-01' }]);
+  h.deliver({ type: 'refused', itemId: 'plan:90-01', reason: 'Lee already changed this card. The board now shows the latest. Nothing was moved.' });
+  assert.match(text(drawer(h)), /Lee already changed this card/, 'a refusal shows in the detail');
+  h.advance(200);
+  assert.ok(h.announcements.some((a) => a.startsWith("Can't assign")), 'and is announced');
+});
+
+test('a developer sees Assign to me on a free card and Unassign me on their own; an observer sees no assignment button', async () => {
+  const world = await standard();
+  const dev = await drawn(800, 'dev', world);
+  openBy(dev.h, 'plan:90-01', messageOf(world, 'plan:90-01', 'dev'));
+  assert.ok(headButtons(dev.h).includes('Assign to me'), headButtons(dev.h).join(' | '));
+  assert.equal(headButtons(dev.h).some((label) => label === 'Assign...' || label === 'Change person...'), false, 'never the person list');
+  buttonNamed(drawer(dev.h).querySelector('.detail-actions')!, 'Assign to me')!.click();
+  assert.deepEqual(assignPosts(dev.h), [{ type: 'assign', itemId: 'plan:90-01' }]);
+
+  world.accept(world.dev, 'item.assigned', { id: 'plan:90-01', memberId: world.dev.memberId });
+  dev.h.deliver({ type: 'state', model: modelOf(world, 'dev') });
+  dev.h.deliver(messageOf(world, 'plan:90-01', 'dev'));
+  assert.deepEqual(factPairs(dev.h)[0], ['Assigned to', 'Dana (Developer)']);
+  assert.ok(headButtons(dev.h).includes('Unassign me'), headButtons(dev.h).join(' | '));
+  assert.equal(headButtons(dev.h).includes('Assign to me'), false);
+  buttonNamed(drawer(dev.h).querySelector('.detail-actions')!, 'Unassign me')!.click();
+  assert.deepEqual(assignPosts(dev.h).at(-1), { type: 'unassign', itemId: 'plan:90-01' });
+
+  const looking = await drawn(800, 'observer', world);
+  openBy(looking.h, 'plan:90-01', messageOf(world, 'plan:90-01', 'observer'));
+  assert.deepEqual(factPairs(looking.h)[0], ['Assigned to', 'Dana (Developer)'], 'everyone can see who has it');
+  assert.deepEqual(headButtons(looking.h).filter((label) => /Assign|Unassign|Change person/.test(label)), [], 'no assignment button for an observer');
+});
+
+test('while the board is offline the assignment buttons stay but are disabled with the offline reason, and post nothing', async () => {
+  const world = await standard();
+  const { h } = await drawn(800, 'owner', world);
+  openBy(h, 'plan:90-01', messageOf(world, 'plan:90-01'));
+  const offline = buildBoardModel(world.state, {
+    nowMs: NOW, status: { kind: 'offline', text: 'Offline' }, canWrite: false, viewerId: world.owner.memberId,
+    readOnlyReason: 'The team could not be reached, so nothing was changed. Check your internet connection and try again.'
+  });
+  h.deliver({ type: 'state', model: offline });
+  const assign = buttonNamed(drawer(h).querySelector('.detail-actions')!, 'Assign...')!;
+  assert.ok(assign && !assign.hidden, 'the button is still there');
+  assert.equal(assign.getAttribute('aria-disabled'), 'true');
+  assert.equal(assign.getAttribute('title'), 'The team could not be reached, so nothing was changed. Check your internet connection and try again.');
+  assign.click();
+  assert.deepEqual(assignPosts(h), [], 'a disabled button posts nothing');
+});

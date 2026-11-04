@@ -218,3 +218,149 @@ test('the person list marks the one who has the card, and choosing them again or
     assert.equal(await remoteAssignee(rig, PLAN), rig.dev.memberId);
   });
 });
+
+// ---- Task 2: unassign, self-assignment and every refusal ------------------------------------------------------------------------------------------
+
+test('Unassign takes the person off with no prompt: one item.unassigned, and the card is back in Unassigned', async () => {
+  await withBoard('lead', async ({ rig, panel }) => {
+    stub.quickPickAnswers.push(DANA);
+    await panel.receive({ type: 'assign', itemId: PLAN });
+    assert.equal(latestCard(panel, PLAN)?.assignee?.name, DANA);
+    const before = remoteEventCount(rig);
+    const prompts = stub.quickPickRequests.length + stub.inputRequests.length + stub.notifications.length;
+
+    await panel.receive({ type: 'unassign', itemId: PLAN });
+    assert.equal(stub.quickPickRequests.length + stub.inputRequests.length + stub.notifications.length, prompts, 'no prompt of any kind');
+    assert.equal(remoteEventCount(rig), before + 1, 'one event was written');
+    assert.deepEqual(newestRemoteEvent(rig), { ...newestRemoteEvent(rig), type: 'item.unassigned', body: { id: PLAN } });
+    assert.equal(await remoteAssignee(rig, PLAN), undefined);
+    const after = latestCard(panel, PLAN);
+    assert.equal(after?.assignee, undefined);
+    assert.equal(after?.lane.member, 'unassigned');
+    assert.deepEqual(after?.assignActions, ['assign']);
+  });
+});
+
+test('a developer assigns themselves with no list and takes themselves off again (62-25)', async () => {
+  await withBoard('dev', async ({ rig, panel }) => {
+    assert.deepEqual(latestCard(panel, PLAN)?.assignActions, ['assign-me'], 'a developer is offered Assign to me on a free card');
+    const before = remoteEventCount(rig);
+    await panel.receive({ type: 'assign', itemId: PLAN });
+    assert.equal(stub.quickPickRequests.length, 0, 'a developer never sees the person list');
+    assert.equal(remoteEventCount(rig), before + 1);
+    assert.deepEqual(newestRemoteEvent(rig), { ...newestRemoteEvent(rig), type: 'item.assigned', body: { id: PLAN, memberId: rig.dev.memberId } });
+    const mine = latestCard(panel, PLAN);
+    assert.deepEqual(mine?.assignee, { id: rig.dev.memberId, name: DANA, initials: 'DD' }, 'her chip is on the card');
+    assert.deepEqual(mine?.assignActions, ['unassign-me']);
+
+    await panel.receive({ type: 'unassign', itemId: PLAN });
+    assert.equal(stub.quickPickRequests.length, 0);
+    assert.equal(remoteEventCount(rig), before + 2);
+    assert.deepEqual(newestRemoteEvent(rig), { ...newestRemoteEvent(rig), type: 'item.unassigned', body: { id: PLAN } });
+    assert.equal(latestCard(panel, PLAN)?.assignee, undefined);
+  });
+});
+
+test('a developer whose card a lead took meanwhile is told who changed it first, and nothing is written', async () => {
+  await withBoard('dev', async ({ rig, panel, started }) => {
+    const lead = await openLog(rig, rig.lead);
+    const took = await lead.log.append(() => [{ type: 'item.assigned', body: { id: PLAN, memberId: rig.lead.memberId as string } }]);
+    assert.equal(took.ok, true, took.ok ? '' : took.reason);
+    assert.equal((started.session.state().items.get(PLAN) as { assignee?: string } | undefined)?.assignee, undefined, 'her window has not synced');
+    const before = remoteEventCount(rig);
+
+    await panel.receive({ type: 'assign', itemId: PLAN });
+    assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: PLAN, reason: `${LENA} ${STALE_TAIL}` });
+    assert.equal(remoteEventCount(rig), before, 'nothing was written');
+    assert.equal(await remoteAssignee(rig, PLAN), rig.lead.memberId);
+    assert.equal(latestCard(panel, PLAN)?.assignee?.name, LENA, 'the board shows the latest');
+  });
+});
+
+test('a reviewer assigns themselves and takes themselves off the same way', async () => {
+  await withBoard('dev', async ({ rig, panel }) => {
+    assert.deepEqual(latestCard(panel, PLAN)?.assignActions, ['assign-me']);
+    await panel.receive({ type: 'assign', itemId: PLAN });
+    assert.equal(stub.quickPickRequests.length, 0);
+    assert.equal(await remoteAssignee(rig, PLAN), rig.dev.memberId);
+    await panel.receive({ type: 'unassign', itemId: PLAN });
+    assert.equal(await remoteAssignee(rig, PLAN), undefined);
+  }, {
+    before: async (rig) => {
+      const owner = await openLog(rig, 'owner');
+      const changed = await owner.log.append(() => [{ type: 'member.role-changed', body: { memberId: rig.dev.memberId as string, role: 'reviewer' } }]);
+      assert.equal(changed.ok, true, changed.ok ? '' : changed.reason);
+    }
+  });
+});
+
+test('an observer is offered nothing, and an assign sent anyway is refused before anything is written', async () => {
+  await withBoard('dev', async ({ rig, panel }) => {
+    assert.deepEqual(latestCard(panel, PLAN)?.assignActions, [], 'no assignment items for an observer');
+    const before = remoteEventCount(rig);
+    await panel.receive({ type: 'assign', itemId: PLAN });
+    assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: PLAN, reason: OBSERVER_SENTENCE });
+    await panel.receive({ type: 'unassign', itemId: PLAN });
+    assert.equal(stub.quickPickRequests.length, 0, 'no list');
+    assert.equal(remoteEventCount(rig), before, 'nothing was written');
+  }, {
+    before: async (rig) => {
+      const owner = await openLog(rig, 'owner');
+      const changed = await owner.log.append(() => [{ type: 'member.role-changed', body: { memberId: rig.dev.memberId as string, role: 'observer' } }]);
+      assert.equal(changed.ok, true, changed.ok ? '' : changed.reason);
+    }
+  });
+});
+
+test('while the list is open a lead takes the card, so choosing Dana is refused naming the lead, and nothing is written', async () => {
+  await withBoard('owner', async ({ rig, panel }) => {
+    const lead = await openLog(rig, rig.lead);
+    const window = (stub.vscode as { window: { showQuickPick: (items: unknown, options?: unknown) => Promise<unknown> } }).window;
+    const originalPick = window.showQuickPick;
+    let after = 0;
+    window.showQuickPick = async (items: unknown, options?: unknown): Promise<unknown> => {
+      const answer = await originalPick(items, options);
+      const took = await lead.log.append(() => [{ type: 'item.assigned', body: { id: PLAN, memberId: rig.lead.memberId as string } }]);
+      assert.equal(took.ok, true, took.ok ? '' : took.reason);
+      after = remoteEventCount(rig);
+      return answer;
+    };
+    try {
+      stub.quickPickAnswers.push(DANA);
+      await panel.receive({ type: 'assign', itemId: PLAN });
+    } finally {
+      window.showQuickPick = originalPick;
+    }
+    assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: PLAN, reason: `${LENA} ${STALE_TAIL}` });
+    assert.equal(remoteEventCount(rig), after, 'only the lead\'s own assignment is on the remote');
+    assert.equal(await remoteAssignee(rig, PLAN), rig.lead.memberId);
+  });
+});
+
+test('an append that fails offline gives the offline sentence, and the failure is written to the output channel without card text', async () => {
+  await withBoard('lead', async ({ rig, panel, started }) => {
+    const away = `${rig.fixture.remote}.away`;
+    renameSync(rig.fixture.remote, away);
+    try {
+      stub.quickPickAnswers.push(DANA);
+      await panel.receive({ type: 'assign', itemId: PLAN });
+    } finally {
+      renameSync(away, rig.fixture.remote);
+    }
+    assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: PLAN, reason: OFFLINE });
+    assert.ok(started.lines.some((line) => line.startsWith('Team Board: an assignment was not saved')), 'the failure is in the output channel');
+    assert.equal(started.lines.some((line) => line.includes('Second slice') || line.includes('90-02') || line.includes(DANA)), false, 'and carries no card text or name');
+    assert.equal(await remoteAssignee(rig, PLAN), undefined);
+  });
+});
+
+test('T-62-66: more assignment requests than the write bucket allows get the busy sentence and write nothing', async () => {
+  await withBoard('dev', async ({ rig, panel }) => {
+    await panel.receive({ type: 'assign', itemId: PLAN });
+    await panel.receive({ type: 'unassign', itemId: PLAN });
+    const before = remoteEventCount(rig);
+    await panel.receive({ type: 'assign', itemId: PLAN });
+    assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: PLAN, reason: BUSY });
+    assert.equal(remoteEventCount(rig), before, 'nothing more was written');
+  }, { requestLimits: { coolDownMs: 2_000, writeBurst: 2, writeRefillMs: 3_600_000 } });
+});
