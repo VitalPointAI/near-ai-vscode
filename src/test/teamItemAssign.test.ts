@@ -1,7 +1,9 @@
 // G-62-5 (62-15): a lead puts a person on a card with item.assigned { id, memberId } and takes them off with item.unassigned { id }. Both are signed,
 // mapped to the item.assign row (owner and lead) and checked on write and on read like every other event. The first test is the tracer over real
-// git: the lead's assignment on one computer shows on the developer's computer after one sync, and a developer's own assignment is refused on
-// write and rejected on read by both clones when it is forged straight into the remote. Reasons are asserted from TEAM_REJECTION_REASONS.
+// git: the lead's assignment on one computer shows on the developer's computer after one sync, and a developer taking a teammate's card is refused
+// on write and rejected on read by both clones when it is forged straight into the remote. Reasons are asserted from TEAM_REJECTION_REASONS.
+// Owner decision 2026-11-03 (62-25): a member's own assignment of an unassigned card, and taking themselves off their own card, is now allowed
+// (item.assign-self, tested in teamSelfAssign.test.ts); the cases below that changed say so where they changed.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -126,7 +128,15 @@ test('a lead assigns a plan to a developer on one computer, the developer sees i
     assert.equal(assigneeOf(owner.log.state(), 'plan:90-02'), developerId);
     assert.equal(serialiseState(developer.log.state()), serialiseState(owner.log.state()));
 
-    // The developer's own client refuses an assignment before anything is written.
+    // Owner decision 2026-11-03 (62-25): a developer may now take an unassigned card and leave their own, so the refused and forged cases here
+    // are the ones the rule still forbids. The lead takes plan:90-01 first, so it is a teammate's card for the developer.
+    const leadTakes = await lead.log.append(() => [assignIntent('plan:90-01', lead.memberId as string)]);
+    assert.equal(leadTakes.ok, true, leadTakes.ok ? '' : leadTakes.reason);
+    assert.equal((await developer.log.sync()).accepted.length, 1);
+    await owner.log.sync();
+    assert.equal(assigneeOf(owner.log.state(), 'plan:90-01'), lead.memberId);
+
+    // The developer's own client refuses taking the lead's card before anything is written.
     const remoteHead = owner.log.state().head;
     const own = await developer.log.append(() => [assignIntent('plan:90-01', developerId)]);
     assert.equal(own.ok, false);
@@ -134,14 +144,15 @@ test('a lead assigns a plan to a developer on one computer, the developer sees i
     await owner.log.sync();
     assert.deepEqual(owner.log.state().head, remoteHead, 'nothing reached the remote');
 
-    // The same events, validly signed by the developer's device, pushed straight to the coordination branch.
+    // The same events, validly signed by the developer's device, pushed straight to the coordination branch: the developer takes the lead's
+    // card, and the developer takes the lead off it.
     const before = withoutRejections(owner.log.state());
     const position = { teamId, lamport: remoteHead.lamport + 1, prev: remoteHead.eventId };
     const developerActor = actorOf(developer, rig.dev.secrets);
     const forgedAssign = signed(developerActor, { ...position, type: 'item.assigned' as never, body: { id: 'plan:90-01', memberId: developerId } as never });
-    const forgedUnassign = signed(developerActor, { ...position, type: 'item.unassigned' as never, body: { id: 'plan:90-02' } as never });
-    rawPush(rootOf(rig, 'b'), forgedAssign, 'raw: a developer assigns themselves');
-    rawPush(rootOf(rig, 'b'), forgedUnassign, 'raw: a developer takes the lead\'s assignment off');
+    const forgedUnassign = signed(developerActor, { ...position, type: 'item.unassigned' as never, body: { id: 'plan:90-01' } as never });
+    rawPush(rootOf(rig, 'b'), forgedAssign, 'raw: a developer takes the lead\'s card');
+    rawPush(rootOf(rig, 'b'), forgedUnassign, 'raw: a developer takes the lead off their card');
 
     const syncedOwner = await owner.log.sync();
     const syncedDeveloper = await developer.log.sync();
@@ -153,7 +164,7 @@ test('a lead assigns a plan to a developer on one computer, the developer sees i
     assert.deepEqual(syncedOwner.rejected, syncedDeveloper.rejected, 'both clients record the very same rejections');
     assert.equal(withoutRejections(owner.log.state()), before, 'nothing changed');
     assert.equal(withoutRejections(developer.log.state()), before, 'nothing changed on the developer clone either');
-    assert.equal(assigneeOf(owner.log.state(), 'plan:90-01'), undefined);
+    assert.equal(assigneeOf(owner.log.state(), 'plan:90-01'), lead.memberId);
     assert.equal(assigneeOf(owner.log.state(), 'plan:90-02'), developerId);
 
     // The forged files did not block the log: the lead unassigns with the next lamport and every clone follows.
