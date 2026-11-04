@@ -280,7 +280,9 @@ test('parseBoardMessage accepts exactly the contract and returns the fields it c
   assert.deepEqual(parseBoardMessage({ type: 'move', itemId: READY_PLAN, target: 'hold' }), { type: 'move', itemId: READY_PLAN, target: 'hold' });
   assert.deepEqual(parseBoardMessage({ type: 'move', itemId: BOARD_ITEM, target: 'unblock' }), { type: 'move', itemId: BOARD_ITEM, target: 'unblock' });
   assert.deepEqual(parseBoardMessage({ type: 'detail', itemId: 'phase:90' }), { type: 'detail', itemId: 'phase:90' });
-  for (const type of ['import-plans', 'open-board', 'retry', 'show-details', 'check-team', 'choose-folders'] as const) assert.deepEqual(parseBoardMessage({ type }), { type });
+  for (const type of ['import-plans', 'retry', 'show-details', 'check-team', 'choose-folders'] as const) assert.deepEqual(parseBoardMessage({ type }), { type });
+  // The page lives only in the editor tab, so it has nothing to open (G-62-1, T-62-57): the bare open-the-board request is not in the contract.
+  assert.equal(parseBoardMessage({ type: 'open-board' }), undefined);
   assert.equal(parseBoardMessage({ type: 'choose-folders', paths: ['/etc'] }), undefined, 'the page cannot hand the host paths');
   assert.deepEqual(
     parseBoardMessage({ type: 'new-item', draft: { kind: 'bug', title: 'Fix it', scope: ['src/a/**'], estimate: 48000, description: 'Why' } }),
@@ -735,7 +737,7 @@ test('hostile messages from a page are ignored or refused and never reach the lo
   });
 });
 
-test('the page can ask for the import, the panel, a retry and the output channel', async () => {
+test('the page can ask for the import, a retry and the output channel, and a request to open the board does nothing (G-62-1, T-62-57)', async () => {
   await withBoard('owner', async ({ panel, started }) => {
     const ran: Array<{ id: string; args: unknown[] }> = [];
     for (const id of ['nearAi.team.importPlans', 'nearAi.team.openBoard']) stub.commands.set(id, (...args: unknown[]) => { ran.push({ id, args }); });
@@ -743,17 +745,25 @@ test('the page can ask for the import, the panel, a retry and the output channel
     const originalNudge = started.session.nudge.bind(started.session);
     started.session.nudge = (): void => { nudged += 1; originalNudge(); };
     let shown = 0;
-    const board = registerTeamBoard(createFakeContext(EXTENSION_ROOT, {}) as never, { session: () => started.session, output: { appendLine: () => undefined, show: () => { shown += 1; } }, timers: new LiveTimers() });
+    const lines: string[] = [];
+    const board = registerTeamBoard(createFakeContext(EXTENSION_ROOT, {}) as never, { session: () => started.session, output: { appendLine: (line) => { lines.push(line); }, show: () => { shown += 1; } }, timers: new LiveTimers() });
     board.openPanel();
     const second = stub.webviewPanels[stub.webviewPanels.length - 1] as RecordedWebviewPanel;
     try {
-      await second.receive({ type: 'import-plans' });
+      const panelsBefore = stub.webviewPanels.length;
+      const postedBefore = second.posted.length;
       await second.receive({ type: 'open-board' });
+      assert.deepEqual(ran, [], 'asking the host to open the board runs no command');
+      assert.equal(stub.webviewPanels.length, panelsBefore, 'and opens no panel');
+      assert.equal(second.posted.length, postedBefore, 'and gets no answer');
+      assert.equal(second.revealCalls + panel.revealCalls, 0, 'and reveals nothing');
+      await second.receive({ type: 'import-plans' });
       await second.receive({ type: 'retry' });
       await second.receive({ type: 'show-details' });
-      assert.deepEqual(ran, [{ id: 'nearAi.team.importPlans', args: [{ milestone: 'current' }] }, { id: 'nearAi.team.openBoard', args: [] }]);
+      assert.deepEqual(ran, [{ id: 'nearAi.team.importPlans', args: [{ milestone: 'current' }] }]);
       assert.equal(nudged, 1);
       assert.equal(shown, 1);
+      assert.deepEqual(lines, [], 'nothing failed');
       assert.ok(panel.posted.length > 0);
     } finally {
       board.controller.dispose();

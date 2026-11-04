@@ -707,6 +707,34 @@ test('board.css: only theme variables for colour, borders kept in high contrast 
   assert.doesNotMatch(BOARD_CSS, /[—–]/);
 });
 
+// Owner decision 2026-11-03 (G-62-1): the board lives only in its own editor tab, so the page has no button or message that opens the board.
+test('G-62-1: the toolbar has Import plans and New item at 400 px and at 900 px, no button opens the board, and nothing posts a request for it', async () => {
+  const toolbarButtons = (h: BoardHarness): string[] => h.$$('.actions button').filter((b) => !b.hidden).map((b) => b.textContent ?? '');
+  for (const width of [400, 900]) {
+    const { h } = await drawn(width, 'owner');
+    assert.equal(h.root.getAttribute('data-layout'), width === 400 ? 'list' : 'kanban');
+    assert.deepEqual(toolbarButtons(h), ['Import plans', 'New item'], `owner toolbar at ${width} px`);
+    assert.equal(buttonNamed(h, 'Open Team Board'), undefined, `no Open Team Board button at ${width} px`);
+    for (const b of h.$$('.actions button').filter((node) => !node.hidden && node.textContent !== 'New item')) b.click();
+    assert.equal(h.posts.some((m) => (m as { type?: string }).type === 'open-board'), false, `no toolbar click asks to open the board at ${width} px`);
+    const dev = (await drawn(width, 'dev')).h;
+    assert.deepEqual(toolbarButtons(dev), ['New item'], `developer toolbar at ${width} px`);
+  }
+  for (const file of ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js']) {
+    assert.equal(readFileSync(path.join(MEDIA, file), 'utf8').includes('open-board'), false, `${file} never posts open-board`);
+  }
+});
+
+test('G-62-1: the page takes the editor background in both layouts, has no surface rules, and the list layout still clamps titles to 2 lines', () => {
+  const css = BOARD_CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.equal(css.includes('data-surface'), false, 'no rule depends on a surface mark');
+  const body = [...css.matchAll(/(^|\})\s*body\s*\{([^}]*)\}/g)].map((m) => m[2] ?? '');
+  assert.equal(body.length, 1, 'one plain body rule');
+  assert.match(body[0] ?? '', /background:\s*var\(--vscode-editor-background\)\s*;/, 'the body takes the editor background');
+  assert.doesNotMatch(body[0] ?? '', /sideBar/, 'no sidebar colour');
+  assert.match(css, /#root\[data-layout="list"\] \.card-title\s*\{[^}]*-webkit-line-clamp:\s*2/, 'the list layout clamps titles to 2 lines');
+});
+
 test('J-02: the card face says the Backlog rule in normal text and the accessible name ends with it; other cards have no rule', async () => {
   const world = await standard();
   const model = modelOf(world, world.owner.memberId);
