@@ -57,6 +57,8 @@ const rows: Row[] = [
   { name: 'item.claim task', kind: 'item.claim', build: () => ({ kind: 'item.claim', itemKind: 'task' }), expect: [T, T, T, F, F] },
   { name: 'item.claim review item', kind: 'item.claim', build: () => ({ kind: 'item.claim', itemKind: 'review' }), expect: [T, T, T, T, F] },
   { name: 'item.assign', kind: 'item.assign', build: () => ({ kind: 'item.assign' }), expect: [T, T, F, F, F] },
+  // Owner decision 2026-11-03 (G-62-5, 62-25): any confirmed member who is not an observer assigns and unassigns themselves.
+  { name: 'item.assign-self', kind: 'item.assign-self', build: () => ({ kind: 'item.assign-self' }), expect: [T, T, T, T, F] },
   { name: 'lease.manual', kind: 'lease.manual', build: () => ({ kind: 'lease.manual' }), expect: [T, T, F, F, F] },
   { name: 'review.submit on others work', kind: 'review.submit', build: () => ({ kind: 'review.submit', ownWork: false }), expect: [T, T, T, T, F] },
   { name: 'review.submit on own work', kind: 'review.submit', build: () => ({ kind: 'review.submit', ownWork: true }), expect: [T, T, F, F, F] },
@@ -101,7 +103,8 @@ for (const row of rows) {
 
 test('the table covers every kind in the matrix and the matrix has five roles per kind', () => {
   const kinds = Object.keys(PERMISSION_MATRIX);
-  assert.equal(kinds.length, 29);
+  // 30 since 62-25 (was 29): item.assign-self joined for the owner decision of 2026-11-03.
+  assert.equal(kinds.length, 30);
   for (const kind of kinds) {
     assert.deepEqual(Object.keys(PERMISSION_MATRIX[kind as TeamActionKind]).sort(), [...ROLES].sort(), kind);
     assert.ok(rows.some((row) => row.kind === kind), `no table row for ${kind}`);
@@ -263,6 +266,50 @@ test('actionForEvent maps the item events, and decides own-draft from the stored
   for (const type of ['item.blocked', 'item.unblocked', 'item.cancelled', 'item.reopened']) {
     const body = type === 'item.blocked' || type === 'item.cancelled' ? { id: ITEM, reason: 'r' } : { id: ITEM };
     assert.deepEqual(actionForEvent(at({ type, body }), mine), { kind: 'item.move' }, type);
+  }
+});
+
+test('the self-assignment row is labelled for the person, and an observer is refused with it', () => {
+  assert.equal(ACTION_LABELS['item.assign-self'], 'assigning items to themselves');
+  assert.equal(decideTeamAction(view(), IDS.observer, { kind: 'item.assign-self' }).reason, 'the observer role does not allow assigning items to themselves');
+  assert.equal(decideTeamAction(view(), IDS.developer, { kind: 'item.assign' }).reason, 'the developer role does not allow assigning items to others');
+});
+
+test('actionForEvent sends a member\'s own assignment to item.assign-self and everything else to item.assign, and needs a state to do so', () => {
+  const FREE = 'plan:62-01';
+  const DEVS = 'plan:62-02';
+  const LEADS = 'plan:62-03';
+  const card = (id: string, assignee?: string): WorkItem => ({ ...boardItem(id, IDS.lead), kind: 'plan', origin: 'import', ...(assignee === undefined ? {} : { assignee }) });
+  const state = { items: new Map([[FREE, card(FREE)], [DEVS, card(DEVS, IDS.developer)], [LEADS, card(LEADS, IDS.lead)]]) };
+  const at = (event: Record<string, unknown>, author: string = IDS.developer): ImplementedTeamEvent => ({ ...ENVELOPE, author, ...event } as ImplementedTeamEvent);
+  const assign = (id: string, memberId: string, author?: string): ImplementedTeamEvent => at({ type: 'item.assigned', body: { id, memberId } }, author);
+  const unassign = (id: string, author?: string): ImplementedTeamEvent => at({ type: 'item.unassigned', body: { id } }, author);
+  const SELF: TeamAction = { kind: 'item.assign-self' };
+  const OTHERS: TeamAction = { kind: 'item.assign' };
+  const cases: Array<[string, ImplementedTeamEvent, TeamAction]> = [
+    ['the developer takes a free card', assign(FREE, IDS.developer), SELF],
+    ['the developer takes a card already theirs (the rules refuse the repeat)', assign(DEVS, IDS.developer), SELF],
+    ['the developer takes a card that is not on the board (the rules say it is missing)', assign('plan:62-99', IDS.developer), SELF],
+    ['the developer takes the lead\'s card', assign(LEADS, IDS.developer), OTHERS],
+    ['the developer puts the lead on a free card', assign(FREE, IDS.lead), OTHERS],
+    ['the developer puts the lead on the developer\'s own card', assign(DEVS, IDS.lead), OTHERS],
+    ['the developer takes themselves off', unassign(DEVS), SELF],
+    ['the developer takes the lead off', unassign(LEADS), OTHERS],
+    ['the developer clears a free card', unassign(FREE), OTHERS],
+    ['the lead takes themselves off', unassign(LEADS, IDS.lead), SELF],
+    ['the lead takes the developer off', unassign(DEVS, IDS.lead), OTHERS],
+    ['the observer takes a free card', assign(FREE, IDS.observer, IDS.observer), SELF]
+  ];
+  for (const [name, event, expected] of cases) assert.deepEqual(actionForEvent(event, state), expected, name);
+  // Without a state there is no assignee to compare, so both events take the stricter answer.
+  assert.deepEqual(actionForEvent(assign(FREE, IDS.developer)), OTHERS, 'assign without a state');
+  assert.deepEqual(actionForEvent(unassign(DEVS)), OTHERS, 'unassign without a state');
+  // The decision on the mapped action: the self row lets the developer and reviewer in and keeps the observer out.
+  for (const [role, allowed] of [['owner', true], ['lead', true], ['developer', true], ['reviewer', true], ['observer', false]] as const) {
+    const event = assign(FREE, IDS[role], IDS[role]);
+    const action = actionForEvent(event, state);
+    assert.ok(action !== undefined);
+    assert.equal(decideTeamAction(view(), IDS[role], action).allowed, allowed, role);
   }
 });
 
