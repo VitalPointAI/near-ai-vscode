@@ -713,7 +713,12 @@ test('board.css: only theme variables for colour, borders kept in high contrast 
   assert.doesNotMatch(BOARD_CSS, /(?<![-\w])(?:white|black|red|green|blue|yellow|orange|purple|pink|brown|gr[ae]y|cyan|magenta|silver|gold|navy|teal|maroon|olive|lime|aqua|fuchsia)(?![-\w])/i);
   const variables = [...BOARD_CSS.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]);
   assert.ok(variables.length > 40);
-  assert.ok(variables.every((name) => name.startsWith('--vscode-')), `non-theme variable: ${variables.find((name) => !name.startsWith('--vscode-'))}`);
+  // 62-21: board.js writes two layout variables (the column widths and the header row height); they are sizes, never colours. Every colour is a theme variable.
+  const LAYOUT_VARIABLES = ['--board-columns', '--board-head-height'];
+  assert.ok(variables.every((name) => name.startsWith('--vscode-') || LAYOUT_VARIABLES.includes(name ?? '')), `non-theme variable: ${variables.find((name) => !name.startsWith('--vscode-'))}`);
+  for (const declaration of BOARD_CSS.matchAll(/([\w-]+)\s*:[^;{}]*var\(\s*--board-/g)) {
+    assert.match(declaration[1] ?? '', /^(grid-template-columns|scroll-padding-top)$/, `a layout variable is used only for sizes, not in ${declaration[1]}`);
+  }
   assert.match(BOARD_CSS, /@media \(prefers-reduced-motion: reduce\)[^{]*\{[^}]*transition-duration: 0\.01ms[^}]*animation-duration: 0\.01ms/);
   assert.match(BOARD_CSS, /@media \(forced-colors: active\)[\s\S]*?\.card[\s\S]*?border: 1px solid/);
   assert.match(BOARD_CSS, /body\.vscode-high-contrast \.card[\s\S]*?var\(--vscode-contrastBorder\)/);
@@ -727,6 +732,53 @@ test('board.css: only theme variables for colour, borders kept in high contrast 
     assert.ok(BOARD_CSS.includes(selector), `${selector} is styled`);
   }
   assert.doesNotMatch(BOARD_CSS, /[—–]/);
+});
+
+// Owner decisions 2026-11-03 (G-62-2, G-62-4, plan 62-21): the toolbar is a solid band, the board region below it is the one scroller, and the header row
+// and every lane share one column layout that board.js writes as --board-columns.
+const cssRule = (selector: string): string => {
+  const css = BOARD_CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+  const found = css.split('}').map((chunk) => chunk.split('{')).filter((pair) => pair.length === 2 && (pair[0] ?? '').trim() === selector).map((pair) => pair[1] ?? '');
+  assert.ok(found.length > 0, `${selector} has a rule`);
+  return found.join(';');
+};
+
+test('G-62-2 and G-62-4: the kanban writes one column layout for the header row and every lane, 256 px open and 40 px folded, and the header row height', async () => {
+  const world = await standard();
+  const h = start({ width: 1200 });
+  h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
+  const region = h.$('.board-scroll')!;
+  const expected = (): string => h.$$('.column').map((c) => (c.className.includes('collapsed') ? '40px' : '256px')).join(' ');
+  assert.equal(h.$$('.column').length, 8);
+  assert.equal(region.style.getPropertyValue('--board-columns'), expected(), 'the widths follow the column order and folds');
+  assert.match(region.style.getPropertyValue('--board-columns'), /^(?:(?:256|40)px ){7}(?:256|40)px$/);
+  h.$('.column[data-column="backlog"] .col-btn')!.click();
+  assert.match(region.style.getPropertyValue('--board-columns'), /^40px /, 'folding Backlog narrows the first column for the headers and every lane at once');
+  assert.equal(region.style.getPropertyValue('--board-columns'), expected());
+  assert.match(region.style.getPropertyValue('--board-head-height'), /^\d+px$/, 'the header row height is written for the scroll padding');
+  // The order inside the board region: the later-columns note, then the header row, then the lanes.
+  assert.deepEqual(Array.from(region.children).map((n) => n.className), ['later-note', 'colheads', 'lanes']);
+});
+
+test('G-62-2 and G-62-4: board.css gives a solid toolbar band, one board scroller with a sticky opaque header row, and a shared grid with full-height cells', () => {
+  const toolbar = cssRule('#toolbar');
+  assert.doesNotMatch(BOARD_CSS, /background:\s*inherit/, 'nothing inherits a see-through background');
+  assert.doesNotMatch(toolbar, /position:\s*sticky/, 'the toolbar is a band, not a sticky layer over the cards');
+  assert.match(toolbar, /background:\s*var\(--vscode-editor-background\)/, 'the toolbar has a solid fill');
+  assert.match(cssRule('#root[data-layout="kanban"]'), /height:\s*100vh/, 'the kanban page fills the view and does not scroll itself');
+  const scroller = cssRule('.board-scroll');
+  assert.match(scroller, /overflow:\s*auto/, 'the board region scrolls both ways');
+  assert.match(scroller, /scroll-padding-top:\s*var\(--board-head-height/, 'a focused card is never scrolled under the header row');
+  const head = cssRule('.colheads');
+  assert.match(head, /position:\s*sticky/);
+  assert.match(head, /top:\s*0/);
+  assert.match(head, /z-index:\s*[1-9]/);
+  assert.match(head, /background:\s*var\(--vscode-editor-background\)/);
+  assert.match(cssRule('.colheads, .lane-grid'), /grid-template-columns:\s*var\(--board-columns/);
+  assert.match(cssRule('.colheads, .lane-grid'), /gap:\s*12px/);
+  assert.match(cssRule('.cell'), /min-height:\s*64px/);
+  assert.match(cssRule('.lane-grid'), /align-items:\s*stretch/, 'cells are as tall as their row');
+  assert.match(cssRule('.lane-title'), /position:\s*sticky[\s\S]*left:\s*0/, 'lane titles stay on the left while the board scrolls sideways');
 });
 
 // Owner decision 2026-11-03 (G-62-1): the board lives only in its own editor tab, so the page has no button or message that opens the board.
