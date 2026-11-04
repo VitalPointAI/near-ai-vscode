@@ -920,6 +920,11 @@
       const r = radios.find((n) => n.dataset.group === m.group);
       if (r) r.click();
     }
+    else if (m.action === 'blur') {
+      // Lets go of focus as a click on empty space would (62-22: a card focused by an earlier step is not measured again after a scroll).
+      const f = document.activeElement;
+      if (f && f !== document.body && typeof f.blur === 'function') f.blur();
+    }
     else if (m.action === 'key' && typeof m.key === 'string' && typeof KeyboardEvent === 'function') {
       const target = document.activeElement || document.body;
       try { target.dispatchEvent(new KeyboardEvent('keydown', { key: m.key, bubbles: true, cancelable: true })); } catch (error) { pageErrors.push(String((error && error.message) || error)); }
