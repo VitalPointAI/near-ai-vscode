@@ -163,10 +163,11 @@
     if (input && typeof input.focus === 'function') input.focus();
   }
 
-  // Whether a node is on the page and none of its ancestors is hidden (the welcome is hidden during a conversation).
+  // Whether a node is on the page and neither it nor an element above it is hidden (the welcome is hidden during a conversation). The walk stops at the
+  // Document: its hidden is the page visibility (true while another window covers this one), not a hidden element, and it never puts the line away.
   function shown(node) {
     if (!node.isConnected) return false;
-    for (let at = node; at; at = at.parentNode) if (at.hidden === true) return false;
+    for (let at = node; at && at.nodeType === 1; at = at.parentNode) if (at.hidden === true) return false;
     return true;
   }
 
@@ -218,9 +219,10 @@
     section.hidden = false;
   }
 
-  // What the quiet empty-chat line shows, or null when it is not drawn.
+  // What the quiet empty-chat line shows, or null when it is not drawn or not shown: the same rule as a click on it, so a line the facts report
+  // can be clicked.
   function describeLine() {
-    if (line === null || !line.node.isConnected) return null;
+    if (line === null || !shown(line.node)) return null;
     const actions = [];
     for (const entry of line.drawn.values()) actions.push({ id: entry.id, label: entry.label.textContent });
     return { text: line.text.textContent, actions };
