@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-20-PLAN.md
-last_updated: "2026-11-04T03:21:42.354Z"
+stopped_at: Completed 62-21-PLAN.md
+last_updated: "2026-11-04T04:15:10.446Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 6496902dd87bb6512cafe27ed760139809734433
+state_head: c3e6cc87c8b842c27c0ca3772af7912d9d5cd249
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 62
-  completed_plans: 58
+  completed_plans: 59
   percent: 13
 ---
 
@@ -112,6 +112,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P25 | 12min | 3 tasks | 5 files |
 | Phase 62 P19 | 28min | 3 tasks | 6 files |
 | Phase 62 P20 | 22 min | 3 tasks | 13 files |
+| Phase 62 P21 | 57 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -246,6 +247,10 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-20: the host chooses the assignment path from the log (person list for owner and leads, the viewer for anyone else); the page sends only the card id
 - [Phase 62]: 62-20: a lead's choice is refused as stale whenever the card's person changed after the page asked, even though a reassignment would be allowed
 - [Phase 62]: 62-20: Move to... shows for cards with moves (owner or lead) or assignment actions (non-observers); only cards with moves are draggable
+- [Phase 62]: 62-21: run.ts starts VS Code only on an xvfb-run screen and strips Wayland (WAYLAND_DISPLAY removed, --ozone-platform=x11); under xvfb-run on a Wayland desktop the test window had gone to the person's real screen
+- [Phase 62]: 62-21: the kanban is a 100vh column with toolbar and banner bands and one .board-scroll; a sticky opaque header row and every lane share --board-columns (256 px open, 40 px folded) written by board.js
+- [Phase 62]: 62-21: folded columns render no cards (a hidden count only); card text uses break-word; .card-main resets every global button property; the probe treats a break after a hyphen as wrapping between words
+- [Phase 62]: 62-21: folds come from foldedByDefault; saved UI state is version 2 and the older board's collapse and filter choices are dropped once; phase:63 is reachable by scrolling only, ordering planless phases first is left to the owner or 62-22/62-24
 
 ### Pending Todos
 
@@ -267,8 +272,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T03:21:42.033Z
-Stopped at: Completed 62-20-PLAN.md
+Last session: 2026-11-04T04:15:10.086Z
+Stopped at: Completed 62-21-PLAN.md
 Resume file: None
 
 ## Notes
