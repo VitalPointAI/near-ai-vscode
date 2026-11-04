@@ -12,10 +12,10 @@ import type { TeamFile } from '../domain/team/types';
 import { pushCodeBranch } from '../team/enable';
 import { DEFAULT_COORDINATION_REF } from '../team/gitTransport';
 import { createDeviceIdentity, deviceKeySecretName, emailHash, loadDeviceIdentity, newMemberId, newTeamId, sealKeySecretName } from '../team/identity';
-import { readInviteDirectory } from '../team/invite';
-import { deriveInviteKey, generateInviteCode } from '../team/inviteCode';
+import { INVITE_FILE, readInviteDirectory } from '../team/invite';
+import { deriveInviteKey, generateInviteCode, parseInviteCode } from '../team/inviteCode';
 import { catchUpCopy } from '../team/joinCatchUp';
-import { readTeamFile } from '../team/teamFile';
+import { TEAM_FILE_REL, readTeamFile } from '../team/teamFile';
 import {
   ACCEPTED_REQUESTS_FILE, JOIN_REQUEST_PREFIX, JoinRequestError, acceptJoinRequest, cancelJoinRequest, completeJoinRequest, createJoinRequest, parseJoinRequest,
   readPendingRequest, requestCheckCode, wasAcceptedHere
@@ -25,7 +25,8 @@ import {
   GIGA, LEAD_EMAIL, closeRig, confirm, createRig, enable, invite, join, link, openLog, publishProject, remoteEventCount, remove, rootOf, storageOf, teamIdOf
 } from './helpers/teamFlowRig';
 import type { Participant, Rig, RigOptions } from './helpers/teamFlowRig';
-import { makeCanaries } from './helpers/teamCanary';
+import { inviteCodeForms, makeCanaries, scanFiles, scanGitObjects } from './helpers/teamCanary';
+import type { Needle } from './helpers/teamCanary';
 import { MemorySecrets, gitIn } from './helpers/teamHarness';
 
 const requestSecretName = (teamId: string): string => `nearAi.team.joinRequest.${teamId}`;
@@ -402,5 +403,131 @@ test('a copy that is behind (no team.json yet) is brought up to date with no tea
     assert.equal(accepted.ok, true, accepted.ok ? '' : accepted.message);
     const done = await complete(rig, rig.dev);
     assert.equal(done.kind, 'joined', JSON.stringify(done));
+  });
+});
+
+// ---- Task 3: nothing leaks, and the signed log format is the one invites already write ------------------------------------------------------
+
+async function filesUnder(target: string): Promise<string[]> {
+  let entries;
+  try {
+    entries = await fs.readdir(target, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  const found: string[] = [];
+  for (const entry of entries) {
+    const child = path.join(target, entry.name);
+    if (entry.isDirectory()) found.push(...await filesUnder(child));
+    else if (entry.isFile()) found.push(child);
+  }
+  return found;
+}
+
+async function mirrorsUnder(storage: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const file of await filesUnder(storage)) if (path.basename(file) === 'HEAD' && path.basename(path.dirname(file)).endsWith('.git')) found.push(path.dirname(file));
+  return found;
+}
+
+const labelsIn = (text: string, needles: Needle[]): string[] => needles.filter((needle) => text.includes(needle.value)).map((needle) => needle.label);
+
+test('privacy: after a request, an accept and the join, the code is nowhere but the requester\'s secure storage, and then nowhere at all', async () => {
+  const canaries = makeCanaries();
+  await withRig({ linked: false, keySecretPrefix: canaries.apiKey }, async (rig) => {
+    await sharedTeam(rig);
+    const teamId = teamIdOf(rig);
+    const dev = rig.dev;
+    const output: string[] = [];
+
+    const asked = await ask(rig, dev);
+    // The code is read from SecretStorage, where it is meant to be, before the join forgets it.
+    const stored = dev.secrets.values.get(requestSecretName(teamId));
+    assert.ok(stored !== undefined, 'control: the stored request is in SecretStorage');
+    const codeText = (JSON.parse(stored as string) as { code: string }).code;
+    const codeBytes = parseInviteCode(codeText);
+    assert.ok(codeBytes !== undefined, 'the stored code is a readable code');
+    const forms = inviteCodeForms(codeText, Buffer.from(codeBytes as Buffer));
+    (codeBytes as Buffer).fill(0);
+    assert.ok(forms.length >= 5, 'the code in at least five renderings');
+    const codeNeedles: Needle[] = forms.map((value, index) => ({ label: `request code form ${index}`, value }));
+    assert.deepEqual(labelsIn(stored as string, codeNeedles).length > 0, true, 'control: the scan sees the code where it is meant to be');
+
+    const accepted = await accept(rig, parseJoinRequest(asked.text), dev.email);
+    assert.equal(accepted.ok, true, accepted.ok ? '' : accepted.message);
+    if (accepted.ok && accepted.notice !== undefined) output.push(accepted.notice);
+    const done = await complete(rig, dev, { pasteOwnKey: async () => dev.ownKey });
+    assert.equal(done.kind, 'joined', JSON.stringify(done));
+    if (done.kind === 'joined') output.push(...done.result.notices);
+    assert.ok(dev.ownKey?.startsWith(canaries.apiKey), 'the person\'s own key carries the run-time canary');
+    assert.ok([...dev.secrets.values.values()].some((value) => value.includes(dev.ownKey as string)), 'control: the pasted key is held by SecretStorage');
+
+    const needles: Needle[] = [...codeNeedles, ...canaries.labelled(), { label: 'own key', value: dev.ownKey as string }];
+    assert.deepEqual(labelsIn(asked.text, needles), [], 'the request text');
+    assert.deepEqual(labelsIn(Buffer.from(asked.text.slice(JOIN_REQUEST_PREFIX.length), 'base64url').toString('utf8'), needles), [], 'the decoded request');
+    assert.deepEqual(labelsIn([...dev.secrets.values.values()].join('\n'), codeNeedles), [], 'the code is forgotten after the join');
+    assert.deepEqual(labelsIn(output.join('\n'), needles), [], 'every sentence the flows handed back');
+
+    const planted = path.join(rig.fixture.storageDir('b'), 'planted-control.txt');
+    await fs.writeFile(planted, `before ${forms[0] as string} after`, 'utf8');
+    try {
+      assert.deepEqual((await scanFiles([rig.fixture.storageDir('b')], needles)).map((hit) => hit.split(': ')[1]), ['request code form 0'], 'control: a planted code is found in a storage folder');
+    } finally {
+      await fs.rm(planted, { force: true });
+    }
+
+    assert.deepEqual(await scanGitObjects(rig.fixture.remote, needles), [], 'bare remote: every coordination blob and object');
+    for (const name of ['a', 'b'] as const) {
+      const mirrors = await mirrorsUnder(rig.fixture.storageDir(name));
+      assert.ok(mirrors.length >= 1, `storage ${name} has a coordination mirror`);
+      for (const mirror of mirrors) assert.deepEqual(await scanGitObjects(mirror, needles), [], `mirror of clone ${name}`);
+      assert.deepEqual(await scanFiles([path.join(rootOf(rig, name), TEAM_FILE_REL)], needles), [], `team.json of clone ${name}`);
+      assert.deepEqual(await scanFiles([path.join(rootOf(rig, name), '.planning')], needles), [], `.planning of clone ${name}`);
+      assert.deepEqual(await scanFiles([rig.fixture.storageDir(name)], needles), [], `every file in the storage folder of clone ${name}`);
+    }
+    const ownerStorage = storageOf(rig, 'owner');
+    assert.ok((await fs.stat(path.join(ownerStorage, ACCEPTED_REQUESTS_FILE))).isFile(), 'accepted-requests.json was scanned');
+    assert.ok((await fs.stat(path.join(ownerStorage, INVITE_FILE))).isFile(), 'invites.json was scanned');
+    assert.deepEqual(labelsIn(await fs.readFile(path.join(ownerStorage, ACCEPTED_REQUESTS_FILE), 'utf8'), [{ label: 'email', value: dev.email }, { label: 'key', value: parseJoinRequest(asked.text).key }]), [], 'accepted-requests.json holds no email and no key');
+  });
+});
+
+function eventBodies(rig: Rig, type: string): Array<Record<string, unknown>> {
+  const names = gitIn(rig.fixture.remote, ['ls-tree', '-r', '--name-only', DEFAULT_COORDINATION_REF]).split('\n').filter((name) => name.startsWith('events/'));
+  return names
+    .map((name) => JSON.parse(gitIn(rig.fixture.remote, ['show', `${DEFAULT_COORDINATION_REF}:${name}`])) as { type: string; body: Record<string, unknown> })
+    .filter((event) => event.type === type)
+    .map((event) => event.body);
+}
+
+function shapeOf(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(shapeOf);
+  if (typeof value === 'object' && value !== null) return Object.fromEntries(Object.keys(value).sort().map((key) => [key, shapeOf((value as Record<string, unknown>)[key])]));
+  return typeof value;
+}
+
+test('an accepted request writes member.invited and member.joined in exactly the shape an invite and its join write', async () => {
+  await withRig({ linked: false }, async (rig) => {
+    await sharedTeam(rig);
+    await invite(rig, rig.lead);
+    await join(rig, rig.lead);
+    const asked = await ask(rig, rig.dev);
+    const accepted = await accept(rig, parseJoinRequest(asked.text), rig.dev.email);
+    assert.equal(accepted.ok, true, accepted.ok ? '' : accepted.message);
+    const done = await complete(rig, rig.dev);
+    assert.equal(done.kind, 'joined', JSON.stringify(done));
+
+    const invited = eventBodies(rig, 'member.invited');
+    const viaInvite = invited.find((body) => body['memberId'] === rig.lead.memberId);
+    const viaRequest = invited.find((body) => body['memberId'] === asked.memberId);
+    assert.ok(viaInvite !== undefined && viaRequest !== undefined, 'both invitations are on the remote');
+    assert.deepEqual(shapeOf(viaRequest), shapeOf(viaInvite), 'member.invited has the same keys and types');
+    const joined = eventBodies(rig, 'member.joined').filter((body) => body['invite'] !== undefined);
+    const joinViaInvite = joined.find((body) => body['memberId'] === rig.lead.memberId);
+    const joinViaRequest = joined.find((body) => body['memberId'] === asked.memberId);
+    assert.ok(joinViaInvite !== undefined && joinViaRequest !== undefined, 'both joins are on the remote');
+    assert.deepEqual(shapeOf(joinViaRequest), shapeOf(joinViaInvite), 'member.joined has the same keys and types');
+    assert.deepEqual(Object.keys(viaRequest ?? {}).sort(), ['allocationNanoUsd', 'emailHashes', 'invite', 'memberId', 'name', 'role', 'ttlSeconds']);
   });
 });
