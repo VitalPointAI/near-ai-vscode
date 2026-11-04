@@ -204,6 +204,52 @@ test('a reasoning model gets room to think: a large token cap by default, and a 
   assert.match(bad.stderr, /REVIEW_MAX_TOKENS must be/);
 });
 
+test('the reply is streamed: chunks are joined in order, and the request asks for a stream', async () => {
+  const { dir } = gathered();
+  const promptPath = path.join(dir, 'prompt.md');
+  writeFileSync(promptPath, 'prompt');
+  let sent;
+  const server = await new Promise((resolve) => {
+    const s = createServer((request, response) => {
+      let raw = '';
+      request.on('data', (chunk) => { raw += chunk; });
+      request.on('end', () => {
+        sent = JSON.parse(raw);
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        const events = [
+          { choices: [{ delta: { reasoning_content: 'thinking' } }] },
+          { choices: [{ delta: { content: '## Recommendation: ' } }] },
+          { choices: [{ delta: { content: 'MERGE' }, finish_reason: 'stop' }] }
+        ];
+        for (const event of events) response.write(`data: ${JSON.stringify(event)}\r\n\r\n`);
+        response.end('data: [DONE]\n\n');
+      });
+    });
+    s.listen(0, '127.0.0.1', () => { servers.push(s); resolve(s); });
+  });
+  const result = await run('ci-review-call.mjs', [promptPath], {
+    REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(sent.stream, true);
+  assert.equal(result.stdout.trim(), '## Recommendation: MERGE');
+});
+
+test('a network failure names its cause instead of a bare fetch failed', async () => {
+  const { dir } = gathered();
+  const promptPath = path.join(dir, 'prompt.md');
+  writeFileSync(promptPath, 'prompt');
+  const server = await new Promise((resolve) => {
+    const s = createServer((request) => { request.socket.destroy(); });
+    s.listen(0, '127.0.0.1', () => { servers.push(s); resolve(s); });
+  });
+  const result = await run('ci-review-call.mjs', [promptPath], {
+    REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /fetch failed \([A-Za-z_]+\)/);
+});
+
 test('a reply in the new shape keeps its recommendation and still passes the gate', async () => {
   // The owner reads the recommendation block, and the gate reads the verdict. Both must survive.
   const { dir, head } = gathered();

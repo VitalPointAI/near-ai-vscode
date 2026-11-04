@@ -43,6 +43,47 @@ function maxTokens() {
   return value;
 }
 
+/** Reads a streamed (server-sent events) reply, or a whole JSON reply from an endpoint that ignores `stream`. */
+async function readReply(response) {
+  const type = response.headers.get('content-type') ?? '';
+  if (!type.includes('text/event-stream')) {
+    const body = await response.json();
+    const choice = body?.choices?.[0];
+    return { text: choice?.message?.content, finishReason: choice?.finish_reason };
+  }
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+  let finishReason;
+  const take = (line) => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') return;
+    let event;
+    try { event = JSON.parse(data); } catch { return; }
+    const choice = event?.choices?.[0];
+    if (typeof choice?.delta?.content === 'string') text += choice.delta.content;
+    if (choice?.finish_reason) finishReason = choice.finish_reason;
+  };
+  for await (const chunk of response.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let newline;
+    while ((newline = buffer.indexOf('\n')) !== -1) {
+      take(buffer.slice(0, newline).replace(/\r$/, ''));
+      buffer = buffer.slice(newline + 1);
+    }
+  }
+  if (buffer) take(buffer);
+  return { text, finishReason };
+}
+
+/** A network failure names its cause (for example a headers timeout or a reset), never the request. */
+function describe(error) {
+  const cause = error?.cause;
+  const detail = cause?.code ?? cause?.name;
+  return detail && error.message === 'fetch failed' ? `fetch failed (${detail})` : error.message;
+}
+
 async function call(prompt, { baseUrl, apiKey, model }) {
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
@@ -50,6 +91,10 @@ async function call(prompt, { baseUrl, apiKey, model }) {
     body: JSON.stringify({
       model,
       max_tokens: maxTokens(),
+      // Streamed, so the first bytes arrive within seconds: a non-streamed reply from a reasoning
+      // model can take longer than Node's five-minute wait for response headers, which fails as a
+      // bare "fetch failed" before our own timeout is reached.
+      stream: true,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: prompt }
@@ -64,9 +109,8 @@ async function call(prompt, { baseUrl, apiKey, model }) {
     await response.body?.cancel().catch(() => {});
     throw new Error(`the model endpoint returned HTTP ${response.status}`);
   }
-  const body = await response.json();
-  const choice = body?.choices?.[0];
-  const text = choice?.message?.content;
+  const { text, finishReason } = await readReply(response);
+  const choice = { finish_reason: finishReason };
   if (typeof text !== 'string' || !text.trim()) {
     // A reasoning model that spends its whole allowance thinking answers with nothing and says why.
     if (choice?.finish_reason === 'length') throw new Error('the model ran out of room before it answered (it stopped at its token limit); raise REVIEW_MAX_TOKENS');
@@ -94,11 +138,11 @@ try {
       process.stdout.write(`${await call(prompt, { baseUrl, apiKey, model })}\n`);
       process.exit(0);
     } catch (error) {
-      lastError = error;
+      lastError = new Error(describe(error));
       // A retry is worth it for a transient 5xx, a timeout, 408 or 429; a 401 will fail the same
       // way three times.
-      console.error(`attempt ${attempt} failed: ${error.message}`);
-      if (/HTTP 4\d\d/.test(error.message) && !/HTTP (408|429)\b/.test(error.message)) break;
+      console.error(`attempt ${attempt} failed: ${lastError.message}`);
+      if (/HTTP 4\d\d/.test(lastError.message) && !/HTTP (408|429)\b/.test(lastError.message)) break;
       if (attempt < MAX_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 2_000 * attempt));
     }
   }
