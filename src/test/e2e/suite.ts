@@ -701,6 +701,14 @@ const MATRIX_WIDTHS: MatrixWidth[] = [480, 900, 1400, 'full'];
 const WIDTH_SLACK = 40;
 /** One line of screens/index.json: a frame the owner can open, and what the probe measured just before it was taken. */
 interface ScreenEntry { file: string; theme: string; askedWidth: MatrixWidth; reachedWidth: number; layout: string; view: string; problems: number }
+/** The four built-in theme kinds, the probe's theme field (the page's body class) for each, and the name the screenshots use. */
+const MATRIX_THEMES = [
+  { uiTheme: 'vs-dark', probe: 'dark', name: 'dark' },
+  { uiTheme: 'vs', probe: 'light', name: 'light' },
+  { uiTheme: 'hc-black', probe: 'high-contrast', name: 'hc' },
+  { uiTheme: 'hc-light', probe: 'high-contrast-light', name: 'hc-light' }
+] as const;
+type MatrixTheme = typeof MATRIX_THEMES[number];
 /** The probe's theme (the page's body class) as the screenshot names write it. */
 const themeName = (probeTheme: string): string => ({ dark: 'dark', light: 'light', 'high-contrast': 'hc', 'high-contrast-light': 'hc-light' } as Record<string, string>)[probeTheme] ?? (probeTheme || 'dark');
 interface BoardModelView { selectedMilestone: string; cards: Array<{ id: string; kind: string; column: string; milestoneId?: string }> }
@@ -807,12 +815,155 @@ function boardTests(): Array<[string, () => Promise<void>]> {
   const top = async (asked: MatrixWidth): Promise<LayoutReport | undefined> => {
     const sized = await sizeTo(asked);
     if (sized === undefined) return undefined;
+    // No card keeps the focus an earlier step gave it (the probe's focus rule is for a person's own keyboard focus), as after a click on empty space.
+    await act({ action: 'blur' });
     await ask({ action: 'scroll', top: 0, left: 0 });
     const report = await settled(`${asked} px at the top`, (r) => r.width === sized.width);
     assert.equal(report.layout, asked === 480 ? 'list' : 'kanban', `the board at ${report.width} px`);
     assert.deepEqual(report.problems, [], problemsOf(report));
     await photograph(`board-${themeName(report.theme)}-${asked}.png`, 'top', asked, report);
     return report;
+  };
+  // The built-in theme of a kind: VS Code's own default for it (the default color theme for dark, else the default of the preferred light, high
+  // contrast or high contrast light setting), when a built-in theme of that kind has that id; otherwise a built-in Default theme of the kind. Applied to
+  // the test window's fresh user settings only (run.ts gives every board run a new user data folder, T-62-78), then the page's theme field must follow.
+  const applyTheme = async (theme: MatrixTheme): Promise<string> => {
+    const themes = vscode.extensions.all.filter((e) => e.id.startsWith('vscode.'))
+      .flatMap((e) => ((e.packageJSON as { contributes?: { themes?: Array<{ id?: string; label?: string; uiTheme?: string }> } }).contributes?.themes ?? []))
+      .filter((t) => t.uiTheme === theme.uiTheme)
+      .map((t) => t.id ?? t.label ?? '')
+      .filter((id) => id !== '');
+    const workbench = vscode.workspace.getConfiguration('workbench');
+    const preferred = ({ 'vs-dark': 'preferredDarkColorTheme', vs: 'preferredLightColorTheme', 'hc-black': 'preferredHighContrastColorTheme', 'hc-light': 'preferredHighContrastLightColorTheme' } as const)[theme.uiTheme];
+    const defaults = [theme.uiTheme === 'vs-dark' ? workbench.inspect<string>('colorTheme')?.defaultValue : undefined, workbench.inspect<string>(preferred)?.defaultValue];
+    const chosen = defaults.find((id): id is string => id !== undefined && themes.includes(id)) ?? themes.find((id) => id.startsWith('Default ')) ?? themes[0];
+    assert.ok(chosen !== undefined, `a built-in ${theme.uiTheme} theme exists`);
+    await vscode.workspace.getConfiguration('workbench').update('colorTheme', chosen, vscode.ConfigurationTarget.Global);
+    await settled(`the ${chosen} theme`, (r) => r.theme === theme.probe);
+    return chosen;
+  };
+  // One question to the page's own probe (board.js, E2E only): it acts as a person would and reports what is drawn, focused and open.
+  const act = async (probe: { action: 'facts' | 'focus' | 'key' | 'open' | 'group' | 'blur'; itemId?: string; key?: string; group?: string }): Promise<Message> => {
+    asks += 1;
+    const id = 10_000 + asks;
+    const before = board.fromView.length;
+    await tap.probe!({ id, ...probe });
+    return board.next('fromView', (message) => message.type === 'e2e-facts' && message.id === id, before);
+  };
+  const fullyIn = (c: LayoutReport['cards'][number], r: LayoutReport['region']): boolean =>
+    c.width > 0 && c.height > 0 && c.left >= r.left - 1 && c.top >= r.top - 1 && c.left + c.width <= r.left + r.width + 1 && c.top + c.height <= r.top + r.height + 1;
+  // In a kanban width: the board region scrolled 600 px down and 400 px right keeps the toolbar and the header row on top and opaque (the probe's
+  // rules), then the last card of the first open lane, focused as the arrow keys do, is fully visible below the header row. Back at the top after.
+  const scrollAndFocus = async (theme: MatrixTheme, asked: MatrixWidth, photo: boolean): Promise<void> => {
+    await act({ action: 'blur' });
+    const scrolled = await ask({ action: 'scroll', top: 600, left: 400 });
+    assert.deepEqual(scrolled.problems, [], problemsOf(scrolled));
+    if (photo) await photograph(`board-${theme.name}-${asked}-scrolled.png`, 'scrolled', asked, scrolled);
+    const atTop = await ask({ action: 'scroll', top: 0, left: 0 });
+    const lane = atTop.lanes.find((l) => !l.collapsed);
+    assert.ok(lane !== undefined, 'a lane is open');
+    const last = atTop.cards.filter((c) => c.lane === lane.lane && c.width > 0).sort((a, b) => a.top - b.top || a.left - b.left).at(-1);
+    assert.ok(last !== undefined, `the ${lane.lane} lane has cards`);
+    const focused = await ask({ action: 'focus', itemId: last.id });
+    assert.equal(focused.focused?.id, last.id, `${last.id} has focus`);
+    assert.equal(focused.focused?.visible, true, `${last.id} is fully visible below the header row`);
+    assert.deepEqual(focused.problems, [], problemsOf(focused));
+    await act({ action: 'blur' });
+    await ask({ action: 'scroll', top: 0, left: 0 });
+  };
+  // One theme's row: the theme applied, then the list under 520 px, 900 px and the full width, then 1400 px, where Done is opened (and, in the dark
+  // theme, the detail, the Move to... menu and Group by Phase are shown), each measured with no problem and photographed.
+  const row = (theme: MatrixTheme): Array<[string, () => Promise<void>]> => {
+    const scrolledPhoto = theme.name === 'dark' || theme.name === 'light';
+    const label = (asked: MatrixWidth): string => (asked === 'full' ? 'the full editor width' : `${asked} px`);
+    const tests: Array<[string, () => Promise<void>]> = [
+      [`${theme.name}: the built-in ${theme.uiTheme} theme is applied to the test window and the page follows`, async () => {
+        const chosen = await applyTheme(theme);
+        console.log(`(theme ${theme.name}: ${chosen})`);
+      }],
+      ...([480, 900, 'full', 1400] as MatrixWidth[]).map((asked): [string, () => Promise<void>] => [
+        `${theme.name} at ${label(asked)}: nothing wrong at the top${asked === 480 ? '' : ', scrolled down and sideways, or with the last card of the first open lane focused'}, and board-${theme.name}-${asked}.png is saved`,
+        async () => {
+          const report = await top(asked);
+          if (report === undefined) return;
+          assert.equal(report.theme, theme.probe, `the ${theme.name} theme`);
+          if (asked !== 480) await scrollAndFocus(theme, asked, scrolledPhoto && asked === 1400);
+        }
+      ]),
+      [`${theme.name} at 1400 px with Done open: the folded stub becomes a column of done cards, every card readable, and board-${theme.name}-1400-done.png is saved`, async () => {
+        const before = await settled('before Done opens', (r) => r.layout === 'kanban');
+        if (Math.abs(before.width - 1400) > WIDTH_SLACK) { if (photographing) throw new Error(`The board is ${before.width} px, not 1400`); console.log('(Done open not measured: 1400 px was not reached)'); return; }
+        assert.equal(before.heads.find((head) => head.column === 'done')?.folded, true, 'Done starts folded');
+        await act({ action: 'blur' });
+        await press('done');
+        try {
+          const report = await settled('Done open', (r) => r.heads.some((head) => head.column === 'done' && !head.folded));
+          assert.ok(report.cards.some((c) => c.column === 'done'), 'the Done cards are drawn');
+          assert.deepEqual(report.problems, [], problemsOf(report));
+          await photograph(`board-${theme.name}-1400-done.png`, 'done', 1400, report);
+        } finally {
+          // Folded again whatever happened, so the next theme's row starts from the board's own first view.
+          await press('done');
+        }
+        const folded = await settled('Done folded again', (r) => r.heads.some((head) => head.column === 'done' && head.folded));
+        assert.deepEqual(folded.problems, [], problemsOf(folded));
+      }]
+    ];
+    if (theme.name === 'dark') tests.push(
+      [`dark at 1400 px with a phase card's detail open: the selected card stays visible beside the drawer, nothing wrong, and board-dark-1400-detail.png is saved`, async () => {
+        const before = await settled('before the detail', (r) => r.layout === 'kanban');
+        if (Math.abs(before.width - 1400) > WIDTH_SLACK) { if (photographing) throw new Error(`The board is ${before.width} px, not 1400`); return; }
+        const phase = before.cards.find((c) => c.id.startsWith('phase:') && fullyIn(c, before.region));
+        assert.ok(phase !== undefined, `a phase card is on the first screen (${before.cards.filter((c) => fullyIn(c, before.region)).map((c) => c.id).join(', ')})`);
+        const facts = await act({ action: 'open', itemId: phase.id });
+        assert.equal(facts.detailOpen, true, 'the detail is open');
+        const report = await settled('the detail open', (r) => r.layout === 'kanban');
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        const seen = report.cards.find((c) => c.id === phase.id);
+        // The drawer is 360 px wide (at most half the page) on the right, above the board.
+        const drawerLeft = report.width - Math.min(360, report.width / 2);
+        assert.ok(seen !== undefined && fullyIn(seen, report.region) && seen.left + seen.width <= drawerLeft + 1, `${phase.id} is fully visible left of the drawer`);
+        await photograph('board-dark-1400-detail.png', 'detail', 1400, report);
+        const closed = await act({ action: 'key', key: 'Escape' });
+        assert.equal(closed.detailOpen, false, 'Escape closes the detail');
+        assert.equal(closed.focusedCard, phase.id, 'focus returns to the card');
+        await act({ action: 'blur' });
+      }],
+      [`dark at 1400 px with Move to... open on a card: nothing wrong, and board-dark-1400-menu.png is saved`, async () => {
+        const before = await settled('before the menu', (r) => r.layout === 'kanban');
+        if (Math.abs(before.width - 1400) > WIDTH_SLACK) { if (photographing) throw new Error(`The board is ${before.width} px, not 1400`); return; }
+        const card = before.cards.find((c) => c.column === 'backlog' && fullyIn(c, before.region));
+        assert.ok(card !== undefined, 'a Backlog card is on the first screen');
+        await act({ action: 'focus', itemId: card.id });
+        const facts = await act({ action: 'key', key: 'm' });
+        assert.equal(facts.menuOpen, true, 'M opens the Move to... menu');
+        const report = await settled('the menu open', (r) => r.layout === 'kanban');
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        await photograph('board-dark-1400-menu.png', 'menu', 1400, report);
+        const closed = await act({ action: 'key', key: 'Escape' });
+        assert.equal(closed.menuOpen, false, 'Escape closes the menu');
+        await act({ action: 'blur' });
+      }],
+      [`dark at 1400 px grouped by phase: nothing wrong, every card readable, and board-dark-1400-by-phase.png is saved`, async () => {
+        const before = await settled('before Group by Phase', (r) => r.layout === 'kanban');
+        if (Math.abs(before.width - 1400) > WIDTH_SLACK) { if (photographing) throw new Error(`The board is ${before.width} px, not 1400`); return; }
+        const facts = await act({ action: 'group', group: 'phase' });
+        assert.equal(facts.groupBy, 'phase', 'grouped by phase');
+        const report = await settled('grouped by phase', (r) => r.layout === 'kanban' && r.lanes.every((l) => !before.lanes.some((b) => b.lane === l.lane)));
+        assert.ok(report.cards.length > 0, 'cards are drawn');
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        await photograph('board-dark-1400-by-phase.png', 'by-phase', 1400, report);
+        const back = await act({ action: 'group', group: 'member' });
+        assert.equal(back.groupBy, 'member', 'grouped by member again');
+        await settled('grouped by member again', (r) => r.lanes.some((l) => before.lanes.some((b) => b.lane === l.lane)));
+      }]
+    );
+    tests.push([`${theme.name}: every frame of the row was taken`, async () => {
+      const frames = index.filter((e) => e.theme === theme.name).map((e) => e.file);
+      console.log(`(theme ${theme.name}: ${frames.length} frames${frames.length ? `: ${frames.join(', ')}` : ''})`);
+      if (photographing) assert.equal(frames.length, 5 + (scrolledPhoto ? 1 : 0) + (theme.name === 'dark' ? 3 : 0), 'frames in this theme');
+    }]);
+    return tests;
   };
 
   return [
@@ -861,7 +1012,7 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       // run gives it the whole screen itself; on a screenshot run that is required, otherwise the run measures what the window has.
       try {
         const filled = await fillScreen();
-        console.log(`(the window ${filled.before.width} by ${filled.before.height} at ${filled.before.x},${filled.before.y} now fills the ${filled.screen.width} by ${filled.screen.height} hidden screen: ${filled.after.width} by ${filled.after.height})`);
+        console.log(`(the window ${filled.before.width} by ${filled.before.height} at ${filled.before.x},${filled.before.y} now fills the ${filled.screen.width} by ${filled.screen.height} hidden screen: ${filled.after.width} by ${filled.after.height}, the pointer parked at ${filled.pointer.x},${filled.pointer.y})`);
         assert.deepEqual(filled.after, { x: 0, y: 0, width: filled.screen.width, height: filled.screen.height }, 'the window has the whole screen');
       } catch (error) {
         if (photographing) throw error;
@@ -898,24 +1049,27 @@ function boardTests(): Array<[string, () => Promise<void>]> {
         await ask({ action: 'scroll', top: 0, left: 0 });
       }
     }],
-    // The dark row of the matrix (62-22, G-62-2, G-62-4, G-62-7): the list under 520 px, then 900, 1400 and the full editor width, each measured at
-    // the top with no problem and photographed. It ends on one editor group at the full width.
-    ...MATRIX_WIDTHS.map((asked): [string, () => Promise<void>] => [`dark at ${asked === 'full' ? 'the full editor width' : `${asked} px`}: the layout probe finds nothing wrong at the top, and the screen is saved as board-dark-${asked}.png`, async () => {
-      const report = await top(asked);
-      if (report !== undefined) assert.equal(report.theme, 'dark', 'the dark theme');
-    }]),
-    ['after scrolling down and sideways the toolbar and the column header row stay solid on top and cover no card', async () => {
-      const report = await ask({ action: 'scroll', top: 600, left: 300 });
-      assert.deepEqual(report.problems, [], problemsOf(report));
-      const back = await ask({ action: 'scroll', top: 0, left: 0 });
-      assert.deepEqual(back.problems, [], problemsOf(back));
-    }],
-    ['with Done opened once, every drawn card at the full width is readable: none in a folded column, whole words on a line, the card\'s own look', async () => {
+    // The screenshot matrix (62-22, G-62-2, G-62-4, G-62-7): every theme at four widths, scrolled, focused, with Done open, and the extra views.
+    ...MATRIX_THEMES.flatMap(row),
+    ['back in the dark theme at the full editor width with Done opened once, every drawn card is readable: none in a folded column, whole words on a line, the card\'s own look', async () => {
+      await applyTheme(MATRIX_THEMES[0]);
+      await sizeTo('full');
+      await act({ action: 'blur' });
       const before = await settled('before Done opens', (r) => r.layout === 'kanban');
       if (before.heads.find((head) => head.column === 'done')?.folded === true) await press('done');
       const report = await settled('Done open', (r) => r.heads.some((head) => head.column === 'done' && !head.folded));
       assert.ok(report.cards.some((c) => c.column === 'done'), 'the Done cards are drawn');
       assert.deepEqual(report.problems, [], problemsOf(report));
+      const scrolled = await ask({ action: 'scroll', top: 600, left: 400 });
+      assert.deepEqual(scrolled.problems, [], problemsOf(scrolled));
+    }],
+    ['the screenshot index lists every frame with no problem in any', async () => {
+      if (!photographing) return;
+      const listed = JSON.parse(await readFile(path.join(screens, 'index.json'), 'utf8')) as ScreenEntry[];
+      const pngs = (await readdir(screens)).filter((f) => f.endsWith('.png')).sort();
+      assert.deepEqual(listed.map((e) => e.file).sort(), pngs, 'one index line per PNG');
+      assert.ok(listed.every((e) => e.problems === 0), 'no frame with a problem');
+      console.log(`(${pngs.length} frames in ${screens})`);
     }]
   ];
 }
