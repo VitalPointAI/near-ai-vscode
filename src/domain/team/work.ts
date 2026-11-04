@@ -1,9 +1,6 @@
 // Work items (spec 6.4, D-04, D-10 to D-14): id shapes and the one pure function that decides whether an item event may move an item.
 // The same transitionProblem runs when an event is written (the transport replays the batch through the materialiser) and when it is read,
 // so a refusal on one side is a rejection on the other. Pure: no I/O, no clock, no vscode.
-// permissions.ts imports isOwnDraft from here and this file asks it the item.claim question. Both modules only call each other at run time,
-// never while loading, so the cycle is safe in either load order.
-import { decideTeamAction } from './permissions';
 import { TEAM_REJECTION_REASONS } from './types';
 import type { ImplementedTeamEvent, ItemChanges, ItemKind, TeamState, WorkItem } from './types';
 
@@ -126,13 +123,13 @@ const ASSIGNABLE_KINDS: readonly ItemKind[] = ['plan', 'phase', 'bug', 'chore', 
 
 export type AssignmentView = Pick<TeamState, 'items' | 'members' | 'team'>;
 
-// A current, confirmed member who may claim this kind of item: not removed, not an unused invitation, not waiting for a lead to confirm a role,
-// and allowed the item.claim decision for the kind (owner, lead or developer for every assignable kind today). It follows the claim row, so a
-// change there changes who can be assigned.
-export function mayBeAssigned(state: Pick<TeamState, 'members' | 'team'>, memberId: string, itemKind: ItemKind): boolean {
+// A current, confirmed member whose role is not observer: not removed, not an unused invitation, not waiting for a lead to confirm a role
+// (owner decision 2026-11-03, 62-25). The same people may assign themselves (the item.assign-self row), so reviewers can now hold an
+// assignment; 62-15 followed the claim row, which gave reviewers only review items. Claims stay separate (Phase 63).
+export function mayBeAssigned(state: Pick<TeamState, 'members'>, memberId: string): boolean {
   const member = state.members.get(memberId);
   if (member === undefined || member.removedEvent !== undefined || member.status === 'invited' || member.pendingRole !== undefined) return false;
-  return decideTeamAction(state, memberId, { kind: 'item.claim', itemKind }).allowed;
+  return member.role !== 'observer';
 }
 
 // The order is fixed so every client gives the same reason: the item, its kind, its state, the person, then a repeat of the same person (refused
@@ -140,7 +137,7 @@ export function mayBeAssigned(state: Pick<TeamState, 'members' | 'team'>, member
 function assignProblem(state: AssignmentView, item: WorkItem, memberId: string): string | undefined {
   if (!ASSIGNABLE_KINDS.includes(item.kind)) return R.itemNotAssignable;
   if (isTerminal(item)) return R.itemTerminal;
-  if (!mayBeAssigned(state, memberId, item.kind)) return R.assigneeNotEligible;
+  if (!mayBeAssigned(state, memberId)) return R.assigneeNotEligible;
   return item.assignee === memberId ? R.itemAlreadyAssigned : undefined;
 }
 

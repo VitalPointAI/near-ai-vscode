@@ -231,7 +231,6 @@ test('each assignment the rules refuse is rejected with its own reason, and noth
     ['a done plan', () => world.send(lead, 'item.assigned', { id: 'plan:90-01', memberId: dev.memberId }), R.itemTerminal],
     ['a cancelled board item', () => world.send(lead, 'item.assigned', { id: cancelled, memberId: dev.memberId }), R.itemTerminal],
     ['an item that is not on the board', () => world.send(lead, 'item.assigned', { id: 'plan:90-77', memberId: dev.memberId }), R.itemMissing],
-    ['a reviewer', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: reviewer.memberId }), R.assigneeNotEligible],
     ['an observer', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: observer.memberId }), R.assigneeNotEligible],
     ['a removed member', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: outsiders.removed }), R.assigneeNotEligible],
     ['an unused invitation', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: outsiders.invited }), R.assigneeNotEligible],
@@ -246,15 +245,20 @@ test('each assignment the rules refuse is rejected with its own reason, and noth
   const after = cloneState(world.state);
   after.rejected = after.rejected.slice(0, after.rejected.length - rows.length);
   assert.equal(serialiseState(after), before);
+  // Owner decision 2026-11-03 (62-25): reviewers can now hold an assignment, so this row moved from not eligible to accepted.
+  world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: reviewer.memberId });
+  assert.equal(world.state.items.get(CHORE_ID)?.assignee, reviewer.memberId);
 });
 
 test('only the owner and a lead may assign or unassign, on read', async () => {
   const world = await seededWorld();
   const { owner, lead, dev, reviewer, observer } = world;
-  for (const [actor, role] of [[dev, 'developer'], [reviewer, 'reviewer'], [observer, 'observer']] as const) {
-    assert.equal(verdictOf(world.send(actor, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId })), `${R.notPermitted}: the ${role} role does not allow assigning items to others`, role);
+  // Owner decision 2026-11-03 (62-25): a developer or reviewer may now assign and unassign themselves (teamSelfAssign.test.ts), so their rows
+  // put the lead on the card and take the lead off it instead; the observer row is unchanged.
+  for (const [actor, role, target] of [[dev, 'developer', lead], [reviewer, 'reviewer', lead], [observer, 'observer', dev]] as const) {
+    assert.equal(verdictOf(world.send(actor, 'item.assigned', { id: CHORE_ID, memberId: target.memberId })), `${R.notPermitted}: the ${role} role does not allow assigning items to others`, role);
   }
-  world.accept(owner, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId });
+  world.accept(owner, 'item.assigned', { id: CHORE_ID, memberId: lead.memberId });
   for (const [actor, role] of [[dev, 'developer'], [reviewer, 'reviewer'], [observer, 'observer']] as const) {
     assert.equal(verdictOf(world.send(actor, 'item.unassigned', { id: CHORE_ID })), `${R.notPermitted}: the ${role} role does not allow assigning items to others`, role);
   }
@@ -341,14 +345,15 @@ test('removing a member clears every card assigned to them in the same step and 
 
 test('the board planner and the reader give the same answer, because both ask transitionProblem', async () => {
   const world = await seededWorld();
-  const { lead, dev, reviewer } = world;
+  // Owner decision 2026-11-03 (62-25): a reviewer can now be assigned, so the person nobody may assign is the observer.
+  const { lead, dev, observer } = world;
   world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId });
   const head = world.state.head;
-  const prepared = prepareEvents(world.state, head, { identity: lead.identity, memberId: lead.memberId }, [{ type: 'item.assigned', body: { id: CHORE_ID, memberId: reviewer.memberId } }], () => new Date('2026-03-02T00:00:00.000Z'));
+  const prepared = prepareEvents(world.state, head, { identity: lead.identity, memberId: lead.memberId }, [{ type: 'item.assigned', body: { id: CHORE_ID, memberId: observer.memberId } }], () => new Date('2026-03-02T00:00:00.000Z'));
   assert.ok(Array.isArray(prepared), 'the permission check passes for a lead');
   const rejection = checkCandidate(world.state, prepared as TeamEvent[]);
   assert.equal(rejection?.reason, R.assigneeNotEligible);
-  assert.equal(verdictOf(world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: reviewer.memberId })), R.assigneeNotEligible);
+  assert.equal(verdictOf(world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: observer.memberId })), R.assigneeNotEligible);
 });
 
 test('card history records who was assigned and who was taken off, in log order, within the 50-entry cap', async () => {
@@ -357,7 +362,8 @@ test('card history records who was assigned and who was taken off, in log order,
   world.accept(lead, 'item.assigned', { id: 'plan:90-02', memberId: dev.memberId });
   world.accept(lead, 'item.assigned', { id: 'plan:90-02', memberId: lead.memberId });
   world.accept(owner, 'item.unassigned', { id: 'plan:90-02' });
-  world.send(dev, 'item.assigned', { id: 'plan:90-02', memberId: dev.memberId });
+  // Owner decision 2026-11-03 (62-25): the developer may now take this free card themselves, so the refused attempt puts the lead on it instead.
+  assert.equal(verdictOf(world.send(dev, 'item.assigned', { id: 'plan:90-02', memberId: lead.memberId })), DEVELOPER_MAY_NOT);
   world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId });
   world.accept(owner, 'member.removed', { memberId: dev.memberId });
   world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: lead.memberId });

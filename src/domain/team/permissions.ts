@@ -5,12 +5,12 @@ import type { ImplementedTeamEvent, ItemKind, Role, TeamState } from './types';
 import { isOwnDraft } from './work';
 
 export type TeamActionKind = 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'member.remove' | 'member.change-role'
-  | 'item.create' | 'item.edit' | 'item.estimate' | 'item.move' | 'item.claim' | 'item.assign' | 'lease.manual' | 'review.submit'
+  | 'item.create' | 'item.edit' | 'item.estimate' | 'item.move' | 'item.claim' | 'item.assign' | 'item.assign-self' | 'lease.manual' | 'review.submit'
   | 'merge.approve-out-of-scope' | 'lease.integrator' | 'budget.set' | 'allocation.grant' | 'allocation.revoke' | 'allocation.request'
   | 'team.stop' | 'team.resume' | 'policy.change' | 'device.add' | 'device.revoke' | 'member.availability' | 'member.skills' | 'snapshot.write' | 'member.key-deliver';
 
 export type TeamAction =
-  | { kind: 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'item.assign' | 'item.move' | 'lease.manual' | 'merge.approve-out-of-scope' | 'lease.integrator' | 'allocation.request' | 'team.stop' | 'team.resume' | 'policy.change' | 'member.availability' | 'snapshot.write' }
+  | { kind: 'board.view' | 'metrics.view-own' | 'metrics.view-all' | 'member.invite' | 'item.assign' | 'item.assign-self' | 'item.move' | 'lease.manual' | 'merge.approve-out-of-scope' | 'lease.integrator' | 'allocation.request' | 'team.stop' | 'team.resume' | 'policy.change' | 'member.availability' | 'snapshot.write' }
   | { kind: 'member.remove'; targetId: string }
   | { kind: 'member.key-deliver'; targetId: string }
   | { kind: 'member.change-role'; targetId: string; role: Role }
@@ -50,6 +50,9 @@ export const PERMISSION_MATRIX: Readonly<Record<TeamActionKind, Row>> = Object.f
   'item.move': MANAGERS,
   'item.claim': row(true, true, true, 'review-items', false),
   'item.assign': MANAGERS,
+  // Owner decision 2026-11-03 (G-62-5, 62-25): any confirmed member who is not an observer puts themselves on an unassigned card and takes
+  // themselves off their own card. A joined member still waiting for a lead is an observer until confirmed, so this row refuses them too.
+  'item.assign-self': EVERYONE_ACTIVE,
   'lease.manual': MANAGERS,
   'review.submit': row(true, true, 'not-own-work', 'not-own-work', false),
   'merge.approve-out-of-scope': MANAGERS,
@@ -82,6 +85,7 @@ export const ACTION_LABELS: Readonly<Record<TeamActionKind, string>> = Object.fr
   'item.move': 'moving items',
   'item.claim': 'claiming items',
   'item.assign': 'assigning items to others',
+  'item.assign-self': 'assigning items to themselves',
   'lease.manual': 'granting or revoking leases',
   'review.submit': 'submitting reviews',
   'merge.approve-out-of-scope': 'approving out-of-scope merges',
@@ -183,6 +187,8 @@ export function decideTeamAction(state: PermissionView, actorId: string, action:
 // ever the stricter answer. Both the reader and prepareEvents pass the state as it stands before the event.
 export function actionForEvent(event: ImplementedTeamEvent, state?: Pick<TeamState, 'items'>): TeamAction | undefined {
   const ownDraft = (itemId: string): boolean => state !== undefined && isOwnDraft(state, itemId, event.author);
+  // The card's assignee before the event; null when there is no state to ask, so the self path is never taken without one.
+  const assigneeBefore = (itemId: string): string | undefined | null => (state === undefined ? null : state.items.get(itemId)?.assignee);
   switch (event.type) {
     case 'team.created':
     case 'member.joined':
@@ -211,8 +217,16 @@ export function actionForEvent(event: ImplementedTeamEvent, state?: Pick<TeamSta
     case 'item.reopened':
       return { kind: 'item.move' };
     // G-62-5: putting a person on a card, or taking them off, is the spec 6.3 "assign or reassign others" row: owner and lead.
-    case 'item.assigned':
+    // Owner decision 2026-11-03 (62-25): a member's own assignment is item.assign-self, but only when it takes nothing from a teammate. Assigning
+    // yourself counts when the card has no assignee, or is already yours (the rules then refuse the repeat with itemAlreadyAssigned); taking
+    // someone off counts when that someone is you. Everything else, including taking a teammate's card, stays item.assign, so a teammate's card
+    // changes hands only when they unassign themselves or a lead reassigns it. Without a state the answer is item.assign, the stricter one.
+    case 'item.assigned': {
+      const before = assigneeBefore(event.body.id);
+      const own = before !== null && event.body.memberId === event.author && (before === undefined || before === event.author);
+      return { kind: own ? 'item.assign-self' : 'item.assign' };
+    }
     case 'item.unassigned':
-      return { kind: 'item.assign' };
+      return { kind: assigneeBefore(event.body.id) === event.author ? 'item.assign-self' : 'item.assign' };
   }
 }
