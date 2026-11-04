@@ -21,13 +21,19 @@ import type { BoardWorld } from './helpers/teamBoardWorld';
 
 const PLAN_BASE = { kind: 'plan' as const, parentId: 'phase:91', scope: ['src/c/**'], estimate: { tokens: 5000 } };
 
-async function moveWorld(): Promise<BoardWorld> {
+// assignTo (owner decision 2026-11-04, 62-27): the lead puts that person on every card of the table before any card moves, so each state is also
+// a card assigned to them. Without it nobody is assigned, as before.
+async function moveWorld(assignTo?: (world: BoardWorld) => TestActor): Promise<BoardWorld> {
   const world = await boardWorld();
   seedStandardBoard(world);
   const { owner, lead } = world;
   for (const number of ['01', '02', '03', '04', '05', '06']) world.accept(owner, 'item.imported', importedBody({ ...PLAN_BASE, id: `plan:91-${number}`, title: `Plan 91-${number}` }));
   world.accept(owner, 'item.imported', importedBody({ kind: 'plan', parentId: 'phase:91', id: 'plan:91-07', title: 'Plan 91-07' }));
   world.accept(owner, 'item.imported', importedBody({ kind: 'plan', parentId: 'phase:91', id: 'plan:91-08', title: 'Plan 91-08', scope: ['src/c/**'] }));
+  if (assignTo !== undefined) {
+    const person = assignTo(world);
+    for (const id of [...['01', '02', '03', '04', '05', '06', '08'].map((number) => `plan:91-${number}`), 'plan:90-02', CHORE_ID]) world.accept(lead, 'item.assigned', { id, memberId: person.memberId });
+  }
   world.accept(owner, 'item.updated', { id: 'plan:91-02', changes: { hold: true } });
   world.accept(lead, 'item.blocked', { id: 'plan:91-03', reason: 'waiting for the API key' });
   world.accept(owner, 'item.updated', { id: 'plan:91-04', changes: { state: 'done' } });
@@ -70,12 +76,18 @@ async function removedViewer(world: BoardWorld): Promise<string> {
   return actor.memberId;
 }
 
+const NOT_ASSIGNEE = 'Only the person assigned, a lead or the owner can move this card. Nothing was moved.';
+const CANCEL_MANAGERS_ONLY = 'Only the team owner or a lead can cancel a card or bring back a cancelled one. Nothing was moved.';
+const OBSERVER_MOVE = 'Observers can look at the board but not move cards. A lead can change your role. Nothing was moved.';
+
+// Owner decision 2026-11-04 (62-27): nobody is assigned in this world, so the developer and the reviewer may not move these cards and hear the
+// not-assignee sentence (it was "Only the team owner or a lead can move cards."); the observer hears the observer sentence.
 const VIEWERS: Viewer[] = [
   { name: 'owner', id: (w) => w.owner.memberId, moves: true, refusal: '' },
   { name: 'lead', id: (w) => w.lead.memberId, moves: true, refusal: '' },
-  { name: 'developer', id: (w) => w.dev.memberId, moves: false, refusal: 'Only the team owner or a lead can move cards. Nothing was moved.' },
-  { name: 'reviewer', id: (w) => w.reviewer.memberId, moves: false, refusal: 'Only the team owner or a lead can move cards. Nothing was moved.' },
-  { name: 'observer', id: (w) => w.observer.memberId, moves: false, refusal: 'Only the team owner or a lead can move cards. Nothing was moved.' },
+  { name: 'developer', id: (w) => w.dev.memberId, moves: false, refusal: NOT_ASSIGNEE },
+  { name: 'reviewer', id: (w) => w.reviewer.memberId, moves: false, refusal: NOT_ASSIGNEE },
+  { name: 'observer', id: (w) => w.observer.memberId, moves: false, refusal: OBSERVER_MOVE },
   { name: 'nobody (no device key)', id: () => undefined, moves: false, refusal: 'This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.' }
 ];
 
@@ -103,6 +115,96 @@ test('planMove answers every move for every state and viewer from the table, and
       assert.deepEqual(offered, succeeded, `${viewer.name} / ${row.name}: the menu is exactly the moves that succeed, in menu order`);
       if (viewer.moves) assert.deepEqual(offered, MOVE_KEYS.filter((move) => row.allowed.includes(move)), `${viewer.name} / ${row.name}: menu order`);
     }
+  }
+});
+
+// ---- the assignee's own cards (owner decision 2026-11-04, 62-27) ------------------------------------------------------------------------------
+// The same states, now assigned to the developer or the reviewer: every move the owner may make except cancel, and a cancelled card does not come
+// back; both of those say the cancel sentence. The other refusals are the card's own, as in the table above.
+function asAssignee(row: StateRow): { allowed: MoveKey[]; denied: Denied } {
+  const cancelled = row.column === 'cancelled';
+  const allowed = row.allowed.filter((move) => move !== 'cancel' && !(cancelled && move === 'reopen'));
+  const denied: Denied = { ...row.denied };
+  if (row.allowed.includes('cancel')) denied.cancel = CANCEL_MANAGERS_ONLY;
+  if (cancelled) denied.reopen = CANCEL_MANAGERS_ONLY;
+  return { allowed, denied };
+}
+
+for (const [name, pick] of [['developer', (w: BoardWorld) => w.dev], ['reviewer', (w: BoardWorld) => w.reviewer]] as const) {
+  test(`a ${name} moves the cards assigned to them, never cancels, and the menu is exactly the moves that succeed`, async () => {
+    const world = await moveWorld(pick);
+    const viewerId = pick(world).memberId;
+    for (const row of STATES) {
+      const { allowed, denied } = asAssignee(row);
+      for (const move of MOVE_KEYS) {
+        const result = planMove(world.state, viewerId, row.id, move, { reason: 'a good reason' });
+        const label = `${name} / ${row.name} / ${move}`;
+        if (allowed.includes(move)) assert.equal(result.ok, true, `${label}: ${result.ok ? '' : result.reason}`);
+        else assert.deepEqual(result, { ok: false, reason: denied[move] }, label);
+      }
+      assert.deepEqual(availableMoves(world.state, viewerId, row.id).map((move) => move.key), MOVE_KEYS.filter((move) => allowed.includes(move)), `${name} / ${row.name}: menu`);
+    }
+    // The owner and the lead move these cards exactly as before.
+    for (const manager of [world.owner, world.lead]) {
+      for (const row of STATES) assert.deepEqual(availableMoves(world.state, manager.memberId, row.id).map((move) => move.key), MOVE_KEYS.filter((move) => row.allowed.includes(move)), `${manager.memberId} / ${row.name}`);
+    }
+    // Every intent the assignee may make is accepted by the log, signed by the assignee.
+    for (const row of STATES) {
+      for (const move of asAssignee(row).allowed) {
+        const planned = planMove(world.state, viewerId, row.id, move, { reason: 'a good reason' });
+        assert.ok(planned.ok);
+        const copy = cloneState(world.state);
+        const event = signed(pick(world), { teamId: world.teamId, type: planned.intent.type as ImplementedEventType, body: planned.intent.body as never, lamport: copy.highLamport + 1, prev: copy.head.eventId });
+        const verdict = applyEntry(copy, entryOf(event));
+        assert.equal(verdict.accepted, true, `${name} / ${row.name} / ${move}: ${verdict.accepted ? '' : verdict.rejection.reason}`);
+      }
+    }
+  });
+}
+
+test('the assignee\'s drop targets: Backlog holds, Done finishes, Cancelled says the cancel sentence and Claimed says it arrives later', async () => {
+  const world = await moveWorld((w) => w.dev);
+  const dana = world.dev.memberId;
+  const expected: Array<[string, BoardColumn, ReturnType<typeof columnMove>]> = [
+    ['plan:91-01', 'backlog', { ok: true, move: 'hold' }],
+    ['plan:91-01', 'done', { ok: true, move: 'done' }],
+    ['plan:91-01', 'ready', { ok: true }],
+    ['plan:91-01', 'cancelled', { ok: false, reason: CANCEL_MANAGERS_ONLY }],
+    ['plan:91-01', 'claimed', { ok: false, reason: R.claimed }],
+    ['plan:91-01', 'in-progress', { ok: false, reason: R['in-progress'] }],
+    ['plan:91-02', 'ready', { ok: true, move: 'release' }],
+    ['plan:91-04', 'backlog', { ok: true, move: 'reopen' }],
+    ['plan:91-05', 'backlog', { ok: false, reason: CANCEL_MANAGERS_ONLY }],
+    ['plan:91-05', 'done', { ok: false, reason: R.terminal }]
+  ];
+  for (const [id, column, verdict] of expected) assert.deepEqual(columnMove(world.state, dana, id, column), verdict, `${id} on ${column}`);
+  const model = buildBoardModel(world.state, { nowMs: Date.parse('2026-03-05T12:00:00.000Z'), status: { kind: 'live', text: 'Live' }, viewerId: dana, canWrite: true });
+  const card = model.cards.find((entry) => entry.id === 'plan:91-01');
+  assert.ok(card);
+  assert.deepEqual(card.moves.map((move) => move.key), ['done', 'hold', 'block']);
+  assert.equal(card.refusals.cancelled, CANCEL_MANAGERS_ONLY);
+  assert.equal(card.refusals.backlog, undefined);
+  assert.equal(card.refusals.done, undefined);
+});
+
+test('a card assigned to a lead or to nobody: the developer has no moves and every other column says the not-assignee sentence', async () => {
+  const world = await moveWorld();
+  world.accept(world.lead, 'item.assigned', { id: 'plan:91-01', memberId: world.lead.memberId });
+  const model = buildBoardModel(world.state, { nowMs: Date.parse('2026-03-05T12:00:00.000Z'), status: { kind: 'live', text: 'Live' }, viewerId: world.dev.memberId, canWrite: true });
+  for (const id of ['plan:91-01', 'plan:91-02', 'plan:91-04', 'plan:91-05']) {
+    const card = model.cards.find((entry) => entry.id === id);
+    assert.ok(card, id);
+    assert.deepEqual(card.moves, [], id);
+    for (const column of BOARD_COLUMNS) {
+      assert.deepEqual(columnMove(world.state, world.dev.memberId, id, column), column === card.column ? { ok: true } : { ok: false, reason: NOT_ASSIGNEE }, `${id} on ${column}`);
+      assert.equal(card.refusals[column], column === card.column ? undefined : NOT_ASSIGNEE, `${id} card refusal for ${column}`);
+    }
+  }
+  // The observer has no moves anywhere and hears the observer sentence, even on the board model.
+  const observed = buildBoardModel(world.state, { nowMs: Date.parse('2026-03-05T12:00:00.000Z'), status: { kind: 'live', text: 'Live' }, viewerId: world.observer.memberId, canWrite: true });
+  for (const card of observed.cards) {
+    assert.deepEqual(card.moves, [], card.id);
+    for (const column of BOARD_COLUMNS) if (column !== card.column && card.refusals[column] !== R.phaseCard) assert.equal(card.refusals[column], OBSERVER_MOVE, `${card.id} ${column}`);
   }
 });
 

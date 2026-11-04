@@ -614,12 +614,14 @@ test('WR-03: an unexpected error from a move, a new item or a model update reach
   });
 });
 
-test('a developer cannot move a card and is told so before any prompt; a window with no device key is told that instead', async () => {
+// Owner decision 2026-11-04 (62-27): a developer moves the cards assigned to them. READY_PLAN is assigned to nobody here, so the developer is told
+// the not-assignee sentence (it was "Only the team owner or a lead can move cards.") before any prompt.
+test('a developer cannot move a card that is not theirs and is told so before any prompt; a window with no device key is told that instead', async () => {
   await withBoard('dev', async ({ rig, panel }) => {
     const before = remoteEventCount(rig);
     for (const target of ['hold', 'block', 'done'] as const) {
       await panel.receive({ type: 'move', itemId: READY_PLAN, target });
-      assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: READY_PLAN, reason: 'Only the team owner or a lead can move cards. Nothing was moved.' });
+      assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: READY_PLAN, reason: 'Only the person assigned, a lead or the owner can move this card. Nothing was moved.' });
     }
     assert.equal(stub.inputRequests.length + stub.notifications.length, 0, 'no prompt was shown');
     assert.equal(remoteEventCount(rig), before);
@@ -639,6 +641,37 @@ test('a developer cannot move a card and is told so before any prompt; a window 
       board.controller.dispose();
       keyless.session.dispose();
     }
+  });
+});
+
+test('a developer blocks the card a lead assigned them after the reason box; on the lead\'s card they are told why before any prompt', async () => {
+  await withBoard('dev', async ({ rig, started, panel }) => {
+    const owner = await openLog(rig, 'owner');
+    const developerId = (await openLog(rig, rig.dev)).memberId as string;
+    const leadId = (await openLog(rig, rig.lead)).memberId as string;
+    const assigned = await owner.log.append(() => [
+      { type: 'item.assigned', body: { id: READY_PLAN, memberId: developerId } }, { type: 'item.assigned', body: { id: DEPENDENT_PLAN, memberId: leadId } }
+    ]);
+    assert.equal(assigned.ok, true, assigned.ok ? '' : assigned.reason);
+    started.timers.fire();
+    await until(() => started.session.state().items.get(DEPENDENT_PLAN)?.assignee === leadId, 'the poll to bring the assignments');
+
+    const before = remoteEventCount(rig);
+    for (const target of ['block', 'done'] as const) {
+      await panel.receive({ type: 'move', itemId: DEPENDENT_PLAN, target });
+      assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: DEPENDENT_PLAN, reason: 'Only the person assigned, a lead or the owner can move this card. Nothing was moved.' });
+    }
+    assert.equal(stub.inputRequests.length + stub.notifications.length, 0, 'no prompt was shown');
+    assert.equal(remoteEventCount(rig), before, 'nothing was written');
+
+    stub.inputAnswers.push(WAITING_FOR_KEY);
+    await panel.receive({ type: 'move', itemId: READY_PLAN, target: 'block' });
+    assert.equal(stub.inputRequests.length, 1, 'the reason box appeared');
+    assert.equal(stub.inputRequests[0]?.title, 'Block 90-02');
+    assert.equal(remoteEventCount(rig), before + 1, 'one event was written');
+    const remote = await openLog(rig, 'owner');
+    assert.equal(remote.log.state().items.get(READY_PLAN)?.blocked?.reason, WAITING_FOR_KEY);
+    assert.equal(remote.log.state().items.get(READY_PLAN)?.blocked?.by, developerId);
   });
 });
 

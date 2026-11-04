@@ -288,8 +288,10 @@ test('viewer facts: what each role may do and the banner that says why not', asy
   const viewerOf = (id: string | undefined, extra: Partial<BoardModelOptions> = {}) => modelFor(world, id, extra).viewer;
   assert.deepEqual(viewerOf(world.owner.memberId), { name: 'Owner Test', role: 'owner', canWrite: true, canImport: true, canCreate: true });
   assert.deepEqual(viewerOf(world.lead.memberId), { name: 'Lee', role: 'lead', canWrite: true, canImport: true, canCreate: true });
+  // Owner decision 2026-11-04 (62-27): a developer now moves the cards assigned to them, so the banner says so.
   assert.deepEqual(viewerOf(world.dev.memberId), {
-    name: 'Dana', role: 'developer', canWrite: true, canImport: false, canCreate: true, readOnlyReason: 'You can add items and edit your own drafts. Leads and the owner move cards.'
+    name: 'Dana', role: 'developer', canWrite: true, canImport: false, canCreate: true,
+    readOnlyReason: 'You can add items, edit your own drafts and move the cards assigned to you. Leads and the owner move any card.'
   });
   for (const actor of [world.reviewer, world.observer]) {
     assert.deepEqual(viewerOf(actor.memberId), {
