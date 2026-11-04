@@ -56,13 +56,10 @@ export function fakeGitHub(state) {
     }
     if (verb === 'pr' && sub === 'comment') {
       if (world.commentFails) throw new Error('gh pr comment failed: HTTP 502');
+      world.comments = [...(world.comments ?? []), { number: args[2], by: world.login }];
       return `https://github.com/${REPO}/pull/${args[2]}#issuecomment-1\n`;
     }
     if (verb === 'pr' && sub === 'diff') return 'diff --git a/x b/x\n';
-    if (verb === 'pr' && sub === 'review') {
-      world.reviews.push({ number: args[2], by: world.login, approve: args.includes('--approve') });
-      return '';
-    }
     if (verb !== 'api') throw new Error(`unexpected gh ${line}`);
 
     const rest = args.slice(1).filter((arg) => arg !== '--paginate');
@@ -75,6 +72,11 @@ export function fakeGitHub(state) {
         world.commits[sha] ??= { checkRuns: [], workflowRuns: [], statuses: [] };
         const checks = Array.isArray(world.commits[sha]) ? world.commits[sha].at(-1) : world.commits[sha];
         checks.statuses.push({ id: checks.statuses.length + 100, context: field('context'), state: field('state'), createdAt: new Date(Date.UTC(2026, 0, 2, 0, 0, checks.statuses.length)).toISOString(), creator: world.login });
+        return '{}';
+      }
+      if (method === 'POST' && /\/pulls\/\d+\/reviews$/.test(endpoint)) {
+        if (world.approveFails) throw new Error(`gh api ${endpoint} failed: HTTP 422`);
+        world.reviews.push({ number: endpoint.split('/').at(-2), by: world.login, event: field('event'), commit: field('commit_id') });
         return '{}';
       }
       if (method === 'POST' && endpoint.endsWith('/git/tags')) {

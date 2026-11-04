@@ -14,11 +14,22 @@
 // It is deliberately a plain fetch rather than a dependency: this repository keeps its runtime
 // dependency list empty, and one POST to an OpenAI-compatible endpoint needs nothing else.
 import { readFileSync } from 'node:fs';
+import { SYSTEM_PROMPT } from './lib/ci-review.mjs';
 import { fail, parseArgs } from './lib/gh.mjs';
 
 const usage = 'usage: ci-review-call.mjs <prompt.md>';
 
 const MAX_ATTEMPTS = 3;
+
+/** The key goes only to https, or to plain http on this machine (tests, a local proxy). */
+function isAllowedEndpoint(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname));
+  } catch {
+    return false;
+  }
+}
 const TIMEOUT_MS = 180_000;
 
 async function call(prompt, { baseUrl, apiKey, model }) {
@@ -30,15 +41,18 @@ async function call(prompt, { baseUrl, apiKey, model }) {
       // Enough for a long finding list plus the diff's context; the reply is a list, not an essay.
       max_tokens: 4_000,
       messages: [
-        { role: 'system', content: 'You are a skeptical code reviewer. Reply with findings and the required verdict lines, and nothing else.' },
+        { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: prompt }
       ]
     }),
+    // Never follow a redirect with the key attached.
+    redirect: 'error',
     signal: AbortSignal.timeout(TIMEOUT_MS)
   });
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`the model endpoint returned HTTP ${response.status}${body ? `: ${body.slice(0, 300)}` : ''}`);
+    // Only the status code: an error body can echo the request, and CI logs are public.
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`the model endpoint returned HTTP ${response.status}`);
   }
   const body = await response.json();
   const text = body?.choices?.[0]?.message?.content;
@@ -55,6 +69,7 @@ try {
   const apiKey = process.env.REVIEW_MODEL_API_KEY;
   const model = process.env.REVIEW_MODEL;
   if (!apiKey) fail('REVIEW_MODEL_API_KEY is not set; the review cannot ask a model.');
+  if (!isAllowedEndpoint(baseUrl)) fail('REVIEW_MODEL_BASE_URL must be an https:// URL (http:// only for localhost); the key is not sent elsewhere.');
   if (!model) fail('REVIEW_MODEL is not set; say which model should review.');
 
   const prompt = readFileSync(promptPath, 'utf8');
@@ -65,9 +80,10 @@ try {
       process.exit(0);
     } catch (error) {
       lastError = error;
-      // A retry is worth it for a transient 5xx or a timeout; a 401 will fail the same way three times.
+      // A retry is worth it for a transient 5xx, a timeout, 408 or 429; a 401 will fail the same
+      // way three times.
       console.error(`attempt ${attempt} failed: ${error.message}`);
-      if (/HTTP 4\d\d/.test(error.message)) break;
+      if (/HTTP 4\d\d/.test(error.message) && !/HTTP (408|429)\b/.test(error.message)) break;
       if (attempt < MAX_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 2_000 * attempt));
     }
   }

@@ -1,26 +1,32 @@
 # The `agent-review` gate, run automatically.
 #
-# Branch protection requires `agent-review`. Until this workflow existed the status only appeared when
-# someone remembered to run `/review-pr` by hand, and the token that posted it lived on the same
-# machine that authored the PR, so an author could certify their own work.
+# Branch protection requires the `agent-review` status and one approving review. This workflow
+# produces both, as the reviewer identity near-ai-reviewer (REVIEW_ACCOUNT in
+# scripts/lib/workflow.mjs), which is not the PR author: the authoring agents run as the owner's
+# account. The merge and release gates trust `agent-review` only from near-ai-reviewer, and
+# `agent-review.mjs submit` refuses any other account, so the owner's machine cannot post it.
 #
-# Two triggers, both safe:
-#   - workflow_run after CI succeeds. `workflow_run` runs in the base repository on the default
-#     branch, so the workflow and the scripts come from `main`, never from the PR under review. A PR
-#     cannot change the code that judges it, and cannot reach the token.
-#   - workflow_dispatch, to re-review by hand (an unchanged head keeps its status, so this is for
-#     re-running after a failure rather than after a push).
+# Triggers:
+#   - workflow_run after CI succeeds for a pull request. workflow_run runs in the base repository
+#     on the default branch, and the job checks out `main`, so a PR cannot change the code that
+#     judges it and cannot reach the token.
+#   - workflow_dispatch with a PR number, to review by hand: gh workflow run agent-review.yml -f pr=<n>
 #
-# The job sits in the `agent-review` environment, which deploys only from protected branches, so the
-# token exists only there and only for runs of `main`. The review posts as near-ai-reviewer
-# (REVIEW_ACCOUNT in scripts/lib/workflow.mjs), a different identity from the PR author (the
-# authoring agents run as the owner's account). The merge and release gates trust the
-# `agent-review` status only from near-ai-reviewer, and `agent-review.mjs submit` refuses any other
-# account, so the owner's machine cannot post it.
+# Jobs:
+#   review          (environment agent-review: NEAR_AI_REVIEW_TOKEN, REVIEW_MODEL_API_KEY) asks the
+#                   model and sets `agent-review` on the head it reviewed.
+#   owner-approval  (environment agent-review-gates: the owner is its required reviewer, no secrets)
+#                   only for a PR that changes the gates (GATE_PATHS in scripts/lib/workflow.mjs) or
+#                   whose diff was too large to review whole. It waits until the owner approves it
+#                   in the Actions UI (Review deployments).
+#   approve         (environment agent-review) approves the reviewed commit, only when the review
+#                   passed, the head has not moved, and, for a gate change, the owner approved.
+#
+# Both environments deploy only from protected branches and admins cannot bypass them.
 #
 # GitHub runs workflow_run and workflow_dispatch only from the default branch, so the PR that adds
-# this file cannot be reviewed by it: that one PR is bootstrapped by hand with
-# scripts/bootstrap-agent-review.mjs (see docs/development-workflow.md, "First run (bootstrap)").
+# this file (#12) cannot be reviewed by it; it is bootstrapped once by the owner with
+# scripts/bootstrap-agent-review.mjs (docs/development-workflow.md, "First run (bootstrap)").
 name: Agent review
 
 on:
@@ -30,18 +36,18 @@ on:
   workflow_dispatch:
     inputs:
       pr:
-        description: Pull request number to review (empty reviews every open PR whose head lacks a passing status)
-        required: false
+        description: Pull request number to review
+        required: true
 
 concurrency:
-  # One review per PR: a newer run supersedes the older one rather than racing it for the status.
-  group: agent-review-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr || 'all' }}
+  # One run per tested commit (or per PR number for a dispatch). Runs queue rather than cancel; a
+  # newer queued run replaces an older queued one.
+  group: agent-review-${{ github.event.workflow_run.head_sha || inputs.pr }}
   cancel-in-progress: false
 
+# The GITHUB_TOKEN only reads; every write uses near-ai-reviewer's token.
 permissions:
   contents: read
-  pull-requests: write
-  statuses: write
 
 env:
   NODE_VERSION: '24'
@@ -49,43 +55,128 @@ env:
 jobs:
   review:
     name: agent-review
-    # Only when CI actually passed: a PR whose tests fail has nothing to review, and the status must
-    # not be posted success on a broken tree.
+    # Only when CI actually passed on a pull request: a PR whose tests fail has nothing to review,
+    # and the status must not be posted success on a broken tree.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'pull_request')
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # The token lives here and nowhere else, and this environment cannot be bypassed by admins.
     environment: agent-review
+    outputs:
+      pr: ${{ steps.target.outputs.pr }}
+      state: ${{ steps.review.outputs.state }}
+      sha: ${{ steps.review.outputs.sha }}
+      gate: ${{ steps.review.outputs.gate }}
+      gate_files: ${{ steps.review.outputs.gate_files }}
+      body_b64: ${{ steps.review.outputs.body_b64 }}
     steps:
-      - name: Work out which PRs to review
-        id: targets
+      - name: Work out which PR to review
+        id: target
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           REQUESTED: ${{ inputs.pr }}
         run: |
           set -euo pipefail
-          if [ -n "${REQUESTED:-}" ]; then
-            echo "numbers=${REQUESTED}" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if ! [[ "$REQUESTED" =~ ^[0-9]+$ ]]; then
+              echo "::error::pr must be a pull request number"
+              exit 1
+            fi
+            echo "pr=${REQUESTED}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # The workflow_run payload lists the PR a run belongs to. Fall back to asking which open PR
-          # has this head, for a run started by a push rather than a pull request.
-          numbers=$(printf '%s' "${PRS:-[]}" | node -e '
+          # The PR this CI run tested: the payload's PR whose head is the commit CI passed on.
+          pr=$(printf '%s' "${PRS:-null}" | node -e '
             let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
-              const list = JSON.parse(s || "[]");
-              process.stdout.write(list.map(pr => pr.number).join(" "));
+              const list = JSON.parse(s || "null") ?? [];
+              const match = list.find(pr => pr?.head?.sha === process.env.HEAD_SHA) ?? list[0];
+              const number = String(match?.number ?? "");
+              process.stdout.write(/^[0-9]+$/.test(number) ? number : "");
             });
           ')
-          echo "numbers=${numbers}" >> "$GITHUB_OUTPUT"
+          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
+
+      - name: Say so when there is nothing to review
+        if: steps.target.outputs.pr == ''
+        run: echo "No pull request was attached to this run, so nothing was reviewed."
 
       - name: Check out the default branch
+        if: steps.target.outputs.pr != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The review runs the scripts from main, never from the PR being reviewed.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - if: steps.target.outputs.pr != ''
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Review
+        id: review
+        if: steps.target.outputs.pr != ''
+        env:
+          # Posts the status and the comment as near-ai-reviewer; submit refuses any other account.
+          GH_TOKEN: ${{ secrets.NEAR_AI_REVIEW_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REVIEW_MODEL_API_KEY: ${{ secrets.REVIEW_MODEL_API_KEY }}
+          REVIEW_MODEL: ${{ vars.REVIEW_MODEL }}
+          REVIEW_MODEL_BASE_URL: ${{ vars.REVIEW_MODEL_BASE_URL }}
+          PR: ${{ steps.target.outputs.pr }}
+          # For workflow_run, the commit CI passed on: a PR whose head has moved since is skipped.
+          EXPECTED_HEAD: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${EXPECTED_HEAD:-}" ]; then
+            node scripts/ci-review-run.mjs review "$PR" --expected-head "$EXPECTED_HEAD"
+          else
+            node scripts/ci-review-run.mjs review "$PR"
+          fi
+
+  # Only for a PR that changes the gates (or was too large to review whole). Holds no secrets; it
+  # exists so the owner approves it under Review deployments before the approval is posted.
+  owner-approval:
+    name: owner approval (gate change)
+    needs: review
+    if: needs.review.outputs.state == 'success' && needs.review.outputs.gate == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: agent-review-gates
+    permissions: {}
+    steps:
+      - name: State which gate files changed
+        env:
+          PR: ${{ needs.review.outputs.pr }}
+          SHA: ${{ needs.review.outputs.sha }}
+          GATE_FILES: ${{ needs.review.outputs.gate_files }}
+        run: |
+          echo "Needs the owner's approval: this PR changes the review or merge gates."
+          echo "PR #${PR} at ${SHA}. Gate files changed:"
+          printf '%s\n' "${GATE_FILES:-(none listed; the diff was too large to review whole)}" | tr ',' '\n' | sed 's/^/- /'
+          echo "The owner approved this run's agent-review-gates deployment, so the approve job may run."
+
+  approve:
+    name: approve
+    needs: [review, owner-approval]
+    # Runs when the review passed and either the PR does not change the gates (owner-approval was
+    # skipped) or the owner approved owner-approval. A rejected or failed owner-approval stops it.
+    if: >
+      !cancelled() &&
+      needs.review.result == 'success' &&
+      needs.review.outputs.state == 'success' &&
+      (needs.review.outputs.gate != 'true' || needs.owner-approval.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: agent-review
+    permissions: {}
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
@@ -93,115 +184,13 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Review each target
-        if: steps.targets.outputs.numbers != ''
-        env:
-          # Posts the status and the comment as near-ai-reviewer, which is not the PR author.
-          # submit refuses to post as any other account.
-          GH_TOKEN: ${{ secrets.NEAR_AI_REVIEW_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          SCRATCH: ${{ runner.temp }}
-        run: |
-          set -euo pipefail
-          mkdir -p "${GITHUB_WORKSPACE}/.agent-review"
-          for pr in ${{ steps.targets.outputs.numbers }}; do
-            out="${SCRATCH}/agent-review-${pr}"
-            mkdir -p "$out"
-            echo "== reviewing #${pr}"
-            node scripts/agent-review.mjs gather "$pr" --out "$out"
-
-            # A review needs judgement, so a model writes it. The prompt and the reply contract are
-            # the same ones `.claude/commands/review-pr.md` uses, so a local review and a CI review
-            # are produced the same way and judged by the same rules.
-            node scripts/ci-review-prompt.mjs "$pr" --dir "$out" > "${out}/prompt.md"
-
-            node scripts/ci-review-call.mjs "${out}/prompt.md" > "${out}/review.md"
-
-            node scripts/agent-review.mjs submit "$pr" --review "${out}/review.md"
-
-            # Kept for the approval job, which is separate and runs without the gathered artifacts.
-            cp "${out}/review.md" "${GITHUB_WORKSPACE}/.agent-review/${pr}.md"
-          done
-
-      # Hand the reviews to the approval job, which cannot see this job's files.
-      - name: Keep the reviews for the approval job
-        if: steps.targets.outputs.numbers != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: agent-reviews
-          path: .agent-review
-          retention-days: 1
-          if-no-files-found: warn
-
-      - name: Say so when there was nothing to review
-        if: steps.targets.outputs.numbers == ''
-        run: echo "No pull request was attached to this run, so nothing was reviewed."
-
-  # A separate job, so the approval uses a token identity that is not the PR author's. GitHub refuses
-  # an approval from the author, which is exactly why the author's own PASS never counted.
-  approve:
-    name: approve
-    needs: review
-    if: needs.review.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment: agent-review
-    steps:
-      - name: Fetch the reviews the review job wrote
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
-        with:
-          name: agent-reviews
-          path: .agent-review
-        continue-on-error: true
-
-      - name: Approve every PR whose agent-review passed
+      - name: Approve the reviewed commit
         env:
           GH_TOKEN: ${{ secrets.NEAR_AI_REVIEW_TOKEN }}
-          # This job has no checkout, so gh needs the repository named.
           GH_REPO: ${{ github.repository }}
-          PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
-          REQUESTED: ${{ inputs.pr }}
-        run: |
-          set -euo pipefail
-          numbers="${REQUESTED:-}"
-          if [ -z "$numbers" ]; then
-            numbers=$(printf '%s' "${PRS:-[]}" | node -e '
-              let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
-                const list = JSON.parse(s || "[]");
-                process.stdout.write(list.map(pr => pr.number).join(" "));
-              });
-            ')
-          fi
-          for pr in $numbers; do
-            # Only approve when the gate itself is green on the current head: branch protection
-            # requires both, and an approval without the status would be a bypass. Only
-            # near-ai-reviewer's status counts, as at merge (the list is newest first).
-            head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
-            state=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${head}/statuses?per_page=100" --jq '[.[] | select(.context == "agent-review" and (.creator.login | ascii_downcase) == "near-ai-reviewer")][0].state // "none"')
-            if [ "$state" != "success" ]; then
-              echo "#${pr}: agent-review is ${state}, not approving"
-              continue
-            fi
-
-            # Carry the reviewer's own recommendation into the approval, so the owner reads it in the
-            # place they act on it rather than hunting for the review comment.
-            body="Approved by the agent review gate: agent-review passed on this commit."
-            review=".agent-review/${pr}.md"
-            if [ -f "$review" ]; then
-              body=$(node -e '
-                const fs = require("node:fs");
-                const text = fs.readFileSync(process.argv[1], "utf8");
-                const start = text.search(/^#{2,3}\s*Recommendation:/m);
-                const end = text.search(/^Verdict:/m);
-                const block = start === -1 ? "" : text.slice(start, end === -1 ? undefined : end).trim();
-                process.stdout.write(
-                  (block || "Approved by the agent review gate.") +
-                  "\n\n---\n\`agent-review\` passed on this commit. Findings are in the review comment."
-                );
-              ' "$review")
-            fi
-
-            # --approve is a no-op when the reviewer already approved this commit.
-            gh pr review "$pr" --approve --body "$body" \
-              || echo "#${pr}: approval not created (already approved, or the PR is closed)"
-          done
+          PR: ${{ needs.review.outputs.pr }}
+          SHA: ${{ needs.review.outputs.sha }}
+          APPROVAL_BODY_B64: ${{ needs.review.outputs.body_b64 }}
+        # Approves only that commit, only if it is still the head and near-ai-reviewer's
+        # agent-review on it is success. A refusal by GitHub fails the job.
+        run: node scripts/ci-review-run.mjs approve "$PR" --sha "$SHA"

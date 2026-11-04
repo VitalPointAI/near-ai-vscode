@@ -52,6 +52,7 @@ export function parseReview(text) {
   let fence;
   const verdicts = [];
   const headShas = [];
+  const recommendations = [];
   const problems = [];
   const openBlockers = [];
   const counts = { blocker: 0, major: 0, minor: 0, nit: 0, resolved: 0 };
@@ -107,6 +108,8 @@ export function parseReview(text) {
       continue;
     }
     if (indent > 3) continue;
+    const recommendation = /^#{1,6}\s*recommendation\s*:\s*(.*)$/i.exec(plain);
+    if (recommendation) recommendations.push(recommendation[1].trim());
     if (/^verdict\b/i.test(plain)) {
       const value = /^verdict\s*:\s*(.*)$/i.exec(plain)?.[1];
       if (value === 'PASS' || value === 'FAIL') verdicts.push(value);
@@ -122,9 +125,11 @@ export function parseReview(text) {
   if (comment) problems.push(`the HTML comment opened on line ${comment.line} is never closed, so GitHub hides everything after it`);
   if (verdicts.length > 1) problems.push(`the review has ${verdicts.length} Verdict lines; it must have exactly one`);
   if (headShas.length > 1) problems.push(`the review has ${headShas.length} Head-SHA lines; it must have exactly one`);
+  if (recommendations.length > 1) problems.push(`the review has ${recommendations.length} Recommendation headings; it must have at most one`);
   const verdict = verdicts.length === 1 ? verdicts[0] : undefined;
   const headSha = headShas.length === 1 ? headShas[0] : undefined;
-  return { verdict, headSha, openBlockers, counts, problems, verdictLines: verdicts.length, headShaLines: headShas.length };
+  const recommendation = recommendations.length === 1 ? recommendations[0] : undefined;
+  return { verdict, headSha, recommendation, openBlockers, counts, problems, verdictLines: verdicts.length, headShaLines: headShas.length };
 }
 
 const SEVERITIES = ['BLOCKER', 'MAJOR', 'MINOR', 'NIT'];
@@ -218,8 +223,16 @@ function fenceMarker(line) {
 }
 
 /** Decides the `agent-review` status for a parsed review and the PR's current head. */
-export function reviewDecision(review, currentHeadSha) {
+export function reviewDecision(review, currentHeadSha, { requireRecommendation = false } = {}) {
   const reasons = [...(review.problems ?? [])];
+  // The recommendation is what the owner reads, and the approval carries it: a PASS that tells the
+  // owner not to merge is a contradiction, so it fails rather than being approved.
+  if (review.verdict === 'PASS' && review.recommendation !== undefined && !/^merge\b/i.test(review.recommendation)) {
+    reasons.push(`the recommendation is "${review.recommendation.slice(0, 60)}" but the verdict is PASS; they must agree (a PASS recommends MERGE)`);
+  }
+  if (requireRecommendation && review.recommendation === undefined && review.verdict === 'PASS') {
+    reasons.push('the review has no "## Recommendation: MERGE" heading');
+  }
   if (review.verdict === 'FAIL') reasons.push('the review verdict is FAIL');
   else if (review.verdict !== 'PASS' && !review.verdictLines) reasons.push('the review file has no "Verdict: PASS" or "Verdict: FAIL" line');
   if (!review.headSha) {
@@ -544,14 +557,27 @@ export function fitComment(review, footer = '', limit = 65_000) {
 }
 
 /**
- * Changed files that are part of the gates themselves (CI and release workflows, the secret-scan
- * allowlist, the gate scripts, the agent commands). CI runs the PR's own copies of these, so a PR
- * can weaken the checks it is judged by; merge-pr points them out.
+ * Changed files that are part of the gates themselves (CI, review and release workflows, the
+ * secret-scan allowlist, the gate and review scripts, SECURITY.md, the agent commands). CI runs the
+ * PR's own copies of some of these, so a PR can weaken the checks it is judged by; merge-pr points
+ * them out, and the automatic review approves them only after the owner approves the `agent-review-gates`
+ * environment (.github/workflows/agent-review.yml, job owner-approval).
  */
+export const GATE_PATHS = Object.freeze([
+  /^\.github\//,
+  /^scripts\/lib\//,
+  /^scripts\/(secret-scan|merge-pr|agent-review|tag-release|prepare-release|verify-release-content|bootstrap-agent-review)\.(mjs|sh)$/,
+  /^scripts\/ci-review-[^/]*\.mjs$/,
+  /^SECURITY\.md$/,
+  /^\.claude\/commands\//
+]);
+
 export function gateFileChanges(paths) {
-  const gates = [/^\.github\//, /^scripts\/lib\//, /^scripts\/(secret-scan|merge-pr|agent-review|tag-release|prepare-release|verify-release-content|ci-review-prompt|ci-review-call|bootstrap-agent-review)\.(mjs|sh)$/, /^\.claude\/commands\//];
-  return (paths ?? []).filter((file) => gates.some((pattern) => pattern.test(file)));
+  return (paths ?? []).filter((file) => GATE_PATHS.some((pattern) => pattern.test(file)));
 }
+
+/** Said wherever the automatic approval waits for the owner because a PR changes the gates. */
+export const GATE_HOLD_MESSAGE = "Needs the owner's approval: this PR changes the review or merge gates.";
 
 // ---- Secret scanning ----------------------------------------------------------------------------
 

@@ -57,11 +57,11 @@ function setStatus(repo, sha, state, description, targetUrl) {
  *
  * Returns { state, reasons, commentUrl }.
  */
-export function submitReview(repo, number, text, { dryRun = false, log = console.log } = {}) {
+export function submitReview(repo, number, text, { dryRun = false, log = console.log, requireRecommendation = false } = {}) {
   const pr = viewPr(repo, number);
   if (pr.state !== 'OPEN') throw new Error(`PR #${number} is ${pr.state}; only open PRs are reviewed`);
   const review = parseReview(text);
-  const decision = reviewDecision(review, pr.headRefOid);
+  const decision = reviewDecision(review, pr.headRefOid, { requireRecommendation });
   const { table, ci } = checkSummary(normalizeChecks(pr.statusCheckRollup));
   const verdictLine = decision.state === 'success'
     ? '**agent-review: success.** The review passed with no open blockers.'

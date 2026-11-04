@@ -59,7 +59,8 @@ A PR can merge only when all of these hold:
 | `release-content` | CI: `npm run verify:release` (package the VSIX, build the SBOM, check its contents); the VSIX is kept as a build artifact for 7 days |
 | `audit` | CI: `npm audit --omit=dev --audit-level=high` |
 | `secret-scan` | CI: `scripts/secret-scan.mjs` over all tracked files and every line the PR's commits add |
-| `agent-review` | Commit status set by `scripts/agent-review.mjs` after the agent review team (section 4) |
+| `agent-review` | Commit status set by `near-ai-reviewer` from `.github/workflows/agent-review.yml` after CI passes (section 4) |
+| One approval | Branch protection: one approving review, posted by `near-ai-reviewer` when the review passes; for a change to the gates, only after the owner approves (section 7) |
 | Up to date | Branch protection ("require branches to be up to date"): rebase onto `main` and re-run |
 | No conflicts | GitHub reports the PR mergeable |
 | Conversations resolved | Branch protection: every review thread resolved |
@@ -145,8 +146,9 @@ the PR when the result is success:
    of CI), and only then sets the result. If the comment cannot be posted, the status stays
    pending and the merge gate refuses, so an earlier success on the same commit never survives a
    failed re-review.
-4. **Approve.** When `near-ai-reviewer`'s `agent-review` is success on the current head, the
-   workflow approves the PR as `near-ai-reviewer`.
+4. **Approve.** When this review set `near-ai-reviewer`'s `agent-review` to success and the
+   reviewed commit is still the head, the workflow approves that commit as `near-ai-reviewer`. A PR
+   that changes the gates waits for the owner first (see "The review runs automatically").
 
 To review (or re-review) by hand, trigger the workflow and read what it posted; never post the
 status from your own machine:
@@ -388,52 +390,80 @@ key from an agent session; the owner handles that.
 
 ### The review runs automatically
 
-`.github/workflows/agent-review.yml` produces the gate result without anyone asking. It runs on
-`workflow_run` after CI succeeds for a PR, and on `workflow_dispatch`
-(`gh workflow run agent-review.yml -f pr=<number>`) to re-review by hand.
+`.github/workflows/agent-review.yml` produces the gate result and the approval without anyone
+asking. It runs on `workflow_run` after CI succeeds for a PR, and on `workflow_dispatch`
+(`gh workflow run agent-review.yml -f pr=<number>`) to review by hand. Its three jobs:
+
+| Job | Environment | What it does |
+| --- | --- | --- |
+| `review` | `agent-review` (reviewer token, model key) | Skips a PR whose head moved after CI. Gathers the PR, asks the model, and sets `agent-review` as `near-ai-reviewer` on the reviewed commit. |
+| `owner-approval` | `agent-review-gates` (owner is the required reviewer; no secrets) | Only when the review passed and the PR changes the gates or was too large to review whole. Lists the gate files and waits for the owner. |
+| `approve` | `agent-review` | Approves the reviewed commit as `near-ai-reviewer`, only if the review passed, that commit is still the head, `near-ai-reviewer`'s `agent-review` on it is success, and, for a gate change, the owner approved `owner-approval`. A refusal by GitHub fails the job. |
 
 - **The code that judges comes from `main`.** `workflow_run` and `workflow_dispatch` execute in
-  the base repository on the default branch, and the job checks out `main`, so the PR cannot change
-  the review scripts or the prompt it is judged by.
-- **The token is out of reach.** The jobs sit in the `agent-review` environment, which deploys
-  only from protected branches, so `NEAR_AI_REVIEW_TOKEN` exists only there, only for runs of
-  `main`, and never in a PR's checkout. This is what makes the review independent of the author:
-  there is no reviewer token on the authoring machine to read.
-- **It posts as `near-ai-reviewer`, the only account the gates trust.** `submit` refuses any other
-  account, and `merge-pr.mjs` and `tag-release.mjs` ignore an `agent-review` status from any other
-  account, the owner's included.
-- **A model does the judging.** `scripts/ci-review-prompt.mjs` builds the prompt and
-  `scripts/ci-review-call.mjs` sends it. The reply is judged by the same `parseReview` and
-  `reviewDecision` as any review file, so an open BLOCKER fails the gate even when the reply claims
-  PASS.
-- **It approves the PR too.** A second job, also as `near-ai-reviewer`, posts an approving review
-  when `near-ai-reviewer`'s `agent-review` is success on the current head. GitHub refuses an
-  approval from the author, so a separate account is the only way an approval requirement can be
-  met for an agent-authored PR.
+  the base repository on the default branch, and the jobs check out `main`, so the PR cannot
+  change the review scripts or the prompt it is judged by.
+- **The token is out of reach.** `NEAR_AI_REVIEW_TOKEN` and `REVIEW_MODEL_API_KEY` exist only in
+  the `agent-review` environment, which deploys only from protected branches and which admins
+  cannot bypass, and never in a PR's checkout or on an authoring machine.
+- **The PR is data, not instructions.** Everything the author controls (title, branch,
+  description, file names, diff) is wrapped in blocks marked with a random nonce, which the content
+  cannot close, and the model is told it is data to review and never instructions. The diff is
+  capped (`MAX_DIFF_BYTES` in `scripts/lib/ci-review.mjs`); files left out are named, and such a
+  PR waits for the owner like a gate change.
+- **The verdict is checked mechanically.** The reply is judged by the same `parseReview` and
+  `reviewDecision` as any review file: an open BLOCKER, a missing or second verdict, a verdict for
+  another commit, a missing `## Recommendation:` heading, or a PASS whose recommendation is not
+  MERGE all fail the gate.
+- **Gate changes need the owner.** A PR that touches a path in `GATE_PATHS`
+  (`scripts/lib/workflow.mjs`: `.github/`, `scripts/lib/`, the review, merge, release and
+  secret-scan scripts, `scripts/ci-review-*.mjs`, `SECURITY.md`, `.claude/commands/`) is reviewed
+  as usual, but the approval waits for the owner's click. Every other PR is approved
+  automatically when its review passes.
 
-Required setup, by the owner (already done for this repository; check it before relying on it):
+**How the owner approves a gate change.** Open the PR's "Agent review" run in the Actions tab
+(the PR's checks link to it, or `gh run list --workflow agent-review.yml`). Read the review
+comment on the PR first. Then, on the run page, choose **Review deployments**, tick
+**agent-review-gates**, and choose **Approve and deploy**. The `approve` job then runs and posts
+`near-ai-reviewer`'s approval. Choosing **Reject** leaves the PR unapproved.
 
-1. **The `agent-review` environment** (Settings, Environments) **restricted to protected branches
-   only** (deployment branches: "Protected branches"). This is required: it is what keeps the
-   reviewer token away from any branch a PR can push to.
-2. **Environment secrets:** `NEAR_AI_REVIEW_TOKEN` (a token of the `near-ai-reviewer` account)
-   and `REVIEW_MODEL_API_KEY` (the review model's key). **Environment variables:** `REVIEW_MODEL`
-   (the model id) and `REVIEW_MODEL_BASE_URL` (an OpenAI-compatible endpoint; default
-   `https://cloud-api.near.ai/v1`). Keep them in the environment, not as repository secrets, so
-   nothing else can read them.
-3. **`near-ai-reviewer` has write access** as a collaborator, so it can set statuses and its
-   approval counts.
+Required setup, by the owner (in place for this repository; check it before relying on it):
+
+1. **`agent-review` environment:** deployment branches "Protected branches" only, and
+   `can_admins_bypass: false`. Secrets `NEAR_AI_REVIEW_TOKEN` and `REVIEW_MODEL_API_KEY`;
+   variables `REVIEW_MODEL` (the model id) and `REVIEW_MODEL_BASE_URL` (an OpenAI-compatible
+   endpoint, https only; default `https://cloud-api.near.ai/v1`). Keep them in the environment,
+   not as repository secrets or variables, so nothing else can read them.
+2. **`agent-review-gates` environment:** required reviewer the owner (`ALuhning`), deployment
+   branches "Protected branches" only, `can_admins_bypass: false`, and **no secrets**.
+3. **The reviewer token.** `NEAR_AI_REVIEW_TOKEN` is a fine-grained personal access token of the
+   `near-ai-reviewer` account, which has write access to this repository as a collaborator. Scope
+   it to this repository only, with: Pull requests read and write (comments and approvals),
+   Commit statuses read and write, Contents read-only, Metadata read-only. Nothing else.
+4. **Branch protection** requires one approving review (section 8), which `near-ai-reviewer`'s
+   approval satisfies.
 
 ```bash
 repo=VitalPointAI/near-ai-vscode
-gh api "repos/$repo/environments/agent-review" --jq '.deployment_branch_policy'   # protected_branches: true
-gh secret list --env agent-review --repo "$repo"    # NEAR_AI_REVIEW_TOKEN, REVIEW_MODEL_API_KEY
-gh variable list --env agent-review --repo "$repo"  # REVIEW_MODEL, REVIEW_MODEL_BASE_URL
+owner_id="$(gh api users/ALuhning --jq .id)"
+gh api -X PUT "repos/$repo/environments/agent-review" --input - <<'JSON'
+{"can_admins_bypass": false,
+ "deployment_branch_policy": {"protected_branches": true, "custom_branch_policies": false}}
+JSON
+gh api -X PUT "repos/$repo/environments/agent-review-gates" --input - <<JSON
+{"reviewers": [{"type": "User", "id": $owner_id}], "prevent_self_review": false,
+ "can_admins_bypass": false,
+ "deployment_branch_policy": {"protected_branches": true, "custom_branch_policies": false}}
+JSON
+gh secret set NEAR_AI_REVIEW_TOKEN --env agent-review --repo "$repo"   # prompts for the value
+gh secret set REVIEW_MODEL_API_KEY --env agent-review --repo "$repo"
+gh variable set REVIEW_MODEL --env agent-review --repo "$repo" --body '<model-id>'
+gh variable set REVIEW_MODEL_BASE_URL --env agent-review --repo "$repo" --body 'https://cloud-api.near.ai/v1'
+# check
+gh api "repos/$repo/environments/agent-review" --jq '{can_admins_bypass, deployment_branch_policy}'
+gh api "repos/$repo/environments/agent-review-gates" --jq '{can_admins_bypass, deployment_branch_policy, rules: [.protection_rules[].type]}'
+gh secret list --env agent-review-gates --repo "$repo"                 # must be empty
 ```
-
-To set or rotate a value: `gh secret set NEAR_AI_REVIEW_TOKEN --env agent-review --repo "$repo"`
-(it prompts, so the value never lands in shell history), likewise `REVIEW_MODEL_API_KEY`, and
-`gh variable set REVIEW_MODEL --env agent-review --repo "$repo" --body '<model-id>'`.
 
 While the environment is unset the workflow fails, so `agent-review` stays absent and PRs stay
 blocked. That is intentional: a gate that cannot run must not pass.
@@ -444,12 +474,17 @@ GitHub runs `workflow_run` and `workflow_dispatch` workflows only from the defau
 that adds `agent-review.yml` (#12) is therefore not on `main` yet and cannot review itself, and
 `main`'s older scripts trust a different account. That one PR is reviewed once by hand: the owner
 runs **that PR's own** review scripts locally, as `near-ai-reviewer`.
-`scripts/bootstrap-agent-review.mjs <pr>` performs exactly the workflow's review and approve steps
-(gather, `ci-review-prompt`, `ci-review-call`, `submit`, then approve only when
-`near-ai-reviewer`'s `agent-review` is success on the current head). It reads `GH_TOKEN`,
-`REVIEW_MODEL_API_KEY` and `REVIEW_MODEL` from the environment only (never from arguments),
-refuses unless `gh api user` is `near-ai-reviewer`, prints no secret, and removes its scratch
-directory. It posts the status and the approval only if the model's verdict passes.
+
+`scripts/bootstrap-agent-review.mjs` runs the same code as the workflow
+(`scripts/lib/auto-review.mjs`). It reads `GH_TOKEN`, `REVIEW_MODEL_API_KEY` and `REVIEW_MODEL`
+from the environment only (never from arguments), refuses unless `gh api user` is
+`near-ai-reviewer`, prints no secret, and removes its scratch directory. It posts the status only
+as the model's review decides, and approves only when that review passed.
+
+#12 changes the gates, so, as in the workflow, the approval is a separate step the owner takes
+after reading the review: the first command reviews and stops; the second (`--approve-gates`) is
+the owner's equivalent of approving `agent-review-gates`, and approves only if
+`near-ai-reviewer`'s `agent-review` is success on the current head.
 
 ```bash
 git fetch origin
@@ -462,15 +497,17 @@ export REVIEW_MODEL='<model-id>'                       # the value of the REVIEW
 export REVIEW_MODEL_BASE_URL='<base-url>'              # optional; default https://cloud-api.near.ai/v1
 export GH_REPO=VitalPointAI/near-ai-vscode
 gh api user --jq .login                                # must print near-ai-reviewer
-node scripts/bootstrap-agent-review.mjs 12
+node scripts/bootstrap-agent-review.mjs 12             # review; exits 2 and stops at the gate hold
+# read the review comment on #12; only if it passed and you agree:
+node scripts/bootstrap-agent-review.mjs 12 --approve-gates
 unset GH_TOKEN REVIEW_MODEL_API_KEY
 ```
 
-Exit 0 means the review passed and the PR is approved; exit 2 means it did not pass (the failure
-and its reasons are in the review comment), and nothing was approved. Merge it with that branch's
-own gate, since `main`'s copy still trusts the old account: from the same worktree, without the
-reviewer token, `node scripts/merge-pr.mjs 12 --dry-run`, then without `--dry-run`. From then on
-every PR is reviewed by the workflow on `main`; the bootstrap script is not needed again.
+If the review fails, nothing is approved: fix the findings with a new commit and run the first
+command again. Merge #12 with that branch's own gate, since `main`'s copy still trusts the old
+account: from the same worktree, after `unset GH_TOKEN`, `node scripts/merge-pr.mjs 12 --dry-run`,
+then without `--dry-run`. From then on every PR is reviewed by the workflow on `main`; the
+bootstrap script is not needed again.
 
 ## 8. Repository settings (owner only)
 
@@ -488,9 +525,11 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
 - Merging: squash only, branches deleted after merge. The squash commit's subject is the PR
   title followed by ` (#<number>)`.
 - Private vulnerability reporting turned on, so SECURITY.md's reporting link works.
-- Environment `agent-review`: deployments only from protected branches, with the
-  `NEAR_AI_REVIEW_TOKEN` and `REVIEW_MODEL_API_KEY` secrets and the `REVIEW_MODEL` and
-  `REVIEW_MODEL_BASE_URL` variables (see "The review runs automatically").
+- Environment `agent-review`: deployments only from protected branches, admins cannot bypass
+  it, with the `NEAR_AI_REVIEW_TOKEN` and `REVIEW_MODEL_API_KEY` secrets and the `REVIEW_MODEL`
+  and `REVIEW_MODEL_BASE_URL` variables. Environment `agent-review-gates`: the owner as the
+  required reviewer, protected branches only, admins cannot bypass it, no secrets. Commands in
+  section 7, "The review runs automatically".
 - Environment `marketplace`: the owner as the required reviewer, deployments only from `v*.*.*`
   tags, admins cannot bypass it (`can_admins_bypass: false`), and the `VSCE_PAT` secret stored
   in this environment only.

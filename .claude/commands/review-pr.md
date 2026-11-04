@@ -44,7 +44,8 @@ run_id=$(gh run list --workflow agent-review.yml --event workflow_dispatch --lim
 gh run watch "$run_id" --exit-status
 ```
 
-The workflow runs from `main` with the reviewer's token from the `agent-review` environment. If the
+The workflow runs from `main` with the reviewer's token from the `agent-review` environment, and
+skips a workflow_run whose PR head moved after CI (the newer head gets its own run). If the
 run fails before reviewing (for example the environment or a secret is missing), report the failing
 step from `gh run view "$run_id" --log-failed`; do not try to post a status yourself.
 
@@ -59,9 +60,14 @@ gh api "repos/{owner}/{repo}/commits/$head/statuses" \
 `target_url` links the review comment; read it with `gh pr view $ARGUMENTS --comments`. Only this
 status counts: one set by any other account is ignored by the gates.
 
+If the review passed and the PR changes the gates (`GATE_PATHS` in `scripts/lib/workflow.mjs`),
+the run's `owner-approval` job waits in the `agent-review-gates` environment. Tell the owner: read
+the review comment, then on the run page choose Review deployments, tick agent-review-gates, and
+Approve and deploy. Never approve it yourself.
+
 Report back: the verdict (the status state), the comment URL, the recommendation, the counts per
-severity, and the blockers if any. If the status is missing or still pending, say so and give the
-run URL.
+severity, the blockers if any, and whether the approval was posted or is waiting for the owner. If
+the status is missing or still pending, say so and give the run URL.
 
 ## Optional: a local second opinion (advisory, posts nothing)
 
