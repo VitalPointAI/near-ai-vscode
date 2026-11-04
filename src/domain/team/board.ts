@@ -39,6 +39,8 @@ export interface BoardCard {
   lane: { member: string; phase: string; milestone: string }; phaseId?: string; milestoneId?: string; requirements: string[]; mine: boolean;
   blocked?: { reason: string; byName: string; since: string }; held: boolean; doneInGsd: boolean; dependencyCount: number; estimateText: string; ageText: string;
   createdByName?: string; moves: CardMove[]; refusals: Partial<Record<BoardColumn, string>>; a11yLabel: string;
+  /** G-62-5: the person on the card (62-15's item.assigned), with the name flattened and up to two initials for the card face. */
+  assignee?: { id: string; name: string; initials: string };
   /** The Backlog rule on the card face (J-02): set only for a card added on the board that sits in Backlog without its parts or its size. */
   backlogRule?: string;
 }
