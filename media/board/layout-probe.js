@@ -432,6 +432,8 @@
       width: data.width, height: data.height, layout: data.layout, theme: data.theme, problems: problems.slice(),
       toolbar: { height: tb ? tb.height : 0, background: tb ? tb.background : '', position: tb ? tb.position : '' },
       region: { left: rg ? rg.left : 0, top: rg ? rg.top : 0, width: rg ? rg.width : 0, height: rg ? rg.height : 0, scrollTop: rg ? rg.scrollTop : 0, scrollLeft: rg ? rg.scrollLeft : 0 },
+      // 62-24: where the sticky header row is (null in the list), so a real drag aims below what it hides.
+      headRow: data.headRow ? { top: data.headRow.top, bottom: data.headRow.bottom } : null,
       heads: data.heads.map((h) => ({ column: h.column, left: h.left, right: h.right, folded: h.folded })),
       lanes: data.lanes.map((l) => ({ lane: l.lane, top: l.top, bottom: l.bottom, collapsed: l.collapsed })),
       cells: data.cells.map((c) => ({ lane: c.lane, column: c.column, left: c.left, top: c.top, width: c.width, height: c.height })),
