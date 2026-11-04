@@ -150,11 +150,12 @@ test('the e2e probe lets go of a card\'s focus as a click on empty space would, 
 
 test('the e2e probe presses a filter chip as a person\'s click would and reports the filters and the open menu\'s item texts (62-24)', async () => {
   const world = await standard();
-  const model = modelOf(world, world.owner.memberId);
+  // The developer added a card of their own in the standard board, so Mine keeps it and leaves the rest out.
+  const devModel = modelOf(world, world.dev.memberId);
   const h = createBoardHarness({ width: 1400 });
   h.document.body.setAttribute('data-e2e', '1');
   h.load(['board.js', 'menu.js']);
-  h.deliver({ type: 'state', model });
+  h.deliver({ type: 'state', model: devModel });
   const last = (): Record<string, any> => h.posts.filter((p) => p.type === 'e2e-facts').at(-1) as Record<string, any>;
   h.deliver({ type: 'e2e-probe', id: 1, action: 'facts' });
   assert.deepEqual(last().filters, { mine: false, ready: false, blocked: false }, 'no filter at first');
@@ -163,16 +164,19 @@ test('the e2e probe presses a filter chip as a person\'s click would and reports
   assert.equal(last().id, 2);
   assert.deepEqual(last().filters, { mine: true, ready: false, blocked: false }, 'Mine is pressed');
   const shown = last().cardIds as string[];
-  assert.ok(shown.length > 0, 'the owner has cards of their own');
-  assert.ok(shown.every((id) => model.cards.find((c) => c.id === id)?.mine === true), 'only the owner\'s own cards are drawn');
-  assert.ok(shown.length < model.cards.filter((c) => c.milestoneId === undefined || c.milestoneId === model.selectedMilestone).length, 'other cards are left out');
+  assert.ok(shown.length > 0, 'the developer has a card of their own');
+  assert.ok(shown.every((id) => devModel.cards.find((c) => c.id === id)?.mine === true), 'only the developer\'s own cards are drawn');
+  assert.ok(shown.length < devModel.cards.filter((c) => c.milestoneId === undefined || c.milestoneId === devModel.selectedMilestone).length, 'other cards are left out');
   h.deliver({ type: 'e2e-probe', id: 3, action: 'filter', filter: 'mine' });
   assert.deepEqual(last().filters, { mine: false, ready: false, blocked: false }, 'a second press lets go of Mine');
   h.deliver({ type: 'e2e-probe', id: 4, action: 'filter', filter: '<img src=x>' });
   assert.deepEqual(last().filters, { mine: false, ready: false, blocked: false }, 'an unknown filter presses nothing');
   assert.deepEqual(last().errors, []);
-  h.deliver({ type: 'e2e-probe', id: 5, action: 'focus', itemId: 'plan:90-01' });
-  h.deliver({ type: 'e2e-probe', id: 6, action: 'key', key: 'm' });
+  // The owner's window: Move to... on a plan lists its moves.
+  const model = modelOf(world, world.owner.memberId);
+  h.deliver({ type: 'state', model });
+  h.press(card(h, 'plan:90-01').querySelector('.card-main')!, 'm');
+  h.deliver({ type: 'e2e-probe', id: 6, action: 'facts' });
   assert.equal(last().menuOpen, true, 'M opens Move to...');
   const texts = last().menuTexts as string[];
   assert.equal(texts.length, last().menuItems, 'one text per menu item');

@@ -115,7 +115,7 @@ export interface BoardLayoutRequest { id: number; action: 'measure' | 'scroll' |
  * and answers with an 'e2e-facts' message (card count and ids, focus, whether the Move menu is open, page errors caught). The host never reads that
  * answer; the tests see it through `fromView`. The page honours this only when the host marked it with data-e2e, which happens only in the tests.
  */
-export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key' | 'column' | 'open' | 'group' | 'blur'; itemId?: string; key?: string; column?: string; group?: string }
+export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key' | 'column' | 'open' | 'group' | 'blur' | 'filter'; itemId?: string; key?: string; column?: string; group?: string; filter?: string }
 
 // ---- what the page may say -------------------------------------------------------------------------------------------------------------------
 

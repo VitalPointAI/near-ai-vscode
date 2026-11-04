@@ -935,6 +935,11 @@
       const r = radios.find((n) => n.dataset.group === m.group);
       if (r) r.click();
     }
+    else if (m.action === 'filter' && typeof m.filter === 'string') {
+      // Presses a filter chip (62-24: the final screenshots show Mine). The name is matched against the page's own chips, never used as a selector.
+      const chip = Object.prototype.hasOwnProperty.call(chips, m.filter) ? chips[m.filter] : null;
+      if (chip) chip.click();
+    }
     else if (m.action === 'blur') {
       // Lets go of focus as a click on empty space would (62-22: a card focused by an earlier step is not measured again after a scroll).
       const f = document.activeElement;
@@ -950,7 +955,9 @@
     post({
       type: 'e2e-facts', id: m.id, cardIds: nodesOf(document, '.card').map((n) => n.getAttribute('data-id')), draggable: nodesOf(document, '.card[draggable="true"]').length,
       focusedCard: focused ? focused.getAttribute('data-id') : '', focusedRole: a && a.getAttribute ? a.getAttribute('role') || '' : '',
-      menuOpen: !!menu && !menu.hidden, menuItems: menu ? menu.querySelectorAll('[role="menuitem"]').length : 0, detailOpen: !detailEl.hidden, groupBy: ui.groupBy,
+      menuOpen: !!menu && !menu.hidden, menuItems: menu ? menu.querySelectorAll('[role="menuitem"]').length : 0,
+      menuTexts: menu && !menu.hidden ? nodesOf(menu, '[role="menuitem"]').map((n) => n.textContent) : [],
+      filters: { mine: ui.filters.mine, ready: ui.filters.ready, blocked: ui.filters.blocked }, detailOpen: !detailEl.hidden, groupBy: ui.groupBy,
       dragLog: dragLog.slice(), dragCount: dragLogged, refusals: nodesOf(document, '.card').filter((n) => n.querySelector('.refusal-line')).map((n) => ({ id: n.getAttribute('data-id'), text: n.querySelector('.refusal-line').textContent })),
       hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : false, focusedText: a && a.getAttribute && a.getAttribute('role') === 'menuitem' ? a.textContent : '', live: ($('live') && $('live').textContent) || '', errors: pageErrors.slice()
     });

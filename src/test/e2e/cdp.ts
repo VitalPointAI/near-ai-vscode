@@ -213,6 +213,8 @@ const KEYS = {
   Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
   Enter: { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' },
   m: { key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, text: 'm' },
+  a: { key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, text: 'a' },
+  u: { key: 'u', code: 'KeyU', windowsVirtualKeyCode: 85, text: 'u' },
   ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 }
 } as const;
 
