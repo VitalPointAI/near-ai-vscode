@@ -3,7 +3,7 @@
 // function on fresh state inside the append. Pure: no vscode, no I/O, no clock reads (nowMs is a parameter used for display text only).
 import {
   ALL_CARDS_LABEL, BACKLOG_RULE_CARD_TEXT, BOARD_LANE_LABEL, COLUMN_CAPTIONS, COLUMN_LABELS, HISTORY_LIMIT_TEXT, KIND_WORDS, MOVE_LABELS, NO_PLANS_TEXT, READ_ONLY_BANNERS, REFUSALS, SOMEONE, SOURCE_BOARD_TEXT,
-  SOURCE_IMPORT_TEXT, UNASSIGNED_LABEL, ageText, cardLabel, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences, stripFormatControls
+  SOURCE_IMPORT_TEXT, UNASSIGNED_LABEL, YOU_SUFFIX, ageText, cardLabel, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences, stripFormatControls
 } from './boardText';
 import { MAX_HISTORY_PER_ITEM } from './itemHistory';
 import type { HistoryEntry } from './itemHistory';
@@ -213,6 +213,26 @@ function memberName(state: TeamState, id: string | undefined): string {
   return name === undefined ? SOMEONE : flattenName(name);
 }
 
+// "D" for Dana, "EO" for E2E Owner: the first letter of each of the first two words of the flattened name, in capitals. Code points, so a letter
+// outside the basic plane is never split.
+function initialsOf(name: string): string {
+  return name.split(' ').filter((word) => word !== '').slice(0, 2).map((word) => (Array.from(word)[0] ?? '').toUpperCase()).join('');
+}
+
+// G-62-5: the person on the card, or undefined when nobody is. The name is flattened like every name the board shows.
+function assigneeOf(state: TeamState, item: WorkItem): BoardCard['assignee'] {
+  if (item.assignee === undefined) return undefined;
+  const name = memberName(state, item.assignee);
+  return { id: item.assignee, name, initials: initialsOf(name) };
+}
+
+// Mine (owner decision 2026-11-03): a card assigned to the viewer, or a card the viewer added on the board that nobody is assigned to.
+function isMine(item: WorkItem, viewerId: string | undefined): boolean {
+  if (viewerId === undefined) return false;
+  if (item.assignee !== undefined) return item.assignee === viewerId;
+  return item.origin === 'board' && item.createdBy === viewerId;
+}
+
 function displayIdOf(item: WorkItem): string {
   if (item.kind === 'plan') return item.id.slice('plan:'.length);
   if (item.origin === 'board') return `${KIND_WORDS[item.kind] ?? item.kind} ${item.id.slice(-4)}`;
@@ -272,17 +292,20 @@ function cardOf(state: TeamState, options: BoardModelOptions, gate: string | und
   const blocked = item.blocked === undefined ? undefined : { reason: flattenName(item.blocked.reason, 200), byName: memberName(state, item.blocked.by), since: item.blocked.since };
   const doneInGsd = item.summary === true && item.state !== 'done' && item.state !== 'cancelled';
   const age = ageText(options.nowMs, item.stateSince);
+  const assignee = assigneeOf(state, item);
   const card: BoardCard = {
     id: item.id, displayId: displayIdOf(item), kind: item.kind, title: flattenName(item.title, 200), column, stateLabel: COLUMN_LABELS[column],
-    lane: { member: 'unassigned', phase: phase ?? 'board', milestone: milestoneId ?? 'board' }, requirements: [...item.requirements],
-    mine: item.origin === 'board' && options.viewerId !== undefined && item.createdBy === options.viewerId,
+    lane: { member: assignee?.id ?? 'unassigned', phase: phase ?? 'board', milestone: milestoneId ?? 'board' }, requirements: [...item.requirements],
+    mine: isMine(item, options.viewerId),
     held: item.hold === true, doneInGsd, dependencyCount: item.dependsOn.length, estimateText: estimateText(item.estimate?.tokens), ageText: age,
     moves: gate === undefined ? availableMoves(state, options.viewerId, item.id) : [], refusals,
     a11yLabel: cardLabel({
       isPlan: item.kind === 'plan', displayId: displayIdOf(item), title: flattenName(item.title, 200), stateLabel: COLUMN_LABELS[column], ...(blocked === undefined ? {} : { blockedReason: blocked.reason }),
-      held: item.hold === true, doneInGsd, cancelled: column === 'cancelled', dependencyCount: item.dependsOn.length, ...(item.estimate === undefined ? {} : { estimateTokens: item.estimate.tokens }), age
+      held: item.hold === true, doneInGsd, cancelled: column === 'cancelled', dependencyCount: item.dependsOn.length, ...(item.estimate === undefined ? {} : { estimateTokens: item.estimate.tokens }), age,
+      ...(assignee === undefined ? {} : { assigneeName: assignee.name })
     })
   };
+  if (assignee !== undefined) card.assignee = assignee;
   if (phase !== undefined) card.phaseId = phase;
   if (milestoneId !== undefined) card.milestoneId = milestoneId;
   if (blocked !== undefined) card.blocked = blocked;
@@ -347,7 +370,24 @@ function phasesOf(state: TeamState): WorkItem[] {
   return [...state.items.values()].filter((item) => item.kind === 'phase').sort((a, b) => compareParts(phaseNumber(a), phaseNumber(b)) || (a.id < b.id ? -1 : 1));
 }
 
-function lanesOf(state: TeamState, cards: readonly BoardCard[], shown: readonly BoardCard[]): BoardModel['lanes'] {
+// G-62-5 (owner decision 2026-11-03, "the member lane uses the assignee"): one lane per person with a shown card, sorted by the name the board
+// shows (then by id, so two people with one name still sort the same on every client), the viewer's own marked, and Unassigned always last.
+function memberLanes(shown: readonly BoardCard[], viewerId: string | undefined): BoardLane[] {
+  const people = new Map<string, { name: string; count: number }>();
+  for (const card of shown) {
+    if (card.assignee === undefined) continue;
+    const entry = people.get(card.assignee.id);
+    if (entry === undefined) people.set(card.assignee.id, { name: card.assignee.name, count: 1 });
+    else entry.count += 1;
+  }
+  const lanes: BoardLane[] = [...people.entries()]
+    .sort(([aId, a], [bId, b]) => (a.name < b.name ? -1 : a.name > b.name ? 1 : aId < bId ? -1 : aId > bId ? 1 : 0))
+    .map(([id, entry]) => ({ key: id, label: id === viewerId ? `${entry.name}${YOU_SUFFIX}` : entry.name, count: entry.count, collapsedByDefault: false }));
+  lanes.push({ key: 'unassigned', label: UNASSIGNED_LABEL, count: shown.filter((card) => card.assignee === undefined).length, collapsedByDefault: false });
+  return lanes;
+}
+
+function lanesOf(state: TeamState, cards: readonly BoardCard[], shown: readonly BoardCard[], viewerId: string | undefined): BoardModel['lanes'] {
   const countBy = (pick: (card: BoardCard) => string, key: string): number => shown.filter((card) => pick(card) === key).length;
   const hasBoardItems = cards.some((card) => state.items.get(card.id)?.origin === 'board');
   const boardLane = (pick: (card: BoardCard) => string): BoardLane[] => (hasBoardItems ? [{ key: 'board', label: BOARD_LANE_LABEL, count: countBy(pick, 'board'), collapsedByDefault: false }] : []);
@@ -363,7 +403,7 @@ function lanesOf(state: TeamState, cards: readonly BoardCard[], shown: readonly 
     return { key: item.id, label: flattenName(item.title, 200), count: countBy((card) => card.lane.milestone, item.id), collapsedByDefault: progress.total === 0, milestoneId: item.id, progress };
   });
   return {
-    member: [{ key: 'unassigned', label: UNASSIGNED_LABEL, count: shown.length, collapsedByDefault: false }],
+    member: memberLanes(shown, viewerId),
     phase: [...phase, ...boardLane((card) => card.lane.phase)],
     milestone: [...milestone, ...boardLane((card) => card.lane.milestone)],
     none: [{ key: 'all', label: ALL_CARDS_LABEL, count: shown.length, collapsedByDefault: false }]
@@ -394,7 +434,7 @@ export function buildBoardModel(state: TeamState, options: BoardModelOptions): B
   const phases: BoardPhase[] = phasesOf(state).map((item) => ({ id: item.id, title: phaseLabel(item), ...(item.parentId === undefined ? {} : { milestoneId: item.parentId }) }));
   const requirements = [...new Set(cards.flatMap((card) => card.requirements))].sort();
   return {
-    status: options.status, viewer: viewerOf(state, options), columns, milestones, selectedMilestone: selected, phases, requirements, lanes: lanesOf(state, cards, shown), cards,
+    status: options.status, viewer: viewerOf(state, options), columns, milestones, selectedMilestone: selected, phases, requirements, lanes: lanesOf(state, cards, shown, options.viewerId), cards,
     counts: { cards: shown.length, ready: shown.filter((card) => card.column === 'ready').length, blocked: shown.filter((card) => card.blocked !== undefined).length }
   };
 }

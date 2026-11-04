@@ -61,6 +61,8 @@ export const READ_ONLY_BANNERS = Object.freeze({
 
 export const BOARD_LANE_LABEL = 'Added on the board';
 export const UNASSIGNED_LABEL = 'Unassigned';
+// G-62-5: the viewer's own member lane says so after their name, "Dana (you)".
+export const YOU_SUFFIX = ' (you)';
 export const ALL_CARDS_LABEL = 'All cards';
 export const NO_PLANS_TEXT = 'No plans yet';
 export const SOURCE_IMPORT_TEXT = 'From the project plans';
@@ -205,6 +207,8 @@ function lowerFirst(text: string): string {
 export interface CardLabelFields {
   isPlan: boolean; displayId: string; title: string; stateLabel: string; blockedReason?: string; held: boolean; doneInGsd: boolean; cancelled: boolean;
   dependencyCount: number; estimateTokens?: number; age: string;
+  /** G-62-5: the flattened name of the person on the card, said right after the state. */
+  assigneeName?: string;
 }
 
 // "Plan 62-03, Board webview client. State: Ready. Blocked: no. 2 dependencies. Estimated 48 thousand tokens. In this state for 3 days."
@@ -213,6 +217,7 @@ export function cardLabel(fields: CardLabelFields): string {
   const parts = [
     `${fields.isPlan ? 'Plan ' : ''}${fields.displayId}, ${sentence(fields.title)}`,
     `State: ${fields.stateLabel}.`,
+    ...(fields.assigneeName === undefined ? [] : [`Assigned to ${fields.assigneeName}.`]),
     fields.blockedReason === undefined ? 'Blocked: no.' : `Blocked: ${sentence(fields.blockedReason)}`
   ];
   if (fields.held) parts.push('On hold.');
