@@ -82,7 +82,9 @@ export const REFUSALS = Object.freeze({
   alreadyBlocked: `This card is already blocked. ${NOTHING_MOVED}`,
   notBlocked: `This card is not blocked. ${NOTHING_MOVED}`,
   blockNotNow: `This card cannot be blocked from where it is. ${NOTHING_MOVED}`,
-  notNow: `This card cannot move there from where it is. ${NOTHING_MOVED}`
+  notNow: `This card cannot move there from where it is. ${NOTHING_MOVED}`,
+  // G-62-3: a phase with no plans shows as a card (owner decision 2026-11-03), but only its plans move through the columns.
+  phaseCard: `Plan this phase first. Its plans move on the board, not the phase. ${NOTHING_MOVED}`
 });
 
 export const READ_ONLY_BANNERS = Object.freeze({
@@ -96,6 +98,9 @@ export const UNASSIGNED_LABEL = 'Unassigned';
 export const YOU_SUFFIX = ' (you)';
 export const ALL_CARDS_LABEL = 'All cards';
 export const NO_PLANS_TEXT = 'No plans yet';
+// G-62-3: the detail's "Why this is not ready" line for a phase card, and the phrase its accessible name carries.
+export const PHASE_NO_PLANS_DETAIL = 'This phase has no plans yet. Its plan cards show up here once its plans are written.';
+export const PHASE_NO_PLANS_LABEL = 'This phase has no plans yet.';
 export const SOURCE_IMPORT_TEXT = 'From the project plans';
 export const SOURCE_BOARD_TEXT = 'Added on the board';
 // J-02: the Backlog rule, said on the card face and in the New item form, so nobody wonders why an item never becomes Ready.
@@ -256,6 +261,21 @@ export function cardLabel(fields: CardLabelFields): string {
   if (fields.cancelled) parts.push('Cancelled.');
   parts.push(fields.dependencyCount === 0 ? 'No dependencies.' : `${fields.dependencyCount} ${plural(fields.dependencyCount, 'dependency', 'dependencies')}.`);
   parts.push(fields.estimateTokens === undefined ? 'No estimate.' : `Estimated ${estimateSpoken(fields.estimateTokens)}.`);
+  parts.push(`In this state for ${lowerFirst(fields.age)}.`);
+  return parts.join(' ');
+}
+
+export interface PhaseCardLabelFields { title: string; stateLabel: string; assigneeName?: string; held: boolean; cancelled: boolean; dependencyCount: number; age: string }
+
+// "Phase 63: Knowledge base. State: Backlog. This phase has no plans yet. 1 dependency. In this state for 4 days." The phase number is in the title,
+// and there is no estimate or blocked flag to read out: a phase is sized by its plans and is never blocked.
+export function phaseCardLabel(fields: PhaseCardLabelFields): string {
+  const parts = [sentence(fields.title), `State: ${fields.stateLabel}.`];
+  if (fields.assigneeName !== undefined) parts.push(`Assigned to ${fields.assigneeName}.`);
+  if (fields.held) parts.push('On hold.');
+  if (fields.cancelled) parts.push('Cancelled.');
+  parts.push(PHASE_NO_PLANS_LABEL);
+  parts.push(fields.dependencyCount === 0 ? 'No dependencies.' : `${fields.dependencyCount} ${plural(fields.dependencyCount, 'dependency', 'dependencies')}.`);
   parts.push(`In this state for ${lowerFirst(fields.age)}.`);
   return parts.join(' ');
 }

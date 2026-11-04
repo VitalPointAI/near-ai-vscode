@@ -22,6 +22,11 @@ function modelFor(world: BoardWorld, viewerId: string | undefined, extra: Partia
   return buildBoardModel(world.state, { nowMs: NOW, status: { kind: 'live', text: 'Live' }, canWrite: viewerId !== undefined, ...(viewerId === undefined ? {} : { viewerId }), ...extra });
 }
 
+// The cards the selected milestone shows: the model carries every milestone's cards so the picker can switch without asking the host.
+function shownOf(model: BoardModel): BoardModel['cards'] {
+  return model.cards.filter((entry) => model.selectedMilestone === 'all' || entry.milestoneId === model.selectedMilestone || entry.milestoneId === undefined);
+}
+
 function card(model: BoardModel, id: string): BoardModel['cards'][number] {
   const found = model.cards.find((entry) => entry.id === id);
   assert.ok(found, `card ${id} is on the board`);
@@ -54,7 +59,7 @@ async function repositoryWorld(): Promise<BoardWorld> {
 test('every phase with no plans is a Backlog card titled with its number, with no moves and one refusal for every other column', async () => {
   const world = await repositoryWorld();
   const model = modelFor(world, world.owner.memberId);
-  const backlog = model.cards.filter((entry) => entry.column === 'backlog').map((entry) => entry.id);
+  const backlog = shownOf(model).filter((entry) => entry.column === 'backlog').map((entry) => entry.id);
   assert.deepEqual(backlog, [...UPCOMING.map((phase) => `phase:${phase}`), CHORE_ID], 'the five upcoming phases in number order, then the board item');
 
   const next = card(model, 'phase:63');
@@ -91,7 +96,7 @@ test('every phase with no plans is a Backlog card titled with its number, with n
 test('the repository-like board: five phase cards in Backlog of the current milestone, counted as cards but never as ready', async () => {
   const world = await repositoryWorld();
   const model = modelFor(world, world.owner.memberId);
-  const phaseCards = model.cards.filter((entry) => entry.kind === 'phase');
+  const phaseCards = shownOf(model).filter((entry) => entry.kind === 'phase');
   assert.deepEqual(phaseCards.map((entry) => entry.id), UPCOMING.map((phase) => `phase:${phase}`));
   assert.ok(phaseCards.every((entry) => entry.column === 'backlog' && entry.milestoneId === 'milestone:v0.6.0'));
   // phase:50 of the older milestone has no plans either, so it is a card there too, out of the current milestone's view.

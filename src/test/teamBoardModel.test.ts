@@ -40,7 +40,8 @@ test('tracer: a model from real events, a hold planned with planMove and applied
     'Waiting, on hold or not ready.', 'Ready to be claimed.', 'Claiming arrives in a later update.', 'Starting work arrives with claims.',
     'Review arrives in a later update.', 'Adding finished work to the project arrives in a later update.', undefined, undefined
   ]);
-  assert.deepEqual(before.cards.map((entry) => [entry.id, entry.column]), [['plan:90-02', 'backlog'], [CHORE_ID, 'backlog'], ['plan:90-01', 'ready']]);
+  // Owner decision 2026-11-03 (G-62-3, amends D-08): phase:91 has no plans, so it shows as a Backlog card, ordered by its number among the plans.
+  assert.deepEqual(before.cards.map((entry) => [entry.id, entry.column]), [['plan:90-02', 'backlog'], ['phase:91', 'backlog'], [CHORE_ID, 'backlog'], ['plan:90-01', 'ready']]);
   assert.equal(before.selectedMilestone, 'milestone:v0.9.0');
 
   const ready = card(before, 'plan:90-01');
@@ -102,22 +103,25 @@ async function fullWorld(): Promise<BoardWorld> {
 
 const PROGRESS_NONE = { percent: 0, done: 0, total: 0, text: 'No plans yet' };
 
-test('lanes: member gives one Unassigned lane, phase and milestone lanes carry weighted progress, and an empty phase starts collapsed', async () => {
+// Owner decision 2026-11-03 (G-62-3, refines D-13): a lane starts collapsed only when it holds no shown card outside Done and Cancelled, and the
+// planless phase:91 is now a Backlog card in its own lane (amends D-08), so it starts open and every count includes it. Before, an empty phase
+// started collapsed and every other lane started open.
+test('lanes: member gives one Unassigned lane, phase and milestone lanes carry weighted progress, and a lane with nothing open starts collapsed', async () => {
   const world = await fullWorld();
   world.accept(world.owner, 'item.updated', { id: 'plan:90-01', changes: { state: 'done' } });
   const model = modelFor(world, world.owner.memberId, { nowMs: AGE_NOW });
 
-  assert.deepEqual(model.lanes.member, [{ key: 'unassigned', label: 'Unassigned', count: 4, collapsedByDefault: false }]);
-  assert.deepEqual(model.lanes.none, [{ key: 'all', label: 'All cards', count: 4, collapsedByDefault: false }]);
+  assert.deepEqual(model.lanes.member, [{ key: 'unassigned', label: 'Unassigned', count: 5, collapsedByDefault: false }]);
+  assert.deepEqual(model.lanes.none, [{ key: 'all', label: 'All cards', count: 5, collapsedByDefault: false }]);
   assert.deepEqual(model.lanes.phase, [
-    { key: 'phase:80', label: 'Phase 80: Old work', count: 0, collapsedByDefault: false, milestoneId: 'milestone:v0.8.0', progress: { percent: 100, done: 1, total: 1, text: '100%, 1 of 1 plans done' } },
+    { key: 'phase:80', label: 'Phase 80: Old work', count: 0, collapsedByDefault: true, milestoneId: 'milestone:v0.8.0', progress: { percent: 100, done: 1, total: 1, text: '100%, 1 of 1 plans done' } },
     { key: 'phase:90', label: 'Phase 90: Alpha work', count: 3, collapsedByDefault: false, milestoneId: 'milestone:v0.9.0', progress: { percent: 80, done: 1, total: 3, text: '80%, 1 of 3 plans done' } },
-    { key: 'phase:91', label: 'Phase 91: Beta work', count: 0, collapsedByDefault: true, milestoneId: 'milestone:v0.9.0', progress: PROGRESS_NONE },
+    { key: 'phase:91', label: 'Phase 91: Beta work', count: 1, collapsedByDefault: false, milestoneId: 'milestone:v0.9.0', progress: PROGRESS_NONE },
     { key: 'board', label: 'Added on the board', count: 1, collapsedByDefault: false }
   ]);
   assert.deepEqual(model.lanes.milestone, [
-    { key: 'milestone:v0.9.0', label: 'Version 0.9.0', count: 3, collapsedByDefault: false, milestoneId: 'milestone:v0.9.0', progress: { percent: 80, done: 1, total: 3, text: '80%, 1 of 3 plans done' } },
-    { key: 'milestone:v0.8.0', label: 'Version 0.8.0', count: 0, collapsedByDefault: false, milestoneId: 'milestone:v0.8.0', progress: { percent: 100, done: 1, total: 1, text: '100%, 1 of 1 plans done' } },
+    { key: 'milestone:v0.9.0', label: 'Version 0.9.0', count: 4, collapsedByDefault: false, milestoneId: 'milestone:v0.9.0', progress: { percent: 80, done: 1, total: 3, text: '80%, 1 of 3 plans done' } },
+    { key: 'milestone:v0.8.0', label: 'Version 0.8.0', count: 0, collapsedByDefault: true, milestoneId: 'milestone:v0.8.0', progress: { percent: 100, done: 1, total: 1, text: '100%, 1 of 1 plans done' } },
     { key: 'board', label: 'Added on the board', count: 1, collapsedByDefault: false }
   ]);
   assert.deepEqual(card(model, 'plan:90-02').lane, { member: 'unassigned', phase: 'phase:90', milestone: 'milestone:v0.9.0' });
@@ -131,7 +135,8 @@ test('the board has no "Added on the board" lane until a board item exists', asy
   const model = modelFor(world, world.owner.memberId);
   assert.deepEqual(model.lanes.phase.map((lane) => lane.key), ['phase:1']);
   assert.deepEqual(model.lanes.milestone.map((lane) => lane.key), ['milestone:v1.0.0']);
-  assert.deepEqual(model.cards, []);
+  // Owner decision 2026-11-03 (G-62-3): the planless phase:1 is the board's one card, so upcoming work shows as soon as the roadmap is imported.
+  assert.deepEqual(model.cards.map((entry) => [entry.id, entry.kind, entry.column]), [['phase:1', 'phase', 'backlog']]);
   assert.equal(model.selectedMilestone, 'milestone:v1.0.0');
   const bare = modelFor(await boardWorld(), undefined);
   assert.equal(bare.selectedMilestone, 'all');
@@ -146,8 +151,9 @@ test('milestones list each imported milestone with its progress, the active one 
     { id: 'milestone:v0.8.0', title: 'Version 0.8.0', active: false, progress: { percent: 100, done: 1, total: 1, text: '100%, 1 of 1 plans done' } }
   ]);
   assert.equal(model.selectedMilestone, 'milestone:v0.9.0');
-  assert.deepEqual(model.counts, { cards: 4, ready: 1, blocked: 1 });
-  assert.deepEqual(model.columns.map((column) => [column.key, column.count]), [['backlog', 3], ['ready', 1], ['claimed', 0], ['in-progress', 0], ['in-review', 0], ['integrating', 0], ['done', 0], ['cancelled', 0]]);
+  // Owner decision 2026-11-03 (G-62-3): the planless phase:91 is a Backlog card, so it counts as a card but never as ready.
+  assert.deepEqual(model.counts, { cards: 5, ready: 1, blocked: 1 });
+  assert.deepEqual(model.columns.map((column) => [column.key, column.count]), [['backlog', 4], ['ready', 1], ['claimed', 0], ['in-progress', 0], ['in-review', 0], ['integrating', 0], ['done', 0], ['cancelled', 0]]);
   // Cards of every milestone are in the model so the milestone picker can switch without asking the host; board items belong to every selection.
   assert.equal(card(model, 'plan:80-01').milestoneId, 'milestone:v0.8.0');
   assert.equal(card(model, CHORE_ID).milestoneId, undefined);

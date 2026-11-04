@@ -3,7 +3,8 @@
 // function on fresh state inside the append. Pure: no vscode, no I/O, no clock reads (nowMs is a parameter used for display text only).
 import {
   ASSIGN_REFUSALS, ROLE_LABELS, ALL_CARDS_LABEL, BACKLOG_RULE_CARD_TEXT, BOARD_LANE_LABEL, COLUMN_CAPTIONS, COLUMN_LABELS, HISTORY_LIMIT_TEXT, KIND_WORDS, MOVE_LABELS, NO_PLANS_TEXT, READ_ONLY_BANNERS, REFUSALS, SOMEONE, SOURCE_BOARD_TEXT,
-  SOURCE_IMPORT_TEXT, UNASSIGNED_LABEL, YOU_SUFFIX, ageText, cardLabel, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences, stripFormatControls
+  PHASE_NO_PLANS_DETAIL, SOURCE_IMPORT_TEXT, UNASSIGNED_LABEL, YOU_SUFFIX, ageText, cardLabel, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences,
+  phaseCardLabel, stripFormatControls
 } from './boardText';
 import { MAX_HISTORY_PER_ITEM } from './itemHistory';
 import type { HistoryEntry } from './itemHistory';
@@ -16,6 +17,24 @@ import { TEAM_REJECTION_REASONS } from './types';
 import { REASON_MAX } from './validate';
 import { BOARD_COLUMNS, effectiveColumn, isCard, isOwnDraft, mayBeAssigned, progressOf, readiness, transitionProblem } from './work';
 import type { BoardColumn } from './work';
+
+type Items = ReadonlyMap<string, WorkItem>;
+
+// ---- phase cards (G-62-3) --------------------------------------------------------------------------------------------------------------------
+// Owner decision 2026-11-03 (amends D-08): a phase with no plan under it at all shows as a card, so upcoming work is visible as soon as the roadmap
+// is imported. This is a display rule of the board model only: isCard, readiness, countReady and planMove are unchanged, so no event's acceptance
+// and no hash moves. A phase that has plans, even all cancelled, stays a lane header with progress.
+
+function phasesWithPlans(items: Items): Set<string> {
+  const planned = new Set<string>();
+  for (const item of items.values()) if (item.kind === 'plan' && item.parentId !== undefined) planned.add(item.parentId);
+  return planned;
+}
+
+/** True for a phase the board shows as a card: one with no plan under it. */
+export function isPhaseCard(items: Items, item: WorkItem): boolean {
+  return item.kind === 'phase' && !phasesWithPlans(items).has(item.id);
+}
 
 export const MOVE_KEYS = ['done', 'cancel', 'hold', 'release', 'reopen', 'block', 'unblock'] as const;
 export type MoveKey = typeof MOVE_KEYS[number];
@@ -274,6 +293,8 @@ function asDrop(planned: MoveResult, move: MoveKey): { ok: true; move: MoveKey }
 // The viewer's own permission comes first, so a viewer who may not move anything hears that, not a sentence about claims.
 export function columnMove(state: TeamState, viewerId: string | undefined, itemId: string, column: BoardColumn): { ok: true; move?: MoveKey } | { ok: false; reason: string } {
   const item = state.items.get(itemId);
+  // A phase card never moves (G-62-3): every other column says so, whoever drops it, because writing plans is what changes it.
+  if (item !== undefined && isPhaseCard(state.items, item)) return effectiveColumn(state.items, item) === column ? { ok: true } : { ok: false, reason: REFUSALS.phaseCard };
   if (item === undefined || !isCard(item)) return { ok: false, reason: REFUSALS.missing };
   const current = effectiveColumn(state.items, item);
   if (current === column) return { ok: true };
@@ -326,6 +347,7 @@ function isMine(item: WorkItem, viewerId: string | undefined): boolean {
 
 function displayIdOf(item: WorkItem): string {
   if (item.kind === 'plan') return item.id.slice('plan:'.length);
+  if (item.kind === 'phase') return `Phase ${phaseNumber(item)}`;
   if (item.origin === 'board') return `${KIND_WORDS[item.kind] ?? item.kind} ${item.id.slice(-4)}`;
   return item.id;
 }
@@ -410,6 +432,32 @@ function cardOf(state: TeamState, options: BoardModelOptions, gate: string | und
   return card;
 }
 
+// The card of a phase with no plans (G-62-3): in Backlog (Done or Cancelled when stored so), titled "Phase 63: {title}", in its own phase lane, with
+// no moves and one refusal for every other column. Its parent is the milestone. It can be assigned like any phase (62-15).
+function phaseCardOf(state: TeamState, options: BoardModelOptions, item: WorkItem): BoardCard {
+  const column = effectiveColumn(state.items, item);
+  const parent = item.parentId === undefined ? undefined : state.items.get(item.parentId);
+  const milestoneId = parent?.kind === 'milestone' ? parent.id : undefined;
+  const assignee = assigneeOf(state, item);
+  const title = phaseLabel(item);
+  const age = ageText(options.nowMs, item.stateSince);
+  const refusals: Partial<Record<BoardColumn, string>> = {};
+  for (const target of BOARD_COLUMNS) if (target !== column) refusals[target] = REFUSALS.phaseCard;
+  const card: BoardCard = {
+    id: item.id, displayId: displayIdOf(item), kind: item.kind, title, column, stateLabel: COLUMN_LABELS[column],
+    lane: { member: assignee?.id ?? 'unassigned', phase: item.id, milestone: milestoneId ?? 'board' }, phaseId: item.id, requirements: [...item.requirements],
+    mine: isMine(item, options.viewerId), held: item.hold === true, doneInGsd: false, dependencyCount: item.dependsOn.length, estimateText: NO_PLANS_TEXT, ageText: age,
+    moves: [], refusals, assignActions: options.canWrite ? availableAssignActions(state, options.viewerId, item.id) : [],
+    a11yLabel: phaseCardLabel({
+      title, stateLabel: COLUMN_LABELS[column], held: item.hold === true, cancelled: column === 'cancelled', dependencyCount: item.dependsOn.length, age,
+      ...(assignee === undefined ? {} : { assigneeName: assignee.name })
+    })
+  };
+  if (milestoneId !== undefined) card.milestoneId = milestoneId;
+  if (assignee !== undefined) card.assignee = assignee;
+  return card;
+}
+
 // ---- ordering and numbers --------------------------------------------------------------------------------------------------------------------
 
 // "9" before "10" before "10.1": each dot-separated part is compared as an integer when both are digits, and a shorter number comes first.
@@ -434,9 +482,14 @@ function planParts(item: WorkItem): { phase: string; plan: string } {
   return cut < 0 ? { phase: key, plan: '' } : { phase: key.slice(0, cut), plan: key.slice(cut + 1) };
 }
 
+// A plan by its phase and plan number; a phase card by its phase number, before any plan of the same number (it has none).
+function gsdParts(item: WorkItem): { phase: string; plan: string } {
+  return item.kind === 'phase' ? { phase: phaseNumber(item), plan: '' } : planParts(item);
+}
+
 function comparePlans(a: WorkItem, b: WorkItem): number {
-  const left = planParts(a);
-  const right = planParts(b);
+  const left = gsdParts(a);
+  const right = gsdParts(b);
   return compareParts(left.phase, right.phase) || compareParts(left.plan, right.plan) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
@@ -465,54 +518,74 @@ function phasesOf(state: TeamState): WorkItem[] {
 
 // G-62-5 (owner decision 2026-11-03, "the member lane uses the assignee"): one lane per person with a shown card, sorted by the name the board
 // shows (then by id, so two people with one name still sort the same on every client), the viewer's own marked, and Unassigned always last.
+// G-62-3 (owner decision 2026-11-03): a lane starts collapsed only when it holds no shown card outside Done and Cancelled, so a lane of finished work
+// folds and a lane with active or upcoming work (a phase card included) opens.
+function onlyFinished(cards: readonly BoardCard[]): boolean {
+  return !cards.some((card) => card.column !== 'done' && card.column !== 'cancelled');
+}
+
 function memberLanes(shown: readonly BoardCard[], viewerId: string | undefined): BoardLane[] {
-  const people = new Map<string, { name: string; count: number }>();
+  const people = new Map<string, { name: string; cards: BoardCard[] }>();
   for (const card of shown) {
     if (card.assignee === undefined) continue;
     const entry = people.get(card.assignee.id);
-    if (entry === undefined) people.set(card.assignee.id, { name: card.assignee.name, count: 1 });
-    else entry.count += 1;
+    if (entry === undefined) people.set(card.assignee.id, { name: card.assignee.name, cards: [card] });
+    else entry.cards.push(card);
   }
   const lanes: BoardLane[] = [...people.entries()]
     .sort(([aId, a], [bId, b]) => (a.name < b.name ? -1 : a.name > b.name ? 1 : aId < bId ? -1 : aId > bId ? 1 : 0))
-    .map(([id, entry]) => ({ key: id, label: id === viewerId ? `${entry.name}${YOU_SUFFIX}` : entry.name, count: entry.count, collapsedByDefault: false }));
-  lanes.push({ key: 'unassigned', label: UNASSIGNED_LABEL, count: shown.filter((card) => card.assignee === undefined).length, collapsedByDefault: false });
+    .map(([id, entry]) => ({ key: id, label: id === viewerId ? `${entry.name}${YOU_SUFFIX}` : entry.name, count: entry.cards.length, collapsedByDefault: onlyFinished(entry.cards) }));
+  const unassigned = shown.filter((card) => card.assignee === undefined);
+  lanes.push({ key: 'unassigned', label: UNASSIGNED_LABEL, count: unassigned.length, collapsedByDefault: onlyFinished(unassigned) });
   return lanes;
 }
 
 function lanesOf(state: TeamState, cards: readonly BoardCard[], shown: readonly BoardCard[], viewerId: string | undefined): BoardModel['lanes'] {
-  const countBy = (pick: (card: BoardCard) => string, key: string): number => shown.filter((card) => pick(card) === key).length;
+  const inLane = (pick: (card: BoardCard) => string, key: string): BoardCard[] => shown.filter((card) => pick(card) === key);
   const hasBoardItems = cards.some((card) => state.items.get(card.id)?.origin === 'board');
-  const boardLane = (pick: (card: BoardCard) => string): BoardLane[] => (hasBoardItems ? [{ key: 'board', label: BOARD_LANE_LABEL, count: countBy(pick, 'board'), collapsedByDefault: false }] : []);
+  const boardLane = (pick: (card: BoardCard) => string): BoardLane[] => {
+    if (!hasBoardItems) return [];
+    const held = inLane(pick, 'board');
+    return [{ key: 'board', label: BOARD_LANE_LABEL, count: held.length, collapsedByDefault: onlyFinished(held) }];
+  };
   const phase: BoardLane[] = phasesOf(state).map((item) => {
-    const progress = progressView(state.items, item.id);
+    const held = inLane((card) => card.lane.phase, item.id);
     return {
-      key: item.id, label: phaseLabel(item), count: countBy((card) => card.lane.phase, item.id), collapsedByDefault: progress.total === 0,
-      ...(item.parentId === undefined ? {} : { milestoneId: item.parentId }), progress
+      key: item.id, label: phaseLabel(item), count: held.length, collapsedByDefault: onlyFinished(held),
+      ...(item.parentId === undefined ? {} : { milestoneId: item.parentId }), progress: progressView(state.items, item.id)
     };
   });
   const milestone: BoardLane[] = milestonesOf(state).map((item) => {
-    const progress = progressView(state.items, item.id);
-    return { key: item.id, label: flattenName(item.title, 200), count: countBy((card) => card.lane.milestone, item.id), collapsedByDefault: progress.total === 0, milestoneId: item.id, progress };
+    const held = inLane((card) => card.lane.milestone, item.id);
+    return { key: item.id, label: flattenName(item.title, 200), count: held.length, collapsedByDefault: onlyFinished(held), milestoneId: item.id, progress: progressView(state.items, item.id) };
   });
   return {
     member: memberLanes(shown, viewerId),
     phase: [...phase, ...boardLane((card) => card.lane.phase)],
     milestone: [...milestone, ...boardLane((card) => card.lane.milestone)],
+    // The one lane of an ungrouped board never starts collapsed: folding it would show an empty board.
     none: [{ key: 'all', label: ALL_CARDS_LABEL, count: shown.length, collapsedByDefault: false }]
   };
 }
 
+// G-62-3 (owner decision 2026-11-03, refines D-13): Backlog and Ready start open; the four later columns, Done and Cancelled start folded, so
+// opening the board shows the work that is coming while finished work waits.
+const FOLDED_BY_DEFAULT: readonly BoardColumn[] = ['claimed', 'in-progress', 'in-review', 'integrating', 'done', 'cancelled'];
+
 export function buildBoardModel(state: TeamState, options: BoardModelOptions): BoardModel {
   const gate = moveGateReason(state, options);
-  const entries = [...state.items.values()].filter(isCard).map((item, seq) => ({ item, seq, card: cardOf(state, options, gate, item) }));
-  // Column by column in board order; inside a column plans go by phase then plan number and board items follow in log order. Done and Cancelled run
-  // the other way, newest number first. Nothing here reads a clock, so every client that replays the same log lists the same cards in the same order.
+  const planned = phasesWithPlans(state.items);
+  const phaseCard = (item: WorkItem): boolean => item.kind === 'phase' && !planned.has(item.id);
+  const entries = [...state.items.values()].filter((item) => isCard(item) || phaseCard(item))
+    .map((item, seq) => ({ item, seq, card: phaseCard(item) ? phaseCardOf(state, options, item) : cardOf(state, options, gate, item) }));
+  // Column by column in board order; inside a column plans and phase cards go together by phase then plan number and board items follow in log
+  // order. Done and Cancelled run the other way, newest number first. Nothing here reads a clock, so every client that replays the same log lists
+  // the same cards in the same order.
   entries.sort((a, b) => {
     const byColumn = BOARD_COLUMNS.indexOf(a.card.column) - BOARD_COLUMNS.indexOf(b.card.column);
     if (byColumn !== 0) return byColumn;
-    const aPlan = a.item.kind === 'plan';
-    if (aPlan !== (b.item.kind === 'plan')) return aPlan ? -1 : 1;
+    const aPlan = a.item.kind === 'plan' || a.item.kind === 'phase';
+    if (aPlan !== (b.item.kind === 'plan' || b.item.kind === 'phase')) return aPlan ? -1 : 1;
     const order = aPlan ? comparePlans(a.item, b.item) : a.seq - b.seq;
     return a.card.column === 'done' || a.card.column === 'cancelled' ? -order : order;
   });
@@ -521,7 +594,7 @@ export function buildBoardModel(state: TeamState, options: BoardModelOptions): B
   const shown = cards.filter((card) => visibleUnder(card, selected));
   const columns: BoardColumnInfo[] = BOARD_COLUMNS.map((key) => {
     const caption = COLUMN_CAPTIONS[key];
-    return { key, label: COLUMN_LABELS[key], ...(caption === undefined ? {} : { caption }), count: shown.filter((card) => card.column === key).length, foldedByDefault: false };
+    return { key, label: COLUMN_LABELS[key], ...(caption === undefined ? {} : { caption }), count: shown.filter((card) => card.column === key).length, foldedByDefault: FOLDED_BY_DEFAULT.includes(key) };
   });
   const milestones: BoardMilestone[] = milestonesOf(state).map((item) => ({ id: item.id, title: flattenName(item.title, 200), active: item.active === true, progress: progressView(state.items, item.id) }));
   const phases: BoardPhase[] = phasesOf(state).map((item) => ({ id: item.id, title: phaseLabel(item), ...(item.parentId === undefined ? {} : { milestoneId: item.parentId }) }));
@@ -614,13 +687,19 @@ function holdDirections(entries: readonly HistoryEntry[], currentlyHeld: boolean
 
 export function buildCardDetail(state: TeamState, itemId: string, options: { viewerId?: string; nowMs: number; history: readonly HistoryEntry[] }): CardDetail | undefined {
   const item = state.items.get(itemId);
-  if (item === undefined || !isCard(item)) return undefined;
+  if (item === undefined) return undefined;
+  const asPhaseCard = isPhaseCard(state.items, item);
+  if (!isCard(item) && !asPhaseCard) return undefined;
   const column = effectiveColumn(state.items, item);
-  const phase = item.parentId === undefined ? undefined : state.items.get(item.parentId);
-  const milestone = phase?.parentId === undefined ? undefined : state.items.get(phase.parentId);
+  // A phase card's parent is its milestone; a plan's parent is its phase, whose parent is the milestone.
+  const phase = asPhaseCard || item.parentId === undefined ? undefined : state.items.get(item.parentId);
+  const milestoneParent = asPhaseCard ? item.parentId : phase?.parentId;
+  const milestone = milestoneParent === undefined ? undefined : state.items.get(milestoneParent);
   const blocked = item.blocked === undefined ? undefined : { reason: flattenName(item.blocked.reason, 200), byName: memberName(state, item.blocked.by), since: item.blocked.since };
   const doneInGsd = item.summary === true && item.state !== 'done' && item.state !== 'cancelled';
-  const facts: CardDetail['facts'] = { estimate: estimateText(item.estimate?.tokens), age: ageText(options.nowMs, item.stateSince), source: item.origin === 'board' ? SOURCE_BOARD_TEXT : SOURCE_IMPORT_TEXT };
+  const facts: CardDetail['facts'] = {
+    estimate: asPhaseCard ? NO_PLANS_TEXT : estimateText(item.estimate?.tokens), age: ageText(options.nowMs, item.stateSince), source: item.origin === 'board' ? SOURCE_BOARD_TEXT : SOURCE_IMPORT_TEXT
+  };
   if (phase?.kind === 'phase') facts.phase = phaseLabel(phase);
   if (milestone?.kind === 'milestone') facts.milestone = flattenName(milestone.title, 200);
   if (item.gsd?.wave !== undefined) facts.wave = item.gsd.wave;
@@ -632,10 +711,10 @@ export function buildCardDetail(state: TeamState, itemId: string, options: { vie
   const entries = options.history.slice(0, MAX_HISTORY_PER_ITEM);
   const directions = holdDirections(entries, item.hold === true);
   const detail: CardDetail = {
-    itemId, displayId: displayIdOf(item), title: flattenName(item.title, 200), kind: item.kind, kindLabel: KIND_WORDS[item.kind] ?? item.kind, column, stateLabel: COLUMN_LABELS[column],
+    itemId, displayId: displayIdOf(item), title: asPhaseCard ? phaseLabel(item) : flattenName(item.title, 200), kind: item.kind, kindLabel: KIND_WORDS[item.kind] ?? item.kind, column, stateLabel: COLUMN_LABELS[column],
     held: item.hold === true, doneInGsd, facts, mustHaves: item.mustHaves.map((text) => flattenName(text, 600)), requirements: [...item.requirements],
     dependencies: dependencyRows(state, item), files: item.scope.map((entry) => flattenName(entry, 200)), tasks: taskRows(state, item),
-    notReady: column === 'backlog' ? notReadySentences(reasons, waiting) : [], editable, assignActions: availableAssignActions(state, viewerId, itemId),
+    notReady: column !== 'backlog' ? [] : asPhaseCard ? [PHASE_NO_PLANS_DETAIL] : notReadySentences(reasons, waiting), editable, assignActions: availableAssignActions(state, viewerId, itemId),
     history: entries.map((entry) => {
       const direction = directions.get(entry.eventId);
       const assigneeName = entry.memberId === undefined ? undefined : state.members.get(entry.memberId)?.name ?? '';
