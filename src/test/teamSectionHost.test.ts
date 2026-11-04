@@ -42,6 +42,8 @@ function soloHandle(): TeamModeHandle & { fire(): void; listeners: number; justM
     boardSummary: () => undefined,
     justMe: () => justMe,
     async setJustMe(value: boolean) { justMeCalls.push(value); justMe = value; fire(); },
+    // 61-29: whether this computer's request to join waits; these fakes never have one.
+    joinRequestPending: async () => false,
     fire,
     justMeCalls,
     get listeners() { return listeners.size; }
@@ -265,6 +267,8 @@ function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire()
     boardSummary: () => undefined,
     justMe: () => justMe,
     async setJustMe(value: boolean) { justMe = value; fire(); },
+    // 61-29: whether this computer's request to join waits; these fakes never have one.
+    joinRequestPending: async () => false,
     fire,
     setSession(session: TeamSession | undefined) { current = session; }
   };

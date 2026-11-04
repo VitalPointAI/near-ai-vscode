@@ -47,11 +47,13 @@ test('package.json contributes Share Team Setup under the NEAR AI category with 
   assert.equal(commandsModule.SHARE_COMMAND, 'nearAi.team.share');
 });
 
-test('package.json contributes the five membership commands under the NEAR AI category with plain titles', () => {
+test('package.json contributes the six membership commands under the NEAR AI category with plain titles', () => {
   const byId = new Map(manifest.contributes.commands.map((entry) => [entry.command, entry]));
   const expected: Array<[string, string]> = [
     ['nearAi.team.invite', 'Invite to Team'],
     ['nearAi.team.join', 'Join Team'],
+    // G-61-9 (61-29): a person with a copy of the project and no invite asks to join.
+    ['nearAi.team.askToJoin', 'Ask to Join a Team'],
     ['nearAi.team.manageMembers', 'Manage Team Members'],
     ['nearAi.team.linkNearOrganization', 'Link Your Organization'],
     ['nearAi.team.signOutNear', 'Sign Out of NEAR AI for This Team']
@@ -64,6 +66,7 @@ test('package.json contributes the five membership commands under the NEAR AI ca
   assert.equal(memberModule.INVITE_COMMAND, 'nearAi.team.invite');
   assert.equal(memberModule.LINK_NEAR_COMMAND, 'nearAi.team.linkNearOrganization');
   assert.equal(memberModule.SIGN_OUT_NEAR_COMMAND, 'nearAi.team.signOutNear');
+  assert.equal(memberModule.ASK_TO_JOIN_COMMAND, 'nearAi.team.askToJoin');
 });
 
 test('the command ids kept in memberCommands equal the copies in teamSession, which solo activation never loads', () => {
@@ -71,6 +74,8 @@ test('the command ids kept in memberCommands equal the copies in teamSession, wh
   const sessionModule = require('../services/team/teamSession') as typeof import('../services/team/teamSession');
   assert.equal(memberModule.JOIN_COMMAND, sessionModule.JOIN_COMMAND);
   assert.equal(memberModule.MANAGE_MEMBERS_COMMAND, sessionModule.MANAGE_MEMBERS_COMMAND);
+  // The session runs Ask to Join with { complete: true } once a request was accepted (61-29).
+  assert.equal(memberModule.ASK_TO_JOIN_COMMAND, sessionModule.ASK_TO_JOIN_COMMAND);
   // The Import now button of the WR-02 notice runs the registered Import command.
   assert.equal(sessionModule.IMPORT_PLANS_COMMAND, commandsModule.IMPORT_PLANS_COMMAND);
 });
@@ -118,7 +123,7 @@ test('the command titles and descriptions contain no em-dash', () => {
 test('registerTeamMode registers every contributed nearAi.team command', async () => {
   const contributed = manifest.contributes.commands.map((entry) => entry.command).filter((id) => id.startsWith('nearAi.team.'));
   assert.deepEqual([...contributed].sort(), [
-    'nearAi.team.enable', 'nearAi.team.importPlans', 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.linkNearOrganization', 'nearAi.team.manageMembers', 'nearAi.team.openBoard',
+    'nearAi.team.askToJoin', 'nearAi.team.enable', 'nearAi.team.importPlans', 'nearAi.team.invite', 'nearAi.team.join', 'nearAi.team.linkNearOrganization', 'nearAi.team.manageMembers', 'nearAi.team.openBoard',
     'nearAi.team.share', 'nearAi.team.signOutNear', 'nearAi.team.verifyLog'
   ]);
   const context = createFakeContext(path.join(ROOT, 'does-not-exist'), {});

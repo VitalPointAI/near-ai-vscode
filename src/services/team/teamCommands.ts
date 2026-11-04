@@ -85,6 +85,7 @@ export interface TeamModeHandle {
   boardSummary(): { ready: number; blocked: number; mine: number } | undefined;
   justMe(): boolean;
   setJustMe(value: boolean): Promise<void>;
+  joinRequestPending(): Promise<boolean>;
 }
 // The extension passes connectNearAi, the same key setup the chat's Set up button runs. Tests point the NEAR calls at a fake server and replace the
 // browser sign-in and the key setup.
@@ -636,6 +637,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       return summarize(state, memberId);
     },
     justMe,
-    setJustMe
+    setJustMe,
+    joinRequestPending: async (): Promise<boolean> => false
   };
 }

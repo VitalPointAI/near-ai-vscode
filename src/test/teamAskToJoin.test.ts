@@ -4,14 +4,19 @@
 // handlers and is brought to the front (its folder and its handlers) before it acts, as a second VS Code window would. Code values are read back
 // from the code under test, never written as literals. Emails use .invalid addresses.
 import assert from 'node:assert/strict';
+import { existsSync, writeFileSync } from 'node:fs';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import test from 'node:test';
 import { deviceKeySecretName, sealKeySecretName } from '../team/identity';
+import { parseInviteCode } from '../team/inviteCode';
 import { parseJoinRequest } from '../team/joinRequest';
 import { planShare, shareTeamSetup } from '../team/projectHome';
 import { NO_ORG_NOTICE } from '../team/join';
 import { readTeamFile } from '../team/teamFile';
 import { startFakeNear } from './helpers/fakeNear';
 import type { FakeNear } from './helpers/fakeNear';
+import { inviteCodeForms } from './helpers/teamCanary';
 import { MemorySecrets, createTeamFixture, gitIn } from './helpers/teamHarness';
 import type { TeamFixture } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
@@ -21,6 +26,7 @@ const stub = createVscodeStub();
 const uninstall = installVscodeStub(stub);
 const commandsModule = require('../services/team/teamCommands') as typeof import('../services/team/teamCommands');
 const memberModule = require('../services/team/memberCommands') as typeof import('../services/team/memberCommands');
+const promptsModule = require('../services/team/teamPrompts') as typeof import('../services/team/teamPrompts');
 test.after(() => { uninstall(); });
 const { ENABLE_COMMAND, registerTeamMode } = commandsModule;
 const { INVITE_COMMAND, JOIN_COMMAND, LINK_NEAR_COMMAND, LINK_NOW_CHOICE, MANAGE_MEMBERS_COMMAND, NOT_NOW_CHOICE, SIGN_OUT_NEAR_COMMAND } = memberModule;
@@ -461,5 +467,173 @@ test('a request whose invitation the owner cancelled is reported once with Ask a
     await dana.sync();
     await dana.sync();
     assert.equal(shownMessages().filter((message) => message === cancelled).length, 1, 'said once');
+  });
+});
+
+// ---- Task 3: show again or cancel, the waiting flag, a behind copy, and privacy -----------------------------------------------------------
+
+test('asking again shows the same request with Copy request and Cancel my request; cancelling asks once; the handle says whether a request waits', async () => {
+  await withWorld(async (w) => {
+    const dana = await w.open('b');
+    assert.equal(await dana.handle.joinRequestPending(), false, 'nothing waits before asking');
+    clearUi();
+    const first = await askAndCopy(dana, { name: 'Dana D', email: 'dana@example.invalid' });
+    assert.equal(await dana.handle.joinRequestPending(), true, 'a request waits');
+    assert.equal(await w.owner.handle.joinRequestPending(), false, 'the owner computer has no request');
+
+    // Shown again: the same request, no question asked, and closing it copies nothing.
+    clearUi();
+    await dana.run(ASK_TO_JOIN);
+    assert.equal(stub.inputRequests.length, 0, 'no question is asked again');
+    const again = modalsShown()[0];
+    assert.equal(again?.message, `Your request to join ${TEAM} is waiting for the person who runs the team to accept it`);
+    assert.deepEqual(again?.actions, ['Copy request', 'Cancel my request']);
+    assert.ok(again?.detail?.startsWith(`${first}\n\nCheck code: `), 'the same request text');
+    assert.equal(stub.clipboardWrites.length, 0);
+    assert.ok(shownMessages().includes('Your request was not copied. Choose Ask to join in the NEAR AI sidebar to see it again.'), shownMessages().join(' | '));
+
+    // Cancel my request asks once, then forgets the request.
+    clearUi();
+    stub.setMessageResponder((_text, actions) => (actions.includes('Cancel my request') ? 'Cancel my request' : actions.includes('Cancel request') ? 'Cancel request' : undefined));
+    await dana.run(ASK_TO_JOIN);
+    stub.setMessageResponder(undefined);
+    const question = modalsShown()[1];
+    assert.equal(question?.message, `Cancel your request to join ${TEAM}?`);
+    assert.equal(question?.detail, 'The request you sent stops working, even if it is accepted later. You can ask again at any time.');
+    assert.deepEqual(question?.actions, ['Cancel request']);
+    assert.ok(shownMessages().includes(`Your request to join ${TEAM} was cancelled. You can ask again at any time.`), shownMessages().join(' | '));
+    assert.equal(await dana.handle.joinRequestPending(), false, 'nothing waits after cancelling');
+    assert.equal(dana.secrets.values.has(`nearAi.team.joinRequest.${parseJoinRequest(first).team}`), false, 'the stored request is gone');
+
+    // Asking afterwards makes a new request.
+    clearUi();
+    const second = await askAndCopy(dana, { name: 'Dana D', email: 'dana@example.invalid' });
+    assert.notEqual(parseJoinRequest(second).member, parseJoinRequest(first).member);
+    assert.equal(everythingShown().includes(EM_DASH), false);
+  });
+});
+
+test('joinRequestPending is false with no folder open and in a project with no team', async () => {
+  resetStub();
+  const fixture = await createTeamFixture({ clones: ['b'], initialised: true });
+  try {
+    for (const folders of [[], [fixture.clones['b'] as string]]) {
+      stub.setWorkspaceFolders(folders);
+      const context = createFakeContext(fixture.storageDir('b'), new MemorySecrets());
+      const handle = registerTeamMode(context as never);
+      assert.equal(await handle.ready, 'solo');
+      assert.equal(await handle.joinRequestPending(), false, folders.length === 0 ? 'no folder' : 'no team.json');
+      for (const subscription of context.subscriptions) subscription.dispose();
+    }
+    assert.equal(existsSync(fixture.storageDir('b')), false, 'nothing was written');
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+test('a copy without the team setup is brought up to date first, then asks; the session starts so it can join by itself', async () => {
+  await withWorld(async (w) => {
+    const dana = await w.open('b', { pull: false });
+    assert.equal(await dana.handle.ready, 'solo', 'clone b has no team.json yet');
+    clearUi();
+    const requestText = await askAndCopy(dana, { name: 'Dana D', email: 'dana@example.invalid' });
+    assert.ok(shownMessages().includes('Your copy of the project was brought up to date.'), shownMessages().join(' | '));
+    assert.deepEqual(stub.progress.find((entry) => entry.title === 'Ask to Join a Team')?.messages, ['Getting the latest version of the project']);
+    assert.equal((await readTeamFile(dana.root))?.teamId, parseJoinRequest(requestText).team, 'team.json is here now');
+    assert.ok(dana.handle.session() !== undefined, 'the session runs, so the copy can join by itself once accepted');
+    assert.equal(await dana.handle.joinRequestPending(), true);
+  });
+});
+
+test('with no folder open, with no team online, and with changes not online yet, Ask to Join says so plainly and asks nothing', async () => {
+  resetStub();
+  const fixture = await createTeamFixture({ clones: ['b', 'c'], initialised: true });
+  const contexts: FakeContext[] = [];
+  const register = (folders: string[], clone: string): ReturnType<typeof registerTeamMode> => {
+    stub.setWorkspaceFolders(folders);
+    const context = createFakeContext(fixture.storageDir(clone), new MemorySecrets());
+    contexts.push(context);
+    return registerTeamMode(context as never);
+  };
+  try {
+    await register([], 'b').ready;
+    await (stub.commands.get(ASK_TO_JOIN) as () => Promise<void>)();
+    assert.deepEqual(shownMessages(), ['Open your copy of the project first, then choose Ask to join in the NEAR AI sidebar.']);
+
+    clearUi();
+    await register([fixture.clones['b'] as string], 'b').ready;
+    await (stub.commands.get(ASK_TO_JOIN) as () => Promise<void>)();
+    assert.deepEqual(shownMessages(), ['This project has no team to ask yet. If someone set one up, ask them to share their team setup, or ask them for an invite and choose Join a team in the NEAR AI sidebar.']);
+    assert.equal(stub.inputRequests.length, 0, 'nothing was asked');
+
+    // A team is set up on clone c and shared; clone b is behind and has a change that is not online yet.
+    const ownerRoot = fixture.clones['c'] as string;
+    gitIn(ownerRoot, ['config', `url.${fixture.remote}.insteadOf`, PUBLIC_URL]);
+    gitIn(ownerRoot, ['remote', 'set-url', 'origin', PUBLIC_URL]);
+    const owner = register([ownerRoot], 'c');
+    await owner.ready;
+    const ownerCommands = new Map(stub.commands);
+    stub.inputAnswers.push(TEAM, 'Lead Owner', 'lead@example.invalid');
+    await (ownerCommands.get(ENABLE_COMMAND) as () => Promise<void>)();
+    const teamFile = await readTeamFile(ownerRoot);
+    assert.ok(teamFile !== undefined, shownMessages().join(' | '));
+    const plan = await planShare({ projectRoot: ownerRoot, teamFile, branch: 'main' });
+    const shared = await shareTeamSetup({ projectRoot: ownerRoot, teamFile, branch: 'main', plan });
+    assert.equal(shared.ok, true, JSON.stringify(shared));
+    writeFileSync(path.join(fixture.clones['b'] as string, 'README.md'), '# Changed here\n', 'utf8');
+    clearUi();
+    await register([fixture.clones['b'] as string], 'b').ready;
+    stub.setMessageResponder((_text, actions) => (actions.includes('Get a fresh copy') ? 'Get a fresh copy' : undefined));
+    await (stub.commands.get(ASK_TO_JOIN) as () => Promise<void>)();
+    stub.setMessageResponder(undefined);
+    assert.ok(shownMessages().includes('Your copy of the project has changes that are not online yet, so it was not brought up to date and nothing in it was changed. To join now, get a fresh copy of the project. This copy stays as it is.'), shownMessages().join(' | '));
+    assert.equal(stub.externalCommands[0]?.command, 'git.clone', 'Get a fresh copy opens the download');
+    assert.equal(existsSync(path.join(fixture.clones['b'] as string, '.planning', '.near-ai', 'team.json')), false, 'nothing in the copy was changed');
+    assert.equal(stub.inputRequests.length, 0, 'nothing was asked');
+  } finally {
+    for (const context of contexts.reverse()) for (const subscription of context.subscriptions) subscription.dispose();
+    await removeFixture(fixture);
+  }
+});
+
+// Everything written under a folder, as one text.
+async function filesUnder(dir: string): Promise<string> {
+  if (!existsSync(dir)) return '';
+  const entries = await fs.readdir(dir, { recursive: true, withFileTypes: true });
+  const texts = await Promise.all(entries.filter((entry) => entry.isFile() && !entry.parentPath.includes(`${path.sep}coordination.git`)).map((entry) => fs.readFile(path.join(entry.parentPath, entry.name), 'utf8')));
+  return texts.join('\n');
+}
+
+test('privacy: the stored code appears in no message, prompt, channel line, setting or file of either window, from asking to confirmed', async () => {
+  await withWorld(async (w) => {
+    const dana = await w.open('b');
+    clearUi();
+    const requestText = await askAndCopy(dana, { name: 'Dana D', email: 'dana@example.invalid' });
+    const teamId = parseJoinRequest(requestText).team;
+    const stored = JSON.parse(dana.secrets.values.get(`nearAi.team.joinRequest.${teamId}`) as string) as { code: string };
+    const bytes = parseInviteCode(stored.code);
+    assert.ok(bytes !== undefined, 'the stored code reads back');
+    const forms = inviteCodeForms(stored.code, bytes);
+    // Control: the forms are found where the code really is.
+    assert.ok(forms.some((form) => (dana.secrets.values.get(`nearAi.team.joinRequest.${teamId}`) as string).includes(form)));
+
+    await acceptInMembers(w.owner, requestText);
+    await dana.sync();
+    await until(() => dana.handle.session()?.memberId() === parseJoinRequest(requestText).member, 'Dana to join');
+    await w.owner.sync();
+    await until(() => w.owner.handle.session()?.state().members.get(parseJoinRequest(requestText).member)?.pendingRole === undefined, 'the confirmation');
+    await w.owner.sync();
+    await dana.sync();
+
+    const shown = `${everythingShown()}\n${JSON.stringify(stub.clipboardWrites)}\n${JSON.stringify(promptsModule.promptTap.shown)}\n${JSON.stringify(stub.configUpdates)}\n${JSON.stringify(stub.progress)}`;
+    const files = [
+      await filesUnder(w.owner.storage), await filesUnder(dana.storage),
+      await filesUnder(path.join(w.owner.root, '.planning')), await filesUnder(path.join(dana.root, '.planning'))
+    ].join('\n');
+    for (const form of forms) {
+      assert.equal(shown.includes(form), false, 'a form of the code was shown or logged');
+      assert.equal(files.includes(form), false, 'a form of the code was written to a file');
+      assert.equal([...dana.secrets.values.values()].some((value) => value.includes(form)), false, 'the code is forgotten after the join');
+    }
   });
 });
