@@ -206,6 +206,76 @@ test('62.1-01: the first posted state carries a timeline with one dot per card a
   });
 });
 
+// 62.1-01 (D-01): a done card says when it was finished only when its history holds the mark done; nothing else about time reaches the timeline.
+test('62.1-01: a plan marked done on the board carries the local date of that mark done; an imported done plan and open cards carry none', async () => {
+  resetStub();
+  await withLiveTeam(async (rig) => {
+    await importFixture(rig);
+    const lead = await startSession(rig, rig.lead);
+    const ui = new LiveTimers();
+    const { panel, board } = openBoard(lead.session, ui, lead.lines);
+    try {
+      await panel.receive({ type: 'ready' });
+      const latest = (): TimelineState | undefined => panel.posted.filter((message): message is TimelineState => (message as { type?: string }).type === 'state').at(-1);
+      assert.ok(latest()?.model.cards.every((card) => card.finishedText === undefined), 'before any mark done no card has a finish date');
+      stub.messageAnswers.push('Mark done');
+      await panel.receive({ type: 'move', itemId: READY_PLAN, target: 'done' });
+      assert.equal(lead.session.state().items.get(READY_PLAN)?.state, 'done');
+      await until(() => {
+        if (ui.live.length > 0) ui.fire();
+        return latest()?.model.cards.find((card) => card.id === READY_PLAN)?.column === 'done';
+      }, 'the state with the plan in Done');
+      const markDone = lead.session.itemHistory(READY_PLAN).find((entry) => entry.type === 'item.updated' && entry.changed?.includes('state') === true);
+      assert.ok(markDone !== undefined, 'the history holds the mark done');
+      const cards = latest()?.model.cards ?? [];
+      const expected = new Date(markDone.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      assert.equal(cards.find((card) => card.id === READY_PLAN)?.finishedText, expected);
+      assert.equal(cards.find((card) => card.id === 'plan:90-01')?.column, 'done', 'the fixture imports 90-01 already done');
+      assert.equal(cards.find((card) => card.id === 'plan:90-01')?.finishedText, undefined, 'an imported done plan has no finish date');
+      for (const card of cards.filter((entry) => entry.column !== 'done')) assert.equal(card.finishedText, undefined, `${card.id} is not done`);
+    } finally {
+      board.controller.dispose();
+      lead.session.dispose();
+    }
+  });
+});
+
+// 62.1-01 (UI-SPEC "States": the timeline could not be drawn): a layout that throws leaves Columns working and logs one line without card text.
+test('62.1-01: when the layout throws, the state has no timeline and timelineProblem, its cards are the board model\'s, and one redacted line is logged', async () => {
+  resetStub();
+  await withLiveTeam(async (rig) => {
+    await importFixture(rig);
+    const a = await startSession(rig, 'owner');
+    const titles = [...a.session.state().items.values()].map((item) => item.title).filter((title) => title.length > 3);
+    assert.ok(titles.length > 0);
+    const context = createFakeContext(path.join(EXTENSION_ROOT, 'does-not-exist'), {});
+    const thrower = (): never => { throw new Error(`cannot place ${titles.join(', ')}`); };
+    const deps = {
+      session: () => a.session, output: { appendLine: (line: string) => { a.lines.push(line); }, show: () => undefined }, timers: new LiveTimers(), nowMs: () => TIMELINE_NOW,
+      buildTimeline: thrower
+    } as Parameters<typeof registerTeamBoard>[1];
+    const board = registerTeamBoard(context as never, deps);
+    board.openPanel();
+    const panel = stub.webviewPanels[stub.webviewPanels.length - 1];
+    assert.ok(panel !== undefined, 'a panel was created');
+    try {
+      await panel.receive({ type: 'ready' });
+      const first = panel.posted.find((message): message is TimelineState => (message as { type?: string }).type === 'state');
+      assert.ok(first !== undefined, 'the board state still arrived');
+      assert.equal(first.model.timeline, undefined, 'no timeline');
+      assert.equal(first.model.timelineProblem, true);
+      assert.deepEqual(plainJson(first.model.cards), (baseModelOf(a.session, first.model.status as { kind: string }) as { cards: unknown }).cards, 'Columns still has every card as before');
+      const failures = a.lines.filter((line) => line.startsWith('Team Board: the timeline could not be drawn:'));
+      assert.equal(failures.length, 1, 'one line in the NEAR AI Team output');
+      for (const title of titles) assert.ok(!(failures[0] ?? '').includes(title), 'the line holds no card text');
+      assert.ok(!a.lines.some((line) => line.startsWith('Team Board: the board could not be updated')), 'the board itself did not fail');
+    } finally {
+      board.controller.dispose();
+      a.session.dispose();
+    }
+  });
+});
+
 test('the panel is one editor tab: a second Open reveals it, and it asks for scripts, no retained context and only media/board', async () => {
   resetStub();
   await withLiveTeam(async (rig) => {
