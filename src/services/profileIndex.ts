@@ -1,5 +1,6 @@
 import type { AuthMode } from '../domain/config';
 import { isProfileId, PROJECT_ID_PATTERN } from '../domain/auth';
+import { redactSecrets } from '../domain/redaction';
 import type { OrganizationProfile, ProfileValidation, ProviderKind } from '../domain/auth';
 
 // The list of NEAR AI profiles set up in projects on this computer, kept in VS Code's global state so another project can reuse one
@@ -127,8 +128,48 @@ export interface UseSavedProfileDeps {
   refresh(): Promise<void>;
 }
 
-export async function runUseSavedProfile(_ui: SavedProfileUi, _deps: UseSavedProfileDeps): Promise<'ready' | 'failed' | 'cancelled' | 'none'> {
-  return 'cancelled'; // declared only
+const SET_UP_NEW = 'Set up a new profile';
+const CHOOSE_ANOTHER = 'Choose another';
+
+/**
+ * Use a profile from another project: pick one by its name and folder, check its key where it is stored, and make it this project's
+ * profile. The key is never shown; with nothing saved yet, or when the check fails, the person is offered Set up a new profile.
+ */
+export async function runUseSavedProfile(ui: SavedProfileUi, deps: UseSavedProfileDeps): Promise<'ready' | 'failed' | 'cancelled' | 'none'> {
+  const entries = listSavedProfiles(deps.projectId);
+  if (!entries.length) {
+    const next = await ui.info('There are no saved profiles from other projects yet. A profile you set up in a project is offered here in your other projects.', SET_UP_NEW);
+    if (next === SET_UP_NEW) await deps.setUpNew();
+    return 'none';
+  }
+  const picked = await ui.pick(entries.map((entry) => ({ label: entry.displayName, description: `from ${entry.projectLabel}`, detail: checkText(entry), entry })), {
+    title: 'Use a profile from another project',
+    placeHolder: 'Choose a saved profile. Its key stays where it was saved and is not shown.'
+  });
+  if (!picked) return 'cancelled';
+  let profile: OrganizationProfile | undefined;
+  let reason: string;
+  try {
+    profile = await ui.progress('Checking your NEAR AI key', () => deps.use(picked.entry));
+    reason = profile.validation.error ?? 'The key did not pass its check.';
+  } catch (error) {
+    reason = redactSecrets(error instanceof Error ? error.message : String(error));
+  }
+  await deps.refresh();
+  if (profile?.validation.status === 'valid') {
+    await ui.info(`${profile.displayName} is ready for this project.`);
+    return 'ready';
+  }
+  const next = await ui.error(`${picked.entry.displayName} could not be used: ${reason}`, SET_UP_NEW, ...(entries.length > 1 ? [CHOOSE_ANOTHER] : []));
+  if (next === SET_UP_NEW) await deps.setUpNew();
+  if (next === CHOOSE_ANOTHER) await runUseSavedProfile(ui, deps);
+  return 'failed';
+}
+
+function checkText(entry: SavedProfileEntry): string {
+  if (entry.validation === 'valid') return `${entry.organization}. Key checked.`;
+  if (entry.validation === 'invalid') return `${entry.organization}. Its key did not pass the last check.`;
+  return `${entry.organization}. Its key is checked when you choose it.`;
 }
 
 function readState(): IndexState {

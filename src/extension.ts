@@ -3,6 +3,7 @@ import { redactSecrets } from './domain/redaction';
 import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
+import { initProfileIndex, listSavedProfiles, runUseSavedProfile } from './services/profileIndex';
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
 import { readAgentLimits, readModelTiers, readSettings, shouldAutoInstallGsd } from './services/settings';
 import { activeProvider } from './services/providerCache';
@@ -41,6 +42,8 @@ export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProv
 
 export function activate(context: vscode.ExtensionContext): NearAiTestApi | undefined {
   const auth = new AuthService(context.secrets);
+  // The computer-wide list of saved profiles (metadata only), so a profile set up in one project can be used in another (G-61-9).
+  initProfileIndex(context.globalState);
   initEmergencyStop(context);
   // NEAR AI errors and rate-limit headers (status, model, request ID, Retry-After, NEAR's message), never keys or prompts.
   const nearLog = vscode.window.createOutputChannel('NEAR AI');
@@ -79,6 +82,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     vscode.commands.registerCommand('nearAi.status', () => showStatus(auth)),
     vscode.commands.registerCommand('nearAi.selectProfile', () => selectProfile(context, auth, sidebar)),
     vscode.commands.registerCommand('nearAi.removeProfile', () => removeProfile(auth, sidebar)),
+    vscode.commands.registerCommand('nearAi.useSavedProfile', () => useSavedProfile(context, auth, sidebar)),
     vscode.commands.registerCommand('nearAi.emergencyStop', async () => {
       await setEmergencyStop(true);
       void vscode.window.showWarningMessage('NEAR AI emergency stop is on. Running requests and workflows were stopped, and nothing more will be sent until you resume.', 'Resume').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAi.resume'); });
@@ -273,17 +277,24 @@ async function selectProfile(context: vscode.ExtensionContext, auth: AuthService
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
   const profiles = new ProfileStore(root, auth);
   const metadata = await profiles.exportMetadata();
-  const setUp = { label: '$(add) Set up a new profile…', profileId: undefined };
+  const setUp = { label: '$(add) Set up a new profile…', profileId: undefined, action: 'set-up' as const };
+  // A profile set up in another project can be used here without entering its key again (G-61-9).
+  const saved = listSavedProfiles(profiles.projectScopeId).length
+    ? [{ label: '$(folder-library) Use a profile from another project…', description: 'Its key stays where it was saved', profileId: undefined, action: 'saved' as const }]
+    : [];
   const picked = await vscode.window.showQuickPick([
     ...metadata.profiles.map((profile) => ({
       label: `${profile.profileId === metadata.activeProfileId ? '$(check) ' : ''}${profile.displayName}`,
       description: profile.organization === profile.displayName ? undefined : profile.organization,
       detail: profile.validation.status === 'valid' ? 'Verified' : `Needs verification (${profile.validation.status}): select to check the key again`,
-      profileId: profile.profileId
+      profileId: profile.profileId,
+      action: 'select' as const
     })),
+    ...saved,
     setUp
   ], { title: 'NEAR AI profile for this project', placeHolder: metadata.profiles.length ? 'Choose the profile to use' : 'No profiles yet' });
   if (!picked) return;
+  if (picked.action === 'saved') { await useSavedProfile(context, auth, sidebar); return; }
   if (!picked.profileId) { await configureApiKey(context, auth, sidebar); return; }
   let profile = await profiles.get(picked.profileId);
   if (profile && profile.validation.status !== 'valid') {
@@ -297,6 +308,25 @@ async function selectProfile(context: vscode.ExtensionContext, auth: AuthService
   await profiles.select(profile.profileId);
   clearProviderCache();
   await sidebar.refresh();
+}
+
+/** Uses a NEAR AI profile set up in another project, by reference to the key stored there; the key is never read out or shown. */
+async function useSavedProfile(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI profiles are kept per project.'); return; }
+  const profiles = new ProfileStore(root, auth);
+  await profiles.list();
+  await runUseSavedProfile({
+    pick: (items, options) => Promise.resolve(vscode.window.showQuickPick(items, { ...options, matchOnDescription: true, ignoreFocusOut: true })),
+    progress: (title, task) => Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, task)),
+    info: (message, ...actions) => Promise.resolve(vscode.window.showInformationMessage(message, ...actions)),
+    error: (message, ...actions) => Promise.resolve(vscode.window.showErrorMessage(message, ...actions))
+  }, {
+    projectId: profiles.projectScopeId,
+    use: (entry) => profiles.useSavedProfile(entry),
+    setUpNew: () => configureApiKey(context, auth, sidebar),
+    refresh: async () => { clearProviderCache(); await sidebar.refresh(); }
+  });
 }
 
 async function openApiKeyPortal(): Promise<void> {
