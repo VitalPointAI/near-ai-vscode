@@ -113,6 +113,24 @@ export function isLinkedCopy(projectId: string, profileId: string, sourceProject
   return readState().links.some((link) => link.projectId === projectId && link.profileId === profileId && link.sourceProjectId === sourceProjectId);
 }
 
+export interface SavedProfileUi {
+  pick<T extends { label: string; description: string; detail: string }>(items: T[], options: { title: string; placeHolder: string }): Promise<T | undefined>;
+  progress<T>(title: string, task: () => Promise<T>): Promise<T>;
+  info(message: string, ...actions: string[]): Promise<string | undefined>;
+  error(message: string, ...actions: string[]): Promise<string | undefined>;
+}
+
+export interface UseSavedProfileDeps {
+  projectId: string;
+  use(entry: SavedProfileEntry): Promise<OrganizationProfile>;
+  setUpNew(): Promise<void>;
+  refresh(): Promise<void>;
+}
+
+export async function runUseSavedProfile(_ui: SavedProfileUi, _deps: UseSavedProfileDeps): Promise<'ready' | 'failed' | 'cancelled' | 'none'> {
+  return 'cancelled'; // declared only
+}
+
 function readState(): IndexState {
   const raw = memento?.get<unknown>(INDEX_KEY);
   const source = raw && typeof raw === 'object' ? raw as { entries?: unknown; links?: unknown } : {};
