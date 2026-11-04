@@ -711,6 +711,23 @@ test('M, Shift+F10 and the ContextMenu key open the menu through the client API;
   assert.deepEqual(calls, ['plan:90-01'], 'a card with no offered move and no assignment opens nothing');
 });
 
+// Owner decision 2026-11-04 (62-27): Move to... follows the card's own moves, not the role. A developer's card assigned to them has moves and shows it;
+// a card with no move and no assignment action shows nothing; a reviewer's assigned card shows it too.
+test('a developer or a reviewer sees Move to... on a card assigned to them, and none on a card with no move and no assignment', async () => {
+  for (const who of ['dev', 'reviewer'] as const) {
+    const world = await standard();
+    world.accept(world.lead, 'item.assigned', { id: 'plan:90-01', memberId: world[who].memberId });
+    const model = modelOf(world, world[who].memberId);
+    assert.ok(model.cards.find((c) => c.id === 'plan:90-01')!.moves.length > 0, `${who}: the model offers moves on the assigned card`);
+    const h = start();
+    h.deliver({ type: 'state', model });
+    assert.equal(card(h, 'plan:90-01').querySelector('.move-btn')!.hidden, false, `${who}: Move to... on the assigned card`);
+    const bare = withCards(model, (cards) => { const c = cards.find((entry) => entry.id === 'plan:90-01')!; c.moves = []; c.assignActions = []; });
+    h.deliver({ type: 'state', model: bare });
+    assert.equal(card(h, 'plan:90-01').querySelector('.move-btn')!.hidden, true, `${who}: no Move to... when the model offers nothing`);
+  }
+});
+
 test('the selected card, the layout switch and a hidden view', async () => {
   const { h, world } = await drawn();
   api(h).registerDetail(() => undefined);

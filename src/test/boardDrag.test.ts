@@ -69,8 +69,9 @@ const drop = (h: BoardHarness, target: FakeNode, dt: DataTransferStub): ReturnTy
 
 // 0.6.3 re-test in code-server (debug session board-codeserver-cards-and-drag): on the owner's board every drawn card was a phase card, which has no
 // move, and the developer is offered no move at all, so nothing could be picked up and a drag did nothing, with no word why. Every card of the kanban
-// can now be picked up by a person who may change the board (owner, lead, developer); a card without moves offers no cell and its drop says why.
-test('tracer: in the kanban every card can be picked up by the owner, a lead or a developer; the list, a reviewer, an observer and a board that is down have none', async () => {
+// can now be picked up by a person who may change the board; a card without moves offers no cell and its drop says why. Owner decision 2026-11-04
+// (62-27): a reviewer moves the cards assigned to her too, so she picks cards up like a developer (she only looked before); an observer still looks.
+test('tracer: in the kanban every card can be picked up by the owner, a lead, a developer or a reviewer; the list, an observer and a board that is down have none', async () => {
   const { h, model, world } = await ownerBoard();
   assert.ok(cardOf(model, 'plan:90-01').moves.length > 0);
   assert.equal(card(h, 'plan:90-01').draggable, true);
@@ -84,12 +85,14 @@ test('tracer: in the kanban every card can be picked up by the owner, a lead or 
   assert.ok(dev.$$('.card').length > 0);
   assert.deepEqual(devModel.cards.filter((c) => c.moves.length > 0).map((c) => c.id), [], 'the developer is offered no move');
   assert.equal(dev.$$('.card').filter((c) => c.getAttribute('draggable') === 'true').length, dev.$$('.card').length, 'and can still pick up every card to learn why');
-  for (const who of ['reviewer', 'observer'] as const) {
-    const look = start();
-    look.deliver({ type: 'state', model: modelOf(world, world[who].memberId) });
-    assert.ok(look.$$('.card').length > 0);
-    assert.equal(look.$$('.card').filter((c) => c.draggable).length, 0, `a ${who} only looks at the board, so nothing is draggable`);
-  }
+  const reviewer = start();
+  reviewer.deliver({ type: 'state', model: modelOf(world, world.reviewer.memberId) });
+  assert.ok(reviewer.$$('.card').length > 0);
+  assert.equal(reviewer.$$('.card').filter((c) => c.getAttribute('draggable') === 'true').length, reviewer.$$('.card').length, 'a reviewer picks cards up too');
+  const look = start();
+  look.deliver({ type: 'state', model: modelOf(world, world.observer.memberId) });
+  assert.ok(look.$$('.card').length > 0);
+  assert.equal(look.$$('.card').filter((c) => c.draggable).length, 0, 'an observer only looks at the board, so nothing is draggable');
   for (const kind of ['offline', 'paused', 'removed'] as const) {
     const down = start();
     down.deliver({ type: 'state', model: modelOf(world, world.owner.memberId, { kind }) });
@@ -272,6 +275,39 @@ const NOT_MOVED = 'Nothing was moved.';
 const radio = (h: BoardHarness, label: string): FakeNode => h.$$('[role="radio"]').find((r) => text(r) === label)!;
 const cantMove = (h: BoardHarness): string[] => h.announcements.filter((a) => a.startsWith("Can't move"));
 
+// Owner decision 2026-11-04 (62-27): a developer or a reviewer moves the cards assigned to them. A drop of their own Ready plan on Backlog asks for
+// one hold; their card on Cancelled, and a card that is not theirs, say why and post nothing.
+for (const who of ['dev', 'reviewer'] as const) {
+  test(`a ${who === 'dev' ? 'developer' : 'reviewer'} drags their assigned plan to Backlog, and is told why on Cancelled and on a card that is not theirs`, async () => {
+    const world = await standard();
+    const person = world[who].memberId;
+    world.accept(world.lead, 'item.assigned', { id: 'plan:90-01', memberId: person });
+    world.accept(world.lead, 'item.assigned', { id: 'plan:90-02', memberId: world.lead.memberId });
+    const h = start();
+    h.deliver({ type: 'state', model: modelOf(world, person) });
+    const mine = lift(h, 'plan:90-01');
+    assert.deepEqual(marked(h, 'drop-ok'), ['backlog', 'done'], 'Backlog and Done are offered in their own row, Cancelled is not');
+    drop(h, cell(h, 'backlog', person), mine);
+    h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: Object.assign(mine, { dropEffect: 'move' }) });
+    assert.deepEqual(moves(h), [{ type: 'move', itemId: 'plan:90-01', target: 'hold' }], 'exactly one request');
+
+    const again = start();
+    again.deliver({ type: 'state', model: modelOf(world, person) });
+    const cancel = lift(again, 'plan:90-01');
+    drop(again, cell(again, 'cancelled', person), cancel);
+    again.fire(card(again, 'plan:90-01'), 'dragend', { dataTransfer: cancel });
+    assert.deepEqual(moves(again), [], 'a cancel is not theirs to make');
+    assert.equal(refusalLine(again, 'plan:90-01'), REFUSALS.cancelManagersOnly);
+
+    const theirs = lift(again, 'plan:90-02');
+    assert.deepEqual(marked(again, 'drop-ok'), [], 'no cell is offered for a card that is not theirs');
+    drop(again, cell(again, 'done', world.lead.memberId), theirs);
+    again.fire(card(again, 'plan:90-02'), 'dragend', { dataTransfer: theirs });
+    assert.deepEqual(moves(again), []);
+    assert.equal(refusalLine(again, 'plan:90-02'), REFUSALS.notAssigneeMove);
+  });
+}
+
 test('a drop on a claim or integration column posts nothing, leaves the card where it is, shows the reason on the card and announces it', async () => {
   const { h, model } = await ownerBoard();
   const ready = cardOf(model, 'plan:90-01');
@@ -338,10 +374,11 @@ test('0.6.3 re-test: a card with no move can be picked up; no cell is offered, e
   assert.deepEqual(marked(dev, 'drop-ok'), []);
   drop(dev, cell(dev, 'backlog'), devDt);
   dev.fire(card(dev, 'plan:90-01'), 'dragend', { dataTransfer: devDt });
+  // Owner decision 2026-11-04 (62-27): plan:90-01 is assigned to nobody, so the developer hears the not-assignee sentence.
   assert.deepEqual(moves(dev), [], 'the developer posts nothing');
-  assert.equal(refusalLine(dev, 'plan:90-01'), REFUSALS.notManager);
+  assert.equal(refusalLine(dev, 'plan:90-01'), REFUSALS.notAssigneeMove);
   dev.advance(150);
-  assert.equal(dev.announcements[dev.announcements.length - 1], `Can't move plan 90-01 to Backlog. ${REFUSALS.notManager}`);
+  assert.equal(dev.announcements[dev.announcements.length - 1], `Can't move plan 90-01 to Backlog. ${REFUSALS.notAssigneeMove}`);
   // Its own cell takes the drop and says nothing, as for any card.
   dev.$('.card[data-id="plan:90-01"] .dismiss')!.click();
   const own = lift(dev, 'plan:90-01');

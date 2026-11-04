@@ -326,7 +326,18 @@ test('Move to... in the detail opens the same menu as the card and is absent whe
   const dev = await drawn(800, 'dev', world);
   openBy(dev.h, 'plan:90-01', messageOf(world, 'plan:90-01', 'dev'));
   const none = buttonNamed(drawer(dev.h).querySelector('.detail-head')!, 'Move to...');
-  assert.ok(none === undefined || none.hidden, 'a developer sees no Move to...');
+  assert.ok(none === undefined || none.hidden, 'a developer sees no Move to... on a card that is not theirs');
+
+  // Owner decision 2026-11-04 (62-27): on a card assigned to them the developer sees Move to..., with the model's moves and no Cancel.
+  world.accept(world.lead, 'item.assigned', { id: 'plan:90-01', memberId: world.dev.memberId });
+  const assigned = await drawn(800, 'dev', world);
+  openBy(assigned.h, 'plan:90-01', messageOf(world, 'plan:90-01', 'dev'));
+  const own = buttonNamed(drawer(assigned.h).querySelector('.detail-head')!, 'Move to...');
+  assert.ok(own && !own.hidden, 'a developer sees Move to... on their own card');
+  own.click();
+  const labels = Array.from(assigned.h.$('#menu')!.querySelectorAll('[role="menuitem"]')).map((i) => text(i));
+  assert.deepEqual(labels, [...api(assigned.h).cardData('plan:90-01').moves.map((m: any) => m.label)], 'exactly the model moves, a lead gave the card so no Unassign me');
+  assert.ok(!labels.includes('Cancel'), 'no Cancel');
 });
 
 test('a refusal for the open card is shown in the detail as well', async () => {
