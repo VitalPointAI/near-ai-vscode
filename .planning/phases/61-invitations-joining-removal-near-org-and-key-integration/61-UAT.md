@@ -58,6 +58,12 @@ result: issue
 reported: "Still seeing this in the chat window when a profile hasn't been set - no profile or setup required should trigger one button to set up the profile before anything else happens." (0.6.1 preview: Team section with Turn on Team Mode / Join a team, plus the welcome cards, planning links and 'No models - set up a profile')
 severity: major
 
+### 9. The Team section fits someone working alone
+expected: a solo person (with their agent team) is not pushed to "turn on Team Mode"; they can dismiss the team prompt and still know how to invite people later.
+result: issue
+reported: "the Join Team/Start Team Mode card is persistent at top of the chat window. I think Start Team Mode is a bit odd as even solo developers are still working alongside the software development agent team, so effectively they are part of a team. However, should be a button that signifies it's a solo human developer project they can select to dismiss that card along with some indicator that they can invite others to join them at any time by doing X."
+severity: major
+
 ### 7. Real NEAR organization check (key cap, removal, revoke) and opt-in live tests
 expected: see 61-VERIFICATION.md human_verification 1 and 2.
 result: blocked
@@ -66,9 +72,9 @@ reason: stopped before reaching it; resume after the fix pass.
 
 ## Summary
 
-total: 8
+total: 9
 passed: 0
-issues: 7
+issues: 8
 pending: 0
 skipped: 0
 blocked: 1
@@ -137,4 +143,13 @@ blocked: 1
   root_cause: "teamSectionHost/teamSection model ignore profile state; the Connect panel from PR #7 is not on this branch (Team Mode is based on 0.4.13)"
   artifacts: [src/services/team/teamSectionHost.ts, src/domain/team/teamSection.ts, media/chat/team.js, src/services/panelView.ts]
   missing: ["profile-gated Team section", "shared profile-readiness rule with PR #7 welcomeState after main is merged in"]
+  debug_session: ""
+- truth: "No 'Team Mode' wording on screen: with no team, the Team section offers 'Invite someone' (turns on the team layer automatically, then invites), 'Join a team' and 'Just me for now'; 'Just me for now' dismisses the card for this project and leaves one quiet line on the empty chat ('Working solo with your agents. Invite people any time.') whose link starts the invite; 'Invite people' is also a Project Setup step; once people have joined, the section shows only Members, the board summary and Open board"
+  status: failed
+  reason: "User reported: the Join Team/Start Team Mode card is persistent at top of the chat window... should be a button that signifies it's a solo human developer project... indicator that they can invite others at any time"
+  severity: major
+  test: 9
+  root_cause: "teamSection model's no-team state shows Turn on Team Mode / Join a team with no dismiss; wording predates the owner's no-solo-mode principle"
+  artifacts: [src/domain/team/teamSection.ts, src/domain/team/teamSectionText.ts, media/chat/team.js, src/services/team/teamSectionHost.ts, src/services/team/teamCommands.ts]
+  missing: ["Just me for now dismiss (per project, workspaceState)", "quiet invite-later line on the empty chat", "Invite someone that enables then invites in one flow", "Invite people as a setup step once main (PR #7 registry) is merged"]
   debug_session: ""
