@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-19-PLAN.md
-last_updated: "2026-11-04T02:51:18.651Z"
+stopped_at: Completed 62-20-PLAN.md
+last_updated: "2026-11-04T03:21:42.354Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: a062dca7f59d2cfc955f537ee3f7b314931ba320
+state_head: 6496902dd87bb6512cafe27ed760139809734433
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 62
-  completed_plans: 57
+  completed_plans: 58
   percent: 13
 ---
 
@@ -111,6 +111,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P18 | 18min | 2 tasks | 8 files |
 | Phase 62 P25 | 12min | 3 tasks | 5 files |
 | Phase 62 P19 | 28min | 3 tasks | 6 files |
+| Phase 62 P20 | 22 min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -242,6 +243,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-19: planAssign checks the viewer, then transitionProblem, then decideTeamAction on actionForEvent's action (item.assign or item.assign-self); a test signs and applies 60 cases and the board and log agree
 - [Phase 62]: 62-19: a phase with no plans is a board-only Backlog card (isPhaseCard); isCard, readiness, planMove and hashes unchanged; columnMove gives it one phase sentence
 - [Phase 62]: 62-19: columns carry foldedByDefault (later four, Done, Cancelled); a lane starts collapsed only when its shown cards are all Done or Cancelled; the All cards lane never folds
+- [Phase 62]: 62-20: the host chooses the assignment path from the log (person list for owner and leads, the viewer for anyone else); the page sends only the card id
+- [Phase 62]: 62-20: a lead's choice is refused as stale whenever the card's person changed after the page asked, even though a reassignment would be allowed
+- [Phase 62]: 62-20: Move to... shows for cards with moves (owner or lead) or assignment actions (non-observers); only cards with moves are draggable
 
 ### Pending Todos
 
@@ -263,8 +267,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T02:51:18.337Z
-Stopped at: Completed 62-19-PLAN.md
+Last session: 2026-11-04T03:21:42.033Z
+Stopped at: Completed 62-20-PLAN.md
 Resume file: None
 
 ## Notes
