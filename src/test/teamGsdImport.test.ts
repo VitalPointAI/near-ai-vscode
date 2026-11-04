@@ -256,7 +256,7 @@ function git(args: string[]): string {
 
 // The expectations come from the files committed at HEAD, so the test follows the repository as plans and SUMMARYs are added (gap-closure plans
 // included): every committed plan is in the graph, and a plan counts as finished exactly when its SUMMARY is committed next to it.
-test('every plan committed at HEAD parses, and HEAD gives milestone v0.6.0 with phases 60 to 67, finished Phase 60 and the first 14 plans of Phase 61', () => {
+test('every plan committed at HEAD parses, and HEAD gives milestone v0.6.0 with phases 60 to 67 (and the inserted 62.1), finished Phase 60 and the first 14 plans of Phase 61', () => {
   const listed = git(['ls-tree', '-r', '-z', '--full-tree', '--name-only', 'HEAD', '--', '.planning']).split('\0').filter((name) => name !== '');
   const files = new Map<string, string>();
   const planPaths = listed.filter((name) => name.endsWith('-PLAN.md'));
@@ -279,7 +279,7 @@ test('every plan committed at HEAD parses, and HEAD gives milestone v0.6.0 with 
   const graph = graphOf({ paths: listed, files });
   assert.equal(graph.milestone.key, 'v0.6.0');
   assert.equal(graph.milestone.current, true);
-  assert.deepEqual(graph.phases.map((phase) => phase.number), ['60', '61', '62', '63', '64', '65', '66', '67']);
+  assert.deepEqual(graph.phases.map((phase) => phase.number), ['60', '61', '62', '62.1', '63', '64', '65', '66', '67']);
   const inPhase = (number: string) => graph.plans.filter((plan) => plan.phase === number);
   const onDisk = (number: string): number => planPaths.filter((name) => planIdentity(name)?.phase === number).length;
   for (const phase of ['60', '61', '62']) assert.equal(inPhase(phase).length, onDisk(phase), `every plan of Phase ${phase} committed at HEAD is in the graph`);
