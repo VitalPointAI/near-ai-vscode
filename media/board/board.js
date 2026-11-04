@@ -18,7 +18,7 @@
     title: 'Team Board', loading: 'Loading the Team Board...', slow: 'This is taking longer than usual. The connection to your team may be slow.', tryAgain: 'Try again', showDetails: 'Show details',
     errorHead: 'The Team Board could not be loaded', emptyHead: 'No work on the board yet', emptyOwner: 'Import your plans from the project roadmap, or add an item yourself.',
     emptyDev: 'A lead has not imported the plans yet. You can add a bug, chore or experiment yourself.', emptyView: 'A lead has not imported the plans yet. Cards show up here when they do.',
-    noCards: 'No cards here.', noMatch: 'No cards match these filters', clearBody: 'Clear the filters to see every card.', mineBody: 'Nothing is yours yet. Cards you create or claim show up here.',
+    noCards: 'No cards here.', noMatch: 'No cards match these filters', clearBody: 'Clear the filters to see every card.', mineBody: 'Nothing is yours yet. Cards assigned to you or that you add show up here.',
     clear: 'Clear filters', importPlans: 'Import plans', newItem: 'New item', moveTo: 'Move to...', dismiss: 'Dismiss message', filters: 'Filters',
     paused: 'Something unexpected changed in the shared team record, so the board is paused to protect your work. Choose "Check the team" to see what happened, or ask your lead.',
     notTrusted: 'The shared team record failed a safety check, so the board is paused. Choose "Check the team" to see what happened, or ask your lead.',
@@ -207,7 +207,7 @@
   const filtersBtn = button('secondary', T.filters, () => { ui.filtersOpen = !ui.filtersOpen; persist(); render(); }, 'filter');
   filtersBtn.setAttribute('aria-controls', 'filters');
   const filtersEl = el('div', 'filters'); filtersEl.id = 'filters';
-  const chips = { mine: chipButton('mine', 'Mine', 'Cards you created or hold'), ready: chipButton('ready', 'Ready'), blocked: chipButton('blocked', 'Blocked') };
+  const chips = { mine: chipButton('mine', 'Mine', 'Cards assigned to you or that you added'), ready: chipButton('ready', 'Ready'), blocked: chipButton('blocked', 'Blocked') };
   const phaseWrap = el('div', 'field');
   const phaseLabel = el('label', '', 'Phase'); phaseLabel.setAttribute('for', 'phase-select');
   const phaseSelect = el('select'); phaseSelect.id = 'phase-select';
@@ -447,6 +447,14 @@
     if (sigs.get(c.id) === sig) return;
     sigs.set(c.id, sig);
     const meta = el('span', 'card-meta');
+    // G-62-5 (62-UI-SPEC "Card face: the assignee"): the person comes first, initials in a round chip that is not read out, then the name as text.
+    if (c.assignee) {
+      const who = el('span', 'meta-item assignee');
+      const initials = el('span', 'assignee-initials', c.assignee.initials);
+      initials.setAttribute('aria-hidden', 'true');
+      who.append(initials, el('span', 'assignee-name', c.assignee.name));
+      meta.appendChild(who);
+    }
     if (c.blocked) meta.appendChild(badge('lock', 'Blocked', 'badge-blocked'));
     if (c.held) meta.appendChild(badge('debug-pause', 'On hold', 'badge-hold'));
     if (c.doneInGsd) meta.appendChild(badge('info', T.doneInPlans, 'badge-info'));

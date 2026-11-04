@@ -95,6 +95,9 @@ button.chip[aria-pressed="true"], .segmented button[aria-checked="true"] { backg
 #root[data-layout="list"] .card-title { -webkit-line-clamp: 2; }
 .card-meta { font-size: 0.85em; line-height: 1.4; color: var(--vscode-descriptionForeground); }
 .meta-item { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+/* G-62-5: the person on the card, a small round initials chip beside the name */
+.assignee { color: var(--vscode-foreground); }
+.assignee-initials { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 2px; box-sizing: border-box; font-size: 0.8em; line-height: 1; border: 1px solid currentColor; border-radius: 50%; }
 .badge-blocked { color: var(--vscode-editorWarning-foreground); }
 .badge-info { color: var(--vscode-editorInfo-foreground); }
 .move-btn { align-self: flex-start; }
@@ -172,9 +175,10 @@ button.chip[aria-pressed="true"], .segmented button[aria-checked="true"] { backg
 body.vscode-high-contrast .card, body.vscode-high-contrast-light .card, body.vscode-high-contrast .banner, body.vscode-high-contrast-light .banner,
 body.vscode-high-contrast #menu, body.vscode-high-contrast-light #menu, body.vscode-high-contrast .badge, body.vscode-high-contrast-light .badge,
 body.vscode-high-contrast .column, body.vscode-high-contrast-light .column { border: 1px solid var(--vscode-contrastBorder); }
+body.vscode-high-contrast .assignee-initials, body.vscode-high-contrast-light .assignee-initials { border: 1px solid var(--vscode-contrastBorder); }
 body.vscode-high-contrast button.link, body.vscode-high-contrast-light button.link { text-decoration: underline; }
 @media (forced-colors: active) {
-  .card, .banner, #menu, .badge, .status-chip, .column, #detail { border: 1px solid currentColor; }
+  .card, .banner, #menu, .badge, .status-chip, .column, #detail, .assignee-initials { border: 1px solid currentColor; }
   button.link { text-decoration: underline; }
   .card.selected { outline: 2px solid var(--vscode-focusBorder); }
   .progress { border: 1px solid currentColor; }
