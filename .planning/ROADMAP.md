@@ -106,7 +106,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. After the full invite, join and remove flow, a privacy canary finds no secret (API key, session token, clear-text invite code) in the coordination branch, `team.json`, settings, audit or transcripts.
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 25/26 plans executed in 15 waves (Waves 8 to 13 are the fix pass for the owner's 61-UAT findings, 2026-11-03; Wave 14 closes 61-UAT test 8; Wave 15 closes test 9)
+**Plans**: 26/26 plans executed in 15 waves (Waves 8 to 13 are the fix pass for the owner's 61-UAT findings, 2026-11-03; Wave 14 closes 61-UAT test 8; Wave 15 closes test 9)
 **UI hint**: yes
 
 **Wave 1**
@@ -163,7 +163,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [x] 61-25-PLAN.md — No working profile, no Team section or planning links: one readiness rule in the sidebar page shared with the 0.4.14 Connect panel (TEAM-02)
 
 **Wave 15** *(gap closure for 61-UAT test 9, G-61-8; starts after 62-23, which edits the e2e suite, and before 62-24)*
-- [ ] 61-26-PLAN.md — Working with your agents: Invite someone sets the team up on the way, Just me for now leaves a quiet invite-any-time line on the empty chat, no nagging once a team exists, no Team Mode wording on screen (TEAM-01, TEAM-02)
+- [x] 61-26-PLAN.md — Working with your agents: Invite someone sets the team up on the way, Just me for now leaves a quiet invite-any-time line on the empty chat, no nagging once a team exists, no Team Mode wording on screen (TEAM-01, TEAM-02)
 
 ### Phase 62: Work model, GSD import, Team Board (live, read and move)
 
@@ -330,7 +330,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
-| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 25/26 | In Progress (61-26 planned) | - |
+| 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 26/26 | In Progress (fix pass executed, re-verification pending) | - |
 | 62. Work model, GSD import, Team Board | v0.6.0 | 24/25 | In Progress (fix pass planned) | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |

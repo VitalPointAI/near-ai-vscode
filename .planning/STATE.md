@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-23-PLAN.md
-last_updated: "2026-11-04T11:47:02.768Z"
+stopped_at: Completed 61-26-PLAN.md
+last_updated: "2026-11-04T12:17:05.132Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: c9f748c3897bdcf784fd787cd88752cb576b4d0c
+state_head: 60de416c6585c363be708a5d2fd1878a45cb9708
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 63
-  completed_plans: 61
+  completed_plans: 62
   percent: 13
 ---
 
@@ -115,6 +115,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P21 | 57 min | 3 tasks | 10 files |
 | Phase 62 P22 | 75min | 2 tasks | 7 files |
 | Phase 62 P23 | 30min | 2 tasks | 8 files |
+| Phase 61 P26 | 25 min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -259,6 +260,10 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-23: real drags in the e2e use DevTools Protocol mouse input (drag path: mouse, Chrome 150); interceptedDrag stays as the unused fallback
 - [Phase 62]: 62-23: Escape does not reach a DevTools-driven drag; the e2e presses Escape, then ends the drag with Input.cancelDragging, the same cancel the system drag loop does
 - [Phase 62]: 62-23: board.js holds renders back during a drag and draws at the drop or dragend; Member-row drops point to Assign to; refused cards scroll their reason into view
+- [Phase 61]: 61-26: Just me for now is kept only in VS Code workspace state (nearAi.team.justMe), cleared when a team session starts or restarts; it changes no team record, event or file
+- [Phase 61]: 61-26: Invite someone in a project with no team runs Enable in invite mode (team name and your name prefilled, no email, no closing message), then the invite and its one share confirmation
+- [Phase 61]: 61-26: once someone else joined, the owner or lead section shows only Members (waiting badge) and Open board; Invite someone is the first row of Members; no Link button in the section
+- [Phase 61]: 61-26: 'Team Mode' is banned in people-facing Team literals; palette titles keep their names; the online-home button is 'Set up anyway'
 
 ### Pending Todos
 
@@ -280,8 +285,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T11:47:02.430Z
-Stopped at: Completed 62-23-PLAN.md
+Last session: 2026-11-04T12:17:04.782Z
+Stopped at: Completed 61-26-PLAN.md
 Resume file: None
 
 ## Notes
