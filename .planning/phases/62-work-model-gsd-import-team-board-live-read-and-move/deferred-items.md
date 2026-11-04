@@ -40,3 +40,21 @@
 - In the full board e2e of 62-23, the page's error list held 8 copies of "ResizeObserver loop completed with undelivered notifications." before the first drag. The drag-only run (no width or theme matrix) had none, and the drags themselves add none (the 62-23 keyboard-path check now counts only errors written after the drag set-up).
 - Likely source: `media/board/board.js` observes the header row with `new ResizeObserver(() => syncHeadHeight())`, and `syncHeadHeight` writes `--board-head-height` on the board region, which can resize the header row again within the same frame while `sizeTo` and `applyTheme` change the page size.
 - Chromium reports this as a benign notice, and the probe found no layout problem in any frame. A follow-up could write the variable in the next animation frame or only when the value changes by at least 1 px (it already skips equal values), then assert no page error after the matrix.
+
+## The kanban scrolls about 15 px sideways when nothing is wider than the board region (seen in 62-24, not caused by it)
+
+- In the realistic board's frames at 1400 px, `board-dark-1400-scrolled.png` shows the board region scrolled 15 px sideways (the Backlog header's first letter is clipped) although the columns are narrower than the region, and a 15 by 35 px sliver of a lane title band shows at the right end of the header row after that scroll.
+- 62-24 made the sticky header row at least as wide as the region (`.colheads { min-width: 100% }`), which removed the band that showed beside the last column (and, in one frame, a lane's card count). The remaining sliver is the sideways overflow itself.
+- Likely source: `.lane-title { width: 100cqw }` sits inside the lanes and is as wide as the container query box; if anything in its row adds a few pixels (a border, the lane's own box or the vertical scrollbar's width), the lanes become wider than the region and the region scrolls sideways by that much.
+- The layout probe found no problem (it allows sideways scroll inside the board region). A follow-up could size the lane title with `width: 100%` of a lanes box that is exactly the region's width, then add a probe rule: no sideways scroll when the columns fit.
+
+## The invitee's "Join a team from the quiet line" click was refused once as hidden (seen in 62-24's first full e2e, not caused by it)
+
+- The first full e2e of the 62-24 gate (default xvfb-run screen) failed in team-join: the probe read the quiet line with Join a team, then the click on it came back with error 'hidden'. In media/chat/team.js a quiet-line action is clicked only while none of its ancestors is hidden (`shown()`), and the line lives in #welcome, which chat.js hides during a conversation. team-confirm then timed out waiting for the joiner (3 + 3 failures), and the run stopped before the board launch.
+- The invite launch alone (NEAR_AI_E2E_ONLY=invite) then passed 16 of 16, and the second full e2e passed (see 62-24-SUMMARY). 62-24 changed nothing in team.js, chat.js, the Team section host or the invite launch.
+- Likely a short moment in which #welcome is hidden right after Just me for now or a profile refresh. A follow-up for the 61-26 code: have the test wait until the line is shown before it clicks (the facts could report whether the line is visible, not only drawn), or find what hides #welcome then.
+
+## The drag set-up's second-client mirror folder is not removed after a board run (seen in 62-24, from 62-23)
+
+- The 62-23 drag set-up makes `near-ai-e2e-board-second-*` under the system temp folder for the owner's second client and never removes it. It holds only a mirror of the test team's coordination record (signed events; no key, no invite text), but one is left per board run: 20 were on this machine during 62-24, 10 of them from 62-24's own runs, which were removed by hand.
+- 62-24's own second client and both teammates' folders are listed in `windowFolders` and removed in `run()`'s finally ("teammate folders removed: 3" in every run). A follow-up: push the drag set-up's folder onto `windowFolders` too (one line in src/test/e2e/suite.ts). It was found after the final gate run, so it was not changed here.
