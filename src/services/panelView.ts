@@ -4,6 +4,7 @@ import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { AuthService } from './auth';
 import { ChatWebviewMessage } from './chatBridge';
 import { attachChatToView } from './chat';
+import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
 
 /** The NEAR AI sidebar: a compact chat in the style of VS Code's own chat panels. */
 export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
@@ -18,7 +19,7 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
   public async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
     this.view = webviewView;
     const media = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'chat');
-    webviewView.webview.options = { enableScripts: true, localResourceRoots: [media] };
+    webviewView.webview.options = { enableScripts: true, localResourceRoots: [media, sharedMedia(this.context.extensionUri)] };
     webviewView.onDidDispose(() => { this.view = undefined; });
     if (this.tap) {
       const tap = this.tap;
@@ -26,6 +27,7 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
       webviewView.webview.postMessage = (message: unknown) => { tap.toView(message); return post(message); };
       webviewView.webview.onDidReceiveMessage((message: unknown) => tap.fromView(message));
     }
+    registerLayoutProbe('chat', webviewView.webview);
     await attachChatToView(this.context, this.auth, webviewView, sidebarHtml(webviewView.webview, media));
     for (const message of this.pending.splice(0)) void webviewView.webview.postMessage(message);
   }
@@ -61,6 +63,7 @@ export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
 export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspSource'>, media: vscode.Uri): string {
   const nonce = randomBytes(16).toString('base64');
   const asset = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
+  const shared = vscode.Uri.joinPath(media, '..', 'shared');
   // The host replaces this list with the installed Open-GSD skills once they load.
   const commands = JSON.stringify(GSD_COMMANDS.map(({ command, title, description }) => ({ command: `gsd-${command}`, title, description })));
   const start = ['new-project', 'onboard', 'progress'].map((id) => GSD_COMMANDS.find((definition) => definition.command === id)).filter((definition) => definition !== undefined);
@@ -70,6 +73,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+<link rel="stylesheet" href="${webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString()}">
 <link rel="stylesheet" href="${asset('chat.css')}">
 <title>NEAR AI</title>
 </head>
@@ -112,7 +116,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
   <button id="spend-token" class="link" type="button" hidden></button>
 </footer>
 <div id="live" class="visually-hidden" aria-live="polite"></div>
-<script nonce="${nonce}" src="${asset('markdown.js')}"></script>
+${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}" src="${asset('markdown.js')}"></script>
 <script nonce="${nonce}" src="${asset('tables.js')}"></script>
 <script nonce="${nonce}" src="${asset('pending.js')}"></script>
 <script nonce="${nonce}" src="${asset('composer.js')}"></script>

@@ -113,7 +113,7 @@ test('provider errors are actionable and never expose credential material', () =
 
 test('the Tools tab is a directory of what agents can use, with no retired sections or second chat', () => {
   const { toolsPageHtml } = require('../services/toolsDirectory') as typeof import('../services/toolsDirectory');
-  const html = toolsPageHtml({ cspSource: 'vscode-webview://test', nonce: 'nonce-0001', script: 'tools.js', style: 'tools.css' });
+  const html = toolsPageHtml({ cspSource: 'vscode-webview://test', nonce: 'nonce-0001', script: 'tools.js', style: 'tools.css', base: 'base.css' });
   // The old page's chat, composer, and its hidden sections (which left empty dropdowns) are gone, not hidden.
   for (const id of ['messages', 'input', 'send', 'team-studio', 'tools-note', 'fleet', 'attachments', 'commands', 'history']) assert.doesNotMatch(html, new RegExp(`id="${id}"`), `no #${id}`);
   assert.doesNotMatch(html, /display:none|advanced-section|<details|wallet-entitlement-heading/);

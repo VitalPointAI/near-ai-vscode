@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
 import { gsdHostFor } from './chat';
@@ -135,11 +136,13 @@ let panel: vscode.WebviewPanel | undefined;
 export function openTools(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill): void {
   if (panel) { panel.reveal(); return; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'tools');
-  const view = vscode.window.createWebviewPanel('nearAiTools', 'NEAR AI Tools', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
+  const shared = sharedMedia(context.extensionUri);
+  const view = vscode.window.createWebviewPanel('nearAiTools', 'NEAR AI Tools', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media, shared] });
   panel = view;
   view.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   const asset = (file: string) => view.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
-  view.webview.html = toolsPageHtml({ cspSource: view.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('tools.js'), style: asset('tools.css') });
+  view.webview.html = toolsPageHtml({ cspSource: view.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('tools.js'), style: asset('tools.css'), base: view.webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString(), probe: layoutProbeAsset(view.webview, shared) });
+  registerLayoutProbe('tools', view.webview);
   const mcp = mcpRegistry(context);
   attachToolsPage(view, {
     gather: () => gatherDirectoryInput(context, auth),

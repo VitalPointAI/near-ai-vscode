@@ -1,11 +1,10 @@
-:root { --muted: var(--vscode-descriptionForeground); --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35)); --warn: var(--vscode-editorWarning-foreground, #cca700); --bad: var(--vscode-errorForeground, #f14c4c); --ok: var(--vscode-testing-iconPassed, #3fb950); }
-* { box-sizing: border-box; }
-body { margin: 0; padding: 0 20px 40px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+:root { --warn: var(--vscode-editorWarning-foreground, #cca700); --bad: var(--vscode-errorForeground, #f14c4c); --ok: var(--vscode-testing-iconPassed, #3fb950); }
+/* Shared basics (theme tokens, box sizing, no sideways page scroll, responsive tables) come from media/shared/base.css. */
+body { padding: 0 20px 40px; background: var(--vscode-editor-background); }
 h1 { font-size: 1.35em; font-weight: 600; margin: 0; }
 h2 { font-size: 1.1em; font-weight: 600; margin: 0 0 6px; }
 section { margin: 18px 0 26px; }
 code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; word-break: break-word; }
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .top { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 14px 0 10px; background: var(--vscode-editor-background); border-bottom: 1px solid var(--border); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
@@ -14,11 +13,11 @@ code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; word-br
 .warning { color: var(--warn); margin: 4px 0; }
 .notice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 10px 0; padding: 8px 10px; border: 1px solid var(--border); border-left: 3px solid var(--vscode-focusBorder); border-radius: 4px; background: var(--vscode-editorWidget-background); }
 .notice .warning { flex-basis: 100%; }
-.table-wrap { overflow-x: auto; margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.table-wrap { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
 .table-wrap:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { padding: 5px 10px; text-align: left; vertical-align: top; white-space: nowrap; border-bottom: 1px solid var(--border); }
-th { font-weight: 600; font-size: 0.85em; color: var(--muted); background: var(--vscode-editorWidget-background); }
+th { white-space: normal; font-weight: 600; font-size: 0.85em; color: var(--muted); background: var(--vscode-editorWidget-background); }
 tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; }
 .strong { font-weight: 600; }
@@ -26,9 +25,9 @@ tbody tr:last-child td { border-bottom: none; }
 .runs { color: var(--muted); font-size: 0.8em; }
 .bad { color: var(--bad); }
 .warn { color: var(--warn); }
-.wrap, .misses { white-space: normal; min-width: 12em; max-width: 36em; }
+.wrap, .misses { max-width: 36em; }
 tr.dim td { opacity: 0.8; }
-.model-cell { white-space: normal; min-width: 14em; }
+.model-cell { white-space: normal; }
 .model-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .mark { margin: 3px 0 0; font-size: 0.85em; color: var(--muted); }
 .mark.stale { color: var(--warn); }
@@ -38,11 +37,14 @@ tr.dim td { opacity: 0.8; }
 .badge.privacy.local { color: var(--vscode-textLink-foreground); border-color: currentColor; }
 .badge.privacy.forwarded, .badge.privacy.unknown { color: var(--warn); border-color: currentColor; }
 .badge.held { color: var(--vscode-textLink-foreground); border-color: currentColor; }
-.role { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 22em; white-space: normal; }
+/* The role picker takes its cell's width, with Apply under it, rather than the width of its longest
+   role name, so it never widens the table. */
+.role { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 7em; max-width: min(22em, 100%); white-space: normal; }
+.role select { width: 100%; min-width: 0; max-width: 100%; }
 .role .warning { flex-basis: 100%; font-size: 0.85em; }
 select, input[type="search"] { font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--border)); border-radius: 2px; padding: 3px 6px; }
 select { color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); border-color: var(--vscode-dropdown-border, var(--border)); }
-fieldset { border: 1px solid var(--border); border-radius: 6px; margin: 10px 0; padding: 8px 12px 10px; }
+fieldset { min-width: 0; border: 1px solid var(--border); border-radius: 6px; margin: 10px 0; padding: 8px 12px 10px; }
 legend { font-weight: 600; padding: 0 4px; }
 .models input[type="search"] { width: 100%; max-width: 360px; margin: 4px 0 6px; }
 .checks { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
@@ -50,18 +52,18 @@ legend { font-weight: 600; padding: 0 4px; }
 .checks li:last-child { border-bottom: none; }
 .checks label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; cursor: pointer; }
 .checks .facts { display: block; margin: 2px 0 0 24px; }
-.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 14px; }
+.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 0 14px; }
 .radio { display: flex; align-items: center; gap: 6px; margin-top: 4px; cursor: pointer; }
 .radio + .hint { margin-left: 24px; }
 .start { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; margin-top: 10px; }
-.estimate { flex: 1 1 320px; }
+.estimate { flex: 1 1 min(320px, 100%); min-width: 0; }
 .estimate p { margin: 4px 0; }
 .reused summary { cursor: pointer; color: var(--muted); }
 #progress { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--vscode-editorWidget-background); }
 progress { width: 100%; height: 8px; accent-color: var(--vscode-progressBar-background); }
 .model-tasks { margin: 12px 0; }
 .model-tasks summary { cursor: pointer; font-weight: 600; }
-.controls { display: flex; gap: 8px; align-items: center; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 button { font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: none; padding: 4px 11px; border-radius: 2px; cursor: pointer; }
 button:hover { background: var(--vscode-button-hoverBackground); }
 button:disabled { opacity: 0.5; cursor: default; }
@@ -70,6 +72,15 @@ button.secondary:hover { background: var(--vscode-button-secondaryHoverBackgroun
 button.link { background: none; color: var(--vscode-textLink-foreground); padding: 2px 0; }
 button.link:hover { text-decoration: underline; background: none; }
 button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-[hidden] { display: none !important; }
+/* The leaderboard has 14 columns, so its least important ones (scores by kind, tokens per second,
+   last tested) go below 1300px rather than the shared 900px; their values show under the model. */
+@media (max-width: 1300px) {
+  .col-tertiary { display: none !important; }
+  .when-medium { display: block; }
+}
 @media (max-width: 520px) { body { padding: 0 12px 32px; } th, td { padding: 4px 6px; } }
+@media (max-width: 420px) {
+  .wrap, .misses { max-width: none; }
+  .role { max-width: 100%; }
+}
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }

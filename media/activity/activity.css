@@ -1,6 +1,6 @@
-:root { --gap: 12px; --muted: var(--vscode-descriptionForeground); --border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35)); --warn: var(--vscode-editorWarning-foreground, #cca700); --bad: var(--vscode-errorForeground, #f14c4c); }
-* { box-sizing: border-box; }
-body { margin: 0; padding: 0 20px 40px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+:root { --gap: 12px; --warn: var(--vscode-editorWarning-foreground, #cca700); --bad: var(--vscode-errorForeground, #f14c4c); }
+/* Shared basics (theme tokens, box sizing, no sideways page scroll, responsive tables) come from media/shared/base.css. */
+body { padding: 0 20px 40px; background: var(--vscode-editor-background); }
 h1 { font-size: 1.35em; font-weight: 600; margin: 0; }
 h2 { font-size: 1.1em; font-weight: 600; margin: 0; }
 h3 { font-size: 0.95em; font-weight: 600; margin: 16px 0 6px; color: var(--muted); }
@@ -13,15 +13,15 @@ section { margin: 18px 0 26px; }
 .menu button { text-align: left; color: var(--vscode-menu-foreground, var(--vscode-foreground)); background: none; }
 .menu button:hover, .menu button:focus-visible { background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, inherit); }
 .section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.segmented { display: inline-flex; border: 1px solid var(--vscode-button-secondaryBackground, var(--border)); border-radius: 3px; overflow: hidden; }
+.segmented { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--vscode-button-secondaryBackground, var(--border)); border-radius: 3px; overflow: hidden; }
 .segmented button { border-radius: 0; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
 .segmented button[aria-checked="true"] { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
 .totals { display: flex; flex-wrap: wrap; gap: 8px 26px; margin: 12px 0 0; }
 .totals dt, .pairs dt { font-size: 0.8em; color: var(--muted); }
 .totals dd { margin: 0; font-size: 1.15em; font-variant-numeric: tabular-nums; }
-.pairs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px 16px; margin: 0; }
+.pairs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(110px, 100%), 1fr)); gap: 8px 16px; margin: 0; }
 .pairs dd { margin: 0; font-size: 1.1em; font-variant-numeric: tabular-nums; }
-.columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 28px; }
+.columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 0 28px; }
 .bar { display: flex; height: 12px; border-radius: 3px; overflow: hidden; background: var(--vscode-editorWidget-background); border: 1px solid var(--border); }
 .seg { display: block; height: 100%; min-width: 0; }
 .seg-generate { background: var(--vscode-charts-blue, #3794ff); }
@@ -30,14 +30,14 @@ section { margin: 18px 0 26px; }
 .seg-near { background: var(--vscode-charts-orange, #d18616); }
 .legend { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 6px 0 0; padding: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
 .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
-.table-wrap { overflow-x: auto; margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.table-wrap { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { padding: 5px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); }
 th { font-weight: 600; font-size: 0.85em; color: var(--muted); background: var(--vscode-editorWidget-background); }
 tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; }
 .bad { color: var(--bad); font-weight: 600; }
-#history td:nth-child(2) { white-space: normal; min-width: 14em; max-width: 40em; }
+#history td:nth-child(2) { max-width: 40em; }
 .title-link { text-align: left; white-space: normal; }
 .badge { margin-left: 6px; padding: 0 6px; border-radius: 8px; font-size: 0.8em; border: 1px solid currentColor; color: var(--muted); }
 .badge-tee { color: var(--vscode-testing-iconPassed, #3fb950); }
@@ -47,7 +47,7 @@ tbody tr:last-child td { border-bottom: none; }
 .phase-waiting-you td:nth-child(3) { color: var(--warn); font-weight: 600; }
 .phase-cooling-down td:nth-child(3) { color: var(--warn); }
 .phase-paused td:nth-child(3) { color: var(--muted); font-style: italic; }
-.controls { display: flex; gap: 6px; align-items: center; }
+.controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 tr.focused td { background: var(--vscode-editor-selectionHighlightBackground, rgba(128, 128, 255, 0.15)); }
 tr.focused td:first-child { box-shadow: inset 3px 0 0 var(--vscode-focusBorder); }
 tr:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
@@ -77,11 +77,15 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
 .periods .pair { display: flex; flex-direction: column; min-width: 7em; }
 .figure-source { font-size: 0.8em; color: var(--muted); }
 .figure-source[data-source="partial"], .figure-source[data-source="estimated"] { color: var(--warn); }
-.credits { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.credits { grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); }
 @media (max-width: 520px) {
   body { padding: 0 12px 32px; }
   th, td { padding: 4px 6px; }
-  .controls { flex-wrap: wrap; }
+}
+@media (max-width: 420px) {
+  #history td:nth-child(2) { max-width: none; }
+  .segmented { display: flex; }
+  .segmented button { flex: 1 1 auto; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
 @media (forced-colors: active) { .seg, .swatch { forced-color-adjust: none; } }

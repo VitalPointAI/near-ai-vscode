@@ -668,7 +668,7 @@
     "install:global": "node scripts/install-global-extension.mjs",
     "verify:release": "npm run package && node scripts/verify-release-content.mjs",
     "check": "npm run lint && npm test",
-    "test:e2e": "npm run compile && env -u ELECTRON_RUN_AS_NODE xvfb-run -a node dist/test/e2e/run.js",
+    "test:e2e": "npm run compile && env -u ELECTRON_RUN_AS_NODE xvfb-run -a -s \"-screen 0 1920x1080x24\" node dist/test/e2e/run.js",
     "generate:screenshots": "npm run compile && node scripts/generate-marketplace-screenshots.mjs",
     "sbom": "node scripts/extension-sbom.mjs"
   },

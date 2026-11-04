@@ -12,6 +12,8 @@ package-lock.json
 *.map
 **/*.map
 dist/test/**
+# Test-only layout measurement, loaded only by the extension-host tests (NEAR_AI_E2E=1).
+media/shared/layout-probe.js
 node_modules/**
 .git/**
 .gitignore
