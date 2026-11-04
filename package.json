@@ -149,6 +149,16 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.newProfile",
+        "title": "Set Up a New Profile\u2026",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.projectSetup",
+        "title": "Project Setup\u2026",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.manageMemory",
         "title": "Manage Project Memory…",
         "category": "NEAR AI"

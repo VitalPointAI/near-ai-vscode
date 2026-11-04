@@ -20,6 +20,7 @@ export function openOnboarding(context: vscode.ExtensionContext, actions: Onboar
     if (message.type === 'configure-api-key') await actions.configureApiKey();
     if (message.type === 'open-api-key-portal') await actions.openApiKeyPortal();
     if (message.type === 'show-progress') await actions.showProgress();
+    if (message.type === 'setup-project-team') await vscode.commands.executeCommand('nearAi.setupProjectTeam');
     if (message.type === 'complete') {
       void vscode.window.showInformationMessage('You are ready. Open the chat to start your first GSD project.');
       await vscode.commands.executeCommand('nearAi.openChat');
@@ -28,7 +29,7 @@ export function openOnboarding(context: vscode.ExtensionContext, actions: Onboar
   return panel;
 }
 
-function onboardingHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+export function onboardingHtml(webview: Pick<vscode.Webview, 'cspSource' | 'asWebviewUri'>, extensionUri: vscode.Uri): string {
   const nonce = randomBytes(16).toString('base64');
   const shared = sharedMedia(extensionUri);
   const asset = (folder: vscode.Uri, file: string) => webview.asWebviewUri(vscode.Uri.joinPath(folder, file)).toString();
@@ -52,9 +53,10 @@ function onboardingHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
   <div class="steps" role="list">
     <div class="step" role="listitem"><div class="number">01</div><strong>Get oriented</strong><span>Understand what the agents will do and what GSD files mean.</span></div>
     <div class="step" role="listitem"><div class="number">02</div><strong>Connect privately</strong><span>Add the NEAR AI Cloud API key used for inference.</span></div>
-    <div class="step" role="listitem"><div class="number">03</div><strong>Set guardrails</strong><span>Reads and planning are automatic; risky actions ask first.</span></div>
-    <div class="step" role="listitem"><div class="number">04</div><strong>Describe the idea</strong><span>Chat through the project brief and let GSD create the plan.</span></div>
-    <div class="step" role="listitem"><div class="number">05</div><strong>Keep momentum</strong><span>Watch phase, plan, agent, cost, and verification progress below chat.</span></div>
+    <div class="step" role="listitem"><div class="number">03</div><strong>Choose your team</strong><span>Tell us what this project is for. We suggest a team of agents and the models they use.</span><button data-action="setup-project-team">Set up your project team</button></div>
+    <div class="step" role="listitem"><div class="number">04</div><strong>Set guardrails</strong><span>Reads and planning are automatic; risky actions ask first.</span></div>
+    <div class="step" role="listitem"><div class="number">05</div><strong>Describe the idea</strong><span>Chat through the project brief and let GSD create the plan.</span></div>
+    <div class="step" role="listitem"><div class="number">06</div><strong>Keep momentum</strong><span>Watch phase, plan, agent, cost, and verification progress below chat.</span></div>
   </div>
   <h2>Connect NEAR AI Cloud</h2>
   <p>Inference requires a NEAR AI Cloud API key. Paste it into the extension and credentials stay in VS Code SecretStorage: they are never written into your project files or sent to an agent as configuration text.</p>

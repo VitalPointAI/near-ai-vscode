@@ -74,6 +74,27 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       const models = await observer.next('toView', (message) => message.type === 'models' && JSON.stringify(message.models).includes('fake-coder'), before);
       assert.match(JSON.stringify(models.models), /fake-coder/);
     }],
+    ['a working profile without a project team shows the "no team yet" card, and Not now hides it', async () => {
+      const before = observer.toView.length;
+      const asked = observer.fromView.length;
+      await api.sidebar.refresh();
+      // Wait for the refresh's round trip (view → host → view) before going on.
+      await observer.next('fromView', (message) => message.type === 'refresh-status', asked);
+      await observer.next('toView', (message) => message.type === 'setup-nudge' && message.show === true, before);
+      const dismissed = observer.toView.length;
+      // Sent through the view, as the card's button would.
+      await api.sidebar.request({ type: 'setup-nudge', action: 'later' });
+      await observer.next('fromView', (message) => message.type === 'setup-nudge' && message.action === 'later', asked);
+      await observer.next('toView', (message) => message.type === 'setup-nudge' && message.show === false, dismissed);
+      // Nothing older brings it back, and a new refresh keeps it hidden.
+      const again = observer.toView.length;
+      const refreshAt = observer.fromView.length;
+      await api.sidebar.request({ type: 'refresh-status' });
+      await observer.next('fromView', (message) => message.type === 'refresh-status', refreshAt);
+      await observer.next('toView', (message) => message.type === 'setup-nudge', again);
+      const shown = observer.toView.slice(dismissed).filter((message) => message.type === 'setup-nudge');
+      assert.equal(shown.at(-1)?.show, false, JSON.stringify(shown));
+    }],
     ['a message streams a reply through the agent and reports usage', async () => {
       const before = observer.toView.length;
       await api.sidebar.request({ type: 'send', text: 'Say hi', model: 'fake-coder' });

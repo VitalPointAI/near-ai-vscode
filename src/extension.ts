@@ -34,6 +34,7 @@ import { clearProviderCache } from './services/providerCache';
 import { setNearAiDiagnostics } from './services/nearAiClient';
 import { closeInterruptedRuns } from './services/activityStore';
 import { offerProxyAdvice } from './domain/proxyAdvice';
+import { offerNextStep, registerNewProfile, registerProjectSetup } from './services/setupMenu';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProvider }
@@ -72,11 +73,11 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
       openApiKeyPortal: () => openApiKeyPortal(),
-      configureApiKey: () => configureApiKey(auth, sidebar),
+      configureApiKey: () => configureApiKey(context, auth, sidebar),
       showProgress: () => showStatus(auth)
     })),
     vscode.commands.registerCommand('nearAi.status', () => showStatus(auth)),
-    vscode.commands.registerCommand('nearAi.selectProfile', () => selectProfile(auth, sidebar)),
+    vscode.commands.registerCommand('nearAi.selectProfile', () => selectProfile(context, auth, sidebar)),
     vscode.commands.registerCommand('nearAi.removeProfile', () => removeProfile(auth, sidebar)),
     vscode.commands.registerCommand('nearAi.emergencyStop', async () => {
       await setEmergencyStop(true);
@@ -124,6 +125,8 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   );
 
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options));
+  registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
+  registerNewProfile(context, () => configureApiKey(context, auth, sidebar));
 
   // `@nearAi` in VS Code's built-in Chat view; skipped on hosts without the Chat Participant API.
   registerChatParticipant(context, auth, (command, args) => sidebar.request({ type: 'open-command', command, ...(args ? { args } : {}) }));
@@ -176,7 +179,8 @@ async function saveCheckpoint(): Promise<void> {
   void vscode.window.showInformationMessage(`Continuity checkpoint saved: ${path}`);
 }
 
-async function configureApiKey(auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
+/** NEAR AI: Set Up. Exported for the host tests of what follows a successful setup. */
+export async function configureApiKey(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider, options: { offerNextStep?: boolean } = {}): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI keys and profiles are scoped to a project.'); return; }
   const kind = await vscode.window.showQuickPick([
@@ -228,12 +232,18 @@ async function configureApiKey(auth: AuthService, sidebar: NearAiPanelViewProvid
       new ProfileStore(root, auth).configure({ profileId: deriveProfileId(root, `${displayName}${suffix}`), displayName: `${displayName}${suffix}`, organization: organization.trim() || displayName, baseUrl: input.baseUrl, authMode: 'apiKey', provider: kind.provider, ...('localBaseUrl' in input && input.localBaseUrl ? { localBaseUrl: input.localBaseUrl } : {}) }, input.apiKey, input.localApiKey));
     clearProviderCache();
     if (profile.validation.status === 'valid') {
+      // The chat reloads and comes into view; its welcome shows the next steps (the "no team yet" card).
       await sidebar.refresh();
-      void vscode.window.showInformationMessage(`NEAR AI is ready for “${profile.displayName}”. Pick a model and start chatting.`);
+      // A caller with its own next steps (turning on Team Mode) gets only the ready message.
+      if (options.offerNextStep === false) {
+        void vscode.window.showInformationMessage(`NEAR AI is ready for “${profile.displayName}”. Pick a model and start chatting.`);
+        return;
+      }
+      await offerNextStep({ secrets: context.secrets, chatVisible: () => sidebar.visible }, profile.displayName);
       return;
     }
     const retry = await vscode.window.showErrorMessage(`Setup couldn't connect: ${profile.validation.error ?? 'validation failed'}`, 'Try again', ...(usesCloud ? ['Open NEAR AI Cloud'] : []));
-    if (retry === 'Try again') await configureApiKey(auth, sidebar);
+    if (retry === 'Try again') await configureApiKey(context, auth, sidebar, options);
     if (retry === 'Open NEAR AI Cloud') await openApiKeyPortal();
   } catch (error) {
     void vscode.window.showErrorMessage(redactSecrets(error instanceof Error ? error.message : String(error)));
@@ -258,7 +268,7 @@ async function removeProfile(auth: AuthService, sidebar: NearAiPanelViewProvider
 }
 
 /** Switches this project's active profile, re-validating ones whose key needs checking. */
-async function selectProfile(auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
+async function selectProfile(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
   const profiles = new ProfileStore(root, auth);
@@ -274,14 +284,14 @@ async function selectProfile(auth: AuthService, sidebar: NearAiPanelViewProvider
     setUp
   ], { title: 'NEAR AI profile for this project', placeHolder: metadata.profiles.length ? 'Choose the profile to use' : 'No profiles yet' });
   if (!picked) return;
-  if (!picked.profileId) { await configureApiKey(auth, sidebar); return; }
+  if (!picked.profileId) { await configureApiKey(context, auth, sidebar); return; }
   let profile = await profiles.get(picked.profileId);
   if (profile && profile.validation.status !== 'valid') {
     profile = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Checking your NEAR AI key…' }, () => profiles.validate(picked.profileId));
   }
   if (profile?.validation.status !== 'valid') {
     const next = await vscode.window.showErrorMessage(`That profile's key couldn't be verified: ${profile?.validation.error ?? 'validation failed'}`, 'Re-enter key');
-    if (next) await configureApiKey(auth, sidebar);
+    if (next) await configureApiKey(context, auth, sidebar);
     return;
   }
   await profiles.select(profile.profileId);

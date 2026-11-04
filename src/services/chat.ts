@@ -40,6 +40,7 @@ import { hostAttribution } from '../domain/activity';
 import { ContextGraphMemory } from './contextGraphMemory';
 import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
+import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 
 /** Chat model and safety model pairs already told that auto approve has no private safety model. */
 const warnedSafetyModels = new Set<string>();
@@ -109,6 +110,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const tabs: ChatTab[] = [];
   let activeId = '';
   let disposed = false;
+  // The "no team yet" card: only the latest answer is posted, so a slow check never undoes "Not now".
+  const setupNudge = latestOnly(() => setupNudgeShows(context, auth), (show) => { if (!disposed) void panel.webview.postMessage({ type: 'setup-nudge', show }); });
   const feed = sharedActivityFeed();
   const workspaceRoot = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const onScreen = (): ChatTab => tabs.find((tab) => tab.id === activeId) ?? tabs[0];
@@ -385,6 +388,20 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand('nearAi.selectProfile');
       return;
     }
+    if (message.type === 'open-folder') {
+      await vscode.commands.executeCommand('workbench.action.files.openFolder');
+      return;
+    }
+    if (message.type === 'new-profile') {
+      await vscode.commands.executeCommand('nearAi.newProfile');
+      return;
+    }
+    if (message.type === 'setup-nudge') {
+      // Hidden at once; a card worked out before the flag was saved is dropped (latestOnly).
+      if (message.action === 'later') { await context.workspaceState?.update(SETUP_NUDGE_DISMISSED_KEY, true); setupNudge.set(false); return; }
+      await vscode.commands.executeCommand(message.action === 'team' ? 'nearAi.setupProjectTeam' : 'nearAi.projectSetup');
+      return;
+    }
     if (message.type === 'open-activity') {
       await vscode.commands.executeCommand('nearAi.openAgentActivity', message.agentId);
       return;
@@ -419,6 +436,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'refresh-status') {
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account: state.spend }));
       await sendProfileStatus(panel, auth);
+      await setupNudge.refresh();
       await sendArtifacts(panel);
       return;
     }
@@ -629,7 +647,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const tokenWatch = onReportingTokenChange(() => { void statusMessage({ agents: runningAgents(), account: state.spend }).then((status) => panel.webview.postMessage(status)); });
   // Back in the window (or its browser tab): prompts that waited unannounced are announced now.
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
-  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
+  const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
+  panel.onDidDispose(() => { disposed = true; for (const tab of tabs) tab.agent?.dispose(); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -652,7 +672,27 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   await ready;
   state.activity = createActivityStore();
   await sendProfileStatus(panel, auth);
+  await setupNudge.refresh();
   await loadModels(panel, auth);
+}
+
+/** Whether the empty chat's "no team yet" card shows: a working profile, no project team, and no "Not now" here. */
+async function setupNudgeShows(context: vscode.ExtensionContext, auth: AuthService): Promise<boolean> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) return false;
+  const exported = await new ProfileStore(root, auth).exportMetadata().catch(() => undefined);
+  const active = exported?.profiles.find((profile) => profile.profileId === exported.activeProfileId);
+  return shouldShowSetupNudge({ workingProfile: active?.validation.status === 'valid', hasTeam: await projectHasTeam(root), dismissed: context.workspaceState?.get(SETUP_NUDGE_DISMISSED_KEY) === true });
+}
+
+/** Calls `changed` when the team file, project.json, or a folder above them is created or deleted. */
+function watchProjectTeam(changed: () => void): vscode.Disposable | undefined {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root || typeof vscode.workspace.createFileSystemWatcher !== 'function' || typeof vscode.RelativePattern !== 'function') return undefined;
+  // Relative to the project folder, so it works before .planning/.near-ai exists.
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(root), `{${PROJECT_TEAM_WATCH_PATHS.join(',')}}`));
+  const subscriptions = [watcher.onDidCreate(changed), watcher.onDidDelete(changed), watcher];
+  return { dispose: () => subscriptions.forEach((subscription) => subscription.dispose()) };
 }
 
 /** How the close picker describes each conversation. */
@@ -792,7 +832,7 @@ async function loadModels(panel: ChatHost, auth: AuthService): Promise<void> {
 async function sendProfileStatus(panel: ChatHost, auth: AuthService, existing?: ProfileStore): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) {
-    panel.webview.postMessage({ type: 'profile-status', value: profileStatusMessage([], 'No workspace', undefined, false) });
+    panel.webview.postMessage({ type: 'profile-status', value: { ...profileStatusMessage([], 'No workspace', undefined, false), noWorkspace: true } });
     return;
   }
   const profiles = existing ?? new ProfileStore(root, auth);

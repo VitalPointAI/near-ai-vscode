@@ -35,6 +35,15 @@
   const agentPanel = $('agents');
   const pendingRegion = $('pending');
   const pendingKit = window.nearPending;
+  // The empty chat's "no team yet" card; without its helper the chat simply shows no card.
+  // Without its helper, the chat shows the usual welcome rather than a blank one.
+  const setupKit = window.nearSetup || { renderSetupNudge: () => undefined, welcomeState: () => 'ready', applyWelcomeState: () => { const ready = $('welcome-ready'); if (ready) ready.hidden = false; } };
+  // Until the project has a working profile, the welcome shows only the Connect NEAR AI panel.
+  const welcomeReady = $('welcome-ready') || welcome;
+  const welcomeMemory = {};
+  if ($('welcome-new-profile')) $('welcome-new-profile').addEventListener('click', () => post({ type: 'new-profile' }));
+  if ($('welcome-choose-profile')) $('welcome-choose-profile').addEventListener('click', () => post({ type: 'select-profile' }));
+  if ($('welcome-open-folder')) $('welcome-open-folder').addEventListener('click', () => post({ type: 'open-folder' }));
   const tabList = $('conversation-tabs');
   const newConversationButton = $('new-conversation');
   const needsYou = $('needs-you');
@@ -974,6 +983,7 @@
       // The view's "New Chat" action: a new conversation, alongside any still running.
       case 'reset': post({ type: 'new-chat' }); break;
       case 'conversations': renderConversations(m); break;
+      case 'setup-nudge': setupKit.renderSetupNudge(document, welcomeReady, m.show === true, post, () => input.focus()); break;
       case 'conversation-show': {
         draftsLive = false;
         activeId = m.id;
@@ -1039,8 +1049,8 @@
         if (current) { removeTurn(current.node); current = undefined; }
         setBusy(false);
         notice(m.text || 'Set up NEAR AI to start chatting.', [
-          textButton('Set up', () => post({ type: 'open-setup' }), true),
-          textButton('Choose profile', () => post({ type: 'select-profile' }))
+          textButton('Set up a new profile', () => post({ type: 'new-profile' }), true),
+          textButton('Choose a profile', () => post({ type: 'select-profile' }))
         ]);
         break;
       case 'profile-status': {
@@ -1049,6 +1059,7 @@
         profile.textContent = active ? active.displayName : 'Set up';
         profile.title = active ? active.displayName + (active.organization && active.organization !== active.displayName ? ' · ' + active.organization : '') + ' — click to switch profile' : 'Set up NEAR AI for this project';
         profile.dataset.state = active ? (active.validation && active.validation.status === 'valid' ? 'ready' : 'attention') : 'missing';
+        { const focus = setupKit.applyWelcomeState(document, setupKit.welcomeState(value), welcomeMemory); if (focus && !welcome.hidden) focus.focus(); }
         break;
       }
       case 'assistant-start': settleContinue(false); runInfo = { model: m.model, privacy: m.privacy }; setBusy(true); if (!current) startAssistant(); if (m.status) status.textContent = m.status; break;
