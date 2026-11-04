@@ -611,9 +611,11 @@
     if (!node) {
       node = el(kind === 'f' ? 'ul' : 'div', 'cell' + (kind === 'x' ? ' collapsed' : ''));
       node.setAttribute('data-column', col.key); node.setAttribute('data-lane', lane.key);
+      // G-62-7: a folded column's cell is its own node and never receives a card; it holds only the count, for screen readers.
+      if (kind === 'x') node.appendChild(el('span', 'sr-only'));
       cellEls.set(key, node);
     }
-    if (kind === 'x') setText(node, plural(cards.length, 'card', 'cards') + ', column collapsed');
+    if (kind === 'x') setText(node.firstChild, plural(cards.length, 'card', 'cards') + ', column folded');
     else if (kind === 'e') { if (!node.children.length) node.appendChild(el('span', 'sr-only', 'No cards')); } else {
       attr(node, 'aria-label', lane.label + ', ' + col.label);
       place(node, cardList(cards, ui.groupBy + '|' + lane.key + '|' + col.key, lane.label + ', ' + col.label));
@@ -882,6 +884,12 @@
   // ---- the extension-host test probe (E2E only) ------------------------------------------------------------------------------------------------
   function probe(m) {
     if (m.action === 'focus' && typeof m.itemId === 'string') api.focusCard(m.itemId);
+    else if (m.action === 'column' && typeof m.column === 'string') {
+      // Presses a column header as a person's click would (62-21: the real-window check opens Done once).
+      const head = nodesOf(heads, '.column').find((n) => n.getAttribute('data-column') === m.column);
+      const b = head ? head.querySelector('.col-btn') : null;
+      if (b) b.click();
+    }
     else if (m.action === 'key' && typeof m.key === 'string' && typeof KeyboardEvent === 'function') {
       const target = document.activeElement || document.body;
       try { target.dispatchEvent(new KeyboardEvent('keydown', { key: m.key, bubbles: true, cancelable: true })); } catch (error) { pageErrors.push(String((error && error.message) || error)); }

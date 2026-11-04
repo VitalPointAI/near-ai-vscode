@@ -729,6 +729,33 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     }
     throw new Error(`The board did not settle (${what}); last reading ${last.layout} at ${last.width} by ${last.height} px`);
   };
+  // Presses a column header on the page (the board's e2e probe), as a person's click would.
+  const press = async (column: string): Promise<void> => {
+    asks += 1;
+    const id = 10_000 + asks;
+    const before = board.fromView.length;
+    await tap.probe!({ id, action: 'column', column });
+    await board.next('fromView', (message) => message.type === 'e2e-facts' && message.id === id, before);
+  };
+  // Splits the editor area in two and sizes the board's group to about `target` px. VS Code applies group sizes only when the layout changes shape (so
+  // it goes back to one group first), and the board's group can come out on either side (so the sizes follow the side the reading shows it on).
+  const listWidth = async (target: number): Promise<LayoutReport> => {
+    let fraction = Math.min(0.9, target / editorWidth);
+    let boardFirst = true;
+    let last: LayoutReport | undefined;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+      await settled('one group', (r) => r.width >= editorWidth - 10).catch(() => undefined);
+      await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: boardFirst ? [{ size: fraction }, { size: 1 - fraction }] : [{ size: 1 - fraction }, { size: fraction }] });
+      const report = await settled('two groups', (r) => r.width < editorWidth - 10).catch(() => undefined);
+      if (report === undefined) continue;
+      last = report;
+      if (report.width < 520 && report.width >= 320) return report;
+      if (Math.abs(report.width - (1 - fraction) * editorWidth) < Math.abs(report.width - fraction * editorWidth)) { boardFirst = !boardFirst; continue; }
+      fraction = Math.max(0.05, Math.min(0.9, fraction * target / report.width));
+    }
+    throw new Error(`The board's group could not be sized under 520 px (last reading ${last === undefined ? 'none' : `${last.width} px`})`);
+  };
   // The whole hidden screen as a PNG in the screens folder, when the run gave the framebuffer folder (NEAR_AI_E2E_FBDIR); it must be the screen's size.
   const screenshot = async (name: string): Promise<void> => {
     const fbdir = process.env.NEAR_AI_E2E_FBDIR;
@@ -795,6 +822,22 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       assert.deepEqual(report.problems, [], problemsOf(report));
       const back = await ask({ action: 'scroll', top: 0, left: 0 });
       assert.deepEqual(back.problems, [], problemsOf(back));
+    }],
+    ['with Done opened once, every drawn card at the full width is readable: none in a folded column, whole words on a line, the card\'s own look', async () => {
+      const before = await settled('before Done opens', (r) => r.layout === 'kanban');
+      if (before.heads.find((head) => head.column === 'done')?.folded === true) await press('done');
+      const report = await settled('Done open', (r) => r.heads.some((head) => head.column === 'done' && !head.folded));
+      assert.ok(report.cards.some((c) => c.column === 'done'), 'the Done cards are drawn');
+      assert.deepEqual(report.problems, [], problemsOf(report));
+    }],
+    ['at a list width under 520 px beside a second editor group the probe finds nothing wrong, and the screen is saved as board-dark-480.png', async () => {
+      const report = await listWidth(480);
+      await screenshot(`board-${report.theme || 'dark'}-480.png`);
+      assert.equal(report.layout, 'list');
+      assert.ok(report.width < 520, `the board is ${report.width} px wide`);
+      assert.deepEqual(report.problems, [], problemsOf(report));
+      await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+      await settled('one group again', (r) => r.layout === 'kanban');
     }]
   ];
 }

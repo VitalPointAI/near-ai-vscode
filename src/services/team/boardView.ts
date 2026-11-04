@@ -110,11 +110,12 @@ export const boardTap: { toView?: (message: unknown) => void; fromView?: (messag
 export interface BoardLayoutRequest { id: number; action: 'measure' | 'scroll' | 'focus' | 'rects'; top?: number; left?: number; itemId?: string }
 
 /**
- * Extension-host tests only (NEAR_AI_E2E=1): asks the real page to report what it drew. The page acts (focus a card, press a key on the focused element)
+ * Extension-host tests only (NEAR_AI_E2E=1): asks the real page to report what it drew. The page acts (focus a card, press a key on the focused element,
+ * press a column header)
  * and answers with an 'e2e-facts' message (card count and ids, focus, whether the Move menu is open, page errors caught). The host never reads that
  * answer; the tests see it through `fromView`. The page honours this only when the host marked it with data-e2e, which happens only in the tests.
  */
-export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key'; itemId?: string; key?: string }
+export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key' | 'column'; itemId?: string; key?: string; column?: string }
 
 // ---- what the page may say -------------------------------------------------------------------------------------------------------------------
 

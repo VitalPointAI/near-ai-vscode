@@ -3,7 +3,8 @@
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 0 16px 32px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
-#root, #board, .state-box, .card, .banner, .lane, .group { overflow-wrap: anywhere; }
+/* G-62-7: text breaks between words; only a word longer than its line (a long path) is broken, so it wraps instead of overflowing. */
+#root, #board, .state-box, .card, .banner, .lane, .group { overflow-wrap: break-word; word-break: normal; }
 button, input, select, textarea { font: inherit; color: inherit; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 [hidden] { display: none !important; }
@@ -88,7 +89,8 @@ body:has(> #root[data-layout="kanban"]) { padding-bottom: 0; }
 .lane-progress { display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
 .lane-grid { margin-top: 12px; align-items: stretch; }
 .cell { position: relative; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; min-height: 64px; }
-.cell.collapsed { overflow: hidden; font-size: 0; border-radius: 4px; background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background)); }
+/* A folded cell is an empty strip under its folded header: board.js puts no card in it, only the count for screen readers (G-62-7). */
+.cell.collapsed { border-radius: 4px; background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background)); }
 
 /* cards */
 .card { position: relative; display: flex; flex-direction: column; gap: 4px; list-style: none; padding: 8px 12px; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px; background: var(--vscode-editorWidget-background); }
@@ -98,10 +100,12 @@ body:has(> #root[data-layout="kanban"]) { padding-bottom: 0; }
 .card.changed { outline: 2px solid var(--vscode-editor-findMatchHighlightBackground); }
 .card.done .state .icon { color: var(--vscode-testing-iconPassed); }
 .card.cancelled .card-title { text-decoration: line-through; }
-.card-main { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; padding: 0; text-align: left; background: none; border: 0; }
+/* The card's main button looks like the card (G-62-7): every property the global button rule sets is set again here. */
+.card-main { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; width: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; cursor: pointer; background: none; color: inherit; font-weight: inherit; text-align: left; white-space: normal; }
 .card-main:hover { background: none; }
 .card-top, .card-meta, .state { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .card-top .state { font-size: 0.85em; padding: 0; }
+.card-title, .card-meta, .card-rule, .pending-line, .refusal-line { overflow-wrap: break-word; word-break: normal; }
 .card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-weight: 400; }
 #root[data-layout="list"] .card-title { -webkit-line-clamp: 2; }
 .card-meta { font-size: 0.85em; line-height: 1.4; color: var(--vscode-descriptionForeground); }
