@@ -24,9 +24,10 @@ function authEntry(family: number, address: string, display: string, name: strin
 interface FakeWindow { id: number; box: Box; viewable: boolean; overrideRedirect?: boolean }
 
 /** A fake X server: checks the setup's cookie, then answers QueryTree, GetWindowAttributes, GetGeometry and applies ConfigureWindow, like Xvfb. */
-async function fakeServer(socketPath: string, windows: FakeWindow[], screen = { width: 1920, height: 1080 }): Promise<{ server: net.Server; configured: Array<{ id: number; box: Box }>; refuse?: string }> {
+async function fakeServer(socketPath: string, windows: FakeWindow[], screen = { width: 1920, height: 1080 }): Promise<{ server: net.Server; configured: Array<{ id: number; box: Box }>; warped: Array<{ x: number; y: number }> }> {
   const ROOT = 0x100;
   const configured: Array<{ id: number; box: Box }> = [];
+  const warped: Array<{ x: number; y: number }> = [];
   const server = net.createServer((socket) => {
     let buffer = Buffer.alloc(0);
     let ready = false;
@@ -98,6 +99,10 @@ async function fakeServer(socketPath: string, windows: FakeWindow[], screen = { 
           assert.equal(request.readUInt16LE(8), 0xf, 'x, y, width and height are set');
           found.box = { x: request.readInt32LE(12), y: request.readInt32LE(16), width: request.readUInt32LE(20), height: request.readUInt32LE(24) };
           configured.push({ id: found.id, box: { ...found.box } });
+        } else if (request[0] === 41 && request.readUInt32LE(8) === ROOT) {
+          // WarpPointer to a point of the root window (no source window).
+          assert.equal(request.readUInt32LE(4), 0, 'no source window');
+          warped.push({ x: request.readInt16LE(20), y: request.readInt16LE(22) });
         } else {
           const error = Buffer.alloc(32);
           error[0] = 0; error[1] = 3; error.writeUInt16LE(sequence, 2); error[10] = request[0];
@@ -107,7 +112,7 @@ async function fakeServer(socketPath: string, windows: FakeWindow[], screen = { 
     });
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-  return { server, configured };
+  return { server, configured, warped };
 }
 
 test('an Xauthority file is read entry by entry, and the cookie for the display is chosen (62-22)', () => {
@@ -143,7 +148,7 @@ test('the setup and ConfigureWindow requests are laid out as the X11 protocol sa
   assert.deepEqual([configure.readInt32LE(12), configure.readInt32LE(16), configure.readUInt32LE(20), configure.readUInt32LE(24)], [0, 0, 1920, 1080]);
 });
 
-test('fillScreen gives the largest shown top-level window the whole screen and leaves hidden and pop-up windows alone (62-22)', async () => {
+test('fillScreen gives the largest shown top-level window the whole screen, leaves hidden and pop-up windows alone, and parks the pointer in the bottom right corner (62-22)', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-x11-'));
   const socketPath = path.join(dir, 'X99');
   const xauthority = path.join(dir, 'Xauthority');
@@ -156,8 +161,10 @@ test('fillScreen gives the largest shown top-level window the whole screen and l
   ]);
   try {
     const result = await fillScreen({ display: ':99', xauthority, socketPath });
-    assert.deepEqual(result, { screen: { width: 1920, height: 1080 }, window: 0x400001, before: { x: 240, y: 90, width: 1440, height: 900 }, after: { x: 0, y: 0, width: 1920, height: 1080 } });
+    assert.deepEqual(result, { screen: { width: 1920, height: 1080 }, window: 0x400001, before: { x: 240, y: 90, width: 1440, height: 900 }, after: { x: 0, y: 0, width: 1920, height: 1080 }, pointer: { x: 1919, y: 1079 } });
     assert.deepEqual(fake.configured, [{ id: 0x400001, box: { x: 0, y: 0, width: 1920, height: 1080 } }], 'only the test window is changed');
+    // Xvfb draws the pointer into its framebuffer, so the screenshots would show it over the board: it goes to the last pixel, its arrow off screen.
+    assert.deepEqual(fake.warped, [{ x: 1919, y: 1079 }], 'the pointer is parked once');
   } finally {
     await new Promise<void>((resolve) => fake.server.close(() => resolve()));
     await rm(dir, { recursive: true, force: true });
@@ -176,6 +183,7 @@ test('fillScreen says why when the server refuses the cookie, and when no window
     await assert.rejects(fillScreen({ display: ':98', xauthority: wrong, socketPath }), /refused the connection: Authorization required/);
     await assert.rejects(fillScreen({ display: ':98', xauthority: right, socketPath }), /shows no window to size \(1 top-level windows, none shown\)/);
     assert.deepEqual(fake.configured, []);
+    assert.deepEqual(fake.warped, []);
   } finally {
     await new Promise<void>((resolve) => fake.server.close(() => resolve()));
     await rm(dir, { recursive: true, force: true });
