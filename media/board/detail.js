@@ -14,7 +14,10 @@
     imported: 'This comes from the project plans. Change the plan and the board follows.', noTasks: 'This plan has no tasks listed.',
     noHistory: 'No changes recorded since this window opened.', historyCap: 'Showing the latest 50 changes.', doneInPlans: 'Looks finished, please confirm',
     // UI review J-17: plain names for the plan facts.
-    wave: 'Order within the phase', kind: 'Type', source: 'Where it came from', mustHaves: 'What must be true when it is done', files: 'Parts of the project'
+    wave: 'Order within the phase', kind: 'Type', source: 'Where it came from', mustHaves: 'What must be true when it is done', files: 'Parts of the project',
+    // G-62-5 (owner decision 2026-11-03): who has the card, and the buttons that change it.
+    assignedTo: 'Assigned to', nobody: 'Nobody yet', assign: 'Assign...', change: 'Change person...', unassign: 'Unassign', assignMe: 'Assign to me', unassignMe: 'Unassign me',
+    cannotChange: 'Cards cannot be changed right now.'
   };
 
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
@@ -42,6 +45,10 @@
   moveBtn.setAttribute('aria-controls', 'menu');
   moveBtn.setAttribute('aria-expanded', 'false');
   const editBtn = button('secondary detail-edit', T.edit, () => { if (current) board.openForm(current.id); });
+  // The assignment buttons post the same requests as the Move to... menu: only the card id; the host decides who is meant.
+  const assignBtn = button('secondary detail-assign', T.assign, () => sendAssign(assignBtn, 'assign'));
+  const unassignBtn = button('secondary detail-unassign', T.unassign, () => sendAssign(unassignBtn, 'unassign'));
+  let assignWaiting; // the card whose assignment request from here the host has not answered
   const closeBtn = button('secondary detail-close', '', () => close(true));
   const actions = el('div', 'detail-actions');
   actions.append(moveBtn, closeBtn); // Edit is put in only while the viewer may edit this board item (updateActions)
@@ -114,11 +121,43 @@
     const canEdit = boardItem && d.editable === true && !down;
     if (canEdit && editBtn.parentNode !== actions) actions.insertBefore(editBtn, closeBtn);
     else if (!canEdit && editBtn.parentNode) editBtn.remove();
+    updateAssign(d, c, down);
     note.hidden = !(d && !boardItem);
     note.textContent = note.hidden ? '' : T.imported;
     const wantBack = board.layout() === 'list';
     const want = wantBack ? T.back : T.close;
     if (closeBtn.textContent !== want) closeBtn.replaceChildren(board.icon(wantBack ? 'arrow-left' : 'close'), el('span', 'label', want));
+  }
+
+  function sendAssign(btn, type) {
+    if (!current || btn.getAttribute('aria-disabled') === 'true') return;
+    assignWaiting = current.id;
+    setRefusal('');
+    board.post({ type, itemId: current.id });
+  }
+
+  function setLabel(btn, label) {
+    if (btn.textContent !== label) btn.replaceChildren(el('span', 'label', label));
+  }
+
+  /** The assignment buttons follow the detail's actions: Assign... or Change person... and Unassign for a lead, Assign to me or Unassign me otherwise. */
+  function updateAssign(d, c, down) {
+    const keys = d && Array.isArray(d.assignActions) ? d.assignActions : [];
+    const assigned = !!(d ? d.assignee : c && c.assignee);
+    const plan = [];
+    if (keys.indexOf('assign') >= 0) plan.push([assignBtn, assigned ? T.change : T.assign]);
+    else if (keys.indexOf('assign-me') >= 0) plan.push([assignBtn, T.assignMe]);
+    if (keys.indexOf('unassign') >= 0) plan.push([unassignBtn, T.unassign]);
+    else if (keys.indexOf('unassign-me') >= 0) plan.push([unassignBtn, T.unassignMe]);
+    const model = board.model();
+    const why = (model && model.viewer.readOnlyReason) || T.cannotChange;
+    for (const btn of [assignBtn, unassignBtn]) {
+      const entry = plan.find((p) => p[0] === btn);
+      if (!entry) { if (btn.parentNode) btn.remove(); continue; }
+      setLabel(btn, entry[1]);
+      if (btn.parentNode !== actions) actions.insertBefore(btn, editBtn.parentNode === actions ? editBtn : closeBtn);
+      if (down) { btn.setAttribute('aria-disabled', 'true'); btn.setAttribute('title', why); } else { btn.removeAttribute('aria-disabled'); btn.removeAttribute('title'); }
+    }
   }
 
   function setRefusal(reason) {
@@ -175,6 +214,7 @@
     const facts = d.facts || {};
     const rows = [];
     const fact = (label, value) => { if (value !== undefined && value !== '') rows.push(el('dt', '', label), el('dd', '', String(value))); };
+    fact(T.assignedTo, d.assignee ? d.assignee.name + (d.assignee.roleLabel ? ' (' + d.assignee.roleLabel + ')' : '') : T.nobody);
     fact('Phase', facts.phase);
     fact('Milestone', facts.milestone);
     fact(T.wave, facts.wave);
@@ -326,6 +366,10 @@
   board.onMessage('refused', (m) => {
     if (!current || m.itemId !== current.id) return;
     const reason = typeof m.reason === 'string' ? m.reason : '';
+    if (assignWaiting === m.itemId) {
+      assignWaiting = undefined;
+      if (reason) board.announce("Can't assign " + (current.detail ? current.detail.displayId : m.itemId) + '. ' + reason);
+    }
     setRefusal(reason);
     if (reason && !current.detail) body.replaceChildren();
   });

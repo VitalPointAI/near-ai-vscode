@@ -159,7 +159,8 @@ test('the detail of a phase card: its milestone, dependencies, requirements and 
   assert.deepEqual(detail.notReady, [NO_PLANS_DETAIL]);
   assert.deepEqual(detail.tasks, { done: 0, total: 0, summary: '', items: [] });
   assert.equal(detail.editable, false);
-  assert.deepEqual(detail.assignee, { id: dev.memberId, name: 'Dana' });
+  // 62-20: the detail's assignee carries the role word for 'Assigned to Dana (Developer)'.
+  assert.deepEqual(detail.assignee, { id: dev.memberId, name: 'Dana', roleLabel: 'Developer' });
   assert.deepEqual(detail.history.map((row) => row.text), ['Lee assigned this to Dana.', 'Import added this to the board.']);
   // A phase that has plans keeps no detail of its own: its plans are the cards.
   assert.equal(buildCardDetail(world.state, 'phase:61', { viewerId: lead.memberId, nowMs: NOW, history: [] }), undefined);

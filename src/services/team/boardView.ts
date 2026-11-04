@@ -524,7 +524,8 @@ export class BoardController {
         this.detail(state, message.itemId);
         return;
       case 'assign':
-        await this.assign(state, message.itemId);
+      case 'unassign':
+        await this.assign(state, message.itemId, message.type === 'unassign');
         return;
       case 'import-plans':
         // From the page the import always takes the current milestone, so no pick is shown (D-09).
@@ -750,8 +751,9 @@ export class BoardController {
   // ---- assignment (G-62-5, owner decision 2026-11-03) ---------------------------------------------------------------------------------------
 
   // Who this viewer puts on the card: for the owner and a lead, the person chosen in the native list the host built from the log; for anyone else,
-  // the viewer themselves (62-25). The page only names the card. Every step answers on the card: a refusal in plain words, or '' when nothing changes.
-  private async assign(state: SurfaceState, itemId: string): Promise<void> {
+  // the viewer themselves (62-25). Unassign takes whoever has the card off, with no prompt; for a member who is not a lead the log allows that only
+  // on their own card. The page only names the card. Every step answers on the card: a refusal in plain words, or '' when nothing changes.
+  private async assign(state: SurfaceState, itemId: string, unassign: boolean): Promise<void> {
     const session = this.deps.session();
     if (session === undefined) {
       this.refuse(state, itemId, NOT_READY_TEXT);
@@ -766,8 +768,8 @@ export class BoardController {
     const known = session.state();
     const knownAssignee = known.items.get(itemId)?.assignee;
     const leads = viewerId !== undefined && decideTeamAction(known, viewerId, { kind: 'item.assign' }).allowed;
-    if (!leads) {
-      await this.writeAssignment(state, session, itemId, viewerId, { known, knownAssignee, seenEventId });
+    if (unassign || !leads) {
+      await this.writeAssignment(state, session, itemId, unassign ? undefined : viewerId, { known, knownAssignee, seenEventId });
       return;
     }
 

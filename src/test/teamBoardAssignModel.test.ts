@@ -315,7 +315,8 @@ test('the card detail names the person, offers the same actions, and its history
     return built;
   };
   const forLead = detail(lead.memberId);
-  assert.deepEqual(forLead.assignee, { id: dev.memberId, name: 'Dana' });
+  // 62-20: the detail's assignee carries the role word for 'Assigned to Dana (Developer)'.
+  assert.deepEqual(forLead.assignee, { id: dev.memberId, name: 'Dana', roleLabel: 'Developer' });
   assert.deepEqual(forLead.assignActions, ['assign', 'unassign']);
   assert.deepEqual(detail(dev.memberId).assignActions, ['unassign-me']);
   assert.deepEqual(forLead.history.map((row) => row.text).slice(0, 5), [

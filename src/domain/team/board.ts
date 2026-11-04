@@ -82,7 +82,7 @@ export interface CardDetail {
   dependencies: Array<{ id: string; label: string; stateLabel?: string; done: boolean; onBoard: boolean }>;
   files: string[]; tasks: { done: number; total: number; summary: string; items: Array<{ id: string; title: string; done: boolean }> };
   notReady: string[]; editable: boolean; history: Array<{ at: string; text: string }>; historyNote?: string;
-  assignee?: { id: string; name: string }; assignActions: AssignAction[];
+  assignee?: { id: string; name: string; roleLabel: string }; assignActions: AssignAction[];
 }
 
 const R = TEAM_REJECTION_REASONS;
@@ -724,7 +724,11 @@ export function buildCardDetail(state: TeamState, itemId: string, options: { vie
       };
     })
   };
-  if (item.assignee !== undefined) detail.assignee = { id: item.assignee, name: memberName(state, item.assignee) };
+  if (item.assignee !== undefined) {
+    // 62-20: the detail says "Dana (Developer)", so the role word travels with the name.
+    const role = state.members.get(item.assignee)?.role;
+    detail.assignee = { id: item.assignee, name: memberName(state, item.assignee), roleLabel: role === undefined ? '' : ROLE_LABELS[role] ?? role };
+  }
   if (item.estimate !== undefined) detail.estimateTokens = item.estimate.tokens;
   if (item.description !== undefined) detail.description = stripFormatControls(item.description);
   if (blocked !== undefined) detail.blocked = blocked;
