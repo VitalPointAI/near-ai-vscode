@@ -63,6 +63,16 @@ async function itemWorld(): Promise<World> {
   return world;
 }
 
+// G-62-5 (62-15): the same world with three cards assigned (the owner is the one member a fixture log can carry): a held plan, a blocked chore
+// and a planless phase. itemWorld itself is left as it was, because teamAssignHashes.test.ts pins the hash of exactly those events.
+async function assignedWorld(): Promise<World> {
+  const world = await itemWorld();
+  send(world, 'item.assigned', { id: 'plan:90-02', memberId: world.owner.memberId }, 14);
+  send(world, 'item.assigned', { id: BOARD_ID, memberId: world.owner.memberId }, 15);
+  send(world, 'item.assigned', { id: 'phase:91', memberId: world.owner.memberId }, 16);
+  return world;
+}
+
 function plainOf(state: TeamState): JsonObject {
   return JSON.parse(serialiseState(state)) as JsonObject;
 }
@@ -82,6 +92,45 @@ test('a state with items serialises and deserialises to the same text and the sa
   assert.equal(restored.items.get(BOARD_ID)?.blocked?.reason, 'waiting for the API key');
   assert.equal(restored.items.get('plan:90-02')?.hold, true);
   assert.equal(restored.items.get(OTHER_BOARD_ID)?.state, 'cancelled');
+});
+
+test('a state with three assignees serialises and deserialises to the same text and the same hash', async () => {
+  const world = await assignedWorld();
+  const text = serialiseState(world.state);
+  const restored = deserialiseState(JSON.parse(text) as JsonObject, world.anchor);
+  assert.equal(serialiseState(restored), text);
+  assert.equal(stateHash(restored), stateHash(world.state));
+  const assigned = [...restored.items.values()].filter((item) => item.assignee !== undefined).map((item) => item.id).sort();
+  assert.deepEqual(assigned, [BOARD_ID, 'phase:91', 'plan:90-02']);
+  for (const id of assigned) assert.equal(restored.items.get(id)?.assignee, world.owner.memberId);
+  assert.ok(!text.includes('"assignee":""'), 'an empty assignee is never written');
+});
+
+test('a signed snapshot of a state with assignees plus the tail after it equals the full replay', async () => {
+  const world = await assignedWorld();
+  const cut = world.entries.length - 2;
+  const head = reduce(world.entries.slice(0, cut), world.anchor);
+  const file = parseSnapshotFile(canonicalize(signedSnapshot(world.owner, head)), world.anchor);
+  assert.equal(file.ok, true, file.ok ? '' : file.reason);
+  if (file.ok) {
+    for (const entry of world.entries.slice(cut)) applyEntry(file.state, entry);
+    assert.equal(serialiseState(file.state), serialiseState(world.state));
+    assert.equal(stateHash(file.state), stateHash(world.state));
+  }
+  const whole = parseSnapshotFile(canonicalize(signedSnapshot(world.owner, world.state)), world.anchor);
+  assert.equal(whole.ok, true, whole.ok ? '' : whole.reason);
+});
+
+test('a snapshot whose assignee is not a member id, or names nobody on the roster, is refused as an invalid snapshot', async () => {
+  const world = await assignedWorld();
+  const plain = plainOf(world.state);
+  for (const [name, assignee] of [['not a member id', 'anyone'], ['an empty assignee', ''], ['a number', 7], ['nobody on the roster', 'mbr-0000000000000000']] as const) {
+    const tampered = withItems(plain, (items) => { pair(items, 'plan:90-02').assignee = assignee; });
+    assert.throws(() => deserialiseState(tampered, world.anchor), (error: Error) => error.message.startsWith(INVALID_ITEMS), name);
+    const file = parseSnapshotFile(canonicalize(signedSnapshot(world.owner, world.state, { state: tampered })), world.anchor);
+    assert.equal(file.ok, false, name);
+    if (!file.ok) assert.ok(file.reason.startsWith(INVALID_ITEMS), `${name}: ${file.reason}`);
+  }
 });
 
 test('a signed snapshot file of a state with items loads, and applying the tail after it matches the full replay', async () => {
@@ -158,7 +207,9 @@ const HOSTILE: Hostile[] = [
   { name: 'a gsd reference of the wrong shape', change: (items) => { pair(items, 'plan:90-01').gsd = { phase: 'ninety' }; } },
   { name: 'a pair whose key is not the item id', change: (items) => { (items.find(([key]) => key === 'plan:90-02') as [string, PlainItem])[0] = 'plan:90-03'; } },
   { name: 'the same item twice', change: (items) => { items.push(['plan:90-02', { ...pair(items, 'plan:90-02') }]); } },
-  { name: 'items out of their canonical order', change: (items) => { items.reverse(); } }
+  { name: 'items out of their canonical order', change: (items) => { items.reverse(); } },
+  { name: 'an assignee that is not a member id', change: (items) => { pair(items, 'plan:90-02').assignee = 'anyone'; } },
+  { name: 'an assignee who is not on the roster', change: (items) => { pair(items, 'plan:90-02').assignee = 'mbr-0000000000000000'; } }
 ];
 
 function withItems(plain: JsonObject, change: (items: Array<[string, PlainItem]>) => void): JsonObject {
@@ -200,9 +251,12 @@ test('an item list that is not a list is refused', async () => {
 });
 
 test('over seeded random logs with work items a snapshot at a random cut plus the tail equals the full replay, also through the signed file', async () => {
+  let assignments = 0;
   for (let index = 0; index < 12; index += 1) {
     const seed = 4001 + index * 131;
-    const scenario = await buildScenario(seed, 70, { items: true });
+    // Since 62-15 the generator also draws item.assigned and item.unassigned by the owner, the one eligible member a fixture log carries.
+    const scenario = await buildScenario(seed, 70, { items: true, assignments: true });
+    assignments += scenario.entries.filter((entry) => entry.kind === 'event' && /"type":"item\.(un)?assigned"/.test(entry.text)).length;
     const full = reduce(scenario.entries, scenario.anchor);
     assert.ok(full.items.size > 0, `seed ${seed}: the scenario carries items`);
     const random = mulberry32(seed ^ 0x51ed270b);
@@ -215,6 +269,7 @@ test('over seeded random logs with work items a snapshot at a random cut plus th
     const loaded = parseSnapshotFile(canonicalize(signedSnapshot(scenario.owner, head)), scenario.anchor);
     assert.equal(loaded.ok, true, `seed ${seed}: ${loaded.ok ? '' : loaded.reason}`);
   }
+  assert.ok(assignments > 0, 'the seeded logs carry assignment events');
 });
 
 test('a snapshot of another team is still refused as such beside the item rules', async () => {

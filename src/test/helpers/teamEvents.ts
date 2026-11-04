@@ -113,6 +113,8 @@ const POLICY_CHANGES: Array<Partial<TeamPolicy>> = [
 export interface ScenarioOptions {
   // Mix work item events into the valid events. Off by default: a seed's roster-only log is a pinned sequence and must not move.
   items?: boolean;
+  // Also draw item.assigned and item.unassigned (62-15). Off by default for the same reason: every other seed draws what it always did.
+  assignments?: boolean;
 }
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -198,8 +200,16 @@ export async function buildScenario(seed: number, length: number, options: Scena
     if (roll < 0.95) return { type: 'item.cancelled', body: { id: target(cards), reason: 'not needed any more' } };
     return { type: 'item.reopened', body: { id: target(cards.filter((entry) => entry.state === 'done' || entry.state === 'cancelled')) } };
   };
+  // The owner is the one member of a scenario, so every assignment names the owner; the rules decide whether it lands at this position.
+  const assignmentIntent = (): { type: ImplementedEventType; body: unknown } => {
+    const all = [...live.items.values()];
+    const assigned = all.filter((entry) => entry.assignee !== undefined);
+    if (assigned.length > 0 && random() < 0.4) return { type: 'item.unassigned', body: { id: (pick(assigned) as WorkItem).id } };
+    const open = all.filter((entry) => entry.assignee === undefined);
+    return { type: 'item.assigned', body: { id: open.length === 0 ? 'plan:99-99' : (pick(open) as WorkItem).id, memberId: owner.memberId } };
+  };
   const addItem = (): boolean => {
-    const intent = itemIntent();
+    const intent = options.assignments === true && live.items.size > 0 && random() < 0.3 ? assignmentIntent() : itemIntent();
     const event = signed(signer(), { ...at(), type: intent.type, body: intent.body as never });
     if (checkCandidate(live, [event]) !== undefined) return false;
     accepted(event);

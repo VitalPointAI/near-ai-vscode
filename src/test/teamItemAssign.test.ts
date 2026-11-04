@@ -9,15 +9,19 @@ import { rmSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import { canonicalize, eventPath } from '../domain/team/canonical';
-import { cloneState, serialiseState } from '../domain/team/materialize';
+import { checkCandidate, cloneState, serialiseState } from '../domain/team/materialize';
 import { TEAM_REJECTION_REASONS } from '../domain/team/types';
-import type { TeamEvent, TeamState } from '../domain/team/types';
+import type { CommittedEvent, TeamEvent, TeamState } from '../domain/team/types';
+import { prepareEvents } from '../team/eventLog';
 import type { EventIntent } from '../team/eventLog';
 import { DEFAULT_COORDINATION_REF } from '../team/gitTransport';
 import { NEUTRAL_IDENTITY_ENV } from '../team/runGit';
 import { closeRig, confirm, createRig, enable, invite, join, openLog, publishProject, rootOf } from './helpers/teamFlowRig';
 import type { OpenLog, Rig } from './helpers/teamFlowRig';
-import { signed } from './helpers/teamEvents';
+import { ItemHistory, MAX_HISTORY_PER_ITEM } from '../domain/team/itemHistory';
+import { CHORE_ID, boardWorld, importedBody, seedStandardBoard } from './helpers/teamBoardWorld';
+import type { BoardWorld } from './helpers/teamBoardWorld';
+import { addFixtureMember, makeActor, signed } from './helpers/teamEvents';
 import type { TestActor } from './helpers/teamEvents';
 import type { MemorySecrets } from './helpers/teamHarness';
 
@@ -161,4 +165,223 @@ test('a lead assigns a plan to a developer on one computer, the developer sees i
     assert.deepEqual(after.rejected, []);
     assert.equal(assigneeOf(developer.log.state(), 'plan:90-02'), undefined);
   });
+});
+
+// ---- In memory: the rules, removal, state independence and history (Task 3) ------------------------------------------------------------------
+// boardWorld is an owner who really signs plus a lead (Lee), a developer (Dana), a reviewer (Rae) and an observer (Obi); seedStandardBoard adds
+// milestone:v0.9.0, phase:90 with plan:90-01 and plan:90-02 (and two tasks), the planless phase:91 and the developer's board chore.
+
+// The person a history entry names, read loosely so this file states the shape it expects.
+function memberIdOf(entry: object | undefined): string | undefined {
+  return (entry as { memberId?: string } | undefined)?.memberId;
+}
+
+function verdictOf(entry: CommittedEvent): string | undefined {
+  const verdict = entry.verdict;
+  assert.ok(verdict !== undefined, 'the entry was applied');
+  return verdict.accepted ? undefined : verdict.rejection.reason;
+}
+
+async function seededWorld(): Promise<BoardWorld> {
+  const world = await boardWorld();
+  seedStandardBoard(world);
+  return world;
+}
+
+// An unused invitation (a real member.invited), a removed developer (a real member.removed) and a joined member who still waits for a lead to
+// confirm the developer role they were invited into (observer with a pending role, the shape a confirmed-join policy leaves).
+async function withOutsiders(world: BoardWorld): Promise<{ invited: string; removed: string; waiting: string }> {
+  const [invitee, leaver, waiter] = await Promise.all([makeActor(world.teamId), makeActor(world.teamId), makeActor(world.teamId)]);
+  world.accept(world.owner, 'member.invited', {
+    memberId: invitee.memberId, name: 'Ivy', emailHashes: ['cd'.repeat(32)], role: 'developer', allocationNanoUsd: 0, ttlSeconds: 604_800, invite: { publicKey: invitee.identity.publicKey }
+  });
+  addFixtureMember(world.state, leaver, 'developer', 'Remy');
+  world.accept(world.owner, 'member.removed', { memberId: leaver.memberId });
+  addFixtureMember(world.state, waiter, 'observer', 'Wes');
+  const waiting = world.state.members.get(waiter.memberId);
+  assert.ok(waiting !== undefined);
+  waiting.pendingRole = 'developer';
+  return { invited: invitee.memberId, removed: leaver.memberId, waiting: waiter.memberId };
+}
+
+test('each assignment the rules refuse is rejected with its own reason, and nothing changes', async () => {
+  const world = await seededWorld();
+  const { lead, dev, reviewer, observer } = world;
+  const outsiders = await withOutsiders(world);
+  const cancelled = `item:${'0'.repeat(22)}9ZZZ`;
+  world.accept(lead, 'item.updated', { id: 'plan:90-01', changes: { state: 'done' } });
+  world.accept(lead, 'item.created', { id: cancelled, kind: 'bug', title: 'Gone', scope: [], requirements: [], mustHaves: [] });
+  world.accept(lead, 'item.cancelled', { id: cancelled, reason: 'duplicate' });
+  world.accept(lead, 'item.assigned', { id: 'plan:90-02', memberId: dev.memberId });
+  const before = serialiseState(world.state);
+  const rows: Array<[string, () => CommittedEvent, string]> = [
+    ['a milestone', () => world.send(lead, 'item.assigned', { id: 'milestone:v0.9.0', memberId: dev.memberId }), R.itemNotAssignable],
+    ['a task', () => world.send(lead, 'item.assigned', { id: 'task:90-01-1', memberId: dev.memberId }), R.itemNotAssignable],
+    ['a done plan', () => world.send(lead, 'item.assigned', { id: 'plan:90-01', memberId: dev.memberId }), R.itemTerminal],
+    ['a cancelled board item', () => world.send(lead, 'item.assigned', { id: cancelled, memberId: dev.memberId }), R.itemTerminal],
+    ['an item that is not on the board', () => world.send(lead, 'item.assigned', { id: 'plan:90-77', memberId: dev.memberId }), R.itemMissing],
+    ['a reviewer', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: reviewer.memberId }), R.assigneeNotEligible],
+    ['an observer', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: observer.memberId }), R.assigneeNotEligible],
+    ['a removed member', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: outsiders.removed }), R.assigneeNotEligible],
+    ['an unused invitation', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: outsiders.invited }), R.assigneeNotEligible],
+    ['a joined member waiting for confirmation', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: outsiders.waiting }), R.assigneeNotEligible],
+    ['someone who is not on the roster', () => world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: 'mbr-0000000000000000' }), R.assigneeNotEligible],
+    ['the same member twice in a row', () => world.send(lead, 'item.assigned', { id: 'plan:90-02', memberId: dev.memberId }), R.itemAlreadyAssigned],
+    ['unassign a card nobody is on', () => world.send(lead, 'item.unassigned', { id: CHORE_ID }), R.itemNotAssigned],
+    ['unassign an item that is not on the board', () => world.send(lead, 'item.unassigned', { id: 'plan:90-77' }), R.itemMissing]
+  ];
+  for (const [name, attempt, reason] of rows) assert.equal(verdictOf(attempt()), reason, name);
+  // The rejections are recorded in the rejected list; everything else is exactly as it was.
+  const after = cloneState(world.state);
+  after.rejected = after.rejected.slice(0, after.rejected.length - rows.length);
+  assert.equal(serialiseState(after), before);
+});
+
+test('only the owner and a lead may assign or unassign, on read', async () => {
+  const world = await seededWorld();
+  const { owner, lead, dev, reviewer, observer } = world;
+  for (const [actor, role] of [[dev, 'developer'], [reviewer, 'reviewer'], [observer, 'observer']] as const) {
+    assert.equal(verdictOf(world.send(actor, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId })), `${R.notPermitted}: the ${role} role does not allow assigning items to others`, role);
+  }
+  world.accept(owner, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId });
+  for (const [actor, role] of [[dev, 'developer'], [reviewer, 'reviewer'], [observer, 'observer']] as const) {
+    assert.equal(verdictOf(world.send(actor, 'item.unassigned', { id: CHORE_ID })), `${R.notPermitted}: the ${role} role does not allow assigning items to others`, role);
+  }
+  world.accept(lead, 'item.unassigned', { id: CHORE_ID });
+  world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: owner.memberId });
+  assert.equal(world.state.items.get(CHORE_ID)?.assignee, owner.memberId);
+});
+
+test('a planless phase, a backlog plan and a board chore take the owner, a lead and a developer in turn, each replacing the last', async () => {
+  const world = await seededWorld();
+  const { owner, lead, dev } = world;
+  for (const id of ['phase:91', 'plan:90-02', CHORE_ID]) {
+    for (const person of [owner, lead, dev]) {
+      world.accept(lead, 'item.assigned', { id, memberId: person.memberId });
+      assert.equal(world.state.items.get(id)?.assignee, person.memberId, `${id} to ${person.memberId}`);
+    }
+  }
+  // The lead replaces the developer on plan:90-02 with themselves, then takes the card off.
+  world.accept(lead, 'item.assigned', { id: 'plan:90-02', memberId: lead.memberId });
+  assert.equal(world.state.items.get('plan:90-02')?.assignee, lead.memberId);
+  world.accept(owner, 'item.unassigned', { id: 'plan:90-02' });
+  assert.equal(world.state.items.get('plan:90-02')?.assignee, undefined);
+  assert.ok(!('assignee' in (world.state.items.get('plan:90-02') ?? {})), 'the key is left out, not stored empty');
+  // A card assigned before it was finished can still be cleared once it is done.
+  world.accept(lead, 'item.assigned', { id: 'plan:90-01', memberId: dev.memberId });
+  world.accept(lead, 'item.updated', { id: 'plan:90-01', changes: { state: 'done' } });
+  assert.equal(world.state.items.get('plan:90-01')?.assignee, dev.memberId);
+  world.accept(lead, 'item.unassigned', { id: 'plan:90-01' });
+  assert.equal(world.state.items.get('plan:90-01')?.assignee, undefined);
+});
+
+test('blocking, holding, releasing, marking done, reopening and cancelling never change the assignee, and assignment never moves stateSince', async () => {
+  const world = await seededWorld();
+  const { lead, dev } = world;
+  const plan = (): NonNullable<ReturnType<TeamState['items']['get']>> => {
+    const item = world.state.items.get('plan:90-02');
+    assert.ok(item !== undefined);
+    return item;
+  };
+  const since = plan().stateSince;
+  world.accept(lead, 'item.assigned', { id: 'plan:90-02', memberId: dev.memberId });
+  assert.equal(plan().stateSince, since, 'assigning is not a state change');
+  // Each step, and whether it moves stateSince (the stored state or the hold flag changed).
+  const steps: Array<[string, () => CommittedEvent, boolean]> = [
+    ['block', () => world.accept(lead, 'item.blocked', { id: 'plan:90-02', reason: 'waiting on design' }), false],
+    ['hold', () => world.accept(lead, 'item.updated', { id: 'plan:90-02', changes: { hold: true } }), true],
+    ['release', () => world.accept(lead, 'item.updated', { id: 'plan:90-02', changes: { hold: false } }), true],
+    ['unblock', () => world.accept(lead, 'item.unblocked', { id: 'plan:90-02' }), false],
+    ['mark done', () => world.accept(lead, 'item.updated', { id: 'plan:90-02', changes: { state: 'done' } }), true],
+    ['reopen', () => world.accept(lead, 'item.reopened', { id: 'plan:90-02' }), true],
+    ['cancel', () => world.accept(lead, 'item.cancelled', { id: 'plan:90-02', reason: 'folded in' }), true],
+    ['reopen again', () => world.accept(lead, 'item.reopened', { id: 'plan:90-02' }), true]
+  ];
+  let expected = since;
+  for (const [name, step, moves] of steps) {
+    const entry = step();
+    if (moves) expected = (JSON.parse(entry.text) as { at: string }).at;
+    assert.equal(plan().assignee, dev.memberId, `${name} keeps the assignee`);
+    assert.equal(plan().stateSince, expected, `${name} stateSince`);
+  }
+  world.accept(lead, 'item.unassigned', { id: 'plan:90-02' });
+  assert.equal(plan().stateSince, expected, 'unassigning is not a state change');
+});
+
+test('removing a member clears every card assigned to them in the same step and leaves the others alone', async () => {
+  const world = await seededWorld();
+  const { owner, lead, dev } = world;
+  world.accept(lead, 'item.assigned', { id: 'plan:90-02', memberId: dev.memberId });
+  world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId });
+  world.accept(lead, 'item.assigned', { id: 'phase:91', memberId: lead.memberId });
+  world.accept(lead, 'item.assigned', { id: 'plan:90-01', memberId: owner.memberId });
+  const accepted = world.state.accepted;
+  world.accept(owner, 'member.removed', { memberId: dev.memberId });
+  assert.equal(world.state.accepted, accepted + 1, 'one event did it all');
+  assert.equal(world.state.items.get('plan:90-02')?.assignee, undefined);
+  assert.equal(world.state.items.get(CHORE_ID)?.assignee, undefined);
+  assert.equal(world.state.items.get('phase:91')?.assignee, lead.memberId);
+  assert.equal(world.state.items.get('plan:90-01')?.assignee, owner.memberId);
+  const holders = [...world.state.items.values()].filter((item) => item.assignee !== undefined).map((item) => item.id).sort();
+  assert.deepEqual(holders, ['phase:91', 'plan:90-01']);
+  // The removed developer cannot be put back on a card.
+  assert.equal(verdictOf(world.send(lead, 'item.assigned', { id: 'plan:90-02', memberId: dev.memberId })), R.assigneeNotEligible);
+});
+
+test('the board planner and the reader give the same answer, because both ask transitionProblem', async () => {
+  const world = await seededWorld();
+  const { lead, dev, reviewer } = world;
+  world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId });
+  const head = world.state.head;
+  const prepared = prepareEvents(world.state, head, { identity: lead.identity, memberId: lead.memberId }, [{ type: 'item.assigned', body: { id: CHORE_ID, memberId: reviewer.memberId } }], () => new Date('2026-03-02T00:00:00.000Z'));
+  assert.ok(Array.isArray(prepared), 'the permission check passes for a lead');
+  const rejection = checkCandidate(world.state, prepared as TeamEvent[]);
+  assert.equal(rejection?.reason, R.assigneeNotEligible);
+  assert.equal(verdictOf(world.send(lead, 'item.assigned', { id: CHORE_ID, memberId: reviewer.memberId })), R.assigneeNotEligible);
+});
+
+test('card history records who was assigned and who was taken off, in log order, within the 50-entry cap', async () => {
+  const world = await seededWorld();
+  const { owner, lead, dev } = world;
+  world.accept(lead, 'item.assigned', { id: 'plan:90-02', memberId: dev.memberId });
+  world.accept(lead, 'item.assigned', { id: 'plan:90-02', memberId: lead.memberId });
+  world.accept(owner, 'item.unassigned', { id: 'plan:90-02' });
+  world.send(dev, 'item.assigned', { id: 'plan:90-02', memberId: dev.memberId });
+  world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId });
+  world.accept(owner, 'member.removed', { memberId: dev.memberId });
+  world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: lead.memberId });
+  world.accept(lead, 'item.unassigned', { id: CHORE_ID });
+  const history = new ItemHistory();
+  history.record(world.entries);
+  const plan = history.forItem('plan:90-02').filter((entry) => entry.type.startsWith('item.') && entry.type.includes('assign'));
+  assert.deepEqual(plan.map((entry) => [entry.type, entry.author, memberIdOf(entry)]), [
+    ['item.unassigned', owner.memberId, lead.memberId],
+    ['item.assigned', lead.memberId, lead.memberId],
+    ['item.assigned', lead.memberId, dev.memberId]
+  ], 'newest first; the rejected developer attempt left nothing');
+  // After the removal cleared the chore, the next unassign names only the person it really took off.
+  const chore = history.forItem(CHORE_ID).filter((entry) => entry.type.includes('assign'));
+  assert.deepEqual(chore.map((entry) => [entry.type, memberIdOf(entry)]), [['item.unassigned', lead.memberId], ['item.assigned', lead.memberId], ['item.assigned', dev.memberId]]);
+  // The cap still holds: 60 more assignments keep only the newest 50.
+  const capWorld = await seededWorld();
+  for (let index = 0; index < 30; index += 1) {
+    capWorld.accept(capWorld.lead, 'item.assigned', { id: CHORE_ID, memberId: capWorld.dev.memberId });
+    capWorld.accept(capWorld.lead, 'item.assigned', { id: CHORE_ID, memberId: capWorld.lead.memberId });
+  }
+  const capped = new ItemHistory();
+  capped.record(capWorld.entries);
+  const kept = capped.forItem(CHORE_ID);
+  assert.equal(kept.length, MAX_HISTORY_PER_ITEM);
+  assert.equal(memberIdOf(kept[0]), capWorld.lead.memberId);
+  assert.equal(memberIdOf(kept[1]), capWorld.dev.memberId);
+});
+
+test('a board item added by the developer can be assigned like an imported plan', async () => {
+  const world = await seededWorld();
+  const { lead, dev } = world;
+  world.accept(lead, 'item.imported', importedBody({ id: 'plan:91-01', kind: 'plan', title: 'Gamma', parentId: 'phase:91' }));
+  world.accept(lead, 'item.assigned', { id: 'plan:91-01', memberId: dev.memberId });
+  world.accept(lead, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId });
+  assert.equal(world.state.items.get('plan:91-01')?.assignee, dev.memberId);
+  assert.equal(world.state.items.get(CHORE_ID)?.assignee, dev.memberId);
 });
