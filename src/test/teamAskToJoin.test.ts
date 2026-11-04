@@ -8,6 +8,7 @@ import test from 'node:test';
 import { deviceKeySecretName, sealKeySecretName } from '../team/identity';
 import { parseJoinRequest } from '../team/joinRequest';
 import { planShare, shareTeamSetup } from '../team/projectHome';
+import { NO_ORG_NOTICE } from '../team/join';
 import { readTeamFile } from '../team/teamFile';
 import { startFakeNear } from './helpers/fakeNear';
 import type { FakeNear } from './helpers/fakeNear';
@@ -22,7 +23,7 @@ const commandsModule = require('../services/team/teamCommands') as typeof import
 const memberModule = require('../services/team/memberCommands') as typeof import('../services/team/memberCommands');
 test.after(() => { uninstall(); });
 const { ENABLE_COMMAND, registerTeamMode } = commandsModule;
-const { MANAGE_MEMBERS_COMMAND } = memberModule;
+const { INVITE_COMMAND, JOIN_COMMAND, LINK_NEAR_COMMAND, LINK_NOW_CHOICE, MANAGE_MEMBERS_COMMAND, NOT_NOW_CHOICE, SIGN_OUT_NEAR_COMMAND } = memberModule;
 const ASK_TO_JOIN = 'nearAi.team.askToJoin';
 
 const EM_DASH = '—';
@@ -271,5 +272,194 @@ test('tracer: a person asks in one window, the owner accepts in Members, and the
     await dana.sync();
     assert.equal(shownMessages().filter((message) => message.startsWith('You are on')).length, joinedMessages);
     assert.equal(everythingShown().includes(EM_DASH), false);
+  });
+});
+
+// ---- Task 2: the accepting computer confirms by itself; expired and cancelled requests ---------------------------------------------------------
+
+const CONFIRMED_BY_REQUEST = 'Dana D joined and is confirmed, because you accepted their request.';
+const waitingNotices = (): string[] => shownMessages().filter((message) => message.includes('waiting for confirmation'));
+const lastList = (): string[] => stub.quickPickRequests[stub.quickPickRequests.length - 1]?.labels ?? [];
+
+// Dana on clone b asks, the owner accepts as a developer with $5, and Dana's computer joins on its next sync. Returns Dana's window and member id.
+async function askAcceptAndJoin(w: World, options: { role?: string } = {}): Promise<{ dana: Window; memberId: string }> {
+  const dana = await w.open('b');
+  clearUi();
+  const requestText = await askAndCopy(dana, { name: 'Dana D', email: 'dana@example.invalid' });
+  await acceptInMembers(w.owner, requestText, options.role === undefined ? {} : { role: options.role });
+  await dana.sync();
+  const memberId = parseJoinRequest(requestText).member;
+  await until(() => dana.handle.session()?.memberId() === memberId, 'Dana to join');
+  clearUi();
+  return { dana, memberId };
+}
+
+// The owner links the team to Team Org / Team workspace and shares the link, so a copy that gets the latest version sees it.
+async function linkTeam(w: World): Promise<void> {
+  stub.quickPickAnswers.push(LINK_NOW_CHOICE, 'Team Org', 'Team workspace');
+  stub.setMessageResponder((_text, actions) => (actions.includes('Share') ? 'Share' : undefined));
+  await w.owner.run(LINK_NEAR_COMMAND);
+  stub.setMessageResponder(undefined);
+  assert.deepEqual((await readTeamFile(w.owner.root))?.near, { organizationId: 'org-1', workspaceId: 'ws-1' }, shownMessages().join(' | '));
+  await w.owner.sync();
+  clearUi();
+}
+
+test('the computer that accepted a request confirms that person by itself when their join arrives, in the role it chose, and says so once', async () => {
+  await withWorld(async (w) => {
+    const { memberId } = await askAcceptAndJoin(w);
+    await w.owner.sync();
+    await until(() => w.owner.handle.session()?.state().members.get(memberId)?.pendingRole === undefined, 'the confirmation');
+    // The confirmation nudged a sync; it is let finish before looking.
+    await w.owner.sync();
+    const member = w.owner.handle.session()?.state().members.get(memberId);
+    assert.equal(member?.role, 'developer', 'the role the owner chose at accept');
+    assert.ok(shownMessages().includes(`${CONFIRMED_BY_REQUEST} ${NO_ORG_NOTICE}`), shownMessages().join(' | '));
+    assert.deepEqual(waitingNotices(), [], 'not the usual waiting notice');
+    const shown = shownMessages().length;
+    await w.owner.sync();
+    assert.equal(shownMessages().length, shown, 'nothing more on the next sync');
+    assert.equal(everythingShown().includes(EM_DASH), false);
+  });
+});
+
+test('in a linked team with the owner signed in, the automatic confirm creates the key capped at the allowance and the person installs it once', async () => {
+  await withWorld(async (w) => {
+    await linkTeam(w);
+    const signInsBefore = w.signIns.count;
+    const { dana, memberId } = await askAcceptAndJoin(w);
+    await w.owner.sync();
+    await until(() => w.owner.handle.session()?.state().members.get(memberId)?.nearApiKeyId !== undefined, 'the key to be sent');
+    await w.owner.sync();
+    assert.ok(shownMessages().includes(`${CONFIRMED_BY_REQUEST} Their team key has a spend cap of $5.00 set by you.`), shownMessages().join(' | '));
+    assert.equal(w.signIns.count, signInsBefore, 'the kept sign-in was used; no new sign-in');
+    const member = w.owner.handle.session()?.state().members.get(memberId);
+    assert.equal(member?.role, 'developer');
+    const key = w.fake?.key(member?.nearApiKeyId as string);
+    assert.equal(key?.spendLimitNanoUsd, 5_000_000_000, 'the allowance is the spending limit');
+
+    // Dana's computer opens the sealed key and installs it, and tells listeners once.
+    const session = dana.handle.session();
+    assert.ok(session !== undefined);
+    let installed = 0;
+    session.onKeyInstalled(() => { installed += 1; });
+    clearUi();
+    await dana.sync();
+    assert.equal(installed, 1, 'onKeyInstalled fired once');
+    assert.ok(shownMessages().includes(`Your team key for ${TEAM} is ready. NEAR AI uses it for this project now.`), shownMessages().join(' | '));
+    await dana.sync();
+    assert.equal(installed, 1, 'and not again');
+    assert.equal(everythingShown().includes(key?.secret as string), false, 'the clear key is never shown');
+  }, { near: true });
+});
+
+test('in a linked team with the owner not signed in, the automatic confirm asks no sign-in, confirms, and leaves Send key with one notice', async () => {
+  await withWorld(async (w) => {
+    await linkTeam(w);
+    await w.owner.run(SIGN_OUT_NEAR_COMMAND);
+    clearUi();
+    const signInsBefore = w.signIns.count;
+    const { memberId } = await askAcceptAndJoin(w);
+    await w.owner.sync();
+    await until(() => w.owner.handle.session()?.state().members.get(memberId)?.pendingRole === undefined, 'the confirmation');
+    await w.owner.sync();
+    await w.owner.sync();
+    assert.equal(w.signIns.count, signInsBefore, 'no sign-in was started');
+    assert.equal(stub.notificationActions.some((actions) => actions.includes('Sign in')), false, 'no sign-in prompt appeared');
+    const member = w.owner.handle.session()?.state().members.get(memberId);
+    assert.equal(member?.role, 'developer');
+    assert.equal(member?.nearApiKeyId, undefined, 'no key yet');
+    const aboutDana = shownMessages().filter((message) => message.includes('Dana D'));
+    assert.deepEqual(aboutDana, [`${CONFIRMED_BY_REQUEST} Their team key was not sent, because you are not signed in to NEAR AI on this computer. Choose Send key in Members when you are ready.`], 'one plain notice');
+    clearUi();
+    await w.owner.run(MANAGE_MEMBERS_COMMAND);
+    assert.ok(lastList().includes('Dana D, developer, key pending'), lastList().join(' | '));
+  }, { near: true });
+});
+
+test('another lead\'s computer that did not accept the request shows the usual waiting notice with Confirm; the accepting computer confirms', async () => {
+  await withWorld(async (w) => {
+    // Lee joins as a lead from clone c with an ordinary invite, and the owner confirms Lee.
+    stub.inputAnswers.push('Lee', 'lee@example.invalid', '5');
+    stub.quickPickAnswers.push(NOT_NOW_CHOICE, 'Lead', '7 days');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Copy invite') ? 'Copy invite' : undefined));
+    await w.owner.run(INVITE_COMMAND);
+    stub.setMessageResponder(undefined);
+    const bundle = stub.clipboardWrites[0] as string;
+    assert.ok(bundle !== undefined, shownMessages().join(' | '));
+    const lee = await w.open('c');
+    stub.inputAnswers.push(bundle, 'Lee L');
+    await lee.run(JOIN_COMMAND);
+    await w.owner.sync();
+    clearUi();
+    stub.quickPickAnswers.push('Lee L, lead, waiting for confirmation', 'Confirm');
+    await w.owner.run(MANAGE_MEMBERS_COMMAND);
+    await w.owner.sync();
+    await lee.sync();
+    assert.equal(lee.handle.session()?.state().members.get(lee.handle.session()?.memberId() as string)?.role, 'lead');
+
+    const { memberId } = await askAcceptAndJoin(w);
+    await lee.sync();
+    const notice = stub.notifications.findIndex((entry) => entry.message === `Dana D joined ${TEAM} and is waiting for confirmation`);
+    assert.ok(notice >= 0, `Lee's computer shows the waiting notice (${shownMessages().join(' | ')})`);
+    assert.deepEqual(stub.notificationActions[notice], ['Confirm', 'Remove']);
+    assert.equal(lee.handle.session()?.state().members.get(memberId)?.pendingRole, 'developer', 'Lee\'s computer confirmed nobody');
+
+    await w.owner.sync();
+    await until(() => w.owner.handle.session()?.state().members.get(memberId)?.pendingRole === undefined, 'the accepting computer to confirm');
+    await w.owner.sync();
+    assert.ok(shownMessages().includes(`${CONFIRMED_BY_REQUEST} ${NO_ORG_NOTICE}`), shownMessages().join(' | '));
+  }, { clones: ['a', 'b', 'c'] });
+});
+
+test('an accepted request whose invitation ran out is reported once with Ask again, and this computer keeps no team key', async () => {
+  await withWorld(async (w) => {
+    const dana = await w.open('b');
+    clearUi();
+    const requestText = await askAndCopy(dana, { name: 'Dana D', email: 'dana@example.invalid' });
+    await acceptInMembers(w.owner, requestText);
+    clearUi();
+    w.clock.offsetMs = 8 * 86_400_000;
+    await dana.sync();
+    const expired = `Your request to join ${TEAM} ran out before this computer could join. Choose Ask again to send a new request.`;
+    await until(() => shownMessages().includes(expired), 'the expired message');
+    assert.deepEqual(stub.notificationActions[shownMessages().indexOf(expired)], ['Ask again']);
+    const teamId = parseJoinRequest(requestText).team;
+    assert.equal(dana.secrets.values.has(deviceKeySecretName(teamId)) || dana.secrets.values.has(sealKeySecretName(teamId)), false, 'no team key was made');
+    assert.equal(dana.handle.session()?.memberId(), undefined);
+    await dana.sync();
+    await dana.sync();
+    assert.equal(shownMessages().filter((message) => message === expired).length, 1, 'said once');
+  });
+});
+
+test('a request whose invitation the owner cancelled is reported once with Ask again, and Ask again makes a new request', async () => {
+  await withWorld(async (w) => {
+    const dana = await w.open('b');
+    clearUi();
+    const requestText = await askAndCopy(dana, { name: 'Dana D', email: 'dana@example.invalid' });
+    await acceptInMembers(w.owner, requestText);
+    clearUi();
+    stub.quickPickAnswers.push('Invitation for Dana D, developer, pending', 'Cancel invitation');
+    stub.setMessageResponder((_text, actions) => (actions.includes('Cancel invitation') ? 'Cancel invitation' : undefined));
+    await w.owner.run(MANAGE_MEMBERS_COMMAND);
+    stub.setMessageResponder(undefined);
+    await w.owner.sync();
+    assert.ok(w.owner.handle.session()?.state().members.get(parseJoinRequest(requestText).member)?.removedEvent !== undefined, shownMessages().join(' | '));
+    clearUi();
+
+    const cancelled = `Your request to join ${TEAM} was cancelled by the team. Choose Ask again to send a new request.`;
+    stub.inputAnswers.push('Dana D', '');
+    stub.setMessageResponder((text, actions) => (text === cancelled ? 'Ask again' : actions.includes('Copy request') ? 'Copy request' : undefined));
+    await dana.sync();
+    await until(() => stub.clipboardWrites.length === 1, 'the new request to be copied');
+    stub.setMessageResponder(undefined);
+    assert.equal(shownMessages().filter((message) => message === cancelled).length, 1);
+    const fresh = parseJoinRequest(stub.clipboardWrites[0] as string);
+    assert.notEqual(fresh.member, parseJoinRequest(requestText).member, 'a new request with a new member id');
+    assert.equal(fresh.email, undefined, 'the email was left empty this time');
+    await dana.sync();
+    await dana.sync();
+    assert.equal(shownMessages().filter((message) => message === cancelled).length, 1, 'said once');
   });
 });

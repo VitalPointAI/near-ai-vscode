@@ -195,6 +195,7 @@ export class TeamSession {
   private readonly updateSubscription: { dispose(): void };
   private readonly history = new ItemHistory();
   private readonly changeListeners = new Set<(entries: readonly CommittedEvent[]) => void>();
+  private readonly keyInstalledListeners = new Set<() => void>();
   // Whether a Team Board is open. It only changes how often this window polls; it is never written anywhere (Phase 60 D-19, T-62-26).
   private boardVisible = false;
   private log: TeamLog;
@@ -349,6 +350,12 @@ export class TeamSession {
   public onStateChange(listener: (entries: readonly CommittedEvent[]) => void): { dispose(): void } {
     this.changeListeners.add(listener);
     return { dispose: () => { this.changeListeners.delete(listener); } };
+  }
+
+  // Told each time a team key delivered to this computer was installed for the project (61-30 refreshes the profile then).
+  public onKeyInstalled(listener: () => void): { dispose(): void } {
+    this.keyInstalledListeners.add(listener);
+    return { dispose: () => { this.keyInstalledListeners.delete(listener); } };
   }
 
   public itemHistory(itemId: string): HistoryEntry[] {
