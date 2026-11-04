@@ -910,6 +910,16 @@
       const b = head ? head.querySelector('.col-btn') : null;
       if (b) b.click();
     }
+    else if (m.action === 'open' && typeof m.itemId === 'string') {
+      // Clicks a card as a person would (62-22: the screenshot matrix opens a phase card's detail). Only a card the page drew can be pressed.
+      const p = parts.get(m.itemId);
+      if (p && p.main.isConnected) p.main.click();
+    }
+    else if (m.action === 'group' && typeof m.group === 'string') {
+      // Presses a Group by choice (62-22: the matrix shows Group by Phase). The choice is matched against the page's own list, never used as a selector.
+      const r = radios.find((n) => n.dataset.group === m.group);
+      if (r) r.click();
+    }
     else if (m.action === 'key' && typeof m.key === 'string' && typeof KeyboardEvent === 'function') {
       const target = document.activeElement || document.body;
       try { target.dispatchEvent(new KeyboardEvent('keydown', { key: m.key, bubbles: true, cancelable: true })); } catch (error) { pageErrors.push(String((error && error.message) || error)); }
@@ -920,7 +930,8 @@
     post({
       type: 'e2e-facts', id: m.id, cardIds: nodesOf(document, '.card').map((n) => n.getAttribute('data-id')), draggable: nodesOf(document, '.card[draggable="true"]').length,
       focusedCard: focused ? focused.getAttribute('data-id') : '', focusedRole: a && a.getAttribute ? a.getAttribute('role') || '' : '',
-      menuOpen: !!menu && !menu.hidden, menuItems: menu ? menu.querySelectorAll('[role="menuitem"]').length : 0, errors: pageErrors.slice()
+      menuOpen: !!menu && !menu.hidden, menuItems: menu ? menu.querySelectorAll('[role="menuitem"]').length : 0, detailOpen: !detailEl.hidden, groupBy: ui.groupBy,
+      errors: pageErrors.slice()
     });
   }
 
