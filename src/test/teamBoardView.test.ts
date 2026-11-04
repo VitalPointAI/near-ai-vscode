@@ -152,6 +152,60 @@ test('tracer: the panel opens on a real team session, gets the first state, post
   });
 });
 
+// 62.1-01 (D-02, D-03): every state the host posts carries the timeline of the same board, and the board model itself is what it always was.
+const TIMELINE_NOW = Date.parse('2026-03-05T12:00:00.000Z');
+interface TimelineState { type: 'state'; model: Record<string, unknown> & { cards: Array<Record<string, unknown> & { id: string }>; timeline?: { dots: Array<{ cardId: string }>; edges: Array<{ from: string; to: string }> } } }
+const plainJson = (value: unknown): unknown => JSON.parse(JSON.stringify(value)) as unknown;
+
+function withoutTimeline(model: TimelineState['model']): unknown {
+  const { timeline: _timeline, timelineProblem: _problem, ...rest } = model;
+  return plainJson({ ...rest, cards: model.cards.map(({ finishedText: _finished, ...card }) => card) });
+}
+
+function baseModelOf(session: Session, status: { kind: string }): unknown {
+  const viewerId = session.memberId();
+  const open = status.kind === 'live' || status.kind === 'syncing';
+  const { buildBoardModel } = require('../domain/team/board') as typeof import('../domain/team/board');
+  return plainJson(buildBoardModel(session.state(), {
+    nowMs: TIMELINE_NOW, status: status as Parameters<typeof buildBoardModel>[1]['status'], canWrite: session.canWrite() && open, ...(viewerId === undefined ? {} : { viewerId })
+  }));
+}
+
+test('62.1-01: the first posted state carries a timeline with one dot per card and the edges, and the rest is exactly the board model', async () => {
+  resetStub();
+  await withLiveTeam(async (rig) => {
+    await importFixture(rig);
+    const a = await startSession(rig, 'owner');
+    const context = createFakeContext(path.join(EXTENSION_ROOT, 'does-not-exist'), {});
+    const board = registerTeamBoard(context as never, {
+      session: () => a.session, output: { appendLine: (line) => { a.lines.push(line); }, show: () => undefined }, timers: new LiveTimers(), nowMs: () => TIMELINE_NOW
+    });
+    board.openPanel();
+    const panel = stub.webviewPanels[stub.webviewPanels.length - 1];
+    assert.ok(panel !== undefined, 'a panel was created');
+    try {
+      await panel.receive({ type: 'ready' });
+      const first = panel.posted.find((message): message is TimelineState => (message as { type?: string }).type === 'state');
+      assert.ok(first !== undefined, 'the first state message arrived');
+      const timeline = first.model.timeline;
+      assert.ok(timeline !== undefined, 'the posted model carries the timeline');
+      assert.deepEqual(timeline.dots.map((dot) => dot.cardId).sort(), first.model.cards.map((card) => card.id).sort(), 'exactly one dot per card of the board');
+      // Every dependency of a card on another card (not a whole phase) is an edge, and nothing else is.
+      const onBoard = new Set(first.model.cards.map((card) => card.id));
+      const items = a.session.state().items;
+      const expected = [...onBoard].flatMap((id) => (items.get(id)?.dependsOn ?? [])
+        .filter((from) => from !== id && onBoard.has(from) && items.get(from)?.kind !== 'phase').map((from) => `${from} > ${id}`)).sort();
+      assert.ok(expected.includes(`plan:90-01 > ${READY_PLAN}`), 'the fixture has its dependency between two plans');
+      assert.deepEqual(timeline.edges.map((edge) => `${edge.from} > ${edge.to}`).sort(), expected, 'one edge per dependency between two cards');
+      assert.equal(first.model.timelineProblem, undefined);
+      assert.deepEqual(withoutTimeline(first.model), baseModelOf(a.session, first.model.status as { kind: string }), 'without the timeline the posted model is buildBoardModel\'s');
+    } finally {
+      board.controller.dispose();
+      a.session.dispose();
+    }
+  });
+});
+
 test('the panel is one editor tab: a second Open reveals it, and it asks for scripts, no retained context and only media/board', async () => {
   resetStub();
   await withLiveTeam(async (rig) => {

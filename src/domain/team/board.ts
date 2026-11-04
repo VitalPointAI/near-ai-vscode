@@ -8,6 +8,7 @@ import {
 } from './boardText';
 import { MAX_HISTORY_PER_ITEM } from './itemHistory';
 import type { HistoryEntry } from './itemHistory';
+import type { BoardTimeline } from './timeline';
 import { actionForEvent, decideTeamAction } from './permissions';
 import { findSecrets } from './secrets';
 import type {
@@ -69,10 +70,16 @@ export interface BoardCard {
   assignActions: AssignAction[];
   /** The Backlog rule on the card face (J-02): set only for a card added on the board that sits in Backlog without its parts or its size. */
   backlogRule?: string;
+  /** 62.1 D-01: the local date a done card was marked done, when its history holds that event. Set by the host only, never by buildBoardModel. */
+  finishedText?: string;
 }
 export interface BoardModel {
   status: BoardStatus; viewer: BoardViewer; columns: BoardColumnInfo[]; milestones: BoardMilestone[]; selectedMilestone: string; phases: BoardPhase[]; requirements: string[];
   lanes: { member: BoardLane[]; phase: BoardLane[]; milestone: BoardLane[]; none: BoardLane[] }; cards: BoardCard[]; counts: { cards: number; ready: number; blocked: number };
+  /** 62.1 (D-02, D-03): the timeline of the same cards, attached by the host; buildBoardModel never sets it. */
+  timeline?: BoardTimeline;
+  /** 62.1: set by the host instead of timeline when the layout failed, so the page shows its error state and Columns keeps working. */
+  timelineProblem?: true;
 }
 export interface CardDetail {
   itemId: string; displayId: string; title: string; kind: ItemKind; kindLabel: string; column: BoardColumn; stateLabel: string; held: boolean; doneInGsd: boolean;
