@@ -71,6 +71,7 @@ const required = [
   'extension/media/chat/pending.js',
   'extension/media/chat/composer.js',
   'extension/media/chat/team.js',
+  'extension/media/chat/readiness.js',
   'extension/docs/marketplace/near-ai-chat.png',
   'extension/docs/marketplace/near-ai-commands.png',
   'extension/docs/marketplace/near-ai-approval.png',
