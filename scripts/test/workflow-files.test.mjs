@@ -107,3 +107,21 @@ test('the release workflow does not claim protections that depend on settings no
   assert.match(header, /organization owners/);
   assert.match(header, /once the tag rulesets .* are applied/is);
 });
+
+test('the agent review workflow posts and approves only as near-ai-reviewer, from main', async () => {
+  const { REVIEW_ACCOUNT } = await import('../lib/workflow.mjs');
+  assert.equal(REVIEW_ACCOUNT, 'near-ai-reviewer');
+  const all = jobs(read('agent-review.yml'));
+  const review = all.get('review');
+  const approve = all.get('approve');
+  for (const [id, job] of [['review', review], ['approve', approve]]) {
+    assert.match(job, /environment: agent-review/, `${id} runs in the agent-review environment`);
+    assert.match(job, /GH_TOKEN: \$\{\{ secrets\.NEAR_AI_REVIEW_TOKEN \}\}/, `${id} acts as the reviewer identity`);
+    assert.match(job, /GH_REPO: \$\{\{ github\.repository \}\}/, `${id} names the repository for gh`);
+  }
+  assert.match(review, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/, 'the judging code comes from main');
+  assert.match(review, /node scripts\/agent-review\.mjs submit/);
+  // The approval looks only at the status the gates trust, set by the reviewer identity.
+  assert.match(approve, new RegExp(`\\(\\.creator\\.login \\| ascii_downcase\\) == "${REVIEW_ACCOUNT}"`));
+  assert.doesNotMatch(approve, /\/status"/, 'not the combined status, which does not say who set it');
+});

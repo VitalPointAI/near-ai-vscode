@@ -4,13 +4,16 @@
 import { CI_CHECKS } from '../lib/workflow.mjs';
 
 export const REPO = 'VitalPointAI/near-ai-vscode';
+/** The owner's account: the PR author, and the account the authoring and merge agents run as. */
 export const OWNER = 'ALuhning';
+/** The reviewer identity whose agent-review status the gates trust (REVIEW_ACCOUNT). */
+export const REVIEWER = 'near-ai-reviewer';
 
 const notFound = (args) => new Error(`gh ${args.join(' ')} failed: gh: Not Found (HTTP 404)`);
 const lines = (values) => values.map((value) => JSON.stringify(value)).join('\n');
 
 /** Check runs, workflow run and agent-review status of a commit whose CI and review passed. */
-export function greenCommit({ suiteId = 1, runId = 11, event = 'pull_request', reviewer = OWNER, review = true } = {}) {
+export function greenCommit({ suiteId = 1, runId = 11, event = 'pull_request', reviewer = REVIEWER, review = true } = {}) {
   return {
     checkRuns: CI_CHECKS.map((name, i) => ({ id: runId * 100 + i, name, status: 'completed', conclusion: 'success', startedAt: '2026-01-01T00:00:00Z', app: 'github-actions', suiteId })),
     workflowRuns: [{ id: runId, name: 'CI', path: '.github/workflows/ci.yml', event, status: 'completed', conclusion: 'success', suiteId }],
@@ -29,7 +32,7 @@ export function fakeGitHub(state) {
   const calls = [];
   const reads = new Map();
   const world = {
-    login: OWNER, prs: {}, commits: {}, files: {}, tags: {}, branches: {}, behind: {}, mainContains: new Set(), threads: [], ...state
+    login: OWNER, prs: {}, commits: {}, files: {}, tags: {}, branches: {}, behind: {}, mainContains: new Set(), threads: [], reviews: [], ...state
   };
   const runner = (command, args) => {
     calls.push([command, ...args]);
@@ -56,6 +59,10 @@ export function fakeGitHub(state) {
       return `https://github.com/${REPO}/pull/${args[2]}#issuecomment-1\n`;
     }
     if (verb === 'pr' && sub === 'diff') return 'diff --git a/x b/x\n';
+    if (verb === 'pr' && sub === 'review') {
+      world.reviews.push({ number: args[2], by: world.login, approve: args.includes('--approve') });
+      return '';
+    }
     if (verb !== 'api') throw new Error(`unexpected gh ${line}`);
 
     const rest = args.slice(1).filter((arg) => arg !== '--paginate');

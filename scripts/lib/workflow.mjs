@@ -6,12 +6,17 @@ export const CI_CHECKS = Object.freeze(['lint', 'test', 'e2e', 'release-content'
 /** Commit status set by scripts/agent-review.mjs after the agent review team has run. */
 export const AGENT_REVIEW_CONTEXT = 'agent-review';
 /**
- * The only GitHub account whose `agent-review` status the merge and release gates trust: the
- * repository owner, whose account the review agents run as. Fixed here rather than taken from
- * whoever runs a script, so another admin running merge-pr cannot have their own status
- * accepted. Changing it is a change to the gates and goes through review like one.
+ * The only GitHub account whose `agent-review` status the merge and release gates trust, and the
+ * only account `agent-review.mjs submit` posts as: `near-ai-reviewer`, the dedicated reviewer
+ * identity whose token lives only in the protected `agent-review` environment
+ * (.github/workflows/agent-review.yml).
+ *
+ * It is deliberately NOT the owner's account (ALuhning): the authoring agents run `gh` as the
+ * owner, so trusting the owner's status would let an author certify its own work. Fixed here
+ * rather than taken from whoever runs a script, so another admin running merge-pr cannot have
+ * their own status accepted. Changing it is a change to the gates and goes through review like one.
  */
-export const AGENT_REVIEW_ACCOUNT = 'ALuhning';
+export const REVIEW_ACCOUNT = 'near-ai-reviewer';
 export const REQUIRED_CHECKS = Object.freeze([...CI_CHECKS, AGENT_REVIEW_CONTEXT]);
 /** Where the CI_CHECKS must come from: jobs of this workflow file, run by GitHub Actions. */
 export const CI_WORKFLOW = Object.freeze({ name: 'CI', path: '.github/workflows/ci.yml', app: 'github-actions' });
@@ -318,7 +323,7 @@ function newest(entries, startOf, { unfinishedFirst = false } = {}) {
  *   counts. A report with
  *   the same name from anywhere else refuses, so a duplicate-named job cannot stand in for or
  *   mask the real one.
- * - `agent-review` counts only as a commit status set by `reviewer` (AGENT_REVIEW_ACCOUNT in the
+ * - `agent-review` counts only as a commit status set by `reviewer` (REVIEW_ACCOUNT in the
  *   scripts). A check run of that name, or the status set by any other account, refuses.
  * - Any other required name must be green wherever it reports; any other failed check refuses.
  * - With exactCommitCi (tagging a release), the CI_CHECKS are judged only on the newest CI run
@@ -430,7 +435,7 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
 /**
  * What tagging `sha` as v<version> requires. A commit on main reached it through a reviewed PR, so
  * it needs green CI. The head of hotfix/<version> (a hotfix cut from an older tag) has not been
- * merged, so it also needs the owner's agent-review on that exact commit. Anything else is
+ * merged, so it also needs near-ai-reviewer's agent-review on that exact commit. Anything else is
  * refused, as the Release workflow would refuse it.
  */
 export function releaseGate({ version, sha, onMain, hotfixHead }) {
@@ -544,7 +549,7 @@ export function fitComment(review, footer = '', limit = 65_000) {
  * can weaken the checks it is judged by; merge-pr points them out.
  */
 export function gateFileChanges(paths) {
-  const gates = [/^\.github\//, /^scripts\/lib\//, /^scripts\/(secret-scan|merge-pr|agent-review|tag-release|prepare-release|verify-release-content)\.mjs$/, /^\.claude\/commands\//];
+  const gates = [/^\.github\//, /^scripts\/lib\//, /^scripts\/(secret-scan|merge-pr|agent-review|tag-release|prepare-release|verify-release-content|ci-review-prompt|ci-review-call|bootstrap-agent-review)\.(mjs|sh)$/, /^\.claude\/commands\//];
   return (paths ?? []).filter((file) => gates.some((pattern) => pattern.test(file)));
 }
 

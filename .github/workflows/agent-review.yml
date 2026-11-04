@@ -11,9 +11,16 @@
 #   - workflow_dispatch, to re-review by hand (an unchanged head keeps its status, so this is for
 #     re-running after a failure rather than after a push).
 #
-# The job sits in the protected `agent-review` environment, so the token exists only there and only
-# after the owner approves that environment. The rest of the run happens as a different identity from
-# the PR author, which is what makes the approval it posts count.
+# The job sits in the `agent-review` environment, which deploys only from protected branches, so the
+# token exists only there and only for runs of `main`. The review posts as near-ai-reviewer
+# (REVIEW_ACCOUNT in scripts/lib/workflow.mjs), a different identity from the PR author (the
+# authoring agents run as the owner's account). The merge and release gates trust the
+# `agent-review` status only from near-ai-reviewer, and `agent-review.mjs submit` refuses any other
+# account, so the owner's machine cannot post it.
+#
+# GitHub runs workflow_run and workflow_dispatch only from the default branch, so the PR that adds
+# this file cannot be reviewed by it: that one PR is bootstrapped by hand with
+# scripts/bootstrap-agent-review.mjs (see docs/development-workflow.md, "First run (bootstrap)").
 name: Agent review
 
 on:
@@ -89,8 +96,10 @@ jobs:
       - name: Review each target
         if: steps.targets.outputs.numbers != ''
         env:
-          # Posts the status and the comment as the reviewer identity, which is not the PR author.
+          # Posts the status and the comment as near-ai-reviewer, which is not the PR author.
+          # submit refuses to post as any other account.
           GH_TOKEN: ${{ secrets.NEAR_AI_REVIEW_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           SCRATCH: ${{ runner.temp }}
         run: |
           set -euo pipefail
@@ -148,6 +157,8 @@ jobs:
       - name: Approve every PR whose agent-review passed
         env:
           GH_TOKEN: ${{ secrets.NEAR_AI_REVIEW_TOKEN }}
+          # This job has no checkout, so gh needs the repository named.
+          GH_REPO: ${{ github.repository }}
           PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
           REQUESTED: ${{ inputs.pr }}
         run: |
@@ -163,8 +174,10 @@ jobs:
           fi
           for pr in $numbers; do
             # Only approve when the gate itself is green on the current head: branch protection
-            # requires both, and an approval without the status would be a bypass.
-            state=$(gh api "repos/${GITHUB_REPOSITORY}/commits/$(gh pr view "$pr" --json headRefOid --jq .headRefOid)/status" --jq '[.statuses[] | select(.context == "agent-review")][0].state // "none"')
+            # requires both, and an approval without the status would be a bypass. Only
+            # near-ai-reviewer's status counts, as at merge (the list is newest first).
+            head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
+            state=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${head}/statuses?per_page=100" --jq '[.[] | select(.context == "agent-review" and (.creator.login | ascii_downcase) == "near-ai-reviewer")][0].state // "none"')
             if [ "$state" != "success" ]; then
               echo "#${pr}: agent-review is ${state}, not approving"
               continue

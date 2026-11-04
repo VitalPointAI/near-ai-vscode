@@ -1,11 +1,16 @@
 ---
-description: Run the agent PR review team on a pull request and set the agent-review status
+description: Run the agent review of a pull request (the agent-review workflow) and report its result
 argument-hint: <pr-number>
 ---
 
-Run the agent review team on pull request **#$ARGUMENTS** of this repository, then record the
-result with `scripts/agent-review.mjs`. The full process is in `docs/development-workflow.md`
-("The agent review gate"); follow it exactly.
+Get the agent review of pull request **#$ARGUMENTS** of this repository and report it. The full
+process is in `docs/development-workflow.md` ("The agent review gate"); follow it exactly.
+
+The `agent-review` status is posted only by the reviewer identity, `near-ai-reviewer`, from
+`.github/workflows/agent-review.yml`. This session runs `gh` as the owner's account, so it never
+posts the status: `scripts/agent-review.mjs submit` refuses any account but `near-ai-reviewer`, and
+the merge and release gates ignore a status from any other account. Trigger the workflow and read
+what it posted.
 
 Rules for the whole run:
 
@@ -13,21 +18,57 @@ Rules for the whole run:
   If one exists, use it; otherwise create it with
   `git fetch origin <branch> && git worktree add .claude/worktrees/<name> origin/<branch>` (detached
   is fine for a review). Never check out, reset or edit the main checkout or local `main`.
-- The review is read-only. Reviewers do not push fixes. Findings go into the review file.
+- The review is read-only. Reviewers do not push fixes. Findings go into the report.
 - Never print, copy or store secrets. Never touch `~/.near-credentials`.
+- Never run `agent-review.mjs submit` without `--dry-run`, and never set the `agent-review` status
+  any other way.
 
-## 1. Gather
+## 1. Gather (read-only)
 
 ```bash
 node scripts/agent-review.mjs gather $ARGUMENTS --out "$SCRATCH/pr-$ARGUMENTS"
 ```
 
 (`$SCRATCH` is your scratchpad directory.) This writes `pr.json`, `diff.patch`, `checks.json` and
-`files.txt`, prints the CI table, and prints the `Head-SHA` to review. If a CI job failed, the
-review can still run, but say so in the summary: the merge gate will refuse until CI is green.
-If CI is still running, start the reviewers anyway and re-check CI with `gather` at the end.
+`files.txt`, prints the CI table, and prints the head SHA. If a CI job failed, say so: the workflow
+reviews automatically only after CI succeeds, and the merge gate refuses until CI is green.
 
-## 2. Spawn the reviewers in parallel (one message, several Agent calls)
+## 2. Trigger the review workflow
+
+The workflow also runs on its own after CI succeeds for the PR. To (re-)review by hand:
+
+```bash
+gh workflow run agent-review.yml -f pr=$ARGUMENTS
+sleep 5
+run_id=$(gh run list --workflow agent-review.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run watch "$run_id" --exit-status
+```
+
+The workflow runs from `main` with the reviewer's token from the `agent-review` environment. If the
+run fails before reviewing (for example the environment or a secret is missing), report the failing
+step from `gh run view "$run_id" --log-failed`; do not try to post a status yourself.
+
+## 3. Read the result
+
+```bash
+head=$(gh pr view $ARGUMENTS --json headRefOid --jq .headRefOid)
+gh api "repos/{owner}/{repo}/commits/$head/statuses" \
+  --jq '[.[] | select(.context == "agent-review" and .creator.login == "near-ai-reviewer")][0] | {state, description, target_url}'
+```
+
+`target_url` links the review comment; read it with `gh pr view $ARGUMENTS --comments`. Only this
+status counts: one set by any other account is ignored by the gates.
+
+Report back: the verdict (the status state), the comment URL, the recommendation, the counts per
+severity, and the blockers if any. If the status is missing or still pending, say so and give the
+run URL.
+
+## Optional: a local second opinion (advisory, posts nothing)
+
+When the owner asks for a deeper review than the workflow's model gives, run the review team
+locally and report its findings alongside the workflow's result. It never changes the status.
+
+### Spawn the reviewers in parallel (one message, several Agent calls)
 
 Give each reviewer the worktree path, the gather directory, the head SHA, and this output
 contract: a markdown list of findings, each line starting with a severity tag `[BLOCKER]`,
@@ -51,7 +92,7 @@ weakened test, a secret, a broken release, or missing required docs for a user-v
    covers every user-visible change since the last tag (`git log v<last>..HEAD --oneline`) and
    that the version bump fits the changes (patch for fixes, minor for features).
 
-## 3. Aggregate and write the review file
+### Aggregate and write the review file
 
 Deduplicate the findings, keep the highest severity when reviewers disagree, and drop anything
 you checked and found to be wrong (say why in one line under "Dismissed"). Write
@@ -87,14 +128,13 @@ only counts as fixed when the review is re-run on the new head. Severity tags co
 the file, code blocks included, so a dismissed item must not keep its `[BLOCKER]` (or other)
 tag: describe it in plain words under "Dismissed".
 
-## 4. Submit
+### Check the file, without posting
 
 ```bash
-node scripts/agent-review.mjs submit $ARGUMENTS --review "$SCRATCH/pr-$ARGUMENTS/review.md"
+node scripts/agent-review.mjs submit $ARGUMENTS --review "$SCRATCH/pr-$ARGUMENTS/review.md" --dry-run
 ```
 
-This posts the file as a PR comment and sets the `agent-review` status on the head commit:
-success only for `Verdict: PASS`, a matching `Head-SHA`, and no open `[BLOCKER]`. Any push to
-the branch afterwards needs a new review (the status is tied to the commit).
-
-Report back: the verdict, the comment URL, the counts per severity, and the blockers if any.
+The dry run shows the comment and the status the file would produce (success only for
+`Verdict: PASS`, a matching `Head-SHA`, and no open `[BLOCKER]`) and posts nothing. Report the
+findings to the owner; if they warrant a change to the verdict, the fix is a new commit on the PR,
+which the workflow then reviews again.

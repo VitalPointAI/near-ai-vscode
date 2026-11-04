@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { currentLogin, gh, prFiles, viewPr } from './gh.mjs';
-import { AGENT_REVIEW_ACCOUNT, AGENT_REVIEW_CONTEXT, CI_CHECKS, evaluateChecks, fitComment, normalizeChecks, parseReview, reviewDecision } from './workflow.mjs';
+import { AGENT_REVIEW_CONTEXT, REVIEW_ACCOUNT, CI_CHECKS, evaluateChecks, fitComment, normalizeChecks, parseReview, reviewDecision } from './workflow.mjs';
 
 function checkSummary(checks) {
   const lines = checks
@@ -48,7 +48,7 @@ function setStatus(repo, sha, state, description, targetUrl) {
 
 /**
  * Posts the review file as a PR comment and sets `agent-review` on the head commit. Throws when
- * the PR is not open, gh does not run as AGENT_REVIEW_ACCOUNT, or posting fails.
+ * the PR is not open, gh does not run as REVIEW_ACCOUNT (near-ai-reviewer), or posting fails.
  *
  * Order matters: `agent-review` is set to pending first, so an older success on the same commit
  * stops counting before anything else happens. If the comment then fails, the status stays
@@ -83,17 +83,19 @@ export function submitReview(repo, number, text, { dryRun = false, log = console
     ? `PASS: ${counts.major} major, ${counts.minor} minor, ${counts.nit} nit, ${counts.resolved} resolved`
     : `FAIL: ${decision.reasons[0]}`;
 
-  // Only the owner's status counts at merge and release (AGENT_REVIEW_ACCOUNT), so a status from
-  // any other account would only confuse; refuse before posting anything.
+  // Only the reviewer identity's status counts at merge and release (REVIEW_ACCOUNT), so a status
+  // from any other account, the owner's included, would only confuse; refuse before posting
+  // anything. The reviewer's token lives only in the agent-review environment, so in practice
+  // this runs in .github/workflows/agent-review.yml (or the one-time bootstrap script).
   const login = currentLogin();
-  const trusted = login.toLowerCase() === AGENT_REVIEW_ACCOUNT.toLowerCase();
+  const trusted = login.toLowerCase() === REVIEW_ACCOUNT.toLowerCase();
   if (dryRun) {
-    if (!trusted) log(`[dry run] note: gh runs as ${login}, but only ${AGENT_REVIEW_ACCOUNT}'s ${AGENT_REVIEW_CONTEXT} counts; a real submit would refuse.`);
+    if (!trusted) log(`[dry run] note: gh runs as ${login}, but only ${REVIEW_ACCOUNT}'s ${AGENT_REVIEW_CONTEXT} counts; a real submit would refuse.`);
     log(body);
     log(`\n[dry run] would set ${AGENT_REVIEW_CONTEXT}=${decision.state} on ${pr.headRefOid}: ${description.slice(0, 140)}`);
     return { state: decision.state, reasons: decision.reasons };
   }
-  if (!trusted) throw new Error(`gh runs as ${login}, but the merge and release gates trust ${AGENT_REVIEW_CONTEXT} only from ${AGENT_REVIEW_ACCOUNT}; nothing was posted`);
+  if (!trusted) throw new Error(`gh runs as ${login}, but the merge and release gates trust ${AGENT_REVIEW_CONTEXT} only from ${REVIEW_ACCOUNT}; nothing was posted. Run the review workflow instead: gh workflow run agent-review.yml -f pr=${number}`);
 
   setStatus(repo, pr.headRefOid, 'pending', 'Posting the agent review');
   const commentDir = mkdtempSync(path.join(tmpdir(), 'agent-review-comment-'));
