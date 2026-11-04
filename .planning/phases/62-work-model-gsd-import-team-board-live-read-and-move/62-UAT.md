@@ -111,14 +111,14 @@ blocked: 1
   artifacts: [media/board/board.css, media/board/board.js]
   missing: ["layout fix", "real-window screenshot verification (e2e captures)", "layout-probe overflow checks like the 0.4.14 panels"]
   debug_session: ""
-- truth: "A lead (owner or lead) can assign a card to a team member and unassign it, from the card's Move menu and detail; the card shows the person, the member lane shows it, and the change is a signed, permission-checked event visible to everyone within one poll"
+- truth: "A lead (owner or lead) can assign a card to a team member and unassign it, from the card's Move menu and detail; the card shows the person, the member lane shows it, and the change is a signed, permission-checked event visible to everyone within one poll. Any confirmed member who is not an observer can also assign a card to themselves and unassign themselves (Assign to me, Unassign me); observers, including joined members waiting for a lead, cannot (owner decision 2026-11-03)"
   status: failed
   reason: "User reported: Don't see any way to assign cards to anyone."
   severity: major
   test: 5
   root_cause: "assignment was scheduled for Phases 63 and 64 (claims and dispatch); item.assign exists only as a declared permission"
   artifacts: [src/domain/team/types.ts, src/domain/team/permissions.ts, src/domain/team/materialize.ts, src/domain/team/board.ts, media/board/*]
-  missing: ["item.assigned event (or equivalent) with validator, permission row, materializer and read-path check", "UI to assign/unassign", "member lane uses the assignee"]
+  missing: ["item.assigned event (or equivalent) with validator, permission row, materializer and read-path check", "UI to assign/unassign", "member lane uses the assignee", "self-assignment for every confirmed member who is not an observer, checked on write and read (owner decision 2026-11-03)"]
   debug_session: ""
 - truth: "Dragging a card to an allowed column moves it in a real VS Code and code-server window, a refused drop snaps back with the reason, and the Move to menu remains the keyboard path; covered by a real-window e2e that performs a drag"
   status: failed

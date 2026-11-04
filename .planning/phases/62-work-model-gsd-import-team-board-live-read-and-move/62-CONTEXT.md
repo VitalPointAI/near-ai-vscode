@@ -107,6 +107,17 @@ Not in this phase: claims, leases and the claim/release/in-progress transitions 
 
 </deferred>
 
+## Owner decision (2026-11-03): self-assignment
+
+Amends the assignment added after the hands-on check (G-62-5, D-18) and the 62-15 rule that only the owner and leads assign.
+
+- Any confirmed member who is not an observer (owner, lead, developer, reviewer) may assign a card to themselves and unassign themselves. On the board they see "Assign to me" on an unassigned card and "Unassign me" on a card assigned to them, in the Move to... menu and the card detail.
+- Owners and leads still assign and unassign anyone, with the person list.
+- Observers cannot assign or unassign, and that includes a joined member who is still waiting for a lead to confirm them (they are observers until then).
+- The signed events stay exactly as 62-15 made them (item.assigned { id, memberId }, item.unassigned { id }); a new permission path (item.assign-self) decides a member's own assignment on write and on read, so no event shape and no Phase 60 to 62 hash changes. Reviewers can now hold an assignment.
+- Planner reading, confirmed in 62-25's checkpoint: a member can take only an unassigned card; a card assigned to a teammate changes hands only when that teammate unassigns themselves or a lead reassigns it, so nobody's card is taken over silently.
+- Plans: 62-25 (permission path), 62-19 (model), 62-20 (board), 62-24 (real-window check and the owner's hands-on repeat).
+
 ---
 
 *Phase: 62-work-model-gsd-import-team-board-live-read-and-move*

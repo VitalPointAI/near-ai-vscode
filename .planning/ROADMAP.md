@@ -172,9 +172,9 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Moves are permission-checked and follow only permitted transitions; an illegal drop snaps back and says why. (BOARD-03)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
 
-**Plans**: 15/24 plans executed in 13 waves (Waves 7 to 13 are the fix pass for the owner's 62-UAT findings, 2026-11-03; they run after Phase 61's fix pass, 61-22)
+**Plans**: 15/25 plans executed in 14 waves (Waves 7 to 14 are the fix pass for the owner's 62-UAT findings, 2026-11-03; they run after Phase 61's fix pass, 61-22)
 **UI hint**: yes
-**Owner amendments (2026-11-03)**: the board opens only in its own editor tab and the sidebar Team section shows a summary; a lead assigns cards (signed item.assigned and item.unassigned, claims stay in Phase 63); planless phases show as Backlog cards; Done folds by default; cards stay readable (folded columns hold no cards, titles wrap between words); layout and drag are proven in a real window on a hidden virtual screen with real screenshots the owner reviews (recorded in 62-CONTEXT.md and 62-UI-SPEC.md by 62-17).
+**Owner amendments (2026-11-03)**: the board opens only in its own editor tab and the sidebar Team section shows a summary; a lead assigns cards and any member who is not an observer assigns themselves (signed item.assigned and item.unassigned, claims stay in Phase 63); planless phases show as Backlog cards; Done folds by default; cards stay readable (folded columns hold no cards, titles wrap between words); layout and drag are proven in a real window on a hidden virtual screen with real screenshots the owner reviews (recorded in 62-CONTEXT.md and 62-UI-SPEC.md by 62-17).
 
 **Wave 1**
 - [x] 62-01-PLAN.md — Item events: confirm the signed bodies, then validators, item.move permission row and the state machine on write and read, two-clone tracer (BOARD-01, BOARD-03)
@@ -209,21 +209,24 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [ ] 62-18-PLAN.md — Sidebar Team section board summary: ready, blocked and mine beside Open board (BOARD-01, BOARD-02)
 
 **Wave 8** *(blocked on Wave 7 completion)*
-- [ ] 62-19-PLAN.md — Board model: assignee on cards and member rows, planAssign and the person list, planless phases as Backlog cards, folded defaults (BOARD-01, BOARD-03)
+- [ ] 62-25-PLAN.md — Self-assignment: any member who is not an observer assigns and unassigns themselves, checked on write and read, no event or hash change (owner decision 2026-11-03) (BOARD-02, BOARD-03)
 
 **Wave 9** *(blocked on Wave 8 completion)*
-- [ ] 62-20-PLAN.md — Assign and unassign from Move to... and the card detail, native person list, the person on the card, seen within one poll (BOARD-02, BOARD-03)
+- [ ] 62-19-PLAN.md — Board model: assignee on cards and member rows, planAssign and the person list, planless phases as Backlog cards, folded defaults (BOARD-01, BOARD-03)
 
 **Wave 10** *(blocked on Wave 9 completion)*
-- [ ] 62-21-PLAN.md — Real-window layout and readable cards on a hidden virtual screen: solid toolbar band, one board scroller, aligned columns and lanes, folded columns without cards, word wrapping, open on active work (BOARD-01)
+- [ ] 62-20-PLAN.md — Assign and unassign from Move to... and the card detail, native person list, the person on the card, seen within one poll (BOARD-02, BOARD-03)
 
 **Wave 11** *(blocked on Wave 10 completion)*
-- [ ] 62-22-PLAN.md — Screenshot matrix: four widths and four themes, scrolled, focused, Done open, detail, menu and Group by Phase, each checked by the probe (BOARD-01)
+- [ ] 62-21-PLAN.md — Real-window layout and readable cards on a hidden virtual screen: solid toolbar band, one board scroller, aligned columns and lanes, folded columns without cards, word wrapping, open on active work (BOARD-01)
 
 **Wave 12** *(blocked on Wave 11 completion)*
-- [ ] 62-23-PLAN.md — Real drag in a real window: allowed drop lands, refused drop snaps back with the reason, Escape cancels, keyboard path kept (BOARD-03)
+- [ ] 62-22-PLAN.md — Screenshot matrix: four widths and four themes, scrolled, focused, Done open, detail, menu and Group by Phase, each checked by the probe (BOARD-01)
 
 **Wave 13** *(blocked on Wave 12 completion)*
+- [ ] 62-23-PLAN.md — Real drag in a real window: allowed drop lands, refused drop snaps back with the reason, Escape cancels, keyboard path kept (BOARD-03)
+
+**Wave 14** *(blocked on Wave 13 completion)*
 - [ ] 62-24-PLAN.md — Realistic board with teammates and assignments, sidebar summary, final screenshot set, full gate, owner review and hands-on repeat (BOARD-01, BOARD-02, BOARD-03)
 
 ### Phase 63: Claims, leases, claim workspaces, LeaseGuard, duplicate checks
@@ -322,7 +325,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 24/24 | In Progress (fix pass planned) | - |
-| 62. Work model, GSD import, Team Board | v0.6.0 | 15/24 | In Progress (fix pass planned) | - |
+| 62. Work model, GSD import, Team Board | v0.6.0 | 15/25 | In Progress (fix pass planned) | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
 | 65. Integration merge train | v0.6.0 | 0/TBD | Not started | - |
