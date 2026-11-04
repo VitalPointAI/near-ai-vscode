@@ -25,6 +25,8 @@ import { safeReason } from './teamStatusBar';
 export const BOARD_PANEL_TYPE = 'nearAiTeamBoard';
 // Load order of the client; plans 62-09 to 62-13 create the files.
 export const BOARD_SCRIPTS = ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js'] as const;
+// RED stub (62-21 Task 1): the test-only page scripts arrive in the GREEN commit.
+export const BOARD_TEST_SCRIPTS: readonly string[] = [];
 export const BOARD_STYLES = ['board.css'] as const;
 
 const PANEL_TITLE = 'Team Board';
@@ -98,7 +100,9 @@ const CARD_STATE_REFUSALS: ReadonlySet<string> = new Set([
  * those tests (NEAR_AI_E2E=1, IN-05): `request` posts { type: 'host-request', payload } to every visible surface, which the real board.js re-posts to
  * the host (the chat sidebar's precedent) only on a page the host marked with data-e2e.
  */
-export const boardTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void; request?: (payload: unknown) => Promise<void>; probe?: (probe: BoardProbe) => Promise<void> } = {};
+export const boardTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void; request?: (payload: unknown) => Promise<void>; probe?: (probe: BoardProbe) => Promise<void>; layout?: (request: BoardLayoutRequest) => Promise<void> } = {};
+
+export interface BoardLayoutRequest { id: number; action: 'measure' | 'scroll' | 'focus' | 'rects'; top?: number; left?: number; itemId?: string }
 
 /**
  * Extension-host tests only (NEAR_AI_E2E=1): asks the real page to report what it drew. The page acts (focus a card, press a key on the focused element)

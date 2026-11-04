@@ -23,7 +23,7 @@ test.after(() => { uninstall(); });
 
 const { TeamSession, projectAuditSink } = sessionModule;
 const { createTeamStatusBar } = barModule;
-const { BOARD_PANEL_TYPE, BOARD_SCRIPTS, BOARD_STYLES, boardHtml, boardTap, parseBoardMessage, registerTeamBoard } = boardModule;
+const { BOARD_PANEL_TYPE, BOARD_SCRIPTS, BOARD_STYLES, BOARD_TEST_SCRIPTS, boardHtml, boardTap, parseBoardMessage, registerTeamBoard } = boardModule;
 type BoardSurface = import('../services/team/boardView').BoardSurface;
 type Session = Awaited<ReturnType<typeof TeamSession.start>>;
 type SessionDeps = Parameters<typeof TeamSession.start>[0];
@@ -109,6 +109,7 @@ function resetStub(): void {
   boardTap.toView = undefined;
   boardTap.fromView = undefined;
   boardTap.request = undefined;
+  boardTap.layout = undefined;
 }
 
 test('tracer: the panel opens on a real team session, gets the first state, posts a hold and gets the card back in Backlog', async () => {
@@ -216,14 +217,18 @@ test('the page has one nonce CSP, one script tag per client file in order and no
     assert.equal(html.match(/<meta http-equiv="Content-Security-Policy"/g)?.length, 1, 'one CSP meta');
     const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)?.[1];
     assert.equal(csp, "default-src 'none'; style-src CSP_SOURCE; script-src 'nonce-NONCE';");
+    // 62-21 (T-62-68): the test-only layout probe is the last script, and only on a page made for the extension-host tests.
+    const files: readonly string[] = testSeams ? [...BOARD_SCRIPTS, ...BOARD_TEST_SCRIPTS] : BOARD_SCRIPTS;
     const scripts = [...html.matchAll(/<script\b([^>]*)>([^<]*)<\/script>/g)];
-    assert.equal(scripts.length, BOARD_SCRIPTS.length, 'one script tag per client file');
-    assert.equal((html.match(/<script\b/g) ?? []).length, BOARD_SCRIPTS.length, 'no script tag the pattern missed');
+    assert.equal(scripts.length, files.length, 'one script tag per client file');
+    assert.equal((html.match(/<script\b/g) ?? []).length, files.length, 'no script tag the pattern missed');
     scripts.forEach((script, index) => {
       assert.ok((script[1] ?? '').includes('nonce="NONCE"'), 'each script carries the nonce');
-      assert.ok((script[1] ?? '').includes(`src="webview://${MEDIA_BOARD}/${BOARD_SCRIPTS[index]}"`), `script ${index} is ${BOARD_SCRIPTS[index]}`);
+      assert.ok((script[1] ?? '').includes(`src="webview://${MEDIA_BOARD}/${files[index]}"`), `script ${index} is ${files[index]}`);
       assert.equal(script[2], '', 'no inline script body');
     });
+    assert.equal(html.includes('layout-probe'), testSeams, 'the layout probe tag only on a test page');
+    if (testSeams) assert.match(scripts.at(-1)?.[1] ?? '', /nonce="NONCE" src="webview:\/\/[^"]*\/layout-probe\.js"/, 'the probe is the last script and nonce-bound');
     const links = [...html.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*>/g)];
     assert.equal(links.length, BOARD_STYLES.length);
     BOARD_STYLES.forEach((file, index) => { assert.ok((links[index]?.[0] ?? '').includes(`href="webview://${MEDIA_BOARD}/${file}"`)); });
@@ -267,6 +272,39 @@ test('host-request reaches the visible pages and nothing that is hidden, and exi
       board.controller.dispose();
       a.session.dispose();
     }
+  });
+});
+
+test('the layout hook exists only under the extension-host tests and asks only the visible page to measure itself (62-21, T-62-68)', async () => {
+  resetStub();
+  assert.deepEqual([...BOARD_TEST_SCRIPTS], ['layout-probe.js']);
+  await withLiveTeam(async (rig) => {
+    await importFixture(rig);
+    const a = await startSession(rig, 'owner');
+    const plain = openBoard(a.session, new LiveTimers(), a.lines);
+    assert.equal(boardTap.layout === undefined, true, 'a normal board offers no layout hook');
+    assert.equal(plain.panel.html.includes('layout-probe'), false, 'and loads no probe');
+    plain.board.controller.dispose();
+    const board = registerTeamBoard(createFakeContext(EXTENSION_ROOT, {}) as never, { session: () => a.session, output: { appendLine: (line) => { a.lines.push(line); }, show: () => undefined }, timers: new LiveTimers(), testSeams: true });
+    board.openPanel();
+    const panel = stub.webviewPanels[stub.webviewPanels.length - 1] as RecordedWebviewPanel;
+    const layouts = (record: RecordedWebview): unknown[] => record.posted.filter((message) => (message as { type?: string }).type === 'e2e-layout');
+    try {
+      assert.equal(panel.html.includes('layout-probe.js'), true, 'the test board loads the probe');
+      const record = secondPage(board);
+      record.setVisible(false);
+      assert.ok(boardTap.layout !== undefined, 'the controller offers the layout hook');
+      await boardTap.layout?.({ id: 3, action: 'scroll', top: 400 });
+      assert.deepEqual(layouts(panel), [{ type: 'e2e-layout', id: 3, action: 'scroll', top: 400 }]);
+      assert.equal(layouts(record).length, 0, 'the hidden page got nothing');
+      panel.setVisible(false);
+      await boardTap.layout?.({ id: 4, action: 'measure' });
+      assert.equal(layouts(panel).length, 1, 'a hidden panel gets nothing either');
+    } finally {
+      board.controller.dispose();
+      a.session.dispose();
+    }
+    assert.equal(boardTap.layout === undefined, true, 'the hook goes with the controller');
   });
 });
 
