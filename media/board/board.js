@@ -460,7 +460,7 @@
   }
   function badge(name, word, cls) { return iconText('badge ' + cls, name, word); }
   // Move to... opens the menu when the card has a move for an owner or lead, or an assignment action (G-62-5): a card that can only be assigned, like a
-  // phase card, still shows it, while only cards with moves are draggable (drag.js). An observer never gets one, whatever the model says.
+  // phase card, still shows it. An observer never gets one, whatever the model says. Which cards can be picked up is drag.js's rule.
   function hasMenu(c) {
     const role = model && model.viewer.role;
     const moves = c.moves.length > 0 && (role === 'owner' || role === 'lead');

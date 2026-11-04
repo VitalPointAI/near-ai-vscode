@@ -317,13 +317,20 @@ test('0.6.3 re-test: a card with no move can be picked up; no cell is offered, e
   assert.equal(refusalLine(h, 'phase:91'), phaseReason);
   h.advance(150);
   assert.equal(h.announcements[h.announcements.length - 1], `Can't move Phase 91 to Ready. ${phaseReason}`);
-  // In another person's row the card's own reason comes first: it cannot move anywhere, so the row sentence would point the wrong way.
-  const other = h.$$('.cell[data-column="ready"]').find((c) => c.getAttribute('data-lane') !== 'unassigned');
-  if (other) {
-    const again = lift(h, 'phase:91');
-    drop(h, other, again);
-    assert.equal(refusalLine(h, 'phase:91'), phaseReason);
-  }
+  // In another row the card's own reason comes first: it cannot move anywhere, so the row sentence would point to a move it does not have.
+  h.$$('[role="radio"]').find((r) => text(r) === 'Phase')!.click();
+  const otherRow = h.$('.cell[data-column="ready"][data-lane="phase:90"]');
+  assert.ok(otherRow, 'grouped by phase, Phase 90 is another row');
+  card(h, 'phase:91').querySelector('.dismiss')!.click();
+  const again = lift(h, 'phase:91');
+  drop(h, otherRow!, again);
+  h.fire(card(h, 'phase:91'), 'dragend', { dataTransfer: again });
+  assert.equal(refusalLine(h, 'phase:91'), phaseReason, 'the phase card says why it stays, not the row sentence');
+  assert.deepEqual(moves(h), []);
+  // A card with moves still gets the row sentence there.
+  const plan = lift(h, 'plan:90-01');
+  drop(h, h.$('.cell[data-column="backlog"][data-lane="phase:91"]')!, plan);
+  assert.equal(refusalLine(h, 'plan:90-01'), 'This card stays in its own row. Drop it in another column of the same row.');
 
   const dev = start();
   dev.deliver({ type: 'state', model: modelOf(world, world.dev.memberId) });

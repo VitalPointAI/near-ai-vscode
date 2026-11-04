@@ -29,30 +29,46 @@
   const cellOf = (node) => { const n = asElement(node); return n ? n.closest('.cell') : null; };
   const cardOfNode = (node) => { const n = asElement(node); return n ? n.closest('.card') : null; };
 
+  const CANNOT = 'This card cannot be moved there. Nothing was moved.';
+  /** Why a card with no move stays where it is: the model's sentence for this column, or for any column when it has none here (its own column). */
+  function stayReason(c, column) {
+    const refusals = c.refusals || {};
+    if (refusals[column]) return refusals[column];
+    const any = Object.keys(refusals).map((k) => refusals[k]).find((text) => typeof text === 'string' && text !== '');
+    return any || CANNOT;
+  }
   /** What dropping the dragged card on this cell means right now: 'own' (nothing), 'ok' (a move), or 'no' (a reason to show). */
   function verdict(cell, s) {
     const c = board.cardData(s.id);
     const column = cell.getAttribute('data-column');
     if (!c) return { kind: 'no', column, text: 'This card is no longer on the board. Nothing was moved.' };
-    if (cell.getAttribute('data-lane') !== s.lane) return { kind: 'no', column, text: board.groupBy && board.groupBy() === 'member' ? OTHER_PERSON : OTHER_ROW };
-    if (column === c.column) return { kind: 'own', column };
+    const sameRow = cell.getAttribute('data-lane') === s.lane;
+    if (sameRow && column === c.column) return { kind: 'own', column };
+    // A card with no move cannot go anywhere, so its own reason comes first in every row: the row sentence would point to a move it does not have.
+    if (c.moves.length === 0) return { kind: 'no', column, text: stayReason(c, column) };
+    if (!sameRow) return { kind: 'no', column, text: board.groupBy && board.groupBy() === 'member' ? OTHER_PERSON : OTHER_ROW };
     const move = c.moves.find((m) => m.column === column);
     if (move) return { kind: 'ok', column, move };
-    return { kind: 'no', column, text: (c.refusals && c.refusals[column]) || 'This card cannot be moved there. Nothing was moved.' };
+    return { kind: 'no', column, text: (c.refusals && c.refusals[column]) || CANNOT };
   }
 
   // ---- what can be dragged ---------------------------------------------------------------------------------------------------------------------
-  function canDrag(c, model) {
-    return c.moves.length > 0 && (model.viewer.role === 'owner' || model.viewer.role === 'lead') && !down(model);
+  // 0.6.3 re-test (debug session board-codeserver-cards-and-drag): on the owner's board every drawn card was a phase card, which has no move, and a
+  // developer has no move at all, so nothing could be picked up and a drag did nothing, with no word why. Every card of the kanban can now be picked up
+  // by a person who may change the board: a card without moves offers no cell and its drop gives the model's reason. A reviewer and an observer only
+  // look, and a board that is down already says why in its banner, so nothing is draggable for them.
+  const MAY_CHANGE = ['owner', 'lead', 'developer'];
+  function canDrag(model) {
+    return MAY_CHANGE.indexOf(model.viewer.role) >= 0 && model.viewer.canWrite !== false && !down(model);
   }
   function syncDraggable() {
     const model = board.model();
     if (!model) return;
-    const on = board.layout() === 'kanban';
+    const on = board.layout() === 'kanban' && canDrag(model);
     for (const c of model.cards) {
       const li = board.cardElement(c.id);
       if (!li) continue;
-      if (on && canDrag(c, model)) { if (li.getAttribute('draggable') !== 'true') li.setAttribute('draggable', 'true'); } else if (li.getAttribute('draggable') !== null) li.removeAttribute('draggable');
+      if (on) { if (li.getAttribute('draggable') !== 'true') li.setAttribute('draggable', 'true'); } else if (li.getAttribute('draggable') !== null) li.removeAttribute('draggable');
     }
   }
 
@@ -116,7 +132,7 @@
     const model = board.model();
     const c = board.cardData(id);
     const source = cellOf(li);
-    if (!model || !c || !source || !canDrag(c, model) || li.getAttribute('aria-busy') === 'true') { log('dragstart', source, 'refused'); e.preventDefault(); return; }
+    if (!model || !c || !source || !canDrag(model) || li.getAttribute('aria-busy') === 'true') { log('dragstart', source, 'refused'); e.preventDefault(); return; }
     e.dataTransfer.setData(TYPE, id);
     e.dataTransfer.effectAllowed = 'move';
     session = { id, lane: source.getAttribute('data-lane'), state: 'active' };
