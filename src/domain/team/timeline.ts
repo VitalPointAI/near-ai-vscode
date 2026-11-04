@@ -35,9 +35,30 @@ export interface TimelineMilestone {
   tileText: string;
   /** The folded tile's accessible name: 'Show {title}, finished, 32 cards'. */
   tileName: string;
+  /** The UI-SPEC cycle sentence, only when cycle is true. */
+  cycleNote?: string;
+  /** 'No plans yet' and the viewer's next-step line, only for a milestone with no cards. */
+  emptyText?: string;
+  emptyNext?: string;
 }
+/** A card or phase named in the expanded card's Waits for and Needed by rows; onBoard is false for a dependency that is not on the board. */
+export interface TimelineLink { id: string; label: string; onBoard: boolean }
 export interface TimelineDot {
-  cardId: string; milestoneId: string; phaseId?: string; step: number; slot: number; inCycle: boolean; waitsFor: string[]; missing: string[]; neededBy: number; label: string;
+  cardId: string; milestoneId: string; phaseId?: string; step: number; slot: number; inCycle: boolean; waitsFor: string[]; missing: string[]; neededBy: number;
+  /** The accessible name (UI-SPEC "Accessible name of a dot"): the card's own name, who it is assigned to once, its step, what it waits for, how many need it. */
+  label: string;
+  /** 'Step 3 of 7' (preview). */
+  stepText: string;
+  /** '3 of 7 in v0.6.0 Team Mode' (the expanded card's Step fact). */
+  stepFact: string;
+  /** 'Assigned to Dana', 'Assigned to you' or 'Nobody yet'. */
+  whoText: string;
+  /** 'Waits for 2 cards', 'Waits for 1 card' or 'Waits for nothing'. */
+  waitsText: string;
+  waitsForLinks: TimelineLink[];
+  neededByLinks: TimelineLink[];
+  /** The missing dependency sentences and the cycle note, when they apply. */
+  notes: string[];
 }
 export interface TimelineEdge { from: string; to: string; waiting: boolean; crossMilestone: boolean }
 export interface BoardTimeline { milestones: TimelineMilestone[]; dots: TimelineDot[]; edges: TimelineEdge[]; now?: TimelineNow; percent?: TimelinePercent }
@@ -307,7 +328,8 @@ export function buildTimeline(state: TeamState, model: BoardModel, _options: { v
       last = at;
       const dot: TimelineDot = {
         cardId: node.card.id, milestoneId: band, step: at, slot, inCycle: placed.inCycle[node.order] === true,
-        waitsFor: placed.waitsFor[node.order] ?? [], missing: placed.missing[node.order] ?? [], neededBy: 0, label: node.card.a11yLabel
+        waitsFor: placed.waitsFor[node.order] ?? [], missing: placed.missing[node.order] ?? [], neededBy: 0, label: node.card.a11yLabel,
+        stepText: '', stepFact: '', whoText: '', waitsText: '', waitsForLinks: [], neededByLinks: [], notes: []
       };
       if (node.card.phaseId !== undefined) dot.phaseId = node.card.phaseId;
       bandDots.push(dot);

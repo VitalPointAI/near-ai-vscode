@@ -280,7 +280,8 @@ test('each phase with a dot has its label, number and step span, ordered by firs
     { id: 'phase:9', label: 'Phase 9: Work 9', number: '9', firstStep: 1, lastStep: 1 },
     { id: 'phase:12', label: 'Phase 12: Work 12', number: '12', firstStep: 3, lastStep: 3 }
   ]);
-  assert.equal(dotOf(timeline, 'phase:12').label, (modelFor(world.state, undefined).cards.find((card) => card.id === 'phase:12'))?.a11yLabel, 'the label is the card\'s own until 62.1-02');
+  const own = modelFor(world.state, undefined).cards.find((card) => card.id === 'phase:12')?.a11yLabel;
+  assert.equal(dotOf(timeline, 'phase:12').label, `${own ?? ''} Nobody is assigned. Step 4 of 4 in Version v1. Waits for Phase 11.`, 'the card\'s own name, then the timeline sentence (62.1-02)');
 });
 
 // Large graphs are written straight into a state (the log is not what is measured): `phases` phases of `perPhase` plans, each plan waiting for up

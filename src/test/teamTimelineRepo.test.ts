@@ -6,11 +6,13 @@ import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import test from 'node:test';
 import { buildBoardModel } from '../domain/team/board';
+import type { BoardModel, BoardModelOptions } from '../domain/team/board';
 import { buildGsdGraph } from '../domain/team/gsdImport';
 import { buildTimeline } from '../domain/team/timeline';
 import type { BoardTimeline } from '../domain/team/timeline';
 import { graphToItems } from '../team/importPlans';
 import { boardWorld } from './helpers/teamBoardWorld';
+import type { BoardWorld } from './helpers/teamBoardWorld';
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const NOW = Date.parse('2026-11-04T12:00:00.000Z');
@@ -20,7 +22,8 @@ function git(args: string[]): string {
   return execFileSync('git', ['-C', REPO_ROOT, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 }
 
-test('this repository\'s roadmap at HEAD: every v0.6.0 card is one dot, each after what it waits for, phases after the phases they depend on, no loop, the same twice', async () => {
+// The roadmap at HEAD imported into a fresh team the way Import plans does, with the lead's board model and timeline.
+async function headBoard(): Promise<{ world: BoardWorld; model: BoardModel; timeline: BoardTimeline; options: BoardModelOptions }> {
   const listed = git(['ls-tree', '-r', '-z', '--full-tree', '--name-only', 'HEAD', '--', '.planning']).split('\0').filter((name) => name !== '');
   const files = new Map<string, string>();
   for (const name of ['.planning/ROADMAP.md', '.planning/STATE.md', ...listed.filter((entry) => entry.endsWith('-PLAN.md'))]) files.set(name, git(['cat-file', 'blob', `HEAD:${name}`]));
@@ -31,10 +34,13 @@ test('this repository\'s roadmap at HEAD: every v0.6.0 card is one dot, each aft
   assert.ok(bodies.some((body) => body.id === MILESTONE), 'the import holds the milestone');
   const world = await boardWorld();
   for (const body of bodies) world.accept(world.lead, 'item.imported', body);
-
-  const options = { nowMs: NOW, status: { kind: 'live' as const, text: 'Live' }, viewerId: world.lead.memberId, canWrite: true };
+  const options: BoardModelOptions = { nowMs: NOW, status: { kind: 'live' as const, text: 'Live' }, viewerId: world.lead.memberId, canWrite: true };
   const model = buildBoardModel(world.state, options);
-  const timeline = buildTimeline(world.state, model, { viewerId: world.lead.memberId });
+  return { world, model, timeline: buildTimeline(world.state, model, { viewerId: world.lead.memberId }), options };
+}
+
+test('this repository\'s roadmap at HEAD: every v0.6.0 card is one dot, each after what it waits for, phases after the phases they depend on, no loop, the same twice', async () => {
+  const { world, model, timeline, options } = await headBoard();
   const again: BoardTimeline = buildTimeline(world.state, buildBoardModel(world.state, options), { viewerId: world.lead.memberId });
   assert.deepEqual(again, timeline, 'two builds give the same timeline');
 
@@ -85,4 +91,34 @@ test('this repository\'s roadmap at HEAD: every v0.6.0 card is one dot, each aft
     assert.ok(stepOf(id) > stepOf('plan:62-27'), `${id} comes after 62-27`);
     assert.ok(stepOf(id) > stepOf('plan:61-31'), `${id} comes after 61-31`);
   }
+});
+
+test('this repository\'s roadmap at HEAD: Now is in v0.6.0 or later at its earliest unfinished step, the percent matches the cards, every dot says its step', async () => {
+  const { model, timeline } = await headBoard();
+  const now = timeline.now;
+  assert.ok(now !== undefined, 'the roadmap has a Now');
+  const order = timeline.milestones.map((band) => band.id);
+  assert.ok(order.indexOf(now.milestoneId) >= order.indexOf(MILESTONE), `Now is in ${MILESTONE} or later (${now.milestoneId})`);
+  const column = new Map(model.cards.map((card) => [card.id, card.column]));
+  const closed = (id: string): boolean => column.get(id) === 'done' || column.get(id) === 'cancelled';
+  const band = timeline.dots.filter((dot) => dot.milestoneId === now.milestoneId);
+  if (!now.allDone) {
+    for (const dot of band.filter((entry) => entry.step < now.step)) assert.ok(closed(dot.cardId), `${dot.cardId} before Now is done or cancelled`);
+    assert.ok(band.some((dot) => dot.step === now.step && !closed(dot.cardId)), 'the Now step holds an unfinished card');
+    assert.ok(now.title.startsWith('Now: '), now.title);
+  }
+  for (const earlier of timeline.milestones.slice(0, order.indexOf(now.milestoneId))) {
+    assert.ok(timeline.dots.filter((dot) => dot.milestoneId === earlier.id).every((dot) => closed(dot.cardId)), `every card of ${earlier.id} before Now is finished`);
+  }
+
+  const counted = model.cards.filter((card) => card.column !== 'cancelled').length;
+  const finished = model.cards.filter((card) => card.column === 'done').length;
+  assert.ok(counted > 0);
+  assert.equal(timeline.percent?.counted, counted);
+  assert.equal(timeline.percent?.finished, finished);
+  assert.equal(timeline.percent?.percent, Math.floor((finished * 100) / counted));
+  assert.ok((timeline.percent?.percent ?? 100) < 100, 'the roadmap still has unfinished work');
+
+  assert.equal(timeline.dots.length, model.cards.length);
+  for (const dot of timeline.dots) assert.ok(dot.label.includes('Step ') && dot.label.includes(' of '), `${dot.cardId} says its step: ${dot.label}`);
 });

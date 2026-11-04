@@ -295,3 +295,189 @@ test('determinism: the same items imported in different orders give the same Now
   assert.deepEqual(nows[1], nows[0]);
   assert.deepEqual(nows[2], nows[0]);
 });
+
+// ---- dot names, facts and notes (D-05, D-10) -------------------------------------------------------------------------------------------------
+
+function setDependencies(state: TeamState, id: string, dependsOn: string[]): void {
+  const item = state.items.get(id);
+  assert.ok(item, `${id} exists`);
+  item.dependsOn = dependsOn;
+}
+
+function cardLabelOf(model: BoardModel, id: string): string {
+  const card = model.cards.find((entry) => entry.id === id);
+  assert.ok(card, `${id} is a card`);
+  return card.a11yLabel;
+}
+
+function viewOf(world: BoardWorld, viewerId: string): { model: BoardModel; timeline: BoardTimeline } {
+  const model = modelFor(world.state, viewerId);
+  return { model, timeline: buildTimeline(world.state, model, { viewerId }) };
+}
+
+const dot = (timeline: BoardTimeline, id: string): BoardTimeline['dots'][number] => {
+  const found = timeline.dots.find((entry) => entry.cardId === id);
+  assert.ok(found, `${id} is a dot`);
+  return found;
+};
+
+const count = (text: string, part: string): number => text.split(part).length - 1;
+
+// milestone:v0.6.0 "Team Mode" with phase 62: 62-01 and 62-02 done, 62-03 (Ready, assigned to Dana) waits for both, four plans wait for 62-03,
+// and a chain of three more gives seven steps.
+async function teamModeWorld(): Promise<BoardWorld> {
+  const titled = (id: string, title: string, extra: Partial<Body> = {}): Body => plan(id, { title, ...extra });
+  const world = await worldOf([
+    milestone('v0.6.0', 'Team Mode', true), phase('62', 'v0.6.0', 'Work model'),
+    titled('62-01', 'Work model', done), titled('62-02', 'Import', { ...done, dependsOn: ['plan:62-01'] }),
+    titled('62-03', 'Board webview client', { ...ready, dependsOn: ['plan:62-01', 'plan:62-02'] }),
+    titled('62-04', 'Columns', { dependsOn: ['plan:62-03'] }), titled('62-05', 'Menu', { dependsOn: ['plan:62-03'] }),
+    titled('62-06', 'Drag', { dependsOn: ['plan:62-03'] }), titled('62-07', 'Detail', { dependsOn: ['plan:62-03'] }),
+    titled('62-08', 'Form', { dependsOn: ['plan:62-04'] }), titled('62-09', 'Live', { dependsOn: ['plan:62-08'] }), titled('62-10', 'Polish', { dependsOn: ['plan:62-09'] })
+  ]);
+  world.accept(world.lead, 'item.assigned', { id: 'plan:62-03', memberId: world.dev.memberId });
+  return world;
+}
+
+test('a dot\'s name is the card\'s own name, who it is assigned to exactly once, its step, what it waits for and how many cards need it', async () => {
+  const world = await teamModeWorld();
+  const lee = viewOf(world, world.lead.memberId);
+  const own = cardLabelOf(lee.model, 'plan:62-03');
+  assert.ok(own.includes('Assigned to Dana.'));
+  const label = dot(lee.timeline, 'plan:62-03').label;
+  assert.equal(label, `${own} Step 3 of 7 in Team Mode. Waits for 62-01 and 62-02. Needed by 4 cards.`);
+  assert.equal(count(label, 'Assigned to'), 1, 'the assignee is said once');
+
+  const dana = viewOf(world, world.dev.memberId);
+  const danaLabel = dot(dana.timeline, 'plan:62-03').label;
+  assert.equal(danaLabel, `${cardLabelOf(dana.model, 'plan:62-03').replace('Assigned to Dana.', 'Assigned to you.')} Step 3 of 7 in Team Mode. Waits for 62-01 and 62-02. Needed by 4 cards.`);
+  assert.equal(count(danaLabel, 'Assigned to'), 1);
+  assert.ok(!danaLabel.includes('Dana'), 'the viewer is "you", never their own name as well');
+
+  assert.equal(dot(lee.timeline, 'plan:62-04').label, `${cardLabelOf(lee.model, 'plan:62-04')} Nobody is assigned. Step 4 of 7 in Team Mode. Waits for 62-03. Needed by 1 card.`);
+  assert.equal(dot(lee.timeline, 'plan:62-10').label, `${cardLabelOf(lee.model, 'plan:62-10')} Nobody is assigned. Step 7 of 7 in Team Mode. Waits for 62-09.`, 'Needed by is left out at 0');
+  assert.equal(dot(lee.timeline, 'plan:62-01').label, `${cardLabelOf(lee.model, 'plan:62-01')} Nobody is assigned. Step 1 of 7 in Team Mode. Waits for nothing. Needed by 2 cards.`);
+});
+
+test('a board item the viewer added and nobody is assigned to says You added this; for anyone else it says Nobody is assigned', async () => {
+  const world = await boardWorld();
+  const id = `item:${'0'.repeat(22)}AAAA`;
+  world.accept(world.dev, 'item.created', { id, kind: 'chore', title: 'Tidy settings', scope: [], requirements: [], mustHaves: [] });
+  const dana = viewOf(world, world.dev.memberId);
+  assert.equal(dot(dana.timeline, id).label, `${cardLabelOf(dana.model, id)} You added this. Step 1 of 1 in Added on the board. Waits for nothing.`);
+  assert.equal(dot(dana.timeline, id).whoText, 'Nobody yet');
+  const lee = viewOf(world, world.lead.memberId);
+  assert.equal(dot(lee.timeline, id).label, `${cardLabelOf(lee.model, id)} Nobody is assigned. Step 1 of 1 in Added on the board. Waits for nothing.`);
+});
+
+test('Waits for names up to three then says how many more, writes a phase as Phase n, and Needed by is singular at one', async () => {
+  const world = await worldOf([
+    milestone('v1', 'Version 1', true), phase('60', 'v1', 'Core'), phase('61', 'v1', 'Next', { dependsOn: ['phase:60'] }),
+    plan('60-01'), plan('60-02'), plan('60-03'), plan('60-04'), plan('60-05'),
+    plan('61-01', { dependsOn: ['plan:60-01', 'plan:60-02', 'plan:60-03', 'plan:60-04', 'plan:60-05'] }), plan('61-02', { dependsOn: ['plan:61-01'] })
+  ]);
+  const { timeline } = viewOf(world, world.lead.memberId);
+  const many = dot(timeline, 'plan:61-01');
+  assert.ok(many.label.includes(' Waits for 60-01, 60-02, 60-03 and 2 more. Needed by 1 card.'), many.label);
+  assert.equal(many.waitsText, 'Waits for 6 cards', 'five plans and the phase its own phase waits for');
+  assert.ok(dot(timeline, 'plan:61-02').label.includes(' Waits for 61-01 and Phase 60.'), dot(timeline, 'plan:61-02').label);
+  assert.equal(dot(timeline, 'plan:61-02').waitsText, 'Waits for 2 cards');
+  const three = await worldOf([milestone('v1', 'Version 1', true), phase('1', 'v1', 'One'), plan('1-01'), plan('1-02'), plan('1-03'), plan('1-04', { dependsOn: ['plan:1-01', 'plan:1-02', 'plan:1-03'] })]);
+  assert.ok(dot(viewOf(three, three.lead.memberId).timeline, 'plan:1-04').label.endsWith(' Waits for 1-01, 1-02 and 1-03.'));
+  assert.equal(dot(viewOf(three, three.lead.memberId).timeline, 'plan:1-01').waitsText, 'Waits for nothing');
+});
+
+test('a dot\'s facts: step, who, waits for and needed by with links, and notes for a missing dependency and a loop', async () => {
+  const world = await teamModeWorld();
+  const lee = viewOf(world, world.lead.memberId).timeline;
+  const target = dot(lee, 'plan:62-03');
+  assert.equal(target.stepText, 'Step 3 of 7');
+  assert.equal(target.stepFact, '3 of 7 in Team Mode');
+  assert.equal(target.whoText, 'Assigned to Dana');
+  assert.equal(target.waitsText, 'Waits for 2 cards');
+  assert.deepEqual(target.waitsForLinks, [
+    { id: 'plan:62-01', label: '62-01 Work model', onBoard: true }, { id: 'plan:62-02', label: '62-02 Import', onBoard: true }
+  ]);
+  assert.deepEqual(target.neededByLinks.map((link) => link.label), ['62-04 Columns', '62-05 Menu', '62-06 Drag', '62-07 Detail']);
+  assert.deepEqual(target.notes, []);
+  assert.equal(dot(viewOf(world, world.dev.memberId).timeline, 'plan:62-03').whoText, 'Assigned to you');
+  assert.equal(dot(lee, 'plan:62-04').whoText, 'Nobody yet');
+  assert.equal(dot(lee, 'plan:62-04').waitsText, 'Waits for 1 card');
+  assert.deepEqual(dot(lee, 'plan:62-10').neededByLinks, []);
+
+  setDependencies(world.state, 'plan:62-10', ['plan:62-09', 'plan:61-09']);
+  const missing = dot(viewOf(world, world.lead.memberId).timeline, 'plan:62-10');
+  assert.deepEqual(missing.notes, ['Waits for 61-09, which is not on the board.']);
+  assert.deepEqual(missing.waitsForLinks, [{ id: 'plan:62-09', label: '62-09 Live', onBoard: true }, { id: 'plan:61-09', label: '61-09', onBoard: false }]);
+  assert.ok(missing.label.includes(' Waits for 62-09 and 61-09.'), missing.label);
+
+  const phased = await worldOf([milestone('v1', 'Version 1', true), phase('60', 'v1', 'Core'), phase('61', 'v1', 'Next', { dependsOn: ['phase:60'] }), plan('60-01'), plan('61-01')]);
+  assert.deepEqual(dot(viewOf(phased, phased.lead.memberId).timeline, 'plan:61-01').waitsForLinks, [{ id: 'phase:60', label: 'Phase 60: Core', onBoard: true }]);
+
+  const loop = await worldOf([milestone('v1', 'Version 1', true), phase('1', 'v1', 'One'), plan('1-01'), plan('1-02'), plan('1-03')]);
+  setDependencies(loop.state, 'plan:1-01', ['plan:1-02']);
+  setDependencies(loop.state, 'plan:1-02', ['plan:1-01']);
+  const looped = viewOf(loop, loop.lead.memberId).timeline;
+  const cycle = 'Some cards here wait for each other in a loop, so their order cannot be worked out. They are shown in plan number order.';
+  assert.deepEqual(dot(looped, 'plan:1-01').notes, [cycle]);
+  assert.deepEqual(dot(looped, 'plan:1-03').notes, []);
+  assert.equal(bandOf(looped, 'milestone:v1').cycleNote, cycle);
+  assert.equal(bandOf(timelineOf(world.state, world.lead.memberId), 'milestone:v0.6.0').cycleNote, undefined);
+});
+
+test('an empty milestone says No plans yet and the next step for the viewer\'s role', async () => {
+  const world = await worldOf([milestone('v1', 'Version 1', true), phase('1', 'v1', 'One'), plan('1-01'), milestone('v2', 'Version 2')]);
+  const lead = bandOf(timelineOf(world.state, world.lead.memberId), 'milestone:v2');
+  assert.equal(lead.emptyText, 'No plans yet');
+  assert.equal(lead.emptyNext, 'Plan this milestone\'s phases, then choose Import plans to see them here.');
+  assert.equal(bandOf(timelineOf(world.state, world.owner.memberId), 'milestone:v2').emptyNext, lead.emptyNext);
+  const dev = bandOf(timelineOf(world.state, world.dev.memberId), 'milestone:v2');
+  assert.equal(dev.emptyText, 'No plans yet');
+  assert.equal(dev.emptyNext, 'Cards show up here when a lead imports the plans for this milestone.');
+  const full = bandOf(timelineOf(world.state, world.lead.memberId), 'milestone:v1');
+  assert.equal(full.emptyText, undefined);
+  assert.equal(full.emptyNext, undefined);
+});
+
+// Every string anywhere in the timeline, with the path it was found at.
+function stringsOf(value: unknown, at = 'timeline', found: Array<[string, string]> = []): Array<[string, string]> {
+  if (typeof value === 'string') found.push([at, value]);
+  else if (Array.isArray(value)) value.forEach((entry, index) => stringsOf(entry, `${at}[${index}]`, found));
+  else if (value !== null && typeof value === 'object') for (const [key, entry] of Object.entries(value)) stringsOf(entry, `${at}.${key}`, found);
+  return found;
+}
+
+test('hostile titles and names are flattened in every sentence they reach, and no authored text adds a dash', async () => {
+  const hostile = 'Fix <b onclick="x()">it</b>\u202E\u2066 now \u2014 later\nsecond line';
+  const flat = 'Fix <b onclick="x()">it</b> now \u2014 later second line';
+  const world = await worldOf([
+    milestone('v1', 'Team Mode', true), phase('1', 'v1', 'One'), phase('2', 'v1', 'Two', { dependsOn: ['phase:1'] }), plan('1-01', ready), plan('1-02', { dependsOn: ['plan:1-01'] })
+  ]);
+  // The log refuses most of this text; it is written into the state by hand so the timeline is tested on its own (defence in depth, T-62.1-04).
+  const retitle = (id: string, title: string): void => {
+    const item = world.state.items.get(id);
+    assert.ok(item, `${id} exists`);
+    item.title = title;
+  };
+  retitle('milestone:v1', `Team <i>Mode</i>\u200B \u2013 ${hostile}`);
+  for (const id of ['phase:1', 'phase:2', 'plan:1-01', 'plan:1-02']) retitle(id, hostile);
+  setDependencies(world.state, 'plan:1-02', ['plan:1-01', 'plan:1-99']);
+  const member = world.state.members.get(world.dev.memberId);
+  assert.ok(member);
+  member.name = `Dana\u202E <script>x</script> \u2014 the\tgreat`;
+  world.accept(world.lead, 'item.assigned', { id: 'plan:1-01', memberId: world.dev.memberId });
+  const timeline = timelineOf(world.state, world.lead.memberId);
+  const strings = stringsOf(timeline);
+  assert.ok(strings.length > 40);
+  const controls = /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/;
+  for (const [at, text] of strings) assert.ok(!controls.test(text), `${at} holds a control or format character: ${JSON.stringify(text)}`);
+  // Remove what teammates wrote; whatever is left was authored and must not hold a dash.
+  const teammate = [flat, 'Team <i>Mode</i> \u2013 ', 'Dana <script>x</script> \u2014 the great'];
+  for (const [at, text] of strings) {
+    const authored = teammate.reduce((rest, part) => rest.split(part).join(''), text);
+    assert.ok(!/[\u2013\u2014]/.test(authored), `${at} adds a dash: ${JSON.stringify(text)}`);
+  }
+  assert.ok(dot(timeline, 'plan:1-02').waitsForLinks.some((link) => link.label === `1-01 ${flat}`), 'the title is flattened in the link');
+  assert.ok(dot(timeline, 'plan:1-01').whoText.startsWith('Assigned to Dana <script>x</script>'), dot(timeline, 'plan:1-01').whoText);
+  assert.ok(bandOf(timeline, 'milestone:v1').heading.includes(flat));
+});
