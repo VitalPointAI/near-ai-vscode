@@ -383,6 +383,47 @@ Revoke or rotate the key first: removing it from git does not make it safe, sinc
 public. Then remove it in a PR. For a NEAR key, never delete the key file or the on-chain access
 key from an agent session; the owner handles that.
 
+### The review runs automatically
+
+`.github/workflows/agent-review.yml` produces the gate result without anyone asking. It runs on
+`workflow_run` after CI succeeds for a PR, and on `workflow_dispatch` to re-review by hand.
+
+- **The code that judges comes from `main`.** A `workflow_run` executes in the base repository on
+  the default branch, so the PR cannot change the review scripts or the prompt it is judged by.
+- **The token is out of reach.** The job sits in the protected `agent-review` environment, so
+  `NEAR_AI_REVIEW_TOKEN` exists only there, only after the owner approves the environment, and
+  never in a PR's checkout. This is what makes the review independent of the author: there is no
+  token file on the authoring machine to read.
+- **A model does the judging.** `scripts/ci-review-prompt.mjs` builds the same prompt `/review-pr`
+  uses and `scripts/ci-review-call.mjs` sends it. The reply is judged by the same `parseReview` and
+  `reviewDecision` as a local review, so an open BLOCKER fails the gate even when the reply claims
+  PASS.
+- **It approves the PR too.** A second job runs as the reviewer identity and posts an approving
+  review when `agent-review` is green on the current head. GitHub refuses an approval from the
+  author, so a separate account is the only way the one-approval requirement can be met for an
+  agent-authored PR.
+
+One-time setup, by the owner:
+
+1. **Create the `agent-review` environment** (Settings, Environments) and add
+   `NEAR_AI_REVIEW_TOKEN` as an environment secret there. Add yourself as a required reviewer so
+   the job waits for you.
+2. **Add the model secret in the same environment:** `REVIEW_MODEL_API_KEY` (a NEAR AI Cloud key),
+   and optionally `REVIEW_MODEL` (the model id) and `REVIEW_MODEL_BASE_URL`. Nothing else in the
+   repository can read them.
+3. **Let the reviewer approve.** `near-ai-reviewer` already has write access as a collaborator, so
+   its approval satisfies `required_approving_review_count: 1`.
+
+```bash
+repo=VitalPointAI/near-ai-vscode
+gh secret set NEAR_AI_REVIEW_TOKEN --env agent-review --repo "$repo"
+gh secret set REVIEW_MODEL_API_KEY --env agent-review --repo "$repo"
+gh variable set REVIEW_MODEL --env agent-review --repo "$repo" --body 'your-model-id'
+```
+
+While the environment is unset the workflow fails, so `agent-review` stays absent and PRs stay
+blocked. That is intentional: a gate that cannot run must not pass.
+
 ## 8. Repository settings (owner only)
 
 This is the required configuration. The owner applies it once with the commands below; agents
