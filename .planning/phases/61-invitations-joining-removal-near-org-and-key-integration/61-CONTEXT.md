@@ -133,3 +133,7 @@ Release of claims, leases and allocations on removal is defined in the materiali
 
 *Phase: 61-invitations-joining-removal-near-org-and-key-integration*
 *Context gathered: 2026-11-01*
+
+## Owner decision (2026-11-04): connecting from inside the team setup
+
+When Invite someone / Join a team (or the team setup) offers "Connect NEAR AI" and the person connects, the 0.4.14 next-step menu ("NEAR AI is ready ... What next?", PR #7) is NOT shown: the person gets the plain "NEAR AI is ready" message and the team flow continues. Implemented in the 0.6.2 integration preview as `configureApiKey(auth, sidebar, context, { offerNextStep: false })` from `connectNearAi` in src/extension.ts. Apply the same when main (with PR #7) is merged into Team Mode.
