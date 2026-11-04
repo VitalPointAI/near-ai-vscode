@@ -46,6 +46,160 @@ function compareCards(a: Node, b: Node): number {
   return a.card.id < b.card.id ? -1 : a.card.id > b.card.id ? 1 : 0;
 }
 
+// Strongly connected components (Tarjan), walked with an explicit stack so a long chain or a hostile log cannot overflow the call stack
+// (T-62.1-01). Components come out in reverse topological order: each one after every component it reaches.
+function components(count: number, successors: readonly (readonly number[])[]): number[][] {
+  const index = new Int32Array(count).fill(-1);
+  const low = new Int32Array(count);
+  const onStack = new Uint8Array(count);
+  const stack: number[] = [];
+  const result: number[][] = [];
+  let next = 0;
+  for (let root = 0; root < count; root += 1) {
+    if (index[root] !== -1) continue;
+    index[root] = next;
+    low[root] = next;
+    next += 1;
+    stack.push(root);
+    onStack[root] = 1;
+    const work: Array<{ vertex: number; edge: number }> = [{ vertex: root, edge: 0 }];
+    while (work.length > 0) {
+      const frame = work[work.length - 1] as { vertex: number; edge: number };
+      const v = frame.vertex;
+      const edges = successors[v] ?? [];
+      if (frame.edge < edges.length) {
+        const w = edges[frame.edge] as number;
+        frame.edge += 1;
+        if (index[w] === -1) {
+          index[w] = next;
+          low[w] = next;
+          next += 1;
+          stack.push(w);
+          onStack[w] = 1;
+          work.push({ vertex: w, edge: 0 });
+        } else if (onStack[w] === 1) {
+          low[v] = Math.min(low[v] as number, index[w] as number);
+        }
+        continue;
+      }
+      work.pop();
+      const parent = work[work.length - 1];
+      if (parent !== undefined) low[parent.vertex] = Math.min(low[parent.vertex] as number, low[v] as number);
+      if (low[v] !== index[v]) continue;
+      const component: number[] = [];
+      let w: number;
+      do {
+        w = stack.pop() as number;
+        onStack[w] = 0;
+        component.push(w);
+      } while (w !== v);
+      result.push(component);
+    }
+  }
+  return result;
+}
+
+interface Layout { step: number[]; inCycle: boolean[]; waitsFor: string[][]; missing: string[][] }
+
+// Steps (D-03 as read in the UI-SPEC amendment): the longest path over every dependency between two cards of the same band, finished or not.
+// A dependency on a whole phase becomes a gate vertex that waits for every card of that phase and weighs nothing, so a phase that waits for
+// another costs one vertex and its edges, never one constraint per pair of cards. Cross-milestone and missing dependencies never move a step.
+// A loop (which the log should never hold) is laid out as a chain in number order from the earliest step its outside dependencies allow.
+function layout(state: TeamState, nodes: readonly Node[]): Layout {
+  const byId = new Map(nodes.map((node, index) => [node.card.id, index]));
+  const phaseCards = new Map<string, number[]>();
+  nodes.forEach((node, index) => {
+    if (node.card.phaseId === undefined) return;
+    const list = phaseCards.get(node.card.phaseId);
+    if (list === undefined) phaseCards.set(node.card.phaseId, [index]);
+    else list.push(index);
+  });
+  const successors: Array<Set<number>> = nodes.map(() => new Set<number>());
+  const gates = new Map<string, number>();
+  const gateOf = (phaseId: string, cards: readonly number[]): number => {
+    const known = gates.get(phaseId);
+    if (known !== undefined) return known;
+    const gate = successors.length;
+    successors.push(new Set<number>());
+    gates.set(phaseId, gate);
+    for (const card of cards) successors[card]?.add(gate);
+    return gate;
+  };
+  const selfLoop = nodes.map(() => false);
+  const waitsFor: string[][] = [];
+  const missing: string[][] = [];
+  nodes.forEach((node, index) => {
+    const own = node.item?.dependsOn ?? [];
+    const parent = node.item?.kind === 'plan' && node.item.parentId !== undefined ? state.items.get(node.item.parentId) : undefined;
+    const inherited = parent?.kind === 'phase' ? parent.dependsOn : [];
+    const waits: string[] = [];
+    const gone: string[] = [];
+    for (const id of new Set([...own, ...inherited])) {
+      const phaseList = state.items.get(id)?.kind === 'phase' ? phaseCards.get(id) : undefined;
+      const card = byId.get(id);
+      if (phaseList !== undefined) {
+        waits.push(id);
+        const band = nodes[phaseList[0] as number]?.band;
+        if (band === node.band) successors[gateOf(id, phaseList)]?.add(index);
+      } else if (card !== undefined && state.items.get(id)?.kind !== 'phase') {
+        waits.push(id);
+        if (card === index) selfLoop[index] = true;
+        else if (nodes[card]?.band === node.band) successors[card]?.add(index);
+      } else {
+        gone.push(id);
+      }
+    }
+    waitsFor.push(waits);
+    missing.push(gone);
+  });
+
+  const lists = successors.map((set) => [...set]);
+  const comps = components(lists.length, lists);
+  const compOf = new Int32Array(lists.length);
+  comps.forEach((members, at) => { for (const v of members) compOf[v] = at; });
+  const start = new Int32Array(comps.length);
+  const step = nodes.map(() => 0);
+  const inCycle = nodes.map(() => false);
+  for (let at = comps.length - 1; at >= 0; at -= 1) {
+    const members = comps[at] as number[];
+    const cards = members.filter((v) => v < nodes.length).sort((a, b) => a - b);
+    const cyclic = members.length > 1 || (cards.length === 1 && selfLoop[cards[0] as number] === true);
+    const first = start[at] as number;
+    cards.forEach((v, offset) => {
+      step[v] = first + offset;
+      inCycle[v] = cyclic;
+    });
+    const after = first + cards.length;
+    for (const v of members) {
+      for (const w of lists[v] ?? []) {
+        const target = compOf[w] as number;
+        if (target !== at && (start[target] as number) < after) start[target] = after;
+      }
+    }
+  }
+  return { step, inCycle, waitsFor, missing };
+}
+
+function phasesOfBand(model: BoardModel, dots: readonly TimelineDot[]): TimelinePhase[] {
+  const spans = new Map<string, { first: number; last: number }>();
+  for (const dot of dots) {
+    if (dot.phaseId === undefined) continue;
+    const span = spans.get(dot.phaseId);
+    if (span === undefined) spans.set(dot.phaseId, { first: dot.step, last: dot.step });
+    else {
+      span.first = Math.min(span.first, dot.step);
+      span.last = Math.max(span.last, dot.step);
+    }
+  }
+  const titles = new Map(model.phases.map((entry) => [entry.id, entry.title]));
+  return [...spans.entries()].map(([id, span]) => {
+    const number = id.slice('phase:'.length);
+    return { id, label: titles.get(id) ?? `Phase ${number}`, number, firstStep: span.first, lastStep: span.last };
+  }).sort((a, b) => a.firstStep - b.firstStep || compareParts(a.number, b.number) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+const closed = (card: BoardCard): boolean => card.column === 'done' || card.column === 'cancelled';
+
 export function buildTimeline(state: TeamState, model: BoardModel, _options: { viewerId?: string }): BoardTimeline {
   const milestoneIds = new Set(model.milestones.map((milestone) => milestone.id));
   const nodes: Node[] = model.cards.map((card) => ({
@@ -53,70 +207,54 @@ export function buildTimeline(state: TeamState, model: BoardModel, _options: { v
   }));
   nodes.sort(compareCards);
   nodes.forEach((node, index) => { node.order = index; });
-  const byId = new Map(nodes.map((node) => [node.card.id, node]));
+  const placed = layout(state, nodes);
 
-  // Longest path over the dependencies between two cards of the same band, in a queue so no walk recurses.
-  const successors = new Map<Node, Node[]>();
-  const waiting = new Map<Node, number>();
-  for (const node of nodes) {
-    waiting.set(node, 0);
-    successors.set(node, []);
-  }
-  for (const node of nodes) {
-    for (const id of new Set(node.item?.dependsOn ?? [])) {
-      const from = byId.get(id);
-      if (from === undefined || from === node || from.band !== node.band || from.item?.kind === 'phase') continue;
-      successors.get(from)?.push(node);
-      waiting.set(node, (waiting.get(node) ?? 0) + 1);
-    }
-  }
-  const step = new Map<Node, number>(nodes.map((node) => [node, 0]));
-  const queue = nodes.filter((node) => waiting.get(node) === 0);
-  for (let head = 0; head < queue.length; head += 1) {
-    const node = queue[head] as Node;
-    for (const next of successors.get(node) ?? []) {
-      step.set(next, Math.max(step.get(next) ?? 0, (step.get(node) ?? 0) + 1));
-      const left = (waiting.get(next) ?? 0) - 1;
-      waiting.set(next, left);
-      if (left === 0) queue.push(next);
-    }
-  }
-
-  const bandOrder = [...model.milestones.map((milestone) => milestone.id).filter((id) => nodes.some((node) => node.band === id)).sort(compareMilestoneKeys)];
-  if (nodes.some((node) => node.band === BOARD_BAND_ID)) bandOrder.push(BOARD_BAND_ID);
+  const bands = model.milestones.map((milestone) => milestone.id).sort(compareMilestoneKeys);
+  if (nodes.some((node) => node.band === BOARD_BAND_ID)) bands.push(BOARD_BAND_ID);
   const dots: TimelineDot[] = [];
   const milestones: TimelineMilestone[] = [];
-  for (const band of bandOrder) {
-    const inBand = nodes.filter((node) => node.band === band)
-      .sort((a, b) => (step.get(a) ?? 0) - (step.get(b) ?? 0) || a.order - b.order);
+  for (const band of bands) {
+    const inBand = nodes.filter((node) => node.band === band).sort((a, b) => (placed.step[a.order] as number) - (placed.step[b.order] as number) || a.order - b.order);
+    const bandDots: TimelineDot[] = [];
     let slot = 0;
     let last = -1;
     for (const node of inBand) {
-      const at = step.get(node) ?? 0;
+      const at = placed.step[node.order] as number;
       slot = at === last ? slot + 1 : 0;
       last = at;
-      const dot: TimelineDot = { cardId: node.card.id, milestoneId: band, step: at, slot, inCycle: false, waitsFor: [], missing: [], neededBy: 0, label: node.card.a11yLabel };
+      const dot: TimelineDot = {
+        cardId: node.card.id, milestoneId: band, step: at, slot, inCycle: placed.inCycle[node.order] === true,
+        waitsFor: placed.waitsFor[node.order] ?? [], missing: placed.missing[node.order] ?? [], neededBy: 0, label: node.card.a11yLabel
+      };
       if (node.card.phaseId !== undefined) dot.phaseId = node.card.phaseId;
-      dots.push(dot);
+      bandDots.push(dot);
     }
+    dots.push(...bandDots);
     const milestone = model.milestones.find((entry) => entry.id === band);
-    const finished = inBand.length > 0 && inBand.every((node) => node.card.column === 'done' || node.card.column === 'cancelled');
+    const finished = inBand.length > 0 && inBand.every((node) => closed(node.card));
     milestones.push({
       id: band, title: milestone?.title ?? BOARD_LANE_LABEL, active: milestone?.active ?? false, finished, foldedByDefault: finished,
-      steps: inBand.length === 0 ? 0 : last + 1, cycle: false, cardCount: inBand.length, cancelled: inBand.filter((node) => node.card.column === 'cancelled').length, phases: []
+      steps: inBand.length === 0 ? 0 : last + 1, cycle: bandDots.some((dot) => dot.inCycle), cardCount: inBand.length,
+      cancelled: inBand.filter((node) => node.card.column === 'cancelled').length, phases: phasesOfBand(model, bandDots)
     });
   }
 
+  // Edges join two cards on the board, across milestones too; a dependency on a whole phase or on something not on the board draws none.
   const position = new Map(dots.map((dot, index) => [dot.cardId, index]));
+  const byId = new Map(nodes.map((node) => [node.card.id, node]));
   const edges: TimelineEdge[] = [];
   for (const node of nodes) {
     for (const id of new Set(node.item?.dependsOn ?? [])) {
       const from = byId.get(id);
-      // A dependency on a whole phase orders the card after that phase and draws no line (the UI-SPEC amendment's reading of D-03).
       if (from === undefined || from === node || from.item?.kind === 'phase') continue;
       edges.push({ from: from.card.id, to: node.card.id, waiting: from.card.column !== 'done', crossMilestone: from.band !== node.band });
     }
   }
   edges.sort((a, b) => (position.get(a.from) ?? 0) - (position.get(b.from) ?? 0) || (position.get(a.to) ?? 0) - (position.get(b.to) ?? 0));
+  const dotOf = new Map(dots.map((dot) => [dot.cardId, dot]));
+  for (const edge of edges) {
+    const dot = dotOf.get(edge.from);
+    if (dot !== undefined) dot.neededBy += 1;
+  }
   return { milestones, dots, edges };
 }
