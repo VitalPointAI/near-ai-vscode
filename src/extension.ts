@@ -4,6 +4,7 @@ import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
 import { initProfileIndex, listSavedProfiles, runUseSavedProfile } from './services/profileIndex';
+import { savedProfileUi } from './services/savedProfileUi';
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
 import { readAgentLimits, readSettings, shouldAutoInstallGsd } from './services/settings';
 import { openOnboarding } from './services/onboarding';
@@ -290,12 +291,7 @@ async function useSavedProfile(auth: AuthService, sidebar: NearAiPanelViewProvid
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI profiles are kept per project.'); return; }
   const profiles = new ProfileStore(root, auth);
   await profiles.list();
-  await runUseSavedProfile({
-    pick: (items, options) => Promise.resolve(vscode.window.showQuickPick(items, { ...options, matchOnDescription: true, ignoreFocusOut: true })),
-    progress: (title, task) => Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, task)),
-    info: (message, ...actions) => Promise.resolve(vscode.window.showInformationMessage(message, ...actions)),
-    error: (message, ...actions) => Promise.resolve(vscode.window.showErrorMessage(message, ...actions))
-  }, {
+  await runUseSavedProfile(savedProfileUi(), {
     projectId: profiles.projectScopeId,
     use: (entry) => profiles.useSavedProfile(entry),
     setUpNew: () => configureApiKey(auth, sidebar),
