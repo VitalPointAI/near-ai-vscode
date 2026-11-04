@@ -216,6 +216,9 @@ function bodiesFor(device: { fingerprint: string; publicKey: string }): Record<s
     'item.unblocked': { id: ITEM_ID },
     'item.cancelled': { id: 'plan:62-01', reason: 'no longer in the roadmap' },
     'item.reopened': { id: 'plan:62-01' },
+    // G-62-5 (62-15): the two assignment bodies, so the loops below cover them like every other implemented type.
+    'item.assigned': { id: 'plan:62-01', memberId: OTHER_ID },
+    'item.unassigned': { id: ITEM_ID },
     'snapshot.written': { coversThrough: EVENT_A, lamport: 500, stateHash: HASH_A, path: 'snapshots/000000000500.json' }
   };
 }
@@ -262,6 +265,24 @@ test('every body rejects extra keys, missing keys and wrong types by field name'
       const nulled = { ...clone(valid), [key]: null };
       assert.equal(validateBody(type, nulled), `${INVALID}: body.${key}`, `${type} null ${key}`);
     }
+  }
+});
+
+test('the assignment bodies are exactly { id, memberId } and { id }, with the item and member id rules', () => {
+  assert.equal(validateBody('item.assigned', { id: 'plan:62-01', memberId: OTHER_ID }), undefined);
+  assert.equal(validateBody('item.assigned', { id: ITEM_ID, memberId: OTHER_ID }), undefined);
+  assert.equal(validateBody('item.unassigned', { id: 'phase:62' }), undefined);
+  assert.equal(validateBody('item.assigned', { id: 'plan:62-01', memberId: OTHER_ID, reason: 'because' }), `${INVALID}: body.reason`);
+  assert.equal(validateBody('item.assigned', { id: 'plan:62-01', memberId: OTHER_ID, at: '2026-01-01T00:00:00.000Z' }), `${INVALID}: body.at`);
+  assert.equal(validateBody('item.unassigned', { id: 'plan:62-01', memberId: OTHER_ID }), `${INVALID}: body.memberId`);
+  assert.equal(validateBody('item.assigned', { id: 'plan:62-01' }), `${INVALID}: body.memberId`);
+  assert.equal(validateBody('item.unassigned', {}), `${INVALID}: body.id`);
+  for (const id of ['plan 62-01', 'item:lowercase', 'epic:1', '', 'plan:', 7]) {
+    assert.equal(validateBody('item.assigned', { id, memberId: OTHER_ID }), `${INVALID}: body.id`, String(id));
+    assert.equal(validateBody('item.unassigned', { id }), `${INVALID}: body.id`, String(id));
+  }
+  for (const memberId of ['mbr-123', 'MBR-0123456789ABCDEF', 'dev-0123456789abcdef', 'anyone', '', null]) {
+    assert.equal(validateBody('item.assigned', { id: 'plan:62-01', memberId }), `${INVALID}: body.memberId`, String(memberId));
   }
 });
 
