@@ -126,6 +126,12 @@ async function teamAt(context: Context, commit: string): Promise<string | undefi
   }
 }
 
+// The team the copy is caught up for: the invite's team when there is one, and any team at all when a copy asks to join without an invite
+// (G-61-9). A missing team.json never qualifies, whatever was asked for.
+function isWantedTeam(context: Context, found: string | undefined): boolean {
+  return found !== undefined && (context.teamId === undefined || found === context.teamId);
+}
+
 type DefaultBranch = { kind: 'has-team' } | { kind: 'no-team' } | { kind: 'offline'; detail: string };
 
 // Does the online default branch (when it is not the copy's own branch) hold this team's team.json? Then the copy is simply on another
@@ -141,7 +147,7 @@ async function defaultBranchHasTeam(context: Context, branch: string): Promise<D
   try {
     if (fetched.code !== 0) return MISSING_REMOTE_REF.test(fetched.stderr) ? { kind: 'no-team' } : { kind: 'offline', detail: detailOf(context, fetched) };
     const commit = await commitOf(context, CATCH_UP_PROBE_REF);
-    return commit !== undefined && await teamAt(context, commit) === context.teamId ? { kind: 'has-team' } : { kind: 'no-team' };
+    return commit !== undefined && isWantedTeam(context, await teamAt(context, commit)) ? { kind: 'has-team' } : { kind: 'no-team' };
   } finally {
     await context.git(['update-ref', '-d', CATCH_UP_PROBE_REF], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
   }
@@ -153,7 +159,9 @@ async function versionRefusal(context: Context, branch: string): Promise<CatchUp
   return refuse(online.kind === 'has-team' ? 'other-version' : 'not-shared');
 }
 
-// Brings the current branch of this copy up to the online version of the same branch, fetched from the named remote only. Every check runs
+// Brings the current branch of this copy up to the online version of the same branch, fetched from the named remote only. With a team id
+// the online team.json must be that team's; without one (a copy asking to join, which has no invite) any team.json this client can read
+// qualifies, and every other rule is the same. Every check runs
 // before anything in the copy changes; the only change is a fast-forward (merge --ff-only). Nothing is reset, stashed or checked out.
 export async function catchUpCopy(input: { projectRoot: string; remote: string; teamId?: string; git?: GitRunner }): Promise<CatchUpResult> {
   const git = input.git ?? runGit;
@@ -178,7 +186,7 @@ export async function catchUpCopy(input: { projectRoot: string; remote: string; 
   const tip = await commitOf(context, tracking);
   if (tip === undefined) return refuse('offline');
 
-  if (await teamAt(context, tip) !== teamId) return versionRefusal(context, branch);
+  if (!isWantedTeam(context, await teamAt(context, tip))) return versionRefusal(context, branch);
   if (head !== tip) {
     const ancestor = await git(['merge-base', '--is-ancestor', head, tip], { cwd: projectRoot, timeoutMs: LOCAL_TIMEOUT_MS });
     if (ancestor.code !== 0) return refuse('unshared-work', ancestor.code === 1 ? undefined : detailOf(context, ancestor));
@@ -202,6 +210,6 @@ export async function catchUpCopy(input: { projectRoot: string; remote: string; 
   } catch (error) {
     if (!(error instanceof TeamFileError)) throw error;
   }
-  if (onDisk !== teamId) return refuse('not-shared');
+  if (!isWantedTeam(context, onDisk)) return refuse('not-shared');
   return { ok: true, updated: head !== tip, branch };
 }
