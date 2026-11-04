@@ -187,6 +187,24 @@ function plainTests(): Array<[string, () => Promise<void>]> {
       await new Promise((resolve) => setTimeout(resolve, 4000));
       assert.equal(vscode.extensions.getExtension(EXTENSION_ID)!.isActive, true, 'the view activates the extension');
       assert.deepEqual(await readdir(workspace), []);
+    }],
+    ['the Cybersecurity command opens its panel in a folder with no NEAR AI setup', async () => {
+      // This is the whole reason nearAi.openCyber has its own activation event: everything else waits
+      // for workspaceContains:.planning/.near-ai, and a cyber engagement can target any folder.
+      const before = vscode.window.tabGroups.all.reduce((count, group) => count + group.tabs.length, 0);
+      await vscode.commands.executeCommand('nearAi.openCyber');
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs);
+      const cyber = tabs.find((tab) => (tab.label ?? '').includes('Cybersecurity'));
+      assert.ok(cyber, `a Cybersecurity tab is open (tabs: ${tabs.map((tab) => tab.label).join(', ')}; before ${before})`);
+      assert.deepEqual(await readdir(workspace), [], 'the panel writes nothing into the folder');
+    }],
+    ['re-running the command reveals the same panel rather than opening a second one', async () => {
+      const count = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => (tab.label ?? '').includes('Cybersecurity')).length;
+      assert.equal(count(), 1);
+      await vscode.commands.executeCommand('nearAi.openCyber');
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      assert.equal(count(), 1, 'the panel is a singleton (D-01)');
     }]
   ];
 }

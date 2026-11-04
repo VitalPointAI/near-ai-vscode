@@ -15,6 +15,7 @@ import { checkCitationsTool, webFetchTool, webSearchTool } from '../agent/webToo
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
 import { AgentTool, CORE_TOOLS, Todo, ToolContext } from '../agent/tools';
+import type { CyberRunAccess } from './cyberRun';
 import { TaskBoard } from '../agent/taskBoard';
 import { displayPath } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
@@ -81,6 +82,11 @@ export interface AgentTurnRequest {
   reputation?: ReputationStore;
   /** Dependency vulnerability checks for the SecurityScan tool. */
   security?: SecurityAccess;
+  /**
+   * A cybersecurity run: the cyber tools attach to this turn only (D-02, the security-tool
+   * precedent). Ordinary chat never carries them.
+   */
+  cyber?: CyberRunAccess;
   /** The WebSearch tool's provider; without one, WebSearch says search is not set up. */
   webSearch?: SearchProvider;
   /** Added after a GSD skill's instructions (e.g. the project's red-team stage). */
@@ -550,7 +556,7 @@ export class AgentConversation {
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.mcpTools ?? []), ...memoryFor()];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...memoryFor()];
     const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
     if (!agents.length) return base;
     const gsd = request.gsd;

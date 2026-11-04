@@ -420,3 +420,99 @@ export function providerErrorMessage(error: unknown): string {
   if (error instanceof Error && (error.name === 'ModelUnavailableError' || error.name === 'ModelStalledError')) return redactSecrets(error.message);
   return 'The NEAR AI request could not be completed. Check your connection and try again.';
 }
+
+// ---- Cybersecurity panel ------------------------------------------------------------------------
+// The cyber panel's own message union, parsed by its own function. It is deliberately not a member
+// of ChatWebviewMessage: the chat union is consumed by the chat webview's dispatcher, and a cyber
+// message arriving there would have to be rejected. Both unions share the hand-rolled validate-then-
+// narrow style above.
+
+export type CyberTargetKind = 'url' | 'workspace' | 'cidr' | 'container' | 'git';
+export type CyberRunMode = 'defensive' | 'offensive' | 'full';
+
+export interface CyberEngagementDraft {
+  kind: CyberTargetKind;
+  value: string;
+  modes: CyberRunMode[];
+  depth: 'quick' | 'standard' | 'deep';
+  exclusions?: string[];
+}
+
+export type CyberWebviewMessage =
+  | { type: 'ready' }
+  | { type: 'resolve-target'; kind: CyberTargetKind; value: string }
+  | { type: 'create-engagement'; draft: CyberEngagementDraft }
+  | { type: 'accept-disclaimer'; acceptor: string; region?: string }
+  | { type: 'decline-disclaimer' }
+  | { type: 'run'; engagementId: string; mode: CyberRunMode; depth: 'quick' | 'standard' | 'deep'; model?: string; vehicle?: 'panel' | 'chat' }
+  | { type: 'stop'; engagementId: string }
+  | { type: 'export'; runId: string; format: 'markdown' | 'json' | 'sarif' }
+  | { type: 'replay'; runId: string }
+  | { type: 'install-tool'; tool: string }
+  | { type: 'select-model'; engagementId: string; model: string };
+
+const CYBER_KINDS: readonly CyberTargetKind[] = ['url', 'workspace', 'cidr', 'container', 'git'];
+const CYBER_MODES: readonly CyberRunMode[] = ['defensive', 'offensive', 'full'];
+const CYBER_DEPTHS = ['quick', 'standard', 'deep'] as const;
+const ENGAGEMENT_ID = /^eng-[0-9a-fA-F-]{8,40}$/;
+const RUN_ID_SHAPE = /^run-[a-z0-9-]{6,80}$/;
+const TOOL_SHAPE = /^[a-z][a-z0-9.+-]{1,30}$/;
+const MODEL_SHAPE = /^[\w./:-]{1,120}$/;
+const REGION_SHAPE = /^[a-z]{2}$/;
+
+/** Validates one message from the cyber webview before any host action reads it (T-25-21). */
+export function parseCyberMessage(value: unknown): CyberWebviewMessage | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const message = value as Record<string, unknown>;
+  const only = (...allowed: string[]) => Object.keys(message).every((key) => key === 'type' || allowed.includes(key));
+  switch (message.type) {
+    case 'ready': case 'decline-disclaimer':
+      return only() ? { type: message.type } : undefined;
+    case 'resolve-target':
+      return only('kind', 'value') && CYBER_KINDS.includes(message.kind as CyberTargetKind) && typeof message.value === 'string' && message.value.trim().length > 0 && message.value.length <= 2_000
+        ? { type: 'resolve-target', kind: message.kind as CyberTargetKind, value: message.value.trim() }
+        : undefined;
+    case 'create-engagement': {
+      if (!only('draft')) return undefined;
+      const draft = message.draft;
+      if (!draft || typeof draft !== 'object' || Array.isArray(draft)) return undefined;
+      const d = draft as Record<string, unknown>;
+      const modes = Array.isArray(d.modes) ? d.modes.filter((mode): mode is CyberRunMode => CYBER_MODES.includes(mode as CyberRunMode)) : [];
+      const exclusions = Array.isArray(d.exclusions) ? d.exclusions.filter((entry): entry is string => typeof entry === 'string').slice(0, 40) : undefined;
+      const valid = CYBER_KINDS.includes(d.kind as CyberTargetKind)
+        && typeof d.value === 'string' && d.value.trim().length > 0
+        && modes.length > 0
+        && (CYBER_DEPTHS as readonly string[]).includes(String(d.depth));
+      if (!valid) return undefined;
+      return { type: 'create-engagement', draft: { kind: d.kind as CyberTargetKind, value: String(d.value).trim(), modes, depth: d.depth as CyberEngagementDraft['depth'], ...(exclusions?.length ? { exclusions } : {}) } };
+    }
+    case 'accept-disclaimer':
+      return only('acceptor', 'region') && typeof message.acceptor === 'string' && message.acceptor.trim().length > 0 && message.acceptor.length <= 200
+        && (message.region === undefined || (typeof message.region === 'string' && REGION_SHAPE.test(message.region)))
+        ? { type: 'accept-disclaimer', acceptor: message.acceptor.trim(), ...(typeof message.region === 'string' ? { region: message.region } : {}) }
+        : undefined;
+    case 'run':
+      return only('engagementId', 'mode', 'depth', 'model', 'vehicle') && typeof message.engagementId === 'string' && ENGAGEMENT_ID.test(message.engagementId)
+        && CYBER_MODES.includes(message.mode as CyberRunMode) && (CYBER_DEPTHS as readonly string[]).includes(String(message.depth))
+        && (message.model === undefined || (typeof message.model === 'string' && MODEL_SHAPE.test(message.model)))
+        && (message.vehicle === undefined || message.vehicle === 'panel' || message.vehicle === 'chat')
+        ? { type: 'run', engagementId: message.engagementId, mode: message.mode as CyberRunMode, depth: message.depth as 'quick' | 'standard' | 'deep', ...(typeof message.model === 'string' ? { model: message.model } : {}), ...(message.vehicle === 'panel' || message.vehicle === 'chat' ? { vehicle: message.vehicle } : {}) }
+        : undefined;
+    case 'stop':
+      return only('engagementId') && typeof message.engagementId === 'string' && ENGAGEMENT_ID.test(message.engagementId) ? { type: 'stop', engagementId: message.engagementId } : undefined;
+    case 'export':
+      return only('runId', 'format') && typeof message.runId === 'string' && RUN_ID_SHAPE.test(message.runId)
+        && (message.format === 'markdown' || message.format === 'json' || message.format === 'sarif')
+        ? { type: 'export', runId: message.runId, format: message.format }
+        : undefined;
+    case 'replay':
+      return only('runId') && typeof message.runId === 'string' && RUN_ID_SHAPE.test(message.runId) ? { type: 'replay', runId: message.runId } : undefined;
+    case 'install-tool':
+      return only('tool') && typeof message.tool === 'string' && TOOL_SHAPE.test(message.tool) ? { type: 'install-tool', tool: message.tool } : undefined;
+    case 'select-model':
+      return only('engagementId', 'model') && typeof message.engagementId === 'string' && ENGAGEMENT_ID.test(message.engagementId) && typeof message.model === 'string' && MODEL_SHAPE.test(message.model)
+        ? { type: 'select-model', engagementId: message.engagementId, model: message.model }
+        : undefined;
+    default: return undefined;
+  }
+}
