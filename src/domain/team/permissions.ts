@@ -219,14 +219,18 @@ export function actionForEvent(event: ImplementedTeamEvent, state?: Pick<TeamSta
     // G-62-5: putting a person on a card, or taking them off, is the spec 6.3 "assign or reassign others" row: owner and lead.
     // Owner decision 2026-11-03 (62-25): a member's own assignment is item.assign-self, but only when it takes nothing from a teammate. Assigning
     // yourself counts when the card has no assignee, or is already yours (the rules then refuse the repeat with itemAlreadyAssigned); taking
-    // someone off counts when that someone is you. Everything else, including taking a teammate's card, stays item.assign, so a teammate's card
+    // someone off counts when that someone is you (narrowed by 62-26 below to a card you also assigned yourself). Everything else, including taking a teammate's card, stays item.assign, so a teammate's card
     // changes hands only when they unassign themselves or a lead reassigns it. Without a state the answer is item.assign, the stricter one.
     case 'item.assigned': {
       const before = assigneeBefore(event.body.id);
       const own = before !== null && event.body.memberId === event.author && (before === undefined || before === event.author);
       return { kind: own ? 'item.assign-self' : 'item.assign' };
     }
-    case 'item.unassigned':
-      return { kind: assigneeBefore(event.body.id) === event.author ? 'item.assign-self' : 'item.assign' };
+    // Owner decision 2026-11-04 (62-26): taking yourself off counts as your own only when you are the card's assignee and also made that
+    // assignment. A card the owner or a lead gave you stays on their row until one of them changes it.
+    case 'item.unassigned': {
+      const item = state?.items.get(event.body.id);
+      return { kind: item !== undefined && item.assignee === event.author && item.assignedBy === event.author ? 'item.assign-self' : 'item.assign' };
+    }
   }
 }

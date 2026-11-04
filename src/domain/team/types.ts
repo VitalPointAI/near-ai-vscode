@@ -98,12 +98,14 @@ export interface SpendSummary { inputTokens: number; cachedInputTokens: number; 
 // left out when absent. stateSince is the display-only `at` of the event that last changed the stored state or the hold flag; it orders nothing.
 // origin says who owns the content: import (the GSD importer) or board (created on the board by createdBy). hold, summary and active are only ever true.
 // assignee is the member id a lead put on the card with item.assigned (G-62-5), left out when nobody is assigned so older states hash as before.
+// assignedBy is the member id of the author of the item.assigned that set the current assignee (owner decision 2026-11-04, 62-26): present only
+// while assignee is, so a state without assignments hashes as before. A member who is not the owner or a lead leaves only a card they assigned themselves.
 export interface WorkItem {
   id: string; kind: ItemKind; title: string; parentId?: string; gsd?: ItemGsdRef; dependsOn: string[]; scope: string[]; requirements: string[]; mustHaves: string[];
   estimate?: { tokens: number; nanoUsd?: number; confidence?: 'low' | 'medium' | 'high' }; state: ItemState; blocked?: { reason: string; by: string; since: string };
   claimId?: string; tags: string[]; ringFenceNanoUsd?: number;
   origin: ItemOrigin; stateSince: string; createdBy?: string; description?: string; hold?: true; summary?: true; active?: true; source?: string;
-  assignee?: string;
+  assignee?: string; assignedBy?: string;
 }
 export interface Claim { id: string; itemId: string; memberId: string; branch: string; base: string; leaseIds: string[]; startedAt: string; lastHeartbeatAt: string; status: 'active' | 'in-review' | 'integrating' | 'released' | 'expired' | 'handed-off' | 'merged'; spend: SpendSummary }
 export interface Lease { id: string; claimId?: string; holder: string; kind: 'paths' | 'resource'; paths?: string[]; resource?: string; grantedAt: string; ttlMinutes: number; parentLeaseId?: string }

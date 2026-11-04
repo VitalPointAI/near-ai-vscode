@@ -279,8 +279,12 @@ test('actionForEvent sends a member\'s own assignment to item.assign-self and ev
   const FREE = 'plan:62-01';
   const DEVS = 'plan:62-02';
   const LEADS = 'plan:62-03';
-  const card = (id: string, assignee?: string): WorkItem => ({ ...boardItem(id, IDS.lead), kind: 'plan', origin: 'import', ...(assignee === undefined ? {} : { assignee }) });
-  const state = { items: new Map([[FREE, card(FREE)], [DEVS, card(DEVS, IDS.developer)], [LEADS, card(LEADS, IDS.lead)]]) };
+  const GIVEN = 'plan:62-04';
+  // assignedBy is who made the assignment (owner decision 2026-11-04, 62-26): DEVS and LEADS were taken by their holders, GIVEN the lead gave the developer.
+  const card = (id: string, assignee?: string, assignedBy: string | undefined = assignee): WorkItem => ({
+    ...boardItem(id, IDS.lead), kind: 'plan', origin: 'import', ...(assignee === undefined ? {} : { assignee }), ...(assignedBy === undefined ? {} : { assignedBy })
+  });
+  const state = { items: new Map([[FREE, card(FREE)], [DEVS, card(DEVS, IDS.developer)], [LEADS, card(LEADS, IDS.lead)], [GIVEN, card(GIVEN, IDS.developer, IDS.lead)]]) };
   const at = (event: Record<string, unknown>, author: string = IDS.developer): ImplementedTeamEvent => ({ ...ENVELOPE, author, ...event } as ImplementedTeamEvent);
   const assign = (id: string, memberId: string, author?: string): ImplementedTeamEvent => at({ type: 'item.assigned', body: { id, memberId } }, author);
   const unassign = (id: string, author?: string): ImplementedTeamEvent => at({ type: 'item.unassigned', body: { id } }, author);
@@ -293,7 +297,9 @@ test('actionForEvent sends a member\'s own assignment to item.assign-self and ev
     ['the developer takes the lead\'s card', assign(LEADS, IDS.developer), OTHERS],
     ['the developer puts the lead on a free card', assign(FREE, IDS.lead), OTHERS],
     ['the developer puts the lead on the developer\'s own card', assign(DEVS, IDS.lead), OTHERS],
-    ['the developer takes themselves off', unassign(DEVS), SELF],
+    ['the developer takes themselves off a card they took', unassign(DEVS), SELF],
+    // Owner decision 2026-11-04 (62-26): a card the lead gave the developer stays on the owner and lead row.
+    ['the developer takes themselves off a card the lead gave them', unassign(GIVEN), OTHERS],
     ['the developer takes the lead off', unassign(LEADS), OTHERS],
     ['the developer clears a free card', unassign(FREE), OTHERS],
     ['the lead takes themselves off', unassign(LEADS, IDS.lead), SELF],

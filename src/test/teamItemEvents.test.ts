@@ -506,14 +506,16 @@ test('the canonical body of one recorded example per item event type is frozen',
 test('the stored WorkItem key set is frozen', () => {
   // Required<WorkItem> makes the compiler refuse this literal when a key is added to or dropped from the type, so the list below cannot drift silently.
   // 62-15 added assignee on purpose (G-62-5): it is optional and left out when empty, so no older state changes its hash (teamAssignHashes.test.ts).
+  // 62-26 added assignedBy on purpose (owner decision 2026-11-04: a member leaves only a card they assigned themselves): it is present only while
+  // assignee is, so a state without assignments hashes as before.
   const full: Required<WorkItem> = {
     id: 'plan:62-01', kind: 'plan', title: 'T', parentId: 'phase:62', gsd: { phase: '62' }, dependsOn: [], scope: [], requirements: [], mustHaves: [],
     estimate: { tokens: 1 }, state: 'backlog', blocked: { reason: 'r', by: 'mbr-0123456789abcdef', since: '2026-01-01T00:00:00.000Z' }, claimId: 'clm-1', tags: [],
     ringFenceNanoUsd: 0, origin: 'import', stateSince: '2026-01-01T00:00:00.000Z', createdBy: 'mbr-0123456789abcdef', description: 'd', hold: true, summary: true, active: true, source: 'a'.repeat(40),
-    assignee: 'mbr-0123456789abcdef'
+    assignee: 'mbr-0123456789abcdef', assignedBy: 'mbr-0123456789abcdef'
   };
   assert.deepEqual(Object.keys(full).sort(), [
-    'active', 'assignee', 'blocked', 'claimId', 'createdBy', 'dependsOn', 'description', 'estimate', 'gsd', 'hold', 'id', 'kind', 'mustHaves', 'origin', 'parentId',
+    'active', 'assignedBy', 'assignee', 'blocked', 'claimId', 'createdBy', 'dependsOn', 'description', 'estimate', 'gsd', 'hold', 'id', 'kind', 'mustHaves', 'origin', 'parentId',
     'requirements', 'ringFenceNanoUsd', 'scope', 'source', 'state', 'stateSince', 'summary', 'tags', 'title'
   ]);
 });

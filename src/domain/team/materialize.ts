@@ -274,7 +274,8 @@ const RELEASABLE_CLAIM_STATUSES: readonly string[] = ['active', 'in-review', 'in
 
 // D-19, TEAM-03: everything a removed member held goes back to the team in this one transition, so every client computes the same release.
 // Claims keep their branch name, base and spend; their items return to ready; the member's leases and allocations are dropped (the unspent
-// amount returns to the pool); released claims leave the integration queue; every card assigned to the member loses its assignee (G-62-5).
+// amount returns to the pool); released claims leave the integration queue; every card assigned to the member loses its assignee and the assigner with it (G-62-5). A removed assigner stays
+// on the cards they assigned (62-26): those cards still need the owner or a lead to change them.
 // Map iteration is insertion order, so the result is deterministic. Merged, handed-off, expired and already released claims are history and stay as they are.
 function releaseHeldWork(state: TeamState, memberId: string): void {
   const releasedIds = new Set<string>();
@@ -289,7 +290,9 @@ function releaseHeldWork(state: TeamState, memberId: string): void {
     }
   }
   for (const item of state.items.values()) {
-    if (item.assignee === memberId) delete item.assignee;
+    if (item.assignee !== memberId) continue;
+    delete item.assignee;
+    delete item.assignedBy;
   }
   for (const [leaseId, lease] of state.leases) {
     if (lease.holder === memberId || (lease.claimId !== undefined && releasedIds.has(lease.claimId))) state.leases.delete(leaseId);
@@ -480,12 +483,19 @@ function applyTransition(state: TeamState, event: ImplementedTeamEvent, commitTi
       settle(itemOf(state, event.body.id), 'backlog', event.at);
       return;
     // G-62-5: an assignment replaces any earlier one and an unassign removes it. Neither is a state change, so stateSince stays where it is.
-    case 'item.assigned':
-      itemOf(state, event.body.id).assignee = event.body.memberId;
+    // 62-26 (owner decision 2026-11-04): the author of the assignment is its assigner, so a lead replacing a self-assignment becomes the assigner.
+    case 'item.assigned': {
+      const item = itemOf(state, event.body.id);
+      item.assignee = event.body.memberId;
+      item.assignedBy = event.author;
       return;
-    case 'item.unassigned':
-      delete itemOf(state, event.body.id).assignee;
+    }
+    case 'item.unassigned': {
+      const item = itemOf(state, event.body.id);
+      delete item.assignee;
+      delete item.assignedBy;
       return;
+    }
     case 'policy.changed':
       state.team.policy = applyPolicyChanges(state.team.policy, event.body.changes);
       return;
@@ -680,7 +690,7 @@ const ITEM_STATES: readonly ItemState[] = ['backlog', 'ready', 'claimed', 'in-pr
 const BOARD_KINDS: readonly ItemKind[] = ['bug', 'chore', 'spike'];
 const PARENT_KIND_OF: Readonly<Record<string, ItemKind>> = { phase: 'milestone', plan: 'phase', task: 'plan' };
 const ITEM_REQUIRED = ['id', 'kind', 'title', 'dependsOn', 'scope', 'requirements', 'mustHaves', 'state', 'tags', 'origin', 'stateSince'];
-const ITEM_OPTIONAL = ['parentId', 'gsd', 'estimate', 'blocked', 'createdBy', 'description', 'hold', 'summary', 'active', 'source', 'assignee'];
+const ITEM_OPTIONAL = ['parentId', 'gsd', 'estimate', 'blocked', 'createdBy', 'description', 'hold', 'summary', 'active', 'source', 'assignee', 'assignedBy'];
 
 // A field validator answers with a problem text or nothing; a snapshot only needs to know there was one, and where.
 function sound(problem: string | undefined, path: string): void {
@@ -757,6 +767,7 @@ function parseWorkItem(value: unknown, path: string): WorkItem {
     item.source = raw.source as string;
   }
   if (present('assignee')) item.assignee = patterned(raw.assignee, `${path}.assignee`, MEMBER_ID_PATTERN);
+  if (present('assignedBy')) item.assignedBy = patterned(raw.assignedBy, `${path}.assignedBy`, MEMBER_ID_PATTERN);
   return item;
 }
 
@@ -885,11 +896,19 @@ function checkAnchorBinding(state: TeamState, anchor: GenesisAnchor): void {
 
 // G-62-5: the log only ever assigns a current, joined member, and removal clears the member's cards, so an assignee must name a member on the
 // roster who is neither removed nor an unused invitation. A role change does not clear an assignment, so the role itself is not checked here.
+// 62-26: an assigner exists only with an assignee and names someone who signed the assignment, so a member on the roster who joined; a removed
+// assigner is allowed, because removal leaves the cards they assigned as they were.
 function checkAssignees(state: TeamState): void {
   for (const item of state.items.values()) {
-    if (item.assignee === undefined) continue;
+    if (item.assignee === undefined) {
+      if (item.assignedBy !== undefined) bad(`items.${item.id}.assignedBy`);
+      continue;
+    }
     const member = state.members.get(item.assignee);
     if (member === undefined || member.removedEvent !== undefined || member.status === 'invited') bad(`items.${item.id}.assignee`);
+    if (item.assignedBy === undefined) continue;
+    const assigner = state.members.get(item.assignedBy);
+    if (assigner === undefined || assigner.status === 'invited') bad(`items.${item.id}.assignedBy`);
   }
 }
 

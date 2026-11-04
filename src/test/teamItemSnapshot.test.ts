@@ -103,6 +103,10 @@ test('a state with three assignees serialises and deserialises to the same text 
   const assigned = [...restored.items.values()].filter((item) => item.assignee !== undefined).map((item) => item.id).sort();
   assert.deepEqual(assigned, [BOARD_ID, 'phase:91', 'plan:90-02']);
   for (const id of assigned) assert.equal(restored.items.get(id)?.assignee, world.owner.memberId);
+  // 62-26: the owner made each assignment, so each card carries the owner as its assigner, and an unassigned card carries none.
+  for (const id of assigned) assert.equal(restored.items.get(id)?.assignedBy, world.owner.memberId);
+  assert.equal(restored.items.get('plan:90-01')?.assignedBy, undefined);
+  assert.ok(!text.includes('"assignedBy":""'), 'an empty assigner is never written');
   assert.ok(!text.includes('"assignee":""'), 'an empty assignee is never written');
 });
 
@@ -126,6 +130,27 @@ test('a snapshot whose assignee is not a member id, or names nobody on the roste
   const plain = plainOf(world.state);
   for (const [name, assignee] of [['not a member id', 'anyone'], ['an empty assignee', ''], ['a number', 7], ['nobody on the roster', 'mbr-0000000000000000']] as const) {
     const tampered = withItems(plain, (items) => { pair(items, 'plan:90-02').assignee = assignee; });
+    assert.throws(() => deserialiseState(tampered, world.anchor), (error: Error) => error.message.startsWith(INVALID_ITEMS), name);
+    const file = parseSnapshotFile(canonicalize(signedSnapshot(world.owner, world.state, { state: tampered })), world.anchor);
+    assert.equal(file.ok, false, name);
+    if (!file.ok) assert.ok(file.reason.startsWith(INVALID_ITEMS), `${name}: ${file.reason}`);
+  }
+});
+
+// 62-26 (owner decision 2026-11-04): the assigner is held to the rules the log follows: a member id, someone on the roster, and only with an assignee.
+test('a snapshot whose assigner is not a member id, names nobody on the roster, or appears without an assignee is refused as an invalid snapshot', async () => {
+  const world = await assignedWorld();
+  const plain = plainOf(world.state);
+  const cases: Array<[string, (items: Array<[string, PlainItem]>) => void]> = [
+    ['not a member id', (items) => { pair(items, 'plan:90-02').assignedBy = 'anyone'; }],
+    ['an empty assigner', (items) => { pair(items, 'plan:90-02').assignedBy = ''; }],
+    ['a number', (items) => { pair(items, 'plan:90-02').assignedBy = 7; }],
+    ['nobody on the roster', (items) => { pair(items, 'plan:90-02').assignedBy = 'mbr-0000000000000000'; }],
+    ['an assigner on a card nobody holds', (items) => { pair(items, 'plan:90-01').assignedBy = world.owner.memberId; }],
+    ['an assigner left behind after the assignee', (items) => { delete pair(items, 'plan:90-02').assignee; }]
+  ];
+  for (const [name, change] of cases) {
+    const tampered = withItems(plain, change);
     assert.throws(() => deserialiseState(tampered, world.anchor), (error: Error) => error.message.startsWith(INVALID_ITEMS), name);
     const file = parseSnapshotFile(canonicalize(signedSnapshot(world.owner, world.state, { state: tampered })), world.anchor);
     assert.equal(file.ok, false, name);
