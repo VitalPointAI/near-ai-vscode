@@ -43,6 +43,11 @@ const items = (h: BoardHarness): FakeNode[] => Array.from(menu(h).querySelectorA
 const isOpen = (h: BoardHarness): boolean => h.$('#menu') !== null && !menu(h).hidden;
 const cardOf = (model: BoardModel, id: string): BoardCard => model.cards.find((c) => c.id === id)!;
 const moves = (h: BoardHarness): Array<Record<string, any>> => h.posts.filter((p) => p.type === 'move');
+// Owner decision 2026-11-03 (G-62-5, 62-20): after the moves the menu lists the card's assignment actions, so a menu holds the moves' labels and then these.
+const ASSIGN_WORDS: Record<string, (c: BoardCard) => string> = {
+  assign: () => 'Assign to...', unassign: (c) => `Unassign ${c.assignee?.name ?? ''}`, 'assign-me': () => 'Assign to me', 'unassign-me': () => 'Unassign me'
+};
+const offered = (c: BoardCard): string[] => [...c.moves.map((m) => m.label), ...c.assignActions.map((key) => ASSIGN_WORDS[key]!(c))];
 
 // ---- Task 1: the tracer ----------------------------------------------------------------------------------------------------------------------
 
@@ -61,10 +66,11 @@ test('tracer: M opens the menu on a ready card, Down and Enter choose Backlog (p
   assert.equal(menu(h).getAttribute('role'), 'menu');
   assert.equal(menu(h).getAttribute('aria-label'), 'Move 90-01 to');
   assert.equal(moveBtn(h, 'plan:90-01').getAttribute('aria-expanded'), 'true');
-  assert.deepEqual(items(h).map((i) => text(i)), ready.moves.map((m) => m.label));
+  // Owner decision 2026-11-03 (62-20): the moves, then Assign to... after its own separator.
+  assert.deepEqual(items(h).map((i) => text(i)), offered(ready));
   assert.equal(h.focused(), items(h)[0]);
   assert.equal(text(h.focused()), 'Done (mark as finished)');
-  assert.deepEqual(menu(h).querySelectorAll('[role="separator"]').length, 1);
+  assert.deepEqual(menu(h).querySelectorAll('[role="separator"]').length, 2, 'one before Block... and one before the assignment items');
   const kids = Array.from(menu(h).children);
   assert.equal(kids[kids.findIndex((k) => k.getAttribute('role') === 'separator') + 1]!.textContent, 'Block...');
 
@@ -101,7 +107,8 @@ test('tracer: in the list layout the row Move to... button opens the same menu w
   assert.ok(isOpen(h));
   assert.equal(button.getAttribute('aria-expanded'), 'true');
   assert.equal(menu(h).getAttribute('aria-label'), 'Move 90-01 to');
-  assert.deepEqual(items(h).map((i) => text(i)), cardOf(model, 'plan:90-01').moves.map((m) => m.label));
+  // Owner decision 2026-11-03 (62-20): the assignment items follow the moves.
+  assert.deepEqual(items(h).map((i) => text(i)), offered(cardOf(model, 'plan:90-01')));
   const hold = items(h).find((i) => text(i) === 'Backlog (put on hold)')!;
   hold.focus();
   h.press(hold, 'Enter');
@@ -142,12 +149,15 @@ test('Up wraps from the first to the last item; Home and End jump; a letter jump
   const { h, model } = await ownerBoard();
   const ready = cardOf(model, 'plan:90-01');
   open(h, 'plan:90-01');
+  // Owner decision 2026-11-03 (62-20): the last item is now the assignment item after the moves.
+  const all = offered(ready);
+  assert.equal(all[all.length - 1], 'Assign to...');
   h.press(h.focused(), 'ArrowUp');
-  assert.equal(text(h.focused()), ready.moves[ready.moves.length - 1].label, 'Up on the first wraps to the last');
+  assert.equal(text(h.focused()), all[all.length - 1], 'Up on the first wraps to the last');
   h.press(h.focused(), 'Home');
   assert.equal(text(h.focused()), ready.moves[0].label);
   h.press(h.focused(), 'End');
-  assert.equal(text(h.focused()), ready.moves[ready.moves.length - 1].label);
+  assert.equal(text(h.focused()), all[all.length - 1]);
   h.press(h.focused(), 'c');
   assert.equal(text(h.focused()), 'Cancelled (cancel this item)...');
   h.press(h.focused(), 'B');
@@ -169,7 +179,9 @@ test('typing u on a blocked card jumps to Unblock, and Space runs the focused it
   const h = start();
   h.deliver({ type: 'state', model });
   open(h, blocked.id);
-  assert.equal(menu(h).querySelectorAll('[role="separator"]').length, 1, 'the separator comes before Unblock');
+  // Owner decision 2026-11-03 (62-20): a second separator comes before the assignment items.
+  assert.equal(menu(h).querySelectorAll('[role="separator"]').length, 2, 'one separator comes before Unblock and one before Assign to...');
+  assert.equal(text(Array.from(menu(h).children)[Array.from(menu(h).children).findIndex((k) => k.getAttribute('role') === 'separator') + 1]), 'Unblock');
   h.press(h.focused(), 'u');
   assert.equal(text(h.focused()), 'Unblock');
   h.press(h.focused(), ' ');
@@ -221,14 +233,16 @@ test('the Move to... button opens, and pressing it again closes; opening a secon
   assert.equal(menu(h).getAttribute('aria-label'), 'Move ' + second.displayId + ' to');
   assert.equal(moveBtn(h, 'plan:90-01').getAttribute('aria-expanded'), 'false');
   assert.equal(moveBtn(h, second.id).getAttribute('aria-expanded'), 'true');
-  assert.deepEqual(items(h).map((i) => text(i)), second.moves.map((m) => m.label));
+  // Owner decision 2026-11-03 (62-20): the second card's assignment items follow its moves.
+  assert.deepEqual(items(h).map((i) => text(i)), offered(second));
 });
 
 test('a card with no moves has no Move to... button and M opens nothing; a read-only model has none; an offline model cannot open it', async () => {
   const { h, model, world } = await ownerBoard();
-  const none = withCards(model, (cards) => { cards.find((c) => c.id === 'plan:90-01')!.moves = []; });
+  // Owner decision 2026-11-03 (62-20): an assignment action alone also opens the menu, so a card with nothing in it has neither.
+  const none = withCards(model, (cards) => { const c = cards.find((x) => x.id === 'plan:90-01')!; c.moves = []; c.assignActions = []; });
   h.deliver({ type: 'state', model: none });
-  assert.ok(moveBtn(h, 'plan:90-01').hidden, 'no moves, no button');
+  assert.ok(moveBtn(h, 'plan:90-01').hidden, 'no moves and no assignment, no button');
   main(h, 'plan:90-01').focus();
   const press = h.press(main(h, 'plan:90-01'), 'm');
   assert.ok(!press.defaultPrevented);

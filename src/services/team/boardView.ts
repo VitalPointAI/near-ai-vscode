@@ -5,9 +5,9 @@
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { MOVE_KEYS, availableMoves, buildBoardModel, buildCardDetail, planMove } from '../../domain/team/board';
-import type { BoardModel, MoveKey } from '../../domain/team/board';
-import { REFUSALS, SOMEONE, flattenName, staleRefusal, stripFormatControls } from '../../domain/team/boardText';
+import { MOVE_KEYS, assignCandidates, availableMoves, buildBoardModel, buildCardDetail, planAssign, planMove } from '../../domain/team/board';
+import type { AssignCandidate, AssignIntent, BoardModel, MoveKey } from '../../domain/team/board';
+import { ASSIGN_REFUSALS, REFUSALS, SOMEONE, flattenName, staleRefusal, stripFormatControls } from '../../domain/team/boardText';
 import { decideTeamAction } from '../../domain/team/permissions';
 import { SecretLeakError, findSecrets } from '../../domain/team/secrets';
 import type { ItemChanges, ItemCreatedBody, TeamState } from '../../domain/team/types';
@@ -19,6 +19,7 @@ import { ulid } from '../../team/identity';
 import type { AppendResult } from '../../team/transport';
 import { IMPORT_PLANS_COMMAND, VERIFY_LOG_COMMAND } from './teamCommands';
 import type { TeamOutput, TeamSession } from './teamSession';
+import { teamPrompts } from './teamPrompts';
 import { safeReason } from './teamStatusBar';
 
 export const BOARD_PANEL_TYPE = 'nearAiTeamBoard';
@@ -80,6 +81,12 @@ const REASON_PROMPTS = Object.freeze({
   block: { prompt: 'Why is this blocked? The team will see your answer.', placeHolder: 'For example: waiting for a teammate\'s answer, or for the API key' },
   cancel: { prompt: 'Why is this being cancelled? The team will see your answer.', placeHolder: 'For example: replaced by another plan' }
 });
+// G-62-5 (owner decision 2026-11-03): the native person list behind Assign to... and the sentence when nobody may take the card.
+const NOBODY_TEXT = 'Nobody on the team can take this card yet. Nothing was changed.';
+const PICK_PLACEHOLDER = 'Choose the person who takes this card';
+const HAS_IT_NOW = 'has this card now';
+// Assignment refusals that describe the card's state: after the page was offered the change, they mean someone changed the card first.
+const ASSIGN_STATE_REFUSALS: ReadonlySet<string> = new Set([ASSIGN_REFUSALS.finished, ASSIGN_REFUSALS.notAssigned]);
 // Refusals that describe the card's state. When the page was offered the move and the log now says no, someone changed the card first.
 const CARD_STATE_REFUSALS: ReadonlySet<string> = new Set([
   REFUSALS.alreadySettled, REFUSALS.doneBlocked, REFUSALS.doneNotNow, REFUSALS.alreadyHeld, REFUSALS.notHeld, REFUSALS.holdNotReady, REFUSALS.holdNotNow,
@@ -104,6 +111,8 @@ export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key'; ite
 
 export type BoardMessage =
   | { type: 'ready' } | { type: 'visible'; value: boolean } | { type: 'move'; itemId: string; target: MoveKey } | { type: 'detail'; itemId: string }
+  // G-62-5: only the card. Who is meant comes from the log (the person list for the owner and leads, the viewer for anyone else), never from the page.
+  | { type: 'assign'; itemId: string } | { type: 'unassign'; itemId: string }
   | { type: 'import-plans' } | { type: 'retry' } | { type: 'show-details' } | { type: 'check-team' } | { type: 'choose-folders' }
   | { type: 'new-item'; draft: { kind: 'bug' | 'chore' | 'spike'; title: string; description?: string; scope: string[]; estimate?: number } }
   | { type: 'edit-item'; itemId: string; changes: { title?: string; description?: string; scope?: string[]; estimate?: number } };
@@ -250,6 +259,8 @@ export function parseBoardMessage(value: unknown): BoardMessage | undefined {
       return onlyKeys(value, ['type', 'itemId', 'target']) && isItemId(value.itemId) && (MOVE_KEYS as readonly unknown[]).includes(value.target)
         ? { type, itemId: value.itemId, target: value.target as MoveKey } : undefined;
     case 'detail':
+    case 'assign':
+    case 'unassign':
       return onlyKeys(value, ['type', 'itemId']) && isItemId(value.itemId) ? { type, itemId: value.itemId } : undefined;
     case 'new-item': {
       const draft = onlyKeys(value, ['type', 'draft']) ? parseDraft(value.draft) : undefined;
@@ -512,6 +523,9 @@ export class BoardController {
       case 'detail':
         this.detail(state, message.itemId);
         return;
+      case 'assign':
+        await this.assign(state, message.itemId);
+        return;
       case 'import-plans':
         // From the page the import always takes the current milestone, so no pick is shown (D-09).
         await this.limited(state, 'import', BUSY_IMPORT_TEXT, () => vscode.commands.executeCommand(IMPORT_PLANS_COMMAND, { milestone: 'current' }));
@@ -634,6 +648,11 @@ export class BoardController {
   // than the viewer made it; otherwise the sentence says Someone, which is never wrong (IN-07).
   private staleOrPlain(session: TeamSession, itemId: string, reason: string, offered: boolean, seenEventId: string | undefined, viewerId: string | undefined): string {
     if (!offered || !CARD_STATE_REFUSALS.has(reason)) return reason;
+    return this.staleText(session, itemId, seenEventId, viewerId);
+  }
+
+  // "{name} already changed this card": the newest change of the card, named only when it came after `seenEventId` and someone else made it.
+  private staleText(session: TeamSession, itemId: string, seenEventId: string | undefined, viewerId: string | undefined): string {
     const newest = session.itemHistory(itemId)[0];
     const author = newest === undefined || newest.eventId === seenEventId || newest.author === viewerId ? undefined : newest.author;
     const name = author === undefined ? '' : session.state().members.get(author)?.name ?? '';
@@ -724,6 +743,121 @@ export class BoardController {
       else {
         this.deps.output.appendLine(`Team Board: the ${target} move failed: ${describe(error)}`);
         this.refuse(state, itemId, NOT_SAVED_TEXT, target);
+      }
+    }
+  }
+
+  // ---- assignment (G-62-5, owner decision 2026-11-03) ---------------------------------------------------------------------------------------
+
+  // Who this viewer puts on the card: for the owner and a lead, the person chosen in the native list the host built from the log; for anyone else,
+  // the viewer themselves (62-25). The page only names the card. Every step answers on the card: a refusal in plain words, or '' when nothing changes.
+  private async assign(state: SurfaceState, itemId: string): Promise<void> {
+    const session = this.deps.session();
+    if (session === undefined) {
+      this.refuse(state, itemId, NOT_READY_TEXT);
+      return;
+    }
+    if (!this.takeWriteToken()) {
+      this.refuse(state, itemId, BUSY_WRITE_TEXT);
+      return;
+    }
+    const viewerId = session.memberId();
+    const seenEventId = session.itemHistory(itemId)[0]?.eventId;
+    const known = session.state();
+    const knownAssignee = known.items.get(itemId)?.assignee;
+    const leads = viewerId !== undefined && decideTeamAction(known, viewerId, { kind: 'item.assign' }).allowed;
+    if (!leads) {
+      await this.writeAssignment(state, session, itemId, viewerId, { known, knownAssignee, seenEventId });
+      return;
+    }
+
+    const candidates = assignCandidates(known, viewerId, itemId);
+    if (candidates.length === 0) {
+      this.refuse(state, itemId, this.nobodyReason(known, viewerId, itemId));
+      return;
+    }
+    const chosen = await this.pickPerson(known, viewerId, itemId, candidates);
+    // A closed list, or the person who has the card already, changes nothing.
+    if (chosen === undefined || chosen.current) {
+      this.refuse(state, itemId, '');
+      return;
+    }
+    await this.writeAssignment(state, session, itemId, chosen.memberId, { known, knownAssignee, seenEventId, offered: true });
+  }
+
+  // Why the person list is empty: the card's own reason (it is finished, gone, or not a kind that takes a person), or that nobody is eligible.
+  private nobodyReason(known: TeamState, viewerId: string | undefined, itemId: string): string {
+    const reasons: string[] = [];
+    for (const memberId of known.members.keys()) {
+      const planned = planAssign(known, viewerId, itemId, memberId);
+      if (!planned.ok) reasons.push(planned.reason);
+    }
+    return reasons.find((reason) => reason !== ASSIGN_REFUSALS.notEligible) ?? NOBODY_TEXT;
+  }
+
+  // The native person list. The answer maps back to the member by the item object the list returned, never by reading its label.
+  private async pickPerson(known: TeamState, viewerId: string | undefined, itemId: string, candidates: AssignCandidate[]): Promise<AssignCandidate | undefined> {
+    const label = buildCardDetail(known, itemId, { ...(viewerId === undefined ? {} : { viewerId }), nowMs: this.nowMs(), history: [] })?.displayId ?? itemId;
+    const items = candidates.map((candidate) => ({ label: candidate.name, description: candidate.current ? `${candidate.roleLabel}, ${HAS_IT_NOW}` : candidate.roleLabel }));
+    const picked = await teamPrompts.pick(items, { title: `Assign ${label} to a person`, placeHolder: PICK_PLACEHOLDER, ignoreFocusOut: true });
+    const index = picked === undefined ? -1 : items.indexOf(picked);
+    return index < 0 ? undefined : candidates[index];
+  }
+
+  // Plans the assignment on what the window knew, on what it knows now, and on the freshest state inside the append. A card whose person changed
+  // since the page asked, or that a teammate settled, is refused with the name of who changed it first, and nothing is written.
+  private async writeAssignment(
+    state: SurfaceState, session: TeamSession, itemId: string, memberId: string | undefined,
+    seen: { known: TeamState; knownAssignee: string | undefined; seenEventId: string | undefined; offered?: boolean }
+  ): Promise<void> {
+    const viewerId = session.memberId();
+    const verdict = (fresh: TeamState): { ok: true; intent: AssignIntent } | { ok: false; reason: string; stale: boolean } => {
+      const item = fresh.items.get(itemId);
+      if (item !== undefined && item.assignee !== seen.knownAssignee) return { ok: false, reason: ASSIGN_REFUSALS.notNow, stale: true };
+      const planned = planAssign(fresh, viewerId, itemId, memberId);
+      return planned.ok ? planned : { ok: false, reason: planned.reason, stale: ASSIGN_STATE_REFUSALS.has(planned.reason) };
+    };
+    const words = (refusal: { reason: string; stale: boolean }, offered: boolean): string =>
+      (offered && refusal.stale ? this.staleText(session, itemId, seen.seenEventId, viewerId) : refusal.reason);
+
+    // What the window knew when the page asked: a refusal here is plain, nothing was offered that the log took back.
+    const first = verdict(seen.known);
+    if (!first.ok) {
+      this.refuse(state, itemId, words(first, seen.offered === true));
+      return;
+    }
+    // The list took time, so plan again on what the window knows now.
+    const again = verdict(session.state());
+    if (!again.ok) {
+      this.refuse(state, itemId, words(again, true));
+      if (again.stale) this.catchUp(state);
+      return;
+    }
+
+    let builderRefusal: { reason: string; stale: boolean } | undefined;
+    try {
+      const result = await session.currentLog().append((fresh) => {
+        const planned = verdict(fresh);
+        if (planned.ok) return [planned.intent];
+        builderRefusal = planned;
+        return { conflict: planned.reason };
+      });
+      if (result.ok) {
+        this.catchUp(state);
+        return;
+      }
+      if (builderRefusal !== undefined && result.reason === builderRefusal.reason) {
+        this.refuse(state, itemId, words(builderRefusal, true));
+        this.catchUp(state);
+        return;
+      }
+      this.refuse(state, itemId, this.failureText('an assignment', result));
+    } catch (error) {
+      if (error instanceof SecretLeakError) this.refuse(state, itemId, REFUSALS.secret);
+      else if (error instanceof NoDeviceKeyError) this.refuse(state, itemId, REFUSALS.noDeviceKey);
+      else {
+        this.deps.output.appendLine(`Team Board: an assignment failed: ${describe(error)}`);
+        this.refuse(state, itemId, NOT_SAVED_TEXT);
       }
     }
   }

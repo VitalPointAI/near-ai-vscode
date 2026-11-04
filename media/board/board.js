@@ -431,10 +431,18 @@
     return li;
   }
   function badge(name, word, cls) { return iconText('badge ' + cls, name, word); }
+  // Move to... opens the menu when the card has a move for an owner or lead, or an assignment action (G-62-5): a card that can only be assigned, like a
+  // phase card, still shows it, while only cards with moves are draggable (drag.js). An observer never gets one, whatever the model says.
+  function hasMenu(c) {
+    const role = model && model.viewer.role;
+    const moves = c.moves.length > 0 && (role === 'owner' || role === 'lead');
+    const assigns = Array.isArray(c.assignActions) && c.assignActions.length > 0 && !!role && role !== 'observer';
+    return moves || assigns;
+  }
   function updateCard(c, li) {
     const p = parts.get(c.id);
     const down = isDown();
-    const mvVisible = c.moves.length > 0 && (model.viewer.role === 'owner' || model.viewer.role === 'lead') && (down || model.viewer.canWrite);
+    const mvVisible = hasMenu(c) && (down || model.viewer.canWrite);
     const sig = JSON.stringify([c, ui.selected === c.id, pending[c.id], refusals[c.id], mvVisible, down, model.viewer.readOnlyReason]);
     if (sigs.get(c.id) === sig) return;
     sigs.set(c.id, sig);
@@ -454,7 +462,7 @@
     // J-02: a card added on the board that cannot leave Backlog says why on its face, in normal text, not only in the detail.
     p.main.replaceChildren(...[top, titleNode, meta].concat(c.backlogRule ? [iconText('card-rule', 'info', c.backlogRule)] : []));
     attr(p.main, 'aria-label', c.backlogRule ? c.a11yLabel + ' ' + c.backlogRule : c.a11yLabel);
-    attr(p.main, 'aria-describedby', c.moves.length > 0 ? 'hint-move' : 'hint-open');
+    attr(p.main, 'aria-describedby', hasMenu(c) ? 'hint-move' : 'hint-open');
     attr(p.main, 'aria-current', ui.selected === c.id ? 'true' : null);
     li.className = 'card' + (ui.selected === c.id ? ' selected' : '') + (c.column === 'cancelled' ? ' cancelled' : '') + (c.column === 'done' ? ' done' : '') + (pending[c.id] ? ' pending' : '') + (c.blocked ? ' is-blocked' : '');
     li.setAttribute('data-column', c.column);
@@ -667,7 +675,7 @@
     const c = cardData(id);
     const menuKey = (!e.ctrlKey && (e.key === 'M' || e.key === 'm')) || (e.shiftKey && e.key === 'F10') || e.key === 'ContextMenu';
     if (menuKey) {
-      if (c && c.moves.length > 0 && !(isDown())) { e.preventDefault(); const p = parts.get(id); api.openMenu(id, p.mv.hidden ? p.main : p.mv); }
+      if (c && hasMenu(c) && !(isDown())) { e.preventDefault(); const p = parts.get(id); api.openMenu(id, p.mv.hidden ? p.main : p.mv); }
       return;
     }
     if (target.classList.contains('card-main') === false) return;
@@ -721,8 +729,11 @@
     for (const fn of renderListeners.slice()) fn();
   }
   const stateWord = (c) => c.stateLabel;
+  const assigneeId = (c) => (c.assignee ? c.assignee.id : '');
   function ownText(prev, c) {
     const l = labelOf(c);
+    // G-62-5: an assignment changes only the person, so it is said first and on its own.
+    if (assigneeId(prev) !== assigneeId(c)) return c.assignee ? 'Assigned ' + l + ' to ' + c.assignee.name + '.' : 'Unassigned ' + l + '.';
     if (c.column === 'cancelled' && prev.column !== 'cancelled') return 'Cancelled ' + l + '.';
     if ((prev.column === 'done' || prev.column === 'cancelled') && c.column === 'backlog') return 'Reopened ' + l + ' in Backlog.';
     if (!prev.blocked && c.blocked) return 'Blocked ' + l + '.';
@@ -734,6 +745,7 @@
   function remoteText(prev, c) {
     const n = c.displayId;
     if (!prev) return n + ' was added';
+    if (assigneeId(prev) !== assigneeId(c)) return c.assignee ? n + ' was assigned to ' + c.assignee.name : n + ' was unassigned';
     if (!prev.blocked && c.blocked) return c.blocked.byName + ' blocked ' + n;
     if (prev.blocked && !c.blocked) return n + ' was unblocked';
     if (!prev.held && c.held) return n + ' was put on hold';
@@ -741,7 +753,7 @@
     if (prev.column !== c.column) return n + ' moved to ' + stateWord(c);
     return '';
   }
-  const changeKey = (c) => JSON.stringify([c.column, !!c.blocked, c.held]);
+  const changeKey = (c) => JSON.stringify([c.column, !!c.blocked, c.held, assigneeId(c)]);
   let queued = [];
   let cooling = false;
   let changeTimer;
@@ -819,12 +831,12 @@
     post, announce, icon, layout: () => layout, model: () => model, cardData, cardElement: (id) => cardEls.get(id),
     focusCard: (id) => { const li = cardEls.get(id); return !!li && li.isConnected && focusEl(li); },
     setPending(id, text) { delete refusals[id]; pending[id] = text; refreshCard(id); },
-    showRefusal(id, columnLabel, reason) {
+    showRefusal(id, columnLabel, reason, action) {
       delete pending[id];
       refusals[id] = reason;
       const c = cardData(id);
       refreshCard(id);
-      announce("Can't move " + (c ? labelOf(c) : id) + (columnLabel ? ' to ' + columnLabel : '') + '. ' + reason);
+      announce("Can't " + (action === 'assign' ? 'assign ' : 'move ') + (c ? labelOf(c) : id) + (columnLabel ? ' to ' + columnLabel : '') + '. ' + reason);
     },
     clearRefusal(id) { delete refusals[id]; refreshCard(id); },
     setFilter(name, value) {

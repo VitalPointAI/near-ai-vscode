@@ -314,7 +314,8 @@ test('Move to... in the detail opens the same menu as the card and is absent whe
   const menu = h.$('#menu')!;
   assert.equal(menu.hidden, false);
   // The model lives in the page's vm realm; copy its labels into a plain array here, since deepEqual compares the arrays' prototypes too.
-  assert.deepEqual(Array.from(menu.querySelectorAll('[role="menuitem"]')).map((i) => text(i)), [...api(h).cardData('plan:90-01').moves.map((m: any) => m.label)]);
+  // Owner decision 2026-11-03 (62-20): the same menu as the card's, so the moves come first and Assign to... follows them.
+  assert.deepEqual(Array.from(menu.querySelectorAll('[role="menuitem"]')).map((i) => text(i)), [...api(h).cardData('plan:90-01').moves.map((m: any) => m.label), 'Assign to...']);
   h.press(h.focused(), 'Escape');
   assert.equal(h.$('#menu')!.hidden, true, 'the first Escape closes only the menu');
   assert.equal(isOpen(h), true);

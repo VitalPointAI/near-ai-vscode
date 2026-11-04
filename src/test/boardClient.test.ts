@@ -592,12 +592,18 @@ test('M, Shift+F10 and the ContextMenu key open the menu through the client API;
   assert.deepEqual(detail, [['plan:90-01', target]]);
   assert.equal(target.getAttribute('aria-current'), 'true', 'the opened card is the selected one');
 
-  const { h: dev } = await drawn(800, 'dev');
+  const { h: dev, world } = await drawn(800, 'dev');
   const calls: string[] = [];
   api(dev).registerMenu((id: string) => calls.push(id));
   main(dev, 'plan:90-01').focus();
   dev.press(main(dev, 'plan:90-01'), 'M');
-  assert.deepEqual(calls, [], 'a card with no offered move opens nothing');
+  // Owner decision 2026-11-03 (62-20, 62-25): a developer has no moves but may assign themselves a free card, so M opens the menu with Assign to me.
+  assert.deepEqual(calls, ['plan:90-01'], 'Assign to me alone opens the menu');
+  const nothing = withCards(modelOf(world, world.dev.memberId), (cards) => { cards.find((c) => c.id === 'plan:90-01')!.assignActions = []; });
+  dev.deliver({ type: 'state', model: nothing });
+  main(dev, 'plan:90-01').focus();
+  dev.press(main(dev, 'plan:90-01'), 'M');
+  assert.deepEqual(calls, ['plan:90-01'], 'a card with no offered move and no assignment opens nothing');
 });
 
 test('the selected card, the layout switch and a hidden view', async () => {

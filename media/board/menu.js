@@ -1,11 +1,21 @@
 // Team Board Move to... menu (62-UI-SPEC "Moving Cards"): lists exactly the moves the host offered for a card, sends one move request and shows the
-// pending line. The page never decides whether a move is allowed; the host checks it again on fresh state. Plain browser JavaScript in an IIFE that
+// pending line. The page never decides whether a move is allowed; the host checks it again on fresh state. After the moves and a separator come the
+// assignment actions the model offers (G-62-5, owner decision 2026-11-03): the page sends only the card, and the host decides who is meant. Plain browser JavaScript in an IIFE that
 // plugs into board.js through window.NearAiBoard. Text nodes only, attributes with setAttribute, no markup strings.
 (function () {
   'use strict';
   const board = window.NearAiBoard;
   if (!board) return;
   const SEPARATED = ['block', 'unblock'];
+  // assign and assign-me post 'assign', unassign and unassign-me post 'unassign'; the host knows from the log which one the viewer means.
+  const ASSIGN_POSTS = { assign: 'assign', unassign: 'unassign', 'assign-me': 'assign', 'unassign-me': 'unassign' };
+  const assignLabel = (c, key) => {
+    if (key === 'assign') return 'Assign to...';
+    if (key === 'unassign') return 'Unassign ' + (c.assignee ? c.assignee.name : '');
+    return key === 'assign-me' ? 'Assign to me' : 'Unassign me';
+  };
+  const assignKeys = (c) => (Array.isArray(c.assignActions) ? c.assignActions.filter((key) => key in ASSIGN_POSTS) : []);
+  const hasItems = (c) => c.moves.length > 0 || assignKeys(c).length > 0;
 
   const menu = document.createElement('div');
   menu.id = 'menu';
@@ -17,8 +27,8 @@
   // Moves this menu sent that the host has not answered: item id -> { column, key, opener }. Only these refusals are drawn here, because the
   // drop handler and the form post their own requests and show their own refusals.
   const awaiting = {};
-  const signature = (moves) => moves.map((m) => m.key + ':' + m.label).join('|');
-  const stateKey = (c) => JSON.stringify([c.column, !!c.blocked, c.held]);
+  const signature = (c) => c.moves.map((m) => m.key + ':' + m.label).concat(assignKeys(c).map((key) => key + ':' + assignLabel(c, key))).join('|');
+  const stateKey = (c) => JSON.stringify([c.column, !!c.blocked, c.held, c.assignee ? c.assignee.id : '']);
 
   const columnLabel = (key) => {
     const model = board.model();
@@ -72,31 +82,51 @@
     board.post({ type: 'move', itemId: id, target: move.key });
   }
 
+  // The assignment items wait for the host like a move does; the pending line says what is happening.
+  function chooseAssign(key) {
+    if (!current) return;
+    const { id, opener } = current;
+    close(true);
+    const c = board.cardData(id);
+    awaiting[id] = { column: '', key: c ? stateKey(c) : '', opener, action: 'assign' };
+    board.setPending(id, key === 'assign' ? 'Choosing a person...' : 'Saving...');
+    board.post({ type: ASSIGN_POSTS[key], itemId: id });
+  }
+
+  function menuItem(key, label, run) {
+    const item = document.createElement('button');
+    item.setAttribute('type', 'button');
+    item.setAttribute('role', 'menuitem');
+    item.setAttribute('tabindex', '-1');
+    item.setAttribute('data-key', key);
+    item.textContent = label;
+    item.addEventListener('click', run);
+    return item;
+  }
+
+  function separator() {
+    const bar = document.createElement('div');
+    bar.setAttribute('role', 'separator');
+    return bar;
+  }
+
   function open(id, opener) {
     const c = board.cardData(id);
     const model = board.model();
-    if (!c || !model || c.moves.length === 0 || ['offline', 'paused', 'removed'].indexOf(model.status.kind) >= 0) return;
+    if (!c || !model || !hasItems(c) || ['offline', 'paused', 'removed'].indexOf(model.status.kind) >= 0) return;
     if (current && current.id === id && current.opener === opener) { close(true); return; }
     close(false);
     const nodes = [];
     c.moves.forEach((move, index) => {
-      if (index > 0 && SEPARATED.indexOf(move.key) >= 0 && SEPARATED.indexOf(c.moves[index - 1].key) < 0) {
-        const bar = document.createElement('div');
-        bar.setAttribute('role', 'separator');
-        nodes.push(bar);
-      }
-      const item = document.createElement('button');
-      item.setAttribute('type', 'button');
-      item.setAttribute('role', 'menuitem');
-      item.setAttribute('tabindex', '-1');
-      item.setAttribute('data-key', move.key);
-      item.textContent = move.label;
-      item.addEventListener('click', () => choose(move));
-      nodes.push(item);
+      if (index > 0 && SEPARATED.indexOf(move.key) >= 0 && SEPARATED.indexOf(c.moves[index - 1].key) < 0) nodes.push(separator());
+      nodes.push(menuItem(move.key, move.label, () => choose(move)));
     });
+    const keys = assignKeys(c);
+    if (keys.length > 0 && nodes.length > 0) nodes.push(separator());
+    for (const key of keys) nodes.push(menuItem(key, assignLabel(c, key), () => chooseAssign(key)));
     menu.setAttribute('aria-label', 'Move ' + c.displayId + ' to');
     menu.replaceChildren(...nodes);
-    current = { id, opener, sig: signature(c.moves) };
+    current = { id, opener, sig: signature(c) };
     mark(opener, true);
     menu.hidden = false;
     position(opener);
@@ -145,7 +175,7 @@
   board.onRender(() => {
     if (!isOpen()) return;
     const c = board.cardData(current.id);
-    if (!c || c.moves.length === 0 || signature(c.moves) !== current.sig) { close(!!c && c.moves.length > 0); return; }
+    if (!c || !hasItems(c) || signature(c) !== current.sig) { close(!!c && hasItems(c)); return; }
     position(current.opener);
   });
 
@@ -156,7 +186,7 @@
     if (!wait) return;
     delete awaiting[m.itemId];
     if (m.reason) {
-      board.showRefusal(m.itemId, wait.column, m.reason);
+      board.showRefusal(m.itemId, wait.column, m.reason, wait.action);
       refocus(m.itemId, wait.opener && wait.opener.classList && wait.opener.classList.contains('move-btn') ? wait.opener : cardButton(m.itemId));
     } else if (document.activeElement === document.body) refocus(m.itemId, wait.opener);
   });
