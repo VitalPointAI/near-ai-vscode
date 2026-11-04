@@ -228,6 +228,7 @@ Every RED record was checked with `gsd-tools check tdd-red-evidence` and returne
   | `foldedByDefault` in board.js | 2 |
 - package.json and package-lock.json unchanged, and no install. The diff adds no em or en dash (the one match is a test regex that forbids them).
 - The full `npm test` was not run. This plan's boundary was the full e2e; the phase gate is 62-24.
+- After the SUMMARY commit, one more board-only run at 1920x1080 with fbdir regenerated the screenshots on the final code. The full run had no framebuffer folder and had emptied the screens folder. Result: 9/9 board passes. With 62-21 now finished on HEAD, phase:63 is the third Backlog card and starts 632 px into a 676 px board region.
 
 ## Deviations from Plan
 
