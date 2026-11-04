@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-22-PLAN.md
-last_updated: "2026-11-04T11:15:35.690Z"
+stopped_at: Completed 62-23-PLAN.md
+last_updated: "2026-11-04T11:47:02.768Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 9e0767465e82c5552400b28b583aa5688535e53b
+state_head: c9f748c3897bdcf784fd787cd88752cb576b4d0c
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 62
-  completed_plans: 60
+  total_plans: 63
+  completed_plans: 61
   percent: 13
 ---
 
@@ -114,6 +114,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P20 | 22 min | 3 tasks | 13 files |
 | Phase 62 P21 | 57 min | 3 tasks | 10 files |
 | Phase 62 P22 | 75min | 2 tasks | 7 files |
+| Phase 62 P23 | 30min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -255,6 +256,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-22: the e2e gives the test window the whole Xvfb screen with a raw X11 ConfigureWindow (VS Code skips saved state for test windows, maximize needs a window manager); full editor width 1862 px
 - [Phase 62]: 62-22: the screenshot matrix uses VS Code's own default themes per kind (Dark 2026, Light 2026, Default High Contrast, Default High Contrast Light) and blurs before each measurement; the probe's focus rule is unchanged
 - [Phase 62]: 62-22: high contrast marks the chosen Group by and pressed filters with a contrastActiveBorder outline; .group-by > .label keeps the caption grey off the choices
+- [Phase 62]: 62-23: real drags in the e2e use DevTools Protocol mouse input (drag path: mouse, Chrome 150); interceptedDrag stays as the unused fallback
+- [Phase 62]: 62-23: Escape does not reach a DevTools-driven drag; the e2e presses Escape, then ends the drag with Input.cancelDragging, the same cancel the system drag loop does
+- [Phase 62]: 62-23: board.js holds renders back during a drag and draws at the drop or dragend; Member-row drops point to Assign to; refused cards scroll their reason into view
 
 ### Pending Todos
 
@@ -276,8 +280,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T11:15:35.356Z
-Stopped at: Completed 62-22-PLAN.md
+Last session: 2026-11-04T11:47:02.430Z
+Stopped at: Completed 62-23-PLAN.md
 Resume file: None
 
 ## Notes
