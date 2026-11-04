@@ -1186,7 +1186,8 @@ test('an assigned card shows the initials chip and the name first in its meta ro
   assert.equal(main(h, 'plan:90-01').querySelectorAll('b').length, 0, 'no element was made from the name');
 });
 
-test('a phase card that can only be assigned shows Move to..., is not draggable, and M opens a menu with only the assignment item', async () => {
+// 0.6.3 re-test (debug session board-codeserver-cards-and-drag): a phase card can be picked up so its drop says why it stays; boardDrag.test.ts checks the drop.
+test('a phase card that can only be assigned shows Move to..., can be picked up to learn why it stays, and M opens a menu with only the assignment item', async () => {
   const world = await standard();
   const model = modelOf(world, world.owner.memberId);
   const phase = model.cards.find((c) => c.id === 'phase:91')!;
@@ -1196,7 +1197,7 @@ test('a phase card that can only be assigned shows Move to..., is not draggable,
   h.deliver({ type: 'state', model });
   const button = card(h, 'phase:91').querySelector('.move-btn')!;
   assert.equal(button.hidden, false, 'Move to... shows for a card that can only be assigned');
-  assert.equal(card(h, 'phase:91').getAttribute('draggable'), null, 'only cards with moves are draggable');
+  assert.equal(card(h, 'phase:91').getAttribute('draggable'), 'true', 'a card without moves can still be picked up; its drop gives the reason');
   assert.equal(card(h, 'plan:90-01').getAttribute('draggable'), 'true', 'a card with moves still is');
   main(h, 'phase:91').focus();
   h.press(main(h, 'phase:91'), 'M');
@@ -1208,7 +1209,7 @@ test('a phase card that can only be assigned shows Move to..., is not draggable,
   assert.deepEqual(devModel.cards.find((c) => c.id === 'phase:91')!.assignActions, ['assign-me']);
   dev.deliver({ type: 'state', model: devModel });
   assert.equal(card(dev, 'phase:91').querySelector('.move-btn')!.hidden, false);
-  assert.equal(card(dev, 'phase:91').getAttribute('draggable'), null);
+  assert.equal(card(dev, 'phase:91').getAttribute('draggable'), 'true', 'for a developer too');
   main(dev, 'phase:91').focus();
   dev.press(main(dev, 'phase:91'), 'M');
   assert.deepEqual(Array.from(dev.$('#menu')!.querySelectorAll('[role="menuitem"]')).map((i) => text(i)), ['Assign to me']);

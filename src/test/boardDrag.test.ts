@@ -67,16 +67,34 @@ const drop = (h: BoardHarness, target: FakeNode, dt: DataTransferStub): ReturnTy
 
 // ---- Task 1: the tracer ----------------------------------------------------------------------------------------------------------------------
 
-test('tracer: in the kanban only a card with offered moves is draggable; the list and a model without moves have none', async () => {
+// 0.6.3 re-test in code-server (debug session board-codeserver-cards-and-drag): on the owner's board every drawn card was a phase card, which has no
+// move, and the developer is offered no move at all, so nothing could be picked up and a drag did nothing, with no word why. Every card of the kanban
+// can now be picked up by a person who may change the board (owner, lead, developer); a card without moves offers no cell and its drop says why.
+test('tracer: in the kanban every card can be picked up by the owner, a lead or a developer; the list, a reviewer, an observer and a board that is down have none', async () => {
   const { h, model, world } = await ownerBoard();
   assert.ok(cardOf(model, 'plan:90-01').moves.length > 0);
   assert.equal(card(h, 'plan:90-01').draggable, true);
   assert.equal(card(h, 'plan:90-01').getAttribute('draggable'), 'true');
+  assert.deepEqual(cardOf(model, 'phase:91').moves, [], 'a phase card has no move');
+  assert.equal(card(h, 'phase:91').getAttribute('draggable'), 'true', 'it can still be picked up, so the drop can say why it stays');
 
   const dev = start();
-  dev.deliver({ type: 'state', model: modelOf(world, world.dev.memberId) });
+  const devModel = modelOf(world, world.dev.memberId);
+  dev.deliver({ type: 'state', model: devModel });
   assert.ok(dev.$$('.card').length > 0);
-  assert.deepEqual(dev.$$('.card').filter((c) => c.draggable).length, 0, 'the developer is offered no moves, so nothing is draggable');
+  assert.deepEqual(devModel.cards.filter((c) => c.moves.length > 0).map((c) => c.id), [], 'the developer is offered no move');
+  assert.equal(dev.$$('.card').filter((c) => c.getAttribute('draggable') === 'true').length, dev.$$('.card').length, 'and can still pick up every card to learn why');
+  for (const who of ['reviewer', 'observer'] as const) {
+    const look = start();
+    look.deliver({ type: 'state', model: modelOf(world, world[who].memberId) });
+    assert.ok(look.$$('.card').length > 0);
+    assert.equal(look.$$('.card').filter((c) => c.draggable).length, 0, `a ${who} only looks at the board, so nothing is draggable`);
+  }
+  for (const kind of ['offline', 'paused', 'removed'] as const) {
+    const down = start();
+    down.deliver({ type: 'state', model: modelOf(world, world.owner.memberId, { kind }) });
+    assert.equal(down.$$('.card').filter((c) => c.draggable).length, 0, `a board that is ${kind} has nothing draggable`);
+  }
 
   const narrow = start({ width: 400 });
   narrow.deliver({ type: 'state', model });
@@ -279,6 +297,50 @@ test('a drop on a claim or integration column posts nothing, leaves the card whe
     assert.deepEqual(marked(h, 'drop-ok'), []);
     assert.deepEqual(marked(h, 'drop-no'), []);
   }
+});
+
+test('0.6.3 re-test: a card with no move can be picked up; no cell is offered, every other cell says why, and the drop shows the reason on the card, announces it and posts nothing', async () => {
+  const { h, model, world } = await ownerBoard();
+  const phaseReason = REFUSALS.phaseCard;
+  assert.equal(cardOf(model, 'phase:91').refusals.ready, phaseReason, 'the model carries the sentence');
+  const dt = lift(h, 'phase:91');
+  assert.equal(dt.getData(TYPE), 'phase:91', 'the drag starts under the board type');
+  assert.ok(classes(card(h, 'phase:91')).includes('dragging'));
+  assert.deepEqual(marked(h, 'drop-ok'), [], 'no cell is offered');
+  const ready = cell(h, 'ready');
+  assert.ok(over(h, ready, dt).defaultPrevented, 'a refused cell still accepts the drop so the reason can be given');
+  assert.equal(text(caption(ready)), `Can't drop here: ${phaseReason}`);
+  drop(h, ready, dt);
+  h.fire(card(h, 'phase:91'), 'dragend', { dataTransfer: dt });
+  assert.deepEqual(moves(h), [], 'nothing is posted');
+  assert.ok(cell(h, 'backlog').contains(card(h, 'phase:91')), 'the card never leaves its cell');
+  assert.equal(refusalLine(h, 'phase:91'), phaseReason);
+  h.advance(150);
+  assert.equal(h.announcements[h.announcements.length - 1], `Can't move Phase 91 to Ready. ${phaseReason}`);
+  // In another person's row the card's own reason comes first: it cannot move anywhere, so the row sentence would point the wrong way.
+  const other = h.$$('.cell[data-column="ready"]').find((c) => c.getAttribute('data-lane') !== 'unassigned');
+  if (other) {
+    const again = lift(h, 'phase:91');
+    drop(h, other, again);
+    assert.equal(refusalLine(h, 'phase:91'), phaseReason);
+  }
+
+  const dev = start();
+  dev.deliver({ type: 'state', model: modelOf(world, world.dev.memberId) });
+  const devDt = lift(dev, 'plan:90-01');
+  assert.deepEqual(marked(dev, 'drop-ok'), []);
+  drop(dev, cell(dev, 'backlog'), devDt);
+  dev.fire(card(dev, 'plan:90-01'), 'dragend', { dataTransfer: devDt });
+  assert.deepEqual(moves(dev), [], 'the developer posts nothing');
+  assert.equal(refusalLine(dev, 'plan:90-01'), REFUSALS.notManager);
+  dev.advance(150);
+  assert.equal(dev.announcements[dev.announcements.length - 1], `Can't move plan 90-01 to Backlog. ${REFUSALS.notManager}`);
+  // Its own cell takes the drop and says nothing, as for any card.
+  dev.$('.card[data-id="plan:90-01"] .dismiss')!.click();
+  const own = lift(dev, 'plan:90-01');
+  drop(dev, cell(dev, 'ready'), own);
+  assert.deepEqual(moves(dev), []);
+  assert.equal(refusalLine(dev, 'plan:90-01'), '', 'nothing is said for the card\'s own cell');
 });
 
 test('hovering a refused cell shows the caption inside it, and the caption goes on leave and on drop', async () => {
