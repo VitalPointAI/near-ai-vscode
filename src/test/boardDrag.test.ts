@@ -376,6 +376,37 @@ test('a drop in another row is refused with the row sentence; a drop on the card
   assert.equal(card(h, 'plan:90-01').getAttribute('aria-busy'), null);
 });
 
+test('62-23: in Group by Member a drop in another person\'s row is refused with the way forward, Assign to in the Move to... menu; Group by Phase keeps the row sentence', async () => {
+  const world = await standard();
+  world.accept(world.lead, 'item.assigned', { id: 'plan:90-02', memberId: world.dev.memberId });
+  const h = start();
+  h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
+  const devLane = world.dev.memberId;
+  assert.equal(card(h, 'plan:90-02').closest('.cell')!.getAttribute('data-lane'), devLane, 'the assigned card has its own person row');
+  const sentence = 'This card stays in its own row. To give it to someone else, use Assign to in its Move to... menu. Nothing was moved.';
+  const dt = lift(h, 'plan:90-01');
+  const other = cell(h, 'backlog', devLane);
+  over(h, other, dt);
+  assert.equal(text(caption(other)), `Can't drop here: ${sentence}`);
+  drop(h, other, dt);
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt });
+  assert.deepEqual(moves(h), [], 'nothing is posted');
+  assert.ok(cell(h, 'ready').contains(card(h, 'plan:90-01')), 'the card stays where it was');
+  assert.equal(refusalLine(h, 'plan:90-01'), sentence);
+  h.advance(150);
+  assert.equal(h.announcements[h.announcements.length - 1], `Can't move plan 90-01 to Backlog. ${sentence}`);
+
+  // Grouped by phase, the rows are phases, so the sentence keeps to the row.
+  card(h, 'plan:90-01').querySelector('.dismiss')!.click();
+  radio(h, 'Phase').click();
+  const dt2 = lift(h, 'plan:90-01');
+  drop(h, cell(h, 'backlog', 'board'), dt2);
+  h.fire(card(h, 'plan:90-01'), 'dragend', { dataTransfer: dt2 });
+  assert.deepEqual(moves(h), []);
+  assert.equal(refusalLine(h, 'plan:90-01'), 'This card stays in its own row. Drop it in another column of the same row.');
+  assert.match(DRAG_JS, /use Assign to/);
+});
+
 test('Escape during a drag, or a drag that ends with no drop, clears the highlights and announces the cancel once', async () => {
   const { h } = await ownerBoard();
   let dt = lift(h, 'plan:90-01');
