@@ -83,6 +83,8 @@ export interface CardDetail {
   files: string[]; tasks: { done: number; total: number; summary: string; items: Array<{ id: string; title: string; done: boolean }> };
   notReady: string[]; editable: boolean; history: Array<{ at: string; text: string }>; historyNote?: string;
   assignee?: { id: string; name: string; roleLabel: string }; assignActions: AssignAction[];
+  /** 62-26 (owner decision 2026-11-04): who made the current assignment, and the sentence for a member on a card the owner or a lead gave them. */
+  assignedBy?: { id: string; name: string }; assignNote?: string;
 }
 
 const R = TEAM_REJECTION_REASONS;

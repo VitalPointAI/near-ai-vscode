@@ -277,6 +277,26 @@ test('a developer whose card a lead took meanwhile is told who changed it first,
   });
 });
 
+// 62-26 (owner decision 2026-11-04): a member leaves only a card they took themselves.
+test('a developer is offered nothing on a card a lead assigned them, and an unassign sent anyway is refused naming the lead, with nothing written', async () => {
+  await withBoard('dev', async ({ rig, panel }) => {
+    assert.equal(latestCard(panel, PLAN)?.assignee?.name, DANA, 'the lead\'s assignment is on her board');
+    assert.deepEqual(latestCard(panel, PLAN)?.assignActions, [], 'no Unassign me on a card the lead gave her');
+    const before = remoteEventCount(rig);
+    await panel.receive({ type: 'unassign', itemId: PLAN });
+    assert.deepEqual(lastOf(panel, 'refused'), { type: 'refused', itemId: PLAN, reason: `${LENA} assigned this card to you. Ask a lead to change it. Nothing was changed.` });
+    assert.equal(stub.quickPickRequests.length, 0, 'no list');
+    assert.equal(remoteEventCount(rig), before, 'nothing was written');
+    assert.equal(await remoteAssignee(rig, PLAN), rig.dev.memberId, 'the card keeps her');
+  }, {
+    before: async (rig) => {
+      const lead = await openLog(rig, rig.lead);
+      const given = await lead.log.append(() => [{ type: 'item.assigned', body: { id: PLAN, memberId: rig.dev.memberId as string } }]);
+      assert.equal(given.ok, true, given.ok ? '' : given.reason);
+    }
+  });
+});
+
 test('a reviewer assigns themselves and takes themselves off the same way', async () => {
   await withBoard('dev', async ({ rig, panel }) => {
     assert.deepEqual(latestCard(panel, PLAN)?.assignActions, ['assign-me']);

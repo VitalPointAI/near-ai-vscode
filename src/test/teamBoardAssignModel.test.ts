@@ -266,7 +266,9 @@ test('the offered actions: Assign to... and Unassign for the owner and leads, As
   }
   assert.deepEqual(actions(observer.memberId, PLAN), []);
 
-  world.accept(lead, 'item.assigned', { id: PLAN, memberId: dev.memberId });
+  // Owner decision 2026-11-04 (62-26): Unassign me is offered only on a card the member took themselves, so Dana takes this one herself here; a card
+  // a lead gave her is covered by the 62-26 test below.
+  world.accept(dev, 'item.assigned', { id: PLAN, memberId: dev.memberId });
   assert.deepEqual(actions(lead.memberId, PLAN), ['assign', 'unassign'], 'assigned open card');
   assert.deepEqual(actions(dev.memberId, PLAN), ['unassign-me'], 'her own card');
   assert.deepEqual(actions(reviewer.memberId, PLAN), [], 'a teammate\'s card');
@@ -338,7 +340,10 @@ test('the card detail names the person, offers the same actions, and its history
   // 62-20: the detail's assignee carries the role word for 'Assigned to Dana (Developer)'.
   assert.deepEqual(forLead.assignee, { id: dev.memberId, name: 'Dana', roleLabel: 'Developer' });
   assert.deepEqual(forLead.assignActions, ['assign', 'unassign']);
-  assert.deepEqual(detail(dev.memberId).assignActions, ['unassign-me']);
+  // Owner decision 2026-11-04 (62-26): Lee made the current assignment, so Dana is offered nothing and the detail says who assigned it.
+  assert.deepEqual(detail(dev.memberId).assignActions, []);
+  assert.equal(detail(dev.memberId).assignNote, 'Assigned to you by Lee. Ask a lead to change it.');
+  assert.equal(forLead.assignNote, undefined, 'the note is only for the person on the card');
   assert.deepEqual(forLead.history.map((row) => row.text).slice(0, 5), [
     'Lee assigned this to Dana.', 'Dana unassigned themselves.', 'Dana assigned this to themselves.', 'Lee unassigned Dana.', 'Lee assigned this to Dana.'
   ]);
@@ -354,4 +359,56 @@ test('the card detail names the person, offers the same actions, and its history
   const entry = { eventId: 'e', type: 'item.assigned', author: lead.memberId, at: 'x', memberId: 'mbr-0123456789abcdef' };
   assert.equal(historySentence(entry, 'Lee', { origin: 'import' }), 'Lee assigned this to Someone.');
   assert.equal(historySentence({ ...entry, type: 'item.unassigned' }, 'Lee', { origin: 'import', assigneeName: '' }), 'Lee unassigned Someone.');
+});
+
+// ---- 62-26 (G-62-5, owner decision 2026-11-04): a member leaves only a card they took themselves --------------------------------------------------
+
+test('a card a lead assigned: the member is offered nothing, hears who assigned it, and the detail says so; a card they took they can leave', async () => {
+  const world = await standard();
+  const { owner, lead, dev, reviewer } = world;
+  const detailFor = (viewerId: string, itemId: string) => {
+    const built = buildCardDetail(world.state, itemId, { viewerId, nowMs: NOW, history: [] });
+    assert.ok(built, `a detail for ${itemId}`);
+    return built;
+  };
+  world.accept(lead, 'item.assigned', { id: PLAN, memberId: dev.memberId });
+  world.accept(dev, 'item.assigned', { id: CHORE_ID, memberId: dev.memberId });
+
+  // On the card Lee gave her, Dana is offered nothing, an unassign sent anyway names Lee, and the detail says who assigned it.
+  assert.deepEqual(card(modelFor(world, dev.memberId), PLAN).assignActions, []);
+  assert.deepEqual(planAssign(world.state, dev.memberId, PLAN, undefined), refused('Lee assigned this card to you. Ask a lead to change it. Nothing was changed.'));
+  const given = detailFor(dev.memberId, PLAN);
+  assert.deepEqual(given.assignActions, []);
+  assert.deepEqual(given.assignedBy, { id: lead.memberId, name: 'Lee' });
+  assert.equal(given.assignNote, 'Assigned to you by Lee. Ask a lead to change it.');
+
+  // On the chore she took herself, Unassign me stays and there is no note.
+  assert.deepEqual(card(modelFor(world, dev.memberId), CHORE_ID).assignActions, ['unassign-me']);
+  const taken = detailFor(dev.memberId, CHORE_ID);
+  assert.deepEqual(taken.assignActions, ['unassign-me']);
+  assert.deepEqual(taken.assignedBy, { id: dev.memberId, name: 'Dana' });
+  assert.equal(taken.assignNote, undefined);
+
+  // Lee's actions are as before, and the note is only for the person on the card.
+  assert.deepEqual(card(modelFor(world, lead.memberId), PLAN).assignActions, ['assign', 'unassign']);
+  assert.deepEqual(card(modelFor(world, lead.memberId), CHORE_ID).assignActions, ['assign', 'unassign']);
+  assert.equal(detailFor(lead.memberId, PLAN).assignNote, undefined);
+
+  // Rae hears who can change each card: only a lead for the one Lee assigned, Dana or a lead for the one Dana took.
+  assert.deepEqual(planAssign(world.state, reviewer.memberId, PLAN, reviewer.memberId), refused('This card is assigned to Dana. A lead can change that. Nothing was changed.'));
+  assert.deepEqual(planAssign(world.state, reviewer.memberId, CHORE_ID, reviewer.memberId), refused('This card is assigned to Dana. Dana or a lead can change that. Nothing was changed.'));
+
+  // A lead the owner assigned sees no note: a lead may change any card.
+  world.accept(owner, 'item.assigned', { id: 'plan:90-01', memberId: lead.memberId });
+  const leads = detailFor(lead.memberId, 'plan:90-01');
+  assert.equal(leads.assignNote, undefined);
+  assert.deepEqual(leads.assignedBy, { id: owner.memberId, name: 'Owner Test' });
+  assert.deepEqual(leads.assignActions, ['assign', 'unassign']);
+
+  // A card nobody holds carries no assigner.
+  world.accept(lead, 'item.unassigned', { id: PLAN });
+  const free = detailFor(dev.memberId, PLAN);
+  assert.equal(free.assignedBy, undefined);
+  assert.equal(free.assignNote, undefined);
+  assert.deepEqual(free.assignActions, ['assign-me']);
 });

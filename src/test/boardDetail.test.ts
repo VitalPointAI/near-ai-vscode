@@ -457,6 +457,32 @@ test('a developer sees Assign to me on a free card and Unassign me on their own;
   assert.deepEqual(headButtons(looking.h).filter((label) => /Assign|Unassign|Change person/.test(label)), [], 'no assignment button for an observer');
 });
 
+// 62-26 (owner decision 2026-11-04): on a card a lead gave them, a member sees who assigned it and no Unassign me; on their own card nothing new is drawn.
+test('on a card a lead assigned, the drawer says who assigned it under Assigned to, as text, with no Unassign me; on a card the member took, no note', async () => {
+  const world = await standard();
+  world.accept(world.lead, 'item.assigned', { id: 'plan:90-01', memberId: world.dev.memberId });
+  world.accept(world.dev, 'item.assigned', { id: CHORE_ID, memberId: world.dev.memberId });
+  const { h } = await drawn(800, 'dev', world);
+  openBy(h, 'plan:90-01', messageOf(world, 'plan:90-01', 'dev'));
+  assert.deepEqual(factPairs(h)[0], ['Assigned to', 'Dana (Developer)']);
+  const facts = sectionOf(h, 'Facts');
+  const note = facts.querySelector('.assign-note');
+  assert.ok(note, 'the note is drawn in the facts');
+  assert.equal(text(note), 'Assigned to you by Lee. Ask a lead to change it.');
+  assert.equal(note.previousSibling, facts.querySelectorAll('dd')[0], 'right under the Assigned to fact');
+  assert.equal(headButtons(h).some((label) => /Unassign|Assign to me/.test(label)), false, headButtons(h).join(' | '));
+
+  // Hostile text in the note is written as text.
+  h.deliver({ ...messageOf(world, 'plan:90-01', 'dev'), assignNote: '<b>Lee</b> assigned this.' });
+  assert.equal(text(sectionOf(h, 'Facts').querySelector('.assign-note')), '<b>Lee</b> assigned this.');
+  assert.equal(drawer(h).querySelectorAll('b').length, 0, 'no element was created from the text');
+  h.press(h.focused(), 'Escape');
+
+  openBy(h, CHORE_ID, messageOf(world, CHORE_ID, 'dev'));
+  assert.equal(sectionOf(h, 'Facts').querySelector('.assign-note'), null, 'nothing new is drawn on a card she took');
+  assert.ok(headButtons(h).includes('Unassign me'), headButtons(h).join(' | '));
+});
+
 test('while the board is offline the assignment buttons stay but are disabled with the offline reason, and post nothing', async () => {
   const world = await standard();
   const { h } = await drawn(800, 'owner', world);

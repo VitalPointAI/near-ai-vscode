@@ -168,7 +168,9 @@ test('the detail of a phase card: its milestone, dependencies, requirements and 
   const forDana = card(modelFor(world, dev.memberId), 'phase:64');
   assert.equal(forDana.mine, true);
   assert.equal(forDana.lane.member, dev.memberId);
-  assert.deepEqual(planAssign(world.state, dev.memberId, 'phase:64', undefined), { ok: true, intent: { type: 'item.unassigned', body: { id: 'phase:64' } } });
+  // Owner decision 2026-11-04 (62-26): Lee assigned the phase card, so Dana cannot take herself off it; Lee still can.
+  assert.deepEqual(planAssign(world.state, dev.memberId, 'phase:64', undefined), { ok: false, reason: 'Lee assigned this card to you. Ask a lead to change it. Nothing was changed.' });
+  assert.deepEqual(planAssign(world.state, lead.memberId, 'phase:64', undefined), { ok: true, intent: { type: 'item.unassigned', body: { id: 'phase:64' } } });
 });
 
 test('Backlog and Ready start open; the four later columns, Done and Cancelled start folded', async () => {
