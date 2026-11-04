@@ -55,11 +55,12 @@
   // ---- what can be dragged ---------------------------------------------------------------------------------------------------------------------
   // 0.6.3 re-test (debug session board-codeserver-cards-and-drag): on the owner's board every drawn card was a phase card, which has no move, and a
   // developer has no move at all, so nothing could be picked up and a drag did nothing, with no word why. Every card of the kanban can now be picked up
-  // by a person who may change the board: a card without moves offers no cell and its drop gives the model's reason. A reviewer and an observer only
-  // look, and a board that is down already says why in its banner, so nothing is draggable for them.
-  const MAY_CHANGE = ['owner', 'lead', 'developer'];
+  // by a person who may change the board: a card without moves offers no cell and its drop gives the model's reason. Owner decision 2026-11-04
+  // (62-27): anyone who is not an observer may move the cards assigned to them, so a reviewer picks cards up too and each card's moves and refusals
+  // decide the drop. An observer only looks, and a board that is down already says why in its banner, so nothing is draggable for them.
   function canDrag(model) {
-    return MAY_CHANGE.indexOf(model.viewer.role) >= 0 && model.viewer.canWrite !== false && !down(model);
+    const role = model.viewer.role;
+    return !!role && role !== 'observer' && model.viewer.canWrite !== false && !down(model);
   }
   function syncDraggable() {
     const model = board.model();

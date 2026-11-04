@@ -105,14 +105,15 @@
     updateActions();
   }
 
-  /** Move to... follows the card exactly: owners and leads only, with at least one offered move, disabled while the board cannot be changed. */
+  /** Move to... follows the card exactly: at least one offered move (62-27: the model decides them card by card), never for an observer, disabled while
+   *  the board cannot be changed. */
   function updateActions() {
     if (!current) return;
     const model = board.model();
     const c = board.cardData(current.id);
     const d = current.detail;
     const down = isDown();
-    const canMove = !!c && !!model && c.moves.length > 0 && (model.viewer.role === 'owner' || model.viewer.role === 'lead') && (down || model.viewer.canWrite);
+    const canMove = !!c && !!model && c.moves.length > 0 && !!model.viewer.role && model.viewer.role !== 'observer' && (down || model.viewer.canWrite);
     moveBtn.hidden = !canMove;
     if (c) moveBtn.setAttribute('aria-label', 'Move to... ' + (c.kind === 'plan' ? 'plan ' : '') + c.displayId + ', ' + c.title);
     if (down) moveBtn.setAttribute('aria-disabled', 'true'); else moveBtn.removeAttribute('aria-disabled');

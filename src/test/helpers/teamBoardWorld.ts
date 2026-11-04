@@ -87,8 +87,10 @@ export function seedStandardBoard(world: BoardWorld): void {
 // The owner's 0.6.3 re-test board (debug session board-codeserver-cards-and-drag): the scratch project carries this repository's v0.6.0 roadmap, so a
 // finished phase holds only done plans and the next phase has no plans yet. Backlog then holds only the phase card, Done (folded) holds every plan,
 // and nobody is assigned: milestone:v0.6.0 (active), phase:60 with `donePlans` done plans plan:60-01..., and the planless phase:63.
-export function seedRetestBoard(world: BoardWorld, donePlans = 3): void {
-  const { owner } = world;
+// assignedPlans (owner decision 2026-11-04, 62-27; off by default, so the board above is unchanged): phase:64 "Board work" with two Ready plans, plan:64-01
+// that the lead assigned to the developer and plan:64-02 that the lead assigned to themselves.
+export function seedRetestBoard(world: BoardWorld, donePlans = 3, options: { assignedPlans?: boolean } = {}): void {
+  const { owner, lead, dev } = world;
   world.accept(owner, 'item.imported', importedBody({ id: 'milestone:v0.6.0', kind: 'milestone', title: 'Team Mode', active: true }));
   world.accept(owner, 'item.imported', importedBody({ id: 'phase:60', kind: 'phase', title: 'Team core', parentId: 'milestone:v0.6.0' }));
   for (let i = 1; i <= donePlans; i += 1) {
@@ -96,4 +98,10 @@ export function seedRetestBoard(world: BoardWorld, donePlans = 3): void {
     world.accept(owner, 'item.imported', importedBody({ id: `plan:60-${n}`, kind: 'plan', title: `Core slice ${n}`, parentId: 'phase:60', state: 'done', summary: true, gsd: { phase: '60', plan: n, wave: 1 } }));
   }
   world.accept(owner, 'item.imported', importedBody({ id: 'phase:63', kind: 'phase', title: 'Claims', parentId: 'milestone:v0.6.0' }));
+  if (options.assignedPlans !== true) return;
+  world.accept(owner, 'item.imported', importedBody({ id: 'phase:64', kind: 'phase', title: 'Board work', parentId: 'milestone:v0.6.0' }));
+  world.accept(owner, 'item.imported', importedBody({ id: 'plan:64-01', kind: 'plan', title: 'Developer slice', parentId: 'phase:64', scope: ['src/d/**'], estimate: { tokens: 4000 }, gsd: { phase: '64', plan: '01', wave: 1 } }));
+  world.accept(owner, 'item.imported', importedBody({ id: 'plan:64-02', kind: 'plan', title: 'Lead slice', parentId: 'phase:64', scope: ['src/l/**'], estimate: { tokens: 4000 }, gsd: { phase: '64', plan: '02', wave: 1 } }));
+  world.accept(lead, 'item.assigned', { id: 'plan:64-01', memberId: dev.memberId });
+  world.accept(lead, 'item.assigned', { id: 'plan:64-02', memberId: lead.memberId });
 }

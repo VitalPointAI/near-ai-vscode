@@ -459,11 +459,12 @@
     return li;
   }
   function badge(name, word, cls) { return iconText('badge ' + cls, name, word); }
-  // Move to... opens the menu when the card has a move for an owner or lead, or an assignment action (G-62-5): a card that can only be assigned, like a
-  // phase card, still shows it. An observer never gets one, whatever the model says. Which cards can be picked up is drag.js's rule.
+  // Move to... opens the menu when the card has a move, or an assignment action (G-62-5): a card that can only be assigned, like a phase card, still
+  // shows it. Owner decision 2026-11-04 (62-27): the model decides the moves card by card (a developer or reviewer gets moves on the cards assigned to
+  // them), so the page follows them. An observer never gets one, whatever the model says. Which cards can be picked up is drag.js's rule.
   function hasMenu(c) {
     const role = model && model.viewer.role;
-    const moves = c.moves.length > 0 && (role === 'owner' || role === 'lead');
+    const moves = c.moves.length > 0 && !!role && role !== 'observer';
     const assigns = Array.isArray(c.assignActions) && c.assignActions.length > 0 && !!role && role !== 'observer';
     return moves || assigns;
   }

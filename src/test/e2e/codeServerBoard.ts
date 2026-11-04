@@ -6,7 +6,11 @@
 // It opens the owner's board shape (one planless phase card in Backlog, done plans in a folded Done, nobody assigned) and checks:
 //   1. the lane count names the cards in folded columns, the folded Done cell shows its number, and the open Backlog header is not a tall empty box;
 //   2. a real drag of the phase card is picked up and its drop shows the phase card's reason, with no move request;
-//   3. after a real click opens Done, a real drag of a done plan onto Backlog sends exactly one reopen request and the page says it was reopened.
+//   3. after a real click opens Done, a real drag of a done plan onto Backlog sends exactly one reopen request and the page says it was reopened;
+//   4. as the developer (owner decision 2026-11-04, 62-27: assignees move their own cards), on the same board plus a Ready plan a lead assigned to the
+//      developer and one the lead assigned to themselves: a real drop of the developer's plan on Cancelled is refused with the cancel sentence, a real
+//      drag of the lead's plan is picked up and refused with the not-assignee sentence, and a real drag of the developer's plan onto Backlog of its row
+//      sends exactly one hold request. None of the refused drops sends anything.
 //
 // Not part of npm test: it needs a code-server install and a Chromium-based browser, and runs only on a hidden xvfb-run screen. For example:
 //   npm run compile && NEAR_AI_CODE_SERVER=/path/to/code-server NEAR_AI_E2E_BROWSER=/path/to/chrome xvfb-run -a node dist/test/e2e/codeServerBoard.js
@@ -71,14 +75,15 @@ async function until<T>(what: string, probe: () => Promise<T | undefined> | T | 
 
 // The test extension: a webview panel with the board's own files, the page markup boardView.ts writes (nonce CSP, one script tag per file, data-e2e
 // so the page keeps its drag log), the recorded model on 'ready', and every message from the page written to a log. A move is answered with the card
-// in its new column, as the host would after the signed event.
+// in its new column, as the host would after the signed event. When the test writes another model to the file (the developer's view, step 4) the
+// harness posts it, as the host does when the session changes.
 const HARNESS_JS = `const vscode = require('vscode');
 const fs = require('fs');
 const crypto = require('crypto');
 function activate(context) {
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'board');
   const log = (m) => fs.appendFileSync(process.env.HARNESS_LOG, JSON.stringify(m) + '\\n');
-  const model = JSON.parse(fs.readFileSync(process.env.HARNESS_MODEL, 'utf8'));
+  let model = JSON.parse(fs.readFileSync(process.env.HARNESS_MODEL, 'utf8'));
   const panel = vscode.window.createWebviewPanel('nearAiTeamBoard', 'Team Board', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
   const nonce = crypto.randomBytes(16).toString('base64');
   const asset = (f) => panel.webview.asWebviewUri(vscode.Uri.joinPath(media, f)).toString();
@@ -87,6 +92,11 @@ function activate(context) {
     + '<meta http-equiv="Content-Security-Policy" content="default-src \\'none\\'; style-src ' + panel.webview.cspSource + '; script-src \\'nonce-' + nonce + '\\';">'
     + '<link rel="stylesheet" href="' + asset('board.css') + '"><title>Team Board</title></head><body data-e2e="1"><div id="root"></div>'
     + '<div id="live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>' + scripts + '</body></html>';
+  fs.watchFile(process.env.HARNESS_MODEL, { interval: 200 }, () => {
+    model = JSON.parse(fs.readFileSync(process.env.HARNESS_MODEL, 'utf8'));
+    panel.webview.postMessage({ type: 'state', model });
+  });
+  context.subscriptions.push({ dispose: () => fs.unwatchFile(process.env.HARNESS_MODEL) });
   panel.webview.onDidReceiveMessage((m) => {
     log(m);
     if (m && m.type === 'ready') panel.webview.postMessage({ type: 'state', model });
@@ -116,7 +126,8 @@ const FACTS = `(() => {
     laneCounts: all('.lane').map((l) => [l.getAttribute('data-lane'), (l.querySelector('.lane-count') || {}).textContent || '']),
     cells: all('.lanes .cell').map((c) => Object.assign({ column: c.getAttribute('data-column'), lane: c.getAttribute('data-lane'), folded: c.classList.contains('collapsed'), shownCount: (c.querySelector('.folded-count') || {}).textContent || '', cards: all('.cell[data-column="' + c.getAttribute('data-column') + '"][data-lane="' + c.getAttribute('data-lane') + '"] .card').map((n) => n.getAttribute('data-id')) }, box(c))),
     cards: all('.card').map((c) => Object.assign({ id: c.getAttribute('data-id'), draggable: c.getAttribute('draggable') === 'true', refusal: (c.querySelector('.refusal-line') || {}).textContent || '' }, box(c))),
-    dragLog: window.NearAiBoard.dragLog(), live: (document.getElementById('live') || {}).textContent || ''
+    dragLog: window.NearAiBoard.dragLog(), live: (document.getElementById('live') || {}).textContent || '',
+    view: box(document.querySelector('.board-scroll') || document.body)
   };
 })()`;
 
@@ -129,6 +140,8 @@ interface Facts {
   cards: Array<Box & { id: string; draggable: boolean; refusal: string }>;
   dragLog: Array<{ event: string; column: string; lane: string; verdict: string }>;
   live: string;
+  // The board's scrolling area in window pixels, so a step can tell whether a point it is about to press is on screen.
+  view: Box;
 }
 
 function stop(child: ChildProcess | undefined): void {
@@ -247,6 +260,13 @@ async function main(): Promise<void> {
     };
     const cellOf = (f: Facts, column: string, lane = 'unassigned'): Facts['cells'][number] | undefined => f.cells.find((c) => c.column === column && c.lane === lane);
     const head = (f: Facts, column: string): Facts['heads'][number] | undefined => f.heads.find((h) => h.column === column);
+    // Step 4 works in rows and columns further right and down than the editor shows, so it scrolls the board's own area (as a person would with the
+    // scroll bars) to put what it is about to press on screen. Only the scroll position is set this way; every press and drag is real mouse input.
+    const reveal = async (selector: string, inline: 'start' | 'end'): Promise<void> => {
+      await evaluate<boolean>(boardContext, `(() => { const n = document.querySelector(${JSON.stringify(selector)}); if (!n) return false; n.scrollIntoView({ block: 'center', inline: '${inline}' }); return true; })()`);
+      await sleep(300);
+    };
+    const onScreen = (p: Point, v: Box): boolean => p.x > v.left && p.x < v.left + v.width && p.y > v.top && p.y < v.top + v.height;
     // A cold code-server start keeps the page busy for a while; the first reading waits for an answer that shows the drawn board.
     let f = await until('the first reading of the board', async () => { const now = await facts(); return now.cards.length > 0 ? now : undefined; }, 120_000);
     await sleep(1_000);
@@ -293,6 +313,70 @@ async function main(): Promise<void> {
       check(f.dragLog.some((e) => e.event === 'drop' && e.column === 'backlog' && e.verdict === 'ok'), 'the drop on Backlog was offered', JSON.stringify(f.dragLog));
       check(cellOf(f, 'backlog')?.cards.includes('plan:60-03') === true && f.live === 'Reopened plan 60-03 in Backlog.', 'the plan is drawn in Backlog and the page says it was reopened', `live: ${f.live}`);
     } else check(false, 'a done plan and the Backlog cell are drawn', JSON.stringify({ plan, backlog }));
+
+    // 4. The developer's view (owner decision 2026-11-04, 62-27): the same board plus a Ready plan the lead gave the developer and one the lead kept.
+    const devWorld = await boardWorld();
+    seedRetestBoard(devWorld, 3, { assignedPlans: true });
+    const devModel = buildBoardModel(devWorld.state, { nowMs: Date.now(), status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: devWorld.dev.memberId });
+    const mineLane = devModel.cards.find((c) => c.id === 'plan:64-01')?.lane.member ?? '';
+    const leadLane = devModel.cards.find((c) => c.id === 'plan:64-02')?.lane.member ?? '';
+    const sentBefore = messages().filter((m) => m.type === 'move').length;
+    writeFileSync(modelFile, JSON.stringify(devModel));
+    f = await until('the developer\'s board', async () => { const now = await facts(); return now.cards.some((c) => c.id === 'plan:64-01') && now.cards.some((c) => c.id === 'plan:64-02') ? now : undefined; }, 15_000);
+    await sleep(500);
+    f = await facts();
+    await photo('codeserver-4-developer-board.png');
+    check(cellOf(f, 'ready', mineLane)?.cards.includes('plan:64-01') === true && cellOf(f, 'ready', leadLane)?.cards.includes('plan:64-02') === true, 'the developer\'s plan and the lead\'s plan are drawn in Ready of their own rows', JSON.stringify(f.cells.filter((c) => c.column === 'ready')));
+    check(f.cards.find((c) => c.id === 'plan:64-01')?.draggable === true && f.cards.find((c) => c.id === 'plan:64-02')?.draggable === true, 'the developer can pick up both plans');
+
+    // 4a. A real drop of the developer's plan on Cancelled, opened by a real click first: refused with the cancel sentence, nothing sent.
+    await reveal('.colheads .column[data-column="cancelled"]', 'end');
+    f = await facts();
+    const cancelledHead = head(f, 'cancelled');
+    if (cancelledHead) await click({ x: cancelledHead.left + cancelledHead.width / 2, y: cancelledHead.top + 24 });
+    f = await until('Cancelled open', async () => { const now = await facts(); return cellOf(now, 'cancelled', mineLane)?.folded === false ? now : undefined; }, 10_000).catch(async () => facts());
+    await reveal('.card[data-id="plan:64-01"]', 'start');
+    f = await facts();
+    const mine = f.cards.find((c) => c.id === 'plan:64-01');
+    const cancelled = cellOf(f, 'cancelled', mineLane);
+    const cancelledAt = cancelled === undefined ? undefined : { x: cancelled.left + Math.min(40, cancelled.width / 2), y: cancelled.top + Math.min(40, cancelled.height / 2) };
+    if (mine && cancelled && cancelledAt && !cancelled.folded && onScreen(grip(mine), f.view) && onScreen(cancelledAt, f.view)) {
+      await mouseDrag(session, grip(mine), cancelledAt, { steps: 15, pauseMs: 20 });
+      f = await until('the refusal on the developer\'s plan', async () => { const now = await facts(); return now.cards.find((c) => c.id === 'plan:64-01')?.refusal ? now : undefined; }, 10_000).catch(async () => facts());
+      await photo('codeserver-5-developer-cancel-refused.png');
+      check(f.dragLog.some((e) => e.event === 'drop' && e.column === 'cancelled' && e.verdict === 'no'), 'the drop on Cancelled was refused', JSON.stringify(f.dragLog.slice(-4)));
+      check(f.cards.find((c) => c.id === 'plan:64-01')?.refusal === REFUSALS.cancelManagersOnly, 'the developer\'s plan shows the cancel sentence', JSON.stringify(f.cards.find((c) => c.id === 'plan:64-01')));
+      check(messages().filter((m) => m.type === 'move').length === sentBefore, 'the refused cancel sent nothing');
+    } else check(false, 'the developer\'s plan and an open Cancelled cell in its row are on screen', JSON.stringify({ mine, cancelled, view: f.view }));
+
+    // 4b. A real drag of the lead's plan to Backlog of its own row: picked up, refused with the not-assignee sentence, nothing sent.
+    await reveal(`.cell[data-column="backlog"][data-lane="${leadLane}"]`, 'start');
+    f = await facts();
+    const theirs = f.cards.find((c) => c.id === 'plan:64-02');
+    const leadBacklog = cellOf(f, 'backlog', leadLane);
+    if (theirs && leadBacklog && onScreen(grip(theirs), f.view) && onScreen(middle(leadBacklog), f.view)) {
+      await mouseDrag(session, grip(theirs), middle(leadBacklog), { steps: 15, pauseMs: 20 });
+      f = await until('the refusal on the lead\'s plan', async () => { const now = await facts(); return now.cards.find((c) => c.id === 'plan:64-02')?.refusal ? now : undefined; }, 10_000).catch(async () => facts());
+      await photo('codeserver-6-developer-lead-card-refused.png');
+      check(f.dragLog.some((e) => e.event === 'dragstart' && e.verdict === 'started'), 'the browser started the drag of the lead\'s plan', JSON.stringify(f.dragLog.slice(-4)));
+      check(f.cards.find((c) => c.id === 'plan:64-02')?.refusal === REFUSALS.notAssigneeMove, 'the lead\'s plan shows the not-assignee sentence', JSON.stringify(f.cards.find((c) => c.id === 'plan:64-02')));
+      check(messages().filter((m) => m.type === 'move').length === sentBefore, 'the refused drag sent nothing');
+    } else check(false, 'the lead\'s plan and the Backlog cell of its row are on screen', JSON.stringify({ theirs, leadBacklog, view: f.view }));
+
+    // 4c. A real drag of the developer's plan onto Backlog of its row: exactly one hold request.
+    await reveal(`.cell[data-column="backlog"][data-lane="${mineLane}"]`, 'start');
+    f = await facts();
+    const own = f.cards.find((c) => c.id === 'plan:64-01');
+    const mineBacklog = cellOf(f, 'backlog', mineLane);
+    if (own && mineBacklog && onScreen(grip(own), f.view) && onScreen(middle(mineBacklog), f.view)) {
+      await mouseDrag(session, grip(own), middle(mineBacklog), { steps: 15, pauseMs: 20 });
+      f = await until('the developer\'s plan in Backlog', async () => { const now = await facts(); return cellOf(now, 'backlog', mineLane)?.cards.includes('plan:64-01') ? now : undefined; }, 10_000).catch(async () => facts());
+      await photo('codeserver-7-developer-plan-held.png');
+      const sent = messages().filter((m) => m.type === 'move').slice(sentBefore);
+      check(sent.length === 1 && sent[0]?.itemId === 'plan:64-01' && sent[0]?.target === 'hold', 'the developer\'s drop sent exactly one hold request for plan 64-01', JSON.stringify(sent));
+      check(f.dragLog.some((e) => e.event === 'drop' && e.column === 'backlog' && e.lane === mineLane && e.verdict === 'ok'), 'the drop on Backlog of the developer\'s row was offered', JSON.stringify(f.dragLog.slice(-4)));
+      check(cellOf(f, 'backlog', mineLane)?.cards.includes('plan:64-01') === true, 'the plan is drawn in Backlog of the developer\'s row');
+    } else check(false, 'the developer\'s plan and the Backlog cell of its row are on screen', JSON.stringify({ own, mineBacklog, view: f.view }));
   } catch (error) {
     check(false, 'the run finished', (error as Error).stack ?? String(error));
   } finally {
