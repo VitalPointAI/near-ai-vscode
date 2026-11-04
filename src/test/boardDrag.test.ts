@@ -407,6 +407,22 @@ test('62-23: in Group by Member a drop in another person\'s row is refused with 
   assert.match(DRAG_JS, /use Assign to/);
 });
 
+test('62-23: a refused drop brings the card with its reason into view (nearest edge), and an offered drop does not scroll', async () => {
+  const { h } = await ownerBoard();
+  const li = card(h, 'plan:90-01');
+  const scrolls: unknown[] = [];
+  (li as unknown as { scrollIntoView: (o: unknown) => void }).scrollIntoView = (o) => { scrolls.push(JSON.parse(JSON.stringify(o))); };
+  const dt = lift(h, 'plan:90-01');
+  drop(h, cell(h, 'in-progress'), dt);
+  h.fire(li, 'dragend', { dataTransfer: dt });
+  assert.equal(refusalLine(h, 'plan:90-01'), REFUSALS['in-progress']);
+  assert.deepEqual(scrolls, [{ block: 'nearest', inline: 'nearest' }], 'the reason is scrolled into view once');
+  const dt2 = lift(h, 'plan:90-01');
+  drop(h, cell(h, 'backlog'), dt2);
+  h.fire(li, 'dragend', { dataTransfer: dt2 });
+  assert.equal(scrolls.length, 1, 'an offered drop leaves the scroll alone');
+});
+
 test('Escape during a drag, or a drag that ends with no drop, clears the highlights and announces the cancel once', async () => {
   const { h } = await ownerBoard();
   let dt = lift(h, 'plan:90-01');

@@ -980,6 +980,8 @@ function boardTests(): Array<[string, () => Promise<void>]> {
   let cdp: CdpSession | undefined;
   let dragPath: DragPath | undefined;
   let boardRemote = '';
+  /** Page errors caught before the drags (the width matrix's resizes can leave ResizeObserver notices); the drags must add none. */
+  let errorsBeforeDrags = 0;
   /** Events on the coordination branch of the board project's online home (a local bare folder behind a test-only insteadOf rule, run.ts). */
   const eventsOnRemote = (): number => Number(execFileSync('git', ['-C', boardRemote, 'rev-list', '--count', 'refs/heads/near-ai/coordination'], { encoding: 'utf8' }).trim());
   const dragFacts = async (): Promise<{ log: DragLogEntry[]; count: number; live: string; facts: Message }> => {
@@ -992,14 +994,14 @@ function boardTests(): Array<[string, () => Promise<void>]> {
   // Where a card and a cell of its own row are on the VS Code window: the probe's page positions plus the webview frame's place in the window. The card
   // is first brought into view (focus scrolls it there), then let go of. The drop point is the cell's middle across, at the card's own height (the
   // cells of a row stretch to the row), kept inside the visible board region.
-  const aim = async (id: string, column: string, lane?: string): Promise<{ from: Point; to: Point; report: LayoutReport }> => {
+  const aim = async (id: string, column: string, pick?: (cells: LayoutReport['cells'], card: LayoutReport['cards'][number], region: LayoutReport['region']) => LayoutReport['cells'][number] | undefined): Promise<{ from: Point; to: Point; report: LayoutReport; lane: string; targetLane: string }> => {
     await ask({ action: 'focus', itemId: id });
     await act({ action: 'blur' });
     const report = await ask({ action: 'rects' });
     const c = report.cards.find((x) => x.id === id);
     assert.ok(c !== undefined && c.width > 0 && c.height > 0, `${id} is drawn`);
-    const target = report.cells.find((x) => x.lane === (lane ?? c.lane) && x.column === column);
-    assert.ok(target !== undefined && target.width > 0, `the ${column} cell of the ${lane ?? c.lane} row is drawn`);
+    const target = pick ? pick(report.cells, c, report.region) : report.cells.find((x) => x.lane === c.lane && x.column === column);
+    assert.ok(target !== undefined && target.width > 0, `the ${column} cell ${pick ? 'chosen' : `of the ${c.lane} row`} is drawn`);
     assert.ok(cdp !== undefined, 'the DevTools connection is open');
     const frame = await webviewFrameRect(cdp, { width: report.width, height: report.height });
     assert.ok(frame !== undefined, `the board's webview frame (${report.width} by ${report.height}) is found in the window`);
@@ -1007,8 +1009,14 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     const inside = (y: number, top: number, height: number): number => Math.max(Math.max(top, r.top) + 8, Math.min(y, Math.min(top + height, r.top + r.height) - 8));
     const from = { x: Math.round(frame.left + c.left + Math.min(60, c.width / 2)), y: Math.round(frame.top + c.top + Math.min(24, c.height / 2)) };
     const to = { x: Math.round(frame.left + target.left + target.width / 2), y: Math.round(frame.top + inside(c.top + c.height / 2, target.top, target.height)) };
-    return { from, to, report };
+    return { from, to, report, lane: c.lane, targetLane: target.lane };
   };
+  /** The model's sentences for this card, from the last state the host sent. */
+  const refusalsOf = (id: string): Record<string, string> => {
+    const state = [...board.toView].reverse().find((m) => m.type === 'state' && m.model !== undefined && cardOf(m, id) !== undefined);
+    return ((state === undefined ? undefined : (cardOf(state, id) as unknown as { refusals?: Record<string, string> }).refusals) ?? {});
+  };
+  const refusalLine = async (id: string): Promise<string> => ((((await dragFacts()).facts.refusals as Array<{ id: string; text: string }> | undefined) ?? []).find((r) => r.id === id)?.text ?? '');
   /**
    * One real drag from `from` to `to`. Mouse input first; when the board's drag log shows no dragstart from it within 2 s, the intercepted drag. The
    * first drag that works fixes the path for the rest of the run. `whileOver` runs with the pointer over the target and the button held (mouse path).
@@ -1202,13 +1210,13 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       const kinds = (ids: string[]): string => ['plan', 'phase', 'item'].map((k) => `${ids.filter((id) => id.startsWith(`${k}:`)).length} ${k}`).join(', ');
       console.log(`(${drawn.filter((c) => c.draggable).length} of ${drawn.length} drawn cards can be dragged by the owner: ${kinds(drawn.filter((c) => c.draggable).map((c) => c.id))}; not draggable: ${kinds(drawn.filter((c) => !c.draggable).map((c) => c.id))})`);
 
+      errorsBeforeDrags = (((await dragFacts()).facts.errors as string[] | undefined) ?? []).length;
       cdp = await connectCdp(port);
       const version = await cdp.send<{ product?: string }>('Browser.getVersion').catch(() => ({ product: 'unknown' }));
       console.log(`(DevTools endpoint on 127.0.0.1:${port}: ${version.product ?? 'unknown'})`);
     }],
     ['a real mouse drag of the Ready bug into Backlog of its own row puts it on hold: one move request, one more signed event, and the card drawn in Backlog', async () => {
-      const { from, to, report } = await aim(DRAG_ITEM, 'backlog');
-      const lane = report.cards.find((c) => c.id === DRAG_ITEM)!.lane;
+      const { from, to, lane } = await aim(DRAG_ITEM, 'backlog');
       const events = eventsOnRemote();
       const fromBefore = board.fromView.length;
       const toBefore = board.toView.length;
@@ -1225,6 +1233,128 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       await until('one more event on the coordination record', () => (eventsOnRemote() === events + 1 ? true : undefined), 20_000);
       assert.equal(board.fromView.slice(fromBefore).filter((m) => m.type === 'move').length, 1, 'exactly one move request');
       await until('the bug drawn in Backlog', async () => ((await ask({ action: 'rects' })).cards.some((c) => c.id === DRAG_ITEM && c.column === 'backlog') ? true : undefined));
+    }],
+    ['Escape during a real drag over the offered Ready cell cancels it: nothing is posted, no event is written, the card stays in Backlog and the cancel is announced; drag-over-dark-1400.png shows the offered cell', async () => {
+      const { from, to, lane } = await aim(DRAG_ITEM, 'ready');
+      const events = eventsOnRemote();
+      const fromBefore = board.fromView.length;
+      let overFrame = false;
+      let cancelledBy = '';
+      // VS Code's notification toasts sit outside the page; they are cleared before the button is pressed, since the frame is taken mid-drag.
+      await vscode.commands.executeCommand('notifications.clearAll');
+      await vscode.commands.executeCommand('notifications.hideToasts');
+      const logBefore = (await dragFacts()).count;
+      const { path: used, entries } = await realDrag(from, to, {
+        whileOver: async () => {
+          // The frame with the pointer held over the offered cell: the probe's reading at that moment goes into index.json, whatever it found.
+          await sleep(300);
+          const reading = await ask({ action: 'measure' });
+          console.log(`(mid-drag reading: ${reading.problems.length} problems${reading.problems.length ? `: ${reading.problems.join(' | ')}` : ''})`);
+          if (photographing) {
+            const file = 'drag-over-dark-1400.png';
+            await captureScreen(fbdir, path.join(screens, file));
+            index.push({ file, theme: themeName(reading.theme), askedWidth: 1400, reachedWidth: reading.width, layout: reading.layout, view: 'drag-over', problems: reading.problems.length });
+            await writeFile(path.join(screens, 'index.json'), `${JSON.stringify(index, null, 2)}\n`, 'utf8');
+            overFrame = true;
+          } else console.log('(no screenshot drag-over-dark-1400.png: the run has no framebuffer folder)');
+          await pressKey(cdp!, 'Escape');
+          await sleep(300);
+          if (since(await dragFacts(), logBefore).some((e) => e.event === 'dragend')) cancelledBy = 'Escape';
+          else {
+            // Chromium's DevTools-driven drag does not hear keys while the button is held (a native drag hears Escape in the system's drag loop and
+            // cancels it there). Input.cancelDragging is that same cancel, done by Chromium: the page gets the dragend with no drop it gets after Escape.
+            console.log('(Escape did not reach the DevTools-driven drag; Chromium cancels it with Input.cancelDragging, as the system does on Escape)');
+            await cdp!.send('Input.cancelDragging');
+            await sleep(300);
+            cancelledBy = 'Input.cancelDragging after Escape';
+          }
+        }
+      });
+      console.log(`(drag log: ${describeLog(entries)}; cancelled by ${cancelledBy || 'nothing'})`);
+      if (used === 'intercepted') console.log('(no drag-over frame: an intercepted drag holds no pointer over the page)');
+      else if (photographing) assert.ok(overFrame, 'the mid-drag frame was taken');
+      assert.ok(entries.some((e) => e.event === 'dragenter' && e.column === 'ready' && e.lane === lane && e.verdict === 'ok'), `the pointer was over the offered Ready cell (log: ${describeLog(entries)})`);
+      assert.equal(entries.some((e) => e.event === 'drop' && e.verdict !== 'ignored'), false, `no drop is taken (log: ${describeLog(entries)})`);
+      await sleep(1_500);
+      assert.deepEqual(board.fromView.slice(fromBefore).filter((m) => m.type === 'move'), [], 'nothing is posted');
+      assert.equal(eventsOnRemote(), events, 'no event is written');
+      const live = await until('the cancel announced', async () => { const l = (await dragFacts()).live; return /^Move cancelled\. The card is still in /.test(l) ? l : undefined; }, 5_000);
+      console.log(`(announced: ${live})`);
+      const report = await ask({ action: 'rects' });
+      assert.equal(report.cards.find((c) => c.id === DRAG_ITEM)?.column, 'backlog', 'the card is still in Backlog');
+    }],
+    ['a real drag of the held bug onto the folded In progress column is refused: nothing posted or written, the card stays in Backlog with the model\'s reason, which is announced; drag-refused-dark-1400.png shows it', async () => {
+      const sentence = refusalsOf(DRAG_ITEM)['in-progress'];
+      assert.ok(typeof sentence === 'string' && sentence.length > 0, 'the model carries the In progress sentence');
+      const { from, to, lane } = await aim(DRAG_ITEM, 'in-progress');
+      const events = eventsOnRemote();
+      const fromBefore = board.fromView.length;
+      const { entries } = await realDrag(from, to);
+      console.log(`(drag log: ${describeLog(entries)})`);
+      assert.deepEqual(entries.find((e) => e.event === 'drop'), { event: 'drop', column: 'in-progress', lane, verdict: 'no' }, `the drop lands on In progress and is refused (log: ${describeLog(entries)})`);
+      await sleep(1_500);
+      assert.deepEqual(board.fromView.slice(fromBefore).filter((m) => m.type === 'move'), [], 'no move request reaches the host');
+      assert.equal(eventsOnRemote(), events, 'the record gains no event');
+      assert.equal(await refusalLine(DRAG_ITEM), sentence, 'the card shows the reason');
+      const live = await until('the refusal announced', async () => { const l = (await dragFacts()).live; return l.startsWith("Can't move ") && l.endsWith(` to In progress. ${sentence}`) ? l : undefined; }, 5_000);
+      console.log(`(announced: ${live})`);
+      const report = await settled('the refused drop', (r) => r.cards.some((c) => c.id === DRAG_ITEM && c.column === 'backlog'));
+      assert.deepEqual(report.problems, [], problemsOf(report));
+      const seen = report.cards.find((c) => c.id === DRAG_ITEM)!;
+      assert.ok(fullyIn(seen, report.region), 'the card with its reason is fully in view');
+      await photograph('drag-refused-dark-1400.png', 'drag-refused', 1400, report);
+    }],
+    ['grouped by phase, a real drag into another phase row is refused with the row sentence and nothing is moved', async () => {
+      const facts = await act({ action: 'group', group: 'phase' });
+      assert.equal(facts.groupBy, 'phase', 'grouped by phase');
+      await settled('grouped by phase', (r) => r.layout === 'kanban' && !r.lanes.some((l) => l.lane === 'unassigned'));
+      const { from, to, lane, targetLane } = await aim(DRAG_ITEM, 'backlog', (cells, card, region) => cells
+        .filter((x) => x.column === 'backlog' && x.lane !== card.lane && x.width > 0 && x.height > 0 && x.top + x.height > region.top + 16 && x.top < region.top + region.height - 16)
+        .sort((a, b) => Math.abs(a.top - card.top) - Math.abs(b.top - card.top))[0]);
+      assert.notEqual(targetLane, lane, 'the target is another row');
+      const events = eventsOnRemote();
+      const fromBefore = board.fromView.length;
+      const { entries } = await realDrag(from, to);
+      console.log(`(drag log: ${describeLog(entries)})`);
+      assert.deepEqual(entries.find((e) => e.event === 'drop'), { event: 'drop', column: 'backlog', lane: targetLane, verdict: 'no' }, `the drop lands in row ${targetLane} and is refused (log: ${describeLog(entries)})`);
+      await sleep(1_500);
+      assert.deepEqual(board.fromView.slice(fromBefore).filter((m) => m.type === 'move'), [], 'nothing is posted');
+      assert.equal(eventsOnRemote(), events, 'no event is written');
+      assert.equal(await refusalLine(DRAG_ITEM), 'This card stays in its own row. Drop it in another column of the same row.');
+      const back = await act({ action: 'group', group: 'member' });
+      assert.equal(back.groupBy, 'member', 'grouped by member again');
+      await settled('grouped by member again', (r) => r.lanes.some((l) => l.lane === 'unassigned'));
+    }],
+    ['Move to... is still the keyboard path in the same window: M, then Down to Ready (release the hold) and Enter releases the hold', async () => {
+      const toBefore = board.toView.length;
+      const fromBefore = board.fromView.length;
+      // Real keys from the keyboard input of the window (DevTools Protocol), so Enter presses the menu item as a person's Enter does.
+      let facts = await act({ action: 'focus', itemId: DRAG_ITEM });
+      assert.equal(facts.focusedCard, DRAG_ITEM, 'the card takes focus');
+      assert.equal(facts.hasFocus, true, 'the board page has the keyboard');
+      await pressKey(cdp!, 'm');
+      facts = await act({ action: 'facts' });
+      assert.equal(facts.menuOpen, true, 'M opens Move to...');
+      for (let step = 0; step < 8 && facts.focusedText !== 'Ready (release the hold)'; step += 1) { await pressKey(cdp!, 'ArrowDown'); facts = await act({ action: 'facts' }); }
+      assert.equal(facts.focusedText, 'Ready (release the hold)', 'Down reaches Ready (release the hold)');
+      await pressKey(cdp!, 'Enter');
+      const posted = await board.next('fromView', (message) => message.type === 'move', fromBefore);
+      assert.deepEqual(posted, { type: 'move', itemId: DRAG_ITEM, target: 'release' });
+      const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, DRAG_ITEM)?.held === false, toBefore, 30_000);
+      assert.equal(cardOf(state, DRAG_ITEM)?.column, 'ready', 'the card is shown in Ready again');
+      await until('the bug drawn in Ready', async () => ((await ask({ action: 'rects' })).cards.some((c) => c.id === DRAG_ITEM && c.column === 'ready') ? true : undefined));
+      assert.deepEqual((((await dragFacts()).facts.errors as string[] | undefined) ?? []).slice(errorsBeforeDrags), [], 'no page error during the drags');
+    }],
+    ['the drag frames are in the screenshot index, and the DevTools connection is closed', async () => {
+      cdp?.close();
+      cdp = undefined;
+      if (!photographing) return;
+      const listed = JSON.parse(await readFile(path.join(screens, 'index.json'), 'utf8')) as ScreenEntry[];
+      const pngs = (await readdir(screens)).filter((f) => f.endsWith('.png')).sort();
+      assert.deepEqual(listed.map((e) => e.file).sort(), pngs, 'one index line per PNG');
+      assert.equal(listed.find((e) => e.file === 'drag-refused-dark-1400.png')?.view, 'drag-refused');
+      assert.equal(listed.find((e) => e.file === 'drag-refused-dark-1400.png')?.problems, 0);
+      if (dragPath === 'mouse') assert.equal(listed.find((e) => e.file === 'drag-over-dark-1400.png')?.view, 'drag-over');
     }]
   ];
   return allBoardTests;

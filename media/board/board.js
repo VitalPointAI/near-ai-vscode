@@ -878,7 +878,7 @@
     if (c && cardEls.has(id)) { updateCard(c, cardEls.get(id)); applyRoving(); }
   }
   const api = {
-    post, announce, icon, layout: () => layout, model: () => model, cardData, cardElement: (id) => cardEls.get(id),
+    post, announce, icon, layout: () => layout, model: () => model, cardData, cardElement: (id) => cardEls.get(id), groupBy: () => ui.groupBy,
     focusCard: (id) => { const li = cardEls.get(id); return !!li && li.isConnected && focusEl(li); },
     setPending(id, text) { delete refusals[id]; pending[id] = text; refreshCard(id); },
     showRefusal(id, columnLabel, reason, action) {
@@ -951,7 +951,8 @@
       type: 'e2e-facts', id: m.id, cardIds: nodesOf(document, '.card').map((n) => n.getAttribute('data-id')), draggable: nodesOf(document, '.card[draggable="true"]').length,
       focusedCard: focused ? focused.getAttribute('data-id') : '', focusedRole: a && a.getAttribute ? a.getAttribute('role') || '' : '',
       menuOpen: !!menu && !menu.hidden, menuItems: menu ? menu.querySelectorAll('[role="menuitem"]').length : 0, detailOpen: !detailEl.hidden, groupBy: ui.groupBy,
-      dragLog: dragLog.slice(), dragCount: dragLogged, live: ($('live') && $('live').textContent) || '', errors: pageErrors.slice()
+      dragLog: dragLog.slice(), dragCount: dragLogged, refusals: nodesOf(document, '.card').filter((n) => n.querySelector('.refusal-line')).map((n) => ({ id: n.getAttribute('data-id'), text: n.querySelector('.refusal-line').textContent })),
+      hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : false, focusedText: a && a.getAttribute && a.getAttribute('role') === 'menuitem' ? a.textContent : '', live: ($('live') && $('live').textContent) || '', errors: pageErrors.slice()
     });
   }
 

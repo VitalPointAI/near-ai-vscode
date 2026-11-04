@@ -195,6 +195,16 @@ test('pressKey sends keyDown then keyUp with the key, code and key code for Esca
   cdp.close();
 });
 
+test('pressKey sends ArrowDown with its code and key code and no text (62-23: the Move to... menu from the real keyboard)', async () => {
+  const { cdp, socket } = await session();
+  socket.autoReply();
+  await pressKey(cdp, 'ArrowDown');
+  assert.deepEqual(socket.sent.map((m) => [m.params!.type, m.params!.key, m.params!.code, m.params!.windowsVirtualKeyCode, m.params!.text]), [
+    ['keyDown', 'ArrowDown', 'ArrowDown', 40, undefined], ['keyUp', 'ArrowDown', 'ArrowDown', 40, undefined]
+  ]);
+  cdp.close();
+});
+
 test('the client drives only the Input domain: it never makes or dispatches DOM events, and it imports only Node built-ins', () => {
   const source = readFileSync(path.resolve(__dirname, '..', '..', 'src', 'test', 'e2e', 'cdp.ts'), 'utf8');
   assert.equal(/new DragEvent|dispatchEvent/.test(source), false);

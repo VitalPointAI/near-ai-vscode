@@ -212,11 +212,12 @@ export async function interceptedDrag(cdp: CdpSession, from: Point, to: Point, o
 const KEYS = {
   Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
   Enter: { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' },
-  m: { key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, text: 'm' }
+  m: { key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, text: 'm' },
+  ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 }
 } as const;
 
 /** A key press with real keyboard input: keyDown then keyUp. */
-export async function pressKey(cdp: CdpSession, key: 'Escape' | 'Enter' | 'm'): Promise<void> {
+export async function pressKey(cdp: CdpSession, key: keyof typeof KEYS): Promise<void> {
   const k = KEYS[key];
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...k });
   const { text: _text, ...up } = k as { text?: string } & typeof k;

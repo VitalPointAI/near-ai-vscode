@@ -7,6 +7,9 @@
   const area = document.getElementById('board');
   if (!board || !area) return;
   const TYPE = 'application/x-near-ai-card';
+  // The other-row sentences (62-23): grouped by member a row is a person, so the way to hand a card over is Assign to; any other grouping keeps to the row.
+  const OTHER_ROW = 'This card stays in its own row. Drop it in another column of the same row.';
+  const OTHER_PERSON = 'This card stays in its own row. To give it to someone else, use Assign to in its Move to... menu. Nothing was moved.';
 
   // The drag in progress: { id, lane, state: 'active' | 'dropped' }. It outlives the drop until dragend so the end of the drag can tell a drop from a cancel.
   let session;
@@ -31,7 +34,7 @@
     const c = board.cardData(s.id);
     const column = cell.getAttribute('data-column');
     if (!c) return { kind: 'no', column, text: 'This card is no longer on the board. Nothing was moved.' };
-    if (cell.getAttribute('data-lane') !== s.lane) return { kind: 'no', column, text: 'This card stays in its own row. Drop it in another column of the same row.' };
+    if (cell.getAttribute('data-lane') !== s.lane) return { kind: 'no', column, text: board.groupBy && board.groupBy() === 'member' ? OTHER_PERSON : OTHER_ROW };
     if (column === c.column) return { kind: 'own', column };
     const move = c.moves.find((m) => m.column === column);
     if (move) return { kind: 'ok', column, move };
@@ -168,7 +171,13 @@
     log('drop', target, v.kind);
     if (v.kind === 'own') return;
     // A refused drop never posts and never moves anything: the card keeps its place and shows and announces the reason.
-    if (v.kind === 'no') { board.showRefusal(s.id, columnLabel(v.column), v.text); return; }
+    if (v.kind === 'no') {
+      board.showRefusal(s.id, columnLabel(v.column), v.text);
+      // The reason line makes the card taller; it is brought into view so the person sees why (62-23: in a real window it fell below the edge).
+      const shown = board.cardElement(s.id);
+      if (shown && shown.isConnected && typeof shown.scrollIntoView === 'function') shown.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      return;
+    }
     const c = board.cardData(s.id);
     awaiting[s.id] = { column: columnLabel(v.column), key: stateKey(c) };
     board.setPending(s.id, 'Moving to ' + columnLabel(v.column) + '...');
