@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 13
+open_count: 16
 waived_count: 0
 fixed_count: 3
-total_count: 16
-last_updated: 2026-11-04T23:11:59.103Z
+total_count: 19
+last_updated: 2026-11-04T23:41:15.871Z
 ---
 
 # Broken Windows Ledger
@@ -31,6 +31,9 @@ last_updated: 2026-11-04T23:11:59.103Z
 | 14 | 62 | deviation | src/test/e2e/suite.ts |  | 62-21: the first planless phase (phase:63) is not on the first screen; 62-19 orders a column by phase then plan, so it is reachable by scrolling the board only. Owner or 62-22/62-24 to decide: planless phases first, compact cards, or accept | open |  | 2026-11-04T04:15:22.916Z |  |
 | 15 | 62.1 | stub | src/domain/team/timeline.ts | 227 | Dot label is the card's a11yLabel placeholder until 62.1-02 writes the timeline sentence | fixed |  | 2026-11-04T22:53:03.099Z | 2026-11-04T23:11:58.978Z |
 | 16 | 62.1 | stub | src/domain/team/timeline.ts | 23 | BoardTimeline.now and the percent fields are declared but not filled until 62.1-02 (D-13, D-14) | fixed |  | 2026-11-04T22:53:03.223Z | 2026-11-04T23:11:59.103Z |
+| 17 | 62.1 | stub | media/board/timeline.js | 366 | The timeline view draws only the screen reader lists (milestones, phases, dots) with no canvas, positions or visible marks until 62.1-04 draws them from NearAiTimeline.geometry | open |  | 2026-11-04T23:41:15.609Z |  |
+| 18 | 62.1 | stub | media/board/timeline.js | 350 | Folded finished milestones still list every dot and have no tile button in the page until 62.1-04 (the geometry already folds them) | open |  | 2026-11-04T23:41:15.742Z |  |
+| 19 | 62.1 | stub | media/board/board.js | 565 | In Timeline a filter that matches nothing shows the board's filtered state in place of the timeline, not the opaque band over ghost dots, until 62.1-04 | open |  | 2026-11-04T23:41:15.871Z |  |
 
 ````json
 [
@@ -240,6 +243,45 @@ last_updated: 2026-11-04T23:11:59.103Z
     "reason": "",
     "recorded_at": "2026-11-04T22:53:03.223Z",
     "resolved_at": "2026-11-04T23:11:59.103Z",
+    "milestone": "v0.6.0"
+  },
+  {
+    "id": 17,
+    "kind": "stub",
+    "phase": "62.1",
+    "file": "media/board/timeline.js",
+    "line": 366,
+    "description": "The timeline view draws only the screen reader lists (milestones, phases, dots) with no canvas, positions or visible marks until 62.1-04 draws them from NearAiTimeline.geometry",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-04T23:41:15.609Z",
+    "resolved_at": null,
+    "milestone": "v0.6.0"
+  },
+  {
+    "id": 18,
+    "kind": "stub",
+    "phase": "62.1",
+    "file": "media/board/timeline.js",
+    "line": 350,
+    "description": "Folded finished milestones still list every dot and have no tile button in the page until 62.1-04 (the geometry already folds them)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-04T23:41:15.742Z",
+    "resolved_at": null,
+    "milestone": "v0.6.0"
+  },
+  {
+    "id": 19,
+    "kind": "stub",
+    "phase": "62.1",
+    "file": "media/board/board.js",
+    "line": 565,
+    "description": "In Timeline a filter that matches nothing shows the board's filtered state in place of the timeline, not the opaque band over ghost dots, until 62.1-04",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-04T23:41:15.871Z",
+    "resolved_at": null,
     "milestone": "v0.6.0"
   }
 ]
