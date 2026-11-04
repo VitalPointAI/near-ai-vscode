@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -50,12 +50,20 @@ export async function run(): Promise<void> {
   } finally {
     // The fake model servers a window's scenarios started (connectProfile) close after that window's last test.
     await Promise.all(windowServers.splice(0).map((server) => new Promise<void>((resolve) => { server.close(() => { resolve(); }); })));
+    // The board scenario's teammates (62-24): their copies, storage and mirrors are removed whatever happened, and the run says which (T-62-74).
+    const folders = windowFolders.splice(0);
+    for (const folder of folders) await rm(folder, { recursive: true, force: true });
+    const left = folders.filter((folder) => existsSync(folder));
+    if (folders.length > 0) console.log(`(teammate folders removed: ${folders.length}${left.length ? `; still there: ${left.join(', ')}` : ''})`);
+    if (left.length > 0) failed += 1;
   }
   if (failed) throw new Error(`${failed} extension-host test(s) failed in the ${scenarios.join(' and ')} scenario.`);
 }
 
 // Fake model servers started for this window, closed once its last scenario has run.
 const windowServers: Server[] = [];
+// Temporary folders of the board scenario's teammates and second clients (62-24), removed once the window's last scenario has run.
+const windowFolders: string[] = [];
 
 function projectTests(): Array<[string, () => Promise<void>]> {
   const observer = new Observer();
@@ -191,7 +199,10 @@ function projectTests(): Array<[string, () => Promise<void>]> {
 
 // ---- the team scenario: a git project whose integration branch holds the fixture roadmap -------------------------------------------------------
 
-interface BoardCardView { id: string; column: string; held: boolean; blocked?: { reason: string } }
+interface BoardCardView {
+  id: string; column: string; held: boolean; blocked?: { reason: string }; kind?: string; title?: string; mine?: boolean; milestoneId?: string; backlogRule?: string;
+  assignee?: { id: string; name: string; initials: string }; lane?: { member: string; phase: string; milestone: string }; assignActions?: string[];
+}
 
 function cardsOf(message: Message): BoardCardView[] {
   return ((message.model as { cards: BoardCardView[] }).cards);
@@ -713,6 +724,8 @@ interface LayoutReport {
   width: number; height: number; layout: string; theme: string; problems: string[];
   toolbar: { height: number; background: string; position: string };
   region: { left: number; top: number; width: number; height: number; scrollTop: number; scrollLeft: number };
+  /** The kanban's sticky column header row (null in the list): what scrolls under it is hidden. */
+  headRow?: { top: number; bottom: number } | null;
   heads: Array<{ column: string; left: number; right: number; folded: boolean }>;
   lanes: Array<{ lane: string; top: number; bottom: number; collapsed: boolean }>;
   cells: Array<{ lane: string; column: string; left: number; top: number; width: number; height: number }>;
@@ -725,8 +738,32 @@ type MatrixWidth = 480 | 900 | 1400 | 'full';
 const MATRIX_WIDTHS: MatrixWidth[] = [480, 900, 1400, 'full'];
 /** How near the asked width the board's group must come. */
 const WIDTH_SLACK = 40;
-/** One line of screens/index.json: a frame the owner can open, and what the probe measured just before it was taken. */
-interface ScreenEntry { file: string; theme: string; askedWidth: MatrixWidth; reachedWidth: number; layout: string; view: string; problems: number }
+/**
+ * One line of screens/index.json: a frame the owner can open, what the probe measured just before it was taken (null for the chat sidebar, which has
+ * no layout probe), and one line saying what to look at in it (62-24).
+ */
+interface ScreenEntry { file: string; theme: string; askedWidth: MatrixWidth | null; reachedWidth: number | null; layout: string; view: string; problems: number | null; lookFor: string }
+// What the owner should look at in each kind of frame (62-24). The list frame and the kanban frames at the top differ, and every theme but dark adds
+// a line about reading the theme's own colours.
+const LOOK_FOR: Record<string, string> = {
+  list: 'The list under 520 px: one column of cards with no sideways scroll, every title in whole words, and each card looks like a card.',
+  top: 'Columns and member rows line up and never overlap; the toolbar is solid; Backlog and Ready are open; folded columns are narrow with only a name and a count.',
+  scrolled: 'Scrolled down and sideways: the toolbar and the column header row stay on top and solid, and no card shows through or hides under them.',
+  done: 'Done opened: its cards read in whole words and look like cards (left aligned, not buttons); the other folded columns hold no cards.',
+  detail: 'A phase card\'s detail: the card stays visible left of the drawer, and the drawer\'s state line, badges and buttons are spaced apart.',
+  'detail-assigned': 'The bug\'s detail: Assigned to Dana (Developer), On hold, and the history sentences saying who assigned it and who held it.',
+  menu: 'Move to... on a Backlog card: the moves read clearly and the menu sits over the board without hiding the card it belongs to.',
+  'menu-assign': 'Move to... on Dana\'s bug: Assign to... and Unassign Dana come after the moves, below a separator.',
+  'by-phase': 'Grouped by phase: one row per phase, each card in its phase\'s row, and no row or column overlaps another.',
+  mine: 'Mine pressed: only cards assigned to you or that you added, and the Mine chip shows it is on.',
+  'drag-over': 'In the middle of a real drag: the dragged card is faded and the cells it may drop in are outlined.',
+  'drag-refused': 'A refused drop: the card is back in Backlog with the reason written under it.',
+  sidebar: 'The chat sidebar\'s Team section: the line with the ready, blocked and mine numbers, and Open board beside it.'
+};
+function lookForOf(view: string, layout: string, theme: string): string {
+  const base = LOOK_FOR[view === 'top' && layout === 'list' ? 'list' : view] ?? LOOK_FOR.top;
+  return theme === 'dark' ? base : `${base} In the ${theme} theme, every word, border and badge reads clearly.`;
+}
 /** The four built-in theme kinds, the probe's theme field (the page's body class) for each, and the name the screenshots use. */
 const MATRIX_THEMES = [
   { uiTheme: 'vs-dark', probe: 'dark', name: 'dark' },
@@ -750,6 +787,17 @@ async function pngSize(file: string): Promise<{ width: number; height: number }>
 interface DragLogEntry { event: 'dragstart' | 'dragenter' | 'drop' | 'dragend'; column: string; lane: string; verdict: string }
 /** The bug the second client adds for the drags: a board item id (item: and 26 Crockford base-32 characters). */
 const DRAG_ITEM = `item:${'0'.repeat(22)}DRAG`;
+/** The realistic board's cards added on the board (62-24): a bug for Dana, a blocked chore and a spike with no parts or size. */
+const SEED = { bug: `item:${'0'.repeat(22)}BG01`, chore: `item:${'0'.repeat(22)}CH01`, spike: `item:${'0'.repeat(22)}SP01` } as const;
+/** A teammate made with the real invite, join and confirm flows on their own copy of the project; their keys live only in memory (T-62-74). */
+interface Teammate { name: string; role: 'developer' | 'lead'; memberId: string; copy: string; storage: string; secrets: MemoryKeys }
+/** An in-memory secret store for a teammate's device and seal keys: nothing is written to disk. */
+class MemoryKeys {
+  private readonly values = new Map<string, string>();
+  public async get(key: string): Promise<string | undefined> { return this.values.get(key); }
+  public async store(key: string, value: string): Promise<void> { this.values.set(key, value); }
+  public async delete(key: string): Promise<void> { this.values.delete(key); }
+}
 type DragPath = 'mouse' | 'intercepted';
 
 function boardTests(): Array<[string, () => Promise<void>]> {
@@ -841,7 +889,7 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     await captureScreen(fbdir, out);
     const screen = readXwd(await readFile(path.join(fbdir, 'Xvfb_screen0')));
     assert.deepEqual(await pngSize(out), { width: screen.width, height: screen.height }, `${file} is the whole screen`);
-    index.push({ file, theme: themeName(report.theme), askedWidth: asked, reachedWidth: report.width, layout: report.layout, view, problems: report.problems.length });
+    index.push({ file, theme: themeName(report.theme), askedWidth: asked, reachedWidth: report.width, layout: report.layout, view, problems: report.problems.length, lookFor: lookForOf(view, report.layout, themeName(report.theme)) });
     await writeFile(path.join(screens, 'index.json'), `${JSON.stringify(index, null, 2)}\n`, 'utf8');
   };
   // One width of a theme's row: sized, back at the top, settled, measured with no problem, photographed.
@@ -876,7 +924,7 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     return chosen;
   };
   // One question to the page's own probe (board.js, E2E only): it acts as a person would and reports what is drawn, focused and open.
-  const act = async (probe: { action: 'facts' | 'focus' | 'key' | 'open' | 'group' | 'blur'; itemId?: string; key?: string; group?: string }): Promise<Message> => {
+  const act = async (probe: { action: 'facts' | 'focus' | 'key' | 'open' | 'group' | 'blur' | 'filter'; itemId?: string; key?: string; group?: string; filter?: string }): Promise<Message> => {
     asks += 1;
     const id = 10_000 + asks;
     const before = board.fromView.length;
@@ -904,6 +952,22 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     await act({ action: 'blur' });
     await ask({ action: 'scroll', top: 0, left: 0 });
   };
+  // Grouped by phase at 1400 px in a theme, photographed, then back to Group by Member.
+  const byPhase = (theme: MatrixTheme): [string, () => Promise<void>] => [
+    `${theme.name} at 1400 px grouped by phase: nothing wrong, every card readable, and board-${theme.name}-1400-by-phase.png is saved`, async () => {
+      const before = await settled('before Group by Phase', (r) => r.layout === 'kanban');
+      if (Math.abs(before.width - 1400) > WIDTH_SLACK) { if (photographing) throw new Error(`The board is ${before.width} px, not 1400`); return; }
+      const facts = await act({ action: 'group', group: 'phase' });
+      assert.equal(facts.groupBy, 'phase', 'grouped by phase');
+      const report = await settled('grouped by phase', (r) => r.layout === 'kanban' && r.lanes.every((l) => !before.lanes.some((b) => b.lane === l.lane)));
+      assert.ok(report.cards.length > 0, 'cards are drawn');
+      assert.deepEqual(report.problems, [], problemsOf(report));
+      await photograph(`board-${theme.name}-1400-by-phase.png`, 'by-phase', 1400, report);
+      const back = await act({ action: 'group', group: 'member' });
+      assert.equal(back.groupBy, 'member', 'grouped by member again');
+      await settled('grouped by member again', (r) => r.lanes.some((l) => before.lanes.some((b) => b.lane === l.lane)));
+    }
+  ];
   // One theme's row: the theme applied, then the list under 520 px, 900 px and the full width, then 1400 px, where Done is opened (and, in the dark
   // theme, the detail, the Move to... menu and Group by Phase are shown), each measured with no problem and photographed.
   const row = (theme: MatrixTheme): Array<[string, () => Promise<void>]> => {
@@ -977,19 +1041,7 @@ function boardTests(): Array<[string, () => Promise<void>]> {
         assert.equal(closed.menuOpen, false, 'Escape closes the menu');
         await act({ action: 'blur' });
       }],
-      [`dark at 1400 px grouped by phase: nothing wrong, every card readable, and board-dark-1400-by-phase.png is saved`, async () => {
-        const before = await settled('before Group by Phase', (r) => r.layout === 'kanban');
-        if (Math.abs(before.width - 1400) > WIDTH_SLACK) { if (photographing) throw new Error(`The board is ${before.width} px, not 1400`); return; }
-        const facts = await act({ action: 'group', group: 'phase' });
-        assert.equal(facts.groupBy, 'phase', 'grouped by phase');
-        const report = await settled('grouped by phase', (r) => r.layout === 'kanban' && r.lanes.every((l) => !before.lanes.some((b) => b.lane === l.lane)));
-        assert.ok(report.cards.length > 0, 'cards are drawn');
-        assert.deepEqual(report.problems, [], problemsOf(report));
-        await photograph('board-dark-1400-by-phase.png', 'by-phase', 1400, report);
-        const back = await act({ action: 'group', group: 'member' });
-        assert.equal(back.groupBy, 'member', 'grouped by member again');
-        await settled('grouped by member again', (r) => r.lanes.some((l) => before.lanes.some((b) => b.lane === l.lane)));
-      }]
+      byPhase(theme)
     );
     tests.push([`${theme.name}: every frame of the row was taken`, async () => {
       const frames = index.filter((e) => e.theme === theme.name).map((e) => e.file);
@@ -1018,22 +1070,25 @@ function boardTests(): Array<[string, () => Promise<void>]> {
   const describeLog = (entries: DragLogEntry[]): string => entries.map((e) => `${e.event} ${e.lane}/${e.column} ${e.verdict}`).join('; ') || 'nothing';
   // Where a card and a cell of its own row are on the VS Code window: the probe's page positions plus the webview frame's place in the window. The card
   // is first brought into view (focus scrolls it there), then let go of. The drop point is the cell's middle across, at the card's own height (the
-  // cells of a row stretch to the row), kept inside the visible board region.
-  const aim = async (id: string, column: string, pick?: (cells: LayoutReport['cells'], card: LayoutReport['cards'][number], region: LayoutReport['region']) => LayoutReport['cells'][number] | undefined): Promise<{ from: Point; to: Point; report: LayoutReport; lane: string; targetLane: string }> => {
+  // cells of a row stretch to the row), kept inside the visible board region: below the sticky column header row, which hides what scrolls under it
+  // (62-24: on the realistic board the nearest other row can sit partly under the header row, and a drop there lands on a header).
+  const aim = async (id: string, column: string, pick?: (cells: LayoutReport['cells'], card: LayoutReport['cards'][number], region: LayoutReport['region'], visibleTop: number) => LayoutReport['cells'][number] | undefined): Promise<{ from: Point; to: Point; report: LayoutReport; lane: string; targetLane: string }> => {
     await ask({ action: 'focus', itemId: id });
     await act({ action: 'blur' });
     const report = await ask({ action: 'rects' });
     const c = report.cards.find((x) => x.id === id);
     assert.ok(c !== undefined && c.width > 0 && c.height > 0, `${id} is drawn`);
-    const target = pick ? pick(report.cells, c, report.region) : report.cells.find((x) => x.lane === c.lane && x.column === column);
+    const visibleTop = Math.max(report.region.top, report.headRow?.bottom ?? report.region.top);
+    const target = pick ? pick(report.cells, c, report.region, visibleTop) : report.cells.find((x) => x.lane === c.lane && x.column === column);
     assert.ok(target !== undefined && target.width > 0, `the ${column} cell ${pick ? 'chosen' : `of the ${c.lane} row`} is drawn`);
     assert.ok(cdp !== undefined, 'the DevTools connection is open');
     const frame = await webviewFrameRect(cdp, { width: report.width, height: report.height });
     assert.ok(frame !== undefined, `the board's webview frame (${report.width} by ${report.height}) is found in the window`);
     const r = report.region;
-    const inside = (y: number, top: number, height: number): number => Math.max(Math.max(top, r.top) + 8, Math.min(y, Math.min(top + height, r.top + r.height) - 8));
+    const inside = (y: number, top: number, height: number): number => Math.max(Math.max(top, visibleTop) + 8, Math.min(y, Math.min(top + height, r.top + r.height) - 8));
     const from = { x: Math.round(frame.left + c.left + Math.min(60, c.width / 2)), y: Math.round(frame.top + c.top + Math.min(24, c.height / 2)) };
     const to = { x: Math.round(frame.left + target.left + target.width / 2), y: Math.round(frame.top + inside(c.top + c.height / 2, target.top, target.height)) };
+    console.log(`(aim ${id}: card ${c.lane}/${c.column} at ${Math.round(c.top)} px, target ${target.lane}/${target.column} ${Math.round(target.top)} to ${Math.round(target.top + target.height)} px, visible from ${Math.round(visibleTop)} px; drop at ${to.x},${to.y} in the window)`);
     return { from, to, report, lane: c.lane, targetLane: target.lane };
   };
   /** The model's sentences for this card, from the last state the host sent. */
@@ -1081,6 +1136,53 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     dragPath = 'intercepted';
     return { path: 'intercepted', entries: since(await dragFacts(), before) };
   };
+
+  // ---- the realistic board (62-24) ----------------------------------------------------------------------------------------------------------------
+  // Dana (developer) and Lee (lead) join through the real invite, join and confirm flows, in this extension host, on copies of the project fetched
+  // from its public-looking address (run.ts). The team has no organization, so nothing calls NEAR. Their keys live in MemoryKeys only, and their
+  // folders are removed in run()'s finally (T-62-74).
+  type TeamLogT = import('../../team/eventLog').TeamLog;
+  type TeamFileT = import('../../domain/team/types').TeamFile;
+  const mates = new Map<string, Teammate>();
+  let ownerLog: TeamLogT | undefined;
+  let ownerId = '';
+  let teamFile: TeamFileT | undefined;
+  /** The last board model the host sent the page. */
+  const latestModel = (): { cards: BoardCardView[]; counts: { ready: number; blocked: number }; selectedMilestone: string; lanes: { member: Array<{ key: string; label: string }> } } => {
+    const state = [...board.toView].reverse().find((m) => m.type === 'state' && m.model !== undefined);
+    assert.ok(state !== undefined, 'the host sent a board state');
+    return state.model as ReturnType<typeof latestModel>;
+  };
+  /** A synced, signed log for one computer: its project folder, its own storage (where its mirror lives) and the secret store holding its device key. */
+  const logFor = async (projectRoot: string, globalStorageDir: string, secrets: MemoryKeys | NearAiTestApi['team']['secrets']): Promise<{ log: TeamLogT; memberId: string }> => {
+    assert.ok(teamFile !== undefined, 'the team exists');
+    const { TeamLog } = load<typeof import('../../team/eventLog')>('team/eventLog');
+    const { GitTransport } = load<typeof import('../../team/gitTransport')>('team/gitTransport');
+    const { teamMaterializer } = load<typeof import('../../domain/team/materialize')>('domain/team/materialize');
+    const { loadDeviceIdentity } = load<typeof import('../../team/identity')>('team/identity');
+    const { teamStorageDir } = load<typeof import('../../team/teamFile')>('team/teamFile');
+    const anchor = { teamId: teamFile.teamId, eventId: teamFile.genesis.eventId, ownerDevice: { ...teamFile.genesis.ownerDevice } };
+    const transport = new GitTransport({
+      mirrorDir: path.join(teamStorageDir(globalStorageDir, teamFile.teamId), 'coordination.git'), projectRoot,
+      remote: teamFile.coordination.remote, ref: teamFile.coordination.ref, materializer: teamMaterializer(anchor), baseDelayMs: 1
+    });
+    const identity = await loadDeviceIdentity(secrets, teamFile.teamId);
+    assert.ok(identity, 'the computer holds its device key');
+    const reader = new TeamLog({ anchor, transport });
+    await reader.sync();
+    const memberId = reader.state().deviceIndex.get(identity.fingerprint);
+    assert.ok(memberId, 'the device belongs to a member');
+    const log = new TeamLog({ anchor, transport, signer: { identity, memberId } });
+    await log.sync();
+    return { log, memberId };
+  };
+  /** One signed event from a log, which must land. */
+  const appendOne = async (log: TeamLogT, what: string, event: import('../../team/eventLog').EventIntent): Promise<void> => {
+    const appended = await log.append(() => [event]);
+    assert.equal(appended.ok, true, appended.ok ? '' : `${what}: ${appended.reason}`);
+  };
+  const mate = (name: string): Teammate => { const found = mates.get(name); assert.ok(found, `${name} joined`); return found; };
+  const promptTapOf = (): typeof import('../../services/team/teamPrompts')['promptTap'] => load<typeof import('../../services/team/teamPrompts')>('services/team/teamPrompts').promptTap;
 
   const allBoardTests: Array<[string, () => Promise<void>]> = [
     ['activates in the board project, a git project holding this repository\'s committed roadmap', async () => {
@@ -1164,6 +1266,104 @@ function boardTests(): Array<[string, () => Promise<void>]> {
         assert.deepEqual(scrolled.problems, [], problemsOf(scrolled));
         await ask({ action: 'scroll', top: 0, left: 0 });
       }
+    }],
+    // ---- the realistic board (62-24): two teammates and cards added on the board, before any screenshot -------------------------------------------
+    ['seeding: the owner invites Dana (developer) and Lee (lead), each joins from a copy of the project fetched from its online address, and the owner confirms both', async () => {
+      const session = api.team.handle.session();
+      assert.ok(session, 'a session is running');
+      teamFile = session.teamFile;
+      const boardUrl = process.env.NEAR_AI_E2E_BOARD_URL ?? '';
+      boardRemote = process.env.NEAR_AI_E2E_BOARD_REMOTE ?? '';
+      assert.ok(boardUrl.startsWith('https://') && existsSync(boardRemote), 'run.ts gives the online address and its bare folder');
+      // The team setup goes online with the project, as Share does, so a copy fetched now holds team.json.
+      const { pushCodeBranch } = load<typeof import('../../team/enable')>('team/enable');
+      const pushed = await pushCodeBranch(workspace, 'origin', 'main');
+      assert.equal(pushed.ok, true, pushed.ok ? '' : pushed.message);
+      // The owner's second client: another computer with the same device key, its own mirror in a temporary folder.
+      const second = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-board-second-'));
+      windowFolders.push(second);
+      const owner = await logFor(workspace, second, api.team.secrets);
+      ownerLog = owner.log;
+      ownerId = owner.memberId;
+      const { inviteMember } = load<typeof import('../../team/invite')>('team/invite');
+      const { DEFAULT_INVITE_TTL_SECONDS } = load<typeof import('../../domain/team/invite')>('domain/team/invite');
+      const { prepareJoin, joinTeam } = load<typeof import('../../team/join')>('team/join');
+      const { confirmMember } = load<typeof import('../../team/keyDelivery')>('team/keyDelivery');
+      const { CleanupChecklist } = load<typeof import('../../team/cleanupChecklist')>('team/cleanupChecklist');
+      const { teamStorageDir } = load<typeof import('../../team/teamFile')>('team/teamFile');
+      for (const [name, role] of [['Dana', 'developer'], ['Lee', 'lead']] as const) {
+        const invited = await inviteMember({
+          projectRoot: workspace, globalStorageDir: api.team.globalStorageDir, teamFile, log: ownerLog, name, email: `${name.toLowerCase()}@example.invalid`, role,
+          allocationNanoUsd: 5_000_000_000, ttlSeconds: DEFAULT_INVITE_TTL_SECONDS
+        });
+        assert.equal(invited.ok, true, invited.ok ? '' : invited.message);
+        if (!invited.ok) return;
+        // The invite text stays in this variable; it is never written anywhere.
+        const parent = await mkdtemp(path.join(tmpdir(), `near-ai-e2e-board-${name.toLowerCase()}-`));
+        windowFolders.push(parent);
+        const copy = path.join(parent, 'project');
+        execFileSync('git', ['clone', '-q', '-c', `url.${boardRemote}.insteadOf=${boardUrl}`, boardUrl, copy], { stdio: 'ignore' });
+        execFileSync('git', ['-C', copy, 'config', 'user.name', name], { stdio: 'ignore' });
+        execFileSync('git', ['-C', copy, 'config', 'user.email', `${name.toLowerCase()}@example.invalid`], { stdio: 'ignore' });
+        const secrets = new MemoryKeys();
+        const storage = path.join(parent, 'storage');
+        const prepared = await prepareJoin({ projectRoot: copy, bundleText: invited.bundle });
+        assert.equal(prepared.kind, 'ready', prepared.kind === 'refused' ? prepared.message : prepared.kind);
+        if (prepared.kind !== 'ready') return;
+        const joined = await joinTeam({ projectRoot: copy, globalStorageDir: storage, teamFile: prepared.teamFile, bundle: prepared.bundle, secrets, displayName: name });
+        assert.equal(joined.ok, true, joined.ok ? '' : joined.message);
+        await ownerLog.sync();
+        const confirmed = await confirmMember({ log: ownerLog, teamFile, memberId: invited.memberId, checklist: new CleanupChecklist(teamStorageDir(second, teamFile.teamId)) });
+        assert.equal(confirmed.ok, true, confirmed.ok ? '' : confirmed.message);
+        mates.set(name, { name, role, memberId: invited.memberId, copy, storage, secrets });
+      }
+      // The owner's window reads both as confirmed members on its next poll.
+      await until('Dana and Lee confirmed in the owner\'s window', () => {
+        session.nudge();
+        const members = [...session.state().members.values()];
+        return [...mates.values()].every((m) => members.some((x) => x.id === m.memberId && x.status !== 'invited' && x.pendingRole === undefined && x.role === m.role)) ? true : undefined;
+      }, 60_000);
+      console.log(`(teammates: ${[...mates.values()].map((m) => `${m.name} (${m.role})`).join(', ')}; their folders: ${windowFolders.join(', ')})`);
+    }],
+    ['seeding: the owner\'s second client adds a bug, a chore and a spike; blocks the chore, assigns the bug to Dana and holds it, assigns the first planless phase to Lee and the chore to the owner', async () => {
+      const session = api.team.handle.session();
+      assert.ok(session && ownerLog, 'the session and the second client');
+      const log = ownerLog;
+      const dana = mate('Dana');
+      const lee = mate('Lee');
+      const toBefore = board.toView.length;
+      await appendOne(log, 'the bug', { type: 'item.created', body: { id: SEED.bug, kind: 'bug', title: 'Board toolbar hides cards', scope: ['media/board/**'], requirements: [], mustHaves: [], estimate: { tokens: 40000 } } });
+      await appendOne(log, 'the chore', { type: 'item.created', body: { id: SEED.chore, kind: 'chore', title: 'Tidy the team settings page', scope: ['src/services/team/**'], requirements: [], mustHaves: [], estimate: { tokens: 20000 } } });
+      await appendOne(log, 'the spike', { type: 'item.created', body: { id: SEED.spike, kind: 'spike', title: 'Try a faster way to share updates', scope: [], requirements: [], mustHaves: [] } });
+      await appendOne(log, 'the block', { type: 'item.blocked', body: { id: SEED.chore, reason: 'waiting for the API key' } });
+      await appendOne(log, 'the bug to Dana', { type: 'item.assigned', body: { id: SEED.bug, memberId: dana.memberId } });
+      await appendOne(log, 'the hold', { type: 'item.updated', body: { id: SEED.bug, changes: { hold: true } } });
+      await appendOne(log, `${planlessPhase} to Lee`, { type: 'item.assigned', body: { id: planlessPhase, memberId: lee.memberId } });
+      await appendOne(log, 'the chore to the owner', { type: 'item.assigned', body: { id: SEED.chore, memberId: ownerId } });
+      session.nudge();
+      const state = await board.next('toView', (message) => {
+        if (message.type !== 'state' || message.model === undefined) return false;
+        const bug = cardOf(message, SEED.bug);
+        const chore = cardOf(message, SEED.chore);
+        return bug?.held === true && bug.assignee?.id === dana.memberId && chore?.blocked !== undefined && chore.assignee?.id === ownerId
+          && cardOf(message, planlessPhase)?.assignee?.id === lee.memberId && cardOf(message, SEED.spike) !== undefined;
+      }, toBefore, 60_000);
+      const lanes = (state.model as ReturnType<typeof latestModel>).lanes.member.map((l) => l.label);
+      assert.deepEqual(lanes, ['Dana', 'E2E Owner (you)', 'Lee', 'Unassigned'], 'a row for each person with cards, the owner marked, and Unassigned last');
+      assert.equal(cardOf(state, SEED.bug)?.column, 'backlog', 'the held bug is in Backlog');
+      assert.equal(cardOf(state, SEED.chore)?.blocked?.reason, 'waiting for the API key');
+      const spike = cardOf(state, SEED.spike);
+      assert.equal(spike?.column, 'backlog', 'the spike without parts or size is in Backlog');
+      assert.ok(typeof spike?.backlogRule === 'string' && spike.backlogRule.length > 0, 'the spike carries the Backlog rule line');
+      // The page draws each card in its person's row.
+      await until('the seeded cards drawn in their rows', async () => {
+        const drawn = (await ask({ action: 'rects' })).cards;
+        const laneOf = (id: string): string | undefined => drawn.find((c) => c.id === id)?.lane;
+        return laneOf(SEED.bug) === dana.memberId && laneOf(SEED.chore) === ownerId && laneOf(planlessPhase) === lee.memberId && laneOf(SEED.spike) === 'unassigned' ? true : undefined;
+      }, 30_000);
+      const report = await settled('the realistic board', (r) => r.layout === 'kanban');
+      assert.deepEqual(report.problems, [], problemsOf(report));
+      console.log(`(the realistic board: ${latestModel().cards.length} cards, rows ${lanes.join(', ')}; spike rule: ${spike?.backlogRule ?? ''})`);
     }],
     // The screenshot matrix (62-22, G-62-2, G-62-4, G-62-7): every theme at four widths, scrolled, focused, with Done open, and the extra views.
     ...MATRIX_THEMES.flatMap(row),
@@ -1278,7 +1478,7 @@ function boardTests(): Array<[string, () => Promise<void>]> {
           if (photographing) {
             const file = 'drag-over-dark-1400.png';
             await captureScreen(fbdir, path.join(screens, file));
-            index.push({ file, theme: themeName(reading.theme), askedWidth: 1400, reachedWidth: reading.width, layout: reading.layout, view: 'drag-over', problems: reading.problems.length });
+            index.push({ file, theme: themeName(reading.theme), askedWidth: 1400, reachedWidth: reading.width, layout: reading.layout, view: 'drag-over', problems: reading.problems.length, lookFor: lookForOf('drag-over', reading.layout, themeName(reading.theme)) });
             await writeFile(path.join(screens, 'index.json'), `${JSON.stringify(index, null, 2)}\n`, 'utf8');
             overFrame = true;
           } else console.log('(no screenshot drag-over-dark-1400.png: the run has no framebuffer folder)');
@@ -1332,23 +1532,44 @@ function boardTests(): Array<[string, () => Promise<void>]> {
     ['grouped by phase, a real drag into another phase row is refused with the row sentence and nothing is moved', async () => {
       const facts = await act({ action: 'group', group: 'phase' });
       assert.equal(facts.groupBy, 'phase', 'grouped by phase');
-      await settled('grouped by phase', (r) => r.layout === 'kanban' && !r.lanes.some((l) => l.lane === 'unassigned'));
-      const { from, to, lane, targetLane } = await aim(DRAG_ITEM, 'backlog', (cells, card, region) => cells
-        .filter((x) => x.column === 'backlog' && x.lane !== card.lane && x.width > 0 && x.height > 0 && x.top + x.height > region.top + 16 && x.top < region.top + region.height - 16)
-        .sort((a, b) => Math.abs(a.top - card.top) - Math.abs(b.top - card.top))[0]);
-      assert.notEqual(targetLane, lane, 'the target is another row');
-      const events = eventsOnRemote();
-      const fromBefore = board.fromView.length;
-      const { entries } = await realDrag(from, to);
-      console.log(`(drag log: ${describeLog(entries)})`);
-      assert.deepEqual(entries.find((e) => e.event === 'drop'), { event: 'drop', column: 'backlog', lane: targetLane, verdict: 'no' }, `the drop lands in row ${targetLane} and is refused (log: ${describeLog(entries)})`);
-      await sleep(1_500);
-      assert.deepEqual(board.fromView.slice(fromBefore).filter((m) => m.type === 'move'), [], 'nothing is posted');
-      assert.equal(eventsOnRemote(), events, 'no event is written');
-      assert.equal(await refusalLine(DRAG_ITEM), 'This card stays in its own row. Drop it in another column of the same row.');
-      const back = await act({ action: 'group', group: 'member' });
-      assert.equal(back.groupBy, 'member', 'grouped by member again');
-      await settled('grouped by member again', (r) => r.lanes.some((l) => l.lane === 'unassigned'));
+      try {
+        const grouped = await settled('grouped by phase', (r) => r.layout === 'kanban' && !r.lanes.some((l) => l.lane === 'unassigned'));
+        // 62-24: on the realistic board the row of cards added on the board is the last one and holds four cards in Backlog, with the drag bug the
+        // lowest: the row above ends about 550 px over it, and the two do not fit in the board region together. The card dragged here is the top card
+        // of that row's Backlog cell (draggable by the owner), and the region is first scrolled so the lower part of the row above shows 120 px below
+        // the header row, with the card fully in view under it (so focusing it does not scroll). The target is that row's Backlog cell.
+        const placed = grouped.cards.find((c) => c.id === DRAG_ITEM);
+        assert.ok(placed !== undefined, 'the bug is drawn grouped by phase');
+        const mover = grouped.cards.filter((c) => c.lane === placed.lane && c.column === 'backlog' && c.draggable).sort((a, b) => a.top - b.top)[0];
+        assert.ok(mover !== undefined, 'a draggable card in Backlog of the row');
+        const above = grouped.cells.filter((x) => x.column === 'backlog' && x.lane !== mover.lane && x.width > 0 && x.height > 0 && x.top < mover.top).sort((a, b) => b.top - a.top)[0];
+        assert.ok(above !== undefined, 'a row above with a Backlog cell');
+        const headBottom = Math.max(grouped.region.top, grouped.headRow?.bottom ?? grouped.region.top);
+        await ask({ action: 'scroll', top: Math.max(0, Math.round(grouped.region.scrollTop + above.top + above.height - headBottom - 120)), left: 0 });
+        console.log(`(dragging ${mover.id}, the top card of row ${mover.lane}, toward row ${above.lane})`);
+        const { from, to, lane, targetLane } = await aim(mover.id, 'backlog', (cells, card, region, visibleTop) => {
+          const target = cells
+            .filter((x) => x.column === 'backlog' && x.lane !== card.lane && x.width > 0 && x.height > 0 && x.top < card.top && x.top + x.height > visibleTop + 16 && x.top < region.top + region.height - 16)
+            .sort((a, b) => b.top - a.top)[0];
+          if (target === undefined) console.log(`(no other row's Backlog cell in view: cells ${cells.filter((x) => x.column === 'backlog').map((x) => `${x.lane} ${Math.round(x.top)}+${Math.round(x.height)}`).join(', ')}; card ${Math.round(card.top)}+${Math.round(card.height)}; visible ${Math.round(visibleTop)} to ${Math.round(region.top + region.height)})`);
+          return target;
+        });
+        assert.notEqual(targetLane, lane, 'the target is another row');
+        const events = eventsOnRemote();
+        const fromBefore = board.fromView.length;
+        const { entries } = await realDrag(from, to);
+        console.log(`(drag log: ${describeLog(entries)})`);
+        assert.deepEqual(entries.find((e) => e.event === 'drop'), { event: 'drop', column: 'backlog', lane: targetLane, verdict: 'no' }, `the drop lands in row ${targetLane} and is refused (log: ${describeLog(entries)})`);
+        await sleep(1_500);
+        assert.deepEqual(board.fromView.slice(fromBefore).filter((m) => m.type === 'move'), [], 'nothing is posted');
+        assert.equal(eventsOnRemote(), events, 'no event is written');
+        assert.equal(await refusalLine(mover.id), 'This card stays in its own row. Drop it in another column of the same row.');
+      } finally {
+        // Grouped by member again whatever happened, so a failure here does not change the rows the later steps read.
+        const back = await act({ action: 'group', group: 'member' });
+        assert.equal(back.groupBy, 'member', 'grouped by member again');
+        await settled('grouped by member again', (r) => r.lanes.some((l) => l.lane === 'unassigned'));
+      }
     }],
     ['Move to... is still the keyboard path in the same window: M, then Down to Ready (release the hold) and Enter releases the hold', async () => {
       const toBefore = board.toView.length;
@@ -1370,9 +1591,7 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       await until('the bug drawn in Ready', async () => ((await ask({ action: 'rects' })).cards.some((c) => c.id === DRAG_ITEM && c.column === 'ready') ? true : undefined));
       assert.deepEqual((((await dragFacts()).facts.errors as string[] | undefined) ?? []).slice(errorsBeforeDrags), [], 'no page error during the drags');
     }],
-    ['the drag frames are in the screenshot index, and the DevTools connection is closed', async () => {
-      cdp?.close();
-      cdp = undefined;
+    ['the drag frames are in the screenshot index', async () => {
       if (!photographing) return;
       const listed = JSON.parse(await readFile(path.join(screens, 'index.json'), 'utf8')) as ScreenEntry[];
       const pngs = (await readdir(screens)).filter((f) => f.endsWith('.png')).sort();
@@ -1380,6 +1599,137 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       assert.equal(listed.find((e) => e.file === 'drag-refused-dark-1400.png')?.view, 'drag-refused');
       assert.equal(listed.find((e) => e.file === 'drag-refused-dark-1400.png')?.problems, 0);
       if (dragPath === 'mouse') assert.equal(listed.find((e) => e.file === 'drag-over-dark-1400.png')?.view, 'drag-over');
+    }],
+    // ---- assignment through the real window (62-24, G-62-5): real keys on Move to..., the native person list answered by promptTap ----------------
+    ['through the real window: on the spike, M opens Move to..., the letter a and Enter choose Assign to..., the person list is answered with Dana; the card shows her chip in her row, and Dana\'s own computer reads it after one sync', async () => {
+      assert.ok(cdp !== undefined, 'the DevTools connection is open');
+      const session = api.team.handle.session();
+      assert.ok(session, 'a session is running');
+      const dana = mate('Dana');
+      const prompts = promptTapOf();
+      // From here on no prompt reaches a real dialog: a prompt no step answers is recorded as unanswered.
+      prompts.script = [{ match: 'to a person', answer: 'Dana' }];
+      const shownBefore = prompts.shown.length;
+      const fromBefore = board.fromView.length;
+      const toBefore = board.toView.length;
+      const events = eventsOnRemote();
+      await ask({ action: 'focus', itemId: SEED.spike });
+      let facts = await act({ action: 'focus', itemId: SEED.spike });
+      assert.equal(facts.focusedCard, SEED.spike, 'the spike takes focus');
+      assert.equal(facts.hasFocus, true, 'the board page has the keyboard');
+      await pressKey(cdp, 'm');
+      facts = await act({ action: 'facts' });
+      assert.equal(facts.menuOpen, true, 'M opens Move to...');
+      console.log(`(Move to... on the spike: ${(facts.menuTexts as string[]).join(', ')})`);
+      for (let step = 0; step < 8 && facts.focusedText !== 'Assign to...'; step += 1) { await pressKey(cdp, 'a'); facts = await act({ action: 'facts' }); }
+      assert.equal(facts.focusedText, 'Assign to...', 'the letter a reaches Assign to...');
+      await pressKey(cdp, 'Enter');
+      const posted = await board.next('fromView', (message) => message.type === 'assign', fromBefore);
+      assert.deepEqual(posted, { type: 'assign', itemId: SEED.spike });
+      const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, SEED.spike)?.assignee?.id === dana.memberId, toBefore, 30_000);
+      assert.equal(cardOf(state, SEED.spike)?.lane?.member, dana.memberId, 'the spike is in Dana\'s row');
+      // One person list, offering every member who may take a card: confirmed, not removed, not an observer.
+      const picks = prompts.shown.slice(shownBefore).filter((record) => record.kind === 'pick');
+      assert.equal(picks.length, 1, 'one person list');
+      const eligible = [...session.state().members.values()].filter((m) => m.status !== 'invited' && m.removedEvent === undefined && m.role !== 'observer').map((m) => m.name).sort();
+      assert.deepEqual([...picks[0].choices].sort(), eligible, `the list offers ${eligible.join(', ')}`);
+      assert.equal(picks[0].answer, 'Dana');
+      assert.equal(prompts.script?.length, 0, 'the scripted answer was used');
+      await until('one more event on the coordination record', () => (eventsOnRemote() === events + 1 ? true : undefined), 20_000);
+      await until('Dana\'s chip on the spike in her row', async () => {
+        const chips = ((await act({ action: 'facts' })).assignees as Array<{ id: string; name: string; initials: string }> | undefined) ?? [];
+        const lane = (await ask({ action: 'rects' })).cards.find((c) => c.id === SEED.spike)?.lane;
+        return chips.some((c) => c.id === SEED.spike && c.name === 'Dana' && c.initials === 'D') && lane === dana.memberId ? true : undefined;
+      });
+      // Dana's own computer, with her key, after one sync.
+      const { log } = await logFor(dana.copy, dana.storage, dana.secrets);
+      assert.equal(log.state().items.get(SEED.spike)?.assignee, dana.memberId, 'Dana\'s computer reads the spike as hers');
+    }],
+    ['through the real window: on the owner\'s chore, M then the Unassign item takes the owner off; the next state shows the chore in Unassigned', async () => {
+      assert.ok(cdp !== undefined, 'the DevTools connection is open');
+      const prompts = promptTapOf();
+      const shownBefore = prompts.shown.length;
+      const fromBefore = board.fromView.length;
+      const toBefore = board.toView.length;
+      const events = eventsOnRemote();
+      await ask({ action: 'focus', itemId: SEED.chore });
+      let facts = await act({ action: 'focus', itemId: SEED.chore });
+      assert.equal(facts.focusedCard, SEED.chore, 'the chore takes focus');
+      await pressKey(cdp, 'm');
+      facts = await act({ action: 'facts' });
+      assert.equal(facts.menuOpen, true, 'M opens Move to...');
+      console.log(`(Move to... on the chore: ${(facts.menuTexts as string[]).join(', ')})`);
+      for (let step = 0; step < 8 && !/^Unassign /.test(String(facts.focusedText)); step += 1) { await pressKey(cdp, 'u'); facts = await act({ action: 'facts' }); }
+      assert.match(String(facts.focusedText), /^Unassign /, 'the letter u reaches the Unassign item');
+      await pressKey(cdp, 'Enter');
+      const posted = await board.next('fromView', (message) => message.type === 'unassign', fromBefore);
+      assert.deepEqual(posted, { type: 'unassign', itemId: SEED.chore });
+      const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, SEED.chore) !== undefined && cardOf(message, SEED.chore)?.assignee === undefined, toBefore, 30_000);
+      assert.equal(cardOf(state, SEED.chore)?.lane?.member, 'unassigned', 'the chore is in Unassigned');
+      assert.equal(prompts.shown.slice(shownBefore).length, 0, 'Unassign asks nothing');
+      await until('one more event on the coordination record', () => (eventsOnRemote() === events + 1 ? true : undefined), 20_000);
+      await until('the chore drawn in Unassigned', async () => ((await ask({ action: 'rects' })).cards.find((c) => c.id === SEED.chore)?.lane === 'unassigned' ? true : undefined));
+    }],
+    ['from her own computer, Dana (developer) assigns an unassigned Backlog card to herself and the owner\'s open board shows her on it after one poll; her attempt to assign Lee is refused on her computer and nothing is written', async () => {
+      const session = api.team.handle.session();
+      assert.ok(session, 'a session is running');
+      const dana = mate('Dana');
+      const lee = mate('Lee');
+      const free = latestModel().cards.filter((c) => c.column === 'backlog' && c.assignee === undefined && c.kind === 'phase');
+      assert.ok(free.length >= 2, `two unassigned phase cards in Backlog (${free.map((c) => c.id).join(', ')})`);
+      const [mine, other] = free;
+      const { log } = await logFor(dana.copy, dana.storage, dana.secrets);
+      const events = eventsOnRemote();
+      const toBefore = board.toView.length;
+      await appendOne(log, `${mine.id} to Dana, by Dana`, { type: 'item.assigned', body: { id: mine.id, memberId: dana.memberId } });
+      assert.equal(eventsOnRemote(), events + 1, 'one more signed event');
+      session.nudge();
+      const state = await board.next('toView', (message) => message.type === 'state' && cardOf(message, mine.id)?.assignee?.id === dana.memberId, toBefore, 30_000);
+      assert.equal(cardOf(state, mine.id)?.lane?.member, dana.memberId, `${mine.id} is in Dana's row`);
+      await until(`Dana's chip on ${mine.id} in her row`, async () => {
+        const chips = ((await act({ action: 'facts' })).assignees as Array<{ id: string; name: string }> | undefined) ?? [];
+        const lane = (await ask({ action: 'rects' })).cards.find((c) => c.id === mine.id)?.lane;
+        return chips.some((c) => c.id === mine.id && c.name === 'Dana') && lane === dana.memberId ? true : undefined;
+      });
+      const refused = await log.append(() => [{ type: 'item.assigned', body: { id: other.id, memberId: lee.memberId } }]);
+      assert.equal(refused.ok, false, 'a developer cannot assign someone else');
+      console.log(`(Dana's attempt to assign Lee: ${refused.ok ? 'written' : refused.reason})`);
+      await sleep(1_000);
+      assert.equal(eventsOnRemote(), events + 1, 'nothing more is written');
+      assert.equal(log.state().items.get(other.id)?.assignee, undefined, `${other.id} stays unassigned`);
+    }],
+    ['the sidebar Team section shows the board line with the realistic board\'s ready, blocked and mine numbers and Open board; sidebar-dark.png is saved', async () => {
+      const kit = inviteKit();
+      // 61-25: the Team section shows only once a NEAR AI profile works; a local profile against a fake model server, as the invite windows do.
+      await kit.connectProfile(api);
+      await vscode.commands.executeCommand('nearAiChatView.focus');
+      const model = latestModel();
+      const shown = model.cards.filter((c) => (model.selectedMilestone === 'all' || c.milestoneId === undefined || c.milestoneId === model.selectedMilestone) && c.column !== 'done' && c.column !== 'cancelled');
+      const wanted = { ready: model.counts.ready, blocked: shown.filter((c) => c.blocked !== undefined).length, mine: shown.filter((c) => c.mine === true).length };
+      const seen = await kit.facts('the board line', (f) => typeof f.board === 'string' && f.board !== '' && ids(f).includes('board'), 30_000);
+      console.log(`(the Team section: ${seen.heading} | ${seen.status} | ${seen.board} | ${seen.actions.map((a) => a.label).join(', ')})`);
+      const numbers = /(\d+) ready, (\d+) blocked, (\d+) (?:is|are) yours/.exec(seen.board ?? '');
+      assert.ok(numbers, `the board line says the numbers: ${seen.board}`);
+      assert.deepEqual({ ready: Number(numbers[1]), blocked: Number(numbers[2]), mine: Number(numbers[3]) }, wanted, 'the line agrees with the board');
+      assert.equal(seen.actions.find((a) => a.id === 'board')?.label, 'Open board');
+      if (!photographing) { console.log('(no screenshot sidebar-dark.png: the run has no framebuffer folder)'); return; }
+      // The board beside the sidebar at its top, with no card focused, as a person opening the sidebar would see it.
+      await act({ action: 'blur' });
+      const theme = themeName((await ask({ action: 'scroll', top: 0, left: 0 })).theme);
+      await vscode.commands.executeCommand('notifications.clearAll');
+      await vscode.commands.executeCommand('notifications.hideToasts');
+      await sleep(600);
+      const file = `sidebar-${theme}.png`;
+      await captureScreen(fbdir, path.join(screens, file));
+      // The chat page has no layout probe, so the frame has no problem count.
+      index.push({ file, theme, askedWidth: null, reachedWidth: null, layout: 'sidebar', view: 'sidebar', problems: null, lookFor: lookForOf('sidebar', 'sidebar', theme) });
+      await writeFile(path.join(screens, 'index.json'), `${JSON.stringify(index, null, 2)}\n`, 'utf8');
+      assert.equal(file, 'sidebar-dark.png', 'the sidebar frame is in the dark theme');
+    }],
+    ['every prompt the board window showed was answered and spoke plain words, and the DevTools connection is closed', async () => {
+      cdp?.close();
+      cdp = undefined;
+      inviteKit().assertPlain();
     }]
   ];
   return allBoardTests;

@@ -103,7 +103,9 @@ const BOARD_URL = 'https://example.invalid/e2e-board.git';
 
 // A test project holding this repository's committed roadmap (.planning as it is at HEAD, so the board shows the real work, phases without plans
 // included), pushed to a bare online home behind a public-looking address that a test-only insteadOf rule maps to the bare folder (as in 61-22).
-async function prepareBoardProject(extensionDevelopmentPath: string): Promise<string> {
+// The online home (the bare folder) is returned too: the board scenario's teammates (62-24) fetch their own copies from the public-looking address
+// through the same rule, as the invite scenario's copy does.
+async function prepareBoardProject(extensionDevelopmentPath: string): Promise<{ workspace: string; remote: string }> {
   const remote = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-board-remote-'));
   git(remote, ['init', '--bare', '-q', '-b', 'main']);
   const workspace = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-board-'));
@@ -120,7 +122,7 @@ async function prepareBoardProject(extensionDevelopmentPath: string): Promise<st
   git(workspace, ['commit', '-q', '-m', 'the project with this repository\'s roadmap']);
   git(workspace, ['remote', 'add', 'origin', BOARD_URL]);
   git(workspace, ['push', '-q', 'origin', 'main']);
-  return workspace;
+  return { workspace, remote };
 }
 
 // A free TCP port on this computer for the board window's DevTools endpoint (62-23): asked from the system on 127.0.0.1, then let go for VS Code.
@@ -179,7 +181,7 @@ async function main(): Promise<void> {
   }
   if (only.has('invite')) await inviteWindows(launch);
   if (only.has('board')) {
-    const workspace = await prepareBoardProject(extensionDevelopmentPath);
+    const { workspace, remote } = await prepareBoardProject(extensionDevelopmentPath);
     const screens = path.join(extensionDevelopmentPath, '.vscode-test', 'screens');
     // The screenshots of a board run replace the last run's (T-62-69); screens-before keeps the red evidence and is never emptied here.
     await rm(screens, { recursive: true, force: true });
@@ -191,7 +193,10 @@ async function main(): Promise<void> {
     // One CSS pixel per screen pixel, so the probe's measurements and the screenshots describe the same picture.
     await launch('board', workspace, await boardUserData(), {
       args: ['--force-device-scale-factor=1', `--remote-debugging-port=${cdpPort}`],
-      env: { NEAR_AI_E2E_SCREENS: screens, NEAR_AI_E2E_CDP_PORT: String(cdpPort), ...(fbdir === undefined || fbdir === '' ? {} : { NEAR_AI_E2E_FBDIR: fbdir }) }
+      env: {
+        NEAR_AI_E2E_SCREENS: screens, NEAR_AI_E2E_CDP_PORT: String(cdpPort), NEAR_AI_E2E_BOARD_URL: BOARD_URL, NEAR_AI_E2E_BOARD_REMOTE: remote,
+        ...(fbdir === undefined || fbdir === '' ? {} : { NEAR_AI_E2E_FBDIR: fbdir })
+      }
     });
   }
 }
