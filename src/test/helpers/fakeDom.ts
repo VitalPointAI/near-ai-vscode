@@ -398,7 +398,7 @@ export interface BoardHarness {
 const SCRIPT_DIRS = Object.freeze({ board: path.resolve(__dirname, '../../../media/board'), chat: path.resolve(__dirname, '../../../media/chat') });
 
 export interface HarnessOptions {
-  width?: number; reducedMotion?: boolean; state?: unknown; surface?: 'view' | 'panel';
+  width?: number; reducedMotion?: boolean; state?: unknown;
   /** Where load() reads scripts from: media/board (the default) or media/chat (the sidebar). */
   scripts?: 'board' | 'chat';
   /** Starts the body with the sidebar's empty, hidden Team section (section#team, a region named Team) before #root. */
@@ -409,7 +409,6 @@ export interface HarnessOptions {
 
 export function createBoardHarness(options: HarnessOptions = {}): BoardHarness {
   const document = new FakeDocument();
-  document.body.setAttribute('data-surface', options.surface ?? 'panel');
   if (options.teamSection === true) {
     const team = document.createElement('section');
     team.id = 'team';

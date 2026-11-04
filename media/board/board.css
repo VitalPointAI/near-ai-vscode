@@ -2,8 +2,7 @@
    Spacing is 4, 8, 12, 16, 24 and 32 px. Type is 0.85em, 1em, 1.2em and 1.5em in two weights. Motion is removed by the reduced-motion block. */
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 0 16px 32px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; color: var(--vscode-foreground); background: var(--vscode-sideBar-background, var(--vscode-editor-background)); }
-body[data-surface="panel"] { background: var(--vscode-editor-background); }
+body { margin: 0; padding: 0 16px 32px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
 #root, #board, .state-box, .card, .banner, .lane, .group { overflow-wrap: anywhere; }
 button, input, select, textarea { font: inherit; color: inherit; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
@@ -93,7 +92,7 @@ button.chip[aria-pressed="true"], .segmented button[aria-checked="true"] { backg
 .card-top, .card-meta, .state { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .card-top .state { font-size: 0.85em; padding: 0; }
 .card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-weight: 400; }
-body[data-surface="view"] .card-title, #root[data-layout="list"] .card-title { -webkit-line-clamp: 2; }
+#root[data-layout="list"] .card-title { -webkit-line-clamp: 2; }
 .card-meta { font-size: 0.85em; line-height: 1.4; color: var(--vscode-descriptionForeground); }
 .meta-item { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .badge-blocked { color: var(--vscode-editorWarning-foreground); }

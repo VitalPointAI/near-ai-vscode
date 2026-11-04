@@ -19,7 +19,7 @@
     errorHead: 'The Team Board could not be loaded', emptyHead: 'No work on the board yet', emptyOwner: 'Import your plans from the project roadmap, or add an item yourself.',
     emptyDev: 'A lead has not imported the plans yet. You can add a bug, chore or experiment yourself.', emptyView: 'A lead has not imported the plans yet. Cards show up here when they do.',
     noCards: 'No cards here.', noMatch: 'No cards match these filters', clearBody: 'Clear the filters to see every card.', mineBody: 'Nothing is yours yet. Cards you create or claim show up here.',
-    clear: 'Clear filters', importPlans: 'Import plans', newItem: 'New item', openBoard: 'Open Team Board', moveTo: 'Move to...', dismiss: 'Dismiss message', filters: 'Filters',
+    clear: 'Clear filters', importPlans: 'Import plans', newItem: 'New item', moveTo: 'Move to...', dismiss: 'Dismiss message', filters: 'Filters',
     paused: 'Something unexpected changed in the shared team record, so the board is paused to protect your work. Choose "Check the team" to see what happened, or ask your lead.',
     notTrusted: 'The shared team record failed a safety check, so the board is paused. Choose "Check the team" to see what happened, or ask your lead.',
     checkTeam: 'Check the team', doneInPlans: 'Looks finished, please confirm',
@@ -172,10 +172,9 @@
   const chip = el('span', 'status-chip');
   titleRow.append(h1, chip);
   const actions = el('div', 'row actions');
-  const openBtn = button('secondary', T.openBoard, () => post({ type: 'open-board' }), 'link-external');
   const importBtn = button('secondary', T.importPlans, () => { if (importBtn.getAttribute('aria-disabled') !== 'true') post({ type: 'import-plans' }); }, 'sync');
   const newBtn = button('primary', T.newItem, () => { if (newBtn.getAttribute('aria-disabled') !== 'true') api.openForm(); }, 'add');
-  actions.append(openBtn, importBtn, newBtn);
+  actions.append(importBtn, newBtn);
   const controls = el('div', 'controls');
   const summary = el('p', 'summary-line');
   const msWrap = el('div', 'field');
@@ -284,7 +283,6 @@
     }
     actions.hidden = !has || empty;
     controls.hidden = !has || empty;
-    openBtn.hidden = layout !== 'list';
     if (!has || empty) return;
     const v = model.viewer;
     const down = isDown();

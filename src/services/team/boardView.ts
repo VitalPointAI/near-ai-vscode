@@ -17,7 +17,7 @@ import { NoDeviceKeyError } from '../../team/eventLog';
 import type { EventIntent } from '../../team/eventLog';
 import { ulid } from '../../team/identity';
 import type { AppendResult } from '../../team/transport';
-import { IMPORT_PLANS_COMMAND, OPEN_BOARD_COMMAND, VERIFY_LOG_COMMAND } from './teamCommands';
+import { IMPORT_PLANS_COMMAND, VERIFY_LOG_COMMAND } from './teamCommands';
 import type { TeamOutput, TeamSession } from './teamSession';
 import { safeReason } from './teamStatusBar';
 
@@ -104,7 +104,7 @@ export interface BoardProbe { id: number; action: 'facts' | 'focus' | 'key'; ite
 
 export type BoardMessage =
   | { type: 'ready' } | { type: 'visible'; value: boolean } | { type: 'move'; itemId: string; target: MoveKey } | { type: 'detail'; itemId: string }
-  | { type: 'import-plans' } | { type: 'open-board' } | { type: 'retry' } | { type: 'show-details' } | { type: 'check-team' } | { type: 'choose-folders' }
+  | { type: 'import-plans' } | { type: 'retry' } | { type: 'show-details' } | { type: 'check-team' } | { type: 'choose-folders' }
   | { type: 'new-item'; draft: { kind: 'bug' | 'chore' | 'spike'; title: string; description?: string; scope: string[]; estimate?: number } }
   | { type: 'edit-item'; itemId: string; changes: { title?: string; description?: string; scope?: string[]; estimate?: number } };
 
@@ -235,7 +235,8 @@ function estimateRefusalTarget(raw: unknown): string | undefined {
   return undefined;
 }
 
-const BARE_TYPES = ['ready', 'import-plans', 'open-board', 'retry', 'show-details', 'check-team', 'choose-folders'] as const;
+// The page lives only in the editor tab, so it never asks the host to open the board (G-62-1, T-62-57): there is no open-board type.
+const BARE_TYPES = ['ready', 'import-plans', 'retry', 'show-details', 'check-team', 'choose-folders'] as const;
 
 /** The one reader of page messages: exact keys, id patterns, move keys and length caps. Anything else is undefined and the host ignores it. */
 export function parseBoardMessage(value: unknown): BoardMessage | undefined {
@@ -514,9 +515,6 @@ export class BoardController {
       case 'import-plans':
         // From the page the import always takes the current milestone, so no pick is shown (D-09).
         await this.limited(state, 'import', BUSY_IMPORT_TEXT, () => vscode.commands.executeCommand(IMPORT_PLANS_COMMAND, { milestone: 'current' }));
-        return;
-      case 'open-board':
-        await vscode.commands.executeCommand(OPEN_BOARD_COMMAND);
         return;
       case 'retry':
         await this.limited(state, 'retry', BUSY_RETRY_TEXT, () => { this.deps.session()?.nudge(); });
