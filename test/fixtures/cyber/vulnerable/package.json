@@ -1,0 +1,9 @@
+{
+  "name": "near-ai-cyber-fixture-vulnerable",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Deliberately weak target for the cybersecurity harness tests; never deployed.",
+  "dependencies": {
+    "express": "4.17.2"
+  }
+}

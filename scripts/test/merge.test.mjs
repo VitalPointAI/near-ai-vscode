@@ -6,7 +6,7 @@ import { setRunner, tagCommit } from '../lib/gh.mjs';
 import { mergePr } from '../lib/merge.mjs';
 import { tagRelease, waitForCi } from '../lib/release.mjs';
 import { CI_CHECKS } from '../lib/workflow.mjs';
-import { REPO, fakeGitHub, greenCommit, openPr } from './fake-github.mjs';
+import { OWNER, REPO, fakeGitHub, greenCommit, openPr } from './fake-github.mjs';
 
 const HEAD = '1'.repeat(40);
 const SQUASH = '2'.repeat(40);
@@ -153,18 +153,32 @@ test('merge-pr refuses a release PR whose version tag already exists, unless --n
   assert.equal(fake.called(/git\/(tags|refs)/).length, 0);
 });
 
-test('only the configured owner\'s agent-review counts, whoever runs merge-pr or tag-release', async () => {
+test('only near-ai-reviewer\'s agent-review counts, whoever runs merge-pr or tag-release', async () => {
   // Another admin runs the merge with their own agent-review status: refused.
   let fake = install(readyToMerge({ login: 'Em-kale', commits: { [HEAD]: greenCommit({ reviewer: 'Em-kale' }) } }));
-  await assert.rejects(mergePr(REPO, '7', quiet), /"agent-review" has not been set on this commit by ALuhning/);
+  await assert.rejects(mergePr(REPO, '7', quiet), /"agent-review" has not been set on this commit by near-ai-reviewer/);
   assert.equal(fake.called(/^gh pr merge/).length, 0);
-  // The same admin can merge a PR the owner's review passed.
+  // The owner's own status (the account the authoring agents run as) does not count either.
+  fake = install(readyToMerge({ commits: { [HEAD]: greenCommit({ reviewer: OWNER }) } }));
+  await assert.rejects(mergePr(REPO, '7', quiet), /set by ALuhning[\s\S]*has not been set on this commit by near-ai-reviewer/);
+  assert.equal(fake.called(/^gh pr merge/).length, 0);
+  // Any admin, the owner included, can merge a PR whose near-ai-reviewer review passed.
   fake = install(readyToMerge({ login: 'Em-kale' }));
   assert.equal((await mergePr(REPO, '7', quiet)).merged, true);
-  // A hotfix head tagged by another admin still needs the owner's review on it.
-  const hotfix = greenCommit({ reviewer: 'Em-kale', event: 'workflow_dispatch' });
-  install({ login: 'Em-kale', commits: { [HEAD]: hotfix }, branches: { 'hotfix/1.2.3': HEAD }, files: releaseFiles(HEAD) });
-  await assert.rejects(tagRelease(REPO, '1.2.3', HEAD, { log: () => {}, wait: false }), /has not been set on this commit by ALuhning/);
+  fake = install(readyToMerge({ login: OWNER }));
+  assert.equal((await mergePr(REPO, '7', quiet)).merged, true);
+});
+
+test('a hotfix tag needs near-ai-reviewer\'s agent-review on its head, not the owner\'s', async () => {
+  for (const reviewer of ['Em-kale', OWNER]) {
+    const hotfix = greenCommit({ reviewer, event: 'workflow_dispatch' });
+    const fake = install({ commits: { [HEAD]: hotfix }, branches: { 'hotfix/1.2.3': HEAD }, files: releaseFiles(HEAD) });
+    await assert.rejects(tagRelease(REPO, '1.2.3', HEAD, { log: () => {}, wait: false }), /has not been set on this commit by near-ai-reviewer/);
+    assert.equal(fake.called(/git\/(tags|refs)/).length, 0, `nothing is tagged on ${reviewer}'s review`);
+  }
+  const fake = install({ commits: { [HEAD]: greenCommit({ event: 'workflow_dispatch' }) }, branches: { 'hotfix/1.2.3': HEAD }, files: releaseFiles(HEAD) });
+  assert.equal(await tagRelease(REPO, '1.2.3', HEAD, { log: () => {}, wait: false }), 'v1.2.3');
+  assert.equal(fake.world.tags['v1.2.3'], HEAD);
 });
 
 test('merge-pr points out a PR that changes the gates themselves', async () => {

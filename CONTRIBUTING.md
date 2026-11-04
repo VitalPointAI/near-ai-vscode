@@ -67,6 +67,15 @@ PRs are squash-merged, so the PR title (followed by ` (#<number>)`) becomes the 
 - These must pass before a PR can merge: the CI jobs `lint`, `test`, `e2e`, `release-content`,
   `audit` and `secret-scan`, and the `agent-review` status. The branch must be up to date with
   `main`, without conflicts, and with every review conversation resolved.
+- The agent review runs on its own after CI passes: `.github/workflows/agent-review.yml` reviews
+  the PR as the reviewer identity `near-ai-reviewer`, sets `agent-review` and approves the PR when
+  the review passes. Only `near-ai-reviewer`'s `agent-review` counts; a status set by any other
+  account, the owner's included, is ignored by the merge and release gates, and
+  `scripts/agent-review.mjs submit` refuses to post as anyone else. To re-review by hand, run
+  `gh workflow run agent-review.yml -f pr=<number>`. A PR that changes the gates (workflows,
+  review, merge and release scripts, `SECURITY.md`, agent commands) is reviewed the same way, but
+  its approval waits for the owner. Setup and the one-time bootstrap are in
+  [docs/development-workflow.md](docs/development-workflow.md) ("The review runs automatically").
 - No new runtime dependencies. Third-party code the extension runs is vendored at build time
   (see SECURITY.md, "Dependencies").
 - Never commit secrets, real API keys or private data, including in tests. A test file that needs

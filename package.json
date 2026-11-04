@@ -2,7 +2,7 @@
   "name": "near-ai-vscode",
   "displayName": "NEAR AI for VS Code",
   "description": "Private AI agents for coding, research, presales, writing, and data work: TEE-backed NEAR AI models, Open-GSD project workflows, and the cost of every answer.",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-vscode-icon-128.png",
   "galleryBanner": {
@@ -54,7 +54,8 @@
     "cost tracking"
   ],
   "activationEvents": [
-    "workspaceContains:.planning/.near-ai/**"
+    "workspaceContains:.planning/.near-ai/**",
+    "onCommand:nearAi.openCyber"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -76,6 +77,12 @@
         "title": "Open Tools",
         "category": "NEAR AI",
         "icon": "$(tools)"
+      },
+      {
+        "command": "nearAi.openCyber",
+        "title": "Cybersecurity",
+        "category": "NEAR AI",
+        "icon": "$(shield)"
       },
       {
         "command": "nearAi.setup",
@@ -101,7 +108,7 @@
       },
       {
         "command": "nearAi.gsdCommand",
-        "title": "Run Open-GSD Command\u2026",
+        "title": "Run Open-GSD Command…",
         "category": "NEAR AI"
       },
       {
@@ -116,7 +123,7 @@
       },
       {
         "command": "nearAi.removeProfile",
-        "title": "Remove Profile\u2026",
+        "title": "Remove Profile…",
         "category": "NEAR AI"
       },
       {
@@ -138,12 +145,12 @@
       },
       {
         "command": "nearAi.setupProjectTeam",
-        "title": "Set Up Project Team\u2026",
+        "title": "Set Up Project Team…",
         "category": "NEAR AI"
       },
       {
         "command": "nearAi.manageMemory",
-        "title": "Manage Project Memory\u2026",
+        "title": "Manage Project Memory…",
         "category": "NEAR AI"
       },
       {
@@ -154,7 +161,7 @@
       },
       {
         "command": "nearAi.exportAnalytics",
-        "title": "Export Usage and Activity\u2026",
+        "title": "Export Usage and Activity…",
         "category": "NEAR AI"
       },
       {
@@ -582,6 +589,11 @@
           "command": "nearAi.openTools",
           "when": "view == nearAiChatView",
           "group": "navigation@3"
+        },
+        {
+          "command": "nearAi.openCyber",
+          "when": "view == nearAiChatView",
+          "group": "navigation@4"
         },
         {
           "command": "nearAi.manageTeams",
