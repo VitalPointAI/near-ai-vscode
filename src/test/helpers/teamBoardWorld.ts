@@ -83,3 +83,17 @@ export function seedStandardBoard(world: BoardWorld): void {
   world.accept(owner, 'item.imported', importedBody({ id: 'task:90-01-2', kind: 'task', title: 'Write the code', parentId: 'plan:90-01' }));
   world.accept(dev, 'item.created', { id: CHORE_ID, kind: 'chore', title: 'Tidy settings page', scope: [], requirements: [], mustHaves: [] });
 }
+
+// The owner's 0.6.3 re-test board (debug session board-codeserver-cards-and-drag): the scratch project carries this repository's v0.6.0 roadmap, so a
+// finished phase holds only done plans and the next phase has no plans yet. Backlog then holds only the phase card, Done (folded) holds every plan,
+// and nobody is assigned: milestone:v0.6.0 (active), phase:60 with `donePlans` done plans plan:60-01..., and the planless phase:63.
+export function seedRetestBoard(world: BoardWorld, donePlans = 3): void {
+  const { owner } = world;
+  world.accept(owner, 'item.imported', importedBody({ id: 'milestone:v0.6.0', kind: 'milestone', title: 'Team Mode', active: true }));
+  world.accept(owner, 'item.imported', importedBody({ id: 'phase:60', kind: 'phase', title: 'Team core', parentId: 'milestone:v0.6.0' }));
+  for (let i = 1; i <= donePlans; i += 1) {
+    const n = String(i).padStart(2, '0');
+    world.accept(owner, 'item.imported', importedBody({ id: `plan:60-${n}`, kind: 'plan', title: `Core slice ${n}`, parentId: 'phase:60', state: 'done', summary: true, gsd: { phase: '60', plan: n, wave: 1 } }));
+  }
+  world.accept(owner, 'item.imported', importedBody({ id: 'phase:63', kind: 'phase', title: 'Claims', parentId: 'milestone:v0.6.0' }));
+}

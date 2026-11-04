@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import test from 'node:test';
 import { buildBoardModel } from '../domain/team/board';
 import type { BoardCard, BoardModel } from '../domain/team/board';
-import { CHORE_ID, boardWorld, seedStandardBoard } from './helpers/teamBoardWorld';
+import { CHORE_ID, boardWorld, seedRetestBoard, seedStandardBoard } from './helpers/teamBoardWorld';
 import type { BoardWorld } from './helpers/teamBoardWorld';
 import { createBoardHarness } from './helpers/fakeDom';
 import type { BoardHarness, FakeNode } from './helpers/fakeDom';
@@ -937,13 +937,7 @@ test('G-62-7: a folded column holds no card, only a hidden count in every lane; 
 // every plan, and everything is unassigned: the owner saw "Backlog 5", "Unassigned (45)" and "Done 40" with only five cards in sight.
 async function retestBoard(): Promise<BoardWorld> {
   const world = await boardWorld();
-  const { importedBody } = await import('./helpers/teamBoardWorld');
-  world.accept(world.owner, 'item.imported', importedBody({ id: 'milestone:v0.6.0', kind: 'milestone', title: 'Team Mode', active: true }));
-  world.accept(world.owner, 'item.imported', importedBody({ id: 'phase:60', kind: 'phase', title: 'Team core', parentId: 'milestone:v0.6.0' }));
-  for (const n of ['01', '02', '03']) {
-    world.accept(world.owner, 'item.imported', importedBody({ id: `plan:60-${n}`, kind: 'plan', title: `Core slice ${n}`, parentId: 'phase:60', state: 'done', summary: true, gsd: { phase: '60', plan: n, wave: 1 } }));
-  }
-  world.accept(world.owner, 'item.imported', importedBody({ id: 'phase:63', kind: 'phase', title: 'Claims', parentId: 'milestone:v0.6.0' }));
+  seedRetestBoard(world);
   return world;
 }
 

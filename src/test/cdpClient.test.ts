@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
-import { connectCdp, interceptedDrag, mouseDrag, pressKey, webviewFrameRect, workbenchTarget } from './e2e/cdp';
+import { connectCdp, interceptedDrag, mouseDrag, originTarget, pressKey, webviewFrameRect, workbenchTarget } from './e2e/cdp';
 import type { CdpSession, SocketLike } from './e2e/cdp';
 
 interface Sent { id: number; method: string; params?: Record<string, any> }
@@ -106,6 +106,25 @@ test('connectCdp refuses a debugger address that is not on this computer, and sa
   const remote = [{ type: 'page', url: 'x/workbench.html', webSocketDebuggerUrl: 'ws://example.com:9333/devtools/page/MAIN' }];
   await assert.rejects(connectCdp(9333, { fetchJson: async () => remote, openSocket: () => new FakeSocket() }), /127\.0\.0\.1/);
   await assert.rejects(connectCdp(9333, { fetchJson: async () => TARGETS.slice(0, 2), openSocket: () => new FakeSocket() }), /workbench\.html/);
+});
+
+// 0.6.3 re-test (debug session board-codeserver-cards-and-drag): the code-server board test drives a browser tab, not the VS Code window.
+test('originTarget picks the page on the code-server origin only, and connectCdp uses a given picker but still refuses an address off this computer', async () => {
+  const tabs = [
+    { type: 'page', url: 'chrome://newtab/', webSocketDebuggerUrl: 'ws://127.0.0.1:9333/devtools/page/NEW' },
+    { type: 'iframe', url: 'http://127.0.0.1:8123/stable-x/static/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1', webSocketDebuggerUrl: 'ws://127.0.0.1:9333/devtools/page/F' },
+    { type: 'page', url: 'http://127.0.0.1:81230/?folder=/x', webSocketDebuggerUrl: 'ws://127.0.0.1:9333/devtools/page/OTHERPORT' },
+    { type: 'page', url: 'http://127.0.0.1:8123/?folder=/tmp/p', webSocketDebuggerUrl: 'ws://127.0.0.1:9333/devtools/page/CS' }
+  ];
+  assert.equal(originTarget(tabs, 'http://127.0.0.1:8123')?.webSocketDebuggerUrl, 'ws://127.0.0.1:9333/devtools/page/CS', 'the page on that origin, not an iframe or another port');
+  assert.equal(originTarget(tabs.slice(0, 3), 'http://127.0.0.1:8123'), undefined);
+  const urls: string[] = [];
+  const cdp = await connectCdp(9333, { fetchJson: async () => tabs, openSocket: (url) => { urls.push(url); return new FakeSocket(); }, pick: (targets) => originTarget(targets, 'http://127.0.0.1:8123') });
+  assert.deepEqual(urls, ['ws://127.0.0.1:9333/devtools/page/CS']);
+  cdp.close();
+  await assert.rejects(connectCdp(9333, { fetchJson: async () => tabs.slice(0, 1), openSocket: () => new FakeSocket(), pick: (targets) => originTarget(targets, 'http://127.0.0.1:8123') }), /No matching page on port 9333/);
+  const far = [{ type: 'page', url: 'http://127.0.0.1:8123/', webSocketDebuggerUrl: 'ws://example.com:9333/devtools/page/CS' }];
+  await assert.rejects(connectCdp(9333, { fetchJson: async () => far, openSocket: () => new FakeSocket(), pick: (targets) => originTarget(targets, 'http://127.0.0.1:8123') }), /127\.0\.0\.1/);
 });
 
 test('mouseDrag presses at the start, moves in steps with the button held to exactly the end, runs whileOver, then releases', async () => {

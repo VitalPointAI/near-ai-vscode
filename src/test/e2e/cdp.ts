@@ -21,7 +21,7 @@ export interface CdpSession {
   close(): void;
 }
 
-type Target = { type: string; url: string; webSocketDebuggerUrl?: string };
+export type Target = { type: string; url: string; webSocketDebuggerUrl?: string };
 type Rect = { left: number; top: number; width: number; height: number };
 
 const OPEN = 1;
@@ -33,6 +33,12 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeo
 /** The VS Code window: the page target whose url ends with workbench.html and that can be debugged. */
 export function workbenchTarget(targets: Target[]): { webSocketDebuggerUrl: string } | undefined {
   const found = targets.find((t) => t.type === 'page' && /workbench\.html$/.test(t.url) && typeof t.webSocketDebuggerUrl === 'string' && t.webSocketDebuggerUrl !== '');
+  return found ? { webSocketDebuggerUrl: found.webSocketDebuggerUrl! } : undefined;
+}
+
+/** A browser tab showing code-server (0.6.3 re-test): the page target whose url is on that origin, for example http://127.0.0.1:8080/?folder=... */
+export function originTarget(targets: Target[], origin: string): { webSocketDebuggerUrl: string } | undefined {
+  const found = targets.find((t) => t.type === 'page' && (t.url === origin || t.url.startsWith(`${origin}/`)) && typeof t.webSocketDebuggerUrl === 'string' && t.webSocketDebuggerUrl !== '');
   return found ? { webSocketDebuggerUrl: found.webSocketDebuggerUrl! } : undefined;
 }
 
@@ -56,14 +62,17 @@ function messageText(event: any): string {
   return Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
 }
 
-/** Connects to the VS Code window's DevTools endpoint on 127.0.0.1:<port>. Refuses any debugger address that is not on this computer. */
-export async function connectCdp(port: number, deps: { fetchJson?: (url: string) => Promise<unknown>; openSocket?: (url: string) => SocketLike; timeoutMs?: number } = {}): Promise<CdpSession> {
+/**
+ * Connects to the VS Code window's DevTools endpoint on 127.0.0.1:<port>, or to the page `pick` chooses (the code-server tab of a browser). Refuses any
+ * debugger address that is not on this computer.
+ */
+export async function connectCdp(port: number, deps: { fetchJson?: (url: string) => Promise<unknown>; openSocket?: (url: string) => SocketLike; timeoutMs?: number; pick?: (targets: Target[]) => { webSocketDebuggerUrl: string } | undefined } = {}): Promise<CdpSession> {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const listUrl = `http://127.0.0.1:${port}/json/list`;
   const list = await (deps.fetchJson ?? ((url: string) => getJson(url, timeoutMs)))(listUrl);
   const targets = Array.isArray(list) ? (list as Target[]) : [];
-  const target = workbenchTarget(targets);
-  if (!target) throw new Error(`No VS Code window (a page ending in workbench.html) on port ${port}. Pages seen: ${targets.map((t) => `${t.type} ${t.url}`).join(', ') || 'none'}`);
+  const target = (deps.pick ?? workbenchTarget)(targets);
+  if (!target) throw new Error(`No ${deps.pick ? 'matching page' : 'VS Code window (a page ending in workbench.html)'} on port ${port}. Pages seen: ${targets.map((t) => `${t.type} ${t.url}`).join(', ') || 'none'}`);
   if (!LOCAL_SOCKET.test(target.webSocketDebuggerUrl)) throw new Error(`The debugger address ${target.webSocketDebuggerUrl} is not on 127.0.0.1; refusing to connect`);
 
   const socket = deps.openSocket ? deps.openSocket(target.webSocketDebuggerUrl) : (new WebSocket(target.webSocketDebuggerUrl) as unknown as SocketLike);
