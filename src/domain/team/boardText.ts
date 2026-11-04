@@ -48,11 +48,19 @@ export const ASSIGN_REFUSALS = Object.freeze({
   alreadyAssigned: (name: string): string => `This card is already assigned to ${flattenName(name)}. ${NOTHING_CHANGED}`,
   notAssigned: `This card is not assigned to anyone. ${NOTHING_CHANGED}`,
   selfOnly: `You can assign a card only to yourself. A lead can assign it to someone else. ${NOTHING_CHANGED}`,
-  takenBy: (name: string): string => `This card is assigned to ${flattenName(name)}. ${flattenName(name)} or a lead can change that. ${NOTHING_CHANGED}`,
+  // 62-26 (owner decision 2026-11-04): the person on the card can change it only when they took it themselves; otherwise only a lead can.
+  takenBy: (name: string, tookItThemselves = false): string =>
+    `This card is assigned to ${flattenName(name)}. ${tookItThemselves ? `${flattenName(name)} or a lead` : 'A lead'} can change that. ${NOTHING_CHANGED}`,
+  assignedByOther: (name: string): string => `${flattenName(name)} assigned this card to you. Ask a lead to change it. ${NOTHING_CHANGED}`,
   selfOffOnly: `You can only take yourself off a card. Ask a lead to change it. ${NOTHING_CHANGED}`,
   notWorker: `Only team members who work on cards can take one. A lead can change your role. ${NOTHING_CHANGED}`,
   notNow: `This card cannot be assigned right now. ${NOTHING_CHANGED}`
 });
+
+// 62-26 (owner decision 2026-11-04): the card detail's sentence for a member on a card the owner or a lead gave them, shown under Assigned to.
+export function assignedToYouBy(name: string): string {
+  return `Assigned to you by ${flattenName(name)}. Ask a lead to change it.`;
+}
 
 // The existing READ_ONLY_TEXT of the team session, repeated here because the domain may not import the host.
 export const NO_DEVICE_KEY_TEXT = 'This computer is not yet approved to make changes for this team. You can look at the board. Ask your lead to approve this computer.';

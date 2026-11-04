@@ -4,7 +4,7 @@
 import {
   ASSIGN_REFUSALS, ROLE_LABELS, ALL_CARDS_LABEL, BACKLOG_RULE_CARD_TEXT, BOARD_LANE_LABEL, COLUMN_CAPTIONS, COLUMN_LABELS, HISTORY_LIMIT_TEXT, KIND_WORDS, MOVE_LABELS, NO_PLANS_TEXT, READ_ONLY_BANNERS, REFUSALS, SOMEONE, SOURCE_BOARD_TEXT,
   PHASE_NO_PLANS_DETAIL, SOURCE_IMPORT_TEXT, UNASSIGNED_LABEL, YOU_SUFFIX, ageText, cardLabel, estimateText, flattenName, historySentence, notReadyRefusal, notReadySentences,
-  phaseCardLabel, stripFormatControls
+  phaseCardLabel, stripFormatControls, assignedToYouBy
 } from './boardText';
 import { MAX_HISTORY_PER_ITEM } from './itemHistory';
 import type { HistoryEntry } from './itemHistory';
@@ -210,10 +210,16 @@ function assignRefusal(state: TeamState, problem: string, item: WorkItem): strin
 }
 
 // Why a member who works on cards, but may not assign others, cannot make this change (62-25): only themselves, and only a free card or their own.
+// 62-26 (owner decision 2026-11-04): only a card they took themselves, so a card the owner or a lead gave them names who did, and a teammate's card
+// says the teammate may change it only when the teammate took it.
 function selfRefusal(state: TeamState, viewerId: string, item: WorkItem, memberId: string | undefined): string {
-  if (memberId === undefined) return ASSIGN_REFUSALS.selfOffOnly;
+  if (memberId === undefined) {
+    const givenByOther = item.assignee === viewerId && item.assignedBy !== undefined && item.assignedBy !== viewerId;
+    return givenByOther ? ASSIGN_REFUSALS.assignedByOther(memberName(state, item.assignedBy)) : ASSIGN_REFUSALS.selfOffOnly;
+  }
   if (memberId !== viewerId) return ASSIGN_REFUSALS.selfOnly;
-  return item.assignee !== undefined && item.assignee !== viewerId ? ASSIGN_REFUSALS.takenBy(memberName(state, item.assignee)) : ASSIGN_REFUSALS.notWorker;
+  if (item.assignee === undefined || item.assignee === viewerId) return ASSIGN_REFUSALS.notWorker;
+  return ASSIGN_REFUSALS.takenBy(memberName(state, item.assignee), item.assignedBy === item.assignee);
 }
 
 // The one function that decides an assignment: the exact intent to append, or one plain refusal (owner decision 2026-11-03). It asks the same two
@@ -741,6 +747,13 @@ export function buildCardDetail(state: TeamState, itemId: string, options: { vie
     // 62-20: the detail says "Dana (Developer)", so the role word travels with the name.
     const role = state.members.get(item.assignee)?.role;
     detail.assignee = { id: item.assignee, name: memberName(state, item.assignee), roleLabel: role === undefined ? '' : ROLE_LABELS[role] ?? role };
+  }
+  // 62-26 (owner decision 2026-11-04): who made the assignment, and for a member on a card the owner or a lead gave them, the sentence that says so.
+  // The owner and leads may change any card, so they never get the note.
+  if (item.assignedBy !== undefined) {
+    const assignerName = memberName(state, item.assignedBy);
+    detail.assignedBy = { id: item.assignedBy, name: assignerName };
+    if (viewerId !== undefined && item.assignee === viewerId && item.assignedBy !== viewerId && !mayAssignOthers(state, viewerId)) detail.assignNote = assignedToYouBy(assignerName);
   }
   if (item.estimate !== undefined) detail.estimateTokens = item.estimate.tokens;
   if (item.description !== undefined) detail.description = stripFormatControls(item.description);

@@ -215,6 +215,8 @@
     const rows = [];
     const fact = (label, value) => { if (value !== undefined && value !== '') rows.push(el('dt', '', label), el('dd', '', String(value))); };
     fact(T.assignedTo, d.assignee ? d.assignee.name + (d.assignee.roleLabel ? ' (' + d.assignee.roleLabel + ')' : '') : T.nobody);
+    // 62-26: on a card the owner or a lead gave this member, the host's sentence saying who, right under Assigned to, as text.
+    if (typeof d.assignNote === 'string' && d.assignNote !== '') rows.push(el('dd', 'assign-note', d.assignNote));
     fact('Phase', facts.phase);
     fact('Milestone', facts.milestone);
     fact(T.wave, facts.wave);
