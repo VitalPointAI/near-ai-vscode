@@ -46,7 +46,7 @@ const RECHECK_AFTER: ReadonlySet<TeamActionId> = new Set<TeamActionId>(['share',
 // itself is loaded only by dynamic import (solo rule). Every id but 'solo' runs the command TEAM_ACTION_COMMANDS maps it to.
 type CommandActionId = Exclude<TeamActionId, 'solo'>;
 const KNOWN_ACTIONS: Readonly<Record<TeamActionId, true>> = Object.freeze({
-  invite: true, join: true, solo: true, share: true, members: true, board: true, link: true, check: true
+  invite: true, join: true, ask: true, solo: true, share: true, members: true, board: true, link: true, check: true
 });
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

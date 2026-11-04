@@ -4,17 +4,19 @@
 // someone, Join a team and Just me for now; Just me for now puts it away for the project and leaves one quiet line on the empty chat. A team that
 // exists does not nag. Pure: no vscode, no I/O, no clock. Every label and sentence comes from teamSectionText.ts.
 import {
-  TEAM_ACTION_HINTS, TEAM_ACTION_LABELS, TEAM_SECTION_HEADING, TEAM_SETUP_TITLES, TEAM_SOLO_LINE_LABELS, TEAM_STATUS, boardSummaryText, connectionStatus,
+  TEAM_ACTION_HINTS, TEAM_ACTION_LABELS, TEAM_CONNECT_FALLBACK, TEAM_SECTION_HEADING, TEAM_SETUP_TITLES, TEAM_SOLO_LINE_LABELS, TEAM_STATUS, boardSummaryText, connectionStatus,
   memberStatus, notOnTeamStatus, notReachableStatus, notSharedStatus, onlyYouStatus, peopleStatus, teamHeading, waitingBadge, waitingStatus
 } from './teamSectionText';
 import type { Role } from './types';
 
-// 'solo' is Just me for now: the host keeps it as a choice for this project and runs no command for it.
-export const TEAM_ACTION_IDS = ['invite', 'join', 'solo', 'share', 'members', 'board', 'link', 'check'] as const;
+// 'solo' is Just me for now: the host keeps it as a choice for this project and runs no command for it. 'ask' is Ask to join (61-29), offered on the
+// Connect screen and to a person whose project has a team they are not on.
+export const TEAM_ACTION_IDS = ['invite', 'join', 'ask', 'solo', 'share', 'members', 'board', 'link', 'check'] as const;
 export type TeamActionId = (typeof TEAM_ACTION_IDS)[number];
 
 export const TEAM_ACTION_COMMANDS: Readonly<Record<Exclude<TeamActionId, 'solo'>, string>> = Object.freeze({
   join: 'nearAi.team.join',
+  ask: 'nearAi.team.askToJoin',
   share: 'nearAi.team.share',
   invite: 'nearAi.team.invite',
   members: 'nearAi.team.manageMembers',
@@ -87,6 +89,13 @@ export interface TeamSectionModel {
 /** Undefined when no folder is open. */
 export function teamSectionModel(input: TeamSectionInput): TeamSectionModel | undefined {
   if (!input.folderOpen) return undefined;
+  const section = sectionModel(input);
+  const connect = connectPart(input);
+  return connect === undefined ? section : { ...section, connect };
+}
+
+// What the Team section shows once a profile works.
+function sectionModel(input: TeamSectionInput): TeamSectionModel {
   const team = input.team;
   if (team === undefined) {
     if (input.justMe === true) {
@@ -113,6 +122,18 @@ export function teamSectionModel(input: TeamSectionInput): TeamSectionModel | un
     model.board = { ready, blocked, mine, text: boardSummaryText(ready, blocked, mine) };
   }
   return model;
+}
+
+// The team part of the Connect screen (61-30, G-61-9): while no profile works, the team way in. The page draws it only then.
+function connectPart(input: TeamSectionInput): TeamConnect | undefined {
+  const fallback = { ...TEAM_CONNECT_FALLBACK };
+  if (input.team === undefined) return { actions: plain(['join', 'ask']), fallback };
+  return undefined;
+}
+
+// Connect buttons in the given order, none of them primary (the Connect screen's own main button is setting up a profile).
+function plain(list: readonly TeamActionId[]): TeamSectionAction[] {
+  return list.map((id) => ({ id, label: TEAM_ACTION_LABELS[id], primary: false, hint: TEAM_ACTION_HINTS[id] }));
 }
 
 interface TeamPlan { status: string; primary: TeamActionId; others: TeamActionId[]; compact: boolean }

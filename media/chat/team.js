@@ -6,16 +6,24 @@
 // read from the profile-status messages the host sends. Until then the latest model is kept but nothing team-related can be seen or clicked.
 // After Just me for now (61-26, G-61-8) the model's placement is empty-chat-line: the section is hidden and its status and actions are one quiet line
 // (p.team-solo) inside #welcome, the empty chat's welcome that chat.js hides during a conversation, so the line is never shown there.
+// While no profile works (61-30, G-61-9) the model's connect part is the team way in on the Connect screen: with PR #7's Connect panel
+// (#welcome-connect, 0.4.14) on the page, one div.team-connect group is added inside it and none of the panel's own elements is touched; without
+// it (this branch), one small Connect block (section#team-connect) inside #welcome has the panel's title, a new profile, a saved profile and the
+// team buttons. Set up a new profile and Use a saved profile post the chat's own open-setup and select-profile messages.
 (function () {
   'use strict';
 
   // The only action ids a click may post, the same list as TEAM_ACTION_IDS in src/domain/team/teamSection.ts (a test keeps the two equal).
-  const ACTIONS = Object.freeze(['invite', 'join', 'solo', 'share', 'members', 'board', 'link', 'check']);
+  const ACTIONS = Object.freeze(['invite', 'join', 'ask', 'solo', 'share', 'members', 'board', 'link', 'check']);
   const LINE_PLACEMENT = 'empty-chat-line';
   const NOT_SHOWN = 'That action is not shown in the Team section.';
   // The probe's answer to a click while the whole section is hidden.
   const HIDDEN = 'hidden';
   const STATUS_ID = 'team-status';
+  // PR #7's Connect panel and its own profile choice (read only), and the id of the Connect block drawn when the panel is not on the page.
+  const PANEL_ID = 'welcome-connect';
+  const PANEL_CHOICE_ID = 'welcome-choose-profile';
+  const BLOCK_ID = 'team-connect';
   const chat = window.nearChat;
   const section = document.getElementById('team');
   if (!section || !chat || typeof chat.post !== 'function') return;
@@ -30,6 +38,9 @@
   let latest = null;
   // The quiet empty-chat line: its paragraph, text and link buttons by action id; null while it is not drawn.
   let line = null;
+  // The Connect part: its node (the group inside PR #7's panel, or the Connect block), its status, its row and team buttons by action id, and the
+  // two profile buttons; null while it is not drawn.
+  let connect = null;
 
   function profileState() {
     const state = readiness ? readiness.current() : undefined;
@@ -46,8 +57,9 @@
     if (input && typeof input.focus === 'function') input.focus();
   }
 
-  // Draws the latest model while the profile works, and hides the section and the line otherwise.
+  // Draws the latest model while the profile works, and hides the section and the line otherwise. The Connect part is the other way round.
   function show() {
+    showConnect();
     const ready = profileState() === 'ready';
     if (ready && latest && latest.placement === LINE_PLACEMENT) {
       render(null);
@@ -219,6 +231,129 @@
     section.hidden = false;
   }
 
+  // ---- the Connect screen (61-30) ----
+
+  function words(value) {
+    return typeof value === 'string' ? value : '';
+  }
+
+  // Only while the profile state is known and not working, with a folder open and a connect part from the host.
+  function showConnect() {
+    const state = profileState();
+    const part = latest && latest.connect && typeof latest.connect === 'object' ? latest.connect : null;
+    if (part === null || state === null || state === 'ready' || state === 'no-folder') {
+      removeConnect();
+      return;
+    }
+    drawConnect(part);
+  }
+
+  // A profile button: the message it posts is fixed here, in this closure, never read from the element or a message.
+  function profileButton(className, message) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.addEventListener('click', () => { chat.post({ type: message }); });
+    return button;
+  }
+
+  function buildConnect(inPanel) {
+    const status = text('p', 'team-connect-status', '');
+    status.setAttribute('aria-live', 'polite');
+    const row = document.createElement('div');
+    row.className = 'team-connect-actions';
+    const saved = profileButton('text-button', 'select-profile');
+    if (inPanel) {
+      const node = document.createElement('div');
+      node.className = 'team-connect';
+      node.append(status, row);
+      return { node, inPanel, status, row, drawn: new Map(), saved };
+    }
+    const node = document.createElement('section');
+    node.id = BLOCK_ID;
+    node.className = 'team-connect-block';
+    node.setAttribute('role', 'region');
+    node.setAttribute('aria-labelledby', BLOCK_ID + '-title');
+    const title = text('h2', '', '');
+    title.id = BLOCK_ID + '-title';
+    const body = text('p', 'team-connect-body', '');
+    const setup = profileButton('text-button primary', 'open-setup');
+    node.append(title, body, status, row);
+    return { node, inPanel, status, row, drawn: new Map(), saved, title, body, setup };
+  }
+
+  function drawConnect(part) {
+    const panel = document.getElementById(PANEL_ID);
+    const place = panel || document.getElementById('welcome');
+    if (!place) {
+      removeConnect();
+      return;
+    }
+    const inPanel = Boolean(panel);
+    if (connect !== null && connect.inPanel !== inPanel) removeConnect();
+    if (connect === null) connect = buildConnect(inPanel);
+    if (connect.node.parentNode !== place) {
+      if (inPanel) place.append(connect.node);
+      else place.prepend(connect.node);
+    }
+    const fallback = part.fallback && typeof part.fallback === 'object' ? part.fallback : {};
+    if (!inPanel) {
+      connect.title.textContent = words(fallback.title);
+      connect.body.textContent = words(fallback.body);
+      connect.setup.textContent = words(fallback.setupLabel);
+    }
+    connect.saved.textContent = words(fallback.savedLabel);
+    const status = words(part.status);
+    connect.status.textContent = status;
+    connect.status.hidden = status === '';
+
+    // Known ids only, each once, in the host's order.
+    const next = new Map();
+    const list = Array.isArray(part.actions) ? part.actions : [];
+    for (const action of list) {
+      if (!action || typeof action !== 'object') continue;
+      const at = ACTIONS.indexOf(action.id);
+      if (at === -1 || next.has(ACTIONS[at])) continue;
+      const entry = connect.drawn.get(ACTIONS[at]) || makeButton(ACTIONS[at]);
+      update(entry, Object.assign({}, action, { primary: false }));
+      entry.button.className = 'text-button team-connect-action';
+      entry.button.removeAttribute('aria-describedby');
+      next.set(entry.id, entry);
+    }
+    // Use a saved profile: always in the Connect block; in PR #7's panel only while the panel shows no profile choice of its own.
+    const choice = inPanel ? document.getElementById(PANEL_CHOICE_ID) : null;
+    const offerSaved = !inPanel || !choice || choice.hidden === true;
+    const team = [...next.values()].map((entry) => entry.button);
+    const children = inPanel ? team.concat(offerSaved ? [connect.saved] : []) : [connect.setup, connect.saved].concat(team);
+    const current = Array.from(connect.row.children);
+    const same = current.length === children.length && children.every((child, index) => current[index] === child);
+    if (!same) {
+      const focused = document.activeElement;
+      connect.row.replaceChildren(...children);
+      if (children.includes(focused)) focused.focus();
+    }
+    connect.drawn = next;
+  }
+
+  function removeConnect() {
+    if (connect === null) return;
+    const focused = document.activeElement;
+    const hadFocus = Boolean(focused) && connect.node.contains(focused);
+    connect.node.remove();
+    connect = null;
+    if (!hadFocus) return;
+    const input = document.getElementById('input');
+    if (input && typeof input.focus === 'function') input.focus();
+  }
+
+  // What the Connect part shows, or null when it is not drawn or not shown, by the same rule as a click on it.
+  function describeConnect() {
+    if (connect === null || !shown(connect.node)) return null;
+    const actions = [];
+    for (const entry of connect.drawn.values()) actions.push({ id: entry.id, label: entry.label.textContent });
+    return { status: connect.status.textContent, actions, inPanel: connect.inPanel };
+  }
+
   // What the quiet empty-chat line shows, or null when it is not drawn or not shown: the same rule as a click on it, so a line the facts report
   // can be clicked.
   function describeLine() {
@@ -230,7 +365,7 @@
 
   // What the section shows, read from the drawn elements.
   function describe() {
-    if (parts === null || section.hidden) return { heading: '', status: '', actions: [], hidden: true, profile: profileState(), soloLine: describeLine() };
+    if (parts === null || section.hidden) return { heading: '', status: '', actions: [], hidden: true, profile: profileState(), soloLine: describeLine(), connect: describeConnect() };
     const actions = [];
     for (const button of Array.from(parts.row.children)) {
       const entry = [...drawn.values()].find((candidate) => candidate.button === button);
@@ -239,7 +374,7 @@
       if (entry.badge.parentNode === button && entry.badge.textContent) fact.badge = entry.badge.textContent;
       actions.push(fact);
     }
-    const facts = { heading: parts.heading.textContent, status: parts.status.textContent, actions, hidden: false, profile: profileState(), soloLine: describeLine() };
+    const facts = { heading: parts.heading.textContent, status: parts.status.textContent, actions, hidden: false, profile: profileState(), soloLine: describeLine(), connect: describeConnect() };
     // The board line, only while it is drawn.
     if (parts.board.parentNode === section && parts.board.textContent) facts.board = parts.board.textContent;
     return facts;
@@ -253,8 +388,11 @@
       const entry = id !== undefined && !section.hidden ? drawn.get(id) : undefined;
       // An action of the quiet line is clicked only while a person could see it (not during a conversation).
       const inLine = id !== undefined && line !== null ? line.drawn.get(id) : undefined;
+      // And a team action of the Connect part, while it is shown.
+      const inConnect = id !== undefined && connect !== null ? connect.drawn.get(id) : undefined;
       if (entry && entry.button.isConnected) entry.button.click();
       else if (inLine && shown(inLine.button)) inLine.button.click();
+      else if (inConnect && shown(inConnect.button)) inConnect.button.click();
       else if (section.hidden) error = HIDDEN;
       else error = NOT_SHOWN;
     }
@@ -267,6 +405,9 @@
     const message = event.data || {};
     if (message.type === 'team-state') receive(message.model);
     else if (message.type === 'team-e2e') probe(message);
+    // Drawn again after chat.js (loaded before this script) has handled the same profile-status, so PR #7's panel already shows its own
+    // profile choice or not when the group decides whether to offer Use a saved profile.
+    else if (message.type === 'profile-status') show();
   });
 
   if (readiness && typeof readiness.onChange === 'function') readiness.onChange(show);

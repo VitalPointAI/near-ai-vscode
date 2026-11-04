@@ -9,6 +9,7 @@ export const TEAM_SECTION_HEADING = 'Working with your agents';
 export const TEAM_ACTION_LABELS = Object.freeze({
   invite: 'Invite someone',
   join: 'Join a team',
+  ask: 'Ask to join',
   solo: 'Just me for now',
   share: 'Share',
   members: 'Members',
@@ -27,6 +28,7 @@ export const TEAM_SOLO_LINE_LABELS = Object.freeze({
 export const TEAM_ACTION_HINTS = Object.freeze({
   invite: 'Invite a person to work on this project with you. If the project has no team yet, it is set up on the way.',
   join: 'Join a team with the invite someone sent you.',
+  ask: 'No invite yet? Send the team owner or a lead a request to join, and this computer joins by itself once they accept it.',
   solo: 'Put this away for this project. You can still invite people any time from the empty chat.',
   share: 'Put the team setup online so the people you invite can join.',
   members: 'See who is on the team, invite more people and confirm the people who joined.',
