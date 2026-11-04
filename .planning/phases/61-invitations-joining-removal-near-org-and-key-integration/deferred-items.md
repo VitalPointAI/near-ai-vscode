@@ -7,3 +7,4 @@
 ## Found during 61-16 (2026-11-03)
 
 - `src/test/teamSession.test.ts` "an unreachable remote pauses with a redacted reason, backs off to 10 minutes, retries on focus and recovers" failed once in the all-team run (58+ files in one `node --test`, MemoryMax=6G) with "the paused state is written once while it lasts: 2 !== 1". It passed 3 times alone (`--test-name-pattern`) and in a full `teamSession.test.js` run (21/21). The test does not touch `src/team/projectHome.ts`; the only shared change is `networkEnv` becoming an export, with no behaviour change. It looks timing-sensitive under load; worth a look in the final full-suite plan (61-22).
+  - Resolved in 62-18 (commit 9e49bc5): git's reason for an unreachable remote carries the connect time ("after 0 ms"), which moves with load, and the session's dedupe key included it. See the phase 62 deferred-items entry.
