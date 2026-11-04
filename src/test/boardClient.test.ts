@@ -184,6 +184,23 @@ test('the e2e probe presses a filter chip as a person\'s click would and reports
   assert.deepEqual(texts.slice(0, c.moves.length), c.moves.map((m) => m.label), 'the moves first, in order');
 });
 
+test('the e2e facts list every drawn assignee chip with its initials and name, so the real window can check the card face (62-24)', async () => {
+  const world = await standard();
+  world.accept(world.owner, 'item.assigned', { id: 'plan:90-01', memberId: world.dev.memberId });
+  const model = modelOf(world, world.owner.memberId);
+  const assigned = model.cards.find((c) => c.id === 'plan:90-01')!.assignee!;
+  assert.ok(assigned !== undefined, 'the plan is assigned in the model');
+  const h = createBoardHarness({ width: 1400 });
+  h.document.body.setAttribute('data-e2e', '1');
+  h.load(['board.js', 'menu.js']);
+  h.deliver({ type: 'state', model });
+  h.deliver({ type: 'e2e-probe', id: 1, action: 'facts' });
+  const facts = h.posts.filter((p) => p.type === 'e2e-facts').at(-1) as Record<string, any>;
+  const drawn = model.cards.filter((c) => c.assignee !== undefined && (facts.cardIds as string[]).includes(c.id));
+  assert.deepEqual(facts.assignees, drawn.map((c) => ({ id: c.id, initials: c.assignee!.initials, name: c.assignee!.name })));
+  assert.ok((facts.assignees as Array<{ id: string }>).some((a) => a.id === 'plan:90-01'), 'the assigned plan shows its chip');
+});
+
 test('a title with markup and icon syntax is drawn as that exact text and creates no element', async () => {
   const world = await standard();
   const hostile = '<img src=x onerror=alert(1)> $(alert) <b>bold</b>';
