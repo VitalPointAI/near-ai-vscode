@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62.1-02-PLAN.md
-last_updated: "2026-11-04T23:13:44.574Z"
+stopped_at: Completed 62.1-03-PLAN.md
+last_updated: "2026-11-04T23:43:53.408Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 7fd1494cd59060c0d4d1d19798ac55cd7c7b1af4
+state_head: 0a6f9feea5f2a284e85a47b0f1a425c78292fe7f
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 72
+  completed_plans: 73
   percent: 11
 ---
 
@@ -126,6 +126,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 61 P31 | 58min | 3 tasks | 6 files |
 | Phase 62.1 P01 | 29min | 3 tasks | 7 files |
 | Phase 62.1 P02 | 13min | 3 tasks | 6 files |
+| Phase 62.1 P03 | 26min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -291,6 +292,10 @@ Recent decisions affecting current work:
 - [Phase 62.1]: 62.1-02: Now counts and percent cover the whole frontier band; all done stands after the last step of the last band with cards with the overall exact count
 - [Phase 62.1]: 62.1-02: the dot name keeps the card's a11yLabel and says the assignee once; the viewer's own sentence is replaced only right after cardLabelHead, never inside a title
 - [Phase 62.1]: 62.1-02: Waits for lists waitsFor then missing ids (3 then and k more), a whole phase counted as one; phase links carry the board's phase label
+- [Phase 62.1]: 62.1-03: a dot's cx and cy are its button box centre, so the Now line half a step pitch before the Now step's centre is the middle of the gap between steps
+- [Phase 62.1]: 62.1-03: horizontal uses one rail height, Now row and axis for every drawn band, so the axis is one straight line
+- [Phase 62.1]: 62.1-03: the band holding the Now marker never folds; drawn horizontal bands are at least 368 px
+- [Phase 62.1]: 62.1-03: in Timeline every milestone is shown (Milestone choice is Columns only) and an empty board keeps row 2 for the View switch
 
 ### Pending Todos
 
@@ -312,8 +317,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T23:13:44.143Z
-Stopped at: Completed 62.1-02-PLAN.md
+Last session: 2026-11-04T23:43:52.980Z
+Stopped at: Completed 62.1-03-PLAN.md
 Resume file: None
 
 ## Notes
