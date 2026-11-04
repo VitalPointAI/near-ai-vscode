@@ -205,6 +205,18 @@ test('pressKey sends ArrowDown with its code and key code and no text (62-23: th
   cdp.close();
 });
 
+test('pressKey sends the letters a and u with their text (62-24: Assign to... and Unassign chosen by their first letter in Move to...)', async () => {
+  const { cdp, socket } = await session();
+  socket.autoReply();
+  await pressKey(cdp, 'a');
+  await pressKey(cdp, 'u');
+  assert.deepEqual(socket.sent.map((m) => [m.params!.type, m.params!.key, m.params!.code, m.params!.windowsVirtualKeyCode, m.params!.text]), [
+    ['keyDown', 'a', 'KeyA', 65, 'a'], ['keyUp', 'a', 'KeyA', 65, undefined],
+    ['keyDown', 'u', 'KeyU', 85, 'u'], ['keyUp', 'u', 'KeyU', 85, undefined]
+  ]);
+  cdp.close();
+});
+
 test('the client drives only the Input domain: it never makes or dispatches DOM events, and it imports only Node built-ins', () => {
   const source = readFileSync(path.resolve(__dirname, '..', '..', 'src', 'test', 'e2e', 'cdp.ts'), 'utf8');
   assert.equal(/new DragEvent|dispatchEvent/.test(source), false);

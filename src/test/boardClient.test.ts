@@ -148,6 +148,38 @@ test('the e2e probe lets go of a card\'s focus as a click on empty space would, 
   assert.deepEqual(last().errors, [], 'a blur with nothing focused throws nothing');
 });
 
+test('the e2e probe presses a filter chip as a person\'s click would and reports the filters and the open menu\'s item texts (62-24)', async () => {
+  const world = await standard();
+  const model = modelOf(world, world.owner.memberId);
+  const h = createBoardHarness({ width: 1400 });
+  h.document.body.setAttribute('data-e2e', '1');
+  h.load(['board.js', 'menu.js']);
+  h.deliver({ type: 'state', model });
+  const last = (): Record<string, any> => h.posts.filter((p) => p.type === 'e2e-facts').at(-1) as Record<string, any>;
+  h.deliver({ type: 'e2e-probe', id: 1, action: 'facts' });
+  assert.deepEqual(last().filters, { mine: false, ready: false, blocked: false }, 'no filter at first');
+  assert.deepEqual(last().menuTexts, [], 'no menu, no item texts');
+  h.deliver({ type: 'e2e-probe', id: 2, action: 'filter', filter: 'mine' });
+  assert.equal(last().id, 2);
+  assert.deepEqual(last().filters, { mine: true, ready: false, blocked: false }, 'Mine is pressed');
+  const shown = last().cardIds as string[];
+  assert.ok(shown.length > 0, 'the owner has cards of their own');
+  assert.ok(shown.every((id) => model.cards.find((c) => c.id === id)?.mine === true), 'only the owner\'s own cards are drawn');
+  assert.ok(shown.length < model.cards.filter((c) => c.milestoneId === undefined || c.milestoneId === model.selectedMilestone).length, 'other cards are left out');
+  h.deliver({ type: 'e2e-probe', id: 3, action: 'filter', filter: 'mine' });
+  assert.deepEqual(last().filters, { mine: false, ready: false, blocked: false }, 'a second press lets go of Mine');
+  h.deliver({ type: 'e2e-probe', id: 4, action: 'filter', filter: '<img src=x>' });
+  assert.deepEqual(last().filters, { mine: false, ready: false, blocked: false }, 'an unknown filter presses nothing');
+  assert.deepEqual(last().errors, []);
+  h.deliver({ type: 'e2e-probe', id: 5, action: 'focus', itemId: 'plan:90-01' });
+  h.deliver({ type: 'e2e-probe', id: 6, action: 'key', key: 'm' });
+  assert.equal(last().menuOpen, true, 'M opens Move to...');
+  const texts = last().menuTexts as string[];
+  assert.equal(texts.length, last().menuItems, 'one text per menu item');
+  const c = model.cards.find((x) => x.id === 'plan:90-01')!;
+  assert.deepEqual(texts.slice(0, c.moves.length), c.moves.map((m) => m.label), 'the moves first, in order');
+});
+
 test('a title with markup and icon syntax is drawn as that exact text and creates no element', async () => {
   const world = await standard();
   const hostile = '<img src=x onerror=alert(1)> $(alert) <b>bold</b>';
