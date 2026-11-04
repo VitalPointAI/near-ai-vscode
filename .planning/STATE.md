@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-17-PLAN.md
-last_updated: "2026-11-04T01:43:07.322Z"
+stopped_at: Completed 62-18-PLAN.md
+last_updated: "2026-11-04T02:02:55.152Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 4e66b8a4bc1cc22e933ad7901ebbdecb5e6a3430
+state_head: bc0e7432d1ab1fc12b1d3859f31b3d7f89ad4b37
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 62
-  completed_plans: 54
+  completed_plans: 55
   percent: 13
 ---
 
@@ -108,6 +108,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P16 | 18 min | 3 tasks | 8 files |
 | Phase 61 P25 | 9 min | 3 tasks | 9 files |
 | Phase 62 P17 | 27min | 3 tasks | 11 files |
+| Phase 62 P18 | 18min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -230,6 +231,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-17: The Team Board is one editor tab opened on purpose; no sidebar view, and nothing opens when Team Mode turns on or a session starts (owner decision 2026-11-03, amends D-15 and AD-22)
 - [Phase 62]: 62-17: The board page cannot ask the host to open the board; the open-board message type is gone from the parser and the controller (T-62-57)
 - [Phase 62]: 62-17: Owner amendments of 2026-11-03 are appended to 62-CONTEXT.md and 62-UI-SPEC.md, each naming the plan that builds it
+- [Phase 62]: 62-18: The sidebar board summary (ready, blocked, mine) is built from buildBoardModel, so it always matches the board; TeamModeHandle.boardSummary() is undefined with no session, before the board module loads, or for a removed member (G-62-1)
+- [Phase 62]: 62-18: The board domain module loads with the board view only after a session starts; a project without a team loads neither
+- [Phase 62]: 62-18: The intermittent teamSession paused-line failure was a product bug: git's reason carries the connect time, which moved the dedupe key; sameFailureKey drops time and byte figures from the key only
 
 ### Pending Todos
 
@@ -251,8 +255,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T01:43:07.017Z
-Stopped at: Completed 62-17-PLAN.md
+Last session: 2026-11-04T02:02:54.846Z
+Stopped at: Completed 62-18-PLAN.md
 Resume file: None
 
 ## Notes
