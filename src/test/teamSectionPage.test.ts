@@ -261,6 +261,51 @@ test('during a conversation the empty chat welcome is hidden, so the line is nev
   assert.equal(h.posts[0].error, 'hidden');
 });
 
+// The real-window invite e2e failed in about half of the full runs (debug session quiet-line-join-hidden): the two test windows share one hidden screen,
+// one covers the other, and Chromium then reports the covered window's page as not visible (document.hidden). The walk up from the line reached the
+// Document, whose hidden is that page visibility, not a hidden element, so the drawn line's Join a team was refused as 'hidden' for the whole run.
+test('a page that is not visible (its window covered by another) still has a usable quiet line: only a hidden element puts the line away', () => {
+  const h = sidebar();
+  h.deliver({ type: 'team-state', model: justMe() });
+  h.setVisible(false);
+  assert.equal(h.document.hidden, true, 'the page reports itself not visible');
+  h.deliver({ type: 'team-e2e', id: 8 });
+  assert.deepEqual(h.posts[0]?.soloLine?.actions.map((action: { id: string }) => action.id), ['invite', 'join'], 'the facts report the line');
+  h.posts.length = 0;
+  h.deliver({ type: 'team-e2e', id: 9, click: 'join' });
+  assert.deepEqual(h.posts.map((post) => [post.type, post.action ?? post.error]), [['team-action', 'join'], ['team-e2e-facts', undefined]], 'the join is clicked');
+  // Boundary neighbour: a page that is not visible during a conversation still refuses, because the welcome itself is hidden.
+  const welcome = h.$('#welcome');
+  assert.ok(welcome !== null);
+  welcome.hidden = true;
+  h.posts.length = 0;
+  h.deliver({ type: 'team-e2e', id: 10, click: 'join' });
+  assert.deepEqual(h.posts.map((post) => [post.type, post.error]), [['team-e2e-facts', 'hidden']], 'a line in a hidden welcome is not clicked');
+  // And the page becoming visible again changes nothing about the line itself.
+  welcome.hidden = false;
+  h.setVisible(true);
+  h.posts.length = 0;
+  h.deliver({ type: 'team-e2e', id: 11, click: 'invite' });
+  assert.deepEqual(h.posts.map((post) => [post.type, post.action ?? post.error]), [['team-action', 'invite'], ['team-e2e-facts', undefined]]);
+});
+
+test('the facts report the quiet line exactly when a click on it is accepted: no line while a conversation hides the welcome, the line again once it is back', () => {
+  const h = sidebar();
+  h.deliver({ type: 'team-state', model: justMe() });
+  const welcome = h.$('#welcome');
+  assert.ok(welcome !== null);
+  welcome.hidden = true;
+  h.deliver({ type: 'team-e2e', id: 12 });
+  const during = h.posts[0];
+  assert.equal(during?.soloLine, null, 'a line nobody can see is not reported');
+  assert.equal(soloLines(h).length, 1, 'it is still drawn, ready for the empty chat');
+  welcome.hidden = false;
+  h.posts.length = 0;
+  h.deliver({ type: 'team-e2e', id: 13 });
+  const after = h.posts[0];
+  assert.deepEqual(after?.soloLine?.actions.map((action: { id: string }) => action.id), ['invite', 'join'], 'reported again once the welcome is back');
+});
+
 test('with the profile not working neither the section nor the line is drawn; the line appears once it works and goes when it stops', () => {
   const h = bare();
   h.deliver({ type: 'team-state', model: justMe() });
