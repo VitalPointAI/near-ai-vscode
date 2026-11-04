@@ -36,15 +36,23 @@ class Observer {
 export async function run(): Promise<void> {
   const scenarios = (process.env.NEAR_AI_E2E_SCENARIO ?? 'project').split(',');
   let failed = 0;
-  for (const scenario of scenarios) {
-    const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : scenario === 'team' ? teamTests()
-      : scenario === 'team-lead' ? teamLeadTests() : scenario === 'team-join' ? teamJoinTests() : scenario === 'team-confirm' ? teamConfirmTests() : projectTests();
-    for (const [name, body] of tests) {
-      try { await body(); console.log(`✔ [${scenario}] ${name}`); } catch (error) { failed += 1; console.error(`✖ [${scenario}] ${name}\n`, error); }
+  try {
+    for (const scenario of scenarios) {
+      const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : scenario === 'team' ? teamTests()
+        : scenario === 'team-lead' ? teamLeadTests() : scenario === 'team-join' ? teamJoinTests() : scenario === 'team-confirm' ? teamConfirmTests() : projectTests();
+      for (const [name, body] of tests) {
+        try { await body(); console.log(`✔ [${scenario}] ${name}`); } catch (error) { failed += 1; console.error(`✖ [${scenario}] ${name}\n`, error); }
+      }
     }
+  } finally {
+    // The fake model servers a window's scenarios started (connectProfile) close after that window's last test.
+    await Promise.all(windowServers.splice(0).map((server) => new Promise<void>((resolve) => { server.close(() => { resolve(); }); })));
   }
   if (failed) throw new Error(`${failed} extension-host test(s) failed in the ${scenarios.join(' and ')} scenario.`);
 }
+
+// Fake model servers started for this window, closed once its last scenario has run.
+const windowServers: Server[] = [];
 
 function projectTests(): Array<[string, () => Promise<void>]> {
   const observer = new Observer();
@@ -326,7 +334,8 @@ function teamTests(): Array<[string, () => Promise<void>]> {
 // by a script through promptTap and recorded; the invite text passes from the lead's window to the invitee's in a handoff folder.
 
 type TeamActionName = 'turn-on' | 'join' | 'share' | 'invite' | 'members' | 'board' | 'link' | 'check';
-interface SectionFacts { id: number; heading: string; status: string; actions: Array<{ id: TeamActionName; label: string; badge?: string }>; error?: string }
+// hidden and profile (61-25): whether the whole section is hidden, and the readiness state the page last read from profile-status (null before any).
+interface SectionFacts { id: number; heading: string; status: string; actions: Array<{ id: TeamActionName; label: string; badge?: string }>; hidden?: boolean; profile?: string | null; error?: string }
 type PromptRecordView = import('../../services/team/teamPrompts').PromptRecord;
 type PromptStepView = import('../../services/team/teamPrompts').PromptStep;
 
@@ -452,7 +461,30 @@ function inviteKit() {
     return api;
   }
 
-  return { load, prompts, handoff, remote, facts, click, finished, assertPlain, readLog, memberNamed, remoteTeamFile, activate };
+  // 61-25: the Team section shows only once a NEAR AI profile works. This connects a local profile against a fake model server (the project
+  // scenario's way), checks that it works, and refreshes the sidebar so the page reads the new profile-status. The profile files land under
+  // .planning/.near-ai, which these projects ignore, so a copy still counts as clean. The server closes after the window's last test.
+  async function connectProfile(api: NearAiTestApi): Promise<void> {
+    const server = await fakeModelServer();
+    windowServers.push(server);
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+    const { ProfileStore } = load<typeof import('../../services/profileStore')>('services/profileStore');
+    const { clearProviderCache } = load<typeof import('../../services/providerCache')>('services/providerCache');
+    const profile = await new ProfileStore(workspace, api.auth).configure({ profileId: 'profile-e2e-local', displayName: 'E2E (local)', organization: 'E2E', baseUrl: url, authMode: 'apiKey', provider: 'local' }, '');
+    assert.equal(profile.validation.status, 'valid', profile.validation.error);
+    clearProviderCache();
+    await api.sidebar.refresh();
+  }
+
+  // Right after activation, before any profile: the section is hidden and the page knows there is no profile to use.
+  async function assertHiddenWithoutProfile(): Promise<void> {
+    const hidden = await facts('nothing before a profile works', (seen) => seen.hidden === true && seen.profile === 'connect');
+    assert.deepEqual(hidden.actions, [], 'no team button can be seen');
+    const refused = await probe('turn-on');
+    assert.equal(refused.error, 'hidden', 'a hidden button cannot be clicked');
+  }
+
+  return { load, prompts, handoff, remote, facts, click, finished, assertPlain, readLog, memberNamed, remoteTeamFile, activate, connectProfile, assertHiddenWithoutProfile };
 }
 
 const ids = (facts: SectionFacts): TeamActionName[] => facts.actions.map((action) => action.id);
@@ -461,6 +493,15 @@ function teamLeadTests(): Array<[string, () => Promise<void>]> {
   const kit = inviteKit();
   let api: NearAiTestApi;
   return [
+    ['before a NEAR AI profile works the Team section is hidden; once a local profile is connected it shows Turn on Team Mode without a reload', async () => {
+      api = await kit.activate();
+      await kit.assertHiddenWithoutProfile();
+      await kit.connectProfile(api);
+      const shown = await kit.facts('the section once the profile works', (facts) => facts.hidden === false && facts.actions.length > 0);
+      assert.equal(shown.profile, 'ready');
+      assert.equal(shown.actions[0]?.id, 'turn-on', 'Turn on Team Mode is the primary action');
+      assert.ok(ids(shown).includes('join'), 'Join a team is offered');
+    }],
     ['the lead\'s project has no team yet, and the Team section offers Turn on Team Mode first and Join a team', async () => {
       api = await kit.activate();
       assert.equal(await api.team.handle.ready, 'solo', 'no team yet');
@@ -539,6 +580,14 @@ function teamJoinTests(): Array<[string, () => Promise<void>]> {
   let bundle = '';
   const head = (cwd: string, ref: string): string => execFileSync('git', ['-C', cwd, 'rev-parse', ref], { encoding: 'utf8' }).trim();
   return [
+    ['before a NEAR AI profile works the invitee\'s Team section is hidden; once a local profile is connected it shows Join a team without a reload', async () => {
+      api = await kit.activate();
+      await kit.assertHiddenWithoutProfile();
+      await kit.connectProfile(api);
+      const shown = await kit.facts('the section once the profile works', (facts) => facts.hidden === false && ids(facts).includes('join'));
+      assert.equal(shown.profile, 'ready');
+      assert.equal(execFileSync('git', ['-C', workspace, 'status', '--porcelain'], { encoding: 'utf8' }).trim(), '', 'the profile files are ignored, so the copy is still clean');
+    }],
     ['the invitee\'s copy has no team yet, and the Team section offers Join a team', async () => {
       api = await kit.activate();
       assert.equal(await api.team.handle.ready, 'solo', 'no team.json in this copy yet');
