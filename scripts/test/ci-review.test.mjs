@@ -454,5 +454,6 @@ test('a diff over the cap keeps whole files, names the rest, and says so in the 
   const { prompt, omitted } = buildReviewPrompt({ number: 1, pr: { title: 't', body: '', headRefOid: head }, checks: '', files: '', diff, maxDiffBytes: 250 });
   assert.deepEqual(omitted, ['src/b.ts', 'src/c.ts']);
   assert.match(prompt, /## Not included[\s\S]*- src\/b\.ts\n- src\/c\.ts/);
-  assert.ok(MAX_DIFF_BYTES >= 100_000);
+  // A 2,400-line PR (#12, about 200 KB of diff) must fit whole.
+  assert.ok(MAX_DIFF_BYTES >= 1_000_000);
 });

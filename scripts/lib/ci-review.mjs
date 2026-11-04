@@ -3,8 +3,13 @@
 // and the tests, so there is one copy of each rule.
 import { randomBytes } from 'node:crypto';
 
-/** The diff sent to the model is capped, so a large PR fails clearly instead of overflowing it. */
-export const MAX_DIFF_BYTES = 200_000;
+/**
+ * The diff sent to the model is capped, so a very large PR is flagged clearly instead of overflowing
+ * the model. 1 MB is about 250,000 tokens, a quarter of DeepSeek V4.1's 1,048,576-token context,
+ * which leaves room for the prompt and the thinking. A file that does not fit sends the PR to the
+ * owner (ci-review-run.mjs), so it is never merged on a partial review.
+ */
+export const MAX_DIFF_BYTES = 1_000_000;
 
 /**
  * Wraps untrusted text (anything the PR author controls) in a block whose delimiters carry a
