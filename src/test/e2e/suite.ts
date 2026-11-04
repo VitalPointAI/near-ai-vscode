@@ -349,7 +349,7 @@ function teamTests(): Array<[string, () => Promise<void>]> {
 // team-join. The online home is a local bare folder behind a test-only insteadOf rule on a public-looking address (run.ts). Every prompt is answered
 // by a script through promptTap and recorded; the invite text passes from the lead's window to the invitee's in a handoff folder.
 
-type TeamActionName = 'invite' | 'join' | 'solo' | 'share' | 'members' | 'board' | 'link' | 'check';
+type TeamActionName = 'invite' | 'join' | 'ask' | 'solo' | 'share' | 'members' | 'board' | 'link' | 'check';
 // hidden and profile (61-25): whether the whole section is hidden, and the readiness state the page last read from profile-status (null before any).
 // soloLine (61-26): the quiet line on the empty chat after Just me for now, or null; board: the board line while it is drawn.
 interface SectionFacts {
@@ -633,7 +633,8 @@ function teamJoinTests(): Array<[string, () => Promise<void>]> {
       await kit.click('join', [
         { match: 'Paste the invite your lead sent you', answer: bundle },
         { match: 'Your name as teammates will see it', answer: 'E2E Joiner' },
-        { match: 'Paste your own NEAR AI API key', answer: '' }
+        // 61-30: a team without an organization asks once how this person gets a working profile; this window already has one.
+        { match: 'This team has no organization linked, so each person uses their own key', answer: 'Later' }
       ]);
       const joined = await kit.finished('the joined message', (record) => record.text.startsWith('You joined E2E team'));
       assert.equal(joined.text, 'You joined E2E team as an observer. Your lead confirms you as a developer.');
