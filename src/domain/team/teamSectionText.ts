@@ -28,6 +28,15 @@ export const TEAM_ACTION_HINTS = Object.freeze({
   check: 'Check the team record and try to reach the team again.'
 });
 
+// The two links of the quiet empty-chat line after Just me for now (61-26): declared, filled in by the GREEN step.
+export const TEAM_SOLO_LINE_LABELS: Readonly<Record<string, string>> = Object.freeze({});
+
+/** Declared only (61-26 RED). */
+export function onlyYouStatus(_pendingInvites: number): string { return ''; }
+
+/** Declared only (61-26 RED). */
+export function peopleStatus(_name: string, _otherMembers: number, _waiting: number): string { return ''; }
+
 // The setup step titles (SETUP-01 can register these later).
 export const TEAM_SETUP_TITLES = Object.freeze({
   'team.turn-on': 'Turn on Team Mode',
@@ -41,7 +50,8 @@ export const TEAM_STATUS = Object.freeze({
   noTeam: 'Work on this project with other people. Turn on Team Mode to start a team, or join one with an invite.',
   removed: 'You were removed from this team. Ask the team owner or a lead if you need to join again.',
   offline: 'The team cannot be reached right now.',
-  paused: 'Team updates are paused for now.'
+  paused: 'Team updates are paused for now.',
+  justMe: ''
 });
 
 function plural(count: number, one: string, many: string): string {

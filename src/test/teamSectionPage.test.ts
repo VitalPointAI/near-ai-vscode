@@ -28,7 +28,18 @@ function bare(): BoardHarness {
   const h = createBoardHarness({ scripts: 'chat', teamSection: true, nearChat: true });
   const input = h.document.createElement('textarea');
   input.id = 'input';
-  h.document.body.append(input);
+  // The empty chat's welcome, inside the transcript, as panelView.ts draws it; chat.js hides it during a conversation.
+  const transcript = h.document.createElement('main');
+  transcript.id = 'transcript';
+  const welcome = h.document.createElement('section');
+  welcome.id = 'welcome';
+  const title = h.document.createElement('h2');
+  title.textContent = 'Private AI for this project';
+  const intro = h.document.createElement('p');
+  intro.textContent = 'Ask anything about your code.';
+  welcome.append(title, intro);
+  transcript.append(welcome);
+  h.document.body.append(transcript, input);
   h.load(['readiness.js', 'team.js']);
   return h;
 }
@@ -56,36 +67,42 @@ function model(input: TeamSectionInput): TeamSectionModel {
 const buttons = (h: BoardHarness): FakeNode[] => h.$$('#team button');
 const section = (h: BoardHarness): FakeNode => { const node = h.$('#team'); assert.ok(node !== null); return node; };
 
-test('tracer: with no team the page draws Turn on Team Mode and Join a team as buttons, and a click posts one fixed team-action', () => {
+test('tracer: with no team the page draws Invite someone, Join a team and Just me for now, and Just me for now posts the solo action', () => {
   const h = sidebar();
   const noTeam = model({ folderOpen: true });
   h.deliver({ type: 'team-state', model: noTeam });
   assert.equal(section(h).hidden, false, 'the section is shown');
-  assert.ok(section(h).textContent.includes(noTeam.status), 'the status line is drawn');
+  assert.equal(h.$('#team .team-heading')?.textContent, 'Working with your agents');
+  assert.equal(h.$('#team .team-heading')?.hidden, false, 'the heading is shown');
+  assert.ok(section(h).textContent.includes('Want people to work with you too?'), 'the status line is drawn');
   const drawn = buttons(h);
-  assert.deepEqual(drawn.map((button) => button.textContent), ['Turn on Team Mode', 'Join a team']);
-  assert.deepEqual(drawn.map((button) => button.getAttribute('data-action')), ['turn-on', 'join']);
+  assert.deepEqual(drawn.map((button) => button.textContent), ['Invite someone', 'Join a team', 'Just me for now']);
+  assert.deepEqual(drawn.map((button) => button.getAttribute('data-action')), ['invite', 'join', 'solo']);
   assert.ok(drawn.every((button) => button.getAttribute('type') === 'button'));
+  assert.ok(!section(h).textContent.includes('Team Mode'), 'the old feature name is not on screen');
+  h.click(drawn[2]);
+  assert.deepEqual(h.posts, [{ type: 'team-action', action: 'solo' }]);
+  h.posts.length = 0;
   h.click(drawn[0]);
-  assert.deepEqual(h.posts, [{ type: 'team-action', action: 'turn-on' }]);
+  assert.deepEqual(h.posts, [{ type: 'team-action', action: 'invite' }]);
 });
 
-test('the model gives no team a Team heading, a status inviting the person to work with others, and turn-on as the one primary action', () => {
+test('the model gives no team the working-with-your-agents heading, the invite question and Invite someone as the one primary action', () => {
   const noTeam = model({ folderOpen: true });
-  assert.equal(noTeam.heading, 'Team');
-  assert.match(noTeam.status, /other people/);
-  assert.equal(noTeam.compact, true);
-  assert.deepEqual(noTeam.actions.map((action) => [action.id, action.primary]), [['turn-on', true], ['join', false]]);
+  assert.equal(noTeam.heading, 'Working with your agents');
+  assert.equal(noTeam.status, 'Want people to work with you too?');
+  assert.equal(noTeam.compact, false);
+  assert.deepEqual(noTeam.actions.map((action) => [action.id, action.primary]), [['invite', true], ['join', false], ['solo', false]]);
   assert.equal(teamSectionModel({ folderOpen: false }), undefined, 'no folder, no section');
 });
 
-test('an owner whose team setup is shared gets Invite someone as the only primary action, then Members, Open board and Link your organization', () => {
+test('an owner nobody has joined yet gets Invite someone as the only primary action, then Members and Open board', () => {
   const owner = model({ folderOpen: true, team: team() });
-  assert.deepEqual(owner.actions.map((action) => action.id), ['invite', 'members', 'board', 'link']);
+  assert.deepEqual(owner.actions.map((action) => action.id), ['invite', 'members', 'board']);
   assert.deepEqual(owner.actions.filter((action) => action.primary).map((action) => action.id), ['invite']);
   const h = sidebar();
   h.deliver({ type: 'team-state', model: owner });
-  assert.deepEqual(buttons(h).map((button) => button.textContent), ['Invite someone', 'Members', 'Open board', 'Link your organization']);
+  assert.deepEqual(buttons(h).map((button) => button.textContent), ['Invite someone', 'Members', 'Open board']);
   const primary = buttons(h)[0];
   assert.ok(primary.classList.contains('primary'), 'the primary button is marked');
   const describedBy = primary.getAttribute('aria-describedby');
@@ -126,20 +143,20 @@ test('tracer: no Team section before a profile works; it appears by itself once 
   assert.equal(section(h).hidden, true, 'working profiles but none chosen keeps it hidden');
   h.deliver(READY);
   assert.equal(section(h).hidden, false, 'shown without another team-state');
-  assert.deepEqual(buttons(h).map((button) => button.textContent), ['Turn on Team Mode', 'Join a team']);
+  assert.deepEqual(buttons(h).map((button) => button.textContent), ['Invite someone', 'Join a team', 'Just me for now']);
   h.deliver({ type: 'profile-status', value: profileValue('stale') });
   assert.equal(section(h).hidden, true, 'a profile that needs checking hides it again');
   h.deliver({ type: 'profile-status', value: profileValue('valid') });
   assert.equal(section(h).hidden, false);
   h.click(buttons(h)[0]);
-  assert.deepEqual(h.posts, [{ type: 'team-action', action: 'turn-on' }]);
+  assert.deepEqual(h.posts, [{ type: 'team-action', action: 'invite' }]);
 });
 
 test('when the section hides with focus on one of its buttons, focus moves to the message box; focus elsewhere is left alone', () => {
   const h = sidebar();
   h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
   buttons(h)[0].focus();
-  assert.equal(h.focused().getAttribute('data-action'), 'turn-on');
+  assert.equal(h.focused().getAttribute('data-action'), 'invite');
   h.deliver({ type: 'profile-status', value: profileValue('pending') });
   assert.equal(section(h).hidden, true);
   assert.equal(h.focused().id, 'input', 'focus is in the message box');
@@ -159,7 +176,7 @@ test('a team-state that arrives while the profile does not work is kept and draw
   assert.equal(section(h).hidden, true);
   h.deliver(READY);
   assert.equal(section(h).hidden, false);
-  assert.deepEqual(buttons(h).map((button) => button.getAttribute('data-action')), ['invite', 'members', 'board', 'link']);
+  assert.deepEqual(buttons(h).map((button) => button.getAttribute('data-action')), ['invite', 'members', 'board']);
   h.deliver({ type: 'team-state', model: null });
   h.deliver(READY);
   assert.equal(section(h).hidden, true, 'a null model stays hidden even with a working profile');
@@ -169,11 +186,11 @@ test('while hidden the probe reports hidden and the profile state, and a click p
   const h = bare();
   h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
   h.deliver({ type: 'team-e2e', id: 1 });
-  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 1, heading: '', status: '', actions: [], hidden: true, profile: null }], 'nothing known yet');
+  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 1, heading: '', status: '', actions: [], hidden: true, profile: null, soloLine: null }], 'nothing known yet');
   h.posts.length = 0;
   h.deliver({ type: 'profile-status', value: { projectScope: 'No workspace', activeProfileId: undefined, configured: false, profiles: [] } });
-  h.deliver({ type: 'team-e2e', id: 2, click: 'turn-on' });
-  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 2, heading: '', status: '', actions: [], hidden: true, profile: 'connect', error: 'hidden' }]);
+  h.deliver({ type: 'team-e2e', id: 2, click: 'invite' });
+  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 2, heading: '', status: '', actions: [], hidden: true, profile: 'connect', soloLine: null, error: 'hidden' }]);
   h.posts.length = 0;
   h.deliver(READY);
   h.deliver({ type: 'team-e2e', id: 3 });
@@ -181,7 +198,8 @@ test('while hidden the probe reports hidden and the profile state, and a click p
   const shown: Record<string, any> = h.posts[0];
   assert.equal(shown.hidden, false);
   assert.equal(shown.profile, 'ready');
-  assert.deepEqual(shown.actions.map((action: { id: string }) => action.id), ['turn-on', 'join']);
+  assert.deepEqual(shown.actions.map((action: { id: string }) => action.id), ['invite', 'join', 'solo']);
+  assert.equal(shown.soloLine, null);
 });
 
 test('without the readiness module the section counts as not ready and stays hidden', () => {
@@ -196,10 +214,100 @@ test('team.js reads readiness only through window.nearReadiness', () => {
   assert.ok(readFileSync(path.join(ROOT, 'media', 'chat', 'team.js'), 'utf8').includes('window.nearReadiness'));
 });
 
+// ---- Just me for now: the quiet empty-chat line (61-26, G-61-8) ---------------------------------------------------------------------------------
+
+const soloLines = (h: BoardHarness): FakeNode[] => h.$$('.team-solo');
+const justMe = (): TeamSectionModel => model({ folderOpen: true, justMe: true });
+
+test('an empty-chat-line model hides the section and draws one quiet line inside the empty chat, whose two links post invite and join', () => {
+  const h = sidebar();
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  assert.equal(section(h).hidden, false);
+  h.deliver({ type: 'team-state', model: justMe() });
+  assert.equal(section(h).hidden, true, 'the section is put away');
+  assert.equal(buttons(h).length, 0, 'no section button can be clicked');
+  const lines = soloLines(h);
+  assert.equal(lines.length, 1, 'one line');
+  const welcome = h.$('#welcome');
+  assert.ok(welcome !== null && welcome.contains(lines[0]), 'the line is inside the empty chat welcome');
+  assert.equal(lines[0].localName, 'p');
+  assert.ok(lines[0].textContent.includes('Working solo with your agents. Invite people any time.'));
+  const links = h.$$('.team-solo button');
+  assert.deepEqual(links.map((link) => link.textContent), ['Invite people', 'Join a team']);
+  assert.ok(links.every((link) => link.getAttribute('type') === 'button' && link.classList.contains('link')), 'link-styled buttons');
+  h.click(links[0]);
+  h.click(links[1]);
+  assert.deepEqual(h.posts, [{ type: 'team-action', action: 'invite' }, { type: 'team-action', action: 'join' }]);
+  h.deliver({ type: 'team-state', model: justMe() });
+  assert.equal(soloLines(h).length, 1, 'drawn again in place, never twice');
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true, team: team() }) });
+  assert.equal(soloLines(h).length, 0, 'a section model removes the line');
+  assert.equal(section(h).hidden, false);
+});
+
+test('during a conversation the empty chat welcome is hidden, so the line is never shown there', () => {
+  const h = sidebar();
+  h.deliver({ type: 'team-state', model: justMe() });
+  const welcome = h.$('#welcome');
+  assert.ok(welcome !== null);
+  welcome.hidden = true;
+  const line = soloLines(h)[0];
+  assert.ok(line !== undefined);
+  let hiddenAncestor = false;
+  for (let node: FakeNode | null = line; node !== null; node = node.parentNode) if (node.hidden) hiddenAncestor = true;
+  assert.equal(hiddenAncestor, true, 'the line sits inside a hidden ancestor');
+  h.deliver({ type: 'team-e2e', id: 4, click: 'join' });
+  assert.deepEqual(h.posts.map((post) => post.type), ['team-e2e-facts'], 'a hidden line is not clicked');
+  assert.equal(h.posts[0].error, 'hidden');
+});
+
+test('with the profile not working neither the section nor the line is drawn; the line appears once it works and goes when it stops', () => {
+  const h = bare();
+  h.deliver({ type: 'team-state', model: justMe() });
+  assert.equal(soloLines(h).length, 0, 'no line before a profile works');
+  assert.equal(section(h).hidden, true);
+  h.deliver(READY);
+  assert.equal(soloLines(h).length, 1, 'shown without another team-state');
+  assert.equal(section(h).hidden, true);
+  h.deliver({ type: 'profile-status', value: profileValue('stale') });
+  assert.equal(soloLines(h).length, 0, 'removed when the profile stops working');
+  h.deliver({ type: 'team-state', model: null });
+  h.deliver(READY);
+  assert.equal(soloLines(h).length, 0, 'a null model draws no line');
+});
+
+test('the probe reports the line and a click probe reaches an action in it', () => {
+  const h = sidebar();
+  h.deliver({ type: 'team-state', model: justMe() });
+  h.deliver({ type: 'team-e2e', id: 5 });
+  assert.deepEqual(h.posts, [{
+    type: 'team-e2e-facts', id: 5, heading: '', status: '', actions: [], hidden: true, profile: 'ready',
+    soloLine: { text: 'Working solo with your agents. Invite people any time.', actions: [{ id: 'invite', label: 'Invite people' }, { id: 'join', label: 'Join a team' }] }
+  }]);
+  h.posts.length = 0;
+  h.deliver({ type: 'team-e2e', id: 6, click: 'invite' });
+  assert.equal(h.posts.length, 2);
+  const posted: Array<Record<string, unknown>> = h.posts;
+  assert.deepEqual(posted[0], { type: 'team-action', action: 'invite' });
+  assert.equal(posted[1]?.error, undefined);
+  posted.length = 0;
+  h.deliver({ type: 'team-e2e', id: 7, click: 'members' });
+  assert.deepEqual(posted.map((post) => [post.type, post.error]), [['team-e2e-facts', 'hidden']], 'an action that is in neither is refused');
+});
+
+test('without an empty chat welcome on the page the line is simply not drawn', () => {
+  const h = createBoardHarness({ scripts: 'chat', teamSection: true, nearChat: true });
+  h.load(['readiness.js', 'team.js']);
+  h.deliver(READY);
+  h.deliver({ type: 'team-state', model: justMe() });
+  assert.equal(soloLines(h).length, 0);
+  assert.equal(section(h).hidden, true);
+});
+
 // ---- page details (Task 3) -------------------------------------------------------------------------------------------------------------------
 
 function leadWaiting(over: Partial<NonNullable<TeamSectionInput['team']>> = {}): TeamSectionModel {
-  return model({ folderOpen: true, team: team({ myRole: 'lead', waiting: 2, ...over }) });
+  return model({ folderOpen: true, team: team({ myRole: 'lead', waiting: 2, otherMembers: 2, ...over }) });
 }
 
 const named = (h: BoardHarness, id: string): FakeNode => { const node = h.$(`#team button[data-action="${id}"]`); assert.ok(node !== null, `${id} is drawn`); return node; };
@@ -213,12 +321,12 @@ test('Members with a waiting count shows the badge in its own element and says i
   assert.equal(badge.textContent, '2 waiting');
   assert.ok(members.textContent.includes('Members') && members.textContent.includes('2 waiting'));
   assert.equal(members.getAttribute('aria-label'), 'Members, 2 waiting');
-  assert.equal(named(h, 'invite').getAttribute('aria-label'), null, 'a button without a badge is named by its text');
+  assert.equal(named(h, 'board').getAttribute('aria-label'), null, 'a button without a badge is named by its text');
   const drawn = buttons(h);
-  assert.equal(drawn[0].getAttribute('data-action'), 'invite');
+  assert.equal(drawn[0].getAttribute('data-action'), 'members');
   assert.ok(drawn[0].classList.contains('primary'));
   assert.ok(drawn.slice(1).every((button) => !button.classList.contains('primary')), 'only one primary button');
-  assert.equal(named(h, 'invite').getAttribute('title'), leadWaiting().actions[0].hint, 'the hint is the tooltip');
+  assert.equal(named(h, 'members').getAttribute('title'), leadWaiting().actions[0].hint, 'the hint is the tooltip');
 });
 
 test('the status line is a polite live region that changes its text in place, and focus stays on a button that is drawn again', () => {
@@ -235,7 +343,7 @@ test('the status line is a polite live region that changes its text in place, an
   assert.equal(h.focused().getAttribute('data-action'), 'members', 'focus is not lost by an update');
   h.deliver({ type: 'team-state', model: model({ folderOpen: true, team: team({ shared: 'no' }) }) });
   assert.equal(h.$('#team .team-status'), status, 'still the same element when the buttons change');
-  assert.deepEqual(buttons(h).map((button) => button.getAttribute('data-action')), ['share', 'members', 'board', 'link']);
+  assert.deepEqual(buttons(h).map((button) => button.getAttribute('data-action')), ['share', 'invite', 'members', 'board']);
 });
 
 test('a board summary is one line inside the section, and a later model without it removes the line', () => {
@@ -251,7 +359,7 @@ test('a board summary is one line inside the section, and a later model without 
 
 test('compact draws the actions in one row under the status with the heading hidden; full also shows the heading', () => {
   const h = sidebar();
-  const compact = model({ folderOpen: true });
+  const compact = model({ folderOpen: true, team: team({ myRole: undefined, canManage: false, shared: undefined }) });
   assert.equal(compact.compact, true);
   h.deliver({ type: 'team-state', model: compact });
   assert.ok(section(h).classList.contains('compact'));
@@ -275,19 +383,19 @@ test('the e2e probe answers what is drawn, clicks a drawn button through the nor
   h.deliver({ type: 'team-state', model: lead });
   h.deliver({ type: 'team-e2e', id: 7 });
   assert.deepEqual(h.posts, [{
-    type: 'team-e2e-facts', id: 7, heading: lead.heading, status: lead.status, hidden: false, profile: 'ready',
-    actions: [{ id: 'invite', label: 'Invite someone' }, { id: 'members', label: 'Members', badge: '2 waiting' }, { id: 'board', label: 'Open board' }, { id: 'link', label: 'Link your organization' }]
+    type: 'team-e2e-facts', id: 7, heading: lead.heading, status: lead.status, hidden: false, profile: 'ready', soloLine: null,
+    actions: [{ id: 'members', label: 'Members', badge: '2 waiting' }, { id: 'board', label: 'Open board' }]
   }]);
   h.posts.length = 0;
-  h.deliver({ type: 'team-e2e', id: 8, click: 'invite' });
+  h.deliver({ type: 'team-e2e', id: 8, click: 'members' });
   assert.equal(h.posts.length, 2);
-  assert.deepEqual(h.posts[0], { type: 'team-action', action: 'invite' });
+  assert.deepEqual(h.posts[0], { type: 'team-action', action: 'members' });
   const clicked: Record<string, unknown> = h.posts[1];
   assert.equal(clicked.type, 'team-e2e-facts');
   assert.equal(clicked.id, 8);
   assert.equal(clicked.error, undefined);
   h.posts.length = 0;
-  h.deliver({ type: 'team-e2e', id: 9, click: 'turn-on' });
+  h.deliver({ type: 'team-e2e', id: 9, click: 'invite' });
   assert.equal(h.posts.length, 1, 'nothing but the answer');
   const refused: Record<string, unknown> = h.posts[0];
   assert.equal(refused.type, 'team-e2e-facts');
@@ -303,7 +411,7 @@ test('a click posts the id bound when the button was drawn, even if the DOM is a
   const h = sidebar();
   const owner = model({ folderOpen: true, team: team() });
   h.deliver({ type: 'team-state', model: { ...owner, actions: [...owner.actions, { id: 'delete-everything', label: 'Delete', primary: false }] } });
-  assert.deepEqual(buttons(h).map((button) => button.getAttribute('data-action')), ['invite', 'members', 'board', 'link']);
+  assert.deepEqual(buttons(h).map((button) => button.getAttribute('data-action')), ['invite', 'members', 'board']);
   const invite = named(h, 'invite');
   invite.setAttribute('data-action', 'delete-everything');
   invite.dataset.action = 'nearAi.something';

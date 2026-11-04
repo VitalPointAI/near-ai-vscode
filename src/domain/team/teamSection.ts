@@ -31,6 +31,8 @@ export type SharedView = 'yes' | 'no' | 'not-reachable-by-teammates' | 'unknown'
 
 export interface TeamSectionInput {
   folderOpen: boolean;
+  /** Declared only (61-26 RED). */
+  justMe?: boolean;
   team?: {
     /** Display-safe text, already passed through displayText by the host. */
     name: string;
@@ -59,7 +61,7 @@ export interface TeamSectionInput {
 }
 
 export interface TeamSectionAction { id: TeamActionId; label: string; primary: boolean; badge?: string; hint?: string }
-export interface TeamSectionModel { heading: string; status: string; compact: boolean; actions: TeamSectionAction[]; board?: TeamBoardSummary & { text: string } }
+export interface TeamSectionModel { placement?: 'section' | 'empty-chat-line'; heading: string; status: string; compact: boolean; actions: TeamSectionAction[]; board?: TeamBoardSummary & { text: string } }
 
 /** Undefined when no folder is open. */
 export function teamSectionModel(input: TeamSectionInput): TeamSectionModel | undefined {
@@ -109,7 +111,7 @@ function ordered(primary: TeamActionId, others: readonly TeamActionId[]): TeamSe
   return [primary, ...rest].map((id) => ({ id, label: TEAM_ACTION_LABELS[id], primary: id === primary, hint: TEAM_ACTION_HINTS[id] }));
 }
 
-export interface TeamSetupStep { id: 'team.turn-on' | 'team.share' | 'team.invite' | 'team.link'; title: string; done: boolean; action: TeamActionId; optional: boolean }
+export interface TeamSetupStep { id: 'team.turn-on' | 'team.share' | 'team.invite' | 'team.link'; title: string; done: boolean; skipped?: boolean; action: TeamActionId; optional: boolean }
 
 /**
  * The team setup as plain steps with done flags and the action each runs, so the guided project setup (SETUP-01) can register them later without
