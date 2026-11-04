@@ -3,7 +3,8 @@
 // then plan order. Pure: no vscode, no I/O and no clock; the same state gives the same timeline on every client.
 import { BOARD_LANE_LABEL } from './boardText';
 import {
-  milestoneHeading, noPercentText, percentDoneText, percentLabel, percentShort, cardsFinishedText, phaseHeading, phaseLabels, tileName, tileText
+  milestoneHeading, noPercentText, NOW_ALL_DONE, nowAllDoneSentence, nowDetail, nowSentence, nowTitle, percentDoneText, percentLabel, percentShort,
+  cardsFinishedText, phaseHeading, phaseLabels, tileName, tileText
 } from './timelineText';
 import { compareParts, comparePlans } from './board';
 import type { BoardCard, BoardModel } from './board';
@@ -238,6 +239,48 @@ function phasesOfBand(model: BoardModel, dots: readonly TimelineDot[], cardOf: R
 }
 
 const closed = (card: BoardCard): boolean => card.column === 'done' || card.column === 'cancelled';
+const STARTED: ReadonlySet<string> = new Set(['claimed', 'in-progress', 'in-review', 'integrating']);
+
+// The Now indicator (D-13 as amended in the UI-SPEC): the frontier band is the first band in timeline order (milestones in version order, then the
+// cards added on the board) holding a card that is not Done or Cancelled; the Now step is the earliest step there holding one, and its phase is that
+// of the first such dot in slot order. Work running ahead does not move it; the counts cover the whole band. When every card is finished it stands
+// after the last step of the last band with cards. With no cards there is none.
+function nowOf(milestones: readonly TimelineMilestone[], dots: readonly TimelineDot[], cardOf: ReadonlyMap<string, BoardCard>, overall: TimelinePercent): TimelineNow | undefined {
+  const open = (dot: TimelineDot): boolean => {
+    const card = cardOf.get(dot.cardId);
+    return card !== undefined && !closed(card);
+  };
+  for (const band of milestones) {
+    const bandDots = dots.filter((dot) => dot.milestoneId === band.id);
+    const first = bandDots.find(open);
+    if (first === undefined) continue;
+    const columns = bandDots.map((dot) => cardOf.get(dot.cardId)?.column);
+    const inProgress = columns.filter((column) => column !== undefined && STARTED.has(column)).length;
+    const ready = columns.filter((column) => column === 'ready').length;
+    // The band holds an unfinished card, so something is counted and the band has a percent.
+    const percent = band.percent?.percent ?? 0;
+    const board = band.id === BOARD_BAND_ID;
+    const phaseNumber = first.phaseId === undefined ? undefined : first.phaseId.slice('phase:'.length);
+    const title = nowTitle(phaseNumber, first.step + 1, band.steps);
+    const now: TimelineNow = {
+      milestoneId: band.id, step: first.step, stepCount: band.steps, allDone: false, inProgress, ready, percent,
+      title, detail: nowDetail(inProgress, ready, percent, board), sentence: nowSentence(title, inProgress, ready, percent, board)
+    };
+    if (first.phaseId !== undefined) now.phaseId = first.phaseId;
+    return now;
+  }
+  const last = [...milestones].reverse().find((band) => band.cardCount > 0);
+  if (last === undefined) return undefined;
+  const lastDot = [...dots].reverse().find((dot) => dot.milestoneId === last.id);
+  const detail = overall.label;
+  const now: TimelineNow = {
+    milestoneId: last.id, step: last.steps, stepCount: last.steps, allDone: true, inProgress: 0, ready: 0,
+    title: NOW_ALL_DONE, detail, sentence: nowAllDoneSentence(detail)
+  };
+  if (lastDot?.phaseId !== undefined) now.phaseId = lastDot.phaseId;
+  if (last.percent?.percent !== undefined) now.percent = last.percent.percent;
+  return now;
+}
 
 export function buildTimeline(state: TeamState, model: BoardModel, _options: { viewerId?: string }): BoardTimeline {
   const milestoneIds = new Set(model.milestones.map((milestone) => milestone.id));
@@ -303,5 +346,9 @@ export function buildTimeline(state: TeamState, model: BoardModel, _options: { v
     const dot = dotOf.get(edge.from);
     if (dot !== undefined) dot.neededBy += 1;
   }
-  return { milestones, dots, edges, percent: percentOf(model.cards) };
+  const percent = percentOf(model.cards);
+  const timeline: BoardTimeline = { milestones, dots, edges, percent };
+  const now = nowOf(milestones, dots, cardOf, percent);
+  if (now !== undefined) timeline.now = now;
+  return timeline;
 }

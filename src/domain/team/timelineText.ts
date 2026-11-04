@@ -89,3 +89,31 @@ export function phaseHeading(label: string, percent: number | undefined, finishe
   if (percent === undefined) return `${titleText(label)}, ${lowerFirst(noPercent)}`;
   return `${titleText(label)}, ${percentDoneText(percent)}, ${cardsFinishedText(finished, counted)}`;
 }
+
+// ---- the Now indicator (D-13) ----------------------------------------------------------------------------------------------------------------
+
+export const NOW_ALL_DONE = 'Now: all the planned work is done';
+
+/** Line 1 of the Now pill: "Now: Phase 62, step 4 of 9", or "Now: Added on the board, step 1 of 2" in the board band. */
+export function nowTitle(phaseNumber: string | undefined, step: number, steps: number): string {
+  return `Now: ${phaseNumber === undefined ? BOARD_BAND_TITLE : phaseName(phaseNumber)}, step ${step} of ${steps}`;
+}
+
+function nowShare(percent: number, board: boolean): string {
+  return `${percent}% of ${board ? 'the cards added on the board' : 'this milestone'} done`;
+}
+
+/** Line 2 of the Now pill: "3 in progress, 2 ready · 62% of this milestone done". Zero counts are written as numbers. */
+export function nowDetail(inProgress: number, ready: number, percent: number, board: boolean): string {
+  return `${inProgress} in progress, ${ready} ready · ${nowShare(percent, board)}`;
+}
+
+/** The screen reader sentence: "Now: Phase 62, step 4 of 9. 3 in progress, 2 ready. 62% of this milestone done." */
+export function nowSentence(title: string, inProgress: number, ready: number, percent: number, board: boolean): string {
+  return `${title}. ${inProgress} in progress, ${ready} ready. ${nowShare(percent, board)}.`;
+}
+
+/** The sentence when every card is finished: "Now: all the planned work is done. 30 of 30 cards finished, 100%." */
+export function nowAllDoneSentence(detail: string): string {
+  return `${NOW_ALL_DONE}. ${detail}.`;
+}
