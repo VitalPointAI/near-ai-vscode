@@ -286,6 +286,39 @@ test('solo project: the sidebar Team section costs one fs.stat and no timer, cha
   }
 });
 
+// The sidebar's board line (G-62-1, plan 62-18) in a project without a team: the handle has no summary, and neither the board model nor the board view
+// is loaded, with the host wired as extension.ts wires it. Placed before the team project test below, which loads both.
+const BOARD_MODULE_FILES = [path.join(DIST_ROOT, 'domain', 'team', 'board.js'), path.join(DIST_ROOT, 'services', 'team', 'boardView.js')];
+
+test('solo project: the Team Mode handle has no boardSummary, and activation plus a section refresh load neither board module', async () => {
+  resetStub();
+  const project = soloProject();
+  const context = createFakeContext(project.storage, {});
+  const handle = registerTeamMode(context as never);
+  assert.equal(handle.boardSummary(), undefined, 'nothing to summarise while Team Mode is still looking');
+  assert.equal(await handle.ready, 'solo');
+  const { createTeamSectionHost } = require('../services/team/teamSectionHost') as typeof import('../services/team/teamSectionHost');
+  const host = createTeamSectionHost({ team: handle, firstFolder: () => project.root, executeCommand: async () => undefined, testSeams: false, boardSummary: () => handle.boardSummary() });
+  try {
+    stub.setWorkspaceFolders([project.root]);
+    const made = stub.createWebviewView();
+    const view = made.view as { webview: never; visible: boolean; onDidChangeVisibility: never };
+    host.attach(view.webview, view.onDidChangeVisibility, () => view.visible);
+    await host.refresh();
+    assert.equal(handle.boardSummary(), undefined, 'a project without a team has no board summary');
+    for (const file of BOARD_MODULE_FILES) assert.equal(Object.keys(require.cache).includes(file), false, `${path.basename(file)} was not loaded`);
+    const allowed = [SECTION_HOST_FILE, ...SECTION_MODEL_FILES];
+    assert.deepEqual(loadedTeamModules().filter((file) => !allowed.includes(file)), [], 'no other compiled team module was loaded');
+    const posted = made.record.posted as Array<{ type: string; model: { board?: unknown; actions: Array<{ id: string }> } | null }>;
+    assert.equal(posted.at(-1)?.model?.board, undefined, 'no board line');
+    assert.deepEqual(posted.at(-1)?.model?.actions.map((action) => action.id), ['turn-on', 'join']);
+  } finally {
+    host.dispose();
+    for (const subscription of context.subscriptions) subscription.dispose();
+    project.cleanup();
+  }
+});
+
 test('a team project loads the session lazily, shows Team: <name> and stops its poll timer when disposed', async () => {
   resetStub();
   const harness = require('./helpers/teamHarness') as typeof import('./helpers/teamHarness');
