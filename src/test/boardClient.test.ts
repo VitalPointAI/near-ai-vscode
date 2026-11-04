@@ -884,6 +884,15 @@ test('G-62-2 and G-62-4: board.css gives a solid toolbar band, one board scrolle
   assert.match(cssRule('.lane-title'), /position:\s*sticky[\s\S]*left:\s*0/, 'lane titles stay on the left while the board scrolls sideways');
 });
 
+// 62-24 (found in the realistic board's frames): a lane title spans the region's width (100cqw), so where the header row ended at its last column the
+// title of a lane scrolled under it showed beside it (a band, or its card count). The header row is at least as wide as the region.
+test('62-24: the sticky header row is at least as wide as the board region, so nothing scrolled under it shows beside its last column', () => {
+  const head = cssRule('.colheads');
+  assert.match(head, /min-width:\s*100%/, 'the header row covers the whole width of the region');
+  assert.match(cssRule('.lanes'), /min-width:\s*100%/, 'the lanes are as wide as the region too');
+  assert.match(cssRule('.lane-title'), /width:\s*100cqw/, 'the lane title spans the visible region');
+});
+
 // Owner decision 2026-11-03 (G-62-7, plan 62-21): every card is readable. A folded column never holds a card, only its count for screen readers; titles
 // wrap between words; the card's main button looks like the card, not like a button.
 test('G-62-7: a folded column holds no card, only a hidden count in every lane; opening it brings the cards back and focus never lands in a folded cell', async () => {
