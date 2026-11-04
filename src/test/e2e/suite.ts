@@ -256,7 +256,9 @@ function teamTests(): Array<[string, () => Promise<void>]> {
         facts = await ask({ action: 'facts' });
       }
       const ids = facts.cardIds as string[];
-      assert.ok(ids.includes('plan:90-01') && ids.includes('plan:90-02'), `the imported cards are drawn (${ids.length} cards: ${ids.join(', ')})`);
+      assert.ok(ids.includes('plan:90-02'), `the imported cards are drawn (${ids.length} cards: ${ids.join(', ')})`);
+      // Owner decisions 2026-11-03 (G-62-3, G-62-7, plan 62-21): Done starts folded and a folded column draws no card, so the done plan:90-01 is not drawn.
+      assert.equal(ids.includes('plan:90-01'), false, 'the done card is not drawn while Done is folded');
       assert.ok((facts.draggable as number) > 0, 'the render listeners ran: at least one card is draggable');
       assert.deepEqual(facts.errors, [], 'no page error after the render');
       facts = await ask({ action: 'focus', itemId: 'plan:90-02' });
@@ -706,6 +708,7 @@ function boardTests(): Array<[string, () => Promise<void>]> {
   let tap: typeof import('../../services/team/boardView')['boardTap'];
   let asks = 0;
   let editorWidth = 0;
+  let planlessPhase = '';
   const problemsOf = (report: LayoutReport): string => `${report.layout} at ${report.width} by ${report.height} px:\n  ${report.problems.join('\n  ')}`;
 
   // One question to the page's layout probe and its one answer.
@@ -801,6 +804,7 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       const model = state.model as BoardModelView;
       const phase = model.cards.find((card) => card.kind === 'phase' && card.milestoneId === model.selectedMilestone)!;
       assert.equal(phase.column, 'backlog', `${phase.id} is a Backlog card`);
+      planlessPhase = phase.id;
       // The page draws the imported cards.
       await until('the imported cards on the page', async () => ((await ask({ action: 'rects' })).cards.length > 0 ? true : undefined));
     }],
@@ -810,6 +814,31 @@ function boardTests(): Array<[string, () => Promise<void>]> {
       const report = await settled('the editor area alone', (r) => r.layout === 'kanban');
       editorWidth = report.width;
       assert.ok(editorWidth >= 1000, `the board is ${editorWidth} px wide`);
+    }],
+    ['first open, before anything changes the view: Backlog and Ready open, the later four, Done and Cancelled folded, Unassigned open, Backlog work in full view and the first planless phase reachable without a click', async () => {
+      const report = await settled('the first open', (r) => r.layout === 'kanban' && r.cards.length > 0);
+      assert.deepEqual(report.heads.filter((head) => head.folded).map((head) => head.column), ['claimed', 'in-progress', 'in-review', 'integrating', 'done', 'cancelled']);
+      assert.deepEqual(report.heads.filter((head) => !head.folded).map((head) => head.column), ['backlog', 'ready']);
+      const unassigned = report.lanes.find((lane) => lane.lane === 'unassigned');
+      assert.ok(unassigned !== undefined && !unassigned.collapsed, 'the Unassigned lane is open');
+      assert.ok(report.visibleCards >= 1, `${report.visibleCards} cards are fully visible`);
+      const r = report.region;
+      const inView = report.cards.filter((c) => c.width > 0 && c.height > 0 && c.left >= r.left - 1 && c.top >= r.top - 1 && c.left + c.width <= r.left + r.width + 1 && c.top + c.height <= r.top + r.height + 1);
+      assert.ok(inView.some((c) => c.column === 'backlog'), `a Backlog card is fully visible without any click (in view: ${inView.map((c) => c.id).join(', ')})`);
+      const phase = report.cards.find((c) => c.id === planlessPhase);
+      assert.ok(phase !== undefined && phase.column === 'backlog' && phase.width > 0 && phase.height > 0, `${planlessPhase} is drawn in the open Backlog cell`);
+      if (!inView.some((c) => c.id === planlessPhase)) {
+        // 62-19 orders a column by phase, then plan, so this repository's unfinished Phase 62 plans come before the first phase without plans. Scrolling
+        // the board region alone, with no click, brings it fully into view under the header row.
+        const below = Math.ceil(phase.top + phase.height - (r.top + r.height));
+        console.log(`(${planlessPhase} starts ${Math.ceil(phase.top - r.top)} px into a ${r.height} px board region, behind ${inView.length} fully visible cards)`);
+        const scrolled = await ask({ action: 'scroll', top: below + 48 });
+        const seen = scrolled.cards.find((c) => c.id === planlessPhase)!;
+        const s = scrolled.region;
+        assert.ok(seen.top >= s.top - 1 && seen.top + seen.height <= s.top + s.height + 1, `${planlessPhase} is fully visible after scrolling the board region by ${scrolled.region.scrollTop} px`);
+        assert.deepEqual(scrolled.problems, [], problemsOf(scrolled));
+        await ask({ action: 'scroll', top: 0, left: 0 });
+      }
     }],
     ['at the full editor width the layout probe finds nothing wrong, and the screen is saved as board-dark-full.png', async () => {
       const report = await settled('the full editor width', (r) => r.layout === 'kanban');

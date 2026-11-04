@@ -226,6 +226,8 @@ test('a not-ready backlog card gets the model sentence on the Ready cell, and a 
 
   world.accept(world.owner, 'item.updated', { id: 'plan:90-01', changes: { state: 'done' } });
   const done = modelOf(world, world.owner.memberId);
+  // Owner decision 2026-11-03 (G-62-3, plan 62-21): Done starts folded, so the person opens it to reach the done card.
+  h.$('.column[data-column="done"] .col-btn')!.click();
   h.deliver({ type: 'state', model: done });
   assert.ok(cell(h, 'done').contains(card(h, 'plan:90-01')));
   assert.equal(card(h, 'plan:90-01').draggable, true, 'a done card can be reopened, so it is draggable');

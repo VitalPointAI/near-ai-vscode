@@ -463,6 +463,8 @@ test('your own confirmed move announces once and keeps focus on that card', asyn
   const world = await standard();
   const h = start();
   h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
+  // Owner decision 2026-11-03 (G-62-3, plan 62-21): Done starts folded, so this person has opened it to watch the card land there.
+  h.$('.column[data-column="done"] .col-btn')!.click();
   h.advance(150);
   api(h).setPending('plan:90-01', 'Moving to Done...');
   assert.equal(card(h, 'plan:90-01').getAttribute('aria-busy'), 'true');
@@ -892,7 +894,7 @@ test('G-62-3: Done opened is kept across a reload; choices saved by the older bo
   assert.equal(o.$('.column[data-column="done"] .col-btn')!.getAttribute('aria-expanded'), 'false', 'Done is folded again');
   assert.equal(o.$('.column[data-column="backlog"] .col-btn')!.getAttribute('aria-expanded'), 'true', 'Backlog is open again');
   assert.equal(chip(o, 'Mine').getAttribute('aria-pressed'), 'false', 'the old Mine filter is dropped');
-  assert.deepEqual(api(o).getDraft(), { title: 'Half written' }, 'an unsent draft is never thrown away');
+  assert.deepEqual(JSON.parse(JSON.stringify(api(o).getDraft())), { title: 'Half written' }, 'an unsent draft is never thrown away');
   // Dropped once: a choice made now is saved with the version and kept.
   o.$('.lane[data-lane="unassigned"] .lane-head')!.click();
   const third = start({ width: 1200, state: o.state });

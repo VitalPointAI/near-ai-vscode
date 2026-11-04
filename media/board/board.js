@@ -11,9 +11,13 @@
   // G-62-4 (62-21): one column layout for the header row and every lane, written on the board region as --board-columns.
   const OPEN_WIDTH = '256px';
   const FOLDED_WIDTH = '40px';
+  // The four columns later updates fill (UI review warning 5), and the finished ones; which columns start folded comes from the model (foldedByDefault,
+  // owner decision 2026-11-03, G-62-3). These lists only choose the words of the folded note. A person who opens a column keeps it open.
   const LATER = ['claimed', 'in-progress', 'in-review', 'integrating'];
+  const FINISHED = ['done', 'cancelled'];
   const GROUPS_OPEN = ['backlog', 'ready'];
-  // The four columns later updates fill start folded in the kanban (UI review warning 5); a person who opens one keeps it open.
+  // The saved choices' version. Choices saved by the older board (no version) folded Backlog work away, so they are dropped once (G-62-3).
+  const UI_VERSION = 2;
   const GROUP_BY = ['member', 'phase', 'milestone', 'none'];
   const GROUP_LABELS = { member: 'Member', phase: 'Phase', milestone: 'Milestone', none: 'None' };
   const COLUMN_ICONS = { backlog: 'circle-outline', ready: 'play-circle', claimed: 'person', 'in-progress': 'sync', 'in-review': 'eye', integrating: 'check-all', done: 'pass', cancelled: 'circle-slash' };
@@ -27,6 +31,7 @@
     notTrusted: 'The shared team record failed a safety check, so the board is paused. Choose "Check the team" to see what happened, or ask your lead.',
     checkTeam: 'Check the team', doneInPlans: 'Looks finished, please confirm',
     laterNote: 'Claimed, In progress, In review and Shipping are folded for now. They fill in when those steps arrive in a later update.',
+    finishedNote: (names) => names + (names.indexOf(' and ') >= 0 ? ' are' : ' is') + ' folded to keep finished work out of the way.',
     removed: 'You were removed from this team. You can still look at the board but not change it.',
     hintMove: 'Press Enter to open details. Press M to move this card.', hintOpen: 'Press Enter to open details.'
   };
@@ -51,7 +56,10 @@
   if (E2E) window.addEventListener('error', (e) => { pageErrors.push(String((e && e.message) || e)); });
 
   // ---- state kept across reloads (D-15) -----------------------------------------------------------------------------------------------------
-  const saved = vscode.getState() || {};
+  const stored = vscode.getState() || {};
+  const current = stored.version === UI_VERSION;
+  // From the older board only the grouping, the milestone, the selected card, the filters toggle and an unsent draft are kept.
+  const saved = current ? stored : { groupBy: stored.groupBy, milestone: stored.milestone, selected: stored.selected, filtersOpen: stored.filtersOpen, draft: stored.draft };
   const ui = {
     groupBy: GROUP_BY.indexOf(saved.groupBy) >= 0 ? saved.groupBy : 'member',
     filters: Object.assign({ mine: false, ready: false, blocked: false, requirement: '', phase: '' }, saved.filters || {}),
@@ -60,7 +68,7 @@
   };
   // The item form's unsent draft (form.js) lives in the same stored state: the page may acquire the VS Code API only once, so the form borrows it here.
   let formDraft = saved.draft && typeof saved.draft === 'object' ? saved.draft : undefined;
-  const persist = () => vscode.setState({ groupBy: ui.groupBy, filters: ui.filters, collapsedColumns: ui.collapsedColumns, collapsedLanes: ui.collapsedLanes, openGroups: ui.openGroups, selected: ui.selected, milestone: ui.milestone, filtersOpen: ui.filtersOpen, ...(formDraft ? { draft: formDraft } : {}) });
+  const persist = () => vscode.setState({ version: UI_VERSION, groupBy: ui.groupBy, filters: ui.filters, collapsedColumns: ui.collapsedColumns, collapsedLanes: ui.collapsedLanes, openGroups: ui.openGroups, selected: ui.selected, milestone: ui.milestone, filtersOpen: ui.filtersOpen, ...(formDraft ? { draft: formDraft } : {}) });
 
   // ---- runtime state (not persisted) ---------------------------------------------------------------------------------------------------------
   let model;
@@ -246,7 +254,17 @@
     attr(bar.box, 'aria-valuenow', pct);
     attr(bar.box, 'aria-label', label);
   }
-  function columnCollapsed(key) { return key in ui.collapsedColumns ? !!ui.collapsedColumns[key] : LATER.indexOf(key) >= 0; }
+  function columnCollapsed(key) {
+    if (key in ui.collapsedColumns) return !!ui.collapsedColumns[key];
+    const info = model && model.columns.find((c) => c.key === key);
+    return !!(info && info.foldedByDefault);
+  }
+  // The folded note: the later columns' sentence when one of them is folded, and the finished columns' sentence for those that are folded.
+  function foldedNote(cols) {
+    const folded = (keys) => cols.filter((c) => keys.indexOf(c.key) >= 0 && columnCollapsed(c.key)).map((c) => c.label);
+    const finished = folded(FINISHED);
+    return [folded(LATER).length ? T.laterNote : '', finished.length ? T.finishedNote(finished.join(' and ')) : ''].filter(Boolean).join(' ');
+  }
   function setGroupBy(key) { ui.groupBy = key; persist(); render(); }
   function clearFilters() {
     ui.filters = { mine: false, ready: false, blocked: false, requirement: '', phase: '' };
@@ -510,7 +528,9 @@
     if (colFocus >= cols.length) colFocus = 0;
     place(heads, cols.map((c, i) => headEl(c, shown.filter((x) => x.column === c.key).length, i)));
     setVar(views.kanban, '--board-columns', cols.map((c) => (columnCollapsed(c.key) ? FOLDED_WIDTH : OPEN_WIDTH)).join(' '));
-    laterNote.hidden = !LATER.some((key) => cols.some((c) => c.key === key) && columnCollapsed(key));
+    const note = foldedNote(cols);
+    setText(laterNote, note);
+    laterNote.hidden = note === '';
     const sel = milestoneId();
     const lanes = (model.lanes[ui.groupBy] || []).filter((l) => {
       if (ui.groupBy === 'phase' && l.milestoneId && sel !== 'all' && l.milestoneId !== sel) return false;
@@ -928,6 +948,7 @@
     new ResizeObserver(() => syncHeadHeight()).observe(heads);
   }
 
+  if (!current && Object.keys(stored).length > 0) persist();
   render();
   startSlowTimer();
   post({ type: 'ready' });
