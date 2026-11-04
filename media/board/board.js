@@ -957,7 +957,10 @@
       focusedCard: focused ? focused.getAttribute('data-id') : '', focusedRole: a && a.getAttribute ? a.getAttribute('role') || '' : '',
       menuOpen: !!menu && !menu.hidden, menuItems: menu ? menu.querySelectorAll('[role="menuitem"]').length : 0,
       menuTexts: menu && !menu.hidden ? nodesOf(menu, '[role="menuitem"]').map((n) => n.textContent) : [],
-      filters: { mine: ui.filters.mine, ready: ui.filters.ready, blocked: ui.filters.blocked }, detailOpen: !detailEl.hidden, groupBy: ui.groupBy,
+      filters: { mine: ui.filters.mine, ready: ui.filters.ready, blocked: ui.filters.blocked },
+      assignees: nodesOf(document, '.card').filter((n) => n.querySelector('.assignee')).map((n) => ({
+        id: n.getAttribute('data-id'), initials: n.querySelector('.assignee-initials').textContent, name: n.querySelector('.assignee-name').textContent
+      })), detailOpen: !detailEl.hidden, groupBy: ui.groupBy,
       dragLog: dragLog.slice(), dragCount: dragLogged, refusals: nodesOf(document, '.card').filter((n) => n.querySelector('.refusal-line')).map((n) => ({ id: n.getAttribute('data-id'), text: n.querySelector('.refusal-line').textContent })),
       hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : false, focusedText: a && a.getAttribute && a.getAttribute('role') === 'menuitem' ? a.textContent : '', live: ($('live') && $('live').textContent) || '', errors: pageErrors.slice()
     });
