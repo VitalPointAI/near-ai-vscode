@@ -8,6 +8,7 @@ import type { AddressInfo } from 'node:net';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { NearAiTestApi } from '../../extension';
+import { captureScreen, readXwd } from './xwdPng';
 
 // Runs inside the extension host. Messages are observed on both sides of the real sidebar webview,
 // so every request below goes host → webview script → host, as a user's click would.
@@ -38,7 +39,7 @@ export async function run(): Promise<void> {
   let failed = 0;
   try {
     for (const scenario of scenarios) {
-      const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : scenario === 'team' ? teamTests()
+      const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : scenario === 'team' ? teamTests() : scenario === 'board' ? boardTests()
         : scenario === 'team-lead' ? teamLeadTests() : scenario === 'team-join' ? teamJoinTests() : scenario === 'team-confirm' ? teamConfirmTests() : projectTests();
       for (const [name, body] of tests) {
         try { await body(); console.log(`✔ [${scenario}] ${name}`); } catch (error) { failed += 1; console.error(`✖ [${scenario}] ${name}\n`, error); }
@@ -672,6 +673,128 @@ function teamConfirmTests(): Array<[string, () => Promise<void>]> {
     }],
     ['every prompt of the confirmation was answered and spoke plain words', async () => {
       kit.assertPlain();
+    }]
+  ];
+}
+
+// ---- the board scenario (62-21): this repository's own roadmap on a test project, measured in a real window on a hidden screen -------------------
+
+// What media/board/layout-probe.js answers (62-16): the real page measured in CSS pixels, and every broken layout or readability rule as a sentence.
+interface LayoutReport {
+  width: number; height: number; layout: string; theme: string; problems: string[];
+  toolbar: { height: number; background: string; position: string };
+  region: { left: number; top: number; width: number; height: number; scrollTop: number; scrollLeft: number };
+  heads: Array<{ column: string; left: number; right: number; folded: boolean }>;
+  lanes: Array<{ lane: string; top: number; bottom: number; collapsed: boolean }>;
+  cells: Array<{ lane: string; column: string; left: number; top: number; width: number; height: number }>;
+  cards: Array<{ id: string; column: string; lane: string; left: number; top: number; width: number; height: number; draggable: boolean }>;
+  visibleCards: number;
+}
+interface BoardModelView { selectedMilestone: string; cards: Array<{ id: string; kind: string; column: string; milestoneId?: string }> }
+
+/** A PNG's own width and height, from its IHDR chunk. */
+async function pngSize(file: string): Promise<{ width: number; height: number }> {
+  const png = await readFile(file);
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+}
+
+function boardTests(): Array<[string, () => Promise<void>]> {
+  const board = new Observer();
+  const extension = (): vscode.Extension<NearAiTestApi | undefined> => vscode.extensions.getExtension<NearAiTestApi | undefined>(EXTENSION_ID)!;
+  const load = <T>(file: string): T => require(path.join(extension().extensionPath, 'dist', file)) as T;
+  let api: NearAiTestApi;
+  let tap: typeof import('../../services/team/boardView')['boardTap'];
+  let asks = 0;
+  let editorWidth = 0;
+  const problemsOf = (report: LayoutReport): string => `${report.layout} at ${report.width} by ${report.height} px:\n  ${report.problems.join('\n  ')}`;
+
+  // One question to the page's layout probe and its one answer.
+  const ask = async (request: { action: 'measure' | 'scroll' | 'focus' | 'rects'; top?: number; left?: number; itemId?: string }): Promise<LayoutReport> => {
+    asks += 1;
+    const id = asks;
+    const before = board.fromView.length;
+    await tap.layout!({ id, ...request });
+    return (await board.next('fromView', (message) => message.type === 'e2e-layout-report' && message.id === id, before)).report as LayoutReport;
+  };
+  // Measures once the page has stopped changing size: three readings in a row that agree (a resize reaches the page a little later), and `wanted` holds.
+  const settled = async (what: string, wanted: (report: LayoutReport) => boolean = () => true): Promise<LayoutReport> => {
+    let last = await ask({ action: 'measure' });
+    let steady = 0;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await sleep(250);
+      const next = await ask({ action: 'measure' });
+      steady = next.width === last.width && next.height === last.height && next.layout === last.layout && wanted(next) ? steady + 1 : 0;
+      if (steady >= 2) return next;
+      last = next;
+    }
+    throw new Error(`The board did not settle (${what}); last reading ${last.layout} at ${last.width} by ${last.height} px`);
+  };
+  // The whole hidden screen as a PNG in the screens folder, when the run gave the framebuffer folder (NEAR_AI_E2E_FBDIR); it must be the screen's size.
+  const screenshot = async (name: string): Promise<void> => {
+    const fbdir = process.env.NEAR_AI_E2E_FBDIR;
+    const screens = process.env.NEAR_AI_E2E_SCREENS;
+    if (fbdir === undefined || fbdir === '' || screens === undefined || screens === '') { console.log(`(no screenshot ${name}: the run has no framebuffer folder)`); return; }
+    const out = path.join(screens, name);
+    await captureScreen(fbdir, out);
+    const screen = readXwd(await readFile(path.join(fbdir, 'Xvfb_screen0')));
+    assert.deepEqual(await pngSize(out), { width: screen.width, height: screen.height }, `${name} is the whole screen`);
+  };
+
+  return [
+    ['activates in the board project, a git project holding this repository\'s committed roadmap', async () => {
+      api = (await extension().activate())!;
+      assert.ok(api?.team, 'the test API carries the team handle');
+      assert.equal(await api.team.handle.ready, 'solo', 'no team yet');
+      assert.ok(existsSync(path.join(workspace, '.planning', 'ROADMAP.md')), 'the roadmap is in the project');
+    }],
+    ['Team Mode is enabled and the board opens with the layout probe on the page', async () => {
+      const { enableTeamMode } = load<typeof import('../../team/enable')>('team/enable');
+      const enabled = await enableTeamMode({
+        projectRoot: workspace, globalStorageDir: api.team.globalStorageDir, secrets: api.team.secrets,
+        teamName: 'E2E board team', ownerName: 'E2E Owner', remote: 'origin', integrationBranch: 'main'
+      });
+      assert.equal(enabled.ok, true, enabled.ok ? '' : enabled.message);
+      tap = load<typeof import('../../services/team/boardView')>('services/team/boardView').boardTap;
+      tap.toView = (message) => board.record(board.toView, message);
+      tap.fromView = (message) => board.record(board.fromView, message);
+      await vscode.commands.executeCommand('nearAi.team.openBoard');
+      await board.next('fromView', (message) => message.type === 'ready');
+      await board.next('toView', (message) => message.type === 'state');
+      assert.ok(tap.layout, 'the layout hook is offered under NEAR_AI_E2E=1');
+      const first = await ask({ action: 'rects' });
+      assert.ok(first.width > 0, 'the probe on the page answers');
+    }],
+    ['the roadmap is imported, and the current milestone\'s phases without plans are Backlog cards', async () => {
+      await vscode.commands.executeCommand('nearAi.team.importPlans', { milestone: 'current' });
+      const state = await board.next('toView', (message) => {
+        if (message.type !== 'state' || message.model === undefined) return false;
+        const model = message.model as BoardModelView;
+        return model.cards.some((card) => card.kind === 'plan') && model.cards.some((card) => card.kind === 'phase' && card.milestoneId === model.selectedMilestone);
+      }, 0, 60_000);
+      const model = state.model as BoardModelView;
+      const phase = model.cards.find((card) => card.kind === 'phase' && card.milestoneId === model.selectedMilestone)!;
+      assert.equal(phase.column, 'backlog', `${phase.id} is a Backlog card`);
+      // The page draws the imported cards.
+      await until('the imported cards on the page', async () => ((await ask({ action: 'rects' })).cards.length > 0 ? true : undefined));
+    }],
+    ['the editor area has the whole window: no side bars, no panel and one editor group', async () => {
+      for (const command of ['workbench.action.closeSidebar', 'workbench.action.closeAuxiliaryBar', 'workbench.action.closePanel']) await vscode.commands.executeCommand(command);
+      await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+      const report = await settled('the editor area alone', (r) => r.layout === 'kanban');
+      editorWidth = report.width;
+      assert.ok(editorWidth >= 1000, `the board is ${editorWidth} px wide`);
+    }],
+    ['at the full editor width the layout probe finds nothing wrong, and the screen is saved as board-dark-full.png', async () => {
+      const report = await settled('the full editor width', (r) => r.layout === 'kanban');
+      await screenshot(`board-${report.theme || 'dark'}-full.png`);
+      assert.equal(report.layout, 'kanban');
+      assert.deepEqual(report.problems, [], problemsOf(report));
+    }],
+    ['after scrolling down and sideways the toolbar and the column header row stay solid on top and cover no card', async () => {
+      const report = await ask({ action: 'scroll', top: 600, left: 300 });
+      assert.deepEqual(report.problems, [], problemsOf(report));
+      const back = await ask({ action: 'scroll', top: 0, left: 0 });
+      assert.deepEqual(back.problems, [], problemsOf(back));
     }]
   ];
 }
