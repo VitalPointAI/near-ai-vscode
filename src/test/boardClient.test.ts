@@ -145,9 +145,12 @@ async function secondMilestone(): Promise<BoardWorld> {
   return world;
 }
 
-test('group by switches the lanes; a phase lane shows its progress, a phase with no plans starts collapsed, and the choice survives a reload', async () => {
+test('group by switches the lanes; a phase lane shows its progress, a phase lane with nothing open starts collapsed, and the choice survives a reload', async () => {
   const world = await standard();
   world.accept(world.owner, 'item.updated', { id: 'plan:90-01', changes: { state: 'done' } });
+  // Owner decision 2026-11-03 (G-62-3, plan 62-19): the standard board's planless phase:91 is now a Backlog card, and a lane starts collapsed only when it holds nothing outside
+  // Done and Cancelled. Cancelling the phase leaves its lane with only a cancelled card, so the lane still starts collapsed here.
+  world.accept(world.owner, 'item.cancelled', { id: 'phase:91', reason: 'not this time' });
   const model = modelOf(world, world.owner.memberId);
   const h = start();
   h.deliver({ type: 'state', model });
@@ -189,15 +192,16 @@ test('filters combine, apply locally, announce the result after 500 ms and survi
   const h = start();
   h.deliver({ type: 'state', model });
   const sent = h.posts.length;
-  assert.equal(h.$$('.card').length, 3);
+  // Owner decision 2026-11-03 (G-62-3, plan 62-19): the standard board's planless phase:91 is now a Backlog card, so the board draws four cards.
+  assert.equal(h.$$('.card').length, 4);
 
   chip(h, 'Mine').click();
   assert.deepEqual(cardIds(h), [CHORE_ID], 'Mine shows the board items the viewer created');
   assert.equal(chip(h, 'Mine').getAttribute('aria-pressed'), 'true');
   h.advance(400);
-  assert.ok(!h.announcements.includes('Showing 1 of 3 cards.'), 'not before 500 ms');
+  assert.ok(!h.announcements.includes('Showing 1 of 4 cards.'), 'not before 500 ms');
   h.advance(300);
-  assert.equal(h.live(), 'Showing 1 of 3 cards.');
+  assert.equal(h.live(), 'Showing 1 of 4 cards.');
   chip(h, 'Mine').click();
   chip(h, 'Ready').click();
   assert.deepEqual(cardIds(h), ['plan:90-01']);
@@ -224,7 +228,7 @@ test('filters combine, apply locally, announce the result after 500 ms and survi
   const clear = buttonNamed(again, 'Clear filters')!;
   assert.ok(clear, 'Clear filters shows while a filter is on');
   clear.click();
-  assert.equal(again.$$('.card').length, 3);
+  assert.equal(again.$$('.card').length, 4);
   assert.equal(buttonNamed(again, 'Clear filters'), undefined, 'and is gone when none is on');
 });
 
@@ -236,7 +240,8 @@ test('the Mine filter has its own empty body and a filtered-out board shows Clea
   assert.equal(text(h.$('.state-head')), 'No cards match these filters');
   assert.equal(text(h.$('.state-body')), 'Nothing is yours yet. Cards you create or claim show up here.');
   buttonNamed(h, 'Clear filters')!.click();
-  assert.equal(h.$$('.card').length, 3);
+  // Owner decision 2026-11-03 (G-62-3, plan 62-19): the standard board's planless phase:91 is now a Backlog card.
+  assert.equal(h.$$('.card').length, 4);
   h.setValue(h.$('#req-input')!, 'zzz');
   assert.equal(text(h.$('.state-body')), 'Clear the filters to see every card.');
 });
@@ -250,12 +255,13 @@ test('the milestone picker lists the active milestone first, then the others, th
   assert.deepEqual(Array.from(select.children).map((o) => o.getAttribute('value')), ['milestone:v0.9.0', 'milestone:v0.8.0', 'all']);
   assert.deepEqual(Array.from(select.children).map((o) => text(o)), ['Version 0.9.0', 'Version 0.8.0', 'All milestones']);
   assert.equal(select.value, 'milestone:v0.9.0');
-  assert.deepEqual(cardIds(h), [CHORE_ID, 'plan:90-01', 'plan:90-02'], 'the old milestone is hidden and the board item shows');
+  // Owner decision 2026-11-03 (G-62-3, plan 62-19): the standard board's planless phase:91 is now a Backlog card of milestone v0.9.0.
+  assert.deepEqual(cardIds(h), [CHORE_ID, 'phase:91', 'plan:90-01', 'plan:90-02'], 'the old milestone is hidden and the board item shows');
   h.setValue(select, 'milestone:v0.8.0', 'change');
   assert.deepEqual(cardIds(h), [CHORE_ID, 'plan:80-01']);
   h.setValue(select, 'all', 'change');
-  assert.equal(h.$$('.card').length, 4);
-  assert.match(text(h.$('.summary-line')), /^4 cards · 2 ready · 0 blocked$/);
+  assert.equal(h.$$('.card').length, 5);
+  assert.match(text(h.$('.summary-line')), /^5 cards · 2 ready · 0 blocked$/);
 });
 
 test('the empty board names the next step for each role and offers one primary button', async () => {
@@ -376,7 +382,8 @@ test('a cell with more than 30 cards shows the first 30 and Show all N; counts r
   const small = start();
   small.deliver({ type: 'state', model: base });
   assert.equal(small.$('.column[data-column="ready"] .col-btn')!.getAttribute('aria-label'), 'Ready column, 1 card, expanded. Press to collapse.');
-  assert.equal(small.$('.column[data-column="backlog"] .col-btn')!.getAttribute('aria-label'), 'Backlog column, 2 cards, expanded. Press to collapse.');
+  // Owner decision 2026-11-03 (G-62-3, plan 62-19): the standard board's planless phase:91 is now a Backlog card.
+  assert.equal(small.$('.column[data-column="backlog"] .col-btn')!.getAttribute('aria-label'), 'Backlog column, 3 cards, expanded. Press to collapse.');
   assert.match(text(card(small, 'plan:90-02').querySelector('.card-meta')), /1 dependency/);
 });
 
@@ -417,7 +424,8 @@ test('the first state announces the board; a teammate change gets a static outli
   const h = start();
   h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
   h.advance(150);
-  assert.equal(h.live(), 'Team Board loaded. 3 cards, 1 ready.');
+  // Owner decision 2026-11-03 (G-62-3, plan 62-19): the standard board's planless phase:91 is now a Backlog card, counted as a card but never as ready.
+  assert.equal(h.live(), 'Team Board loaded. 4 cards, 1 ready.');
 
   world.accept(world.lead, 'item.blocked', { id: 'plan:90-02', reason: 'waiting for the API key' });
   h.deliver({ type: 'state', model: modelOf(world, world.owner.memberId) });
@@ -493,13 +501,16 @@ test('kanban: one tab stop per lane, arrows move inside and across columns, Home
   const { h } = await drawn();
   const stops = h.$$('.card-main').filter((b) => b.getAttribute('tabindex') === '0');
   assert.equal(stops.length, 1, 'one card per lane takes the tab stop');
-  assert.equal(h.$$('.card-main').filter((b) => b.getAttribute('tabindex') === '-1').length, 2);
+  // Owner decision 2026-11-03 (G-62-3, plan 62-19): the standard board's planless phase:91 is now a Backlog card between plan:90-02 and the chore.
+  assert.equal(h.$$('.card-main').filter((b) => b.getAttribute('tabindex') === '-1').length, 3);
 
   main(h, 'plan:90-02').focus();
   h.press(h.focused(), 'ArrowDown');
-  assert.equal(focusedId(h), CHORE_ID);
-  assert.equal(main(h, CHORE_ID).getAttribute('tabindex'), '0', 'the stop follows the focus');
+  assert.equal(focusedId(h), 'phase:91');
+  assert.equal(main(h, 'phase:91').getAttribute('tabindex'), '0', 'the stop follows the focus');
   assert.equal(main(h, 'plan:90-02').getAttribute('tabindex'), '-1');
+  h.press(h.focused(), 'ArrowDown');
+  assert.equal(focusedId(h), CHORE_ID);
   h.press(h.focused(), 'ArrowDown');
   assert.equal(focusedId(h), CHORE_ID, 'nothing happens at the end of a cell');
   h.press(h.focused(), 'ArrowRight');
@@ -539,6 +550,9 @@ test('the column header row is one stop; Left, Right, Home and End move between 
 test('list: rows of an open group are one roving stop with Up, Down, Home and End', async () => {
   const { h } = await drawn(400);
   main(h, 'plan:90-02').focus();
+  h.press(h.focused(), 'ArrowDown');
+  // Owner decision 2026-11-03 (G-62-3, plan 62-19): the standard board's planless phase:91 is now a Backlog card between plan:90-02 and the chore.
+  assert.equal(focusedId(h), 'phase:91');
   h.press(h.focused(), 'ArrowDown');
   assert.equal(focusedId(h), CHORE_ID);
   h.press(h.focused(), 'ArrowDown');
