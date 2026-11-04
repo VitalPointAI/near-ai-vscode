@@ -279,12 +279,6 @@
           "id": "nearAiChatView",
           "name": "Chat",
           "visibility": "visible"
-        },
-        {
-          "type": "webview",
-          "id": "nearAiTeamBoardView",
-          "name": "Team Board",
-          "when": "nearAi.teamMode"
         }
       ]
     },

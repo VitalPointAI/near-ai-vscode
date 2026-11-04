@@ -211,9 +211,8 @@ test('the page has one nonce CSP, one script tag per client file in order and no
   const media = uri.Uri.file(MEDIA_BOARD);
   const webview = { cspSource: 'CSP_SOURCE', asWebviewUri: (value: { fsPath: string }) => ({ toString: () => `webview://${value.fsPath}` }) };
   // The page is written for one place, the editor tab, so boardHtml takes no surface and the body carries no surface attribute (G-62-1).
-  const page = boardHtml as unknown as (webview: unknown, media: unknown, nonce: string, testSeams?: boolean) => string;
   for (const testSeams of [false, true]) {
-    const html = page(webview, media, 'NONCE', testSeams);
+    const html = boardHtml(webview as never, media as never, 'NONCE', testSeams);
     assert.equal(html.match(/<meta http-equiv="Content-Security-Policy"/g)?.length, 1, 'one CSP meta');
     const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)?.[1];
     assert.equal(csp, "default-src 'none'; style-src CSP_SOURCE; script-src 'nonce-NONCE';");

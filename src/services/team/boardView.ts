@@ -1,5 +1,5 @@
-// The Team Board in VS Code (D-15, D-16, AD-22): a sidebar view and one editor panel serve the same page from media/board under a nonce CSP, and one
-// controller turns log changes into model posts and page messages into permission-checked moves. It lives here, not in chat.ts. The page is
+// The Team Board in VS Code (D-15, D-16, AD-22, amended by the owner on 2026-11-03, G-62-1): one editor panel, opened only when someone asks, serves
+// the page from media/board under a nonce CSP, and one controller turns log changes into model posts and page messages into permission-checked moves. It lives here, not in chat.ts. The page is
 // untrusted (Pitfall 9): every message passes parseBoardMessage, a move is planned again on the freshest state inside the append, and the role,
 // the permission and the state always come from the log, never from the page.
 import { randomBytes } from 'node:crypto';
@@ -21,7 +21,6 @@ import { IMPORT_PLANS_COMMAND, OPEN_BOARD_COMMAND, VERIFY_LOG_COMMAND } from './
 import type { TeamOutput, TeamSession } from './teamSession';
 import { safeReason } from './teamStatusBar';
 
-export const BOARD_VIEW_ID = 'nearAiTeamBoardView';
 export const BOARD_PANEL_TYPE = 'nearAiTeamBoard';
 // Load order of the client; plans 62-09 to 62-13 create the files.
 export const BOARD_SCRIPTS = ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js'] as const;
@@ -268,16 +267,16 @@ export function parseBoardMessage(value: unknown): BoardMessage | undefined {
 
 /**
  * The page: a nonce CSP with no inline script or style, no remote address and no font source (icons are inline SVG), one script tag per client
- * file in load order, and the root and live region the client draws into. `surface` tells the client whether it is the sidebar or the tab.
+ * file in load order, and the root and live region the client draws into. The page lives only in the editor tab, so it carries no surface mark.
  */
-export function boardHtml(webview: { cspSource: string; asWebviewUri(uri: vscode.Uri): vscode.Uri }, media: vscode.Uri, nonce: string, surface: 'view' | 'panel', testSeams = false): string {
+export function boardHtml(webview: { cspSource: string; asWebviewUri(uri: vscode.Uri): vscode.Uri }, media: vscode.Uri, nonce: string, testSeams = false): string {
   const asset = (file: string): string => webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
   const styles = BOARD_STYLES.map((file) => `<link rel="stylesheet" href="${asset(file)}">`).join('\n');
   const scripts = BOARD_SCRIPTS.map((file) => `<script nonce="${nonce}" src="${asset(file)}"></script>`).join('\n');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 ${styles}
-<title>${PANEL_TITLE}</title></head><body data-surface="${surface}"${testSeams ? ' data-e2e="1"' : ''}>
+<title>${PANEL_TITLE}</title></head><body${testSeams ? ' data-e2e="1"' : ''}>
 <div id="root"></div>
 <div id="live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 ${scripts}
@@ -287,7 +286,7 @@ ${scripts}
 // ---- surfaces and the controller -------------------------------------------------------------------------------------------------------------
 
 export interface BoardSurface {
-  kind: 'view' | 'panel';
+  kind: 'panel';
   webview: { postMessage(message: unknown): Thenable<boolean>; onDidReceiveMessage(listener: (message: unknown) => unknown): { dispose(): void } };
   isVisible(): boolean;
   onDidChangeVisibility(listener: (visible: boolean) => void): { dispose(): void };
@@ -904,14 +903,6 @@ export class BoardController {
 
 // ---- registration ----------------------------------------------------------------------------------------------------------------------------
 
-function viewSurface(view: vscode.WebviewView): BoardSurface {
-  return {
-    kind: 'view', webview: view.webview, isVisible: () => view.visible,
-    onDidChangeVisibility: (listener) => view.onDidChangeVisibility(() => { listener(view.visible); }),
-    onDidDispose: (listener) => view.onDidDispose(listener)
-  };
-}
-
 function panelSurface(panel: vscode.WebviewPanel): BoardSurface {
   return {
     kind: 'panel', webview: panel.webview, isVisible: () => panel.visible,
@@ -923,8 +914,9 @@ function panelSurface(panel: vscode.WebviewPanel): BoardSurface {
 const nonceOf = (): string => randomBytes(16).toString('base64');
 
 /**
- * Registers the sidebar view provider and returns the controller and the way to open the one editor panel. Called once per extension lifetime,
- * and only in a project that has a team (a solo project never loads this module).
+ * Returns the controller and the way to open the one editor panel. Nothing is shown here: the only page is the panel openPanel makes, and only the
+ * Open Team Board command calls it (owner decision 2026-11-03, G-62-1: no sidebar board view, nothing opens by itself). Called once per extension
+ * lifetime, and only in a project that has a team (a solo project never loads this module).
  */
 export function registerTeamBoard(context: vscode.ExtensionContext, deps: BoardDeps): { openPanel(): void; controller: BoardController } {
   const testSeams = deps.testSeams ?? process.env.NEAR_AI_E2E === '1';
@@ -933,14 +925,6 @@ export function registerTeamBoard(context: vscode.ExtensionContext, deps: BoardD
   let panel: vscode.WebviewPanel | undefined;
 
   // No retainContextWhenHidden: the page keeps its own state with getState and setState and asks for the model again when it is shown.
-  const provider: vscode.WebviewViewProvider = {
-    resolveWebviewView(view: vscode.WebviewView): void {
-      view.webview.options = { enableScripts: true, localResourceRoots: [media] };
-      view.webview.html = boardHtml(view.webview, media, nonceOf(), 'view', testSeams);
-      controller.attach(viewSurface(view));
-    }
-  };
-
   function openPanel(): void {
     if (panel !== undefined) {
       panel.reveal();
@@ -949,11 +933,11 @@ export function registerTeamBoard(context: vscode.ExtensionContext, deps: BoardD
     const created = vscode.window.createWebviewPanel(BOARD_PANEL_TYPE, PANEL_TITLE, vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
     panel = created;
     created.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
-    created.webview.html = boardHtml(created.webview, media, nonceOf(), 'panel', testSeams);
+    created.webview.html = boardHtml(created.webview, media, nonceOf(), testSeams);
     controller.attach(panelSurface(created));
     created.onDidDispose(() => { if (panel === created) panel = undefined; });
   }
 
-  context.subscriptions.push(vscode.window.registerWebviewViewProvider(BOARD_VIEW_ID, provider), controller);
+  context.subscriptions.push(controller);
   return { openPanel, controller };
 }
