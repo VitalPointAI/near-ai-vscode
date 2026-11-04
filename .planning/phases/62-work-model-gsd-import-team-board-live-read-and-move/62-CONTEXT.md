@@ -137,3 +137,14 @@ The owner checked the 0.6.0 team preview by hand on 2026-11-03 and stopped the c
 - **The toolbar is solid and the board is the only scroller.** The toolbar has a solid background, and the board region below it is the only part of the page that scrolls, so cards never pass under the toolbar or show through it. (62-21, proven by 62-22. G-62-2, G-62-4.)
 - **Cards must be readable (G-62-7).** A folded column shows only its name and count and holds no cards. Titles wrap between words, never inside a word. A card's main button keeps card styling (left aligned, theme text colour), not the look of a plain button. (62-21, proven by 62-22.)
 - **Real screenshots are part of verification.** Verification includes real screenshots of the board in a VS Code window on a hidden virtual screen, and the owner reviews them before the phase is accepted. (62-16 tools, 62-22 and 62-24.)
+
+## Owner decision (2026-11-04): unassigning yourself
+
+Found in the owner's re-test on 0.6.3 (62-UAT "Re-test on 0.6.3"): "Bob shouldn't be able to unassign himself from cards that Alice assigned him - only those he assigns himself." Narrows the self-assignment decision of 2026-11-03.
+
+- A member who is not the owner or a lead can take themselves off a card only when they assigned it to themselves. A card the owner or a lead assigned to them stays theirs until the owner or a lead changes it.
+- Assigning yourself an unassigned card, and the owner's and leads' assigning and unassigning of anyone, are unchanged.
+- Every client records who made a card's current assignment (assignedBy, the author of the item.assigned event) and uses it on write and on read. The signed events, the hash version, card history and the pinned hashes stay as they are.
+- On the board, Unassign me appears only on cards you took yourself; on a card a lead assigned to you, the card detail says "Assigned to you by {name}. Ask a lead to change it." instead.
+- Teams that used the 0.6.x previews: a self-unassignment from a lead-assigned card that 0.6.3 accepted is rejected once everyone updates, so that card shows the member again.
+- Plan: 62-26.
