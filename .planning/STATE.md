@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-25-PLAN.md
-last_updated: "2026-11-04T01:12:52.799Z"
+stopped_at: Completed 62-17-PLAN.md
+last_updated: "2026-11-04T01:43:07.322Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 356e1770c8d9883f2448f7eb93b3e5194ad0809e
+state_head: 4e66b8a4bc1cc22e933ad7901ebbdecb5e6a3430
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 62
-  completed_plans: 53
+  completed_plans: 54
   percent: 13
 ---
 
@@ -107,6 +107,7 @@ Progress: [█░░░░░░░░░] 13%
 | Phase 62 P15 | 20min | 3 tasks | 12 files |
 | Phase 62 P16 | 18 min | 3 tasks | 8 files |
 | Phase 61 P25 | 9 min | 3 tasks | 9 files |
+| Phase 62 P17 | 27min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -226,6 +227,9 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-25: one readiness rule in the page (media/chat/readiness.js, PR #7's welcomeState case for case) gates the Team section and the planning-file links on profile-status; no host file check
 - [Phase 61]: 61-25: before the first profile-status the state is unknown and counts as not ready; the section keeps the latest model and draws it by itself once the profile works
 - [Phase 61]: 61-25: merge note: keep readiness.js as the rule, setup.js delegates to nearReadiness.welcomeState or keeps a copy checked by the parity test; readiness.js before setup.js and chat.js
+- [Phase 62]: 62-17: The Team Board is one editor tab opened on purpose; no sidebar view, and nothing opens when Team Mode turns on or a session starts (owner decision 2026-11-03, amends D-15 and AD-22)
+- [Phase 62]: 62-17: The board page cannot ask the host to open the board; the open-board message type is gone from the parser and the controller (T-62-57)
+- [Phase 62]: 62-17: Owner amendments of 2026-11-03 are appended to 62-CONTEXT.md and 62-UI-SPEC.md, each naming the plan that builds it
 
 ### Pending Todos
 
@@ -247,8 +251,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T01:12:52.476Z
-Stopped at: Completed 61-25-PLAN.md
+Last session: 2026-11-04T01:43:07.017Z
+Stopped at: Completed 62-17-PLAN.md
 Resume file: None
 
 ## Notes
