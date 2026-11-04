@@ -11,10 +11,26 @@ export interface TimelineNow {
   milestoneId: string; step: number; stepCount: number; phaseId?: string; allDone: boolean; inProgress: number; ready: number; percent?: number;
   title: string; detail: string; sentence: string;
 }
-export interface TimelinePhase { id: string; label: string; number: string; firstStep: number; lastStep: number; percent?: TimelinePercent }
+export interface TimelinePhase {
+  id: string; label: string; number: string; firstStep: number; lastStep: number; percent?: TimelinePercent;
+  /** The segment label, longest first: 'Phase 62: {title} · 62%', 'Phase 62 · 62%', '62 · 62%'. */
+  labels: string[];
+  /** The h3 and the label's title: 'Phase 62: {title}, 62% done, 17 of 27 cards finished'. */
+  heading: string;
+}
 export interface TimelineMilestone {
   id: string; title: string; active: boolean; finished: boolean; foldedByDefault: boolean; steps: number; cycle: boolean; cardCount: number; cancelled: number;
   phases: TimelinePhase[]; percent?: TimelinePercent;
+  /** The h2: '{title}, current milestone, 62% done'. */
+  heading: string;
+  /** '62%', or '' when nothing is counted. */
+  percentText: string;
+  /** '26 of 42 cards finished', or the no-percent text. */
+  progressText: string;
+  /** The folded tile's line: 'Finished: 30 done' or 'Finished: 30 done, 2 cancelled'. */
+  tileText: string;
+  /** The folded tile's accessible name: 'Show {title}, finished, 32 cards'. */
+  tileName: string;
 }
 export interface TimelineDot {
   cardId: string; milestoneId: string; phaseId?: string; step: number; slot: number; inCycle: boolean; waitsFor: string[]; missing: string[]; neededBy: number; label: string;
@@ -194,7 +210,7 @@ function phasesOfBand(model: BoardModel, dots: readonly TimelineDot[]): Timeline
   const titles = new Map(model.phases.map((entry) => [entry.id, entry.title]));
   return [...spans.entries()].map(([id, span]) => {
     const number = id.slice('phase:'.length);
-    return { id, label: titles.get(id) ?? `Phase ${number}`, number, firstStep: span.first, lastStep: span.last };
+    return { id, label: titles.get(id) ?? `Phase ${number}`, number, firstStep: span.first, lastStep: span.last, labels: [], heading: '' };
   }).sort((a, b) => a.firstStep - b.firstStep || compareParts(a.number, b.number) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
@@ -235,7 +251,8 @@ export function buildTimeline(state: TeamState, model: BoardModel, _options: { v
     milestones.push({
       id: band, title: milestone?.title ?? BOARD_LANE_LABEL, active: milestone?.active ?? false, finished, foldedByDefault: finished,
       steps: inBand.length === 0 ? 0 : last + 1, cycle: bandDots.some((dot) => dot.inCycle), cardCount: inBand.length,
-      cancelled: inBand.filter((node) => node.card.column === 'cancelled').length, phases: phasesOfBand(model, bandDots)
+      cancelled: inBand.filter((node) => node.card.column === 'cancelled').length, phases: phasesOfBand(model, bandDots),
+      heading: '', percentText: '', progressText: '', tileText: '', tileName: ''
     });
   }
 
