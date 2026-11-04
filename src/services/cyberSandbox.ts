@@ -59,20 +59,6 @@ export const runCapture: Runner = (command, args) => new Promise((resolve, rejec
   });
 });
 
-/**
- * The same runner, for a command whose non-zero exit is a result rather than a failure. `docker exec`
- * returns the containerised command's own exit code as its process code, so `runCapture` would throw
- * on every failing payload and the sandbox could never report a failed exploit — it reported a crash.
- */
-export const runCapturingExit: Runner = (command, args) => new Promise((resolve, reject) => {
-  execFile(command, args, { timeout: VERSION_TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
-    if (!error) { resolve(`0\n${stdout}${stderr}`); return; }
-    const code = (error as { code?: unknown }).code;
-    if (typeof code === 'number') { resolve(`${code}\n${stdout}${stderr}`); return; }
-    reject(error);
-  });
-});
-
 /** docker first, then podman; undefined when neither answers. Nothing is installed. */
 export async function detectRuntime(run: Runner = runCapture): Promise<ContainerRuntime | undefined> {
   for (const candidate of ['docker', 'podman'] as const) {

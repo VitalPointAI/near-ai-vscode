@@ -280,7 +280,7 @@ export function panelTools(options: {
     granted: () => Boolean(options.grants.intrusiveEngagement),
     stopped: options.stopped,
     sandboxTier: options.sandboxTier,
-    // A payload gets the run's own deadline, not the three-second version check's.
+    // A payload gets a fixed two-minute deadline, not the three-second version check's.
     sandboxOptions: { execTimeoutMs: 120_000 }
   });
   return [...readOnly, ...exploit.map((tool) => ({ tool, capability: 'shell' as const }))];

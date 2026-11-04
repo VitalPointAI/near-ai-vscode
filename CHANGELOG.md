@@ -23,14 +23,11 @@ test, and runs a scan against it.
   first and reports whether it worked.
 - **Offensive scans run in a sandbox.** A deep scan can attempt exploits, but
   only inside a container or a temporary folder, under a rate limit and a time
-  budget, with a stop button that works within one step. Cleanup is verified
-  both ways, and after a successful exploit only read-only commands may run.
-- **Stopped runs keep what they found.** Stopping a scan still records every
-  finding it had already reached, so a stopped run reports honestly instead of
-  losing its evidence.
-- **Long steps finish.** A command in a deep scan now gets the run's own time
-  limit instead of being cut off after three seconds, so a slow exploit is no
-  longer reported as failed. Stop still interrupts it at once.
+  budget, with a stop button that works within one step. Stopping keeps and
+  records every finding the scan already reached. A sandboxed command may run
+  for up to two minutes, so a slow exploit is not reported as failed, and Stop
+  still interrupts it at once. Cleanup is verified both ways, and after a
+  successful exploit only read-only commands may run.
 - **Honest results.** Every attempt ends in one of four verdicts — not
   vulnerable, exploit failed, could not determine, or verified access — and a
   failure always says why. A check that could not run is always named, so a
