@@ -35,14 +35,16 @@ class Observer {
   }
 }
 
-// NEAR_AI_E2E_SCENARIO names one scenario, or several run one after another in the same window (the lead's window runs team-lead, then team-confirm).
+// NEAR_AI_E2E_SCENARIO names one scenario, or several run one after another in the same window (the lead's window runs team-lead, team-confirm, then
+// team-accept).
 export async function run(): Promise<void> {
   const scenarios = (process.env.NEAR_AI_E2E_SCENARIO ?? 'project').split(',');
   let failed = 0;
   try {
     for (const scenario of scenarios) {
       const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : scenario === 'team' ? teamTests() : scenario === 'board' ? boardTests()
-        : scenario === 'team-lead' ? teamLeadTests() : scenario === 'team-join' ? teamJoinTests() : scenario === 'team-confirm' ? teamConfirmTests() : projectTests();
+        : scenario === 'team-lead' ? teamLeadTests() : scenario === 'team-join' ? teamJoinTests() : scenario === 'team-confirm' ? teamConfirmTests()
+          : scenario === 'team-accept' ? teamAcceptTests() : scenario === 'team-ask' ? teamAskTests() : projectTests();
       for (const [name, body] of tests) {
         try { await body(); console.log(`✔ [${scenario}] ${name}`); } catch (error) { failed += 1; console.error(`✖ [${scenario}] ${name}\n`, error); }
       }
@@ -50,11 +52,12 @@ export async function run(): Promise<void> {
   } finally {
     // The fake model servers a window's scenarios started (connectProfile) close after that window's last test.
     await Promise.all(windowServers.splice(0).map((server) => new Promise<void>((resolve) => { server.close(() => { resolve(); }); })));
-    // The board scenario's teammates (62-24): their copies, storage and mirrors are removed whatever happened, and the run says which (T-62-74).
+    // The board scenario's teammates (62-24), the invite scenarios' saved-profile folder and online reads (61-31): removed whatever happened, and the
+    // run says which (T-62-74).
     const folders = windowFolders.splice(0);
     for (const folder of folders) await rm(folder, { recursive: true, force: true });
     const left = folders.filter((folder) => existsSync(folder));
-    if (folders.length > 0) console.log(`(teammate folders removed: ${folders.length}${left.length ? `; still there: ${left.join(', ')}` : ''})`);
+    if (folders.length > 0) console.log(`(temporary folders removed: ${folders.length}${left.length ? `; still there: ${left.join(', ')}` : ''})`);
     if (left.length > 0) failed += 1;
   }
   if (failed) throw new Error(`${failed} extension-host test(s) failed in the ${scenarios.join(' and ')} scenario.`);
@@ -62,7 +65,8 @@ export async function run(): Promise<void> {
 
 // Fake model servers started for this window, closed once its last scenario has run.
 const windowServers: Server[] = [];
-// Temporary folders of the board scenario's teammates and second clients (62-24), removed once the window's last scenario has run.
+// Temporary folders of the board scenario's teammates and second clients (62-24), and of the invite scenarios' saved profile and online reads (61-31),
+// removed once the window's last scenario has run.
 const windowFolders: string[] = [];
 
 function projectTests(): Array<[string, () => Promise<void>]> {
@@ -374,13 +378,13 @@ const OTHER_WINDOW_MS = 180_000;
 let probes = 0;
 
 // Bounded polling: the condition's value once it holds, or a failure that says what was awaited.
-async function until<T>(what: string, check: () => T | undefined | false | Promise<T | undefined | false>, timeoutMs = STEP_MS): Promise<T> {
+async function until<T>(what: string, check: () => T | undefined | false | Promise<T | undefined | false>, timeoutMs = STEP_MS, everyMs = 250): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await check();
     if (value !== undefined && value !== false) return value;
     if (Date.now() > deadline) throw new Error(`Timed out after ${timeoutMs} ms waiting for ${what}.`);
-    await sleep(250);
+    await sleep(everyMs);
   }
 }
 
@@ -457,6 +461,8 @@ function inviteKit() {
     assert.ok(teamFile, 'the project has team.json');
     const anchor = { teamId: teamFile.teamId, eventId: teamFile.genesis.eventId, ownerDevice: { ...teamFile.genesis.ownerDevice } };
     const mirrorRoot = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-reader-'));
+    // Each read makes its own mirror; they are removed with the window's other temporary folders.
+    windowFolders.push(mirrorRoot);
     const transport = new GitTransport({
       mirrorDir: path.join(teamStorageDir(mirrorRoot, teamFile.teamId), 'coordination.git'), projectRoot,
       remote: teamFile.coordination.remote, ref: teamFile.coordination.ref, materializer: teamMaterializer(anchor), baseDelayMs: 1
@@ -763,6 +769,156 @@ function teamConfirmTests(): Array<[string, () => Promise<void>]> {
       await until('every scripted step to be used', () => kit.prompts().script?.length === 0);
     }],
     ['every prompt of the confirmation was answered and spoke plain words', async () => {
+      kit.assertPlain();
+    }]
+  ];
+}
+
+// ---- Ask to join (61-31, G-61-9): a person without an invite asks from a copy that is behind, the lead accepts the request in Members, and both
+// computers finish by themselves. The request text passes from the requester's window to the lead's through the handoff folder, like the invite.
+
+// The requester's window opens only after the invitee's has closed, so the lead's window waits longer for the request than for the invitee.
+const ASK_WINDOW_MS = 360_000;
+// Reading the team online fetches a mirror, so a long wait reads it every few seconds instead of every quarter second.
+const ONLINE_POLL_MS = 3_000;
+const REQUESTER = 'E2E Requester';
+
+// Runs in the lead's window after team-confirm: the same window, so the lead's device key is the one that window made.
+function teamAcceptTests(): Array<[string, () => Promise<void>]> {
+  const kit = inviteKit();
+  let api: NearAiTestApi;
+  let memberId = '';
+  return [
+    ['a request to join arrives from a person without an invite, and Members accepts it after its check code, as a developer with 0 dollars for seven days', async () => {
+      api = await kit.activate();
+      const text = await until('the requester\'s window to hand over the request', async () => {
+        const found = await readFile(path.join(kit.handoff, 'request.txt'), 'utf8').catch(() => '');
+        return found.trim().startsWith(REQUEST_PREFIX) ? found.trim() : undefined;
+      }, ASK_WINDOW_MS, ONLINE_POLL_MS);
+      const { parseJoinRequest, requestCheckCode } = kit.load<typeof import('../../team/joinRequest')>('team/joinRequest');
+      const request = parseJoinRequest(text);
+      memberId = request.member;
+      assert.equal(request.name, REQUESTER);
+      await kit.click('members', [
+        { match: 'Accept a request', answer: 'Accept a request' },
+        { match: 'Paste the request to join that the person sent you', answer: text },
+        { match: `Accept ${REQUESTER}'s request to join E2E team?`, answer: 'Continue' },
+        { match: `${REQUESTER}'s email address`, answer: 'requester@example.invalid' },
+        { match: `Role for ${REQUESTER}`, answer: 'Developer' },
+        { match: 'Allocation in US dollars', answer: '0' },
+        { match: 'How long the invite works', answer: '7 days' }
+      ]);
+      const said = await kit.finished('the accepted message', (record) => record.text.startsWith(`Accepted ${REQUESTER}'s request.`));
+      assert.equal(said.modal, false);
+      const shown = kit.prompts().shown;
+      const check = shown.find((record) => record.text === `Accept ${REQUESTER}'s request to join E2E team?`);
+      assert.equal(check?.modal, true, 'the check is one modal');
+      assert.deepEqual(check?.choices, ['Continue']);
+      assert.ok(check?.detail?.includes(`Check code: ${requestCheckCode(request)}`), 'the lead sees the same check code as the requester');
+      assert.ok(check?.detail?.includes('Email: none given'), 'the requester gave no email, so the lead is asked for it');
+      const member = await until('the team record online to show the accepted request', async () => {
+        const found = (await kit.readLog(workspace)).members.get(memberId);
+        return found?.invitedEvent !== undefined ? found : undefined;
+      }, STEP_MS, ONLINE_POLL_MS);
+      assert.equal(member.name, REQUESTER);
+      assert.equal(member.status, 'invited', 'the request became an invitation for that person');
+      assert.equal(member.pendingRole ?? member.role, 'developer');
+    }],
+    ['the requester\'s computer joins by itself, and this computer confirms them as a developer by itself, with no question asked', async () => {
+      const confirmed = await until('this computer to confirm the requester by itself', async () => {
+        api.team.handle.session()?.nudge();
+        const found = (await kit.readLog(workspace)).members.get(memberId);
+        return found?.status !== 'invited' && found?.role === 'developer' && found.pendingRole === undefined ? found : undefined;
+      }, ASK_WINDOW_MS, ONLINE_POLL_MS);
+      assert.equal(confirmed.name, REQUESTER);
+      assert.equal(kit.prompts().shown.some((record) => record.modal && /confirm/i.test(record.text)), false, 'no confirmation was asked');
+      const shown = await kit.facts('no one waiting', (facts) => /3 people are on E2E team/.test(facts.status), STEP_MS, () => { api.team.handle.session()?.nudge(); });
+      assert.equal(shown.actions.find((action) => action.id === 'members')?.badge, undefined, 'nobody waits in Members');
+    }],
+    ['every prompt of the acceptance was answered and spoke plain words', async () => {
+      kit.assertPlain();
+    }]
+  ];
+}
+
+// The requester's window: their copy, made before the team existed, with no profile and no invite.
+function teamAskTests(): Array<[string, () => Promise<void>]> {
+  const kit = inviteKit();
+  let api: NearAiTestApi;
+  let request = '';
+  const head = (cwd: string, ref: string): string => execFileSync('git', ['-C', cwd, 'rev-parse', ref], { encoding: 'utf8' }).trim();
+  const nudge = (): void => { api.team.handle.session()?.nudge(); };
+  return [
+    ['with no NEAR AI profile and no invite, the Connect screen offers Join a team and Ask to join, and this copy is behind', async () => {
+      api = await kit.activate();
+      await kit.assertHiddenWithoutProfile();
+      const connect = await kit.connectScreen('Join a team and Ask to join', (part) => ids(part).includes('ask'));
+      assert.equal(connect.inPanel, false);
+      assert.deepEqual(ids(connect), ['join', 'ask']);
+      assert.notEqual(head(workspace, 'HEAD'), head(kit.remote, 'main'), 'the copy is behind the online home');
+      assert.equal(existsSync(path.join(workspace, '.planning', '.near-ai', 'team.json')), false, 'the copy has no team.json');
+    }],
+    ['Ask to join on the Connect screen brings the copy up to date and shows the request once, with Copy request and its check code', async () => {
+      const clipboardBefore = await vscode.env.clipboard.readText();
+      try {
+        await kit.click('ask', [
+          { match: 'Your name as the team will see it', answer: REQUESTER },
+          { match: 'Your email address, so the person who runs the team knows the request is yours', answer: '' },
+          { match: 'Your request to join E2E team', answer: 'Copy request' }
+        ]);
+        await kit.finished('the copied message', (record) => record.text === 'Request copied. Send it to the person who runs the team.');
+        const shown = kit.prompts().shown;
+        assert.ok(shown.some((record) => record.text === 'Your copy of the project was brought up to date.'), 'the copy was brought up to date and said so');
+        assert.equal(head(workspace, 'HEAD'), head(kit.remote, 'main'), 'the copy is at the online home\'s main version');
+        assert.ok(existsSync(path.join(workspace, '.planning', '.near-ai', 'team.json')), 'the copy has the team setup');
+        const requests = shown.filter((record) => record.detail?.startsWith(REQUEST_PREFIX) === true);
+        assert.equal(requests.length, 1, 'the request is shown exactly once');
+        const [modal] = requests;
+        assert.equal(modal!.modal, true);
+        assert.equal(modal!.text, 'Your request to join E2E team');
+        assert.deepEqual(modal!.choices, ['Copy request']);
+        request = modal!.detail!.split('\n')[0]!;
+        const { parseJoinRequest, requestCheckCode } = kit.load<typeof import('../../team/joinRequest')>('team/joinRequest');
+        const parsed = parseJoinRequest(request);
+        assert.equal(parsed.name, REQUESTER);
+        assert.equal(parsed.email, undefined, 'no email was given');
+        assert.ok(modal!.detail!.includes(`Check code: ${requestCheckCode(parsed)}`), 'the check code is shown with the request');
+        assert.equal(shown.filter((record) => JSON.stringify(record).includes(request)).length, 1, 'the request is in no other prompt');
+        assert.equal(await vscode.env.clipboard.readText(), request, 'the clipboard holds the request');
+        // Written whole, then renamed, so the lead's window never reads half a request.
+        await writeFile(path.join(kit.handoff, 'request.part'), request, { encoding: 'utf8', mode: 0o600 });
+        await rename(path.join(kit.handoff, 'request.part'), path.join(kit.handoff, 'request.txt'));
+      } finally {
+        await vscode.env.clipboard.writeText(clipboardBefore);
+      }
+    }],
+    ['the Connect screen then says the request waits for a lead, with Show my request', async () => {
+      const connect = await kit.connectScreen('Show my request', (part) => part.actions.some((action) => action.id === 'ask' && action.label === 'Show my request'));
+      assert.equal(connect.status, 'Your request to join E2E team is waiting for a lead. This computer joins by itself once they accept it.');
+      assert.deepEqual(ids(connect), ['ask'], 'only Show my request');
+    }],
+    ['once the lead accepts, this computer joins by itself, once, and the lead\'s computer confirms it as a developer by itself', async () => {
+      const joined = await until('this computer to join by itself', () => {
+        nudge();
+        return kit.prompts().shown.find((record) => record.text.startsWith('You are on E2E team now.'));
+      }, ASK_WINDOW_MS, ONLINE_POLL_MS);
+      assert.equal(joined.modal, false, 'said in a plain message');
+      const member = await until('the lead\'s computer to confirm this person', async () => {
+        nudge();
+        const found = kit.memberNamed(await kit.readLog(workspace), REQUESTER);
+        return found?.role === 'developer' && found.pendingRole === undefined ? found : undefined;
+      }, ASK_WINDOW_MS, ONLINE_POLL_MS);
+      assert.equal(member.status === 'invited', false);
+      assert.equal(kit.prompts().shown.filter((record) => record.text.startsWith('You are on E2E team now.')).length, 1, 'joined once, with no second completion');
+    }],
+    ['the Connect screen then says this team has no organization, so this person needs their own key or a saved profile', async () => {
+      const connect = await kit.connectScreen('the own-key sentence', (part) => /has no organization linked/.test(part.status), STEP_MS, nudge);
+      assert.equal(connect.status, 'E2E team has no organization linked, so each person uses their own key. Set up a new profile with your key or use a saved profile.');
+      assert.deepEqual(connect.actions, [], 'the Connect screen\'s own profile buttons are the way in');
+      const facts = await kit.facts('no Team section yet', (seen) => seen.hidden === true);
+      assert.equal(facts.profile, 'connect', 'no profile works here yet');
+    }],
+    ['every prompt of the requester\'s window was answered and spoke plain words', async () => {
       kit.assertPlain();
     }]
   ];

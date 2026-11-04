@@ -29,10 +29,10 @@ async function prepareTeamProject(workspace: string, extensionDevelopmentPath: s
 // sends git to a local bare folder instead, so the invite's address check runs unchanged: nothing in the extension accepts a local path (T-61-92).
 const PUBLIC_URL = 'https://example.invalid/e2e-team.git';
 
-interface InviteProjects { remote: string; lead: string; copy: string; handoff: string }
+interface InviteProjects { remote: string; lead: string; copy: string; askCopy: string; handoff: string }
 
-// The lead's project (NEAR AI set up, no team yet) and the invitee's copy of it, made before Team Mode is on, so the copy is behind once the lead shares
-// the team setup. The copy has no .planning/.near-ai. Both identities are local to their repository.
+// The lead's project (NEAR AI set up, no team yet), the invitee's copy of it and the requester's copy (61-31), both made before Team Mode is on, so
+// each copy is behind once the lead shares the team setup. The copies have no .planning/.near-ai. Every identity is local to its repository.
 async function prepareInviteProjects(): Promise<InviteProjects> {
   const remote = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-invite-remote-'));
   git(remote, ['init', '--bare', '-q', '-b', 'main']);
@@ -54,9 +54,15 @@ async function prepareInviteProjects(): Promise<InviteProjects> {
   git(parent, ['clone', '-q', '-c', `url.${remote}.insteadOf=${PUBLIC_URL}`, PUBLIC_URL, copy]);
   git(copy, ['config', 'user.name', 'E2E Joiner']);
   git(copy, ['config', 'user.email', 'joiner@example.invalid']);
-  // Holds the invite text between the lead's launch and the invitee's; removed after the last launch (T-61-93).
+  // The person who asks to join without an invite (61-31) has a copy of their own, fetched the same way, with their own identity.
+  const askParent = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-ask-'));
+  const askCopy = path.join(askParent, 'project');
+  git(askParent, ['clone', '-q', '-c', `url.${remote}.insteadOf=${PUBLIC_URL}`, PUBLIC_URL, askCopy]);
+  git(askCopy, ['config', 'user.name', 'E2E Requester']);
+  git(askCopy, ['config', 'user.email', 'requester@example.invalid']);
+  // Holds the invite text and the request text between the windows; removed after the last launch (T-61-93, T-61-121).
   const handoff = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-handoff-'));
-  return { remote, lead, copy, handoff };
+  return { remote, lead, copy, askCopy, handoff };
 }
 
 // ---- the hidden virtual screen (owner, 2026-11-03: a test window must never appear on a person's real screen) -----------------------------------
@@ -147,8 +153,11 @@ async function boardUserData(): Promise<string> {
 }
 
 // Launches a real VS Code with the extension under development: in a project set up with the extension, in an unrelated folder and in a git project where
-// Team Mode gets enabled, one after another. Then one invite in two windows open at the same time: the lead's window (team-lead, then team-confirm)
-// turns Team Mode on, shares, invites, and once the invitee has joined confirms them; the invitee's window (team-join) joins from a copy that is behind.
+// Team Mode gets enabled, one after another. Then one invite in two windows open at the same time: the lead's window (team-lead, team-confirm, then
+// team-accept) turns Team Mode on, shares, invites, and once the invitee has joined confirms them; the invitee's window (team-join) joins from a copy
+// that is behind, from the Connect screen with a saved profile. Once the invitee's window has closed, the requester's window (team-ask, 61-31) asks to
+// join from a second copy; the lead's window accepts the request in Members, and both computers finish the join by themselves. At most two windows
+// run at once.
 // The lead's steps stay in one window because VS Code keeps all storage, SecretStorage included, in memory while extension tests run, so the lead's
 // device key cannot outlive the window and is never written anywhere else (T-61-94). The basic password store keeps VS Code from looking for an OS
 // keyring (no keyring prompt on a desktop display). Last, the board window (62-21): this repository's own committed roadmap on a test project, a
@@ -203,22 +212,27 @@ async function main(): Promise<void> {
 
 type Launch = (scenario: string, workspace: string, userData: string, extra?: { args?: string[]; env?: Record<string, string> }) => Promise<number>;
 
-// One invite in two windows open at the same time (61-22).
+// One invite in two windows open at the same time (61-22), then a request to join in a third window that opens once the invitee's has closed (61-31):
+// the lead's window runs throughout, so never more than two windows run at once.
 async function inviteWindows(launch: Launch): Promise<void> {
   const invite = await prepareInviteProjects();
   try {
     const extra = { args: ['--password-store=basic'], env: { NEAR_AI_E2E_HANDOFF: invite.handoff, NEAR_AI_E2E_REMOTE: invite.remote } };
-    const windows = await Promise.allSettled([
-      launch('team-lead,team-confirm', invite.lead, await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-lead-')), extra),
-      launch('team-join', invite.copy, await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-join-')), extra)
-    ]);
+    const lead = launch('team-lead,team-confirm,team-accept', invite.lead, await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-lead-')), extra);
+    // The requester's window opens even when the invitee's failed, so the lead's window is not left waiting for a request; the failure still counts.
+    const others = (async (): Promise<void> => {
+      const joined = await launch('team-join', invite.copy, await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-join-')), extra).then(() => undefined, (error: unknown) => ({ error }));
+      await launch('team-ask', invite.askCopy, await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-user-ask-')), extra);
+      if (joined !== undefined) throw joined.error;
+    })();
+    const windows = await Promise.allSettled([lead, others]);
     const failed = windows.find((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (failed !== undefined) throw failed.reason;
   } finally {
-    // The invite text is a test secret: it is not left on disk, whatever happened above (T-61-93).
+    // The invite text and the request text are test material: they are not left on disk, whatever happened above (T-61-93, T-61-121).
     await rm(invite.handoff, { recursive: true, force: true });
     if (existsSync(invite.handoff)) throw new Error(`The handoff folder could not be removed: ${invite.handoff}`);
-    console.log('The handoff folder with the invite text is removed.');
+    console.log('The handoff folder with the invite text and the request text is removed.');
   }
 }
 
