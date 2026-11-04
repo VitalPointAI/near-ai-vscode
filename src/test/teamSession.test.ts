@@ -413,6 +413,42 @@ test('an unreachable remote pauses with a redacted reason, backs off to 10 minut
   });
 });
 
+// The test above failed now and then on a loaded machine ("the paused state is written once while it lasts: 3 !== 1"). git's own words for an
+// unreachable remote carry how long the connect took ("Failed to connect to 127.0.0.1 port 1 after 0 ms"), and that figure moves with the machine's
+// load, so each poll could look like a new reason and write the paused line again. Here every failed fetch reports a different time, as a loaded
+// machine would, and the line must still be written once.
+test('a remote that stays down is written once even when git reports a different connect time on every try', async () => {
+  await withRig(async (rig) => {
+    let tries = 0;
+    const git: GitRunner = async (args, options) => {
+      const result = await rig.git(args, options);
+      if (result.code === 0 || !/ after \d+ ms/.test(result.stderr)) return result;
+      tries += 1;
+      return { ...result, stderr: result.stderr.replace(/ after \d+ ms/g, ` after ${tries * 7} ms`) };
+    };
+    const started = await startSession(rig, { git });
+    await until(() => rig.timers.requests.length === 1, 'the first poll');
+    gitIn(rig.projectRoot, ['remote', 'set-url', 'origin', 'http://127.0.0.1:1/team.git']);
+    for (let failure = 1; failure <= 4; failure += 1) {
+      rig.timers.fire();
+      await until(() => rig.timers.requests.length === failure + 1, `failure ${failure} to be scheduled`);
+    }
+    assert.ok(tries >= 4, `every try reported its own connect time (${tries})`);
+    assert.equal(lastItem().text, `$(warning) ${PAUSED_UNREACHABLE_TEXT}`);
+    const paused = started.lines.filter((line) => line.startsWith(PAUSED_UNREACHABLE_TEXT));
+    assert.equal(paused.length, 1, 'the paused state is written once while it lasts');
+    assert.ok(paused[0]?.includes('after 7 ms'), 'the first reason is written as git gave it');
+    assert.equal(started.lines.filter((line) => line.startsWith('Team sync failed')).length <= 1, true, 'and no failure line repeats for a time alone');
+
+    // The remote comes back: the recovery is still written, so only the time figure is ignored.
+    gitIn(rig.projectRoot, ['remote', 'set-url', 'origin', rig.fixture.remote]);
+    started.session.focusChanged(false);
+    started.session.focusChanged(true);
+    await until(() => lastItem().text === `$(organization) Team: ${TEAM_NAME}`, 'the status bar to recover');
+    assert.ok(started.lines.includes('Team sync is working again.'));
+  });
+});
+
 test('a rewritten coordination branch shows the log rewritten state with the D-33 sentence', async () => {
   await withRig(async (rig) => {
     const started = await startSession(rig);
