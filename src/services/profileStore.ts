@@ -25,6 +25,7 @@ const defaultFileSystem: ProfileStoreFileSystem = {
 const PROFILE_STORE_VERSION = 1 as const;
 const MAX_PROFILES = 50;
 const SOURCE_UNAVAILABLE = 'That saved profile is no longer available. Set up a new profile or choose another.';
+const SOURCE_REMOVED = 'The saved profile this one uses was removed. Set up a new profile or choose another.';
 const KEY_ELSEWHERE = 'This profile uses a key saved in another project. Set up a new profile to use a different key.';
 
 export interface CreateOrganizationProfileInput {
@@ -244,11 +245,13 @@ export class ProfileStore {
   public async remove(profileId: string): Promise<boolean> {
     await this.load();
     if (!isProfileId(profileId)) throw new Error('A stable profile ID is required.');
-    const before = this.ledger.profiles.length;
+    const removed = this.ledger.profiles.find((profile) => profile.profileId === profileId);
+    if (!removed) return false;
     this.ledger.profiles = this.ledger.profiles.filter((profile) => profile.profileId !== profileId);
-    if (before === this.ledger.profiles.length) return false;
     if (this.ledger.active?.profileId === profileId) this.ledger.active = undefined;
-    if (this.auth) {
+    // A reused profile removes only this project's copy: the key belongs to the project it came from.
+    if (removed.keySource) await dropCopyLink(this.projectId, profileId);
+    else if (this.auth) {
       await this.auth.removeScopedCredentials(this.getScope(profileId));
       await this.auth.removeScopedCredentials(localKeyScope(this.getScope(profileId)));
     }
@@ -261,6 +264,11 @@ export class ProfileStore {
     const profile = this.ledger.profiles.find((candidate) => candidate.profileId === profileId);
     if (!profile) throw new Error('The requested profile was not found.');
     const probe = validator ?? this.validator ?? this.defaultValidator.bind(this);
+    if (profile.keySource) {
+      // A copy works only through a source the person chose on this computer, and only while that source still has its key.
+      if (!this.linkedSource(profileId)) return this.setValidation(profileId, { status: 'invalid', error: SOURCE_UNAVAILABLE });
+      if (this.auth && profile.provider !== 'local' && !await this.hasStoredKey(this.getScope(profileId))) return this.setValidation(profileId, { status: 'invalid', error: SOURCE_REMOVED });
+    }
     try {
       await probe(clone(profile), this.getScope(profileId));
       return this.setValidation(profileId, { status: 'valid', validatedAt: this.clock() });
@@ -286,6 +294,12 @@ export class ProfileStore {
     return { version: PROFILE_STORE_VERSION, projectId: this.projectId, profiles: this.ledger.profiles.map(clone), activeProfileId: this.ledger.active?.profileId };
   }
 
+  /** Whether a key or token is stored for the scope; the value itself is not kept. */
+  private async hasStoredKey(scope: ProjectCredentialScope): Promise<boolean> {
+    if (!this.auth) return false;
+    return Boolean(await this.auth.getScopedApiKey(scope)) || Boolean(await this.auth.getScopedRefreshToken(scope));
+  }
+
   private async defaultValidator(profile: OrganizationProfile, scope: ProjectCredentialScope): Promise<void> {
     if (!this.auth) throw new Error('An authentication service is required for provider validation.');
     await validateNearAiProvider({ auth: this.auth, profile, scope });
@@ -308,6 +322,10 @@ export class ProfileStore {
       const parsed = JSON.parse(await this.fileSystem.readFile(this.filePath, 'utf8')) as Partial<ProfileLedger> & { profiles?: unknown[]; activeProfileId?: unknown };
       if (parsed.version !== PROFILE_STORE_VERSION && parsed.version !== 0 && parsed.version !== undefined) throw new Error('Unsupported profile ledger.');
       const profiles = (Array.isArray(parsed.profiles) ? parsed.profiles : []).map((value) => normalizeProfile(value)).filter((value): value is OrganizationProfile => Boolean(value)).slice(0, MAX_PROFILES);
+      // A copy that was not chosen on this computer is never trusted as checked: it must pass the check (which it cannot) first.
+      for (const profile of profiles) {
+        if (profile.keySource && profile.validation.status === 'valid' && !isLinkedCopy(this.projectId, profile.profileId, profile.keySource.projectId)) profile.validation = { status: 'stale' };
+      }
       const activeProfileId = typeof parsed.activeProfileId === 'string' ? parsed.activeProfileId : (parsed.active?.profileId);
       const active = isProfileId(activeProfileId) && profiles.some((profile) => profile.profileId === activeProfileId) ? { version: AUTH_PROFILE_VERSION, projectId: this.projectId, profileId: activeProfileId, selectedAt: typeof parsed.active?.selectedAt === 'string' ? parsed.active.selectedAt : this.clock() } : undefined;
       this.ledger = { version: PROFILE_STORE_VERSION, projectId: this.projectId, profiles, active };
