@@ -63,6 +63,15 @@ export interface TeamSectionInput {
 }
 
 export interface TeamSectionAction { id: TeamActionId; label: string; primary: boolean; badge?: string; hint?: string }
+/**
+ * The team part of the Connect screen (61-30, G-61-9), drawn by the page only while no profile works: the plain sentence for this person's
+ * situation, if any, and the team buttons. fallback holds the words of the small Connect block the page draws when PR #7's panel is absent.
+ */
+export interface TeamConnect {
+  status?: string;
+  actions: TeamSectionAction[];
+  fallback: { title: string; body: string; setupLabel: string; savedLabel: string };
+}
 export interface TeamSectionModel {
   /** empty-chat-line: the section is hidden and the status with its actions is one quiet line inside the empty chat's welcome. */
   placement: 'section' | 'empty-chat-line';
@@ -71,6 +80,8 @@ export interface TeamSectionModel {
   compact: boolean;
   actions: TeamSectionAction[];
   board?: TeamBoardSummary & { text: string };
+  /** The team part of the Connect screen; absent when there is nothing to offer there (no folder, or removed from the team). */
+  connect?: TeamConnect;
 }
 
 /** Undefined when no folder is open. */

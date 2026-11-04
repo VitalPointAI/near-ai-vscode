@@ -265,10 +265,11 @@ test('every label and sentence comes from the text table, with no en or em dash,
 });
 
 test('the action ids are a closed list; every one but Just me for now maps to an existing team command', () => {
-  assert.deepEqual([...TEAM_ACTION_IDS], ['invite', 'join', 'solo', 'share', 'members', 'board', 'link', 'check']);
+  assert.deepEqual([...TEAM_ACTION_IDS], ['invite', 'join', 'ask', 'solo', 'share', 'members', 'board', 'link', 'check']);
   assert.deepEqual(Object.keys(TEAM_ACTION_COMMANDS).sort(), (TEAM_ACTION_IDS as readonly string[]).filter((id) => id !== 'solo').sort());
   assert.equal(TEAM_ACTION_COMMANDS.invite, 'nearAi.team.invite');
   assert.equal(TEAM_ACTION_COMMANDS.join, 'nearAi.team.join');
+  assert.equal((TEAM_ACTION_COMMANDS as Readonly<Record<string, string>>).ask, 'nearAi.team.askToJoin', 'Ask to join runs only the Ask to Join a Team command (61-29)');
   assert.equal(TEAM_ACTION_COMMANDS.members, 'nearAi.team.manageMembers');
   assert.equal(TEAM_ACTION_COMMANDS.link, 'nearAi.team.linkNearOrganization');
   assert.equal(TEAM_ACTION_COMMANDS.check, 'nearAi.team.verifyLog');
@@ -277,4 +278,24 @@ test('the action ids are a closed list; every one but Just me for now maps to an
   assert.ok(Object.isFrozen(TEAM_ACTION_COMMANDS));
   for (const bad of ['', 'turn-on', 'Solo', 'delete', 'nearAi.team.enable', undefined, null, 3, ['join'], { id: 'join' }]) assert.equal(isTeamActionId(bad), false);
   for (const id of TEAM_ACTION_IDS) assert.equal(isTeamActionId(id), true);
+});
+
+// ---- the Connect screen (61-30, G-61-9) -------------------------------------------------------------------------------------------------------
+// While no profile works, the Connect screen offers the team way in too: a person can join a team (or ask to) without making a profile first.
+
+const connectIds = (m: TeamSectionModel): string[] => (m.connect?.actions ?? []).map((action) => action.id);
+
+test('tracer: with no team the Connect screen offers Join a team and Ask to join, with no status, and the fallback words of the Connect block', () => {
+  const m = model({ folderOpen: true });
+  assert.ok(m.connect !== undefined, 'the model has a connect part');
+  assert.deepEqual(m.connect.actions.map((action) => [action.id, action.label]), [['join', 'Join a team'], ['ask', 'Ask to join']]);
+  assert.equal(m.connect.status, undefined, 'nothing to explain yet');
+  assert.deepEqual(m.connect.fallback, {
+    title: 'Connect NEAR AI to start', body: text.TEAM_CONNECT_FALLBACK.body, setupLabel: 'Set up a new profile', savedLabel: 'Use a saved profile'
+  });
+  assert.ok(m.connect.fallback.body.length > 0 && !m.connect.fallback.body.includes('\n'), 'a one-line body');
+  // Just me for now is about the Team section once a profile works; the Connect screen still offers the team way in.
+  assert.deepEqual(connectIds(model({ folderOpen: true, justMe: true })), ['join', 'ask']);
+  // The section itself with a working profile is unchanged (61-26).
+  assert.deepEqual(ids(m), ['invite', 'join', 'solo']);
 });

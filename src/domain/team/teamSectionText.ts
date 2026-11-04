@@ -120,3 +120,12 @@ export function accessibleLabel(label: string, badge?: string): string {
 export function boardSummaryText(ready: number, blocked: number, mine: number): string {
   return `On the board: ${ready} ready, ${blocked} blocked, ${mine} ${plural(mine, 'is', 'are')} yours.`;
 }
+
+// The small Connect block the sidebar draws while no profile works and PR #7's Connect panel is not on the page (61-30): its title, one line and
+// the two profile buttons, next to the team buttons.
+export const TEAM_CONNECT_FALLBACK = Object.freeze({
+  title: 'Connect NEAR AI to start',
+  body: 'Set up a profile with your own key, use one you saved, or join a team that already has one.',
+  setupLabel: 'Set up a new profile',
+  savedLabel: 'Use a saved profile'
+});

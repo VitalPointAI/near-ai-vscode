@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import { teamSectionModel } from '../domain/team/teamSection';
+import * as text from '../domain/team/teamSectionText';
 import type { TeamSectionInput, TeamSectionModel } from '../domain/team/teamSection';
 import { createBoardHarness } from './helpers/fakeDom';
 import type { BoardHarness, FakeNode } from './helpers/fakeDom';
@@ -186,11 +187,13 @@ test('while hidden the probe reports hidden and the profile state, and a click p
   const h = bare();
   h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
   h.deliver({ type: 'team-e2e', id: 1 });
-  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 1, heading: '', status: '', actions: [], hidden: true, profile: null, soloLine: null }], 'nothing known yet');
+  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 1, heading: '', status: '', actions: [], hidden: true, profile: null, soloLine: null, connect: null }], 'nothing known yet');
   h.posts.length = 0;
   h.deliver({ type: 'profile-status', value: { projectScope: 'No workspace', activeProfileId: undefined, configured: false, profiles: [] } });
   h.deliver({ type: 'team-e2e', id: 2, click: 'invite' });
-  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 2, heading: '', status: '', actions: [], hidden: true, profile: 'connect', soloLine: null, error: 'hidden' }]);
+  // 61-30: with no profile the Connect screen offers the team way in, so the facts report it; Invite someone is not there, so it is refused.
+  const connect = { status: '', actions: [{ id: 'join', label: 'Join a team' }, { id: 'ask', label: 'Ask to join' }], inPanel: false };
+  assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 2, heading: '', status: '', actions: [], hidden: true, profile: 'connect', soloLine: null, connect, error: 'hidden' }]);
   h.posts.length = 0;
   h.deliver(READY);
   h.deliver({ type: 'team-e2e', id: 3 });
@@ -326,7 +329,7 @@ test('the probe reports the line and a click probe reaches an action in it', () 
   h.deliver({ type: 'team-state', model: justMe() });
   h.deliver({ type: 'team-e2e', id: 5 });
   assert.deepEqual(h.posts, [{
-    type: 'team-e2e-facts', id: 5, heading: '', status: '', actions: [], hidden: true, profile: 'ready',
+    type: 'team-e2e-facts', id: 5, heading: '', status: '', actions: [], hidden: true, profile: 'ready', connect: null,
     soloLine: { text: 'Working solo with your agents. Invite people any time.', actions: [{ id: 'invite', label: 'Invite people' }, { id: 'join', label: 'Join a team' }] }
   }]);
   h.posts.length = 0;
@@ -434,7 +437,7 @@ test('the e2e probe answers what is drawn, clicks a drawn button through the nor
   h.deliver({ type: 'team-state', model: lead });
   h.deliver({ type: 'team-e2e', id: 7 });
   assert.deepEqual(h.posts, [{
-    type: 'team-e2e-facts', id: 7, heading: lead.heading, status: lead.status, hidden: false, profile: 'ready', soloLine: null,
+    type: 'team-e2e-facts', id: 7, heading: lead.heading, status: lead.status, hidden: false, profile: 'ready', soloLine: null, connect: null,
     actions: [{ id: 'members', label: 'Members', badge: '2 waiting' }, { id: 'board', label: 'Open board' }]
   }]);
   h.posts.length = 0;
@@ -524,4 +527,177 @@ test('the Team section styles use only theme colours, and team.js is on the rele
   for (const file of ['chat.js', 'chat.css', 'markdown.js', 'pending.js', 'composer.js', 'team.js']) {
     assert.ok(release.includes(`'extension/media/chat/${file}'`), `${file} is on the release list`);
   }
+});
+
+// ---- the Connect screen (61-30, G-61-9) -------------------------------------------------------------------------------------------------------
+// While no profile works, team.js offers the team way in on the Connect screen. On this branch (no 0.4.14 Connect panel) it draws a small Connect
+// block of its own inside the empty chat; once PR #7's panel (#welcome-connect) is on the page, it only adds a .team-connect group inside it.
+
+const NO_PROFILE = { type: 'profile-status', value: { projectScope: 'project', activeProfileId: undefined, configured: false, profiles: [] } };
+
+/** PR #7's Connect panel as panelView.ts (feat/setup-next-steps) draws it, with setup.js's 'connect' state applied: Choose a profile hidden. */
+function withPanel(): BoardHarness {
+  const h = createBoardHarness({ scripts: 'chat', teamSection: true, nearChat: true });
+  const input = h.document.createElement('textarea');
+  input.id = 'input';
+  const transcript = h.document.createElement('main');
+  transcript.id = 'transcript';
+  const welcome = h.document.createElement('section');
+  welcome.id = 'welcome';
+  const panel = h.document.createElement('div');
+  panel.id = 'welcome-connect';
+  panel.setAttribute('role', 'region');
+  panel.setAttribute('aria-labelledby', 'welcome-connect-title');
+  const make = (tag: string, id: string, value: string, hidden = false, className = ''): FakeNode => {
+    const node = h.document.createElement(tag);
+    node.id = id;
+    node.textContent = value;
+    if (className) node.className = className;
+    if (tag === 'button') node.setAttribute('type', 'button');
+    node.hidden = hidden;
+    return node;
+  };
+  const row = h.document.createElement('div');
+  row.className = 'welcome-connect-actions';
+  row.append(
+    make('button', 'welcome-new-profile', 'Set up a new profile', false, 'text-button primary'),
+    make('button', 'welcome-choose-profile', 'Choose a profile', true, 'text-button'),
+    make('button', 'welcome-open-folder', 'Open a folder', true, 'text-button primary')
+  );
+  panel.append(
+    make('h2', 'welcome-connect-title', 'Connect NEAR AI to start'),
+    make('p', 'welcome-connect-body', 'Connect NEAR AI to use private models in this project.'),
+    make('p', 'welcome-connect-reason', '', true),
+    row
+  );
+  const ready = h.document.createElement('div');
+  ready.id = 'welcome-ready';
+  ready.hidden = true;
+  welcome.append(panel, ready);
+  transcript.append(welcome);
+  h.document.body.append(transcript, input);
+  h.load(['readiness.js', 'team.js']);
+  return h;
+}
+
+const PANEL_IDS = ['welcome-connect', 'welcome-connect-title', 'welcome-connect-body', 'welcome-connect-reason', 'welcome-new-profile', 'welcome-choose-profile', 'welcome-open-folder', 'welcome-ready'];
+
+// Every attribute and the text of PR #7's own elements; the panel's text without the group team.js adds, and its own children in order.
+function panelSnapshot(h: BoardHarness): unknown {
+  return PANEL_IDS.map((id) => {
+    const node = h.document.getElementById(id);
+    assert.ok(node !== null, `${id} is on the page`);
+    const own = Array.from(node.children).filter((child) => !child.classList.contains('team-connect'));
+    return { id, tag: node.localName, attrs: [...node.attrs.entries()].sort(), text: own.map((child) => child.textContent).join('|'), kids: own.map((child) => child.id || child.className) };
+  });
+}
+
+const connectBlock = (h: BoardHarness): FakeNode | null => h.$('#team-connect');
+const connectButtons = (h: BoardHarness, scope: string): FakeNode[] => h.$$(`${scope} button`);
+
+test('tracer: without PR #7\'s panel and with no profile, a Connect block in the empty chat offers a new profile, a saved profile, Join a team and Ask to join', () => {
+  const h = bare();
+  h.deliver(NO_PROFILE);
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  const block = connectBlock(h);
+  assert.ok(block !== null, 'the Connect block is drawn');
+  assert.equal(block.localName, 'section');
+  const welcome = h.$('#welcome');
+  assert.ok(welcome !== null && welcome.contains(block), 'inside the empty chat welcome');
+  assert.equal(h.$$('#team-connect').length, 1, 'one block');
+  assert.equal(h.$('#team-connect h2')?.textContent, 'Connect NEAR AI to start');
+  assert.ok(block.textContent.includes(text.TEAM_CONNECT_FALLBACK.body), 'the one-line body');
+  const drawn = connectButtons(h, '#team-connect');
+  assert.deepEqual(drawn.map((button) => button.textContent), ['Set up a new profile', 'Use a saved profile', 'Join a team', 'Ask to join']);
+  assert.ok(drawn.every((button) => button.getAttribute('type') === 'button'), 'real buttons');
+  for (const button of drawn) h.click(button);
+  assert.deepEqual(h.posts, [{ type: 'open-setup' }, { type: 'select-profile' }, { type: 'team-action', action: 'join' }, { type: 'team-action', action: 'ask' }]);
+  assert.equal(section(h).hidden, true, 'the Team section stays hidden');
+  assert.equal(buttons(h).length, 0, 'no section button can be clicked');
+  assert.equal(soloLines(h).length, 0, 'no empty-chat line');
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  h.deliver(NO_PROFILE);
+  assert.equal(h.$$('#team-connect').length, 1, 'drawn again in place, never twice');
+});
+
+test('inside PR #7\'s panel team.js adds one .team-connect group with Join a team, Ask to join and Use a saved profile, and changes nothing of the panel', () => {
+  const h = withPanel();
+  const before = panelSnapshot(h);
+  h.deliver(NO_PROFILE);
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  const groups = h.$$('#welcome-connect .team-connect');
+  assert.equal(groups.length, 1, 'one group inside the panel');
+  assert.equal(groups[0].localName, 'div');
+  assert.equal(connectBlock(h), null, 'no Connect block of its own');
+  assert.equal(h.$$('.team-connect').length, 1, 'and no group anywhere else');
+  const drawn = connectButtons(h, '#welcome-connect .team-connect');
+  assert.deepEqual(drawn.map((button) => button.textContent), ['Join a team', 'Ask to join', 'Use a saved profile']);
+  assert.deepEqual(panelSnapshot(h), before, 'PR #7\'s own elements are unchanged');
+  for (const button of drawn) h.click(button);
+  assert.deepEqual(h.posts, [{ type: 'team-action', action: 'join' }, { type: 'team-action', action: 'ask' }, { type: 'select-profile' }]);
+  // When the panel shows its own profile choice (setup.js's choose or select state), the group adds no second one.
+  const choose = h.document.getElementById('welcome-choose-profile');
+  assert.ok(choose !== null);
+  choose.hidden = false;
+  const shownChoice = panelSnapshot(h);
+  h.deliver({ type: 'profile-status', value: profileValue('stale') });
+  assert.deepEqual(connectButtons(h, '#welcome-connect .team-connect').map((button) => button.textContent), ['Join a team', 'Ask to join']);
+  assert.deepEqual(panelSnapshot(h), shownChoice, 'still unchanged');
+  assert.equal(h.$$('.team-connect').length, 1);
+});
+
+test('a working profile removes the Connect part and shows the Team section as before; a profile that stops working brings it back', () => {
+  for (const make of [bare, withPanel]) {
+    const h = make();
+    h.deliver(NO_PROFILE);
+    h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+    assert.equal(h.$$('.team-connect, #team-connect').length, 1, `${make.name}: drawn while no profile works`);
+    h.deliver(READY);
+    assert.equal(h.$$('.team-connect').length + h.$$('#team-connect').length, 0, `${make.name}: removed once the profile works`);
+    assert.equal(section(h).hidden, false, `${make.name}: the section is shown`);
+    assert.deepEqual(buttons(h).map((button) => button.getAttribute('data-action')), ['invite', 'join', 'solo'], `${make.name}: the 61-26 section`);
+    h.deliver({ type: 'profile-status', value: profileValue('invalid') });
+    assert.equal(h.$$('.team-connect').length + h.$$('#team-connect').length, 1, `${make.name}: back when it stops working`);
+    assert.equal(section(h).hidden, true, `${make.name}: the section hides again`);
+  }
+});
+
+test('the Connect part waits for the first profile-status, and is not drawn with no folder open or without a model', () => {
+  const h = bare();
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  assert.equal(connectBlock(h), null, 'nothing before the profile state is known');
+  h.deliver({ type: 'profile-status', value: { noWorkspace: true, profiles: [] } });
+  assert.equal(connectBlock(h), null, 'no folder open: nothing to join');
+  h.deliver({ type: 'team-state', model: null });
+  h.deliver(NO_PROFILE);
+  assert.equal(connectBlock(h), null, 'no model, no Connect part');
+});
+
+test('the probe reports the Connect part and a click probe reaches a team action in it', () => {
+  for (const [make, inPanel] of [[bare, false], [withPanel, true]] as const) {
+    const h = make();
+    h.deliver(NO_PROFILE);
+    h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+    h.deliver({ type: 'team-e2e', id: 21 });
+    const facts: Record<string, any> = h.posts[0];
+    assert.deepEqual(facts.connect, { status: '', actions: [{ id: 'join', label: 'Join a team' }, { id: 'ask', label: 'Ask to join' }], inPanel });
+    h.posts.length = 0;
+    h.deliver({ type: 'team-e2e', id: 22, click: 'ask' });
+    assert.deepEqual(h.posts.map((post) => [post.type, post.action ?? post.error]), [['team-action', 'ask'], ['team-e2e-facts', undefined]]);
+    h.deliver(READY);
+    h.posts.length = 0;
+    h.deliver({ type: 'team-e2e', id: 23 });
+    assert.equal(h.posts[0]?.connect, null, 'nothing reported once the profile works');
+  }
+});
+
+test('when the Connect part goes away with focus on one of its buttons, focus moves to the message box', () => {
+  const h = bare();
+  h.deliver(NO_PROFILE);
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  const join = h.$('#team-connect button[data-action="join"]');
+  assert.ok(join !== null);
+  join.focus();
+  h.deliver(READY);
+  assert.equal(h.focused().id, 'input');
 });
