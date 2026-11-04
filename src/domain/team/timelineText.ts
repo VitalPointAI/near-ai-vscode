@@ -3,7 +3,7 @@
 // plain-language and dash scans cover them (the scan finds every *Text.ts file). Plain words, sentence case, no em-dash or en-dash; the middle dot
 // appears only where the UI-SPEC amendment puts it. Teammate text (titles, names, ids from the log) passes flattenName before it enters a sentence.
 // Pure: no I/O, no clock, no vscode.
-import { BOARD_LANE_LABEL, flattenName } from './boardText';
+import { BOARD_LANE_LABEL, flattenName, NO_PLANS_TEXT } from './boardText';
 
 /** The title of the band of cards added on the board. */
 export const BOARD_BAND_TITLE = BOARD_LANE_LABEL;
@@ -116,4 +116,89 @@ export function nowSentence(title: string, inProgress: number, ready: number, pe
 /** The sentence when every card is finished: "Now: all the planned work is done. 30 of 30 cards finished, 100%." */
 export function nowAllDoneSentence(detail: string): string {
   return `${NOW_ALL_DONE}. ${detail}.`;
+}
+
+// ---- milestone notes and the empty milestone -------------------------------------------------------------------------------------------------
+
+export const CYCLE_NOTE = 'Some cards here wait for each other in a loop, so their order cannot be worked out. They are shown in plan number order.';
+export const EMPTY_MILESTONE_TEXT = NO_PLANS_TEXT;
+export const EMPTY_NEXT_LEAD = 'Plan this milestone\'s phases, then choose Import plans to see them here.';
+export const EMPTY_NEXT_OTHER = 'Cards show up here when a lead imports the plans for this milestone.';
+
+/** The muted next-step line under No plans yet: the owner and leads plan and import, everyone else waits for a lead. */
+export function emptyNext(role: string | undefined): string {
+  return role === 'owner' || role === 'lead' ? EMPTY_NEXT_LEAD : EMPTY_NEXT_OTHER;
+}
+
+// ---- a dot: who, step, waits for, needed by (D-05, D-10) -------------------------------------------------------------------------------------
+
+export const ASSIGNED_TO_YOU = 'Assigned to you.';
+export const YOU_ADDED_THIS = 'You added this.';
+export const NOBODY_ASSIGNED = 'Nobody is assigned.';
+export const WHO_YOU = 'Assigned to you';
+export const WHO_NOBODY = 'Nobody yet';
+export const WAITS_FOR_NOTHING = 'Waits for nothing';
+const WAITS_LISTED = 3;
+
+/** The preview's who line: "Assigned to Dana". */
+export function whoText(name: string): string {
+  return `Assigned to ${flattenName(name)}`;
+}
+
+/**
+ * The card's own name with its assignee sentence ("Assigned to Dana.", right after the state) said as "Assigned to you." for the viewer. `head` is
+ * the start of the name (boardText cardLabelHead), so a title that happens to hold the same words is never touched. Unchanged when it does not match.
+ */
+export function labelForViewer(label: string, head: string, stateLabel: string, name: string): string {
+  const named = `${head} State: ${stateLabel}. ${whoText(name)}.`;
+  return label.startsWith(named) ? `${head} State: ${stateLabel}. ${ASSIGNED_TO_YOU}${label.slice(named.length)}` : label;
+}
+
+/** A dependency as people say it: "62-01" for a plan, "Phase 60" for a phase, anything else as written. */
+export function idName(id: string): string {
+  if (id.startsWith('plan:')) return flattenName(id.slice('plan:'.length));
+  if (id.startsWith('phase:')) return phaseName(id.slice('phase:'.length));
+  return flattenName(id);
+}
+
+/** A link to a card in the expanded card: "62-01 Work model". */
+export function cardLinkLabel(displayId: string, title: string): string {
+  return `${flattenName(displayId)} ${titleText(title)}`;
+}
+
+/** "Step 3 of 7". */
+export function stepText(step: number, steps: number): string {
+  return `Step ${step} of ${steps}`;
+}
+
+/** The expanded card's Step fact: "3 of 7 in v0.6.0 Team Mode". */
+export function stepFact(step: number, steps: number, milestone: string): string {
+  return `${step} of ${steps} in ${titleText(milestone)}`;
+}
+
+/** "Waits for 2 cards", "Waits for 1 card", "Waits for nothing". */
+export function waitsText(count: number): string {
+  return count === 0 ? WAITS_FOR_NOTHING : `Waits for ${count} ${plural(count, 'card', 'cards')}`;
+}
+
+// "62-01", "62-01 and 62-02", "60-01, 60-02 and 60-03", "60-01, 60-02, 60-03 and 2 more".
+function listed(names: readonly string[]): string {
+  if (names.length > WAITS_LISTED) return `${names.slice(0, WAITS_LISTED).join(', ')} and ${names.length - WAITS_LISTED} more`;
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] as string}`;
+}
+
+/**
+ * The timeline part of a dot's accessible name: "Step 3 of 7 in v0.6.0 Team Mode. Waits for 62-01 and 62-02. Needed by 4 cards.". `waits` are the
+ * names from idName; Needed by is left out at 0.
+ */
+export function dotSentences(step: number, steps: number, milestone: string, waits: readonly string[], neededBy: number): string {
+  const parts = [`Step ${step} of ${steps} in ${titleText(milestone)}.`, waits.length === 0 ? `${WAITS_FOR_NOTHING}.` : `Waits for ${listed(waits)}.`];
+  if (neededBy > 0) parts.push(`Needed by ${neededBy} ${plural(neededBy, 'card', 'cards')}.`);
+  return parts.join(' ');
+}
+
+/** The note for a dependency missing from the board, as in the Copywriting Contract ("Missing dependency"), naming it the way idName does. */
+export function missingNote(id: string): string {
+  return `Waits for ${idName(id)}, which is not on the board.`;
 }

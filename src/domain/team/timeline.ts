@@ -1,10 +1,11 @@
 // Board timeline (62.1-CONTEXT D-02, D-03): the whole project on one axis. Milestones are bands in version order, phases are segments inside
 // them, and every card of the board model is one dot at its dependency depth inside its milestone. Parallel cards share a step and stack in phase
 // then plan order. Pure: no vscode, no I/O and no clock; the same state gives the same timeline on every client.
-import { BOARD_LANE_LABEL } from './boardText';
+import { BOARD_LANE_LABEL, cardLabelHead, phaseCardLabelHead } from './boardText';
 import {
-  milestoneHeading, noPercentText, NOW_ALL_DONE, nowAllDoneSentence, nowDetail, nowSentence, nowTitle, percentDoneText, percentLabel, percentShort,
-  cardsFinishedText, phaseHeading, phaseLabels, tileName, tileText
+  cardLinkLabel, cardsFinishedText, CYCLE_NOTE, dotSentences, EMPTY_MILESTONE_TEXT, emptyNext, idName, labelForViewer, milestoneHeading, missingNote,
+  NOBODY_ASSIGNED, noPercentText, NOW_ALL_DONE, nowAllDoneSentence, nowDetail, nowSentence, nowTitle, percentDoneText, percentLabel, percentShort,
+  phaseHeading, phaseLabels, phaseName, stepFact, stepText, tileName, tileText, titleText, waitsText, WHO_NOBODY, WHO_YOU, whoText, YOU_ADDED_THIS
 } from './timelineText';
 import { compareParts, comparePlans } from './board';
 import type { BoardCard, BoardModel } from './board';
@@ -260,6 +261,57 @@ function phasesOfBand(model: BoardModel, dots: readonly TimelineDot[], cardOf: R
 }
 
 const closed = (card: BoardCard): boolean => card.column === 'done' || card.column === 'cancelled';
+
+// What a dot says (D-05, D-10, UI-SPEC "Accessible name of a dot", "Preview", "Expanded card"): the card's own name with who it is assigned to said
+// exactly once (its own "Assigned to {name}." becomes "Assigned to you." for the viewer; a card nobody is on gets "You added this." or "Nobody is
+// assigned."), then its step, what it waits for and how many cards need it; plus the preview lines, the expanded card's links and the notes. Every
+// sentence comes from timelineText.ts, and every title, name and id in it is flattened there.
+function describeDots(state: TeamState, model: BoardModel, timeline: BoardTimeline, cardOf: ReadonlyMap<string, BoardCard>, viewerId: string | undefined): void {
+  const bands = new Map(timeline.milestones.map((band) => [band.id, band]));
+  const phaseTitles = new Map(model.phases.map((entry) => [entry.id, entry.title]));
+  const dependents = new Map<string, string[]>();
+  for (const edge of timeline.edges) {
+    const list = dependents.get(edge.from);
+    if (list === undefined) dependents.set(edge.from, [edge.to]);
+    else list.push(edge.to);
+  }
+  const isPhase = (id: string): boolean => state.items.get(id)?.kind === 'phase';
+  const nameOf = (id: string): string => {
+    const card = cardOf.get(id);
+    return isPhase(id) || card === undefined ? idName(id) : idName(card.displayId);
+  };
+  const linkOf = (id: string): TimelineLink => {
+    const card = cardOf.get(id);
+    if (isPhase(id)) return { id, label: titleText(phaseTitles.get(id) ?? phaseName(id.slice('phase:'.length))), onBoard: true };
+    return card === undefined ? { id, label: idName(id), onBoard: false } : { id, label: cardLinkLabel(card.displayId, card.title), onBoard: true };
+  };
+  for (const dot of timeline.dots) {
+    const card = cardOf.get(dot.cardId);
+    const band = bands.get(dot.milestoneId);
+    if (card === undefined || band === undefined) continue;
+    let own = card.a11yLabel;
+    if (card.assignee !== undefined && card.assignee.id === viewerId) {
+      const head = card.kind === 'phase' ? phaseCardLabelHead(card.title) : cardLabelHead(card.kind === 'plan', card.displayId, card.title);
+      own = labelForViewer(card.a11yLabel, head, card.stateLabel, card.assignee.name);
+      dot.whoText = WHO_YOU;
+    } else if (card.assignee !== undefined) {
+      dot.whoText = whoText(card.assignee.name);
+    } else {
+      const item = state.items.get(card.id);
+      own = `${own} ${viewerId !== undefined && item?.origin === 'board' && item.createdBy === viewerId ? YOU_ADDED_THIS : NOBODY_ASSIGNED}`;
+      dot.whoText = WHO_NOBODY;
+    }
+    const step = dot.step + 1;
+    const waits = [...dot.waitsFor, ...dot.missing];
+    dot.label = `${own} ${dotSentences(step, band.steps, band.title, waits.map(nameOf), dot.neededBy)}`;
+    dot.stepText = stepText(step, band.steps);
+    dot.stepFact = stepFact(step, band.steps, band.title);
+    dot.waitsText = waitsText(waits.length);
+    dot.waitsForLinks = waits.map(linkOf);
+    dot.neededByLinks = (dependents.get(dot.cardId) ?? []).map(linkOf);
+    dot.notes = [...dot.missing.map(missingNote), ...(dot.inCycle ? [CYCLE_NOTE] : [])];
+  }
+}
 const STARTED: ReadonlySet<string> = new Set(['claimed', 'in-progress', 'in-review', 'integrating']);
 
 // The Now indicator (D-13 as amended in the UI-SPEC): the frontier band is the first band in timeline order (milestones in version order, then the
@@ -303,7 +355,7 @@ function nowOf(milestones: readonly TimelineMilestone[], dots: readonly Timeline
   return now;
 }
 
-export function buildTimeline(state: TeamState, model: BoardModel, _options: { viewerId?: string }): BoardTimeline {
+export function buildTimeline(state: TeamState, model: BoardModel, options: { viewerId?: string }): BoardTimeline {
   const milestoneIds = new Set(model.milestones.map((milestone) => milestone.id));
   const nodes: Node[] = model.cards.map((card) => ({
     card, item: state.items.get(card.id), band: card.milestoneId !== undefined && milestoneIds.has(card.milestoneId) ? card.milestoneId : BOARD_BAND_ID, order: 0
@@ -347,7 +399,9 @@ export function buildTimeline(state: TeamState, model: BoardModel, _options: { v
       cancelled, phases: phasesOfBand(model, bandDots, cardOf), percent,
       heading: milestoneHeading(title, active, percent.percent, percent.text), percentText: percentShort(percent.percent),
       progressText: percent.percent === undefined ? percent.text : cardsFinishedText(percent.finished, percent.counted),
-      tileText: tileText(percent.finished, cancelled), tileName: tileName(title, inBand.length)
+      tileText: tileText(percent.finished, cancelled), tileName: tileName(title, inBand.length),
+      ...(bandDots.some((dot) => dot.inCycle) ? { cycleNote: CYCLE_NOTE } : {}),
+      ...(inBand.length === 0 ? { emptyText: EMPTY_MILESTONE_TEXT, emptyNext: emptyNext(model.viewer.role) } : {})
     });
   }
 
@@ -370,6 +424,7 @@ export function buildTimeline(state: TeamState, model: BoardModel, _options: { v
   }
   const percent = percentOf(model.cards);
   const timeline: BoardTimeline = { milestones, dots, edges, percent };
+  describeDots(state, model, timeline, cardOf, options.viewerId);
   const now = nowOf(milestones, dots, cardOf, percent);
   if (now !== undefined) timeline.now = now;
   return timeline;

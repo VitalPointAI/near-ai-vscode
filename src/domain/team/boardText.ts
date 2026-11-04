@@ -259,11 +259,21 @@ export interface CardLabelFields {
   assigneeName?: string;
 }
 
+/** The start of a card's accessible name, "Plan 62-03, Board webview client." (62.1-02: the timeline finds the assignee sentence right after it). */
+export function cardLabelHead(isPlan: boolean, displayId: string, title: string): string {
+  return `${isPlan ? 'Plan ' : ''}${displayId}, ${sentence(title)}`;
+}
+
+/** The start of a phase card's accessible name, "Phase 63: Knowledge base.". */
+export function phaseCardLabelHead(title: string): string {
+  return sentence(title);
+}
+
 // "Plan 62-03, Board webview client. State: Ready. Blocked: no. 2 dependencies. Estimated 48 thousand tokens. In this state for 3 days."
 // Variants say why a card is blocked, held, waiting for confirmation or cancelled. Plain text only: the host sets it with setAttribute.
 export function cardLabel(fields: CardLabelFields): string {
   const parts = [
-    `${fields.isPlan ? 'Plan ' : ''}${fields.displayId}, ${sentence(fields.title)}`,
+    cardLabelHead(fields.isPlan, fields.displayId, fields.title),
     `State: ${fields.stateLabel}.`,
     ...(fields.assigneeName === undefined ? [] : [`Assigned to ${fields.assigneeName}.`]),
     fields.blockedReason === undefined ? 'Blocked: no.' : `Blocked: ${sentence(fields.blockedReason)}`
@@ -282,7 +292,7 @@ export interface PhaseCardLabelFields { title: string; stateLabel: string; assig
 // "Phase 63: Knowledge base. State: Backlog. This phase has no plans yet. 1 dependency. In this state for 4 days." The phase number is in the title,
 // and there is no estimate or blocked flag to read out: a phase is sized by its plans and is never blocked.
 export function phaseCardLabel(fields: PhaseCardLabelFields): string {
-  const parts = [sentence(fields.title), `State: ${fields.stateLabel}.`];
+  const parts = [phaseCardLabelHead(fields.title), `State: ${fields.stateLabel}.`];
   if (fields.assigneeName !== undefined) parts.push(`Assigned to ${fields.assigneeName}.`);
   if (fields.held) parts.push('On hold.');
   if (fields.cancelled) parts.push('Cancelled.');

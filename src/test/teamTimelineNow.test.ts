@@ -372,16 +372,17 @@ test('a board item the viewer added and nobody is assigned to says You added thi
 
 test('Waits for names up to three then says how many more, writes a phase as Phase n, and Needed by is singular at one', async () => {
   const world = await worldOf([
-    milestone('v1', 'Version 1', true), phase('60', 'v1', 'Core'), phase('61', 'v1', 'Next', { dependsOn: ['phase:60'] }),
+    milestone('v1', 'Version 1', true), phase('60', 'v1', 'Core'), phase('61', 'v1', 'Next', { dependsOn: ['phase:60'] }), phase('62', 'v1', 'Side'),
     plan('60-01'), plan('60-02'), plan('60-03'), plan('60-04'), plan('60-05'),
-    plan('61-01', { dependsOn: ['plan:60-01', 'plan:60-02', 'plan:60-03', 'plan:60-04', 'plan:60-05'] }), plan('61-02', { dependsOn: ['plan:61-01'] })
+    plan('62-01', { dependsOn: ['plan:60-01', 'plan:60-02', 'plan:60-03', 'plan:60-04', 'plan:60-05'] }), plan('61-01', { dependsOn: ['plan:62-01'] })
   ]);
   const { timeline } = viewOf(world, world.lead.memberId);
-  const many = dot(timeline, 'plan:61-01');
+  const many = dot(timeline, 'plan:62-01');
   assert.ok(many.label.includes(' Waits for 60-01, 60-02, 60-03 and 2 more. Needed by 1 card.'), many.label);
-  assert.equal(many.waitsText, 'Waits for 6 cards', 'five plans and the phase its own phase waits for');
-  assert.ok(dot(timeline, 'plan:61-02').label.includes(' Waits for 61-01 and Phase 60.'), dot(timeline, 'plan:61-02').label);
-  assert.equal(dot(timeline, 'plan:61-02').waitsText, 'Waits for 2 cards');
+  assert.equal(many.waitsText, 'Waits for 5 cards');
+  const phased = dot(timeline, 'plan:61-01');
+  assert.ok(phased.label.includes(' Waits for 62-01 and Phase 60.'), phased.label);
+  assert.equal(phased.waitsText, 'Waits for 2 cards', 'its own dependency and the phase its phase waits for');
   const three = await worldOf([milestone('v1', 'Version 1', true), phase('1', 'v1', 'One'), plan('1-01'), plan('1-02'), plan('1-03'), plan('1-04', { dependsOn: ['plan:1-01', 'plan:1-02', 'plan:1-03'] })]);
   assert.ok(dot(viewOf(three, three.lead.memberId).timeline, 'plan:1-04').label.endsWith(' Waits for 1-01, 1-02 and 1-03.'));
   assert.equal(dot(viewOf(three, three.lead.memberId).timeline, 'plan:1-01').waitsText, 'Waits for nothing');
