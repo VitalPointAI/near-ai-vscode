@@ -28,7 +28,7 @@ import { SNAPSHOT_ALREADY_WRITTEN, TeamLog } from '../../team/eventLog';
 import type { TeamSigner, VerifyReport } from '../../team/eventLog';
 import { GitTransport } from '../../team/gitTransport';
 import { loadDeviceIdentity } from '../../team/identity';
-import { readPendingRequest } from '../../team/joinRequest';
+import { readPendingRequest, wasAcceptedHere } from '../../team/joinRequest';
 import { installDeliveredKey } from '../../team/keyDelivery';
 import type { DeviceIdentity } from '../../team/identity';
 import { importPlans as runImportPlans, importResultText, readImportState } from '../../team/importPlans';
@@ -807,6 +807,13 @@ export class TeamSession {
       this.clearIssue('key-install');
       this.line(`The team key for ${this.teamFile.name} was installed for this project.`);
       this.say('info', `Your team key for ${team} is ready. NEAR AI uses it for this project now.`);
+      for (const listener of [...this.keyInstalledListeners]) {
+        try {
+          listener();
+        } catch (error) {
+          this.reportIssue('key-listener', `A part of NEAR AI could not be told about the new team key: ${describeError(error)}`);
+        }
+      }
     } else if (result.status === 'failed') {
       this.installFailed = { event: member.nearKeyEvent, retryAt: now + INSTALL_RETRY_MS };
       const text = `The team key for ${this.teamFile.name} could not be installed: ${safeReason(result.message)}`;
@@ -899,7 +906,20 @@ export class TeamSession {
       const name = displayText(member.name);
       const keyEvent = member.nearKeyEvent ?? member.joinedEvent;
       if (item.kind === 'confirm') {
-        if (!(await this.firstTime(`confirm:${member.joinedEvent}`))) continue;
+        const onceKey = `confirm:${member.joinedEvent}`;
+        if ((await this.loadNotified()).has(onceKey)) continue;
+        // D-15 as applied to Ask to join (G-61-9): the lead on this computer chose the role when accepting the request, and the code never left the
+        // requester's computer, so this computer confirms that person by itself, once per join. Another lead's computer shows the usual notice.
+        if (this.deps.runCommand !== undefined && (await this.acceptedHere(member.id))) {
+          if (!this.started) {
+            this.autoDeferred = true;
+            continue;
+          }
+          await this.firstTime(onceKey);
+          await this.autoConfirm(member.id, `deliver-key:${member.id}:${keyEvent}`);
+          continue;
+        }
+        if (!(await this.firstTime(onceKey))) continue;
         this.offer('info', `${name} joined ${team} and is waiting for confirmation`, [
           { label: 'Confirm', run: () => this.runManage(member.id, 'confirm') },
           { label: 'Remove', run: () => this.runManage(member.id, 'remove') }
@@ -912,6 +932,29 @@ export class TeamSession {
         this.offer('info', `${name}'s AI key has to be replaced because their devices changed`, [{ label: 'Rotate key', run: () => this.runManage(member.id, 'rotate-key') }]);
       }
     }
+  }
+
+  private async acceptedHere(memberId: string): Promise<boolean> {
+    try {
+      const accepted = await wasAcceptedHere(this.storage, memberId);
+      this.clearIssue('accepted-requests');
+      return accepted;
+    } catch (error) {
+      this.reportIssue('accepted-requests', `The list of requests to join accepted on this computer could not be read: ${describeError(error)}`);
+      return false;
+    }
+  }
+
+  // The confirm says whether the key was sent and where Send key is, so the separate key notice is not shown again for this join.
+  private async autoConfirm(memberId: string, keyNoticeKey: string): Promise<void> {
+    const run = this.deps.runCommand;
+    if (run === undefined) return;
+    try {
+      await run(MANAGE_MEMBERS_COMMAND, { memberId, action: 'confirm', auto: true });
+    } catch (error) {
+      this.line(`Confirming a person whose request was accepted here did not finish: ${describeError(error)}`);
+    }
+    await this.firstTime(keyNoticeKey);
   }
 
   // The signer needs the member id this computer's key belongs to, which is only known once the roster has been read.
@@ -942,7 +985,7 @@ export function focusTransitions(initialFocused: boolean, forward: (focused: boo
 // Tests pass their own timers and git runner through overrides. The extension passes nothing.
 export async function createVscodeTeamSession(
   context: vscode.ExtensionContext, projectRoot: string, teamFile: TeamFile, output: TeamOutput,
-  overrides: Pick<TeamSessionDeps, 'timers' | 'git'> = {}
+  overrides: Pick<TeamSessionDeps, 'timers' | 'git' | 'nearBaseUrl' | 'fetch'> = {}
 ): Promise<TeamSession> {
   const statusBar = createTeamStatusBar();
   let session: TeamSession;

@@ -1106,7 +1106,9 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     }
   }
 
-  async function runMemberAction(ctx: ManageContext, memberId: string, action: MemberAction): Promise<void> {
+  // `auto` is the accepting computer confirming a person whose request it accepted (G-61-9): no sign-in is asked; the key is sent only with a NEAR
+  // AI sign-in this computer already keeps for the team, and otherwise left for Send key with one plain notice.
+  async function runMemberAction(ctx: ManageContext, memberId: string, action: MemberAction, auto = false): Promise<void> {
     const { teamFile, checklist } = ctx;
     const member = ctx.session.state().members.get(memberId);
     if (member === undefined) {
@@ -1119,7 +1121,10 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const keys = await import('../../team/keyDelivery');
     switch (action) {
       case 'confirm': {
-        const chosen = await orgForAction(teamFile, `Confirming ${name} also sends their AI key, which needs your NEAR AI sign-in. Sign in now, or confirm now and send the key later from this list.`, true);
+        const kept = auto && teamFile.near !== undefined ? await keptSession(teamFile.teamId) : undefined;
+        const chosen = auto
+          ? (kept === undefined ? {} : { org: kept.org })
+          : await orgForAction(teamFile, `Confirming ${name} also sends their AI key, which needs your NEAR AI sign-in. Sign in now, or confirm now and send the key later from this list.`, true);
         if (chosen === undefined) return;
         const result = await withSteps(`Confirming ${name}`, false, (step) => keys.confirmMember({
           log, teamFile, memberId, checklist, ...(chosen.org === undefined ? {} : { org: chosen.org }), onStep: (code) => { step(DELIVERY_STEP_TEXT[code]); }
@@ -1129,6 +1134,14 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
           return;
         }
         deps.output.appendLine(await safe(result.message));
+        if (auto) {
+          const said = `${name} joined and is confirmed, because you accepted their request.`;
+          if (teamFile.near === undefined) deps.report('info', `${said} ${(await import('../../team/join')).NO_ORG_NOTICE}`);
+          else if (result.key === 'delivered') deps.report('info', `${said} Their team key has a spend cap of ${allocationOf(ctx, memberId)} set by you.`);
+          else if (chosen.org === undefined) deps.report('info', `${said} Their team key was not sent, because you are not signed in to NEAR AI on this computer. Choose Send key in Members when you are ready.`);
+          else deps.report('warn', `${said} ${await safe(result.message)} Choose Send key in Members when you are ready.`);
+          return;
+        }
         const role = ctx.session.state().members.get(memberId)?.role ?? member.role;
         const is = `${name} is now ${article(role)}.`;
         if (teamFile.near === undefined) deps.announce('info', `${is} ${(await import('../../team/join')).NO_ORG_NOTICE}`);
@@ -1495,14 +1508,21 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const canManage = myId !== undefined && decideTeamAction(session.state(), myId, { kind: 'member.invite' }).allowed;
     const ctx: ManageContext = { projectRoot, session, teamFile, checklist: new CleanupChecklist(session.storageDir()), canManage };
 
-    // The notification buttons of 61-12 pass {memberId, action}; anything else opens the list.
-    const request = typeof argument === 'object' && argument !== null ? argument as { memberId?: unknown; action?: unknown } : undefined;
+    // The notification buttons of 61-12 pass {memberId, action}; anything else opens the list. The session passes {memberId, action: 'confirm',
+    // auto: true} for a person whose request this computer accepted (G-61-9); that is checked again here, and the confirm keeps its permission check.
+    const request = typeof argument === 'object' && argument !== null ? argument as { memberId?: unknown; action?: unknown; auto?: unknown } : undefined;
     if (request !== undefined && typeof request.memberId === 'string' && (MEMBER_ACTIONS as readonly unknown[]).includes(request.action)) {
+      const auto = request.auto === true && request.action === 'confirm';
       if (!canManage) {
-        await requireManager(session, 'change the team');
+        if (auto) deps.output.appendLine('A person whose request was accepted here was not confirmed by this computer, because it can no longer change the team.');
+        else await requireManager(session, 'change the team');
         return;
       }
-      await runMemberAction(ctx, request.memberId, request.action as MemberAction);
+      if (auto && !(await (await import('../../team/joinRequest')).wasAcceptedHere(session.storageDir(), request.memberId))) {
+        deps.output.appendLine('A person was not confirmed by this computer, because this computer did not accept their request to join.');
+        return;
+      }
+      await runMemberAction(ctx, request.memberId, request.action as MemberAction, auto);
       session.nudge();
       return;
     }

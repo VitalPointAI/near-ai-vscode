@@ -260,7 +260,10 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
       const teamFile = await readTeamFile(projectRoot);
       if (teamFile === undefined) return { state: 'solo' };
       const { createVscodeTeamSession } = await import('./teamSession');
-      const started = await createVscodeTeamSession(context, projectRoot, teamFile, output);
+      // The session checks and installs team keys at the same NEAR AI address the commands use (61-29).
+      const started = await createVscodeTeamSession(context, projectRoot, teamFile, output, {
+        ...(options.nearBaseUrl === undefined ? {} : { nearBaseUrl: options.nearBaseUrl }), ...(options.fetch === undefined ? {} : { fetch: options.fetch })
+      });
       if (disposed) {
         started.dispose();
         return { state: 'solo' };

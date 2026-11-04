@@ -345,7 +345,7 @@ test('in a linked team with the owner signed in, the automatic confirm creates t
     session.onKeyInstalled(() => { installed += 1; });
     clearUi();
     await dana.sync();
-    assert.equal(installed, 1, 'onKeyInstalled fired once');
+    assert.equal(installed, 1, `onKeyInstalled fired once (${shownMessages().join(' | ')} // ${outputLines().join(' | ')})`);
     assert.ok(shownMessages().includes(`Your team key for ${TEAM} is ready. NEAR AI uses it for this project now.`), shownMessages().join(' | '));
     await dana.sync();
     assert.equal(installed, 1, 'and not again');
