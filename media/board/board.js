@@ -17,12 +17,21 @@
   const FINISHED = ['done', 'cancelled'];
   const GROUPS_OPEN = ['backlog', 'ready'];
   // The saved choices' version. Choices saved by the older board (no version) folded Backlog work away, so they are dropped once (G-62-3).
-  const UI_VERSION = 2;
+  // Version 3 (62.1-03, TD-18) adds the view and the timeline's choices; a version 2 state keeps every choice it has.
+  const UI_VERSION = 3;
   const GROUP_BY = ['member', 'phase', 'milestone', 'none'];
   // 62.1-03 (D-04, TD-2): the board's two views. Columns is the kanban (or the list under 520 px); Timeline is drawn by timeline.js.
   const VIEWS = ['columns', 'timeline'];
   const VIEW_LABELS = { columns: 'Columns', timeline: 'Timeline' };
   const VIEW_SAID = { columns: 'Showing columns.', timeline: 'Showing the timeline.' };
+  const DIRECTIONS = ['horizontal', 'vertical'];
+  const DIRECTION_LABELS = { horizontal: 'Horizontal', vertical: 'Vertical' };
+  const DIRECTION_SAID = { horizontal: 'Timeline shown left to right.', vertical: 'Timeline shown top to bottom.' };
+  const NARROW_SAID = 'The window is narrow, so the timeline is shown top to bottom.';
+  const HORIZONTAL_OFF = 'Horizontal needs a wider window.';
+  const ZOOMS = [50, 75, 100, 150, 200];
+  // The most finished milestones a person's open or folded choice is kept for (a bound on what the saved state can grow to).
+  const SHOWN_MAX = 500;
   const GROUP_LABELS = { member: 'Member', phase: 'Phase', milestone: 'Milestone', none: 'None' };
   const COLUMN_ICONS = { backlog: 'circle-outline', ready: 'play-circle', claimed: 'person', 'in-progress': 'sync', 'in-review': 'eye', integrating: 'check-all', done: 'pass', cancelled: 'circle-slash' };
   const T = {
@@ -65,18 +74,51 @@
   // ---- state kept across reloads (D-15) -----------------------------------------------------------------------------------------------------
   const stored = vscode.getState() || {};
   const current = stored.version === UI_VERSION;
-  // From the older board only the grouping, the milestone, the selected card, the filters toggle and an unsent draft are kept.
-  const saved = current ? stored : { groupBy: stored.groupBy, milestone: stored.milestone, selected: stored.selected, filtersOpen: stored.filtersOpen, draft: stored.draft };
+  // Version 2 (62-21) keeps every choice it has and gains the view and the timeline defaults. From the older board (no version) only the grouping,
+  // the milestone, the selected card, the filters toggle and an unsent draft are kept.
+  const saved = current || stored.version === 2 ? stored : { groupBy: stored.groupBy, milestone: stored.milestone, selected: stored.selected, filtersOpen: stored.filtersOpen, draft: stored.draft };
+  // The timeline's saved choices (T-62.1-08): each value is checked against its allowed list, or as a finite number of 0 or more, and a value that
+  // fails takes its default. A milestone id is kept only with true or false, never as a key that would reach an object's prototype.
+  const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const UNSAFE_KEYS = ['__proto__', 'constructor', 'prototype'];
+  const position = (v) => typeof v === 'number' && isFinite(v) && v >= 0;
+  function timelineDefaults() { return { direction: 'horizontal', zoom: 100, legendOpen: false, shown: {}, scroll: { horizontal: { x: 0, y: 0 }, vertical: { x: 0, y: 0 } } }; }
+  /** The timeline choices with every good value of the patch applied over the base (bad values leave the base's). */
+  function checkedTimeline(base, patch) {
+    const out = JSON.parse(JSON.stringify(base));
+    if (!isObject(patch)) return out;
+    if (DIRECTIONS.indexOf(patch.direction) >= 0) out.direction = patch.direction;
+    if (ZOOMS.indexOf(patch.zoom) >= 0) out.zoom = patch.zoom;
+    if (typeof patch.legendOpen === 'boolean') out.legendOpen = patch.legendOpen;
+    if (isObject(patch.shown)) {
+      for (const k of Object.keys(patch.shown)) {
+        if (typeof patch.shown[k] !== 'boolean' || UNSAFE_KEYS.indexOf(k) >= 0 || k.length > 200) continue;
+        if (!own(out.shown, k) && Object.keys(out.shown).length >= SHOWN_MAX) continue;
+        out.shown[k] = patch.shown[k];
+      }
+    }
+    if (isObject(patch.scroll)) {
+      for (const d of DIRECTIONS) {
+        const at = patch.scroll[d];
+        if (!isObject(at)) continue;
+        if (position(at.x)) out.scroll[d].x = at.x;
+        if (position(at.y)) out.scroll[d].y = at.y;
+      }
+    }
+    return out;
+  }
   const ui = {
     groupBy: GROUP_BY.indexOf(saved.groupBy) >= 0 ? saved.groupBy : 'member',
     filters: Object.assign({ mine: false, ready: false, blocked: false, requirement: '', phase: '' }, saved.filters || {}),
     collapsedColumns: saved.collapsedColumns || {}, collapsedLanes: saved.collapsedLanes || {}, openGroups: saved.openGroups || {},
     selected: typeof saved.selected === 'string' ? saved.selected : '', milestone: typeof saved.milestone === 'string' ? saved.milestone : '', filtersOpen: saved.filtersOpen === true,
-    view: VIEWS.indexOf(saved.view) >= 0 ? saved.view : 'columns'
+    view: VIEWS.indexOf(saved.view) >= 0 ? saved.view : 'columns',
+    timeline: checkedTimeline(timelineDefaults(), saved.timeline)
   };
   // The item form's unsent draft (form.js) lives in the same stored state: the page may acquire the VS Code API only once, so the form borrows it here.
   let formDraft = saved.draft && typeof saved.draft === 'object' ? saved.draft : undefined;
-  const persist = () => vscode.setState({ version: UI_VERSION, groupBy: ui.groupBy, filters: ui.filters, collapsedColumns: ui.collapsedColumns, collapsedLanes: ui.collapsedLanes, openGroups: ui.openGroups, selected: ui.selected, milestone: ui.milestone, filtersOpen: ui.filtersOpen, view: ui.view, ...(formDraft ? { draft: formDraft } : {}) });
+  const persist = () => vscode.setState({ version: UI_VERSION, groupBy: ui.groupBy, filters: ui.filters, collapsedColumns: ui.collapsedColumns, collapsedLanes: ui.collapsedLanes, openGroups: ui.openGroups, selected: ui.selected, milestone: ui.milestone, filtersOpen: ui.filtersOpen, view: ui.view, timeline: ui.timeline, ...(formDraft ? { draft: formDraft } : {}) });
 
   // ---- runtime state (not persisted) ---------------------------------------------------------------------------------------------------------
   let model;
@@ -219,6 +261,25 @@
     setView(next);
     viewRadios[VIEWS.indexOf(next)].focus();
   });
+  // The Direction switch (Timeline only, right after the View switch). Under 520 px the timeline is drawn top to bottom whatever is saved, and
+  // Horizontal says why it is off (TD-11); the saved choice comes back when the window is wider.
+  const dirSeg = el('div', 'segmented'); dirSeg.id = 'direction-switch'; dirSeg.setAttribute('role', 'radiogroup'); dirSeg.setAttribute('aria-label', 'Direction');
+  const dirRadios = DIRECTIONS.map((key) => {
+    const r = button('', DIRECTION_LABELS[key], () => setDirection(key));
+    r.setAttribute('role', 'radio'); r.dataset.direction = key;
+    return r;
+  });
+  dirSeg.append(...dirRadios);
+  dirSeg.addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const next = DIRECTIONS[(DIRECTIONS.indexOf(drawnDirection()) + step + DIRECTIONS.length) % DIRECTIONS.length];
+    setDirection(next);
+    dirRadios[DIRECTIONS.indexOf(drawnDirection())].focus();
+  });
+  // Where timeline.js puts its own controls (zoom, Jump to now, legend), right after the Direction switch.
+  const tlSlot = el('div', 'tl-tools');
   const summary = el('p', 'summary-line');
   const msWrap = el('div', 'field');
   const msLabel = el('label', '', 'Milestone'); msLabel.setAttribute('for', 'ms-select');
@@ -264,7 +325,7 @@
   reqWrap.append(reqLabel, reqInput, reqList);
   const clearBtn = button('link', T.clear, () => clearFilters());
   filtersEl.append(chips.mine, chips.ready, chips.blocked, phaseWrap, reqWrap, clearBtn);
-  controls.append(viewSeg, summary, msWrap, msSummary, groupWrap, filtersBtn, filtersEl);
+  controls.append(viewSeg, dirSeg, tlSlot, summary, msWrap, msSummary, groupWrap, filtersBtn, filtersEl);
   tb.append(titleRow, controls, actions);
   root.append(tb, bannerEl, board, detailEl, hints);
 
@@ -305,7 +366,24 @@
     persist();
     if (old && typeof old.leave === 'function') old.leave();
     render();
-    announce(VIEW_SAID[key]);
+    announce(VIEW_SAID[key] + (key === 'timeline' && narrow() ? ' ' + NARROW_SAID : ''));
+  }
+  const narrow = () => layout === 'list';
+  /** The direction the timeline is drawn in: vertical under 520 px, else the saved choice. */
+  const drawnDirection = () => (narrow() ? 'vertical' : ui.timeline.direction);
+  function setDirection(key) {
+    if (DIRECTIONS.indexOf(key) < 0 || key === drawnDirection() || (narrow() && key === 'horizontal')) return;
+    ui.timeline.direction = key;
+    persist();
+    render();
+    announce(DIRECTION_SAID[key]);
+  }
+  function setUiState(patch) {
+    const before = drawnDirection();
+    ui.timeline = checkedTimeline(ui.timeline, patch);
+    persist();
+    if (drawnDirection() !== before) { render(); announce(DIRECTION_SAID[drawnDirection()]); }
+    return JSON.parse(JSON.stringify(ui.timeline));
   }
   function clearFilters() {
     ui.filters = { mine: false, ready: false, blocked: false, requirement: '', phase: '' };
@@ -321,6 +399,7 @@
   function applyLayout() {
     root.setAttribute('data-layout', layout);
     attr(root, 'data-view', timelineOn() ? 'timeline' : 'columns');
+    attr(root, 'data-direction', drawnDirection());
     if (layout === 'list') { place(tb, [titleRow, actions, bannerEl, controls]); place(root, [tb, board, detailEl, hints]); } else { place(tb, [titleRow, controls, actions]); place(root, [tb, bannerEl, board, detailEl, hints]); }
   }
   function setLayout(width) {
@@ -328,6 +407,7 @@
     if (next === layout) return;
     layout = next;
     render();
+    if (next === 'list' && timelineOn() && model && ui.timeline.direction === 'horizontal') announce(NARROW_SAID);
   }
 
   // ---- toolbar -----------------------------------------------------------------------------------------------------------------------------------
@@ -345,8 +425,22 @@
       chip.className = 'status-chip status-' + (readOnly ? 'readonly' : k);
     }
     actions.hidden = !has || empty;
-    controls.hidden = !has || empty;
+    // 62.1-03: an empty board keeps row 2 for the View switch alone, so the person can see which view they are in.
+    controls.hidden = !has;
+    const tl = timelineOn();
+    viewRadios.forEach((r) => { const on = r.dataset.view === ui.view; attr(r, 'aria-checked', on ? 'true' : 'false'); attr(r, 'tabindex', on ? 0 : -1); });
+    for (const n of [summary, msWrap, msSummary, groupWrap, filtersBtn, filtersEl, dirSeg, tlSlot]) if (empty) n.hidden = true;
     if (!has || empty) return;
+    dirSeg.hidden = !tl;
+    tlSlot.hidden = !tl;
+    summary.hidden = false;
+    dirRadios.forEach((r) => {
+      const key = r.dataset.direction;
+      const on = key === drawnDirection();
+      const off = key === 'horizontal' && narrow();
+      attr(r, 'aria-checked', on ? 'true' : 'false'); attr(r, 'tabindex', on ? 0 : -1);
+      attr(r, 'aria-disabled', off ? 'true' : null); attr(r, 'title', off ? HORIZONTAL_OFF : null);
+    });
     const v = model.viewer;
     const down = isDown();
     const canAdd = ['owner', 'lead', 'developer'].indexOf(v.role) >= 0;
@@ -360,15 +454,15 @@
     const ready = all.filter((c) => c.column === 'ready').length;
     setText(summary, plural(all.length, 'card', 'cards') + ' · ' + ready + ' ready · ' + all.filter((c) => c.blocked).length + ' blocked');
     const sel = milestoneId();
-    msWrap.hidden = model.milestones.length === 0;
+    // In Timeline every milestone is on the timeline with its own progress, and lanes do not apply (TD-2): hidden, not removed.
+    msWrap.hidden = model.milestones.length === 0 || tl;
     const wanted = model.milestones.map((m) => [m.id, m.title]).concat([['all', 'All milestones']]);
     syncOptions(msSelect, wanted, sel);
     const m = model.milestones.find((x) => x.id === sel);
-    msSummary.hidden = layout !== 'kanban' || !m;
+    msSummary.hidden = layout !== 'kanban' || !m || tl;
     if (m) { setText(msText, m.title + ': ' + m.progress.text); setProgress(msBar, m.progress, m.title + ' progress'); msBar.box.hidden = m.progress.total === 0; }
     // group by (kanban only)
-    groupWrap.hidden = layout !== 'kanban';
-    viewRadios.forEach((r) => { const on = r.dataset.view === ui.view; attr(r, 'aria-checked', on ? 'true' : 'false'); attr(r, 'tabindex', on ? 0 : -1); });
+    groupWrap.hidden = layout !== 'kanban' || tl;
     radios.forEach((r) => { const on = r.dataset.group === ui.groupBy; attr(r, 'aria-checked', on ? 'true' : 'false'); attr(r, 'tabindex', on ? 0 : -1); });
     // filters
     filtersBtn.hidden = layout !== 'list';
@@ -903,7 +997,7 @@
       if (first) {
         first = false;
         const all = cardsInMilestone();
-        announce('Team Board loaded. ' + plural(all.length, 'card', 'cards') + ', ' + all.filter((c) => c.column === 'ready').length + ' ready.');
+        announce('Team Board loaded. ' + plural(all.length, 'card', 'cards') + ', ' + all.filter((c) => c.column === 'ready').length + ' ready.' + (timelineOn() && all.length > 0 ? ' ' + VIEW_SAID.timeline : ''));
       } else if (own.length) announce(own[own.length - 1]);
       if (remote.length) queueChanges(remote);
       render();
@@ -937,6 +1031,13 @@
     registerView(name, view) { if (VIEWS.indexOf(name) >= 0 && name !== 'columns' && view && typeof view.render === 'function') { registeredViews[name] = view; if (ui.view === name) render(); } },
     view: () => ui.view,
     setView,
+    /** A copy of the timeline's saved choices, and the checked way to change them (each value is checked, then saved). */
+    uiState: () => JSON.parse(JSON.stringify(ui.timeline)),
+    setUiState,
+    toolbarSlot: () => tlSlot,
+    drawnDirection,
+    /** Draws the board again, for a view whose own choices changed (zoom, a folded milestone). */
+    redraw: () => render(),
     /** The card the person selected (it stays selected across the views). */
     selected: () => ui.selected,
     focusCard: (id) => { const li = cardEls.get(id); return !!li && li.isConnected && focusEl(li); },

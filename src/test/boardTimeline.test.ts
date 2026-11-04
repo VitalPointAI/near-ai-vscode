@@ -179,6 +179,8 @@ test('the View switch moves with the arrow keys like Group by, and a model with 
 
 // ---- Task 2: saved choices at version 3, the Direction switch, and the vertical drawing under 520 px ----------------------------------------------
 
+// A new item's unsent draft in the shape form.js keeps (it drops any other shape when it loads).
+const draftOf = (title: string): Record<string, unknown> => ({ mode: 'new', values: { type: 'chore', title, description: '', files: '', estimate: '' } });
 const DEFAULTS = { direction: 'horizontal', zoom: 100, legendOpen: false, shown: {}, scroll: { horizontal: { x: 0, y: 0 }, vertical: { x: 0, y: 0 } } };
 const saved = (h: BoardHarness): Record<string, any> => h.state as Record<string, any>;
 /** The board's api for the timeline scripts (62.1-03 interfaces): each name must be a function before it is called. */
@@ -201,7 +203,7 @@ test('TD-18: a version 2 state keeps every choice, opens in Columns with the tim
   const filters = { mine: false, ready: true, blocked: false, requirement: 'BOARD-01', phase: '' };
   const v2 = {
     version: 2, groupBy: 'phase', filters, collapsedColumns: { done: false, backlog: true }, collapsedLanes: { 'phase:phase:91': false }, openGroups: { done: true },
-    selected: 'plan:90-01', milestone: 'all', filtersOpen: true, draft: { title: 'Half written' }
+    selected: 'plan:90-01', milestone: 'all', filtersOpen: true, draft: draftOf('Half written')
   };
   const h = start({ state: v2 });
   h.deliver({ type: 'state', model });
@@ -222,7 +224,7 @@ test('TD-18: a version 2 state keeps every choice, opens in Columns with the tim
   assert.equal(saved(h).version, 3);
   assert.equal(saved(h).view, 'timeline');
   assert.equal(saved(h).groupBy, 'phase');
-  assert.deepEqual(saved(h).draft, { title: 'Half written' });
+  assert.deepEqual(saved(h).draft, draftOf('Half written'));
   const again = start({ state: h.state });
   again.deliver({ type: 'state', model });
   assert.equal(again.root.getAttribute('data-view'), 'timeline', 'the view is remembered');
@@ -231,12 +233,12 @@ test('TD-18: a version 2 state keeps every choice, opens in Columns with the tim
 test('an unversioned state still follows the 62-21 rule: only the grouping, milestone, selection, filters toggle and draft are kept', async () => {
   const world = await chainBoard();
   const model = modelOf(world, world.owner.memberId);
-  const older = { groupBy: 'phase', milestone: 'all', selected: 'plan:90-01', filtersOpen: true, draft: { title: 'Kept' }, filters: { mine: true }, collapsedColumns: { backlog: true }, view: 'timeline' };
+  const older = { groupBy: 'phase', milestone: 'all', selected: 'plan:90-01', filtersOpen: true, draft: draftOf('Kept'), filters: { mine: true }, collapsedColumns: { backlog: true }, view: 'timeline' };
   const h = start({ state: older });
   h.deliver({ type: 'state', model });
   const s = saved(h);
   assert.equal(s.version, 3);
-  assert.deepEqual([s.groupBy, s.milestone, s.selected, s.filtersOpen, s.draft], ['phase', 'all', 'plan:90-01', true, { title: 'Kept' }]);
+  assert.deepEqual([s.groupBy, s.milestone, s.selected, s.filtersOpen, s.draft], ['phase', 'all', 'plan:90-01', true, draftOf('Kept')]);
   assert.equal(s.filters.mine, false, 'the old filters are dropped');
   assert.deepEqual(s.collapsedColumns, {}, 'the old folds are dropped');
   assert.equal(s.view, 'columns', 'a view saved without a version is dropped too');
