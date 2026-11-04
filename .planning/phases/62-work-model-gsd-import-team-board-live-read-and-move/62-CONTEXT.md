@@ -148,3 +148,7 @@ Found in the owner's re-test on 0.6.3 (62-UAT "Re-test on 0.6.3"): "Bob shouldn'
 - On the board, Unassign me appears only on cards you took yourself; on a card a lead assigned to you, the card detail says "Assigned to you by {name}. Ask a lead to change it." instead.
 - Teams that used the 0.6.x previews: a self-unassignment from a lead-assigned card that 0.6.3 accepted is rejected once everyone updates, so that card shows the member again.
 - Plan: 62-26.
+
+## Owner decision (2026-11-04): assignees move their own cards
+
+"developers should be able to move cards they have been assigned." Any confirmed non-observer member who is the current assignee of a card (assigned by a lead or by themselves) may make the board moves on that card: mark done, block/unblock, hold/release, reopen. Cancel (and reopen from Cancelled) stays with the owner and leads (orchestrator default, owner may override). Owners and leads may still move any card. Enforced on write and read (actionForEvent with state), signed events unchanged. Drag follows the same rule.
