@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AuthService, SecretStorageLike } from '../services/auth';
+import { initProfileIndex, listSavedProfiles } from '../services/profileIndex';
 import { ProfileStore, ProfileStoreFileSystem } from '../services/profileStore';
 
 class MemorySecrets implements SecretStorageLike {
@@ -119,4 +121,95 @@ test('configure leaves the active profile unchanged when the key fails validatio
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+// G-61-9: a profile reused from another project. Removing the copy never touches the original key, and a copy whose original is gone says so.
+class MemoryMemento {
+  public readonly values = new Map<string, unknown>();
+  public get<T>(key: string): T | undefined { return this.values.get(key) as T | undefined; }
+  public update(key: string, value: unknown): Promise<void> { this.values.set(key, JSON.parse(JSON.stringify(value))); return Promise.resolve(); }
+}
+
+async function twoProjects(): Promise<{ base: string; secrets: MemorySecrets; auth: AuthService; canary: string; alpha: ProfileStore; beta: ProfileStore; store(root: string): ProfileStore; rootB: string; cleanup(): Promise<void> }> {
+  const base = await mkdtemp(path.join(tmpdir(), 'near-ai-profile-copy-'));
+  const rootA = path.join(base, 'alpha-site');
+  const rootB = path.join(base, 'beta-app');
+  await mkdir(rootA, { recursive: true });
+  await mkdir(rootB, { recursive: true });
+  initProfileIndex(new MemoryMemento());
+  const secrets = new MemorySecrets();
+  const auth = new AuthService(secrets);
+  const canary = `sk-canary-${randomUUID()}`;
+  const validator = async (_profile: unknown, scope: unknown): Promise<void> => { if (await auth.getScopedApiKey(scope as never) !== canary) throw new Error('HTTP 401'); };
+  const store = (root: string): ProfileStore => new ProfileStore(root, auth, { validator });
+  const alpha = store(rootA);
+  await alpha.configure({ profileId: 'profile-alpha-cloud', displayName: 'Alpha Cloud', organization: 'Alpha Co', baseUrl: 'https://example.test/v1', authMode: 'apiKey' }, canary);
+  return { base, secrets, auth, canary, alpha, beta: store(rootB), store, rootB, cleanup: () => rm(base, { recursive: true, force: true }) };
+}
+
+test('removing a reused profile removes only this project\'s copy; the original profile and its key stay', async () => {
+  const w = await twoProjects();
+  try {
+    const copy = await w.beta.useSavedProfile(listSavedProfiles(w.beta.projectScopeId)[0]);
+    assert.equal(copy.validation.status, 'valid');
+    assert.equal(await w.beta.remove(copy.profileId), true);
+    assert.deepEqual(await w.beta.list(), [], 'the copy is gone from this project');
+    assert.equal(await w.beta.getActiveSelection(), undefined, 'and is no longer selected');
+    assert.equal(await w.auth.getScopedApiKey(w.alpha.getScope('profile-alpha-cloud')), w.canary, 'the original key is untouched');
+    assert.equal((await w.alpha.get('profile-alpha-cloud'))?.validation.status, 'valid', 'the original profile is untouched');
+    assert.deepEqual(listSavedProfiles().map((entry) => entry.profileId), ['profile-alpha-cloud'], 'the original is still offered');
+  } finally { await w.cleanup(); }
+});
+
+test('when the original profile is removed, the copy says plainly that it no longer works', async () => {
+  const w = await twoProjects();
+  try {
+    const copy = await w.beta.useSavedProfile(listSavedProfiles(w.beta.projectScopeId)[0]);
+    assert.equal(await w.alpha.remove('profile-alpha-cloud'), true);
+    assert.equal(w.secrets.values.size, 0, 'removing the original removed its key');
+    assert.deepEqual(listSavedProfiles(), [], 'the removed profile is no longer offered');
+    const checked = await w.store(w.rootB).validate(copy.profileId);
+    assert.equal(checked.validation.status, 'invalid');
+    assert.equal(checked.validation.error, 'The saved profile this one uses was removed. Set up a new profile or choose another.');
+  } finally { await w.cleanup(); }
+});
+
+test('setting up a reused profile again gives this project its own key and never writes the original project\'s key', async () => {
+  const w = await twoProjects();
+  try {
+    const copy = await w.beta.useSavedProfile(listSavedProfiles(w.beta.projectScopeId)[0]);
+    await assert.rejects(() => w.beta.saveProfileApiKey(copy.profileId, 'sk-other'), /key saved in another project/);
+    assert.equal(await w.auth.getScopedApiKey(w.alpha.getScope('profile-alpha-cloud')), w.canary, 'the original key was not overwritten');
+  } finally { await w.cleanup(); }
+});
+
+test('a reused profile whose source is malformed in the profile file is dropped on load, and a hand-written source reaches no key', async () => {
+  const w = await twoProjects();
+  try {
+    const alphaId = w.alpha.projectScopeId;
+    const base = { version: 1, displayName: 'Alpha Cloud', organization: 'Alpha Co', provider: 'near-ai', baseUrl: 'https://example.test/v1', authMode: 'apiKey', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', validation: { status: 'valid', validatedAt: '2026-01-01T00:00:00.000Z' } };
+    const write = async (profiles: unknown[], active?: string): Promise<void> => {
+      await mkdir(path.dirname(w.beta.filePath), { recursive: true });
+      await writeFile(w.beta.filePath, JSON.stringify({ version: 1, projectId: w.beta.projectScopeId, profiles, ...(active ? { active: { profileId: active, selectedAt: '2026-01-01T00:00:00.000Z' } } : {}) }), 'utf8');
+    };
+    await write([
+      { ...base, profileId: 'profile-alpha-cloud', keySource: { projectId: '../alpha', profileId: 'profile-alpha-cloud' } },
+      { ...base, profileId: 'profile-bad-id', keySource: { projectId: alphaId, profileId: 'not a profile' } },
+      { ...base, profileId: 'profile-other-id', keySource: { projectId: alphaId, profileId: 'profile-alpha-cloud' } },
+      { ...base, profileId: 'profile-extra', keySource: { projectId: alphaId, profileId: 'profile-extra', path: '/tmp' } },
+      { ...base, profileId: 'profile-string', keySource: 'profile-alpha-cloud' }
+    ]);
+    assert.deepEqual(await w.store(w.rootB).list(), [], 'every malformed copy is dropped');
+
+    // Well formed, but never chosen through Use a saved profile on this computer (for example shipped in a cloned repository).
+    await write([{ ...base, profileId: 'profile-alpha-cloud', keySource: { projectId: alphaId, profileId: 'profile-alpha-cloud' } }], 'profile-alpha-cloud');
+    const tampered = w.store(w.rootB);
+    const [loaded] = await tampered.list();
+    assert.notEqual(loaded?.validation.status, 'valid', 'it is not trusted as checked');
+    assert.notDeepEqual(tampered.getScope('profile-alpha-cloud'), w.alpha.getScope('profile-alpha-cloud'), 'it does not resolve to the other project\'s key');
+    assert.equal(await w.auth.getScopedApiKey(tampered.getScope('profile-alpha-cloud')), undefined);
+    const checked = await tampered.validate('profile-alpha-cloud');
+    assert.equal(checked.validation.status, 'invalid');
+    assert.equal(checked.validation.error, 'That saved profile is no longer available. Set up a new profile or choose another.');
+  } finally { await w.cleanup(); }
 });
