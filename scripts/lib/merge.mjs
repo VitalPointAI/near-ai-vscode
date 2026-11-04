@@ -2,7 +2,7 @@
 // gh (scripts/test/merge.test.mjs). See merge-pr.mjs for what it checks.
 import { behindBy, commitChecks, fileAt, gh, ghJson, prFiles, protectedContexts, sleep, tagCommit, unresolvedThreads, viewPrSettled } from './gh.mjs';
 import { tagRelease } from './release.mjs';
-import { AGENT_REVIEW_ACCOUNT, BRANCH_PATTERN, REQUIRED_CHECKS, evaluateCommit, gateFileChanges, mergeOutcomeProblem, releasePrProblems, releaseVersionFromBranch } from './workflow.mjs';
+import { BRANCH_PATTERN, REQUIRED_CHECKS, REVIEW_ACCOUNT, evaluateCommit, gateFileChanges, mergeOutcomeProblem, releasePrProblems, releaseVersionFromBranch } from './workflow.mjs';
 
 /**
  * Checks every gate for PR `number` and, unless dryRun, squash-merges it and tags a release PR.
@@ -20,7 +20,7 @@ export async function mergePr(repo, number, { dryRun = false, noTag = false, log
   if (!BRANCH_PATTERN.test(pr.headRefName)) reasons.push(`branch "${pr.headRefName}" does not follow the naming rules (feat|fix|chore|docs/<name>, release|hotfix/x.y.z)`);
 
   const required = [...new Set([...REQUIRED_CHECKS, ...protectedContexts(repo, pr.baseRefName)])];
-  const checks = evaluateCommit(commitChecks(repo, pr.headRefOid), { required, reviewer: AGENT_REVIEW_ACCOUNT });
+  const checks = evaluateCommit(commitChecks(repo, pr.headRefOid), { required, reviewer: REVIEW_ACCOUNT });
   reasons.push(...checks.problems);
 
   const position = behindBy(repo, pr.baseRefName, pr.headRefOid);

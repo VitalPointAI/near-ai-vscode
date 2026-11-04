@@ -20,6 +20,7 @@ Last reviewed: 2026-10-26, against the code on `main`.
 | Your environment variables | Not passed to the agent's commands when they look like credentials (by name or value) | So `env` or a careless script cannot send them to the model. Pass specific ones with `nearAi.agent.shellEnvAllow`. Local MCP servers get only a minimal environment plus what you configure; the Open-GSD installer gets the environment without credential-like variables. |
 | Web searches | Only after **NEAR AI: Set Up Web Search**: your SearXNG instance, Brave Search, or Tavily | The query text; Brave and Tavily also receive your API key, which links the searches to your account. A SearXNG instance you run keeps queries on your infrastructure. |
 | Web pages the agent fetches | The page's site | A plain GET with the extension's user agent and no cookies, login, or referrer. Asks first under `approve-risky`. |
+| Cybersecurity scans (**NEAR AI: Cybersecurity**) | The model you picked: step results, and response headers, bodies, and TLS certificate details from the target you nominated | Only the target you resolved to a scope is contacted. What comes back is treated as untrusted: fenced as data, invisible characters stripped, injection attempts flagged, and secrets redacted before it is stored or exported. Engagement records and evidence stay in VS Code's extension storage, never in the project. |
 | MCP tool calls | Only servers you add and switch on for the project | The call's arguments, shown on the approval card; see MCP connections below. |
 | Dependency checks | OSV.dev (package names and versions) and endoflife.date (runtime versions), after you agree once per project | No code, file contents, or project names. See Checking your project's dependencies. |
 | Activity and cost records | `.planning/.near-ai/` in your project | Operational facts only (models, token counts, costs, outcomes); no prompts or replies. Add it to `.gitignore` if you do not want it committed. |
@@ -98,6 +99,32 @@ Search results leave out credential-looking files unless you search one
 directly. WebFetch follows redirects itself, requires https at every hop, and
 refuses hosts that resolve to loopback, private, link-local or metadata
 addresses.
+
+### Cybersecurity scans
+
+A scan is the one feature that deliberately reaches private addresses, because
+the target is usually your own machine or network. Its own rules different:
+
+- **Only the resolved scope is contacted.** A step naming a host, URL or folder
+  outside the scope the panel showed you is refused, and the refusal is recorded
+  in the run's ledger. A folder is compared as a resolved path, so `..` cannot
+  climb out of it.
+- **Loopback is allowed only when named literally.** Typing `127.0.0.1` or
+  `localhost` scans this machine; a *hostname* that resolves to loopback is
+  refused, so a target cannot point the harness at your own machine by accident.
+- **Intrusive steps need one grant.** Defensive scans run freely. Exploit and
+  post-exploitation steps need the engagement's intrusive grant, given once for
+  the run; after that each step is still scope-checked and denied rather than
+  asked again if it strays. A step that would be risky also asks through the
+  same approval card as chat, unless the grant covers it.
+- **Payloads run in a sandbox, never on the host.** A container (`--rm`,
+  `--network none`, target mounted read-only) or a temporary folder, chosen per
+  engagement. A disabled sandbox refuses the step rather than falling back.
+  Cleanup is verified against the runtime, and only read-only commands
+  (`cat`, `ls`, `whoami`, `hostname`, `id`, `uname`) may follow a successful
+  exploit.
+- **Installs ask first.** A one-click host-tool install shows the exact
+  command and waits for your confirmation before running a package manager.
 
 Sub-agents, model tiers and image generation only use models on the same route
 as the one you picked (local or cloud) that are at least as private. A run on a
@@ -310,17 +337,45 @@ The checksum shows that the VSIX published is the one the build job made; it doe
 the build itself. The build job installs dependencies with their install scripts and runs the
 tests, so a compromised dependency could change the VSIX before its checksum is taken.
 
-AI agents do much of this work, and today they act through the owner's GitHub account, which
-is a repository and organization admin. So the review result (`agent-review`), the Marketplace
-approval and the repository settings are not barriers an agent session cannot cross: an agent
-running as the owner could technically set that status, approve the deployment or change the
-settings. These steps are kept by policy: the agents are instructed never to take them, the
-scripts they use never do, and the approval is given by the owner in person. The planned
-hardening is a separate, non-admin GitHub identity for the agents that cannot approve
-deployments, with only that identity's `agent-review` trusted.
+AI agents do much of this work, and they act through the owner's GitHub account, which is a
+repository and organization admin. The Marketplace approval and the repository settings are
+therefore kept by policy: the agents are instructed never to take those steps, the scripts they
+use never do, and the approval is given by the owner in person.
+
+The review result is not taken from the owner's account. It comes from a separate reviewer
+identity, `near-ai-reviewer`, through `.github/workflows/agent-review.yml`:
+
+- **Who reviews.** After CI passes on a pull request, the workflow, run from `main` (never the
+  pull request's own copy), sends the pull request to a review model and posts the result as the
+  `agent-review` status and a review comment, as `near-ai-reviewer`. The merge and release gates
+  trust `agent-review` only from that account, and the review script refuses to post as any
+  other, so an agent running as the owner cannot certify its own work.
+- **Where the token lives.** `near-ai-reviewer`'s token and the review model's key are secrets of
+  the `agent-review` environment, which deploys only from protected branches. No machine that
+  authors code holds them. This is a repository setting: a repository admin could still change
+  the environment's branch policy, so it protects against mistakes and against a PR, not against
+  an admin account acting on purpose. `can_admins_bypass: false` only stops an admin skipping a
+  required reviewer.
+- **What leaves the repository.** For each pull request, its title, description, branch name,
+  CI results, list of changed files and diff (capped in size) are sent to the review model's
+  endpoint: NEAR AI Cloud (`https://cloud-api.near.ai/v1`) unless the `REVIEW_MODEL_BASE_URL`
+  variable names another; the key is sent only over https. For this public repository that
+  content is already public.
+- **What a model verdict is worth.** The verdict is a model's judgement, and the pull request's
+  own content can try to influence it. The prompt marks everything the author wrote as untrusted
+  data, and the gate fails mechanically on an open BLOCKER, a missing or second verdict, a verdict
+  for another commit, or a PASS that does not recommend merging. It cannot catch a model that is
+  simply persuaded; that is why changes to the gates need the owner.
+- **What it approves on its own.** When the review passes, `near-ai-reviewer` approves the pull
+  request, pinned to the reviewed commit, which satisfies the one approval branch protection
+  requires. A pull request that changes the gates (the workflows, the review, merge and release
+  scripts, `SECURITY.md`, the agent commands) or whose diff was too large to review whole is not
+  approved automatically: the approval waits for the owner to approve the run in the
+  `agent-review-gates` environment, whose only reviewer is the owner and which holds no secrets.
 
 GitHub enforces these rules through repository settings (branch protection on `main`, a ruleset
-that keeps release tags from being moved or deleted, and a protected `marketplace` environment).
+that keeps release tags from being moved or deleted, and the protected `marketplace`,
+`agent-review` and `agent-review-gates` environments).
 They are listed, with the commands that apply them, in
 [docs/development-workflow.md](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs/development-workflow.md)
 (section 8), which also describes the whole process. A rule is in force only once its setting is

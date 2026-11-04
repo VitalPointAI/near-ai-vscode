@@ -1,0 +1,9 @@
+{
+  "name": "near-ai-cyber-fixture-patched",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Hardened twin of the vulnerable fixture target for the cybersecurity harness tests.",
+  "dependencies": {
+    "express": "4.19.2"
+  }
+}

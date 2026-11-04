@@ -1,7 +1,12 @@
 #!/usr/bin/env node
-// The `agent-review` gate. The owner's agents act as the owner's GitHub account, so they cannot
-// approve a PR the owner opened. Instead the review team's result is recorded as a commit status
-// named `agent-review` on the PR's head commit, which branch protection requires.
+// The `agent-review` gate. The review's result is recorded as a commit status named
+// `agent-review` on the PR's head commit, which branch protection requires. The status is posted by
+// the reviewer identity, near-ai-reviewer (REVIEW_ACCOUNT), from .github/workflows/agent-review.yml;
+// the authoring agents run as the owner's account and never post it.
+//
+// `gather` only reads and works from any account. `submit` is what the workflow (and the one-time
+// scripts/bootstrap-agent-review.mjs) runs; to review a PR by hand, trigger the workflow:
+//   gh workflow run agent-review.yml -f pr=<n>
 //
 //   node scripts/agent-review.mjs gather <pr> [--out <dir>] [--repo owner/name]
 //       Writes what reviewers need into <dir>: pr.json, diff.patch, checks.json, files.txt.
@@ -9,7 +14,8 @@
 //       Sets `agent-review` to pending, posts the review file as a PR comment, then sets the
 //       result on the head commit: success only if the file says "Verdict: PASS", names the
 //       current head in "Head-SHA:", and has no open [BLOCKER] finding. Anything else sets
-//       failure. Refuses unless gh runs as the owner's account (AGENT_REVIEW_ACCOUNT).
+//       failure. Refuses unless gh runs as near-ai-reviewer (REVIEW_ACCOUNT), so it
+//       refuses on the owner's machine.
 //
 // See docs/development-workflow.md and .claude/commands/review-pr.md. The logic is in
 // scripts/lib/review.mjs.

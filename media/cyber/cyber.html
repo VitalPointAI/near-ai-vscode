@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <!-- The same shell cyberPanelHtml generates; this file is the reference copy for the media tree.
+       The CSP is replaced with the panel's nonce and cspSource when the host serves the page. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'nonce-{{nonce}}';">
+  <link rel="stylesheet" href="cyber.css">
+  <title>NEAR AI Cybersecurity</title>
+</head>
+<body>
+  <header>
+    <h1>NEAR AI Cybersecurity</h1>
+    <p class="hint">Pick a target, resolve its scope, accept the regional disclaimer once per engagement, then run a defensive, offensive, or full scan. Nothing is sent to a model until you press Run.</p>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </header>
+  <main>
+    <section id="target-section" aria-labelledby="target-title">
+      <h2 id="target-title">Target</h2>
+      <form id="target-form">
+        <label for="target-kind">Kind</label>
+        <select id="target-kind" aria-label="Target kind">
+          <option value="url">URL or host</option>
+          <option value="workspace">Workspace folder</option>
+          <option value="cidr">CIDR range</option>
+          <option value="container">Container</option>
+          <option value="git">Git repository folder</option>
+        </select>
+        <label for="target-value">Value</label>
+        <input id="target-value" type="text" required aria-label="Target value" placeholder="https://example.com, 10.0.0.0/30, . or a folder path">
+        <button id="resolve" type="submit">Resolve scope</button>
+      </form>
+      <div id="scope-preview" aria-live="polite"></div>
+      <div id="warning" class="warning" hidden role="alert"></div>
+    </section>
+    <section id="mode-section" aria-labelledby="mode-title">
+      <h2 id="mode-title">Mode and depth</h2>
+      <div id="mode-selector" role="group" aria-label="Scan mode"></div>
+      <label for="depth">Depth</label>
+      <select id="depth" aria-label="Depth profile">
+        <option value="quick">Quick</option>
+        <option value="standard">Standard</option>
+        <option value="deep">Deep</option>
+      </select>
+      <button id="create" type="button" disabled>Create engagement</button>
+    </section>
+    <section id="disclaimer-section" aria-labelledby="disclaimer-title" hidden>
+      <h2 id="disclaimer-title">Legal disclaimer</h2>
+      <div id="disclaimer-modal" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title"></div>
+    </section>
+    <section id="run-section" aria-labelledby="run-title" hidden>
+      <h2 id="run-title">Run</h2>
+      <label for="model">Model</label>
+      <select id="model" aria-label="Model for this engagement"></select>
+      <label for="vehicle">Run in</label>
+      <select id="vehicle" aria-label="Where the run is driven from">
+        <option value="panel">This panel</option>
+        <option value="chat">The chat (survives closing this panel)</option>
+      </select>
+      <p id="vehicle-note" class="hint" role="note"></p>
+      <button id="run" type="button">Run</button>
+      <button id="stop" type="button" class="secondary" disabled>Stop</button>
+    <div id="progress-wrap">
+      <progress id="progress" max="100" hidden></progress>
+      <p id="progress-text" class="hint" role="status" aria-live="polite"></p>
+    </div>
+      <p id="run-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+    <section id="timeline-section" aria-labelledby="timeline-title">
+      <h2 id="timeline-title">Step timeline</h2>
+      <div id="timeline" aria-live="polite"></div>
+    </section>
+    <section id="findings-section" aria-labelledby="findings-title">
+      <h2 id="findings-title">Findings</h2>
+      <div id="findings"></div>
+    </section>
+    <section id="tools-section" aria-labelledby="tools-title">
+      <h2 id="tools-title">Missing host tools</h2>
+      <div id="tools"></div>
+    </section>
+    <section id="export-section" aria-labelledby="export-title">
+      <h2 id="export-title">Export and replay</h2>
+      <div id="export"></div>
+    </section>
+  </main>
+  <script nonce="{{nonce}}" src="cyber.js"></script>
+</body>
+</html>

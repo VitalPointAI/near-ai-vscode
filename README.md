@@ -400,6 +400,42 @@ until it runs out aren't shown.
   Memory stays on this machine and refuses secret-looking content. Review,
   correct, retract, export, or reset it with **Manage Project Memory**.
 
+### Cybersecurity scans
+
+**NEAR AI: Cybersecurity** opens a panel that tests a system you own for
+security problems. Pick a target, a web address, a folder in your project, a
+range of addresses, a running container, or a git folder, and the panel shows
+the exact scope it will touch before anything is sent to a model: hosts, ports,
+folders and exclusions.
+
+Accept a short regional disclaimer once per engagement: twelve regions, each
+with its own statement of the law that applies, detected from your locale and
+changeable. The record names who accepted it, on which machine, and which
+version of the text, so a later change asks you to accept again.
+
+Then run a scan:
+
+- **Defensive** checks response headers, TLS certificates, DNS, open ports,
+  robots.txt, committed secrets, infrastructure-as-code, dependency
+  vulnerabilities and fingerprints. These need no extra tools installed.
+- **Offensive** can attempt exploits. It needs your grant once per engagement,
+  then runs only inside a container or a temporary folder, under a rate limit
+  and a time budget, with a Stop button that works within one step.
+
+Every attempt ends in one of four verdicts, not vulnerable, exploit failed,
+could not determine, or verified access, and a failure always says why. A check
+that could not run is named, so a scan never reads as clean when it was only
+incomplete. Each step is an entry in an append-only chain that proves the report
+was not edited afterwards, and you can replay a finished run offline.
+
+Export the result as Markdown, JSON, or SARIF, each carrying the authorization
+record. Ten optional host tools (nmap, trivy, nuclei and others) add more
+checks; the panel lists them with how strongly it recommends each and what
+installing it changes on your machine.
+
+A long scan can run in the panel or in the chat. A deep run goes to the chat by
+default, so closing the panel does not end it and you can steer it by typing.
+
 ### Respects your projects
 
 The extension only acts in projects you set up with it. Opening a folder,
@@ -426,6 +462,10 @@ copy of Open-GSD to a project that doesn't already have one.
   CheckCitations. Hidden text is stripped, likely prompt injections are
   flagged, outside content is fenced as data, and after reading it, commands
   that could send data out always ask. Agent Activity shows each detection.
+- **Cybersecurity scans** touch only the scope the panel showed you. Loopback is
+  scanned only when you name it literally, an intrusive step needs one grant and
+  is still refused if it strays outside the scope, and exploit payloads run in a
+  container or temporary folder with no network, never on your machine.
 - **Dependency checks.** **NEAR AI: Scan Dependencies for Vulnerabilities**
   writes an SBOM (`sbom.cdx.json`, CycloneDX) from your lockfiles and checks
   every package on OSV.dev and your runtimes on endoflife.date, after asking
