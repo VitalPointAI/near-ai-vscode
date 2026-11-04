@@ -256,13 +256,36 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 
 ### Phase 62.1: Board timeline: milestones on one timeline with cards as dots in dependency order (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
-**Depends on:** Phase 62
-**Plans:** 0 plans
+**Goal:** As part of the Team Board, a person sees the whole project on one timeline they can view left to right or top to bottom: milestones in order, phases as segments, every card a small dot in dependency order that opens into the full card with the board's own actions, a Now marker showing where the work is, and the percent complete, proven in a real window and in code-server for the owner to review.
+**Requirements**: BOARD-01, BOARD-02, BOARD-03
+**Depends on:** Phase 62 (runs after 62-27 and Phase 61's 61-31, the last planned plans of both)
+**Plans:** 9 plans in 7 waves (decisions D-01 to D-14 in 62.1-CONTEXT.md, including the owner's Now indicator D-13 and percent complete D-14 of 2026-11-04; design contract 62.1-UI-SPEC.md with its 2026-11-04 amendment)
+**UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 62.1 to break down)
+
+**Wave 1** *(blocked on 62-27 and 61-31)*
+- [ ] 62.1-01-PLAN.md — Timeline model core: pure dependency layout in timeline.ts (steps, slots, edges, phase and cross-milestone dependencies, loops), attached to every board state, finish dates from history, a layout failure that leaves Columns working, proven on this repository's roadmap (BOARD-01, BOARD-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 62.1-02-PLAN.md — Percent complete (D-14), the Now step and sentence (D-13), and every dot name, fact and note in plain words (BOARD-01)
+- [ ] 62.1-03-PLAN.md — The Timeline view in the page: View and Direction switches, saved state version 3, vertical under 520px, timeline.js under the existing CSP, and the pure geometry proven free of overlap (BOARD-01, BOARD-03)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 62.1-04-PLAN.md — Drawing: bands, headers with percents, phase rail with fills, dots by colour, shape and glyph, lines, ghosts, tiles, stacks, states, the Now marker, the toolbar ring, zoom group, Jump to now and legend, theme-only CSS (BOARD-01)
+- [ ] 62.1-07-PLAN.md — Real-window instruments: the layout probe's timeline rules 1 to 12 and real mouse, wheel and key helpers for the DevTools client (BOARD-01)
+
+**Wave 4** *(blocked on 62.1-04)*
+- [ ] 62.1-05-PLAN.md — Preview, expanded card with the board's own face and actions, placement off the Now label, and the full keyboard model with N for now (BOARD-01, BOARD-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 62.1-06-PLAN.md — Live updates in place with the pulse, the gliding Now marker and filling percents, zoom and pan, the first screen centred on now, every motion with reduced motion, and test-only metrics (BOARD-01, BOARD-02)
+
+**Wave 6** *(blocked on 62.1-06 and 62.1-07)*
+- [ ] 62.1-08-PLAN.md — Real VS Code window: the timeline launch, real keys and mouse, a move from the card, a teammate moving the Now step, frame timing, narrow width, and the rare states through a test-only seam (BOARD-01, BOARD-02, BOARD-03)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [ ] 62.1-09-PLAN.md — The 121-frame screenshot matrix, the code-server browser test, the full gate, the validation map, and the owner's review (BOARD-01, BOARD-02, BOARD-03)
 
 ### Phase 63: Claims, leases, claim workspaces, LeaseGuard, duplicate checks
 
