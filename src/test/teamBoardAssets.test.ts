@@ -17,8 +17,9 @@ const files = [...BOARD_SCRIPTS, ...BOARD_STYLES];
 const text = (file: string): string => readFileSync(path.join(ROOT, 'media', 'board', file), 'utf8');
 const release = readFileSync(path.join(ROOT, 'scripts', 'verify-release-content.mjs'), 'utf8');
 
-test('the board loads six files, in the order the client needs them', () => {
-  assert.deepEqual([...BOARD_SCRIPTS], ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js']);
+// 62.1-03 (D-04, T-62.1-06): timeline.js plugs into board.js like the other feature scripts, so it loads last, with the page's nonce.
+test('the board loads seven files, in the order the client needs them', () => {
+  assert.deepEqual([...BOARD_SCRIPTS], ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js', 'timeline.js']);
   assert.deepEqual([...BOARD_STYLES], ['board.css']);
 });
 
