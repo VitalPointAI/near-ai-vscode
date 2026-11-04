@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62-26-PLAN.md
-last_updated: "2026-11-04T19:54:21.859Z"
+stopped_at: Completed 62-27-PLAN.md
+last_updated: "2026-11-04T20:29:16.945Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 0151d3bd627a999c6ef24a102f65f8361e2069ab
+state_head: b0b844d0c976d828280865c1b50ce105a7fa5c9e
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 64
+  completed_plans: 65
   percent: 11
 ---
 
@@ -118,6 +118,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 61 P26 | 25 min | 3 tasks | 17 files |
 | Phase 62 P24 | 46min | 3 tasks | 12 files |
 | Phase 62 P26 | 18 min | 3 tasks | 14 files |
+| Phase 62 P27 | 31min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -269,6 +270,7 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-24: the board e2e makes teammates with the real invite, join and confirm flows in the extension host, with an in-memory key store (not the test harness, which would change V8's WebAssembly limit for the host) and folders removed in run()'s finally
 - [Phase 62]: 62-24: the full e2e runs before the screenshot run, because every board launch empties .vscode-test/screens
 - [Phase 62]: 62-26: WorkItem.assignedBy records who made the current assignment; a member's unassign is item.assign-self only when they are assignee and assigner (owner decision 2026-11-04); no event body or pinned hash moved
+- [Phase 62]: 62-27: the card's assignee moves it (item.move-own: hold, release, done, block, unblock, reopen from Done); cancel and reopening a cancelled card stay item.move (owner and leads); the board, page and drag decide per card through actionForEvent
 
 ### Pending Todos
 
@@ -290,8 +292,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T19:54:21.440Z
-Stopped at: Completed 62-26-PLAN.md
+Last session: 2026-11-04T20:29:16.555Z
+Stopped at: Completed 62-27-PLAN.md
 Resume file: None
 
 ## Notes
