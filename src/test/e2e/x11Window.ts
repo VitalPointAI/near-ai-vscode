@@ -14,8 +14,8 @@ export interface XAuthEntry { family: number; address: Buffer; display: string; 
 
 export interface Box { x: number; y: number; width: number; height: number }
 
-/** What fillScreen changed: the screen, and the test window before and after. */
-export interface FillResult { screen: { width: number; height: number }; window: number; before: Box; after: Box }
+/** What fillScreen changed: the screen, the test window before and after, and where the pointer was parked. */
+export interface FillResult { screen: { width: number; height: number }; window: number; before: Box; after: Box; pointer: { x: number; y: number } }
 
 const COOKIE = 'MIT-MAGIC-COOKIE-1';
 const FAMILY_WILD = 65535;
@@ -25,6 +25,7 @@ const GET_WINDOW_ATTRIBUTES = 3;
 const CONFIGURE_WINDOW = 12;
 const GET_GEOMETRY = 14;
 const QUERY_TREE = 15;
+const WARP_POINTER = 41;
 const VIEWABLE = 2;
 const INPUT_OUTPUT = 1;
 
@@ -127,6 +128,18 @@ export function configureWindowRequest(window: number, box: Box): Buffer {
   return out;
 }
 
+/** WarpPointer to a point of `window`, from anywhere (no source window). */
+export function warpPointerRequest(window: number, x: number, y: number): Buffer {
+  const out = Buffer.alloc(24);
+  out[0] = WARP_POINTER;
+  out.writeUInt16LE(6, 2);
+  out.writeUInt32LE(0, 4);
+  out.writeUInt32LE(window, 8);
+  out.writeInt16LE(x, 20);
+  out.writeInt16LE(y, 22);
+  return out;
+}
+
 export const parseQueryTree = (reply: Buffer): number[] => Array.from({ length: reply.readUInt16LE(16) }, (_, i) => reply.readUInt32LE(32 + i * 4));
 export const parseGeometry = (reply: Buffer): Box => ({ x: reply.readInt16LE(12), y: reply.readInt16LE(14), width: reply.readUInt16LE(16), height: reply.readUInt16LE(18) });
 export const parseAttributes = (reply: Buffer): { inputOutput: boolean; viewable: boolean; overrideRedirect: boolean } =>
@@ -189,7 +202,8 @@ class Connection {
 
 /**
  * Moves the largest shown top-level window (the test's VS Code window; without a window manager it is a child of the root) to the screen's top left
- * corner and gives it the whole screen, then reads its size back from the server.
+ * corner and gives it the whole screen, then reads its size back from the server. Xvfb draws the pointer into its framebuffer, so the pointer goes to
+ * the screen's last pixel, where its arrow is off screen and covers nothing in a screenshot.
  */
 export async function fillScreen(options: { display?: string; xauthority?: string; socketPath?: string } = {}): Promise<FillResult> {
   const number = localDisplay(options.display ?? process.env.DISPLAY);
@@ -209,8 +223,9 @@ export async function fillScreen(options: { display?: string; xauthority?: strin
     }
     if (best === undefined) throw new Error(`The hidden screen shows no window to size (${children.length} top-level windows, none shown)`);
     const target = { x: 0, y: 0, width: screen.width, height: screen.height };
-    const after = parseGeometry(await x.batch([configureWindowRequest(best.window, target), getGeometryRequest(best.window)]));
-    return { screen: { width: screen.width, height: screen.height }, window: best.window, before: best.box, after };
+    const pointer = { x: screen.width - 1, y: screen.height - 1 };
+    const after = parseGeometry(await x.batch([configureWindowRequest(best.window, target), warpPointerRequest(screen.root, pointer.x, pointer.y), getGeometryRequest(best.window)]));
+    return { screen: { width: screen.width, height: screen.height }, window: best.window, before: best.box, after, pointer };
   } finally {
     x.close();
   }
