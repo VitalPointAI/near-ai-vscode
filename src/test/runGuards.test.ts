@@ -64,6 +64,44 @@ test('the owner\'s case: many different `cd <worktree> && ...` commands with dif
   assert.equal(transcripts.at(-1)!.some((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>')), false, 'never nudged');
 });
 
+test('0.4.14, the owner\'s case: a bare `cd <worktree>` repeated between real commands is not a loop', async () => {
+  // As reported: the agent ran `cd <worktree>` on its own over and over (the shell already keeps
+  // the folder, so each one prints nothing), between commands that were making progress.
+  const worktree = tmpdir();
+  const commands = ['npm test', 'git status', 'npx tsc --noEmit', 'git diff --stat', 'ls src'];
+  const { result, transcripts } = await runScript((turn) => {
+    if (turn >= 20) return 'Done: the checks pass.';
+    return [call(`c${turn}a`, 'Bash', { command: `cd ${worktree}` }), call(`c${turn}b`, 'Bash', { command: `cd ${worktree}` }), call(`c${turn}c`, 'Bash', { command: 'pwd' }), call(`c${turn}d`, 'Bash', { command: `echo "${commands[turn % commands.length]} run ${turn}"` })];
+  });
+  assert.equal(result.outcome, 'completed');
+  assert.equal(transcripts.at(-1)!.some((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>')), false, 'never nudged');
+});
+
+test('a failing `cd` to a missing folder, repeated, is still caught as a loop', async () => {
+  const { result } = await runScript(() => [call('m', 'Bash', { command: 'cd /no/such/folder/near-ai-test' })]);
+  assert.equal(result.outcome, 'stuck');
+  assert.equal(result.stop?.kind, 'loop');
+});
+
+test('only changing folder or printing it counts as navigation; anything that does work still counts', async () => {
+  const { isNavigationOnly, loopActionKey, resultSignature } = await import('../agent/loop');
+  assert.equal(resultSignature('/tmp/near-ai-shell-Ab12/__NEAR_AI_5cf008d4f1dcaa47__.sh: line 1: cd: /x: No such file or directory\n\n[exit code 1]'), resultSignature('/tmp/near-ai-shell-Zz99/__NEAR_AI_f98ce07e3fb093e1__.sh: line 1: cd: /x: No such file or directory\n\n[exit code 1]'), 'the random script name in shell errors is ignored');
+  for (const command of ['cd /a/b', 'cd "/a b"', "cd '/a b'", 'cd', 'pwd', 'cd /a/b && pwd', 'cd /a ;']) assert.equal(isNavigationOnly(loopActionKey(call('n', 'Bash', { command }))), true, command);
+  for (const command of ['cd /a && npm test', 'cat missing-file.txt', 'cd /a || exit 1', 'pwd && ls', 'cd /a\nnpm test', 'cd "$(npm test)"', 'cd $(make build)', 'cd `touch x`', 'cd /a>out.txt', 'cd (x)', 'cd "/a`id`"']) assert.equal(isNavigationOnly(loopActionKey(call('w', 'Bash', { command }))), false, command);
+  assert.equal(isNavigationOnly(loopActionKey(call('r', 'Read', { file_path: 'cd' }))), false, 'other tools never count as navigation');
+  // A tool call exactly as the model sends it: the arguments are a JSON string, not an object.
+  const raw: ToolCall = { id: 'raw', type: 'function', function: { name: 'Bash', arguments: '{"command":"cd /a/b && pwd"}' } };
+  assert.equal(loopActionKey(raw), 'Bash pwd', 'the key is built from the parsed command, with the leading cd removed');
+  assert.equal(isNavigationOnly(loopActionKey(raw)), true);
+});
+
+test('an agent that only ever changes folder is never stopped as a loop, and still ends at the turn limit', async () => {
+  const { result, turns } = await runScript((turn) => [call(`c${turn}`, 'Bash', { command: 'cd .' })]);
+  assert.equal(result.outcome, 'max-turns');
+  assert.deepEqual(result.stop, { kind: 'turn-limit', turns: 60 });
+  assert.equal(turns, 60);
+});
+
 test('the same command whose output keeps changing is not a loop', async () => {
   const { result, turns, transcripts } = await runScript((turn) => (turn < 24 ? [call(`b${turn}`, 'Bash', { command: 'cd . && echo run >> runs.log && wc -l < runs.log' })] : 'done'));
   assert.equal(result.outcome, 'completed');

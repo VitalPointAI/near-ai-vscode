@@ -397,7 +397,15 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const warnAt = guard.warnAt ?? Math.round((guard.nudgeAt + guard.stopAt) / 2);
     calls.forEach((call, index) => {
       const key = loopActionKey(call);
-      const result = resultSignature(String(results.find((message) => message.role === 'tool' && message.tool_call_id === call.id)?.content ?? results[index]?.content ?? ''));
+      // The call's own result, or the one in its position. With none, the content is empty, so a
+      // navigation call has no "[exit code 0]" and is counted: a missing result never hides a loop.
+      const content = String(results.find((message) => message.role === 'tool' && message.tool_call_id === call.id)?.content ?? results[index]?.content ?? '');
+      // Moving to a folder or asking where you are changes nothing and always gives the same
+      // result, so a successful one is never progress or a loop by itself (the shell keeps the
+      // folder anyway). A failing one (a missing folder) still counts, so repeating it is caught.
+      // An agent that only ever changes folder is still bounded by the turn limit.
+      if (isNavigationOnly(key) && /\[exit code 0\]\s*$/.test(content)) return;
+      const result = resultSignature(content);
       for (let at = this.recent.length - 1; at >= 0; at -= 1) if (this.recent[at].key === key && this.recent[at].result !== result) this.recent.splice(at, 1);
       this.recent.push({ key, result });
     });
@@ -560,6 +568,17 @@ export function loopActionKey(call: ToolCall): string {
   return `${call.function.name} ${call.function.arguments.slice(0, 200)}`;
 }
 
+// The folder may be quoted, but must not run anything: no `$(…)`, backticks, redirects or subshells.
+// Matched against a loop key, not the raw tool call: loopActionKey has already parsed the JSON
+// arguments into "Bash <command>" and normalizeShellCommand has removed any leading `cd <dir> &&`
+// (or `;`), so `cd /a/b && pwd` arrives here as "Bash pwd".
+const NAVIGATION_ONLY = /^Bash (?:cd(?:\s+(?:"[^"$`]*"|'[^']*'|[^\s;&|$`<>()]+))?|pwd)\s*;?$/;
+
+/** Whether a loop key is only a change of folder (`cd <dir>`, a bare `cd`) or `pwd`, which the loop guard ignores. */
+export function isNavigationOnly(key: string): boolean {
+  return NAVIGATION_ONLY.test(key);
+}
+
 /** An action as the user and the model are shown it: short enough to read in one line. */
 function actionLabel(key: string): string {
   return key.length > 100 ? `${key.slice(0, 99).trimEnd()}…` : key;
@@ -571,6 +590,10 @@ function actionLabel(key: string): string {
  */
 export function resultSignature(output: string): string {
   const stable = output
+    // The shell runs each command from a temporary script with a random name, which appears in
+    // shell errors ("…/__NEAR_AI_<random>__.sh: line 1: cd: …"); without this every repeat of a
+    // failing shell command would look like a new result.
+    .replace(/\S*__NEAR_AI_[0-9a-f]+__\.sh/g, '<script>')
     .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, '<time>')
     .replace(/\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b/g, '<time>')
     .replace(/\b\d+(?:\.\d+)?\s?(?:ms|s|secs?|seconds?|mins?|minutes?)\b/gi, '<duration>');
