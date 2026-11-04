@@ -72,6 +72,10 @@ export const REFUSALS = Object.freeze({
   integrating: 'Adding finished work to the project arrives in a later update. Nothing was moved.',
   terminal: 'A finished or cancelled card can only be reopened. Use Move to... and choose Reopen. Nothing was moved.',
   notManager: 'Only the team owner or a lead can move cards. Nothing was moved.',
+  // Owner decision 2026-11-04 (62-27): the person assigned moves their own card; cancel and bringing back a cancelled card stay with the owner and leads.
+  notAssigneeMove: 'Only the person assigned, a lead or the owner can move this card. Nothing was moved.',
+  cancelManagersOnly: 'Only the team owner or a lead can cancel a card or bring back a cancelled one. Nothing was moved.',
+  observerMove: 'Observers can look at the board but not move cards. A lead can change your role. Nothing was moved.',
   noDeviceKey: NO_DEVICE_KEY_TEXT,
   removed: 'You were removed from this team. You can still look at the board but not change it.',
   differentRow: 'This card stays in its own row. Drop it in another column of the same row.',
@@ -97,7 +101,7 @@ export const REFUSALS = Object.freeze({
 
 export const READ_ONLY_BANNERS = Object.freeze({
   lookOnly: 'You can look at the board but not change it. A lead can change your role.',
-  developer: 'You can add items and edit your own drafts. Leads and the owner move cards.'
+  developer: 'You can add items, edit your own drafts and move the cards assigned to you. Leads and the owner move any card.'
 });
 
 export const BOARD_LANE_LABEL = 'Added on the board';

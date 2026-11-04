@@ -95,13 +95,22 @@ const MOVE_PROMPT: Readonly<Record<MoveKey, CardMove['prompt']>> = { done: 'conf
 
 // ---- who may move ----------------------------------------------------------------------------------------------------------------------------
 
-// The reason this viewer may not move cards at all, or undefined when the role allows it. Decision first (D-12, A12): no viewer is a computer
-// without a device key, a removed member can look but not touch, and the matrix decides the rest.
-function moveDenial(state: TeamState, viewerId: string | undefined): string | undefined {
+// The reason this viewer may not move any card at all, or undefined when they may move some. Who the viewer is comes first (D-12, A12): no viewer is a
+// computer without a device key, a removed member can look but not touch, and an observer never moves a card. Owner decision 2026-11-04 (62-27):
+// everyone else may move at least the cards assigned to them, so the rest is decided card by card.
+function viewerMoveDenial(state: TeamState, viewerId: string | undefined): string | undefined {
   if (viewerId === undefined) return REFUSALS.noDeviceKey;
   const member = state.members.get(viewerId);
   if (member?.removedEvent !== undefined) return REFUSALS.removed;
-  return decideTeamAction(state, viewerId, { kind: 'item.move' }).allowed ? undefined : REFUSALS.notManager;
+  if (decideTeamAction(state, viewerId, { kind: 'item.move' }).allowed || decideTeamAction(state, viewerId, { kind: 'item.move-own' }).allowed) return undefined;
+  return member?.role === 'observer' ? REFUSALS.observerMove : REFUSALS.notManager;
+}
+
+// Whether this viewer may move this card at all (62-27): the owner and leads move any card, everyone else only a card assigned to them. This only ever
+// refuses what the log refuses too: for anyone but the assignee, actionForEvent gives item.move, the owner and lead row.
+function cardMoveDenial(state: TeamState, viewerId: string, item: WorkItem): string | undefined {
+  if (decideTeamAction(state, viewerId, { kind: 'item.move' }).allowed) return undefined;
+  return item.assignee === viewerId ? undefined : REFUSALS.notAssigneeMove;
 }
 
 // ---- planMove --------------------------------------------------------------------------------------------------------------------------------
@@ -123,10 +132,6 @@ function intentFor(itemId: string, move: MoveKey, reason: string): MoveIntent {
 function probeEvent(state: TeamState, viewerId: string, intent: MoveIntent | AssignIntent): ImplementedTeamEvent {
   const event = { v: 1, id: 'evt-probe', teamId: state.team.id, type: intent.type, lamport: 0, at: '', author: viewerId, device: '', prev: '', body: intent.body, sig: '' };
   return event as unknown as ImplementedTeamEvent;
-}
-
-function transitionFor(state: TeamState, viewerId: string, intent: MoveIntent | AssignIntent): string | undefined {
-  return transitionProblem(state, probeEvent(state, viewerId, intent));
 }
 
 // A transition reason in the board's own words, by the move that ran into it.
@@ -155,11 +160,16 @@ function cleanReason(raw: string | undefined): { ok: true; reason: string } | { 
 const REASON_REQUIRED: readonly MoveKey[] = ['cancel', 'block'];
 
 // The one function that decides a move: the exact intent to append, or a plain refusal that ends "Nothing was moved." (D-12, D-16, BOARD-03).
+// Owner decision 2026-11-04 (62-27): like planAssign, it asks the questions the log asks on the same state. Who the viewer is, then whether the card
+// is theirs to move, then the card's rules (transitionProblem), then decideTeamAction on the action actionForEvent gives this very event (item.move,
+// or item.move-own for the assignee's own move), so the board and the log never disagree.
 export function planMove(state: TeamState, viewerId: string | undefined, itemId: string, move: MoveKey, input: { reason?: string } = {}): MoveResult {
-  const denied = moveDenial(state, viewerId);
+  const denied = viewerMoveDenial(state, viewerId);
   if (denied !== undefined || viewerId === undefined) return { ok: false, reason: denied ?? REFUSALS.noDeviceKey };
   const item = state.items.get(itemId);
   if (item === undefined || !isCard(item)) return { ok: false, reason: REFUSALS.missing };
+  const notTheirs = cardMoveDenial(state, viewerId, item);
+  if (notTheirs !== undefined) return { ok: false, reason: notTheirs };
   let reason = '';
   if (REASON_REQUIRED.includes(move)) {
     const cleaned = cleanReason(input.reason);
@@ -167,9 +177,15 @@ export function planMove(state: TeamState, viewerId: string | undefined, itemId:
     reason = cleaned.reason;
   }
   const intent = intentFor(itemId, move, reason);
-  const problem = transitionFor(state, viewerId, intent);
+  const event = probeEvent(state, viewerId, intent);
+  const problem = transitionProblem(state, event);
   if (problem !== undefined) return { ok: false, reason: refusalFor(move, problem, item) };
   if (move === 'hold' && effectiveColumn(state.items, item) !== 'ready') return { ok: false, reason: REFUSALS.holdNotReady };
+  const action = actionForEvent(event, state);
+  if (action === undefined || !decideTeamAction(state, viewerId, action).allowed) {
+    // Past the card check the viewer is the assignee, so the only moves left to refuse are a cancel and bringing back a cancelled card.
+    return { ok: false, reason: item.assignee === viewerId ? REFUSALS.cancelManagersOnly : REFUSALS.notAssigneeMove };
+  }
   return { ok: true, intent };
 }
 
@@ -298,7 +314,8 @@ function asDrop(planned: MoveResult, move: MoveKey): { ok: true; move: MoveKey }
 }
 
 // A drop target as a move: the key to plan, nothing to do when the card is already there, or the one refusal to show on the card (D-13, D-16).
-// The viewer's own permission comes first, so a viewer who may not move anything hears that, not a sentence about claims.
+// The viewer's own permission comes first, so a viewer who may not move anything, or may not move this card (62-27), hears that, not a sentence about
+// claims.
 export function columnMove(state: TeamState, viewerId: string | undefined, itemId: string, column: BoardColumn): { ok: true; move?: MoveKey } | { ok: false; reason: string } {
   const item = state.items.get(itemId);
   // A phase card never moves (G-62-3): every other column says so, whoever drops it, because writing plans is what changes it.
@@ -306,8 +323,10 @@ export function columnMove(state: TeamState, viewerId: string | undefined, itemI
   if (item === undefined || !isCard(item)) return { ok: false, reason: REFUSALS.missing };
   const current = effectiveColumn(state.items, item);
   if (current === column) return { ok: true };
-  const denied = moveDenial(state, viewerId);
-  if (denied !== undefined) return { ok: false, reason: denied };
+  const denied = viewerMoveDenial(state, viewerId);
+  if (denied !== undefined || viewerId === undefined) return { ok: false, reason: denied ?? REFUSALS.noDeviceKey };
+  const notTheirs = cardMoveDenial(state, viewerId, item);
+  if (notTheirs !== undefined) return { ok: false, reason: notTheirs };
   const ask = (move: MoveKey): { ok: true; move: MoveKey } | { ok: false; reason: string } => asDrop(planMove(state, viewerId, itemId, move, { reason: PLACEHOLDER_REASON }), move);
   if (current === 'done' || current === 'cancelled') return column === 'backlog' ? ask('reopen') : { ok: false, reason: REFUSALS.terminal };
   if (CLAIM_COLUMNS.includes(column)) return { ok: false, reason: REFUSALS[column as 'claimed' | 'in-progress' | 'in-review' | 'integrating'] };
@@ -395,9 +414,11 @@ function viewerOf(state: TeamState, options: BoardModelOptions): BoardViewer {
   return viewer;
 }
 
+// The gate for the whole board, about the viewer only (no device key, offline, removed, observer). Owner decision 2026-11-04 (62-27): everything
+// else is decided card by card, so each card carries its own moves and refusals.
 function moveGateReason(state: TeamState, options: BoardModelOptions): string | undefined {
   if (!options.canWrite) return options.readOnlyReason ?? (options.viewerId === undefined ? REFUSALS.noDeviceKey : REFUSALS.offline);
-  return moveDenial(state, options.viewerId);
+  return viewerMoveDenial(state, options.viewerId);
 }
 
 function cardOf(state: TeamState, options: BoardModelOptions, gate: string | undefined, item: WorkItem): BoardCard {

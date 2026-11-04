@@ -456,7 +456,9 @@ test('a developer sees only Assign to me on a free card and Unassign me on their
   h.deliver({ type: 'state', model: modelOf(world, world.dev.memberId) });
   assert.equal(card(h, 'plan:90-01').querySelector('.pending-line'), null);
   open(h, 'plan:90-01');
-  assert.deepEqual(items(h).map((i) => text(i)), ['Unassign me']);
-  items(h)[0]!.click();
+  // Owner decision 2026-11-04 (62-27): the card is now hers, so her moves come first (no Cancel), then Unassign me after the separator.
+  assert.deepEqual(items(h).map((i) => text(i)), ['Done (mark as finished)', 'Backlog (put on hold)', 'Block...', 'Unassign me']);
+  assert.equal(menu(h).querySelectorAll('[role="separator"]').length, 2, 'one separator before Block..., as for any move list, and one before Unassign me');
+  items(h).find((i) => text(i) === 'Unassign me')!.click();
   assert.deepEqual(assigns(h), [{ type: 'assign', itemId: 'plan:90-01' }, { type: 'unassign', itemId: 'plan:90-01' }]);
 });

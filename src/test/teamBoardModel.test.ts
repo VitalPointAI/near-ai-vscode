@@ -65,8 +65,9 @@ test('tracer: a model from real events, a hold planned with planMove and applied
   assert.deepEqual(held.moves.map((move) => move.key), ['done', 'cancel', 'release', 'block']);
   assert.equal(card(before, 'plan:90-01').held, false, 'the earlier model is a snapshot and does not change');
 
+  // Owner decision 2026-11-04 (62-27): plan:90-01 is assigned to nobody, so the developer may not move it and hears the not-assignee sentence.
   const refused = planMove(world.state, world.dev.memberId, 'plan:90-01', 'release');
-  assert.deepEqual(refused, { ok: false, reason: 'Only the team owner or a lead can move cards. Nothing was moved.' });
+  assert.deepEqual(refused, { ok: false, reason: 'Only the person assigned, a lead or the owner can move this card. Nothing was moved.' });
 });
 
 // ---- the fuller world: two milestones, tasks, dependencies, a blocked plan and a chore -------------------------------------------------------

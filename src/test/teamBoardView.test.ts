@@ -801,9 +801,10 @@ test('hostile messages from a page are ignored or refused and never reach the lo
     assert.equal(remoteEventCount(rig), before);
     assert.equal(stub.inputRequests.length + stub.notifications.length, 0);
     assert.equal(started.session.state().items.get(READY_PLAN)?.hold, undefined);
-    // A legal move from the developer's page is refused by the host from the log's roster, whatever the page believes.
+    // A legal move from the developer's page is refused by the host from the log's roster, whatever the page believes. Owner decision 2026-11-04
+    // (62-27): READY_PLAN is assigned to nobody, so the refusal is the not-assignee sentence.
     await panel.receive({ type: 'move', itemId: READY_PLAN, target: 'hold' });
-    assert.equal((lastOf(panel, 'refused') as { reason?: string } | undefined)?.reason, 'Only the team owner or a lead can move cards. Nothing was moved.');
+    assert.equal((lastOf(panel, 'refused') as { reason?: string } | undefined)?.reason, 'Only the person assigned, a lead or the owner can move this card. Nothing was moved.');
     assert.equal(remoteEventCount(rig), before);
   });
 });
