@@ -5,6 +5,7 @@ import { AuthMode, isSecureEndpoint } from '../domain/config';
 import { ActiveProfileSelection, AUTH_PROFILE_VERSION, OrganizationProfile, ProviderKind, localKeyScope, ProfileValidation, ProjectCredentialScope, createProjectCredentialScope, isProfileId } from '../domain/auth';
 import { AuthService } from './auth';
 import { validateNearAiProvider } from './providerFactory';
+import type { SavedProfileEntry } from './profileIndex';
 
 export interface ProfileStoreFileSystem {
   mkdir(directory: string, options: { recursive: true }): Promise<void>;
@@ -197,6 +198,10 @@ export class ProfileStore {
     const validated = await this.validate(input.profileId);
     if (validated.validation.status === 'valid') await this.select(input.profileId);
     return validated;
+  }
+
+  public async useSavedProfile(_entry: SavedProfileEntry): Promise<OrganizationProfile> {
+    throw new Error('not implemented');
   }
 
   public async remove(profileId: string): Promise<boolean> {
