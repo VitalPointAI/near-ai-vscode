@@ -32,12 +32,13 @@ function isAllowedEndpoint(value) {
 }
 // Reasoning models think before they answer, and the thinking counts against max_tokens, so a large
 // pull request needs room (and time) for both. REVIEW_MAX_TOKENS can raise or lower the cap.
-const DEFAULT_MAX_TOKENS = 32_000;
+// A 2,000-line pull request took DeepSeek V4.1 about 30,000 tokens of thinking alone.
+const DEFAULT_MAX_TOKENS = 96_000;
 // There is no fixed time limit while the model is working: a reasoning model can think for well over
 // ten minutes on a large pull request, and the stream shows it is alive. The call gives up only when
 // nothing arrives for IDLE seconds, or at the overall cap. Both can be changed for tests or a slow model.
 const DEFAULT_IDLE_SECONDS = 120;
-const DEFAULT_TOTAL_SECONDS = 1_500;
+const DEFAULT_TOTAL_SECONDS = 2_700;
 
 function seconds(name, fallback) {
   const raw = process.env[name];
@@ -172,7 +173,7 @@ async function ask(prompt, { baseUrl, apiKey, model }, signal, alive) {
   const choice = { finish_reason: finishReason };
   if (typeof text !== 'string' || !text.trim()) {
     // A reasoning model that spends its whole allowance thinking answers with nothing and says why.
-    if (choice?.finish_reason === 'length') throw new Error('the model ran out of room before it answered (it stopped at its token limit); raise REVIEW_MAX_TOKENS');
+    if (choice?.finish_reason === 'length') throw new FinalError(`the model ran out of room before it answered (it stopped at its limit of ${maxTokens()} tokens); raise REVIEW_MAX_TOKENS`);
     throw new Error('the model returned an empty reply');
   }
   return text.trim();
@@ -200,7 +201,7 @@ try {
       process.exit(0);
     } catch (error) {
       lastError = new Error(describe(error));
-      // Another attempt after the overall cap would only take as long again.
+      // Another attempt after the overall cap, or at the same token limit, would only fail the same way.
       if (error instanceof FinalError) { console.error(`attempt ${attempt} failed: ${lastError.message}`); break; }
       // A retry is worth it for a transient 5xx, a model that went quiet, 408 or 429; a 401 will fail the same
       // way three times.

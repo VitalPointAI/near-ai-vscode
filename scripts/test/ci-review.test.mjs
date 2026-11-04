@@ -197,8 +197,10 @@ test('a reasoning model gets room to think: a large token cap by default, and a 
     REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
   });
   assert.notEqual(result.status, 0);
-  assert.ok(sent.max_tokens >= 32_000, `max_tokens ${sent.max_tokens}`);
-  assert.match(result.stderr, /ran out of room before it answered/);
+  assert.ok(sent.max_tokens >= 96_000, `max_tokens ${sent.max_tokens}`);
+  assert.match(result.stderr, /ran out of room before it answered \(it stopped at its limit of 96000 tokens\)/);
+  // The same limit would stop the same way again, so there is no second attempt.
+  assert.doesNotMatch(result.stderr, /attempt 2/);
   const bad = await run('ci-review-call.mjs', [promptPath], { REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MAX_TOKENS: '12abc', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}` });
   assert.notEqual(bad.status, 0);
   assert.match(bad.stderr, /REVIEW_MAX_TOKENS must be/);

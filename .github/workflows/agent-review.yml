@@ -62,7 +62,7 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'pull_request')
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # up to 3 model attempts (each stops after 2 quiet minutes or 25 minutes in all), plus gather and submit
+    timeout-minutes: 150  # up to 3 model attempts (each stops after 2 quiet minutes or 45 minutes in all), plus gather and submit
     environment: agent-review
     outputs:
       pr: ${{ steps.target.outputs.pr }}
