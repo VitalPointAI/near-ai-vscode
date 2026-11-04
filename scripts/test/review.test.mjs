@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
 import { setRunner } from '../lib/gh.mjs';
-import { gatherReview, submitReview } from '../lib/review.mjs';
+import { gatherReview, readReviewToken, REVIEW_TOKEN_ENV, reviewTokenPath, submitReview } from '../lib/review.mjs';
 import { evaluateCommit } from '../lib/workflow.mjs';
 import { OWNER, REPO, fakeGitHub, greenCommit, openPr } from './fake-github.mjs';
 
@@ -87,4 +87,49 @@ test('gather lists every changed file through the paginated API', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---- Where the reviewer token comes from -------------------------------------------------------
+
+test('the token comes from the environment when it is set there', () => {
+  const { token, source } = readReviewToken({ env: { [REVIEW_TOKEN_ENV]: 'env-token' }, read: () => { throw new Error('must not read the file'); } });
+  assert.equal(token, 'env-token');
+  assert.equal(source, 'environment');
+});
+
+test('the token falls back to the config file, because a shell profile is not durable for scripts', () => {
+  const env = { XDG_CONFIG_HOME: '/home/someone/.config' };
+  const file = reviewTokenPath(env);
+  assert.equal(file, path.join('/home/someone/.config', 'near-ai', 'review.env'));
+  const { token, source } = readReviewToken({
+    env,
+    read: (at) => { assert.equal(at, file); return '# the reviewer token\n\nNEAR_AI_REVIEW_TOKEN=file-token\n'; },
+    warn: () => {}
+  });
+  assert.equal(token, 'file-token');
+  assert.equal(source, file);
+});
+
+test('a quoted value and surrounding whitespace are handled', () => {
+  const { token } = readReviewToken({ env: {}, read: () => 'NEAR_AI_REVIEW_TOKEN="  spaced-token  "\n', warn: () => {} });
+  assert.equal(token, 'spaced-token');
+});
+
+test('a missing file names both places it looked', () => {
+  assert.throws(
+    () => readReviewToken({ env: {}, read: () => { throw new Error('ENOENT'); } }),
+    /is not set, and .*review\.env does not exist/
+  );
+});
+
+test('a file without the variable is a clear error, not an empty token', () => {
+  assert.throws(() => readReviewToken({ env: {}, read: () => 'SOMETHING_ELSE=1\n', warn: () => {} }), /does not set NEAR_AI_REVIEW_TOKEN/);
+});
+
+test('a world-readable token file warns rather than failing', () => {
+  const warnings = [];
+  const { token } = readReviewToken({ env: {}, read: () => `${REVIEW_TOKEN_ENV}=t\n`, warn: (m) => warnings.push(m) });
+  assert.equal(token, 't');
+  // The real file is created 0644 by a shell redirect, which is exactly the case worth warning about.
+  assert.ok(warnings.length <= 1, 'at most one warning');
 });

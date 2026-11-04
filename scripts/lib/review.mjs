@@ -1,7 +1,7 @@
 // The `agent-review` gate (scripts/agent-review.mjs), as functions so the order of what it posts
 // can be tested with a fake gh (scripts/test/review.test.mjs).
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { gh, prFiles, viewPr } from './gh.mjs';
 import { AGENT_REVIEW_ACCOUNT, AGENT_REVIEW_CONTEXT, CI_CHECKS, evaluateChecks, fitComment, normalizeChecks, parseReview, reviewDecision } from './workflow.mjs';
@@ -43,18 +43,56 @@ export function gatherReview(repo, number, out, { log = console.log } = {}) {
  * The token the review process posts with. It belongs to the reviewer identity, not the author, so
  * the `agent-review` status is independent of whoever wrote or merged the change (B of the gate
  * hardening). Without it, submit refuses: signing as the author would defeat the gate.
+ *
+ * It is read from the environment first, then from a file, because a shell profile is not durable
+ * here: `.bashrc` returns early for non-interactive shells, so a script run by an agent never sees
+ * an export from it. The file lives outside the repository, so it cannot be committed by accident.
  */
 export const REVIEW_TOKEN_ENV = 'NEAR_AI_REVIEW_TOKEN';
 
-function reviewEnv() {
-  const token = process.env[REVIEW_TOKEN_ENV]?.trim();
-  if (!token) throw new Error(`${REVIEW_TOKEN_ENV} is not set. The agent review must post as the reviewer identity, not as the author; see docs/development-workflow.md ("The agent review gate").`);
+/** Where the token is read from when the environment does not carry it. */
+export function reviewTokenPath(env = process.env) {
+  const base = env.XDG_CONFIG_HOME?.trim() || path.join(homedir(), '.config');
+  return path.join(base, 'near-ai', 'review.env');
+}
+
+/**
+ * The token from the environment, else from the file. Returns the token and where it came from, so
+ * a caller can say which one was used. Throws when neither has it, naming both places it looked.
+ */
+export function readReviewToken({ env = process.env, read = readFileSync, warn = () => {} } = {}) {
+  const fromEnv = env[REVIEW_TOKEN_ENV]?.trim();
+  if (fromEnv) return { token: fromEnv, source: 'environment' };
+  const file = reviewTokenPath(env);
+  let text;
+  try {
+    text = read(file, 'utf8');
+  } catch {
+    throw new Error(
+      `${REVIEW_TOKEN_ENV} is not set, and ${file} does not exist. The agent review must post as the reviewer identity, not as the author; see docs/development-workflow.md ("The reviewer identity").`
+    );
+  }
+  // A single `NAME=value` line, ignoring blanks and comments, so the file can be documented in place.
+  const line = text.split(/\r?\n/).map((entry) => entry.trim()).find((entry) => entry && !entry.startsWith('#') && entry.startsWith(`${REVIEW_TOKEN_ENV}=`));
+  // Strip optional quotes first, then trim: trimming first leaves the space inside the quotes.
+  const token = line?.slice(REVIEW_TOKEN_ENV.length + 1).replace(/^\s*["']|["']\s*$/g, '').trim();
+  if (!token) throw new Error(`${file} does not set ${REVIEW_TOKEN_ENV} (expected one line, ${REVIEW_TOKEN_ENV}=...).`);
+  // Warn rather than fail: a loose mode on a private machine is a choice, not an error.
+  try {
+    const mode = statSync(file).mode & 0o777;
+    if (mode & 0o077) warn(`warning: ${file} is readable by other users (mode ${mode.toString(8)}); run: chmod 600 ${file}`);
+  } catch { /* the file was readable, so a stat failure is not worth failing over */ }
+  return { token, source: file };
+}
+
+function reviewEnv(options) {
+  const { token } = readReviewToken(options);
   return { ...process.env, GH_TOKEN: token };
 }
 
 /** The login the review token belongs to, so the gate's account is checked against the token, not gh's own. */
-function reviewLogin() {
-  const login = gh(['api', 'user', '--jq', '.login'], { env: reviewEnv() }).trim();
+function reviewLogin(options) {
+  const login = gh(['api', 'user', '--jq', '.login'], { env: reviewEnv(options) }).trim();
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(login)) throw new Error(`could not read the reviewer account (got ${login})`);
   return login;
 }
@@ -105,7 +143,15 @@ export function submitReview(repo, number, text, { dryRun = false, log = console
 
   // Only the reviewer identity's status counts at merge and release (AGENT_REVIEW_ACCOUNT). The
   // token is checked, not gh's own account, so the author running this cannot certify their work.
-  const login = dryRun && !process.env[REVIEW_TOKEN_ENV]?.trim() ? `(no ${REVIEW_TOKEN_ENV})` : reviewLogin();
+  // A dry run still resolves the token when one exists, so it reports the identity a real submit
+  // would use; without one it names the miss rather than failing, since nothing is posted.
+  let login;
+  try {
+    login = reviewLogin({ warn: log });
+  } catch (error) {
+    if (!dryRun) throw error;
+    login = `(no ${REVIEW_TOKEN_ENV})`;
+  }
   const trusted = login.toLowerCase() === AGENT_REVIEW_ACCOUNT.toLowerCase();
   if (dryRun) {
     if (!trusted) log(`[dry run] note: the review token belongs to ${login}, but only ${AGENT_REVIEW_ACCOUNT}'s ${AGENT_REVIEW_CONTEXT} counts; a real submit would refuse.`);

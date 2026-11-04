@@ -495,17 +495,26 @@ self-certification. One-time setup, by the owner:
    with the `write` role), and no organization role, no repository admin, and no access to any
    other repository. It must not be a reviewer of the `marketplace` environment.
 2. **Create a fine-grained personal access token** signed in as `near-ai-reviewer`, scoped to
-   this repository only, with **Contents: read** and **Commit statuses: write**. Nothing else:
-   with those two permissions the token can read the PR and post the review status, and cannot
-   merge, push, or change settings.
-3. **Store the token** where the review process reads it, as `NEAR_AI_REVIEW_TOKEN`:
+   this repository only, with **Contents: read** and **Commit statuses: read and write** (that
+   permission has no plain "write" option). Nothing else: with those two the token can read the PR
+   and post the review status, and cannot merge, push, or change settings. Fine-grained tokens need
+   the account to be an **organization member**, not an outside collaborator, so add the machine
+   user to the organization as a member and give it write on this repository.
+3. **Store the token** where the review process reads it. It reads `NEAR_AI_REVIEW_TOKEN` from the
+   environment first, then from `$XDG_CONFIG_HOME/near-ai/review.env` (default
+   `~/.config/near-ai/review.env`). **Use the file**: a shell profile is not durable for this,
+   because `.bashrc` returns early for non-interactive shells and a script run by an agent never
+   sees an export from it.
 
    ```bash
-   # a shell profile, or a secret manager that exports it
-   export NEAR_AI_REVIEW_TOKEN='github_pat_...'
+   mkdir -p ~/.config/near-ai
+   printf 'NEAR_AI_REVIEW_TOKEN=github_pat_...\n' > ~/.config/near-ai/review.env
+   chmod 600 ~/.config/near-ai/review.env
    ```
 
-   The author's own `gh` login stays as it is; the review simply posts as the reviewer.
+   The file lives outside the repository, so it cannot be committed. A mode looser than `600`
+   prints a warning rather than failing. The author's own `gh` login stays as it is; the review
+   simply posts as the reviewer.
 4. **Raise the PR approval requirement** to one, so merging is the owner's own act:
 
    ```bash
