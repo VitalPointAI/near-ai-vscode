@@ -174,6 +174,8 @@ async function startContainer(options: SandboxOptions): Promise<Sandbox> {
   // `:ro` keeps it read-only; the mount is given a readable identity via docker's own default user.
   if (options.mountTarget) args.push('-v', `${path.resolve(options.mountTarget)}:/target:ro`);
   args.push(image, 'sleep', 'infinity');
+  // One runner for every payload command in this sandbox, with the payload deadline.
+  const payloadRun = options.runner ?? runnerWithTimeout(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS, 4 * 1024 * 1024);
   // A runtime that answered and then failed is NOT a fallback: the caller gets the failure. This is
   // the one call that may pull the image, so it uses the long deadline rather than the version one.
   const started = await (options.runner ?? runContainerStart)(runtime, args);
@@ -189,8 +191,7 @@ async function startContainer(options: SandboxOptions): Promise<Sandbox> {
       // Fixed argv, never a joined shell string: an argument with a space or a quote must survive.
       // The payload's deadline, not the version check's: a payload over three seconds used to be
       // killed and reported as a failed exploit.
-      const exec = options.runner ? run : runnerWithTimeout(options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS, 4 * 1024 * 1024);
-      const started = await exec(runtime, ['exec', name, ...argv]);
+      const started = await payloadRun(runtime, ['exec', name, ...argv]);
       if (signal?.aborted) throw new SandboxError('The stop control stopped the sandbox command.');
       const match = /^(\d+)\n([\s\S]*)$/.exec(started);
       return { argv, exitCode: match ? Number(match[1]) : 0, stdout: match ? match[2] : started, stderr: '' };
