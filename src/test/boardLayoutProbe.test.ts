@@ -188,6 +188,17 @@ test('readability rules: a card in a folded column, no size or a zero font size,
   assert.deepEqual(check((() => { const d = clean(); d.cards[2].main.background = CARD_BG; return d; })()), [], 'the card\'s own background is fine');
 });
 
+// 62-21: in the real window the split-word rule named "two-lead", "snap-back" and "SETUP-01". Chromium may end a line right after a hyphen (a break the
+// Unicode line breaking rules allow on purpose), which keeps whole word parts on each line; that is wrapping between words, not a split word. So the probe
+// measures each hyphen-joined part on its own, and a line break inside a part is still caught.
+test('the split-word rule measures hyphen-joined parts on their own: a break after a hyphen is fine, a break inside a part is not (62-21)', () => {
+  const parts = (text: string): string[] => [...(probeHarness.window.NearAiBoardLayout.wordsIn(text) as Array<{ text: string; index: number }>)].map((w) => `${w.text}@${w.index}`);
+  assert.deepEqual(parts('Fix two-lead SETUP-01 in src/team/a-b.ts'), ['Fix@0', 'two-@4', 'lead@8', 'SETUP-@13', '01@19', 'in@22', 'src/team/a-@25', 'b.ts@36']);
+  assert.deepEqual(parts('  --flag  x '), ['--@2', 'flag@4', 'x@10']);
+  assert.deepEqual(check((() => { const d = clean(); d.cards[2].words = [{ text: 'two-', lines: 1, width: 30 }, { text: 'lead', lines: 1, width: 30 }]; return d; })()), [], 'a title that wraps after the hyphen of "two-lead"');
+  expectOne((d) => { d.cards[2].words = [{ text: 'two-', lines: 1, width: 30 }, { text: 'lead', lines: 2, width: 30 }]; }, /Card C-1 splits the word "lead" across two lines although it fits on one/);
+});
+
 // The probe waits two animation frames (each a fake timer) with a promise step between them, so time and the microtask queue take turns a few times.
 async function settle(h: BoardHarness): Promise<void> {
   for (let turn = 0; turn < 4; turn += 1) {

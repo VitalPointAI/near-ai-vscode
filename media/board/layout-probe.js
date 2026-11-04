@@ -54,6 +54,15 @@
     return textOf(li.querySelector('.did')) || id;
   }
 
+  /** The words of a title with where each starts (RED stub, 62-21: every run of non-space characters). */
+  function wordsIn(text) {
+    const out = [];
+    const pattern = /\S+/g;
+    let m;
+    while ((m = pattern.exec(String(text))) !== null) out.push({ text: m[0], index: m.index });
+    return out;
+  }
+
   // Each word of a card title, measured with a Range: on how many lines it sits and how wide it is in total.
   function wordsOf(titleEl) {
     const out = [];
@@ -467,7 +476,7 @@
     });
   }
 
-  window.NearAiBoardLayout = Object.freeze({ collect, check, measure });
+  window.NearAiBoardLayout = Object.freeze({ collect, check, measure, wordsIn });
 
   if (!board || typeof board.onMessage !== 'function' || typeof board.post !== 'function') return;
   board.onMessage('e2e-layout', (m) => {
