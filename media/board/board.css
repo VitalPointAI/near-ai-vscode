@@ -22,7 +22,8 @@ h1.title { font-size: 1.5em; }
 .controls { grid-area: controls; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .summary-line { margin: 0; font-size: 0.85em; line-height: 1.4; color: var(--vscode-descriptionForeground); }
 .field { display: inline-flex; align-items: center; gap: 4px; }
-.field label, .group-by .label { font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+/* Only the caption beside the choices (62-22: the words inside the choices keep the button's own colour). */
+.field label, .group-by > .label { font-size: 0.85em; color: var(--vscode-descriptionForeground); }
 select, input[type="text"], input[type="number"], textarea { min-height: 24px; padding: 0 8px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 2px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
 textarea { padding: 4px 8px; }
 select { background: var(--vscode-dropdown-background, var(--vscode-input-background)); color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); border-color: var(--vscode-dropdown-border, var(--vscode-input-border, var(--vscode-panel-border))); }
@@ -147,6 +148,12 @@ body:has(> #root[data-layout="kanban"]) { padding-bottom: 0; }
 /* detail drawer and drill-in page (detail.js fills #detail) */
 #detail { position: fixed; top: 0; right: 0; bottom: 0; z-index: 5; width: 360px; max-width: 50%; overflow: auto; padding: 24px; border-left: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); background: var(--vscode-editorWidget-background); }
 #detail h2 { font-size: 1.2em; }
+/* the detail head: the state line, badges and buttons are spaced rows (62-22: the state line ran its parts together) */
+#detail .detail-head { display: flex; flex-direction: column; gap: 8px; }
+#detail .detail-head > p { margin: 0; }
+#detail .detail-state, #detail .detail-badges, #detail .detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+#detail .detail-state { font-size: 0.85em; }
+#detail li.dep > .icon { margin-right: 4px; }
 #detail h3 { margin-top: 24px; font-size: 1.2em; }
 #detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0 0; }
 #detail dt { color: var(--vscode-descriptionForeground); font-size: 0.85em; }
@@ -193,9 +200,14 @@ body.vscode-high-contrast #menu, body.vscode-high-contrast-light #menu, body.vsc
 body.vscode-high-contrast .column, body.vscode-high-contrast-light .column { border: 1px solid var(--vscode-contrastBorder); }
 body.vscode-high-contrast .assignee-initials, body.vscode-high-contrast-light .assignee-initials { border: 1px solid var(--vscode-contrastBorder); }
 body.vscode-high-contrast button.link, body.vscode-high-contrast-light button.link { text-decoration: underline; }
+/* the button fill is see-through in high contrast, so the chosen Group by and a pressed filter carry the active border (62-22); aria-checked and
+   aria-pressed stay what says which one is chosen */
+body.vscode-high-contrast .segmented button[aria-checked="true"], body.vscode-high-contrast-light .segmented button[aria-checked="true"],
+body.vscode-high-contrast button.chip[aria-pressed="true"], body.vscode-high-contrast-light button.chip[aria-pressed="true"] { outline: 2px solid var(--vscode-contrastActiveBorder); outline-offset: -2px; }
 @media (forced-colors: active) {
   .card, .banner, #menu, .badge, .status-chip, .column, #detail, .assignee-initials { border: 1px solid currentColor; }
   button.link { text-decoration: underline; }
+  .segmented button[aria-checked="true"], button.chip[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: -2px; }
   .card.selected { outline: 2px solid var(--vscode-focusBorder); }
   .progress { border: 1px solid currentColor; }
   .progress .bar { background: currentColor; }
