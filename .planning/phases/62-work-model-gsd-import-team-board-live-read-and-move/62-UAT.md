@@ -3,7 +3,7 @@ status: diagnosed
 phase: 62-work-model-gsd-import-team-board-live-read-and-move
 source: [62-VERIFICATION.md human_verification, owner hands-on session on the 0.6.0 team preview build]
 started: 2026-11-03T20:00:00Z
-updated: 2026-11-03T21:00:00Z
+updated: 2026-11-05T19:30:00Z
 ---
 
 ## Current Test
@@ -168,4 +168,28 @@ Passed: 62-UAT 1 (board opens only on purpose), 2, 4, 7 (themes, zoom), 10 (lead
   root_cause: "62-25 maps item.unassigned by the current assignee to item.assign-self without checking who made the assignment"
   artifacts: [src/domain/team/permissions.ts, src/domain/team/materialize.ts, src/domain/team/board.ts]
   missing: ["assignedBy (who made the current assignment) in materialized item state", "unassign-me only when assignedBy === author"]
+  debug_session: ""
+
+## Re-test on 0.6.4 (owner, 2026-11-05)
+
+Setup: preview 0.6.4 (team-preview 8777d43), code-server 4.144 in Brave, scratch repo `ALuhning/team-check-scratch-3` seeded with this repository's v0.6.0 roadmap (Phases 60 to 62: 40 plans, all done; later phases planless), alice (owner), bob and carol (developers), one code-server for all three. Script: /home/aaron/projects/scratch/team-check-3/RETEST.md.
+
+Passed: Open board in its own tab with nothing opening below the chat (step 10); Import plans; every header count draws that many cards when open (11, the 0.6.3 counts gap above); Assign to Bob (13); Assign to me (14); the Unassign me rules, offered only on a card the person assigned themselves (15, the 0.6.3 unassign gap above). Step 16 expected bob to move alice's card, which was phase:63, a planless phase card that correctly cannot move (G-62-3): a script error, not a product defect. Issues:
+- truth: "A finished plan dragged from Done to Backlog, or moved with Move to... -> Backlog (reopen), is drawn in Backlog afterwards; wherever a move puts a card, the menu names that column and the board shows it there"
+  status: failed
+  reason: "User reported (0.6.4, steps 12 and 16): a finished (Done) plan card will not move to Backlog, by drag or by Move to..., for alice (team owner)"
+  severity: major
+  test: 6
+  root_cause: "Nothing refuses the move: both of alice's reopens are in the log and accepted (lamport 158 plan:62-14 at 15:22:58Z, lamport 162 plan:61-14 at 15:33:46Z; replay: 162 accepted, 0 rejected). src/domain/team/board.ts:338 maps a drop on Backlog of a done card to 'reopen', and board.ts:100 plus src/domain/team/boardText.ts:21 ('Backlog (reopen)') promise Backlog; src/domain/team/materialize.ts:483 settles the item to state 'backlog'; src/domain/team/work.ts:239-240 then draws any stored backlog item that passes readiness in Ready. Every imported plan in the scratch project has files, an estimate and finished dependencies, so each reopened card is drawn in Ready (replay: plan columns done 38, ready 2), not where it was dropped, and the host says nothing on success (src/services/team/boardView.ts move(), 755-819). Not caught because the reopen fixtures (seedRetestBoard, the code-server board harness's plan:60-01) have no estimate, so their cards land in Backlog."
+  artifacts: [src/domain/team/board.ts, src/domain/team/boardText.ts, src/domain/team/materialize.ts, src/domain/team/work.ts, src/services/team/boardView.ts, media/board/drag.js, src/test/teamBoardReopenColumn.test.ts]
+  missing: ["owner decision: (A) a drop on Backlog, or Move to... -> Backlog, reopens and holds in one append so the card stays in Backlog, and a drop on Ready reopens it into Ready when it is ready; or (B) one reopen whose menu item and drop name the real destination ('Reopen (goes to Ready)') with a short notice of where the card went", "RED src/test/teamBoardReopenColumn.test.ts (6ff8876) made green (both failing tests; the boundary neighbour keeps passing)", "a ready-shaped plan in the reopen fixtures and in the code-server board harness"]
+  debug_session: ".planning/debug/board-reopen-lands-in-ready.md"
+- truth: "The lane header makes its count obvious at a glance: it says who the lane is for, how many cards it holds and where the hidden ones are (for example 'Nobody assigned · 45 cards (40 in Done)'), and each column cell of the lane shows its own count, so an open lane never reads as if all its cards should be listed"
+  status: failed
+  reason: "User reported (0.6.4): the board's 'Unassigned' lane header shows a count (45) but the expanded lane shows only the open columns' cards (Backlog's phase cards); the 40 done cards are in folded Done. It reads as if all 45 should be listed; make it obvious at a glance."
+  severity: minor
+  test: 9
+  root_cause: "media/board/board.js:806-808 writes the lane head as 'Unassigned (45, 40 in folded columns)' (the 0.6.3 fix 185bb54): the total comes first and the folded share is a trailing clause naming no column; open cells show no count of their own (cellEl, board.js:821-848, writes a number only in folded cells); the lane label is UNASSIGNED_LABEL 'Unassigned' (src/domain/team/boardText.ts:108, lane built at src/domain/team/board.ts:587)"
+  artifacts: [media/board/board.js, media/board/board.css, src/domain/team/boardText.ts, src/domain/team/board.ts]
+  missing: ["lane head: 'Nobody assigned · 45 cards (40 in Done)', naming the folded columns that hold cards (or '... (40 in Done, 2 in Cancelled)'); a person's lane the same way", "a small count in every open cell of the lane, as the folded cells already have", "the screen-reader label says the same", "screenshot check of the Unassigned lane in Columns view, Done folded and open"]
   debug_session: ""

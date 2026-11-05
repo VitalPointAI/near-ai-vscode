@@ -3,7 +3,7 @@ status: diagnosed
 phase: 61-invitations-joining-removal-near-org-and-key-integration
 source: [61-VERIFICATION.md human_verification, owner hands-on session on the 0.6.0 team preview build]
 started: 2026-11-03T19:30:00Z
-updated: 2026-11-03T21:00:00Z
+updated: 2026-11-05T19:30:00Z
 ---
 
 ## Current Test
@@ -165,4 +165,82 @@ Passed: Connect-first screen, Working with your agents, Just me for now and the 
   root_cause: "Connect panel offers only own-key setup; join requires a working profile; no join-request flow; profiles are per project with no reuse"
   artifacts: [media/chat/readiness.js, media/chat/setup.js, src/services/team/memberCommands.ts, src/team/join.ts, src/team/teamKeyProfile.ts, src/services/profileStore.ts]
   missing: ["Join a team on the Connect screen", "team key becomes the profile on join (org-linked)", "Ask to join request/accept flow", "use a saved profile from another project"]
+  debug_session: ""
+
+## Re-test on 0.6.4 (owner, 2026-11-05)
+
+Setup: preview 0.6.4 (Team Mode feat/team-fix-pass merged with main, team-preview 8777d43), code-server 4.144 in Brave, private scratch repo `ALuhning/team-check-scratch-3` with copies alice, bob, carol and alice-second (all made before the team existed), each person in a separate Brave profile; no organization linked. Script: /home/aaron/projects/scratch/team-check-3/RETEST.md. In this setup the three people share one code-server, so one globalStorage (team storage, coordination mirror, saved-profile list); only secrets are per browser profile.
+
+Passed: Connect screen (step 1); alice Set up a new profile (2); Invite someone, with no email question for the owner (3); bob Join a team with no "Get the project" (4); alice Confirm (6); carol Ask to join and Show my request (7); alice Accept a request (8); carol confirmed automatically on alice's side (9, alice); Use a saved profile in alice-second (22). Issues:
+- truth: "Join a team on a team without an organization, Paste your own key: once NEAR AI has checked the key, the sidebar gives way to the chat and the Team section at once, without a reload, and later changes (a lead confirming the person) show there"
+  status: failed
+  reason: "User reported (0.6.4, step 5): the key is checked, then bob's sidebar stays on 'Connect NEAR AI to start ... Scratch Team has no organization linked, so each person uses their own key. Set up a new profile with your key or use a saved profile.' and never shows that he was accepted (alice confirmed him)"
+  severity: major
+  test: 10
+  root_cause: "src/services/team/memberCommands.ts:826: after joinTeam succeeds the join command only restarts the team session. The own key was written straight into the project's profile file by src/team/join.ts:322 (installTeamKey, its own ProfileStore), and nothing asks the sidebar page for a fresh profile-status: the only Team Mode trigger is src/services/team/teamSectionHost.ts:148/154-158 on session.onKeyInstalled, fired only for a lead-delivered key (src/services/team/teamSession.ts:810). The page's readiness (media/chat/readiness.js) stays 'connect' until a reload. bob's profile is valid and selected on disk; after his window reloaded at 15:24:44 the chat loaded models at once (code-server exthost31). The readiness rule does count a team-key profile (eliminated)."
+  artifacts: [src/services/team/memberCommands.ts, src/team/join.ts, src/services/team/teamSectionHost.ts, src/services/team/teamCommands.ts, media/chat/readiness.js, src/test/teamConnectRefresh.test.ts]
+  missing: ["one refresh-status to the sidebar page after every Team Mode profile change outside the session's key-installed event: own key at join (and, same shape, removal's removeTeamKey and the unfinished-join reset)", "RED src/test/teamConnectRefresh.test.ts 'Join with Paste your own key: the page is asked for a fresh profile status...' (5297b2d) made green"]
+  debug_session: ".planning/debug/join-own-key-connect-stuck.md"
+- truth: "The key a person pastes when joining a team without an organization becomes that person's own profile (a normal profile, in the saved-profile list for their other projects, kept when they leave the team, counted as personal spend), not the team key profile"
+  status: failed
+  reason: "Found while diagnosing step 5: bob's own key is stored as 'Scratch Team (team key)' (profile-team-8c2f37d697, organization 'Scratch Team')"
+  severity: major
+  test: 10
+  root_cause: "src/team/join.ts:322 installs the pasted own key with installTeamKey (src/team/teamKeyProfile.ts:117-152), which names it '<team> (team key)' under teamProfileId(teamId) (teamKeyProfile.ts:136-139). Consequences: src/services/profileIndex.ts:58-62 leaves it out of the saved-profile list; src/team/removedClient.ts:124 (removeTeamKey) deletes it and its key when the person is removed; src/services/providerCache.ts:28-29 tags its spend as team spend; a later lead-made team key (if the team links an organization) is installed under the same id and replaces the person's own key with no earlier profile kept (teamKeyProfile.ts:143-146). 61-30 kept this on purpose ('keeps today's masked input and check'); src/test/teamJoinCommand.test.ts:349 pins it."
+  artifacts: [src/team/join.ts, src/team/teamKeyProfile.ts, src/services/profileStore.ts, src/services/profileIndex.ts, src/test/teamJoinCommand.test.ts, src/test/teamConnectRefresh.test.ts]
+  missing: ["own key installed through ProfileStore as a personal profile (plain name such as 'My NEAR AI key', organization from the key check), selected for the project and recorded in the saved-profile list", "teamJoinCommand.test.ts:349 changed to assert the personal profile (behaviour change asked by the owner, not a weakened test)", "RED src/test/teamConnectRefresh.test.ts 'Join with Paste your own key: the own key becomes the person's own profile...' (5297b2d) made green"]
+  debug_session: ".planning/debug/join-own-key-connect-stuck.md"
+- truth: "After the automatic join that follows an accepted request, the requester's Connect screen changes by itself to the next step: on a team without an organization, the sentence that each person uses their own key with Set up a new profile and Use a saved profile (as bob's screen shows after Join)"
+  status: failed
+  reason: "User reported (0.6.4, step 9): carol gets the notification that she is on Scratch Team, but her chat/Connect screen does not change"
+  severity: major
+  test: 10
+  root_cause: "Not confirmed. Ruled out with evidence: the model built from the real log for carol is right (ownKeyStatus at every log length after her join); the host refreshes by itself after the automatic join (GREEN src/test/teamConnectRefresh.test.ts, real git and commands, no explicit refresh); the page redraws the Connect group inside PR #7's panel for that model (fake DOM with the preview's team.js). Carol's code-server channel shows the join and the restart finished with no error. Ranked suspects for the real window: S1 a Team section refresh that throws or never settles in the real extension host, invisible because src/services/team/teamSectionHost.ts:296 swallows every refresh failure and refreshes share one chain (285-299); S2 the code-server page not drawing a team-state that arrived while its Brave window was in the background; S3 the one-server test sharing one mirror and one globalStorage between alice, bob and carol."
+  artifacts: [src/services/team/teamSectionHost.ts, src/services/team/memberCommands.ts, src/services/team/teamSession.ts, src/services/team/teamCommands.ts, media/chat/team.js, src/test/teamConnectRefresh.test.ts]
+  missing: ["real-window reproduction in code-server (two browser profiles, Ask to join, accept, automatic join) with the extension-host probe recording each team-state the page gets and draws", "a channel line when a Team section refresh fails or takes more than a few seconds (once per reason)", "the fix the repro points to, with a real-window regression check"]
+  debug_session: ".planning/debug/ask-join-connect-no-refresh.md"
+- truth: "On the Connect screen the team group (status sentence and Join a team, Ask to join, Use a saved profile) sits clearly apart from PR #7's Set up a new profile row, with vertical space between them"
+  status: failed
+  reason: "User reported (0.6.4): add vertical space between the Connect panel's 'Set up a new profile' button and the team group below it"
+  severity: cosmetic
+  test: 8
+  root_cause: "media/chat/team.js:260-271 (buildConnect) makes div.team-connect (p.team-connect-status and div.team-connect-actions) and team.js:296 appends it as the last child of PR #7's #welcome-connect, right after .welcome-connect-actions; media/chat/chat.css styles only .welcome-connect-actions (line 191 in the merged preview) and has no rule for .team-connect, so the group gets no top margin"
+  artifacts: [media/chat/chat.css, media/chat/team.js]
+  missing: ["a .team-connect rule (top margin about 12px, optionally a top border in the panel's border colour), and spacing for .team-connect-status and .team-connect-actions matching .welcome-connect-actions", "a layout-probe or screenshot check of the Connect panel with the team group"]
+  debug_session: ""
+- truth: "Use a saved profile offers only profiles whose key this browser or computer actually holds; a listed profile whose key is not here is labelled ('Its key is not on this computer or browser') and not offered as usable"
+  status: failed
+  reason: "User reported (0.6.4): the list offers a profile whose key is not in this browser's storage (it reads the project file's last check status, not key presence), then fails with 'The saved profile this one uses was removed'"
+  severity: minor
+  test: 10
+  root_cause: "src/services/profileIndex.ts:80-83 listSavedProfiles returns every entry of the computer-wide list (VS Code globalState, which code-server keeps on the server, shared by every browser profile) and checkText (profileIndex.ts:169-173) labels it from the last check status in the source project's file. Key presence is checked only after the pick, in ProfileStore (src/services/profileStore.ts:270, hasStoredKey at :298), which then says SOURCE_REMOVED (:28) although the key was never removed, it lives in another browser's storage"
+  artifacts: [src/services/profileIndex.ts, src/services/profileStore.ts, src/extension.ts]
+  missing: ["check each entry's key in SecretStorage (by scope, never reading it out) before listing", "label entries without a key here and leave them out of the usable choices", "a failure message that says the key is not on this computer or browser instead of 'was removed'"]
+  debug_session: ""
+- truth: "After upgrading, Use a saved profile explains an empty list: profiles from other projects appear once each project has been opened with this version"
+  status: failed
+  reason: "User reported (0.6.4): after upgrading, the list is empty until each older project is opened once with the new version; the empty-list message should say so"
+  severity: minor
+  test: 10
+  root_cause: "The list is written only by ProfileStore when a project's profiles are read or written (src/services/profileStore.ts:333-356 recordIndex), so projects not opened since the upgrade are not in it; the empty message (src/services/profileIndex.ts:141) says only that there are no saved profiles yet"
+  artifacts: [src/services/profileIndex.ts, src/services/profileStore.ts]
+  missing: ["empty-list message: 'Profiles from your other projects appear here after you open each of those projects once with this version of NEAR AI.' with Set up a new profile"]
+  debug_session: ""
+- truth: "Known limitation, recorded: moving or renaming a project folder keeps its saved key reachable (or the person is told plainly and offered to reconnect it)"
+  status: failed
+  reason: "User reported (0.6.4): moving or renaming a project folder cuts it off from its saved key because the project id is a hash of the path"
+  severity: minor
+  test: 10
+  root_cause: "src/domain/auth.ts:102-105 createProjectCredentialScope derives the project id from the project identity, which ProfileStore sets to the workspace folder path (src/services/profileStore.ts:96-97); keys are stored under that scope, so a moved folder gets a new id and its profiles' keys are no longer found, and its saved-profile list entries keep the old id"
+  artifacts: [src/domain/auth.ts, src/services/profileStore.ts, src/services/profileIndex.ts]
+  missing: ["proposal: a stable project id kept in .planning/.near-ai/auth-profiles.json (its projectId field already exists) and used as the identity when present, with the path hash only for a new project; on a mismatch between the file's projectId and the path hash, offer 'This project moved. Reconnect its saved key?' which re-links the old scope (by reference, never reading the key out)", "until then, a README line under the profile section"]
+  debug_session: ""
+- truth: "In a web UI (code-server and other browser-based VS Code) the person is warned that several tabs of the same browser profile can lose each other's saved keys (NEAR AI keys, team keys, the team device key), and the README's code-server tips say to keep one tab per browser profile"
+  status: failed
+  reason: "User reported (0.6.4): code-server's LocalStorageSecretStorageProvider (vs/code/browser/workbench/workbench.js, storageKey 'secrets.provider') loads the whole secret bundle once per tab and writes its in-memory copy back on every set or delete, so two code-server tabs in one browser profile overwrite each other's secrets. Not ours to fix; the extension should warn and the README should say so."
+  severity: major
+  test: 11
+  root_cause: "Upstream code-server behaviour (whole-bundle write-back per tab). The extension does not detect a web UI for this (vscode.env.uiKind is used only for sign-in and the proxy tip: src/extension.ts:125 here, :159 in the merged preview; src/services/nearSignIn.ts:48) and the README code-server notes (merged preview README.md around lines 568-580) cover runs and proxy support only. Losing the team device key leaves the computer unable to sign team events until it is re-invited."
+  artifacts: [src/extension.ts, README.md, src/services/team/teamSession.ts]
+  missing: ["a one-time notice when vscode.env.uiKind is Web: 'In a browser, keep one tab of this editor per browser profile. Two tabs in the same profile can overwrite each other's saved keys.' with Don't show again", "README code-server tip with the same rule and what to do after a lost key (set up the profile again; ask the lead to re-invite for a lost team device key)", "optional: a cheap self-check that a key just stored can still be read back on the next start, with a plain message when it cannot"]
   debug_session: ""
