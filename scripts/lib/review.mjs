@@ -95,7 +95,7 @@ export function submitReview(repo, number, text, { dryRun = false, log = console
     log(`\n[dry run] would set ${AGENT_REVIEW_CONTEXT}=${decision.state} on ${pr.headRefOid}: ${description.slice(0, 140)}`);
     return { state: decision.state, reasons: decision.reasons };
   }
-  if (!trusted) throw new Error(`gh runs as ${login}, but the merge and release gates trust ${AGENT_REVIEW_CONTEXT} only from ${REVIEW_ACCOUNT}; nothing was posted. Run the review workflow instead: gh workflow run agent-review.yml -f pr=${number}`);
+  if (!trusted) throw new Error(`gh runs as ${login}, but the merge and release gates trust ${AGENT_REVIEW_CONTEXT} only from ${REVIEW_ACCOUNT}; nothing was posted. The workflow posts it as ${REVIEW_ACCOUNT}; start it from an account that can run workflows here: gh workflow run agent-review.yml -f pr=${number}`);
 
   setStatus(repo, pr.headRefOid, 'pending', 'Posting the agent review');
   const commentDir = mkdtempSync(path.join(tmpdir(), 'agent-review-comment-'));
