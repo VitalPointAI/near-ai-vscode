@@ -898,6 +898,7 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
     const { forgetDeviceIdentity } = await import('../../team/identity');
     await forgetDeviceIdentity(deps.context.secrets, teamFile.teamId);
     await deps.restartSession(projectRoot);
+    deps.profileChanged();
     deps.report('info', 'The unfinished keys were removed from this computer. Ask your lead to re-issue your invitation from "NEAR AI: Manage Team Members", then run "NEAR AI: Join Team" again with the new invite.');
   }
 

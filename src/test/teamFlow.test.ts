@@ -4,13 +4,16 @@
 // helpers/teamFlowRig.ts; this file is what they must add up to.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { deriveProfileId } from '../domain/auth';
 import { serialiseState } from '../domain/team/materialize';
+import { AuthService } from '../services/auth';
+import { ProfileStore } from '../services/profileStore';
 import { CleanupChecklist } from '../team/cleanupChecklist';
 import { deviceKeySecretName, sealKeySecretName } from '../team/identity';
 import { NO_ORG_NOTICE } from '../team/join';
 import { REMOVED_FILE, readRemovedMarker } from '../team/removedClient';
 import { readTeamFile } from '../team/teamFile';
-import { readInstalledKey, teamProfileId } from '../team/teamKeyProfile';
+import { OWN_KEY_PROFILE_NAME, readInstalledKey, teamProfileId } from '../team/teamKeyProfile';
 import {
   GIGA, LEAD_EMAIL, NEAR_LINK, PERSONAL_PROFILE, activeProfileOf, closeRig, confirm, createRig, enable, givePersonalProfile, installKey, invite, join,
   link, openLog, ownRemoval, publishProject, remove, rootOf, storageOf, teamIdOf
@@ -176,8 +179,12 @@ test('the same lifecycle in a team with no NEAR organization uses the members\' 
 
     assert.equal((await confirm(rig, rig.lead)).key, 'not-applicable');
     assert.equal((await confirm(rig, rig.dev)).key, 'not-applicable');
-    assert.equal(await activeProfileOf(rig, rig.dev), teamProfileId(teamId));
-    assert.equal((await readInstalledKey(rig.dev.globalStorageDir, teamId))?.previousProfileId, PERSONAL_PROFILE);
+    // D-21 as amended by the owner in the 0.6.4 re-test (2026-11-05): the pasted key is the person's own, so it is their own profile 'My NEAR AI
+    // key', selected, not the team key profile; no team key was installed, so nothing remembers a profile to go back to.
+    const ownProfile = deriveProfileId(rootOf(rig, rig.dev.clone), OWN_KEY_PROFILE_NAME);
+    assert.equal(await activeProfileOf(rig, rig.dev), ownProfile);
+    assert.notEqual(ownProfile, teamProfileId(teamId));
+    assert.equal(await readInstalledKey(rig.dev.globalStorageDir, teamId), undefined);
 
     const developerWindow = await openLog(rig, rig.dev);
     const removed = await remove(rig, rig.lead, rig.dev);
@@ -190,8 +197,10 @@ test('the same lifecycle in a team with no NEAR organization uses the members\' 
     const attempt = await developerWindow.log.append(() => [{ type: 'member.availability', body: { availability: 'focus' } }]);
     assert.equal(attempt.ok, false);
     const cleaned = await ownRemoval(rig, rig.dev);
-    assert.equal(cleaned.restoredProfileId, PERSONAL_PROFILE);
-    assert.equal(await activeProfileOf(rig, rig.dev), PERSONAL_PROFILE);
+    // The own profile is the person's, so the removal keeps it selected (D-21 as amended in the 0.6.4 re-test); the personal profile is untouched.
+    assert.equal(cleaned.restoredProfileId, undefined);
+    assert.equal(await activeProfileOf(rig, rig.dev), ownProfile);
+    assert.ok(await new ProfileStore(rootOf(rig, rig.dev.clone), new AuthService(rig.dev.secrets)).get(PERSONAL_PROFILE), 'the personal profile is still there');
     assert.equal(rig.dev.secrets.values.has(deviceKeySecretName(teamId)), false);
 
     // Everything NEAR was asked since the invitations: the two key checks of the pasted keys, nothing else.

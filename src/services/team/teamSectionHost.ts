@@ -145,7 +145,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
     followedSubscriptions = [];
     followed = session;
     if (session === undefined) return;
-    followedSubscriptions = [session.onStateChange(() => { void refresh(); }), session.onKeyInstalled(() => { if (session === followed) void profileChanged(); })];
+    followedSubscriptions = [session.onStateChange(() => { void refresh(); }), session.onProfileChanged(() => { if (session === followed) void profileChanged(); })];
   }
 
   // 61-30, 61-32: Team Mode changed this project's profile (a team key a lead delivered, the own key pasted at Join, ...), so it is now the project's

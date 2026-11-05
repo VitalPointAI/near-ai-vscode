@@ -196,6 +196,7 @@ export class TeamSession {
   private readonly history = new ItemHistory();
   private readonly changeListeners = new Set<(entries: readonly CommittedEvent[]) => void>();
   private readonly keyInstalledListeners = new Set<() => void>();
+  private readonly profileListeners = new Set<() => void>();
   // Whether a Team Board is open. It only changes how often this window polls; it is never written anywhere (Phase 60 D-19, T-62-26).
   private boardVisible = false;
   private log: TeamLog;
@@ -358,6 +359,23 @@ export class TeamSession {
     return { dispose: () => { this.keyInstalledListeners.delete(listener); } };
   }
 
+  // 61-32: told each time this session changed the project's profile: a delivered team key was installed, or the clean-up after this person's own
+  // removal ran (it may select the earlier profile again). The Team section host asks the sidebar for a fresh profile status then.
+  public onProfileChanged(listener: () => void): { dispose(): void } {
+    this.profileListeners.add(listener);
+    return { dispose: () => { this.profileListeners.delete(listener); } };
+  }
+
+  private profileChanged(): void {
+    for (const listener of [...this.profileListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        this.reportIssue('profile-listener', `A part of NEAR AI could not be told about the changed profile: ${describeError(error)}`);
+      }
+    }
+  }
+
   public itemHistory(itemId: string): HistoryEntry[] {
     return this.history.forItem(itemId);
   }
@@ -394,6 +412,7 @@ export class TeamSession {
     this.diagnosticSubscription.dispose();
     this.updateSubscription.dispose();
     this.changeListeners.clear();
+    this.profileListeners.clear();
     this.deps.statusBar.dispose();
   }
 
@@ -786,6 +805,7 @@ export class TeamSession {
     } catch (error) {
       this.line(`The clean-up after your removal could not finish: ${describeError(error)}`);
     }
+    this.profileChanged();
     this.line(removedText(this.teamFile.name));
     this.announce('warn', removedText(team));
   }
@@ -814,6 +834,7 @@ export class TeamSession {
           this.reportIssue('key-listener', `A part of NEAR AI could not be told about the new team key: ${describeError(error)}`);
         }
       }
+      this.profileChanged();
     } else if (result.status === 'failed') {
       this.installFailed = { event: member.nearKeyEvent, retryAt: now + INSTALL_RETRY_MS };
       const text = `The team key for ${this.teamFile.name} could not be installed: ${safeReason(result.message)}`;
