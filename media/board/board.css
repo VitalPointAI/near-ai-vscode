@@ -332,6 +332,30 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 #tl-preview, #tl-card { position: absolute; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px; overflow-wrap: break-word; word-break: normal; color: var(--vscode-foreground); background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px var(--vscode-widget-shadow); }
 #tl-preview { z-index: 7; width: 256px; padding: 8px 12px; pointer-events: none; }
 #tl-card { z-index: 6; width: 320px; max-width: calc(100% - 16px); padding: 12px 16px; overflow: auto; }
+#tl-preview, #tl-card { display: flex; flex-direction: column; gap: 8px; }
+#tl-preview { gap: 4px; }
+.tl-preview-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin: 0; line-height: 1.5; }
+.tl-preview-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.tl-preview-who, .tl-preview-step, .tl-preview-hint { margin: 0; font-size: 0.85em; line-height: 1.4; }
+.tl-preview-step { display: flex; flex-wrap: wrap; gap: 0 8px; font-variant-numeric: tabular-nums; }
+.tl-preview-step, .tl-preview-hint { color: var(--vscode-descriptionForeground); }
+/* the card's title row stays at the top while a capped card scrolls inside; the title is never clamped */
+.tl-card-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: flex-start; gap: 8px; background: var(--vscode-editorWidget-background); }
+.tl-card-title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 1.2em; font-weight: 600; line-height: 1.2; overflow-wrap: break-word; word-break: normal; }
+.tl-card-close { flex: none; min-width: 28px; min-height: 28px; }
+.tl-card-face { display: flex; flex-direction: column; gap: 4px; }
+.tl-card-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; margin: 0; font-size: 0.85em; line-height: 1.4; }
+.tl-card-facts dt { color: var(--vscode-descriptionForeground); }
+.tl-card-facts dd { display: flex; flex-wrap: wrap; gap: 0 4px; min-width: 0; margin: 0; }
+.tl-card-notes { display: flex; flex-direction: column; gap: 4px; }
+.tl-card-note { margin: 0; font-size: 0.85em; line-height: 1.4; }
+.tl-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* the dot whose card is open (the selected halo), a dot waiting for the host (dashed outline) and a refused dot (the error pip) */
+.tl-dot.selected::before { content: ''; position: absolute; left: -4px; top: -4px; z-index: -1; width: 36px; height: 36px; border-radius: 50%; pointer-events: none; background: color-mix(in srgb, var(--vscode-focusBorder) 20%, transparent); }
+.tl-dot.selected .tl-mark { transform: scale(1.25); }
+.tl-dot.pending::after { content: ''; position: absolute; inset: 0; border: 1px dashed var(--vscode-descriptionForeground); border-radius: 14px; pointer-events: none; }
+.tl-mark .tl-pip.tl-pip-error { fill: var(--vscode-errorForeground); }
+.tl-dot, .tl-folded, .tl-more { scroll-margin: 48px; }
 
 /* high contrast: a contrast ring on every mark and a border on every surface */
 body.vscode-high-contrast .tl-mark, body.vscode-high-contrast-light .tl-mark { outline: 1px solid var(--vscode-contrastBorder); border-radius: 50%; }
@@ -348,6 +372,9 @@ body.vscode-high-contrast .tl-phase-bar, body.vscode-high-contrast-light .tl-pha
   .tl-dot.filled .tl-body, .tl-mark.filled .tl-body { fill: CanvasText; }
   .tl-dot.filled .tl-glyph, .tl-mark.filled .tl-glyph { stroke: Canvas; }
   .tl-mark .tl-pip { fill: Highlight; stroke: Canvas; }
+  .tl-mark .tl-pip.tl-pip-error { fill: Highlight; }
+  .tl-dot.selected::before { background: Highlight; }
+  .tl-dot.pending::after { border-color: CanvasText; }
   .tl-mark.tl-ring { outline-color: CanvasText; }
   .tl-initials.mine { border-color: CanvasText; background: CanvasText; color: Canvas; }
   .tl-line { stroke: CanvasText; }

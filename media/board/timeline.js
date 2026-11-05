@@ -56,7 +56,10 @@
     factNeeded: 'Needed by',
     factFinished: 'Finished',
     nothing: 'Nothing',
-    gone: 'That card is no longer on the board.'
+    gone: 'That card is no longer on the board.',
+    // The preview's last line (UI-SPEC "Preview"): the pointer opened it, or the keyboard did.
+    previewPointer: 'Click to open the card.',
+    previewKeyboard: 'Press Enter to open the card.'
   });
 
   // ---- the pure geometry (UI-SPEC "Timeline geometry", "Pitches by zoom", "Horizontal", "Vertical", "Stacks taller than the cap", "Folded finished
@@ -328,7 +331,87 @@
     return '';
   }
 
-  window.NearAiTimeline = Object.freeze({ geometry, pickLabel, sizes: G });
+  // ---- the placement of the preview and the expanded card (UI-SPEC "Placement", the D-13 amendment) ------------------------------------------
+  // One pure function for both layers. Everything is in canvas pixels: anchor is the dot's hit box, obstacles what the layer must not cover (the Now
+  // pill, the sticky milestone headers and the percent labels), view the scroller's visible rectangle less its 8 px edge margin.
+  const LAYER = Object.freeze({ gap: 8, room: 160, min: 48 });
+  const boxOf = (b) => ({ left: Number(b && b.left) || 0, top: Number(b && b.top) || 0, width: Math.max(0, Number(b && b.width) || 0), height: Math.max(0, Number(b && b.height) || 0) });
+  const overlaps = (a, b) => a.left < b.left + b.width && b.left < a.left + a.width && a.top < b.top + b.height && b.top < a.top + a.height;
+  /**
+   * Where a layer of this size goes next to its dot. The sides are tried in the direction's order (horizontal: below, above, right, left; vertical:
+   * right, left, below, above; narrow: below, above at the full view width). The first side where the whole layer fits inside the view and covers
+   * neither the dot nor an obstacle wins. Otherwise a side with at least 160 px of room that covers neither wins, its height capped to that room. Otherwise
+   * the side with the most room that covers nothing, else the side with the most room, capped. Below and above put the layer's left edge at the dot's
+   * left edge, right and left its top at the dot's top, each shifted to stay inside the view. The layer is never over its own dot.
+   * Returns { left, top, width, height, side, capped }.
+   */
+  function placeLayer(anchor, size, view, obstacles, mode) {
+    const a = boxOf(anchor);
+    const v = boxOf(view);
+    const s = boxOf({ width: size && size.width, height: size && size.height });
+    const m = isObj(mode) ? mode : {};
+    const narrow = m.narrow === true;
+    const sides = narrow ? ['below', 'above'] : m.direction === 'vertical' ? ['right', 'left', 'below', 'above'] : ['below', 'above', 'right', 'left'];
+    const obs = (Array.isArray(obstacles) ? obstacles : []).filter(isObj).map(boxOf).filter((o) => o.width > 0 && o.height > 0);
+    const w = narrow ? v.width : Math.min(s.width, v.width);
+    const h = s.height;
+    const gap = LAYER.gap;
+    const right = v.left + v.width;
+    const bottom = v.top + v.height;
+    const alongX = () => clamp(a.left, v.left, Math.max(v.left, right - w));
+    const alongY = (hh) => clamp(a.top, v.top, Math.max(v.top, bottom - hh));
+    const vertical = (side) => side === 'below' || side === 'above';
+    function at(side, hh) {
+      if (side === 'below') return { left: alongX(), top: a.top + a.height + gap, width: w, height: hh };
+      if (side === 'above') return { left: alongX(), top: a.top - gap - hh, width: w, height: hh };
+      if (side === 'right') return { left: a.left + a.width + gap, top: alongY(hh), width: w, height: hh };
+      return { left: a.left - gap - w, top: alongY(hh), width: w, height: hh };
+    }
+    const within = (r) => r.left >= v.left && r.top >= v.top && r.left + r.width <= right && r.top + r.height <= bottom;
+    const clear = (r) => !overlaps(r, a) && obs.every((o) => !overlaps(r, o));
+    /** The height the layer has on a side: up to the view edge, and, when aware, up to the first obstacle in its way. -Infinity when the layer's
+     * width does not fit beside the dot (right and left cannot be squeezed: the card keeps its readable width). */
+    function roomOf(side, aware) {
+      if (vertical(side)) {
+        const x0 = alongX();
+        const x1 = x0 + w;
+        const start = a.top + a.height + gap;
+        const end = a.top - gap;
+        let free = side === 'below' ? bottom - start : end - v.top;
+        if (aware) {
+          for (const o of obs) {
+            if (!(o.left < x1 && x0 < o.left + o.width)) continue;
+            if (side === 'below' && o.top + o.height > start) free = Math.min(free, o.top - start);
+            if (side === 'above' && o.top < end) free = Math.min(free, end - (o.top + o.height));
+          }
+        }
+        return free;
+      }
+      const across = side === 'right' ? right - (a.left + a.width + gap) : a.left - gap - v.left;
+      if (across < w) return -Infinity;
+      const hh = Math.min(h, v.height);
+      return aware && !clear(at(side, hh)) ? -Infinity : hh;
+    }
+    const done = (r, side) => ({ left: r.left, top: r.top, width: r.width, height: r.height, side, capped: r.height < h || r.width < s.width && !narrow });
+    for (const side of sides) { const r = at(side, h); if (within(r) && clear(r)) return done(r, side); }
+    for (const side of sides) {
+      const free = roomOf(side, true);
+      if (free < LAYER.room) continue;
+      const r = at(side, Math.min(h, free));
+      if (within(r) && clear(r)) return done(r, side);
+    }
+    let best;
+    let most = -Infinity;
+    for (const side of sides) { const free = roomOf(side, true); if (free > most) { most = free; best = side; } }
+    if (most < LAYER.min) {
+      most = -Infinity;
+      for (const side of sides) { const free = roomOf(side, false); if (free > most) { most = free; best = side; } }
+    }
+    if (best === undefined || most === -Infinity) { best = sides[0]; most = roomOf(best, false); }
+    return done(at(best, Math.min(h, Math.max(most, LAYER.min))), best);
+  }
+
+  window.NearAiTimeline = Object.freeze({ geometry, pickLabel, place: placeLayer, sizes: G });
 
   const board = window.NearAiBoard;
   if (!board) return;
@@ -375,7 +458,7 @@
     return glyphCache[state];
   }
   /** The 20 px mark: its body (a circle, or a rounded square for a phase card), the 12 px glyph and the info pip for a plan that looks finished. */
-  function buildMark(state, square, pip) {
+  function buildMark(state, square, pip, refused) {
     const svg = svgEl('svg', { class: 'tl-mark', viewBox: '0 0 20 20', width: 20, height: 20, 'aria-hidden': 'true', focusable: 'false' });
     svg.appendChild(square ? svgEl('rect', { class: 'tl-body', x: 1, y: 1, width: 18, height: 18, rx: 4 }) : svgEl('circle', { class: 'tl-body', cx: 10, cy: 10, r: 9 }));
     const paths = glyphPaths(state);
@@ -384,7 +467,9 @@
       for (const d of paths) g.appendChild(svgEl('path', { d }));
       svg.appendChild(g);
     }
-    if (pip) svg.appendChild(svgEl('circle', { class: 'tl-pip', cx: 17, cy: 3, r: 4 }));
+    // A refusal on the card wins over the info pip (UI-SPEC "State colours").
+    if (refused) svg.appendChild(svgEl('circle', { class: 'tl-pip tl-pip-error', cx: 17, cy: 3, r: 4 }));
+    else if (pip) svg.appendChild(svgEl('circle', { class: 'tl-pip', cx: 17, cy: 3, r: 4 }));
     return svg;
   }
 
@@ -414,7 +499,6 @@
   cardBox.setAttribute('role', 'dialog');
   cardBox.setAttribute('aria-modal', 'false');
   cardBox.setAttribute('aria-labelledby', 'tl-card-title');
-  cardBox.hidden = true;
   const cardHead = el('div', 'tl-card-head');
   const cardTitle = el('h2', 'tl-card-title');
   cardTitle.id = 'tl-card-title';
@@ -439,7 +523,17 @@
   cardDetails.setAttribute('type', 'button');
   cardActions.append(cardMove, cardDetails);
   cardBox.append(cardHead, cardFaceBox, cardFacts, cardNotes, cardMsg, cardActions);
-  canvas.append(shades, lines, ghosts, list, cardBox);
+  // The preview (D-06): visual only, the dot's name already says everything, so it is hidden from screen readers and never takes the pointer.
+  const previewBox = el('div');
+  previewBox.id = 'tl-preview';
+  previewBox.setAttribute('aria-hidden', 'true');
+  // Both layers are on the page only while they are shown, after the dots in the DOM: the preview, then the card.
+  canvas.append(shades, lines, ghosts, list);
+  function showLayer(node, on) {
+    if (!on) { if (node.parentNode) node.remove(); return; }
+    if (node === previewBox) { if (node.parentNode !== canvas) canvas.insertBefore(node, cardBox.parentNode === canvas ? cardBox : null); }
+    else if (node.parentNode !== canvas) canvas.appendChild(node);
+  }
   scroll.append(canvas, hints);
   // The board's empty filter state, in an opaque band at the top of the scroller, the ghosts below it (UI-SPEC "Filters").
   const filterBand = el('div', 'tl-filter-empty');
@@ -662,6 +756,12 @@
       const b = el('button', 'tl-dot');
       b.setAttribute('type', 'button');
       b.setAttribute('data-id', dot.cardId);
+      const id = dot.cardId;
+      // The preview and the line emphasis (62.1-05, D-06, D-07).
+      b.addEventListener('pointerenter', () => pointerIn(id));
+      b.addEventListener('pointerleave', () => pointerOut(id));
+      b.addEventListener('focus', () => focusIn(id));
+      b.addEventListener('blur', () => focusOut(id));
       li.appendChild(b);
       d = { li, button: b, markKey: '', mark: null, chip: el('span', 'tl-initials'), chipKey: '', idLabel: el('span', 'tl-id') };
       d.chip.setAttribute('aria-hidden', 'true');
@@ -680,8 +780,9 @@
     attr(b, 'aria-describedby', board.hasMenu(card) ? hintMove.id : hintOpen.id);
     attr(b, 'aria-current', board.selected() === dot.cardId ? 'true' : null);
     put(b, box, ox, oy);
-    const markKey = state + '|' + square + '|' + card.doneInGsd;
-    if (d.markKey !== markKey) { d.mark = buildMark(state, square, card.doneInGsd); d.markKey = markKey; }
+    const refused = board.pendingText(dot.cardId) === '' && board.refusalText(dot.cardId) !== '';
+    const markKey = state + '|' + square + '|' + card.doneInGsd + '|' + refused;
+    if (d.markKey !== markKey) { d.mark = buildMark(state, square, card.doneInGsd, refused); d.markKey = markKey; }
     // Mine (D-05): a filled chip from 100 %, an outer ring on the mark at 50 and 75 % where there is no chip.
     const chipped = zoom >= 100;
     attr(d.mark, 'class', 'tl-mark' + (card.mine && !chipped ? ' tl-ring' : ''));
@@ -841,7 +942,7 @@
 
   function render(container, shown) {
     // Coming back to the timeline from Columns starts with no card open (the selected card stays selected).
-    if (!scroll.isConnected && open) { open = undefined; hide(cardBox, true); }
+    if (!scroll.isConnected) dropLayers();
     const model = board.model();
     const timeline = model && model.timeline;
     const saved = board.uiState();
@@ -850,7 +951,7 @@
     if (!model || !timeline || model.timelineProblem === true || !Array.isArray(timeline.milestones) || !Array.isArray(timeline.dots)) {
       place(scroll, [errorBox]);
       forget();
-      open = undefined;
+      dropLayers();
       return;
     }
     try {
@@ -859,7 +960,7 @@
       // The layout function threw: the error state, and Columns keeps working.
       place(scroll, [errorBox]);
       forget();
-      open = undefined;
+      dropLayers();
     }
   }
 
@@ -1000,6 +1101,8 @@
     for (const b of order) attr(b, 'tabindex', b === stop ? 0 : -1);
     drawn = { timeline, geo, cards, boxes, dotOf, matching };
     followCard();
+    followPreview();
+    applyEmphasis();
   }
 
   // ---- the expanded card (62.1-05, D-06, D-01, UI-SPEC "Expanded card") -----------------------------------------------------------------------
@@ -1076,28 +1179,78 @@
       hide(cardNotes, notes.length === 0);
     }
   }
-  /** Places the card next to its dot, again only when the dot moved, the window or the drawing changed (UI-SPEC "Placement"). */
+  // ---- placing the two layers (UI-SPEC "Placement") -------------------------------------------------------------------------------------------
+  const scrollerSize = () => ({ width: scroll.clientWidth > 0 ? scroll.clientWidth : window.innerWidth || 800, height: scroll.clientHeight > 0 ? scroll.clientHeight : window.innerHeight || 600 });
+  /** The scroller's visible rectangle in canvas pixels, less the 8 px edge margin. */
+  function viewOf() {
+    const size = scrollerSize();
+    return { left: (scroll.scrollLeft || 0) + LAYER.gap, top: (scroll.scrollTop || 0) + LAYER.gap, width: Math.max(0, size.width - 2 * LAYER.gap), height: Math.max(0, size.height - 2 * LAYER.gap) };
+  }
+  const asBox = (r) => ({ left: r.x, top: r.y, width: r.w, height: r.h });
+  /** What a layer must never cover: the Now pill, every milestone header where it sticks now (with the 8 px margin under it), whose percent and
+   * progress words are in it, and every phase label on the rail, which carries the phase percent (probe rules 11 and 12). */
+  function obstaclesOf(geo) {
+    const out = [];
+    if (geo.now) out.push(asBox(geo.now.pill));
+    const sl = scroll.scrollLeft || 0;
+    const st = scroll.scrollTop || 0;
+    for (const b of geo.bands) {
+      if (b.folded || !b.header) continue;
+      const head = { x: b.header.x, y: b.header.y, w: b.header.w, h: b.header.h + LAYER.gap };
+      if (geo.direction === 'horizontal' && b.x <= sl && sl < b.x + b.w) head.x = clamp(sl, b.header.x, b.x + b.w - b.header.w);
+      if (geo.direction === 'vertical' && b.y <= st && st < b.y + b.h) head.y = clamp(st, b.y, b.y + b.h - b.header.h);
+      out.push(asBox(head));
+      for (const ph of b.phases || []) if (ph.label && !ph.label.hidden && ph.label.w > 0) out.push(asBox(ph.label));
+    }
+    return out;
+  }
+  /** The drawn height of a layer at its width, or an estimate where nothing is laid out (the vm). */
+  function heightOf(node, fallback) {
+    const hgt = node.scrollHeight || node.offsetHeight;
+    return typeof hgt === 'number' && isFinite(hgt) && hgt > 0 ? hgt : fallback;
+  }
+  /** Places a layer (the preview or the card) next to the dot's box with the one placement function, and writes where it went. */
+  function putLayer(node, box, width, maxHeight, fallback) {
+    const view = viewOf();
+    const narrow = scrollerSize().width < G.narrow;
+    setStyle(node, 'width', px(narrow ? view.width : Math.min(width, view.width)));
+    node.style.removeProperty('max-height');
+    const size = { width, height: Math.min(heightOf(node, fallback), maxHeight(view)) };
+    const r = placeLayer(asBox(box), size, view, obstaclesOf(drawn.geo), { direction: drawn.geo.direction, narrow });
+    setStyle(node, 'left', px(r.left));
+    setStyle(node, 'top', px(r.top));
+    setStyle(node, 'width', px(r.width));
+    if (r.capped) setStyle(node, 'max-height', px(r.height));
+    attr(node, 'data-side', r.side);
+    return r;
+  }
+  // The expanded card is 320 px wide (the view width under 520 px), its height its content's, at most the scroller less 16 px.
+  const CARD = Object.freeze({ width: 320, estimate: 240 });
+  /** Places the card next to its dot, again only when the dot moved or the window or the drawing changed (UI-SPEC "Placement"): panning keeps it where
+   * it is, beside its dot. */
   function placeCard(box) {
-    const at = JSON.stringify([box.x, box.y, box.w, box.h, drawn.geo.direction, drawn.geo.zoom, drawn.geo.width]);
+    const size = scrollerSize();
+    const at = JSON.stringify([box.x, box.y, box.w, box.h, drawn.geo.direction, drawn.geo.zoom, size.width, size.height]);
     if (open.at === at) return;
     open.at = at;
-    setStyle(cardBox, 'left', px(box.x));
-    setStyle(cardBox, 'top', px(box.y + box.h + 8));
+    putLayer(cardBox, box, CARD.width, (view) => view.height, CARD.estimate);
   }
-  function openCard(id) {
+  function openCard(id, options) {
     const c = board.cardData(id);
     const dot = drawn && drawn.dotOf.get(id);
     if (!c || !dot || !drawn.boxes.has(id) || !dotButton(id)) return;
+    hidePreview();
     const was = open ? open.id : undefined;
     open = { id, faceSig: '', factsSig: '', at: '' };
     attr(cardBox, 'data-id', id);
     board.select(id);
     fillCard(c, dot);
-    hide(cardBox, false);
+    showLayer(cardBox, true);
     placeCard(drawn.boxes.get(id));
     if (was !== undefined && was !== id) redecorate(was);
     redecorate(id);
-    cardTitle.focus();
+    applyEmphasis();
+    if (!options || options.focus !== false) cardTitle.focus();
   }
   /** Closes the card. With restore, focus goes back to the dot when it was inside the card (or nowhere). */
   function closeCard(restore) {
@@ -1106,9 +1259,10 @@
     const a = document.activeElement;
     const inside = !a || a === document.body || !a.isConnected || cardBox.contains(a);
     open = undefined;
-    hide(cardBox, true);
+    showLayer(cardBox, false);
     attr(cardBox, 'data-id', null);
     redecorate(id);
+    applyEmphasis();
     if (restore && inside) focusDot(id);
   }
   /** After a draw: the card follows its dot, takes the new model's words, and closes when its card left the board or its dot is not drawn. */
@@ -1125,11 +1279,127 @@
     fillCard(c, dot);
     placeCard(drawn.boxes.get(open.id));
   }
-  /** A Waits for or Needed by link: the card switches to that dot. */
+  /** The timeline is gone from the page or could not be drawn: no card, no preview and no emphasis survive it. */
+  function dropLayers() {
+    open = undefined;
+    showLayer(cardBox, false);
+    hidePreview();
+    hoverId = undefined;
+    focusId = undefined;
+  }
+  /** A Waits for or Needed by link: focus moves to that dot and its card opens beside it. */
   function goTo(id) {
     if (!dotButton(id)) return;
+    openCard(id, { focus: false });
     focusDot(id);
-    openCard(id);
+  }
+
+  // ---- the preview and the line emphasis (62.1-05, D-06, D-07, UI-SPEC "Preview") ----------------------------------------------------------------
+  let shownPreview; // { id, how: 'pointer' | 'keyboard' }
+  let hoverId;
+  let focusId;
+  let hoverTimer;
+  let leaveTimer;
+  let warmTimer;
+  let warm = false;
+  const PREVIEW = Object.freeze({ delay: 300, linger: 100, warm: 600, width: 256, estimate: 160 });
+  /** The preview's words: the state and display ID and the badges from the board face, the title (clamped to 3 lines by the stylesheet), who, the
+   * step, what it waits for and how to open the card. */
+  function fillPreview(c, dot, how) {
+    const face = board.cardFace(c);
+    const badges = Array.from(face.meta.children).filter((n) => n.classList.contains('badge'));
+    const parts = [face.top, el('p', 'tl-preview-title', c.title)];
+    if (badges.length) { const row = el('div', 'tl-preview-badges'); row.append(...badges); parts.push(row); }
+    const step = el('p', 'tl-preview-step');
+    step.append(el('span', '', dot.stepText || ''), el('span', '', dot.waitsText || ''));
+    parts.push(el('p', 'tl-preview-who', dot.whoText || ''), step, el('p', 'tl-preview-hint', how === 'pointer' ? T.previewPointer : T.previewKeyboard));
+    previewBox.replaceChildren(...parts);
+  }
+  function showPreview(id, how) {
+    clearTimeout(hoverTimer); hoverTimer = undefined;
+    clearTimeout(leaveTimer); leaveTimer = undefined;
+    const c = board.cardData(id);
+    const dot = drawn && drawn.dotOf.get(id);
+    if (!c || !dot || !drawn.boxes.has(id) || (open && open.id === id)) return;
+    shownPreview = { id, how };
+    attr(previewBox, 'data-id', id);
+    fillPreview(c, dot, how);
+    showLayer(previewBox, true);
+    putLayer(previewBox, drawn.boxes.get(id), PREVIEW.width, (view) => (view.height + 2 * LAYER.gap) / 2, PREVIEW.estimate);
+  }
+  /** Closes the preview; for 600 ms after, the next dot's preview opens with no delay. */
+  function hidePreview() {
+    clearTimeout(hoverTimer); hoverTimer = undefined;
+    clearTimeout(leaveTimer); leaveTimer = undefined;
+    if (!shownPreview) return;
+    shownPreview = undefined;
+    showLayer(previewBox, false);
+    attr(previewBox, 'data-id', null);
+    warm = true;
+    clearTimeout(warmTimer);
+    warmTimer = setTimeout(() => { warm = false; warmTimer = undefined; }, PREVIEW.warm);
+  }
+  /** After a draw the preview follows its dot, or closes when its dot is gone. */
+  function followPreview() {
+    if (!shownPreview) return;
+    const id = shownPreview.id;
+    if (!drawn.boxes.has(id) || !drawn.matching(id) || !dotButton(id) || (open && open.id === id)) { hidePreview(); return; }
+    const c = board.cardData(id);
+    fillPreview(c, drawn.dotOf.get(id), shownPreview.how);
+    putLayer(previewBox, drawn.boxes.get(id), PREVIEW.width, (view) => (view.height + 2 * LAYER.gap) / 2, PREVIEW.estimate);
+  }
+  function pointerIn(id) {
+    hoverId = id;
+    clearTimeout(leaveTimer); leaveTimer = undefined;
+    applyEmphasis();
+    if ((open && open.id === id) || (shownPreview && shownPreview.id === id)) return;
+    clearTimeout(hoverTimer); hoverTimer = undefined;
+    if (shownPreview || warm) showPreview(id, 'pointer');
+    else hoverTimer = setTimeout(() => { hoverTimer = undefined; if (hoverId === id) showPreview(id, 'pointer'); }, PREVIEW.delay);
+  }
+  function pointerOut(id) {
+    if (hoverId === id) hoverId = undefined;
+    clearTimeout(hoverTimer); hoverTimer = undefined;
+    applyEmphasis();
+    if (shownPreview && shownPreview.id === id && shownPreview.how === 'pointer') {
+      clearTimeout(leaveTimer);
+      leaveTimer = setTimeout(() => { leaveTimer = undefined; hidePreview(); }, PREVIEW.linger);
+    }
+  }
+  function focusIn(id) {
+    focusId = id;
+    applyEmphasis();
+    // Focus coming back from the card, the menu or the drawer does not pop the preview up again.
+    if (quiet || (open && open.id === id)) return;
+    showPreview(id, 'keyboard');
+  }
+  function focusOut(id) {
+    if (focusId === id) focusId = undefined;
+    applyEmphasis();
+    if (shownPreview && shownPreview.id === id) hidePreview();
+  }
+  /** Emphasises the in and out lines of one card: the hovered dot, else the focused dot, else the open card (D-07). Other lines stay at rest. */
+  function applyEmphasis() {
+    const id = hoverId || (focusId && dotButton(focusId) ? focusId : undefined) || (open ? open.id : undefined);
+    for (const p of Array.from(lines.children)) {
+      const on = id !== undefined && (p.getAttribute('data-from') === id || p.getAttribute('data-to') === id);
+      if (p.classList.contains('emphasis') !== on) p.classList.toggle('emphasis', on);
+    }
+  }
+  // Escape on a dot backs out one level: the card, else the preview (the menu takes its own Escape).
+  list.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    if (!e.target || !e.target.closest || !e.target.closest('button.tl-dot, button.tl-folded, button.tl-more')) return;
+    if (open) { e.preventDefault(); closeCard(false); return; }
+    if (shownPreview) { e.preventDefault(); hidePreview(); }
+  });
+  // A width change re-places the card and the preview (the drawing itself redraws on the board's breakpoint).
+  if (typeof window.ResizeObserver === 'function') {
+    new window.ResizeObserver(() => {
+      if (!drawn || !scroll.isConnected) return;
+      if (open && drawn.boxes.has(open.id)) placeCard(drawn.boxes.get(open.id));
+      if (shownPreview && drawn.boxes.has(shownPreview.id)) putLayer(previewBox, drawn.boxes.get(shownPreview.id), PREVIEW.width, (view) => (view.height + 2 * LAYER.gap) / 2, PREVIEW.estimate);
+    }).observe(scroll);
   }
   list.addEventListener('click', (e) => {
     const b = e.target && e.target.closest ? e.target.closest('button.tl-dot') : null;
