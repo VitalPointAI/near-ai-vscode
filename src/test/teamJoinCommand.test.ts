@@ -9,6 +9,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import test from 'node:test';
+import { deriveProfileId } from '../domain/auth';
+import { AuthService } from '../services/auth';
+import { isTeamProfileId } from '../services/profileIndex';
+import { ProfileStore } from '../services/profileStore';
 import { pushCodeBranch } from '../team/enable';
 import { parseInviteBundle } from '../team/inviteBundle';
 import { readTeamFile } from '../team/teamFile';
@@ -343,7 +347,17 @@ test('a team without an organization: one pick offers Paste your own key, Use a 
     const box = stub.inputRequests[2];
     assert.equal(box?.password, true, 'the key box is masked');
     assert.match(box?.prompt ?? '', /Paste your own NEAR AI API key/);
-    assert.equal(await activeProfileOf(rig, rig.dev), teamProfileId(teamIdOf(rig)), 'the checked key is this project\'s profile');
+    // D-21 as amended by the owner in the 0.6.4 re-test (2026-11-05): the pasted key is the person's own key, so the checked key becomes their own
+    // profile 'My NEAR AI key' (saved-profile list, kept on removal, personal spend), never the team key profile.
+    const active = await activeProfileOf(rig, rig.dev);
+    assert.equal(active, deriveProfileId(b, 'My NEAR AI key'), 'the checked key is this project\'s profile, the person\'s own');
+    assert.equal(isTeamProfileId(active ?? ''), false, 'not a team key profile');
+    assert.notEqual(active, teamProfileId(teamIdOf(rig)));
+    const ownProfile = await new ProfileStore(b, new AuthService(rig.dev.secrets)).getActiveProfile();
+    assert.equal(ownProfile?.displayName, 'My NEAR AI key');
+    const joined = messages().find((said) => said.startsWith('You joined '));
+    assert.ok(joined?.endsWith(' Your NEAR AI key is now this project\'s profile.'), messages().join(' | '));
+    assert.equal(messages().some((said) => /team key/i.test(said)), false, `the own key is never called a team key: ${messages().join(' | ')}`);
     assert.ok(!messages().some((said) => said.startsWith('No API key was added')), messages().join(' | '));
     assert.equal(JSON.stringify([stub.notifications, outputLines()]).includes(ownKey), false, 'the key is never shown or written');
     assert.deepEqual(stub.externalCommands.filter((entry) => entry.command === 'nearAi.useSavedProfile'), []);

@@ -9,7 +9,9 @@ import { DEFAULT_INVITE_TTL_SECONDS, INVITE_SKEW_SECONDS, memberAttention } from
 import { teamMaterializer } from '../domain/team/materialize';
 import { defaultTeamPolicy } from '../domain/team/policy';
 import type { GenesisAnchor, TeamFile, TeamState } from '../domain/team/types';
+import { deriveProfileId } from '../domain/auth';
 import { AuthService } from '../services/auth';
+import { isTeamProfileId } from '../services/profileIndex';
 import { ProfileStore } from '../services/profileStore';
 import { TeamLog, buildGenesisEvents } from '../team/eventLog';
 import type { TeamSigner } from '../team/eventLog';
@@ -502,8 +504,17 @@ test('a team with no NEAR organization checks a pasted key with check_api_key on
       const calls = fake.requests.slice(before);
       assert.ok(calls.length >= 1);
       assert.ok(calls.every((call) => call.path === '/v1/check_api_key' && call.auth === 'api-key'));
-      const active = await new ProfileStore(joiner.projectRoot, new AuthService(joiner.secrets)).getActiveSelection();
-      assert.equal(active?.profileId, teamProfileId(seed.teamId));
+      // D-21 as amended by the owner in the 0.6.4 re-test (2026-11-05): a key the person pastes at Join is their own key, so it becomes their own
+      // profile 'My NEAR AI key' (saved-profile list, kept on removal, personal spend), never the team key profile.
+      const store = new ProfileStore(joiner.projectRoot, new AuthService(joiner.secrets));
+      const active = await store.getActiveSelection();
+      assert.equal(active?.profileId, deriveProfileId(joiner.projectRoot, 'My NEAR AI key'));
+      assert.equal(isTeamProfileId(active?.profileId ?? ''), false, 'not a team key profile');
+      assert.notEqual(active?.profileId, teamProfileId(seed.teamId));
+      const profile = await store.getActiveProfile();
+      assert.equal(profile?.displayName, 'My NEAR AI key');
+      assert.equal(profile?.organization, 'org-keys', 'the organization is the one NEAR AI named in the key check');
+      assert.equal(profile?.validation.status, 'valid');
       // Nothing about the key reached the log, the notices or the stored join state.
       assert.equal(everyObject(fixture.remote).includes(Buffer.from(secret)), false);
       assert.equal(result.notices.join(' ').includes(secret), false);
@@ -531,8 +542,13 @@ test('a rejected pasted key or none at all leaves the join done and says so plai
       assert.equal(rejected.key, 'skipped');
       assert.ok(rejected.notices.includes(NO_ORG_NOTICE));
       assert.ok(rejected.notices.some((notice) => /did not accept/i.test(notice)));
+      // The 0.6.4 re-test: the words are about the person's own key, then the existing next step.
+      assert.ok(rejected.notices.includes('NEAR AI did not accept this key. Check it and try again. You are on the team; add your own NEAR AI API key from the NEAR AI settings.'), rejected.notices.join(' | '));
       assert.equal(rejected.notices.join(' ').includes('sk-not-a-real-key'), false);
-      assert.equal(await new ProfileStore(joinerB.projectRoot, new AuthService(joinerB.secrets)).getActiveSelection(), undefined);
+      const refusedStore = new ProfileStore(joinerB.projectRoot, new AuthService(joinerB.secrets));
+      assert.equal(await refusedStore.getActiveSelection(), undefined);
+      assert.deepEqual(await refusedStore.list(), [], 'a refused key leaves no profile behind');
+      assert.equal([...joinerB.secrets.values.values()].some((value) => value.includes('sk-not-a-real-key')), false, 'a refused key is not stored');
 
       const joinerC = await joinerOn(fixture, 'c', seed);
       const none = await joinTeam(joinInput(joinerC, await readyFor(joinerC, two.bundle), { nearBaseUrl: fake.baseUrl, pasteOwnKey: async () => undefined }));
