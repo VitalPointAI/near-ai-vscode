@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62.1-03-PLAN.md
-last_updated: "2026-11-04T23:43:53.408Z"
+stopped_at: Completed 62.1-07-PLAN.md
+last_updated: "2026-11-05T00:10:44.231Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 0a6f9feea5f2a284e85a47b0f1a425c78292fe7f
+state_head: 34177b6cf68600c814422490c7c80a0d87415d63
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 73
+  completed_plans: 74
   percent: 11
 ---
 
@@ -127,6 +127,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 62.1 P01 | 29min | 3 tasks | 7 files |
 | Phase 62.1 P02 | 13min | 3 tasks | 6 files |
 | Phase 62.1 P03 | 26min | 3 tasks | 8 files |
+| Phase 62.1 P07 | 22min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -296,6 +297,11 @@ Recent decisions affecting current work:
 - [Phase 62.1]: 62.1-03: horizontal uses one rail height, Now row and axis for every drawn band, so the axis is one straight line
 - [Phase 62.1]: 62.1-03: the band holding the Now marker never folds; drawn horizontal bands are at least 368 px
 - [Phase 62.1]: 62.1-03: in Timeline every milestone is shown (Milestone choice is Columns only) and an empty board keeps row 2 for the View switch
+- [Phase 62.1]: 62.1-07: a sticky milestone header held at the scroller edge hides what scrolls under it on purpose; the probe leaves it out of overlap and Now pill checks and rule 6 guards the focused dot
+- [Phase 62.1]: 62.1-07: chips and ID labels inside their own dot box are judged with the box, so one collision gives one sentence
+- [Phase 62.1]: 62.1-07: in Columns the layout report has no timeline key (reads as null), keeping the 62-16 keys; in Timeline the board's sideways and first-screen card rules give way to timeline rule 5 and the firstScreen facts
+- [Phase 62.1]: 62.1-07: a glyph is judged against its mark's fill when the mark is filled, else against the canvas; contrast reads rgb, rgba and color(srgb) and skips unknown colours
+- [Phase 62.1]: 62.1-07: pressKey sends modifiers only when asked and no text while Ctrl is held
 
 ### Pending Todos
 
@@ -317,8 +323,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04T23:43:52.980Z
-Stopped at: Completed 62.1-03-PLAN.md
+Last session: 2026-11-05T00:10:43.794Z
+Stopped at: Completed 62.1-07-PLAN.md
 Resume file: None
 
 ## Notes
