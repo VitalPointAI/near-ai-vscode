@@ -541,7 +541,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
   }
 }
 
-const LEADING_CD = /^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/;
+const LEADING_CD = /^cd\s+(?:--\s+)?(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/;
 const LEADING_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s;&|]*)\s+/;
 
 /**
@@ -572,7 +572,8 @@ export function loopActionKey(call: ToolCall): string {
 // Matched against a loop key, not the raw tool call: loopActionKey has already parsed the JSON
 // arguments into "Bash <command>" and normalizeShellCommand has removed any leading `cd <dir> &&`
 // (or `;`), so `cd /a/b && pwd` arrives here as "Bash pwd".
-const NAVIGATION_ONLY = /^Bash (?:cd(?:\s+(?:"[^"$`]*"|'[^']*'|[^\s;&|$`<>()]+))?|pwd)\s*;?$/;
+// Bash is the only tool that runs shell commands (on every system), so no other tool name is needed.
+const NAVIGATION_ONLY = /^Bash (?:cd(?:\s+--)?(?:\s+(?:"[^"$`]*"|'[^']*'|[^\s;&|$`<>()]+))?|pwd)\s*;?$/;
 
 /** Whether a loop key is only a change of folder (`cd <dir>`, a bare `cd`) or `pwd`, which the loop guard ignores. */
 export function isNavigationOnly(key: string): boolean {

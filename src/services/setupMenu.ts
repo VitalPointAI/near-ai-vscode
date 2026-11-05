@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { redactSecrets } from '../domain/redaction';
 import { buildSetupMenu, collectSetupContext, projectHasTeam, registerSetupFacts, SETUP_STEPS, START_CHATTING } from './setupSteps';
 import { webSearchProvider } from './webSearchSetup';
 
@@ -52,6 +53,9 @@ export async function offerNextStep(_host: SetupMenuHost, profileName: string): 
   void vscode.window.showInformationMessage(`NEAR AI is ready for “${profileName}”. Pick a model and start chatting.`, REVIEW_PROJECT_TEAM, MORE_SETUP_STEPS).then(async (choice) => {
     if (choice === REVIEW_PROJECT_TEAM) await vscode.commands.executeCommand('nearAi.manageTeams');
     if (choice === MORE_SETUP_STEPS) await vscode.commands.executeCommand(PROJECT_SETUP_COMMAND);
+  }).then(undefined, (error: unknown) => {
+    // A step that fails says so, without a key or token in the message.
+    void vscode.window.showErrorMessage(redactSecrets(error instanceof Error ? error.message : String(error)));
   });
 }
 

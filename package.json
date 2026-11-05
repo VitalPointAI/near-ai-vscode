@@ -127,6 +127,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.useSavedProfile",
+        "title": "Use a Saved Profile",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.emergencyStop",
         "title": "Emergency Stop",
         "category": "NEAR AI",

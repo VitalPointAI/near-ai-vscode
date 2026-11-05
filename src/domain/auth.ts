@@ -30,6 +30,11 @@ export interface OrganizationProfile {
   createdAt: string;
   updatedAt: string;
   validation: ProfileValidation;
+  /**
+   * A profile reused from another project: its key stays where that project saved it and is read by reference through this
+   * scope, never copied. The copy keeps the original's profileId.
+   */
+  keySource?: { projectId: string; profileId: string };
 }
 
 export interface ProjectCredentialScope {

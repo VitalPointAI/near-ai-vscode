@@ -2,9 +2,11 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { redactSecrets } from '../domain/redaction';
 import { AuthMode, isSecureEndpoint } from '../domain/config';
-import { ActiveProfileSelection, AUTH_PROFILE_VERSION, OrganizationProfile, ProviderKind, localKeyScope, ProfileValidation, ProjectCredentialScope, createProjectCredentialScope, isProfileId } from '../domain/auth';
+import { ActiveProfileSelection, AUTH_PROFILE_VERSION, OrganizationProfile, PROJECT_ID_PATTERN, PROJECT_SCOPE_VERSION, ProviderKind, localKeyScope, ProfileValidation, ProjectCredentialScope, createProjectCredentialScope, isProfileId } from '../domain/auth';
 import { AuthService } from './auth';
 import { validateNearAiProvider } from './providerFactory';
+import { dropCopyLink, findSavedProfile, isLinkedCopy, isTeamProfileId, recordCopyLink, recordProjectProfiles } from './profileIndex';
+import type { SavedProfileEntry } from './profileIndex';
 
 export interface ProfileStoreFileSystem {
   mkdir(directory: string, options: { recursive: true }): Promise<void>;
@@ -22,6 +24,9 @@ const defaultFileSystem: ProfileStoreFileSystem = {
 
 const PROFILE_STORE_VERSION = 1 as const;
 const MAX_PROFILES = 50;
+const SOURCE_UNAVAILABLE = 'That saved profile is no longer available. Set up a new profile or choose another.';
+const SOURCE_REMOVED = 'The saved profile this one uses was removed. Set up a new profile or choose another.';
+const KEY_ELSEWHERE = 'This profile uses a key saved in another project. Set up a new profile to use a different key.';
 
 export interface CreateOrganizationProfileInput {
   profileId: string;
@@ -109,7 +114,14 @@ export class ProfileStore {
     return profile ? clone(profile) : undefined;
   }
 
+  /**
+   * The SecretStorage scope of a profile's key. A profile reused from another project (chosen through useSavedProfile on this
+   * computer) reads that project's key by reference; anything else, including a reference written into the profile file by hand,
+   * reads this project's own scope.
+   */
   public getScope(profileId: string): ProjectCredentialScope {
+    const source = this.linkedSource(profileId);
+    if (source) return { version: PROJECT_SCOPE_VERSION, projectId: source.projectId, profileId: source.profileId };
     return createProjectCredentialScope(this.projectIdentity, profileId);
   }
 
@@ -156,13 +168,16 @@ export class ProfileStore {
     if (!this.auth) throw new Error('An authentication service is required to save a profile credential.');
     const profile = await this.get(profileId);
     if (!profile) throw new Error('The requested profile was not found.');
+    if (profile.keySource) throw new Error(KEY_ELSEWHERE);
     await this.auth.saveScopedApiKey(this.getScope(profileId), apiKey, profile.baseUrl);
     return this.markValidationStale(profileId);
   }
 
   public async saveProfileRefreshToken(profileId: string, refreshToken: string): Promise<OrganizationProfile> {
     if (!this.auth) throw new Error('An authentication service is required to save a profile credential.');
-    if (!await this.get(profileId)) throw new Error('The requested profile was not found.');
+    const profile = await this.get(profileId);
+    if (!profile) throw new Error('The requested profile was not found.');
+    if (profile.keySource) throw new Error(KEY_ELSEWHERE);
     await this.auth.saveScopedRefreshToken(this.getScope(profileId), refreshToken);
     return this.markValidationStale(profileId);
   }
@@ -183,6 +198,8 @@ export class ProfileStore {
    * provider, and makes it this project's active profile when validation passes.
    */
   public async configure(input: CreateOrganizationProfileInput, apiKey: string, localApiKey = ''): Promise<OrganizationProfile> {
+    // Setting up a reused profile again gives this project its own profile and key; the original project's key is never written.
+    if ((await this.get(input.profileId))?.keySource) await this.remove(input.profileId);
     if (await this.get(input.profileId)) await this.update(input);
     else await this.create(input);
     if (input.provider === 'hybrid') {
@@ -199,14 +216,42 @@ export class ProfileStore {
     return validated;
   }
 
+  /**
+   * Reuses a profile set up in another project on this computer: copies its metadata into this project and reads its key by reference
+   * from where that project stored it. The key is never read out here. The copy is checked and becomes active only when it passes.
+   */
+  public async useSavedProfile(entry: SavedProfileEntry): Promise<OrganizationProfile> {
+    await this.load();
+    if (entry.projectId === this.projectId) throw new Error('That profile is already in this project. Choose it from the list instead.');
+    const source = findSavedProfile(entry.projectId, entry.profileId);
+    if (!source || isTeamProfileId(source.profileId)) throw new Error(SOURCE_UNAVAILABLE);
+    const existing = this.ledger.profiles.find((profile) => profile.profileId === source.profileId);
+    if (existing && existing.keySource?.projectId !== source.projectId) throw new Error('This project already has a profile with that name. Choose it from the list instead.');
+    const now = this.clock();
+    const profile = normalizeProfile({
+      version: AUTH_PROFILE_VERSION, profileId: source.profileId, displayName: source.displayName, organization: source.organization, provider: source.provider,
+      baseUrl: source.baseUrl, ...(source.localBaseUrl ? { localBaseUrl: source.localBaseUrl } : {}), authMode: source.authMode,
+      keySource: { projectId: source.projectId, profileId: source.profileId }, createdAt: existing?.createdAt ?? now, updatedAt: now, validation: { status: 'pending' }
+    });
+    if (!profile) throw new Error('Profile metadata is invalid.');
+    await recordCopyLink(this.projectId, profile.profileId, source.projectId);
+    this.ledger.profiles = [profile, ...this.ledger.profiles.filter((candidate) => candidate.profileId !== profile.profileId)].slice(0, MAX_PROFILES);
+    await this.persist();
+    const validated = await this.validate(profile.profileId);
+    if (validated.validation.status === 'valid') await this.select(profile.profileId);
+    return validated;
+  }
+
   public async remove(profileId: string): Promise<boolean> {
     await this.load();
     if (!isProfileId(profileId)) throw new Error('A stable profile ID is required.');
-    const before = this.ledger.profiles.length;
+    const removed = this.ledger.profiles.find((profile) => profile.profileId === profileId);
+    if (!removed) return false;
     this.ledger.profiles = this.ledger.profiles.filter((profile) => profile.profileId !== profileId);
-    if (before === this.ledger.profiles.length) return false;
     if (this.ledger.active?.profileId === profileId) this.ledger.active = undefined;
-    if (this.auth) {
+    // A reused profile removes only this project's copy: the key belongs to the project it came from.
+    if (removed.keySource) await dropCopyLink(this.projectId, profileId);
+    else if (this.auth) {
       await this.auth.removeScopedCredentials(this.getScope(profileId));
       await this.auth.removeScopedCredentials(localKeyScope(this.getScope(profileId)));
     }
@@ -219,6 +264,11 @@ export class ProfileStore {
     const profile = this.ledger.profiles.find((candidate) => candidate.profileId === profileId);
     if (!profile) throw new Error('The requested profile was not found.');
     const probe = validator ?? this.validator ?? this.defaultValidator.bind(this);
+    if (profile.keySource) {
+      // A copy works only through a source the person chose on this computer, and only while that source still has its key.
+      if (!this.linkedSource(profileId)) return this.setValidation(profileId, { status: 'invalid', error: SOURCE_UNAVAILABLE });
+      if (this.auth && profile.provider !== 'local' && !await this.hasStoredKey(this.getScope(profileId))) return this.setValidation(profileId, { status: 'invalid', error: SOURCE_REMOVED });
+    }
     try {
       await probe(clone(profile), this.getScope(profileId));
       return this.setValidation(profileId, { status: 'valid', validatedAt: this.clock() });
@@ -233,6 +283,7 @@ export class ProfileStore {
     await this.load();
     const profile = this.ledger.profiles.find((candidate) => candidate.profileId === profileId);
     if (!profile) throw new Error('The requested profile was not found.');
+    if (profile.keySource) throw new Error(KEY_ELSEWHERE);
     const imported = await this.auth.importLegacyCredentials(this.getScope(profileId), confirmed);
     const pending = await this.setValidation(profileId, { status: 'pending' });
     return { profile: pending, ...imported };
@@ -241,6 +292,12 @@ export class ProfileStore {
   public async exportMetadata(): Promise<ProfileMetadataExport> {
     await this.load();
     return { version: PROFILE_STORE_VERSION, projectId: this.projectId, profiles: this.ledger.profiles.map(clone), activeProfileId: this.ledger.active?.profileId };
+  }
+
+  /** Whether a key or token is stored for the scope; the value itself is not kept. */
+  private async hasStoredKey(scope: ProjectCredentialScope): Promise<boolean> {
+    if (!this.auth) return false;
+    return Boolean(await this.auth.getScopedApiKey(scope)) || Boolean(await this.auth.getScopedRefreshToken(scope));
   }
 
   private async defaultValidator(profile: OrganizationProfile, scope: ProjectCredentialScope): Promise<void> {
@@ -265,12 +322,18 @@ export class ProfileStore {
       const parsed = JSON.parse(await this.fileSystem.readFile(this.filePath, 'utf8')) as Partial<ProfileLedger> & { profiles?: unknown[]; activeProfileId?: unknown };
       if (parsed.version !== PROFILE_STORE_VERSION && parsed.version !== 0 && parsed.version !== undefined) throw new Error('Unsupported profile ledger.');
       const profiles = (Array.isArray(parsed.profiles) ? parsed.profiles : []).map((value) => normalizeProfile(value)).filter((value): value is OrganizationProfile => Boolean(value)).slice(0, MAX_PROFILES);
+      // A copy that was not chosen on this computer is never trusted as checked: it must pass the check (which it cannot) first.
+      for (const profile of profiles) {
+        if (profile.keySource && profile.validation.status === 'valid' && !isLinkedCopy(this.projectId, profile.profileId, profile.keySource.projectId)) profile.validation = { status: 'stale' };
+      }
       const activeProfileId = typeof parsed.activeProfileId === 'string' ? parsed.activeProfileId : (parsed.active?.profileId);
       const active = isProfileId(activeProfileId) && profiles.some((profile) => profile.profileId === activeProfileId) ? { version: AUTH_PROFILE_VERSION, projectId: this.projectId, profileId: activeProfileId, selectedAt: typeof parsed.active?.selectedAt === 'string' ? parsed.active.selectedAt : this.clock() } : undefined;
       this.ledger = { version: PROFILE_STORE_VERSION, projectId: this.projectId, profiles, active };
       if (parsed.version !== PROFILE_STORE_VERSION || parsed.projectId !== this.projectId) await this.persist();
-    } catch {
+      else await this.recordIndex();
+    } catch (error) {
       this.ledger = { version: PROFILE_STORE_VERSION, projectId: this.projectId, profiles: [] };
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') await this.recordIndex();
     }
   }
 
@@ -284,6 +347,22 @@ export class ProfileStore {
       await this.fileSystem.rename(temporary, this.filePath);
     });
     await this.writeQueue;
+    await this.recordIndex();
+  }
+
+  /** Keeps the computer-wide list of saved profiles in step with this project (metadata only; nothing when the list is not set up). */
+  private async recordIndex(): Promise<void> {
+    try {
+      await recordProjectProfiles(this.projectId, path.basename(this.workspaceRoot), this.ledger.profiles);
+    } catch { /* the list is a convenience: a failure never blocks this project's profiles */ }
+  }
+
+  /** The original scope of a reused profile, only when the person chose it through useSavedProfile on this computer. */
+  private linkedSource(profileId: string): { projectId: string; profileId: string } | undefined {
+    if (!this.loaded) return undefined;
+    const profile = this.ledger.profiles.find((candidate) => candidate.profileId === profileId);
+    const source = profile?.keySource;
+    return source && isLinkedCopy(this.projectId, profileId, source.projectId) ? source : undefined;
   }
 }
 
@@ -302,8 +381,21 @@ function normalizeProfile(value: unknown): OrganizationProfile | undefined {
   if (!authMode) return undefined;
   const validation = normalizeValidation(source.validation ?? { status: source.validationStatus });
   if (!validation) return undefined;
+  // A reused profile names the original scope in exactly this shape, for the same profile id; anything else is dropped, never resolved.
+  const keySource = source.keySource === undefined ? undefined : normalizeKeySource(source.keySource, source.profileId);
+  if (source.keySource !== undefined && !keySource) return undefined;
   const now = new Date(0).toISOString();
-  return { version: AUTH_PROFILE_VERSION, profileId: source.profileId, displayName, organization, provider, baseUrl, ...(localBaseUrl ? { localBaseUrl } : {}), authMode, createdAt: safeTimestamp(source.createdAt) ?? now, updatedAt: safeTimestamp(source.updatedAt) ?? now, validation };
+  return { version: AUTH_PROFILE_VERSION, profileId: source.profileId, displayName, organization, provider, baseUrl, ...(localBaseUrl ? { localBaseUrl } : {}), authMode, createdAt: safeTimestamp(source.createdAt) ?? now, updatedAt: safeTimestamp(source.updatedAt) ?? now, validation, ...(keySource ? { keySource } : {}) };
+}
+
+function normalizeKeySource(value: unknown, profileId: string): { projectId: string; profileId: string } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const keys = Object.keys(source).sort();
+  if (keys.length !== 2 || keys[0] !== 'profileId' || keys[1] !== 'projectId') return undefined;
+  if (typeof source.projectId !== 'string' || !PROJECT_ID_PATTERN.test(source.projectId)) return undefined;
+  if (!isProfileId(source.profileId) || source.profileId !== profileId || isTeamProfileId(source.profileId)) return undefined;
+  return { projectId: source.projectId, profileId: source.profileId };
 }
 
 function normalizeValidation(value: unknown): ProfileValidation | undefined {
