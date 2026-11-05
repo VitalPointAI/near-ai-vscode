@@ -381,7 +381,18 @@
     persist();
     if (old && typeof old.leave === 'function') old.leave();
     render();
+    // 62.1-06 (D-08, View switch): the incoming view fades in over 160 ms, and at once under reduced motion; timeline.js fades the timeline itself.
+    if (key === 'columns') fadeIn(layout === 'kanban' ? views.kanban : views.list);
     announce(VIEW_SAID[key] + (key === 'timeline' && narrow() ? ' ' + NARROW_SAID : ''));
+  }
+  let fadeTimer;
+  function fadeIn(node) {
+    let still = false;
+    try { still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (err) { still = false; }
+    if (still || !node) return;
+    node.classList.add('tl-view-in');
+    clearTimeout(fadeTimer);
+    fadeTimer = setTimeout(() => node.classList.remove('tl-view-in'), 160);
   }
   const narrow = () => layout === 'list';
   /** The direction the timeline is drawn in: vertical under 520 px, else the saved choice. */
