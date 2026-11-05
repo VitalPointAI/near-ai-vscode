@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-32-PLAN.md
-last_updated: "2026-11-05T17:08:31.054Z"
+stopped_at: Completed 61-34-PLAN.md
+last_updated: "2026-11-05T20:45:00.000Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: a89171e204e19bcad4537cdda46f13560e62404f
+state_head: 87f3d04aafd24dbd20f5d1f0f4cabd2eac33767d
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 86
-  completed_plans: 80
+  completed_plans: 81
   percent: 11
 ---
 
@@ -134,6 +134,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 62.1 P08 | 60min | 3 tasks | 12 files |
 | Phase 62.1 P09 | 45min | 3 tasks | 12 files |
 | Phase 61 P32 | 18min | 3 tasks | 16 files |
+| Phase 61 P34 | 8min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -330,6 +331,10 @@ Recent decisions affecting current work:
 - [Phase 62.1]: 62.1-09: owner accepted (2026-11-05, relayed) probe rule 12's held-header reading and the teammate step's reopen of plan:62-27; the ResizeObserver notice stays deferred
 - [Phase 61]: 61-32: a key pasted at Join is installed by installOwnKey as the person's own profile 'My NEAR AI key' (organization from check_api_key), never the team key profile; installTeamKey only for lead-delivered team keys
 - [Phase 61]: 61-32: the Team section host turns each Team Mode profile change (handle.onProfileChanged from the member commands, session.onProfileChanged for a delivered key or the own-removal clean-up) into exactly one refresh-status; the handle does not forward session events
+- [Phase 61]: 61-34: ProfileStore.savedKeyHere answers a boolean only (an API key or sign-in token under the entry's own scope; a local-only profile counts as here), so Use a saved profile lists an entry whose key is not here as unavailable and never uses it; 61-35 builds on this check
+- [Phase 61]: 61-34: a reused profile whose source is still listed but has no key here says 'Its key is not on this computer or browser...' instead of 'was removed'; a removed source keeps its old sentence
+- [Phase 61]: 61-34: useSavedProfile may replace this project's own profile of the same name only when that profile has no key, sign-in token or local key here, which is the tested way back after a folder move; the stable project id stays deferred
+- [Phase 61]: 61-34: a web UI is told once, with Got it, to keep one tab of the editor per browser profile; the shown flag is written as soon as the notice is shown and cleared if showing it failed, so a notice that could not be shown is retried next start (owner decision C)
 
 ### Pending Todos
 
@@ -351,8 +356,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T17:08:30.513Z
-Stopped at: Completed 61-32-PLAN.md
+Last session: 2026-11-05T20:45:00.000Z
+Stopped at: Completed 61-34-PLAN.md
 Resume file: None
 
 ## Notes
