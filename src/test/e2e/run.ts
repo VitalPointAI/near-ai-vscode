@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -215,14 +215,20 @@ async function main(): Promise<void> {
 // The timeline window (62.1-08): the board's own launch shape on a fresh copy of this repository's committed roadmap, with its own user data (a
 // first open, so the timeline's first screen is the Now-centred one), its own screens folder (emptied at the start of each timeline run, so frames
 // from an earlier run are never mixed in) and its own DevTools port on 127.0.0.1 for real mouse and keyboard input (T-62.1-18). The port is a free
-// one chosen now and closes with this VS Code. NEAR_AI_E2E_TIMELINE_PART (the screenshot parts of 62.1-09) is passed on when given.
+// one chosen now and closes with this VS Code. NEAR_AI_E2E_TIMELINE_PART (the screenshot parts of 62.1-09, horizontal or vertical) is passed on when
+// given; a part replaces only its own frames (tl-h-* or tl-v-*) and its own index file, so the two parts together leave the whole matrix (T-62.1-20).
 async function timelineWindow(launch: Launch, extensionDevelopmentPath: string): Promise<void> {
+  const part = process.env.NEAR_AI_E2E_TIMELINE_PART;
+  if (part !== undefined && part !== '' && part !== 'horizontal' && part !== 'vertical') throw new Error(`NEAR_AI_E2E_TIMELINE_PART is ${part}. Use horizontal or vertical.`);
   const { workspace, remote } = await prepareBoardProject(extensionDevelopmentPath);
   const screens = path.join(extensionDevelopmentPath, '.vscode-test', 'screens-timeline');
-  await rm(screens, { recursive: true, force: true });
+  if (part === undefined || part === '') await rm(screens, { recursive: true, force: true });
   await mkdir(screens, { recursive: true });
+  if (part !== undefined && part !== '') {
+    const own = (name: string): boolean => name === `index-${part}.json` || (name.startsWith(`tl-${part[0]}-`) && name.endsWith('.png'));
+    for (const name of (await readdir(screens)).filter(own)) await rm(path.join(screens, name), { force: true });
+  }
   const fbdir = process.env.NEAR_AI_E2E_FBDIR;
-  const part = process.env.NEAR_AI_E2E_TIMELINE_PART;
   const cdpPort = await freeLocalPort();
   await launch('timeline', workspace, await boardUserData(), {
     args: ['--force-device-scale-factor=1', `--remote-debugging-port=${cdpPort}`],

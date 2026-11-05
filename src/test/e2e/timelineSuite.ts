@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { NearAiTestApi } from '../../extension';
 import { connectCdp, mouseClick, mouseDrag, mouseMove, pressKey, webviewFrameRect, type CdpSession, type Point } from './cdp';
 import { fillScreen } from './x11Window';
+import { captureScreen, readXwd } from './xwdPng';
 
 // The timeline scenario (62.1-08, D-11): this repository's own committed roadmap on a test project (run.ts), the board switched to its Timeline view
 // in a real VS Code window on a hidden virtual screen, and every step measured by the page's layout probe (media/board/layout-probe.js, 62.1-07).
@@ -97,6 +98,55 @@ const HOLD_TEXT = 'Backlog (put on hold)';
 /** The frame budget (D-08): a 60 fps target, and a failure under 30 fps. */
 const FRAME_TARGET_MS = 17;
 const FRAME_FAIL_MS = 33;
+
+// ---- the screenshot matrix (62.1-09, D-11, D-13, D-14; UI-SPEC "Screenshot matrix" and its amendment) -------------------------------------------
+// Two parts, one per direction (NEAR_AI_E2E_TIMELINE_PART), so each run stays inside its time limit. A frame is the whole hidden screen, taken only
+// after a probe reading with no problem (T-62-79), and listed in the part's index file with what the owner should look at in it.
+type Part = 'horizontal' | 'vertical';
+type MatrixWidth = 480 | 900 | 1400 | 'full';
+const MATRIX_WIDTHS: MatrixWidth[] = [480, 900, 1400, 'full'];
+/** The four built-in theme kinds, the probe's theme field (the page's body class) for each, and the name the frames use (as the board's matrix). */
+const MATRIX_THEMES = [
+  { uiTheme: 'vs-dark', probe: 'dark', name: 'dark' },
+  { uiTheme: 'vs', probe: 'light', name: 'light' },
+  { uiTheme: 'hc-black', probe: 'high-contrast', name: 'hc' },
+  { uiTheme: 'hc-light', probe: 'high-contrast-light', name: 'hc-light' }
+] as const;
+type MatrixTheme = typeof MATRIX_THEMES[number];
+const themeName = (probeTheme: string): string => ({ dark: 'dark', light: 'light', 'high-contrast': 'hc', 'high-contrast-light': 'hc-light' } as Record<string, string>)[probeTheme] ?? (probeTheme || 'dark');
+const THEME_WORDS: Record<string, string> = { light: 'light', hc: 'high contrast dark', 'hc-light': 'high contrast light' };
+/** One line of index-horizontal.json or index-vertical.json: the frame, the part's direction and the one drawn, what the probe measured, and what to look at. */
+interface ScreenEntry {
+  file: string; theme: string; direction: Part; drawn: string; horizontalDisabled: boolean; askedWidth: MatrixWidth; reachedWidth: number; zoom: number;
+  view: string; problems: number; lookFor: string;
+}
+const EDGE_LOOK = (edge: string): string => `The card open on the dot nearest the ${edge} edge of the view: the whole card is on screen and readable, placed beside its dot away from that edge, and it covers neither its dot nor the Now label.`;
+const LOOK_FOR: Record<string, string> = {
+  rest: 'At rest on the first screen: milestones read as bands in order, phases as segments with their percent, every card is a small dot and no two dots touch, and the Now marker with its two lines of text is on screen, with the shade behind the finished steps.',
+  hover: 'The hover preview of a dot of the Now step: it sits beside its dot without covering it, and the lines into and out of that dot are lit.',
+  card: 'The card open on a dot of the Now step: the full card is readable, sits beside its dot inside the view, does not cover the Now label, and shows Move to... and Open details.',
+  'edge-right': EDGE_LOOK('right'), 'edge-bottom': EDGE_LOOK('bottom'), 'edge-left': EDGE_LOOK('left'), 'edge-top': EDGE_LOOK('top'),
+  folded: 'A finished earlier milestone folded into one tile: the tile reads its name, Finished and 100%, and comes before the current milestone.',
+  stack: 'A step with more cards than fit: 8 dots and a +n button in the ninth place, all apart and readable.',
+  cycle: 'Cards that wait for each other in a loop: the band shows the loop note in whole words, and the dots are in plan number order.',
+  nomatch: 'Ready and Blocked both on, which no card matches: the empty filter message with Clear filters is on top, and the dots stay in their places as faint rings.',
+  error: 'The timeline could not be drawn: the message reads clearly, with Show columns and Draw the timeline again as buttons.',
+  zoom50: 'Zoomed out to 50%: dots are closer together but never touch, and labels and percents stay readable. Check that the roadmap is not crowded.',
+  zoom200: 'Zoomed in to 200%: dots are farther apart and show their IDs. Check that the roadmap is not sparse.',
+  now: 'After Jump to now from far away: the Now marker is in the middle of the view with its two lines of text, the shade behind finished steps is clear, focus is on the first unfinished dot of the Now step, and the toolbar ring, the band percents and the phase bars agree.',
+  'now-moved': 'After a teammate\'s change moved the work: the Now marker and its two lines of text are at the new step, and the percents changed with it.'
+};
+function lookForOf(view: string, theme: string, horizontalDisabled: boolean): string {
+  const base = LOOK_FOR[view] ?? LOOK_FOR.rest;
+  const narrow = horizontalDisabled ? ' Under 520 px the timeline is drawn top to bottom and Horizontal is disabled, which is expected.' : '';
+  const themed = theme === 'dark' ? '' : ` In the ${THEME_WORDS[theme] ?? theme} theme, every dot, word, line and border reads clearly.`;
+  return `${base}${narrow}${themed}`;
+}
+/** A PNG's own width and height, from its IHDR chunk. */
+async function pngSize(file: string): Promise<{ width: number; height: number }> {
+  const png = await readFile(file);
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+}
 
 const centre = (b: Box): { x: number; y: number } => ({ x: (b.left + b.right) / 2, y: (b.top + b.bottom) / 2 });
 const overlaps = (a: Box, b: Box, pad = 0): boolean => a.left < b.right + pad && b.left < a.right + pad && a.top < b.bottom + pad && b.top < a.bottom + pad;
@@ -329,7 +379,150 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
     }
   };
 
-  return [
+  // ---- the screenshot frames (62.1-09) --------------------------------------------------------------------------------------------------------
+  const fbdir = process.env.NEAR_AI_E2E_FBDIR ?? '';
+  const screens = process.env.NEAR_AI_E2E_SCREENS ?? '';
+  const partEnv = process.env.NEAR_AI_E2E_TIMELINE_PART ?? '';
+  const part: Part | undefined = partEnv === 'horizontal' || partEnv === 'vertical' ? partEnv : undefined;
+  const letter = part === 'vertical' ? 'v' : 'h';
+  const index: ScreenEntry[] = [];
+  // The whole hidden screen as a PNG in screens-timeline, only after a reading with no problem (T-62-79), and one line in the part's index file.
+  // VS Code's notification toasts sit outside the page, so they are cleared first.
+  const photograph = async (file: string, view: string, asked: MatrixWidth, report: LayoutReport): Promise<void> => {
+    if (report.problems.length > 0) throw new Error(`No screenshot ${file}: the last reading found a problem.\n${problemsOf(report)}`);
+    assert.ok(part !== undefined && fbdir !== '' && screens !== '', 'a screenshot part has the framebuffer folder (NEAR_AI_E2E_FBDIR) and its screens folder');
+    const t = timelineOf(report);
+    await vscode.commands.executeCommand('notifications.clearAll');
+    await vscode.commands.executeCommand('notifications.hideToasts');
+    await sleep(400);
+    const out = path.join(screens, file);
+    await captureScreen(fbdir, out);
+    const screen = readXwd(await readFile(path.join(fbdir, 'Xvfb_screen0')));
+    assert.deepEqual(await pngSize(out), { width: screen.width, height: screen.height }, `${file} is the whole screen`);
+    const theme = themeName(report.theme);
+    index.push({
+      file, theme, direction: part, drawn: t.direction, horizontalDisabled: t.horizontalDisabled, askedWidth: asked, reachedWidth: report.width, zoom: t.zoom,
+      view, problems: report.problems.length, lookFor: lookForOf(view, theme, t.horizontalDisabled)
+    });
+    await writeFile(path.join(screens, `index-${part}.json`), `${JSON.stringify(index, null, 2)}\n`, 'utf8');
+    console.log(`(frame ${file}: ${t.direction}${t.horizontalDisabled ? ', Horizontal disabled' : ''} at ${report.width} px, zoom ${t.zoom}%, no problem)`);
+  };
+  // The built-in theme of a kind, chosen as the board's matrix chooses it (VS Code's own default for the kind when it is built in), applied to the
+  // window's fresh user settings only (run.ts gives every timeline run new user data), then the page's theme field must follow.
+  const applyTheme = async (theme: MatrixTheme): Promise<string> => {
+    const themes = vscode.extensions.all.filter((e) => e.id.startsWith('vscode.'))
+      .flatMap((e) => ((e.packageJSON as { contributes?: { themes?: Array<{ id?: string; label?: string; uiTheme?: string }> } }).contributes?.themes ?? []))
+      .filter((t) => t.uiTheme === theme.uiTheme)
+      .map((t) => t.id ?? t.label ?? '')
+      .filter((id) => id !== '');
+    const workbench = vscode.workspace.getConfiguration('workbench');
+    const preferred = ({ 'vs-dark': 'preferredDarkColorTheme', vs: 'preferredLightColorTheme', 'hc-black': 'preferredHighContrastColorTheme', 'hc-light': 'preferredHighContrastLightColorTheme' } as const)[theme.uiTheme];
+    const defaults = [theme.uiTheme === 'vs-dark' ? workbench.inspect<string>('colorTheme')?.defaultValue : undefined, workbench.inspect<string>(preferred)?.defaultValue];
+    const chosen = defaults.find((id): id is string => id !== undefined && themes.includes(id)) ?? themes.find((id) => id.startsWith('Default ')) ?? themes[0];
+    assert.ok(chosen !== undefined, `a built-in ${theme.uiTheme} theme exists`);
+    await vscode.workspace.getConfiguration('workbench').update('colorTheme', chosen, vscode.ConfigurationTarget.Global);
+    await settled(`the ${chosen} theme`, (r) => r.theme === theme.probe);
+    // The theme's colours reach the timeline's marks and lines a moment after the body class.
+    await sleep(500);
+    return chosen;
+  };
+  /** The first screen of the drawn direction (timeline.js firstScreen): the Now marker in the middle along the axis, at 0 across. */
+  const toFirstScreen = async (what: string): Promise<LayoutReport> => {
+    const r = await settled(what);
+    const t = timelineOf(r);
+    const s = t.scroller;
+    const line = t.now?.line;
+    assert.ok(s && line, 'the scroller and the Now marker are drawn');
+    const horizontal = t.direction === 'horizontal';
+    const left = horizontal ? Math.max(0, Math.round(s.scrollLeft + (line.left + line.right) / 2 - (s.rect.left + s.clientWidth / 2))) : 0;
+    const top = horizontal ? 0 : Math.max(0, Math.round(s.scrollTop + (line.top + line.bottom) / 2 - (s.rect.top + s.clientHeight / 2)));
+    await ask({ action: 'scroll', left, top });
+    return settled(`${what}, the first screen`);
+  };
+  /** The pointer is parked on empty canvas for a frame at rest (only cdp mouse moves ever hover anything). */
+  const park = async (report: LayoutReport): Promise<void> => {
+    await mouseMove(cdp!, await emptyPoint(report));
+    await sleep(300);
+  };
+  /** At rest: no card, no focus, the first screen, the pointer parked; the Now pill and a dot of the Now step on screen; then the frame. */
+  const restFrame = async (asked: MatrixWidth, theme: string): Promise<LayoutReport> => {
+    await noCard();
+    await act({ action: 'blur' });
+    await park(await toFirstScreen(`${asked} px in ${theme}`));
+    const report = await settled(`${asked} px at rest`, (r) => r.timeline?.preview === null && r.timeline.card === null);
+    const t = timelineOf(report);
+    if (asked === 480) {
+      assert.equal(t.direction, 'vertical', 'drawn vertical under 520 px');
+      assert.equal(t.horizontalDisabled, true, 'Horizontal is disabled under 520 px');
+    } else assert.equal(t.direction, part, `drawn ${part}`);
+    assert.equal(t.firstScreen.nowVisible, true, 'the Now pill is on the first screen');
+    assert.equal(t.firstScreen.nowStepDotVisible, true, 'a dot of the Now step is on the first screen');
+    await photograph(`tl-${letter}-${theme}-${asked}-rest.png`, 'rest', asked, report);
+    return report;
+  };
+  /** A real hover on the Now dot (brought into view first only when it is not), the preview beside it, then the frame. */
+  const hoverFrame = async (asked: MatrixWidth, theme: string, rest: LayoutReport): Promise<{ at: Point; id: string }> => {
+    const id = nowDotOf(latestModel());
+    let shown = rest;
+    const t0 = timelineOf(rest);
+    let dot = t0.dots.find((d) => d.id === id && d.rendered);
+    if (dot === undefined || t0.scroller === null || !within(dot.box, t0.scroller.rect, 4) || t0.headers.some((h) => overlaps(h.box, dot!.box))) ({ report: shown, dot } = await inView(id));
+    const away = await emptyPoint(shown);
+    const at = await aim(shown, dot.box, `the dot ${id}`);
+    await mouseMove(cdp!, away);
+    await sleep(200);
+    await mouseMove(cdp!, at, { from: away, steps: 8 });
+    await sleep(450);
+    const report = await settled('the preview shown', (r) => !!r.timeline?.preview);
+    const t = timelineOf(report);
+    const own = t.dots.find((d) => d.id === id)!;
+    assert.equal(t.preview!.dotId, id, 'the preview is the hovered dot\'s');
+    assert.equal(overlaps(t.preview!.box, own.box), false, 'the preview is not over its own dot');
+    await photograph(`tl-${letter}-${theme}-${asked}-hover.png`, 'hover', asked, report);
+    return { at, id };
+  };
+  /** A real click on the hovered dot opens its card inside the view, then the frame; a real Escape closes it with focus back on the dot. */
+  const cardFrame = async (asked: MatrixWidth, theme: string, at: Point, id: string, file = `tl-${letter}-${theme}-${asked}-card.png`, view = 'card'): Promise<void> => {
+    await mouseClick(cdp!, at);
+    await sleep(600);
+    const report = await settled('the card open', (r) => !!r.timeline?.card);
+    const t = timelineOf(report);
+    assert.equal(t.card!.dotId, id, 'the card is the clicked dot\'s');
+    assert.ok(t.scroller !== null && within(t.card!.box, t.scroller.rect), 'the card is inside the visible timeline area');
+    const own = t.dots.find((d) => d.id === id);
+    assert.ok(own === undefined || !overlaps(t.card!.box, own.box), 'the card is not over its own dot');
+    assert.ok(t.card!.buttons.some((b) => b.name.startsWith('Open details')), `the card has Open details (${t.card!.buttons.map((b) => b.name).join(', ')})`);
+    await photograph(file, view, asked, report);
+    await pressKey(cdp!, 'Escape');
+    await sleep(350);
+    const closed = await settled('the card closed', (r) => r.timeline?.card === null);
+    assert.equal(timelineOf(closed).focusedDot, id, 'Escape brings focus back to the dot');
+  };
+  /** One width of a theme's row: at rest, the hover preview and the card open, all on the Now dot. */
+  const widthRow = async (asked: MatrixWidth, theme: string): Promise<void> => {
+    const sized = await sizeTo(asked);
+    console.log(`(${theme} at ${asked}: the board is ${sized.width} px)`);
+    await sleep(600);
+    const rest = await restFrame(asked, theme);
+    const { at, id } = await hoverFrame(asked, theme, rest);
+    await cardFrame(asked, theme, at, id);
+  };
+  const frames: Array<[string, () => Promise<void>]> = [
+    ['frames, the tracer row: horizontal in dark at 1400 px at rest, with a hover preview and with the card open, each after a reading with no problem', async () => {
+      assert.equal(part, 'horizontal', 'the tracer row is in the horizontal part');
+      await applyTheme(MATRIX_THEMES[0]);
+      await widthRow(1400, 'dark');
+      await sizeTo('full');
+    }],
+    [`the ${part ?? 'screenshot'} index lists every frame of the part, one line per PNG, each with no problem and with what to look at`, async () => {
+      const listed = JSON.parse(await readFile(path.join(screens, `index-${part}.json`), 'utf8')) as ScreenEntry[];
+      const pngs = (await readdir(screens)).filter((f) => f.startsWith(`tl-${letter}-`) && f.endsWith('.png')).sort();
+      assert.deepEqual(listed.map((e) => e.file).sort(), pngs, 'one index line per PNG of the part');
+      assert.ok(listed.every((e) => e.problems === 0 && e.lookFor.length > 0), 'no frame with a problem, and each says what to look at');
+      console.log(`(${pngs.length} frames of the ${part} part in ${screens})`);
+    }]
+  ];
+  const setup: Array<[string, () => Promise<void>]> = [
     ['activates in the timeline project, a git project holding this repository\'s committed roadmap', async () => {
       api = (await extension().activate())!;
       assert.ok(api?.team, 'the test API carries the team handle');
@@ -446,7 +639,9 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
       const after = await settled('the bug added');
       assert.deepEqual(after.problems, [], problemsOf(after));
       console.log(`(the bug ${BUG} is a Ready dot at step ${(dot?.step ?? 0) + 1} of the board band; ${timelineOf(report).dots.length} dots drawn)`);
-    }],
+    }]
+  ];
+  const interaction: Array<[string, () => Promise<void>]> = [
     ['real keys, horizontal: Right and Down move along and across the steps, Home and End reach the milestone\'s ends, Enter opens the card, Escape brings focus back, M opens Move to..., and N goes to the Now dot and says the Now sentence', async () => {
       const model = latestModel();
       const now = model.timeline!.now!;
@@ -863,8 +1058,10 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
       } finally {
         if (tap.shape !== undefined || latestModel().timeline === undefined) { tap.shape = undefined; await repost((m) => m.timeline !== undefined).catch(() => undefined); }
       }
-    }],
-    // Last, whatever happened above (run() runs every step): the second client's folders go, and the run says how many (T-62.1-19).
+    }]
+  ];
+  // Last, whatever happened above (run() runs every step): the second client's folders go, and the run says how many (T-62.1-19).
+  const cleanup: Array<[string, () => Promise<void>]> = [
     ['the second client\'s folders are removed', async () => {
       const folders = secondFolders.splice(0);
       for (const folder of folders) await rm(folder, { recursive: true, force: true });
@@ -873,4 +1070,6 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
       assert.deepEqual(left, [], 'every second client folder is removed');
     }]
   ];
+  // A screenshot part (NEAR_AI_E2E_TIMELINE_PART, 62.1-09) takes the frames after the set-up; a run without one runs the real-window steps of 62.1-08.
+  return [...setup, ...(part === undefined ? interaction : frames), ...cleanup];
 }
