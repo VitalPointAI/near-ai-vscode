@@ -3,6 +3,8 @@
 // test-only draw time and frame metrics. Every model comes from the real buildBoardModel and buildTimeline over a signed in-memory log; time is the
 // harness's fake clock (an animation frame is a 16 ms timer), so every duration below is exact.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
 import test from 'node:test';
 import { buildBoardModel } from '../domain/team/board';
 import type { BoardModel } from '../domain/team/board';
@@ -112,6 +114,29 @@ const settle = (h: BoardHarness): void => { h.advance(4000); };
 function onlyKnownPosts(h: BoardHarness): void {
   const types = [...new Set(h.posts.map((p) => String(p.type)))];
   assert.deepEqual(types.filter((t) => !KNOWN_POSTS.has(t)), [], 'no new message type');
+}
+interface Rule { selectors: string[]; decls: Array<[string, string]>; media: string }
+/** The rules of board.css's timeline section (the same reading as boardTimelineDraw's). */
+function timelineRules(): Rule[] {
+  const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'board', 'board.css'), 'utf8').split('/* timeline */')[1]!.replace(/\/\*[\s\S]*?\*\//g, '');
+  const out: Rule[] = [];
+  const walk = (body: string, media: string): void => {
+    let i = 0;
+    while (i < body.length) {
+      const open = body.indexOf('{', i);
+      if (open < 0) break;
+      const head = body.slice(i, open).trim();
+      let depth = 1;
+      let j = open + 1;
+      while (j < body.length && depth > 0) { if (body[j] === '{') depth += 1; else if (body[j] === '}') depth -= 1; j += 1; }
+      const inner = body.slice(open + 1, j - 1);
+      if (head.startsWith('@media')) walk(inner, head);
+      else out.push({ selectors: head.split(',').map((s) => s.trim().replace(/\s+/g, ' ')), decls: inner.split(';').map((d) => d.trim()).filter(Boolean).map((d) => { const k = d.indexOf(':'); return [d.slice(0, k).trim(), d.slice(k + 1).trim()] as [string, string]; }), media });
+      i = j;
+    }
+  };
+  walk(css, '');
+  return out;
 }
 
 // ---- Task 1: the tracer ---------------------------------------------------------------------------------------------------------------------------
@@ -614,4 +639,309 @@ test('D-13 Jump to now and N: the Now line is centred with a smooth scroll (a ju
     assert.deepEqual(calls, [want], 'N centres the marker');
     assert.equal(h.focused(), dot(h, 'plan:2-04'));
   }
+});
+
+// ---- Task 3: every motion, the reduced-motion path and the test-only metrics ---------------------------------------------------------------------
+
+// One milestone with a chain of n plans, each waiting for the one before (one dot per step, so a long axis); nothing is started.
+async function chainWorld(n: number): Promise<BoardWorld> {
+  const world = await boardWorld();
+  const { owner } = world;
+  world.accept(owner, 'item.imported', milestone('v5', 'Version 5', true));
+  world.accept(owner, 'item.imported', phase('5', 'v5', 'Long work'));
+  for (let i = 1; i <= n; i += 1) {
+    const id = `5-${String(i).padStart(2, '0')}`;
+    world.accept(owner, 'item.imported', plan(id, i === 1 ? {} : { dependsOn: [`plan:5-${String(i - 1).padStart(2, '0')}`] }));
+  }
+  return world;
+}
+// One plan that 30 others wait for (30 lines from one dot).
+async function hubWorld(): Promise<BoardWorld> {
+  const world = await boardWorld();
+  const { owner } = world;
+  for (const body of [milestone('v6', 'Version 6', true), phase('6', 'v6', 'Hub'), plan('6-01')]) world.accept(owner, 'item.imported', body);
+  for (let i = 2; i <= 31; i += 1) world.accept(owner, 'item.imported', plan(`6-${String(i).padStart(2, '0')}`, { dependsOn: ['plan:6-01'] }));
+  return world;
+}
+/** A matchMedia whose reduced-motion answer the test can change while the page is open. */
+function motionQuery(initial: boolean): { install: (h: BoardHarness) => void; set: (on: boolean) => void } {
+  const listeners: Array<(e: { matches: boolean }) => void> = [];
+  const mq = { matches: initial, media: '(prefers-reduced-motion: reduce)', addEventListener: (_t: string, fn: (e: { matches: boolean }) => void) => { listeners.push(fn); }, removeEventListener: () => undefined, addListener: (fn: (e: { matches: boolean }) => void) => { listeners.push(fn); }, removeListener: () => undefined };
+  return {
+    install: (h) => { h.window.matchMedia = (q: string) => (/prefers-reduced-motion/.test(q) ? mq : { matches: false, media: q, addEventListener: () => undefined, removeEventListener: () => undefined }); },
+    set: (on) => { mq.matches = on; for (const fn of listeners) fn({ matches: on }); }
+  };
+}
+const MOTION = ['tl-appear', 'tl-pulse', 'tl-glide', 'tl-filling', 'tl-moving', 'tl-turning', 'tl-xfade', 'tl-view-in', 'tl-card-in', 'tl-card-out', 'tl-preview-in', 'tl-draw', 'tl-lines-in', 'tl-lines-off', 'tl-lines-back'];
+const moving = (h: BoardHarness): string[] => h.$$('#root *').flatMap((n) => classes(n).filter((c) => MOTION.includes(c)).map((c) => `${n.getAttribute('data-id') ?? n.className.split(' ')[0]}:${c}`));
+
+test('D-08 first draw: dots in or near the view appear with a delay of min(step x 24, 600) ms over 160 ms, far ones at once, lines fade in after the last; every dot works from the first frame, and no later draw staggers', async () => {
+  const world = await chainWorld(60);
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model, { width: 1400 });
+  const s = scroller(h);
+  const geo = geoOf(h, model);
+  const near = { l: s.scrollLeft - 700, r: s.scrollLeft + 2100 };
+  const steps = new Map(model.timeline!.dots.map((d) => [d.cardId, d.step]));
+  let last = 0;
+  let far = 0;
+  for (const d of geo.dots) {
+    const b = dot(h, d.id);
+    const inView = d.x + d.w > near.l && d.x < near.r;
+    if (!inView) { far += 1; assert.ok(!has(b, 'tl-appear'), `${d.id} is far away and appears at once`); continue; }
+    const delay = Math.min(steps.get(d.id)! * 24, 600);
+    last = Math.max(last, delay);
+    assert.ok(has(b, 'tl-appear'), `${d.id} appears in sequence`);
+    assert.equal(styleOf(b, 'animation-delay'), `${delay}ms`, `${d.id} waits ${delay} ms`);
+    assert.equal(b.getAttribute('tabindex') === null, false, `${d.id} is in the tab order from the first frame`);
+  }
+  assert.ok(far > 0, 'the fixture has dots far away');
+  assert.equal(last, 600, 'the delay is capped at 600 ms');
+  const lines = h.$('svg.tl-lines')!;
+  assert.ok(has(lines, 'tl-lines-in'), 'the lines fade in');
+  assert.equal(styleOf(lines, 'animation-delay'), `${last + 160}ms`, 'after the last dot');
+  h.advance(176);
+  assert.ok(!has(dot(h, 'plan:5-01'), 'tl-appear'), 'the first dot is done after 160 ms');
+  assert.ok(has(dot(h, 'plan:5-20'), 'tl-appear'), 'later ones are still on their way');
+  h.advance(600 + 160 + 200);
+  assert.deepEqual(moving(h), [], 'everything has arrived');
+  // A second render, a live update and a direction switch do not stagger.
+  boardApi(h, 'redraw')();
+  assert.deepEqual(h.$$('.tl-appear'), []);
+  h.deliver({ type: 'state', model: modelOf(world, world.lead.memberId) });
+  assert.deepEqual(h.$$('.tl-appear'), []);
+  // A click during the stagger works and ends it at once.
+  const q = timelineOf(model, { width: 1400 });
+  assert.ok(q.$$('.tl-appear').length > 0);
+  q.fire(dot(q, 'plan:5-03'), 'pointerdown', { clientX: 10, clientY: 10, button: 0, pointerId: 1 });
+  assert.deepEqual(q.$$('.tl-appear'), [], 'a press ends the stagger');
+  q.click(dot(q, 'plan:5-03'));
+  assert.ok(q.$('#tl-card'), 'and the click opens the card');
+});
+
+test('D-08 re-layout: a zoom FLIPs the moved dots from their old place on screen over 240 ms with will-change only while they move, the lines hide and fade back 120 ms after; a direction switch moves them over 320 ms with the headers and rail cross-fading; the view switch fades in', async () => {
+  const world = await liveWorld({ withOld: true, ahead: true });
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model, { width: 600 });
+  assert.ok(has(scroller(h), 'tl-view-in'), 'the view switch fades the timeline in');
+  settle(h);
+  assert.ok(!has(scroller(h), 'tl-view-in'), 'for 160 ms');
+  const s = scroller(h);
+  const before = geoOf(h, model);
+  const old = { left: s.scrollLeft, top: s.scrollTop };
+  h.click(zoomButton(h, 'in'));
+  const after = geoOf(h, model);
+  const id = 'plan:2-04';
+  const o = before.dots.find((d: any) => d.id === id);
+  const n = after.dots.find((d: any) => d.id === id);
+  const dx = (o.x - old.left) - (n.x - s.scrollLeft);
+  const dy = (o.y - old.top) - (n.y - s.scrollTop);
+  assert.ok(dx !== 0 || dy !== 0, 'the dot moved on screen');
+  const b = dot(h, id);
+  assert.equal(styleOf(b, 'transform'), `translate(${dx}px, ${dy}px)`, 'it starts where it was on screen');
+  assert.equal(styleOf(b, 'will-change'), 'transform');
+  const lines = h.$('svg.tl-lines')!;
+  assert.ok(has(lines, 'tl-lines-off'), 'the lines hide while the dots move');
+  h.advance(40);
+  assert.ok(has(b, 'tl-moving'), 'it moves');
+  assert.equal(styleOf(b, 'transform'), '', 'to its new place');
+  h.advance(240);
+  assert.ok(!has(b, 'tl-moving'), 'the move takes 240 ms');
+  assert.equal(styleOf(b, 'will-change'), '', 'will-change goes with it');
+  assert.ok(!has(lines, 'tl-lines-off') && has(lines, 'tl-lines-back'), 'the lines fade back');
+  h.advance(130);
+  assert.ok(!has(lines, 'tl-lines-back'), 'in 120 ms');
+  assert.deepEqual(h.$$('#root *').filter((x) => styleOf(x, 'will-change') !== '').map((x) => x.className), [], 'nothing keeps will-change at rest');
+
+  // A folded milestone shown moves what follows it.
+  settle(h);
+  const tileGeo = geoOf(h, model);
+  h.click(h.$('li.tl-milestone[data-milestone="milestone:v0"] button.tl-folded')!);
+  const shownGeo = geoOf(h, model);
+  assert.notEqual(shownGeo.dots.find((d: any) => d.id === 'plan:1-01').x, tileGeo.dots.find((d: any) => d.id === 'plan:1-01').x, 'the next band moved');
+  h.advance(40);
+  assert.ok(h.$$('button.tl-dot.tl-moving').length > 0, 'its dots move to their new places');
+  settle(h);
+
+  // A direction switch: 320 ms, and the headers, axis and rail cross-fade over 160 ms.
+  direction(h, 'vertical');
+  assert.ok(h.$$('.tl-ms-head.tl-xfade').length > 0, 'the headers cross-fade');
+  assert.ok(h.$$('.tl-phase-label.tl-xfade').length > 0 && h.$$('.tl-axis.tl-xfade').length > 0, 'the rail and the axis too');
+  h.advance(40);
+  const turning = h.$$('button.tl-dot.tl-turning');
+  assert.ok(turning.length > 0, 'the dots move from their horizontal to their vertical place');
+  h.advance(140);
+  assert.deepEqual(h.$$('.tl-xfade'), [], 'the cross-fade takes 160 ms');
+  assert.ok(h.$$('button.tl-dot.tl-turning').length > 0, 'the move is still on its way');
+  h.advance(160);
+  assert.deepEqual(h.$$('button.tl-dot.tl-turning'), [], 'and takes 320 ms');
+});
+
+test('D-08 card and preview: the card springs open in 200 ms from its corner nearest the dot and closes in 120 ms as a picture (hidden from screen readers, inert); the preview slides in over 120 ms; emphasised lines draw in over 240 ms, at most 24 at a time; the mark grows on hover and focus with the hit box unchanged', async () => {
+  const world = await liveWorld({ withOld: true, ahead: true });
+  const h = timelineOf(modelOf(world, world.lead.memberId), { width: 1400 });
+  settle(h);
+  const d = dot(h, 'plan:2-04');
+  h.click(d);
+  const c = h.$('#tl-card')!;
+  assert.ok(has(c, 'tl-card-in'), 'the card springs open');
+  assert.equal(c.getAttribute('data-side'), 'below');
+  assert.equal(styleOf(c, 'transform-origin'), 'left top', 'from its corner nearest the dot');
+  h.advance(210);
+  assert.ok(!has(c, 'tl-card-in'), 'in 200 ms');
+  h.press(h.focused(), 'Escape');
+  assert.equal(h.focused(), d, 'focus is back on the dot at once');
+  assert.equal(d.getAttribute('aria-expanded'), null, 'the dot is not expanded');
+  assert.ok(c.isConnected && has(c, 'tl-card-out'), 'the card closes over 120 ms');
+  assert.equal(c.getAttribute('aria-hidden'), 'true', 'as a picture only');
+  assert.ok(c.hasAttribute('inert'), 'that takes no input');
+  h.advance(130);
+  assert.equal(h.$('#tl-card'), null, 'then it leaves the page');
+  // Opening another card while one closes ends the closing at once.
+  h.click(d);
+  h.press(h.focused(), 'Escape');
+  h.click(dot(h, 'plan:2-05'));
+  assert.equal(h.$$('#tl-card').length, 1);
+  assert.equal(h.$('#tl-card')!.getAttribute('aria-hidden'), null, 'the new card is a real one');
+  assert.ok(!h.$('#tl-card')!.hasAttribute('inert'));
+  h.press(h.focused(), 'Escape');
+  settle(h);
+  // The preview.
+  dot(h, 'plan:2-06').focus();
+  const p = h.$('#tl-preview')!;
+  assert.ok(has(p, 'tl-preview-in'), 'the preview slides in');
+  h.advance(130);
+  assert.ok(!has(p, 'tl-preview-in'), 'over 120 ms');
+  // CSS: the mark grows to 1.25 in 120 ms on hover and focus, the slide is 4 px away from the dot.
+  const css = timelineRules();
+  assert.ok(css.some((r) => r.selectors.includes('.tl-dot:hover .tl-mark') && r.decls.some(([k, v]) => k === 'transform' && v === 'scale(1.25)')));
+  assert.ok(css.some((r) => r.selectors.includes('.tl-mark') && r.decls.some(([k, v]) => k === 'transition' && v === 'transform 120ms ease-out')));
+  assert.ok(css.every((r) => !r.selectors.some((x) => x.includes('.tl-dot:hover') && !x.includes('.tl-mark')) || !r.decls.some(([k]) => ['width', 'height', 'padding', 'transform'].includes(k))), 'the hit box does not change on hover');
+
+  // Lines draw in on emphasis, at most 24 at a time.
+  const hub = await hubWorld();
+  const q = timelineOf(modelOf(hub, hub.lead.memberId), { width: 1400 });
+  settle(q);
+  q.fire(dot(q, 'plan:6-01'), 'pointerenter');
+  const drawing = q.$$('path.tl-line.tl-draw');
+  assert.equal(q.$$('path.tl-line.emphasis').length, 30, 'every line of the hub is emphasised');
+  assert.equal(drawing.length, 24, 'and at most 24 draw in');
+  assert.ok(drawing.every((x) => x.getAttribute('pathLength') === '1'), 'from the path length');
+  q.advance(250);
+  assert.deepEqual(q.$$('path.tl-line.tl-draw'), [], 'over 240 ms');
+  assert.ok(q.$$('path.tl-line').every((x) => x.getAttribute('pathLength') === null), 'the paths are left as they were');
+  boardApi(q, 'redraw')();
+  assert.deepEqual(q.$$('path.tl-line.tl-draw'), [], 'a redraw does not draw the same emphasis in again');
+});
+
+test('D-08: a press or a key during any motion jumps it to its end state at once', async () => {
+  const world = await liveWorld({ withOld: true, ahead: true });
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model, { width: 600 });
+  settle(h);
+  h.click(zoomButton(h, 'in'));
+  h.advance(40);
+  assert.ok(h.$$('button.tl-dot.tl-moving').length > 0, 'the dots move');
+  h.press(dot(h, 'plan:2-04'), 'ArrowRight');
+  assert.deepEqual(moving(h), [], 'a key ends every motion');
+  assert.deepEqual(h.$$('button.tl-dot').filter((b) => styleOf(b, 'transform') !== '' || styleOf(b, 'will-change') !== ''), [], 'every dot is at its new place');
+  settle(h);
+  h.click(zoomButton(h, 'out'));
+  assert.ok(h.$$('button.tl-dot').some((b) => styleOf(b, 'transform') !== ''), 'a move is about to start');
+  h.fire(h.$('.tl-canvas')!, 'pointerdown', { clientX: 5, clientY: 5, button: 0, pointerId: 1 });
+  assert.deepEqual(moving(h), [], 'a press ends it before it starts');
+  assert.deepEqual(h.$$('button.tl-dot').filter((b) => styleOf(b, 'transform') !== ''), []);
+  h.advance(400);
+  assert.deepEqual(moving(h), [], 'and nothing starts later');
+});
+
+test('D-08 reduced motion: at load nothing staggers, springs, slides, moves, draws in or fades; a change while the page is open stops what runs and the rest is still; the outline and the focus ring stay', async () => {
+  const world = await liveWorld({ withOld: true, ahead: true });
+  const model = modelOf(world, world.lead.memberId);
+  const seen = new Set<string>();
+  const look = (h: BoardHarness): void => { for (const x of moving(h)) seen.add(x); };
+  const h = timelineOf(model, { width: 600, reducedMotion: true });
+  look(h);
+  h.click(dot(h, 'plan:2-04'));
+  look(h);
+  h.press(h.focused(), 'Escape');
+  assert.equal(h.$('#tl-card'), null, 'the card goes at once');
+  h.fire(dot(h, 'plan:2-05'), 'pointerenter');
+  look(h);
+  h.click(zoomButton(h, 'in'));
+  look(h);
+  assert.deepEqual(h.$$('button.tl-dot').filter((b) => styleOf(b, 'transform') !== ''), [], 'no FLIP: the dots are at their new places');
+  direction(h, 'vertical');
+  look(h);
+  for (const ms of [16, 16, 200, 400]) { h.advance(ms); look(h); }
+  assert.deepEqual([...seen], [], 'no motion class at any time');
+  const css = timelineRules();
+  assert.ok(css.some((r) => r.selectors.includes('.tl-dot:focus-visible') && r.decls.some(([k]) => k === 'outline')), 'the focus ring is not motion');
+
+  // The setting changes while the page is open.
+  const query = motionQuery(false);
+  const q = timelineOf(model, { width: 600, before: query.install });
+  assert.ok(q.$$('.tl-appear').length > 0, 'motion runs at first');
+  query.set(true);
+  assert.deepEqual(moving(q), [], 'turning reduced motion on ends what runs');
+  q.click(zoomButton(q, 'in'));
+  assert.deepEqual(moving(q), []);
+  q.advance(40);
+  assert.deepEqual(moving(q), [], 'and nothing new moves');
+  query.set(false);
+  q.click(zoomButton(q, 'in'));
+  q.advance(40);
+  assert.ok(q.$$('button.tl-dot.tl-moving').length > 0, 'turned off again, the motion is back');
+});
+
+test('D-08 budget: on a page marked for the extension-host tests NearAiTimeline.metrics() reports the first-draw time and the frame intervals of the stagger, a pan and a zoom, and reset clears them; without the mark there are no metrics', async () => {
+  const world = await liveWorld({ withOld: true, ahead: true });
+  const model = modelOf(world, world.lead.memberId);
+  let t = 1000;
+  const clock = (h: BoardHarness): void => {
+    h.window.performance = { now: () => t };
+    const raf = h.window.requestAnimationFrame as (fn: (ts?: number) => void) => number;
+    h.window.requestAnimationFrame = (fn: (ts?: number) => void): number => raf(() => { t += 16; fn(t); });
+  };
+  const h = timelineOf(model, { width: 600, e2e: true, before: clock });
+  const metrics = timelineApi(h, 'metrics');
+  h.advance(2000);
+  const first = plain(metrics());
+  assert.equal(typeof first.drawMs, 'number', `drawMs is a number (${first.drawMs})`);
+  assert.ok(first.drawMs >= 0);
+  assert.ok(first.frames.count > 0, 'the stagger was sampled');
+  assert.equal(first.frames.p95, 16, 'every frame here is 16 ms');
+  assert.deepEqual(plain(metrics({ reset: true })).frames.count, first.frames.count, 'reset returns the sample');
+  assert.equal(plain(metrics()).frames.count, 0, 'and clears it');
+  // A pan is sampled.
+  const canvas = h.$('.tl-canvas')!;
+  h.fire(canvas, 'pointerdown', { clientX: 300, clientY: 300, button: 0, pointerId: 1 });
+  h.fire(canvas, 'pointermove', { clientX: 280, clientY: 300, buttons: 1, pointerId: 1 });
+  h.advance(100);
+  h.fire(canvas, 'pointerup', { clientX: 280, clientY: 300, button: 0, pointerId: 1 });
+  h.advance(1000);
+  assert.ok(plain(metrics({ reset: true })).frames.count > 0, 'the pan was sampled');
+  // A zoom is sampled.
+  h.click(zoomButton(h, 'in'));
+  h.advance(1000);
+  assert.ok(plain(metrics()).frames.count > 0, 'the zoom was sampled');
+  assert.ok(h.pendingTimers() < 20, 'the sampling stops when nothing moves');
+  // Without data-e2e there is nothing.
+  const plainPage = timelineOf(model, { width: 600 });
+  assert.equal((plainPage.window.NearAiTimeline as Record<string, unknown>).metrics, undefined, 'no metrics on a person\'s page');
+});
+
+test('62.1-04 follow-up: in vertical a width change across 900 px draws again, so the phase gutter follows the width', async () => {
+  const world = await liveWorld();
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model, { width: 1000 });
+  direction(h, 'vertical');
+  settle(h);
+  const wide = px(dot(h, 'plan:1-01'), 'left');
+  h.setWidth(800);
+  h.advance(40);
+  const narrow = px(dot(h, 'plan:1-01'), 'left');
+  assert.equal(wide - narrow, 40, 'the gutter went from 160 to 120 px');
+  const geo = geoOf(h, model);
+  assert.equal(narrow, geo.dots.find((d: any) => d.id === 'plan:1-01').x - geo.bands[0].x);
 });
