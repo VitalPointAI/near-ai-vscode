@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **The Software development team has a DevOps member.** It sets up a
+  protected way of working for the project: a CI workflow that runs the
+  tests, a secret scan, and a dependency audit on every pull request,
+  required checks and a review before anything reaches the default branch,
+  and a release workflow whose publishing waits for your approval. It never
+  asks for or stores a token, and for settings outside the repository
+  (branch protection, environments, secrets) it writes the exact commands
+  for you to approve and run. The team's guidance now tells every member to
+  work through pull requests.
+
 ## 0.4.15
 
 - **Use a profile from another project.** **NEAR AI: Use a Saved Profile**,
