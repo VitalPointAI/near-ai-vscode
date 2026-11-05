@@ -3,7 +3,8 @@
 // into board.js through window.NearAiBoard like menu.js and detail.js; the toolbar, banners, live region, Move to... menu and detail drawer stay the
 // board's. Plain browser JavaScript in one strict IIFE: every text node is set with textContent and every attribute with setAttribute, positions only
 // with style.setProperty, no markup strings and no network. The page never decides permissions and posts no message the board does not already post.
-// What it draws here is the screen reader structure (ordered lists of milestones, phases and dots); 62.1-04 draws it on the canvas.
+// The lists are the screen reader structure (milestones, phases, dots in sequence); the same nodes are placed on the canvas from the pure geometry
+// below, so what is read and what is seen cannot drift apart (62.1-04).
 (function () {
   'use strict';
   // The page's own words (the timeline's sentences come from the model). The plain-language scan reads this file.
@@ -12,7 +13,13 @@
     milestones: 'Milestones',
     phasesIn: (title) => 'Phases in ' + title,
     cardsIn: (name) => 'Cards in ' + name + ', in order',
-    phase: (number) => 'Phase ' + number
+    phase: (number) => 'Phase ' + number,
+    current: 'Current',
+    fold: 'Fold milestone',
+    foldName: (title) => 'Fold ' + title,
+    progressName: (title) => title + ' progress',
+    hintMove: 'Use the arrow keys to move along the timeline. Press Enter to open the card. Press M to move it. Press N to jump to now.',
+    hintOpen: 'Use the arrow keys to move along the timeline. Press Enter to open the card. Press N to jump to now.'
   });
 
   // ---- the pure geometry (UI-SPEC "Timeline geometry", "Pitches by zoom", "Horizontal", "Vertical", "Stacks taller than the cap", "Folded finished
@@ -264,31 +271,95 @@
     return out;
   }
 
-  window.NearAiTimeline = Object.freeze({ geometry, sizes: G });
+  /** The longest of the labels (longest first) whose measured width fits the room, or '' when none does (UI-SPEC "Typography": the label falls back
+   * to the number, then to nothing; the full name stays in the h3, the preview and the card). measure(text) gives the drawn width in pixels. */
+  function pickLabel(labels, room, measure) {
+    if (!Array.isArray(labels) || !(room > 0) || typeof measure !== 'function') return '';
+    for (const text of labels) {
+      if (typeof text !== 'string' || text === '') continue;
+      const w = measure(text);
+      if (typeof w === 'number' && isFinite(w) && w <= room) return text;
+    }
+    return '';
+  }
+
+  window.NearAiTimeline = Object.freeze({ geometry, pickLabel, sizes: G });
 
   const board = window.NearAiBoard;
   if (!board) return;
 
   // ---- small helpers -------------------------------------------------------------------------------------------------------------------------
+  const SVG_NS = 'http://www.w3.org/2000/svg';
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  const svgEl = (tag, attrs) => { const n = document.createElementNS(SVG_NS, tag); for (const k of Object.keys(attrs || {})) n.setAttribute(k, String(attrs[k])); return n; };
   const setText = (n, t) => { if (n.textContent !== t) n.textContent = t; };
   const attr = (n, k, v) => { if (v === null || v === undefined || v === false) { if (n.getAttribute(k) !== null) n.removeAttribute(k); } else if (n.getAttribute(k) !== String(v)) n.setAttribute(k, String(v)); };
+  const setStyle = (n, k, v) => { if (n.style.getPropertyValue(k) !== v) n.style.setProperty(k, v); };
+  const px = (v) => v + 'px';
+  /** Places a node on a rect given in canvas pixels, relative to the box (ox, oy) it is positioned in. Only style.setProperty (the CSP). */
+  function put(n, r, ox, oy) {
+    setStyle(n, 'left', px(r.x - (ox || 0)));
+    setStyle(n, 'top', px(r.y - (oy || 0)));
+    setStyle(n, 'width', px(r.w));
+    setStyle(n, 'height', px(r.h));
+  }
+  const setClass = (n, cls) => { if (n.className !== cls) n.className = cls; };
   /** Puts exactly these nodes, in this order, into the parent. Nodes already there are kept (so focus survives), others are moved or removed. */
   function place(parent, nodes) {
     let i = 0;
     for (const n of nodes) { const cur = parent.children[i]; if (cur !== n) parent.insertBefore(n, cur || null); i += 1; }
     while (parent.children.length > nodes.length) parent.children[parent.children.length - 1].remove();
   }
-  // The main appearance of a dot (UI-SPEC "State colours"): blocked, then on hold, then the column.
-  const stateOf = (c) => (c.blocked ? 'blocked' : c.held ? 'held' : c.column);
+  const hide = (n, hidden) => { if (n.hidden !== !!hidden) n.hidden = !!hidden; };
 
-  // ---- the screen reader structure (UI-SPEC "Screen Reader Structure") ------------------------------------------------------------------------
+  // ---- dots: state by colour, shape and glyph (UI-SPEC "State colours", D-05) ------------------------------------------------------------------
+  // The main appearance of a dot: blocked, then on hold, then the column.
+  const stateOf = (c) => (c.blocked ? 'blocked' : c.held ? 'held' : c.column);
+  const SHAPES = { 'in-progress': 'filled', 'in-review': 'filled', integrating: 'filled', done: 'filled', held: 'dashed' };
+  const shapeOf = (state) => SHAPES[state] || 'hollow';
+  // The glyph of each state from the board's ICONS: the icon's name and the one path of it the glyph uses (all of them when no index is given).
+  const GLYPHS = { ready: ['play-circle', 1], claimed: ['person'], 'in-progress': ['sync'], 'in-review': ['eye'], integrating: ['check-all'], done: ['pass', 1], cancelled: ['circle-slash', 1], blocked: ['lock'], held: ['debug-pause'] };
+  const glyphCache = {};
+  function glyphPaths(state) {
+    if (!own(GLYPHS, state)) return [];
+    if (!glyphCache[state]) {
+      const [name, index] = GLYPHS[state];
+      const paths = Array.from(board.icon(name).querySelectorAll('path')).map((p) => p.getAttribute('d') || '');
+      glyphCache[state] = index === undefined ? paths : paths.slice(index, index + 1);
+    }
+    return glyphCache[state];
+  }
+  /** The 20 px mark: its body (a circle, or a rounded square for a phase card), the 12 px glyph and the info pip for a plan that looks finished. */
+  function buildMark(state, square, pip) {
+    const svg = svgEl('svg', { class: 'tl-mark', viewBox: '0 0 20 20', width: 20, height: 20, 'aria-hidden': 'true', focusable: 'false' });
+    svg.appendChild(square ? svgEl('rect', { class: 'tl-body', x: 1, y: 1, width: 18, height: 18, rx: 4 }) : svgEl('circle', { class: 'tl-body', cx: 10, cy: 10, r: 9 }));
+    const paths = glyphPaths(state);
+    if (paths.length) {
+      const g = svgEl('g', { class: 'tl-glyph', transform: 'translate(4 4) scale(0.75)' });
+      for (const d of paths) g.appendChild(svgEl('path', { d }));
+      svg.appendChild(g);
+    }
+    if (pip) svg.appendChild(svgEl('circle', { class: 'tl-pip', cx: 17, cy: 3, r: 4 }));
+    return svg;
+  }
+
+  // ---- the page's own nodes ----------------------------------------------------------------------------------------------------------------------
   const scroll = el('div', 'tl-scroll');
   scroll.setAttribute('role', 'region');
   scroll.setAttribute('aria-label', T.region);
+  const canvas = el('div', 'tl-canvas');
+  const art = el('div', 'tl-art');
+  art.setAttribute('aria-hidden', 'true');
   const list = el('ol', 'tl-milestones');
   list.setAttribute('aria-label', T.milestones);
-  scroll.appendChild(list);
+  // The hidden hints the dots point at (aria-describedby reads hidden text).
+  const hints = el('div', 'tl-hints');
+  hints.hidden = true;
+  const hintMove = el('span', '', T.hintMove); hintMove.id = 'tl-hint-move';
+  const hintOpen = el('span', '', T.hintOpen); hintOpen.id = 'tl-hint-open';
+  hints.append(hintMove, hintOpen);
+  canvas.append(art, list);
+  scroll.append(canvas, hints);
   const bandEls = new Map();
   const groupEls = new Map();
   const dotEls = new Map();
@@ -299,16 +370,50 @@
       const li = el('li', 'tl-milestone');
       li.setAttribute('data-milestone', band.id);
       const head = el('div', 'tl-ms-head');
-      const h2 = el('h2', 'tl-ms-title');
-      head.appendChild(h2);
+      const row1 = el('div', 'tl-ms-row');
+      const h2 = el('h2', 'sr-only');
+      const title = el('span', 'tl-ms-title'); title.setAttribute('aria-hidden', 'true');
+      const badge = el('span', 'badge', T.current); badge.setAttribute('aria-hidden', 'true');
+      const percent = el('span', 'tl-ms-percent'); percent.setAttribute('aria-hidden', 'true');
+      row1.append(h2, title);
+      const row2 = el('div', 'tl-ms-row');
+      const bar = el('div', 'progress'); bar.setAttribute('role', 'progressbar'); bar.setAttribute('aria-valuemin', '0'); bar.setAttribute('aria-valuemax', '100');
+      const fill = el('span', 'bar');
+      bar.appendChild(fill);
+      const progress = el('span', 'progress-text');
+      const fold = el('button', 'secondary tl-fold', T.fold); fold.setAttribute('type', 'button'); fold.setAttribute('aria-expanded', 'true');
+      fold.addEventListener('click', () => foldBand(b.id, false));
+      row2.append(bar, progress);
+      head.append(row1, row2);
+      const axis = el('div', 'tl-axis');
+      const ticks = el('div', 'tl-ticks');
       const phases = el('ol', 'tl-phases');
       li.append(head, phases);
-      b = { li, h2, phases };
+      b = { id: band.id, li, head, row1, row2, h2, title, badge, percent, bar, fill, progress, fold, axis, ticks, phases };
       bandEls.set(band.id, b);
     }
-    setText(b.h2, band.heading);
-    attr(b.phases, 'aria-label', T.phasesIn(band.title));
     return b;
+  }
+  /** The header's words from the model (D-14): the h2 is the model's heading, the rest is what the eye reads. */
+  function drawHead(b, band, place_, canFold) {
+    setText(b.h2, band.heading);
+    setText(b.title, band.title);
+    attr(b.title, 'title', band.title);
+    setText(b.percent, band.percentText || '');
+    place(b.row1, [b.h2, b.title, ...(band.active ? [b.badge] : []), ...(band.percentText ? [b.percent] : [])]);
+    place(b.row2, [b.bar, b.progress, ...(canFold ? [b.fold] : [])]);
+    attr(b.phases, 'aria-label', T.phasesIn(band.title));
+    const pct = band.percent && typeof band.percent.percent === 'number' ? band.percent.percent : undefined;
+    attr(b.bar, 'aria-valuenow', pct === undefined ? null : pct);
+    attr(b.bar, 'aria-label', T.progressName(band.title));
+    setStyle(b.fill, 'width', (pct || 0) + '%');
+    setText(b.progress, band.progressText || '');
+    attr(b.fold, 'aria-label', T.foldName(band.title));
+    // The header is in the band's flow so it can stick (left edge in horizontal, top edge in vertical); its size and offset come from the geometry.
+    setStyle(b.head, 'margin-left', px(place_.header.x - place_.x));
+    setStyle(b.head, 'margin-top', px(place_.header.y - place_.y));
+    setStyle(b.head, 'width', px(place_.header.w));
+    setStyle(b.head, 'height', px(place_.header.h));
   }
   // A phase's list entry, or the entry of the dots with no phase in their band (the cards added on the board), named after the band.
   function groupEl(band, group) {
@@ -317,17 +422,20 @@
     if (!g) {
       const li = el('li', 'tl-phase');
       li.setAttribute('data-phase', group.key);
-      const h3 = el('h3', 'tl-phase-label');
+      const h3 = el('h3', 'tl-phase-head sr-only');
       const dots = el('ol', 'tl-dots');
-      li.append(h3, dots);
-      g = { li, h3, dots };
+      const label = el('span', 'tl-phase-label'); label.setAttribute('aria-hidden', 'true');
+      const bar = el('div', 'tl-phase-bar'); bar.setAttribute('aria-hidden', 'true');
+      const fill = el('span', 'tl-phase-fill');
+      bar.appendChild(fill);
+      g = { li, h3, dots, label, bar, fill };
       groupEls.set(key, g);
     }
     setText(g.h3, group.phase ? group.phase.heading : band.title);
     attr(g.dots, 'aria-label', T.cardsIn(group.phase ? T.phase(group.phase.number) : band.title));
     return g;
   }
-  function dotEl(dot, card) {
+  function dotEl(dot, card, box, ox, oy, zoom) {
     let d = dotEls.get(dot.cardId);
     if (!d) {
       const li = el('li');
@@ -335,14 +443,40 @@
       b.setAttribute('type', 'button');
       b.setAttribute('data-id', dot.cardId);
       li.appendChild(b);
-      d = { li, button: b };
+      d = { li, button: b, markKey: '', mark: null, chip: el('span', 'tl-initials'), chipKey: '', idLabel: el('span', 'tl-id') };
+      d.chip.setAttribute('aria-hidden', 'true');
+      d.idLabel.setAttribute('aria-hidden', 'true');
       dotEls.set(dot.cardId, d);
     }
-    attr(d.button, 'data-step', dot.step);
-    attr(d.button, 'data-slot', dot.slot);
-    attr(d.button, 'data-state', stateOf(card));
-    attr(d.button, 'aria-label', dot.label);
-    attr(d.button, 'aria-current', board.selected() === dot.cardId ? 'true' : null);
+    const state = stateOf(card);
+    const square = card.kind === 'phase';
+    const b = d.button;
+    setClass(b, 'tl-dot ' + shapeOf(state) + (square ? ' tl-square' : '') + (card.mine ? ' mine' : ''));
+    attr(b, 'data-step', dot.step);
+    attr(b, 'data-slot', dot.slot);
+    attr(b, 'data-state', state);
+    attr(b, 'aria-label', dot.label);
+    attr(b, 'aria-describedby', board.hasMenu(card) ? hintMove.id : hintOpen.id);
+    attr(b, 'aria-current', board.selected() === dot.cardId ? 'true' : null);
+    put(b, box, ox, oy);
+    const markKey = state + '|' + square + '|' + card.doneInGsd;
+    if (d.markKey !== markKey) { d.mark = buildMark(state, square, card.doneInGsd); d.markKey = markKey; }
+    // Mine (D-05): a filled chip from 100 %, an outer ring on the mark at 50 and 75 % where there is no chip.
+    const chipped = zoom >= 100;
+    attr(d.mark, 'class', 'tl-mark' + (card.mine && !chipped ? ' tl-ring' : ''));
+    const parts = [d.mark];
+    if (chipped && (card.assignee || card.mine)) {
+      setClass(d.chip, 'tl-initials' + (card.mine ? ' mine' : ''));
+      const chipKey = card.assignee ? 'i:' + card.assignee.initials : 'me';
+      if (d.chipKey !== chipKey) {
+        if (card.assignee) d.chip.textContent = card.assignee.initials;
+        else d.chip.replaceChildren(board.icon('person'));
+        d.chipKey = chipKey;
+      }
+      parts.push(d.chip);
+    }
+    if (zoom >= 200) { setText(d.idLabel, card.displayId); parts.push(d.idLabel); }
+    place(b, parts);
     return d;
   }
   // The phases of a band in the model's order (first step, then phase number), each with its dots in sequence order (step, then slot); dots whose
@@ -362,40 +496,103 @@
     }
     return groups;
   }
+  // The label's drawn width (scrollWidth in a browser); without layout (the vm) an estimate of 7 px per character.
+  function measureIn(node) {
+    return (text) => {
+      setText(node, text);
+      const w = node.scrollWidth;
+      return typeof w === 'number' && isFinite(w) && node.clientWidth > 0 ? w : text.length * 7;
+    };
+  }
+  /** The phase rail: the label with the longest variant that fits its segment, and the bar filled to the phase's percent. */
+  function drawRail(g, group, where, ox, oy) {
+    put(g.label, where.label, ox, oy);
+    attr(g.label, 'title', group.phase.heading);
+    put(g.bar, where.bar, ox, oy);
+    const pct = group.phase.percent && typeof group.phase.percent.percent === 'number' ? group.phase.percent.percent : 0;
+    setStyle(g.fill, '--fill', String(pct / 100));
+    hide(g.label, !!where.label.hidden);
+    if (where.label.hidden) setText(g.label, '');
+    else setText(g.label, pickLabel(group.phase.labels, where.label.w, measureIn(g.label)));
+  }
+
+  /** Shows or folds a finished milestone (the person's choice is saved), then draws again. */
+  function foldBand(id, show) {
+    board.setUiState({ shown: { [id]: show } });
+    board.redraw();
+  }
 
   function render(container, shown) {
     const model = board.model();
     const timeline = model && model.timeline;
+    place(container, [scroll]);
+    if (!timeline || !Array.isArray(timeline.milestones)) { place(list, []); bandEls.clear(); groupEls.clear(); dotEls.clear(); return; }
+    const saved = board.uiState();
+    const width = scroll.clientWidth > 0 ? scroll.clientWidth : window.innerWidth || 800;
+    const geo = geometry(timeline, { direction: board.drawnDirection(), zoom: saved.zoom, width, shown: saved.shown, openStacks: {} });
+    setStyle(canvas, 'width', px(geo.width));
+    setStyle(canvas, 'height', px(geo.height));
+    attr(canvas, 'data-zoom', geo.zoom);
     const cards = new Map((model ? model.cards : []).map((c) => [c.id, c]));
     const shownIds = new Set(shown.map((c) => c.id));
+    const places = new Map(geo.bands.map((b) => [b.id, b]));
+    const boxes = new Map(geo.dots.map((d) => [d.id, d]));
     const byBand = new Map();
-    for (const dot of timeline ? timeline.dots : []) {
-      if (!shownIds.has(dot.cardId) || !cards.has(dot.cardId)) continue;
+    for (const dot of timeline.dots) {
+      if (!shownIds.has(dot.cardId) || !cards.has(dot.cardId) || !boxes.has(dot.cardId)) continue;
       if (!byBand.has(dot.milestoneId)) byBand.set(dot.milestoneId, []);
       byBand.get(dot.milestoneId).push(dot);
     }
     const usedBands = new Set();
     const usedGroups = new Set();
     const usedDots = new Set();
-    place(list, (timeline ? timeline.milestones : []).map((band) => {
+    const labels = [];
+    place(list, timeline.milestones.filter((band) => places.has(band.id)).map((band) => {
       usedBands.add(band.id);
+      const where = places.get(band.id);
       const b = bandEl(band);
+      put(b.li, where);
+      const finished = band.finished === true && !(timeline.now && timeline.now.milestoneId === band.id);
+      drawHead(b, band, where, finished && !where.folded);
+      const ox = where.x;
+      const oy = where.y;
+      const parts = [b.head];
+      if (where.axis) {
+        put(b.axis, where.axis, ox, oy);
+        const horizontal = geo.direction === 'horizontal';
+        place(b.ticks, (where.ticks || []).map((t, i) => {
+          const tick = b.ticks.children[i] || el('span', 'tl-tick');
+          // A tick crosses the axis through the mark's centre, 14 px into the dot box.
+          const at = horizontal ? t.at - geo.box.w / 2 + 14 : t.at;
+          put(tick, horizontal ? { x: at, y: where.axis.y - 3, w: 1, h: 8 } : { x: where.axis.x - 3, y: at, w: 8, h: 1 }, ox, oy);
+          return tick;
+        }));
+        parts.push(b.axis, b.ticks);
+      }
+      const rail = new Map(where.phases.map((p) => [p.id, p]));
       place(b.phases, groupsOf(band, byBand.get(band.id) || []).map((group) => {
         usedGroups.add(band.id + '|' + group.key);
         const g = groupEl(band, group);
-        place(g.dots, group.dots.map((dot) => { usedDots.add(dot.cardId); return dotEl(dot, cards.get(dot.cardId)).li; }));
+        const nodes = group.dots.map((dot) => { usedDots.add(dot.cardId); return dotEl(dot, cards.get(dot.cardId), boxes.get(dot.cardId), ox, oy, geo.zoom).li; });
+        place(g.dots, nodes);
+        const at = group.phase ? rail.get(group.phase.id) : undefined;
+        if (at) labels.push([g, group, at, ox, oy]);
+        place(g.li, at ? [g.h3, g.dots, g.label, g.bar] : [g.h3, g.dots]);
         return g.li;
       }));
+      parts.push(b.phases);
+      place(b.li, parts);
       return b.li;
     }));
     for (const [k] of bandEls) if (!usedBands.has(k)) bandEls.delete(k);
     for (const [k] of groupEls) if (!usedGroups.has(k)) groupEls.delete(k);
     for (const [k] of dotEls) if (!usedDots.has(k)) dotEls.delete(k);
+    // Labels are measured once every box is on the page.
+    for (const [g, group, at, ox, oy] of labels) drawRail(g, group, at, ox, oy);
     // One tab stop for the dots: the selected card's dot when it is shown, else the first (the arrow keys come with 62.1-05).
     const order = Array.from(list.querySelectorAll('button.tl-dot'));
     const stop = order.find((b) => b.getAttribute('data-id') === board.selected()) || order[0];
     for (const b of order) attr(b, 'tabindex', b === stop ? 0 : -1);
-    place(container, [scroll]);
   }
 
   board.registerView('timeline', { render });

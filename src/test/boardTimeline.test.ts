@@ -103,7 +103,8 @@ test('tracer: a person chooses Timeline and the board shows the ordered list of 
       assert.ok(phaseLi.getAttribute('data-phase') !== null, 'every phase entry names its phase');
       const [h3, dots] = children(phaseLi);
       assert.equal(h3!.localName, 'h3');
-      assert.ok(h3!.className.split(' ').includes('tl-phase-label'));
+      // 62.1-04: the h3 keeps the full heading for screen readers (tl-phase-head); the label the eye reads is the separate .tl-phase-label.
+      assert.ok(h3!.className.split(' ').includes('tl-phase-head'));
       assert.equal(dots!.localName, 'ol');
       assert.ok(dots!.className.split(' ').includes('tl-dots'));
       const phaseId = phaseLi.getAttribute('data-phase');

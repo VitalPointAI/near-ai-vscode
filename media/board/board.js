@@ -59,7 +59,9 @@
       'arrow-swap': ['M2.5 5.5H12.5', 'M10 3L12.5 5.5L10 8', 'M13.5 10.5H3.5', 'M6 8L3.5 10.5L6 13'], 'chevron-right': ['M6 3.5L10.5 8L6 12.5'], 'chevron-down': ['M3.5 6L8 10.5L12.5 6'],
       error: [o(8, 8, 5.5), 'M5.8 5.8L10.2 10.2', 'M10.2 5.8L5.8 10.2'], warning: ['M8 2L14.5 13.5H1.5Z', 'M8 6.5V9.5', 'M8 11.5V11.6'], filter: ['M2 3H14L9.5 8.5V13L6.5 11.5V8.5Z'],
       add: ['M8 3V13', 'M3 8H13'], 'link-external': ['M9 2.5H13.5V7', 'M13.5 2.5L7.5 8.5', 'M11.5 9.5V13.5H2.5V4.5H6.5'], close: ['M3.5 3.5L12.5 12.5', 'M12.5 3.5L3.5 12.5'],
-      'arrow-left': ['M13 8H3', 'M7 4L3 8L7 12'], organization: [o(8, 5, 2), 'M3.5 13.5V12a2.5 2.5 0 0 1 2.5-2.5H10a2.5 2.5 0 0 1 2.5 2.5V13.5']
+      'arrow-left': ['M13 8H3', 'M7 4L3 8L7 12'], organization: [o(8, 5, 2), 'M3.5 13.5V12a2.5 2.5 0 0 1 2.5-2.5H10a2.5 2.5 0 0 1 2.5 2.5V13.5'],
+      // 62.1-04: the timeline's Zoom out (minus) and Fit (four corners).
+      remove: ['M3 8H13'], 'screen-full': ['M2.5 6V2.5H6', 'M10 2.5H13.5V6', 'M13.5 10V13.5H10', 'M6 13.5H2.5V10']
     };
   })();
 
@@ -1040,6 +1042,12 @@
     redraw: () => render(),
     /** The card the person selected (it stays selected across the views). */
     selected: () => ui.selected,
+    /** 62.1-04: the filter rule the kanban uses, so a dot the filters leave out is a ghost in the timeline (TD-14). */
+    matches: (c) => !!c && matches(c),
+    /** 62.1-04: true while the board cannot change cards (offline, paused or removed). */
+    isDown,
+    /** 62.1-04: true when the card has a Move to... menu for this viewer (moves or assignment items). */
+    hasMenu: (c) => !!c && !!model && hasMenu(c),
     focusCard: (id) => { const li = cardEls.get(id); return !!li && li.isConnected && focusEl(li); },
     setPending(id, text) { delete refusals[id]; pending[id] = text; refreshCard(id); },
     showRefusal(id, columnLabel, reason, action) {
