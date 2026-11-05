@@ -259,7 +259,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 **Goal:** As part of the Team Board, a person sees the whole project on one timeline they can view left to right or top to bottom: milestones in order, phases as segments, every card a small dot in dependency order that opens into the full card with the board's own actions, a Now marker showing where the work is, and the percent complete, proven in a real window and in code-server for the owner to review.
 **Requirements**: BOARD-01, BOARD-02, BOARD-03
 **Depends on:** Phase 62 (runs after 62-27 and Phase 61's 61-31, the last planned plans of both)
-**Plans:** 6/9 plans executed in 7 waves (decisions D-01 to D-14 in 62.1-CONTEXT.md, including the owner's Now indicator D-13 and percent complete D-14 of 2026-11-04; design contract 62.1-UI-SPEC.md with its 2026-11-04 amendment)
+**Plans:** 7/9 plans executed in 7 waves (decisions D-01 to D-14 in 62.1-CONTEXT.md, including the owner's Now indicator D-13 and percent complete D-14 of 2026-11-04; design contract 62.1-UI-SPEC.md with its 2026-11-04 amendment)
 **UI hint**: yes
 
 Plans:
@@ -279,7 +279,7 @@ Plans:
 - [x] 62.1-05-PLAN.md — Preview, expanded card with the board's own face and actions, placement off the Now label, and the full keyboard model with N for now (BOARD-01, BOARD-03)
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 62.1-06-PLAN.md — Live updates in place with the pulse, the gliding Now marker and filling percents, zoom and pan, the first screen centred on now, every motion with reduced motion, and test-only metrics (BOARD-01, BOARD-02)
+- [x] 62.1-06-PLAN.md — Live updates in place with the pulse, the gliding Now marker and filling percents, zoom and pan, the first screen centred on now, every motion with reduced motion, and test-only metrics (BOARD-01, BOARD-02)
 
 **Wave 6** *(blocked on 62.1-06 and 62.1-07)*
 - [ ] 62.1-08-PLAN.md — Real VS Code window: the timeline launch, real keys and mouse, a move from the card, a teammate moving the Now step, frame timing, narrow width, and the rare states through a test-only seam (BOARD-01, BOARD-02, BOARD-03)

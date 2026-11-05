@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62.1-05-PLAN.md
-last_updated: "2026-11-05T01:17:00.351Z"
+stopped_at: Completed 62.1-06-PLAN.md
+last_updated: "2026-11-05T02:12:09.129Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 275f1a1bbd4bc77b82bee1107b2bc2124c4af370
+state_head: 4199953d1a1885b2a239aec7ad21885820d7e212
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 76
+  completed_plans: 77
   percent: 11
 ---
 
@@ -130,6 +130,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 62.1 P07 | 22min | 3 tasks | 4 files |
 | Phase 62.1 P04 | 30min | 3 tasks | 6 files |
 | Phase 62.1 P05 | 21min | 3 tasks | 4 files |
+| Phase 62.1 P06 | 55min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -311,6 +312,10 @@ Recent decisions affecting current work:
 - [Phase 62.1]: 62.1-05: The kanban card and the timeline's expanded card share one face builder (board.js cardFace, moveOf); the timeline registers focus(id) and refresh(id) so the menu and drawer return focus to the dot and pending or refusal lines reach it
 - [Phase 62.1]: 62.1-05: Placement obstacles are the Now pill, the stuck milestone headers plus 8 px (their percent and progress words) and the visible phase labels, so probe rules 11 and 12 hold; right and left never squeeze the card width
 - [Phase 62.1]: 62.1-05: #tl-preview and #tl-card are in the canvas only while shown; a Waits for link focuses the target dot and opens its card; focus returning to a dot does not reopen the preview
+- [Phase 62.1]: 62.1-06: A live update is diffed against the last draw: changed states pulse (600 ms) with the board's 3 second outline, the Now marker glides 320 ms with the past shade, fills move over 400 ms, and the Now sentence joins the board's batched change summary (board.announceAfter)
+- [Phase 62.1]: 62.1-06: Motion is a class plus FLIP start values let go two frames later; any press or key ends it (capture listener on the scroller), prefers-reduced-motion skips it with a change listener; the closing card stays 120 ms as an inert, aria-hidden picture
+- [Phase 62.1]: 62.1-06: Zoom keeps the point under the pointer (or the focused dot) by the nearest dot's mark; the first open of a direction centres the Now marker, later opens restore the per-direction scroll; Jump to now and N focus quietly after a smooth scroll
+- [Phase 62.1]: 62.1-06: NearAiTimeline.metrics exists only with data-e2e (drawMs, frame count and p95; reset returns then clears); the fake DOM now runs capture listeners first, as a browser does
 
 ### Pending Todos
 
@@ -332,8 +337,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T01:16:59.874Z
-Stopped at: Completed 62.1-05-PLAN.md
+Last session: 2026-11-05T02:12:08.683Z
+Stopped at: Completed 62.1-06-PLAN.md
 Resume file: None
 
 ## Notes
