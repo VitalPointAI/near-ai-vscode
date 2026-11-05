@@ -442,6 +442,96 @@
   }
   const hide = (n, hidden) => { if (n.hidden !== !!hidden) n.hidden = !!hidden; };
 
+  // ---- motion (62.1-06, D-08, UI-SPEC "Motion" and the amendment's motion table) ------------------------------------------------------------------
+  // Only transform and opacity move (plus stroke-dashoffset on the ring and on emphasised lines). A motion is a class the stylesheet animates, with an
+  // optional start value written inline (FLIP: the old place as a transform from the new one) that is let go two frames later, so the browser has drawn
+  // the start before it moves. Nothing is read from the layout inside a frame. A new interaction ends every running motion at once (its end state), and
+  // prefers-reduced-motion: reduce skips every motion: the end state is simply drawn.
+  const reduceQuery = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  let reduced = !!(reduceQuery && reduceQuery.matches);
+  const raf = (fn) => (typeof window.requestAnimationFrame === 'function' ? window.requestAnimationFrame(fn) : setTimeout(fn, 16));
+  const caf = (id) => (typeof window.cancelAnimationFrame === 'function' ? window.cancelAnimationFrame(id) : clearTimeout(id));
+  // The motion classes of each node, so a redraw that writes a dot's classes keeps them.
+  const fxOf = new Map();
+  const fxClasses = (node) => { const s = fxOf.get(node); return s && s.size ? ' ' + Array.from(s).join(' ') : ''; };
+  function setFx(node, cls, on) {
+    let s = fxOf.get(node);
+    if (on) { if (!s) { s = new Set(); fxOf.set(node, s); } s.add(cls); } else if (s) { s.delete(cls); if (!s.size) fxOf.delete(node); }
+    if (node.classList.contains(cls) !== on) node.classList.toggle(cls, on);
+  }
+  const running = new Set();
+  let waiting = [];
+  let playFrame;
+  /** Puts a motion's end values on its node: each start value is replaced by its end value, or let go (the stylesheet's or the attribute's). */
+  function toEnd(m) {
+    for (const k of Object.keys(m.from)) { if (own(m.to, k)) setStyle(m.node, k, m.to[k]); else m.node.style.removeProperty(k); }
+  }
+  function endMotion(m) {
+    if (!running.has(m)) return;
+    running.delete(m);
+    clearTimeout(m.timer);
+    toEnd(m);
+    setFx(m.node, m.cls, false);
+    if (m.will) m.node.style.removeProperty('will-change');
+    if (m.delay) m.node.style.removeProperty('animation-delay');
+    if (m.done) m.done();
+  }
+  function startMotion(m) {
+    if (!running.has(m)) return;
+    setFx(m.node, m.cls, true);
+    if (m.delay) setStyle(m.node, 'animation-delay', m.delay + 'ms');
+    toEnd(m);
+    m.timer = setTimeout(() => endMotion(m), m.delay + m.ms);
+  }
+  function play() {
+    playFrame = undefined;
+    const list = waiting;
+    waiting = [];
+    for (const m of list) startMotion(m);
+    if (running.size) sampleFrames();
+  }
+  /**
+   * Runs one motion: cls on node for ms (after delay). from holds inline start values (FLIP), to the end values that stay after it (the rest are let
+   * go). Under reduced motion nothing runs: the end values are written and done is called. A node runs one motion of a class at a time, and one that
+   * moves it (a transform) at a time: the older one ends first.
+   */
+  function motion(node, cls, ms, options) {
+    const o = options || {};
+    const from = o.from || {};
+    const to = o.to || {};
+    for (const m of Array.from(running)) if (m.node === node && (m.cls === cls || (own(m.from, 'transform') && own(from, 'transform')))) endMotion(m);
+    if (reduced) {
+      for (const k of Object.keys(to)) setStyle(node, k, to[k]);
+      if (o.done) o.done();
+      return undefined;
+    }
+    const m = { node, cls, ms, from, to, delay: o.delay || 0, done: o.done, timer: undefined, will: own(from, 'transform') || o.will === true };
+    running.add(m);
+    if (m.will) setStyle(node, 'will-change', 'transform');
+    if (Object.keys(from).length) {
+      for (const k of Object.keys(from)) setStyle(node, k, from[k]);
+      waiting.push(m);
+      if (playFrame === undefined) playFrame = raf(() => { playFrame = raf(play); });
+    } else {
+      startMotion(m);
+      sampleFrames();
+    }
+    return m;
+  }
+  /** A new interaction (a press, a key, a wheel, a toolbar action): every running motion jumps to its end state. */
+  function finishMotion() {
+    if (playFrame !== undefined) { caf(playFrame); playFrame = undefined; }
+    waiting = [];
+    for (const m of Array.from(running)) endMotion(m);
+  }
+  function onReduce(e) { reduced = !!(e && e.matches); if (reduced) finishMotion(); }
+  if (reduceQuery) {
+    if (typeof reduceQuery.addEventListener === 'function') reduceQuery.addEventListener('change', onReduce);
+    else if (typeof reduceQuery.addListener === 'function') reduceQuery.addListener(onReduce);
+  }
+  // The frame sample for the real-window budget check (62.1-08); it samples only on a page the host marked for the extension-host tests.
+  function sampleFrames() { /* filled in with the metrics */ }
+
   // ---- dots: state by colour, shape and glyph (UI-SPEC "State colours", D-05) ------------------------------------------------------------------
   // The main appearance of a dot: blocked, then on hold, then the column.
   const stateOf = (c) => (c.blocked ? 'blocked' : c.held ? 'held' : c.column);
@@ -896,7 +986,7 @@
     setText(nowSentence, now.sentence);
   }
   /** The past shade: every band before the frontier band, and the frontier band up to the line. */
-  function drawShades(geo) {
+  function shadesOf(geo) {
     const out = [];
     const at = geo.now ? geo.bands.findIndex((b) => b.id === geo.now.milestoneId) : -1;
     if (at >= 0) {
@@ -905,7 +995,10 @@
       const line = geo.now.line;
       out.push(geo.direction === 'horizontal' ? rect(b.x, b.y, line.x - b.x, b.h) : rect(b.x, b.y, b.w, line.y - b.y));
     }
-    place(shades, out.map((r, i) => { const n = shades.children[i] || el('div', 'tl-past'); put(n, r); return n; }));
+    return out;
+  }
+  function drawShades(geo) {
+    place(shades, shadesOf(geo).map((r, i) => { const n = shades.children[i] || el('div', 'tl-past'); put(n, r); return n; }));
   }
 
   // ---- dependency lines (D-07) ---------------------------------------------------------------------------------------------------------------
@@ -977,12 +1070,24 @@
     }
   }
 
+  // The milestones drawn open in this session while they were not finished: one that finishes while it is shown stays shown until the next open
+  // (UI-SPEC "Live Updates"). The person's own saved choice always wins.
+  const sessionShown = {};
+  function shownFor(saved) {
+    const out = Object.assign({}, saved.shown);
+    for (const id of Object.keys(sessionShown)) if (!own(out, id)) out[id] = true;
+    return out;
+  }
+  /** What the geometry is asked for this draw: the saved choices, the session's shown milestones and the open stacks. */
+  const geoOptions = (saved, width, zoom) => ({ direction: board.drawnDirection(), zoom: zoom === undefined ? saved.zoom : zoom, width, shown: shownFor(saved), openStacks });
+
   function draw(model, timeline, saved, shown) {
+    const prev = drawn;
     const nothing = model.cards.length > 0 && shown.length === 0;
     place(scroll, nothing ? [filterBand, canvas, hints] : [canvas, hints]);
     if (nothing) place(filterBand, [board.filterEmptyState()]);
     const width = scroll.clientWidth > 0 ? scroll.clientWidth : window.innerWidth || 800;
-    const geo = geometry(timeline, { direction: board.drawnDirection(), zoom: saved.zoom, width, shown: saved.shown, openStacks });
+    const geo = geometry(timeline, geoOptions(saved, width));
     const horizontal = geo.direction === 'horizontal';
     setStyle(canvas, 'width', px(geo.width));
     setStyle(canvas, 'height', px(geo.height));
@@ -1113,10 +1218,106 @@
     const stop = order.find((b) => stopKey(b) === activeKey) || order.find((b) => b.getAttribute('data-id') === board.selected()) || order.find((b) => b.classList.contains('tl-dot')) || order[0];
     for (const b of order) attr(b, 'tabindex', b === stop ? 0 : -1);
     lastOrder = order.map(stopKey);
-    drawn = { timeline, geo, cards, boxes, dotOf, matching };
+    drawn = { model, timeline, geo, cards, boxes, dotOf, matching, width };
     followCard();
     followPreview();
     applyEmphasis();
+    keepShown(prev, timeline);
+    if (prev) liveMotion(prev, drawn);
+  }
+
+  /** The session's open milestones, and a milestone that stops being finished stays unfolded from now on (saved, UI-SPEC "Folded finished milestones"). */
+  function keepShown(prev, timeline) {
+    const was = new Map(prev ? prev.timeline.milestones.map((m) => [m.id, m.finished === true]) : []);
+    const reopened = {};
+    for (const m of timeline.milestones) {
+      if (m.finished !== true) sessionShown[m.id] = true;
+      if (was.get(m.id) === true && m.finished !== true) reopened[m.id] = true;
+    }
+    if (Object.keys(reopened).length) board.setUiState({ shown: reopened });
+  }
+
+  // ---- what changed since the last draw (62.1-06, D-08, D-13, D-14, BOARD-02, UI-SPEC "Live Updates") --------------------------------------------
+  const PULSE = 600;
+  const OUTLINE = 3000;
+  const GLIDE = 320;
+  const FILL = 400;
+  const outlineTimers = new Map();
+  /** The board's static 3 second outline on a dot whose state changed (it is not motion, so reduced motion keeps it). */
+  function outlineDot(id) {
+    const d = dotEls.get(id);
+    if (!d) return;
+    clearTimeout(outlineTimers.get(id));
+    setFx(d.button, 'changed', true);
+    outlineTimers.set(id, setTimeout(() => { outlineTimers.delete(id); setFx(d.button, 'changed', false); }, OUTLINE));
+  }
+  const nowKey = (now) => (now ? now.milestoneId + ':' + now.step + ':' + (now.allDone === true) : '');
+  const pctOf = (p) => (p && typeof p.percent === 'number' ? p.percent : 0);
+  const translate = (dx, dy) => 'translate(' + dx + 'px, ' + dy + 'px)';
+  /** Applies the motions to what changed between two draws: the changed dots pulse and get the outline, the Now marker glides to its new place with
+   * the past shade following it, the percents fill to their new values, and a moved Now step is said once after the board's change summary. */
+  function liveMotion(prev, next) {
+    const live = prev.model !== next.model;
+    const turned = prev.geo.direction !== next.geo.direction;
+    if (live) {
+      for (const [id, c] of next.cards) {
+        const old = prev.cards.get(id);
+        if (!old || stateOf(old) === stateOf(c) || !dotButton(id)) continue;
+        motion(dotEls.get(id).button, 'tl-pulse', PULSE);
+        outlineDot(id);
+      }
+      const now = next.timeline.now;
+      if (now && prev.timeline.now && nowKey(prev.timeline.now) !== nowKey(now) && typeof board.announceAfter === 'function') board.announceAfter(now.sentence);
+      fills(prev, next);
+    }
+    if (turned) return;
+    const a = prev.geo.now;
+    const b = next.geo.now;
+    if (a && b && nowItem.isConnected) {
+      const lineFrom = { x: a.line.x - b.line.x, y: a.line.y - b.line.y };
+      const pillFrom = { x: a.pill.x - b.pill.x, y: a.pill.y - b.pill.y };
+      if (lineFrom.x || lineFrom.y) motion(nowLine, 'tl-glide', GLIDE, { from: { transform: translate(lineFrom.x, lineFrom.y) } });
+      if (pillFrom.x || pillFrom.y) motion(nowPill, 'tl-glide', GLIDE, { from: { transform: translate(pillFrom.x, pillFrom.y) } });
+    }
+    // The past shade: a shade that keeps its start and changes its length grows (or shrinks) from the band start.
+    const horizontal = next.geo.direction === 'horizontal';
+    const oldShades = shadesOf(prev.geo);
+    shadesOf(next.geo).forEach((r, i) => {
+      const o = oldShades[i];
+      const n = shades.children[i];
+      if (!o || !n || o.x !== r.x || o.y !== r.y) return;
+      const lo = horizontal ? o.w : o.h;
+      const ln = horizontal ? r.w : r.h;
+      if (lo === ln || !(ln > 0)) return;
+      motion(n, 'tl-glide', GLIDE, { from: { transform: (horizontal ? 'scaleX(' : 'scaleY(') + lo / ln + ')' } });
+    });
+  }
+  /** The toolbar ring, each band's bar and each phase fill move from the old percent to the new one in 400 ms (D-14); the first draw shows the value. */
+  function fills(prev, next) {
+    const p0 = pctOf(prev.timeline.percent);
+    const p1 = pctOf(next.timeline.percent);
+    if (p0 !== p1 && !overall.hidden) motion(ringFill, 'tl-filling', FILL, { from: { 'stroke-dashoffset': (RING * (1 - p0 / 100)).toFixed(2) + 'px' } });
+    const horizontal = next.geo.direction === 'horizontal';
+    const before = new Map(prev.timeline.milestones.map((m) => [m.id, m]));
+    for (const m of next.timeline.milestones) {
+      const old = before.get(m.id);
+      const b = bandEls.get(m.id);
+      if (!old || !b) continue;
+      const q0 = pctOf(old.percent);
+      const q1 = pctOf(m.percent);
+      if (q0 !== q1 && q1 > 0 && b.fill.isConnected) motion(b.fill, 'tl-filling', FILL, { from: { transform: 'scaleX(' + q0 / q1 + ')' } });
+      const phases = new Map((old.phases || []).map((ph) => [ph.id, ph]));
+      for (const ph of m.phases || []) {
+        const was = phases.get(ph.id);
+        const g = groupEls.get(m.id + '|' + ph.id);
+        if (!was || !g || !g.fill.isConnected) continue;
+        const r0 = pctOf(was.percent);
+        const r1 = pctOf(ph.percent);
+        if (r0 === r1) continue;
+        const axis = horizontal ? 'scaleX(' : 'scaleY(';
+        motion(g.fill, 'tl-filling', FILL, { from: { transform: axis + r0 / 100 + ')' }, to: { transform: axis + r1 / 100 + ')' } });
+      }
+    }
   }
 
   // ---- the expanded card (62.1-05, D-06, D-01, UI-SPEC "Expanded card") -----------------------------------------------------------------------
@@ -1129,7 +1330,7 @@
     const expanded = !!open && open.id === id;
     const busy = board.pendingText(id) !== '';
     const refused = !busy && board.refusalText(id) !== '';
-    setClass(d.button, d.base + (expanded ? ' selected' : '') + (busy ? ' pending' : '') + (refused ? ' refused' : ''));
+    setClass(d.button, d.base + (expanded ? ' selected' : '') + (busy ? ' pending' : '') + (refused ? ' refused' : '') + fxClasses(d.button));
     attr(d.button, 'aria-expanded', expanded ? 'true' : null);
     attr(d.button, 'aria-controls', expanded ? 'tl-card' : null);
     attr(d.button, 'aria-busy', busy ? 'true' : null);

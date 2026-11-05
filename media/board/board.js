@@ -188,12 +188,23 @@
   }
   const post = (message) => vscode.postMessage(message);
   let liveTimer;
+  let liveNext = '';
   function announce(text) {
     const live = $('live');
     if (!text || !live) return;
     live.textContent = '';
     clearTimeout(liveTimer);
-    liveTimer = setTimeout(() => { live.textContent = text; }, 100);
+    liveNext = text;
+    liveTimer = setTimeout(() => { liveTimer = undefined; liveNext = ''; live.textContent = text; }, 100);
+  }
+  /** 62.1-06: a sentence said after the words already on their way: with the next batched summary of teammates' changes when one is waiting, else
+   * after the words about to be said, else on its own. One live region, one announcement, so nothing is cut off. */
+  let trailing = '';
+  function announceAfter(text) {
+    if (!text) return;
+    if (changeTimer || (cooling && queued.length)) { trailing = text; return; }
+    if (liveTimer && liveNext) { announce(liveNext + ' ' + text); return; }
+    announce(text);
   }
   const labelOf = (c) => (c.kind === 'plan' ? 'plan ' + c.displayId : c.displayId);
 
@@ -996,7 +1007,8 @@
     const named = list.slice(0, 3);
     const rest = list.length - named.length;
     const body = named.length > 1 && rest === 0 ? named.slice(0, -1).join(', ') + ' and ' + named[named.length - 1] : named.join(', ') + (rest > 0 ? ', and ' + rest + ' more' : '');
-    announce(plural(list.length, 'change', 'changes') + ' from your team: ' + body + '.');
+    announce(plural(list.length, 'change', 'changes') + ' from your team: ' + body + '.' + (trailing ? ' ' + trailing : ''));
+    trailing = '';
     cooling = true;
     coolTimer = setTimeout(() => { cooling = false; if (queued.length) flushChanges(); }, 5000);
   }
@@ -1055,7 +1067,7 @@
     if (timelineOn() && typeof registeredViews.timeline.refresh === 'function') registeredViews.timeline.refresh(id);
   }
   const api = {
-    post, announce, icon, layout: () => layout, model: () => model, cardData, cardElement: (id) => cardEls.get(id), groupBy: () => ui.groupBy,
+    post, announce, announceAfter, icon, layout: () => layout, model: () => model, cardData, cardElement: (id) => cardEls.get(id), groupBy: () => ui.groupBy,
     /** 62.1-03: a script draws a whole view of the board; the board hands it the shown cards when that view is chosen. */
     registerView(name, view) { if (VIEWS.indexOf(name) >= 0 && name !== 'columns' && view && typeof view.render === 'function') { registeredViews[name] = view; if (ui.view === name) render(); } },
     view: () => ui.view,

@@ -236,7 +236,9 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 #tl-overall { display: inline-flex; align-items: center; gap: 4px; font-size: 0.85em; line-height: 1.4; font-variant-numeric: tabular-nums; }
 .tl-overall-ring { flex: none; width: 16px; height: 16px; }
 .tl-ring-track { fill: none; stroke: var(--vscode-panel-border, var(--vscode-widget-border)); stroke-width: 2; }
-.tl-ring-fill { fill: none; stroke: var(--vscode-progressBar-background); stroke-width: 2; transition: stroke-dashoffset 400ms ease-out; }
+.tl-ring-fill { fill: none; stroke: var(--vscode-progressBar-background); stroke-width: 2; }
+/* 62.1-06: a fill moves only on a change from a live update (timeline.js adds tl-filling for 400 ms); the first draw shows the value at once */
+.tl-ring-fill.tl-filling { transition: stroke-dashoffset 400ms ease-out; }
 .zoom { display: inline-flex; align-items: center; gap: 4px; }
 .zoom-level { min-width: 4ch; text-align: center; font-size: 0.85em; font-variant-numeric: tabular-nums; }
 #tl-legend { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 8px; padding: 8px 12px; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px; background: var(--vscode-editorWidget-background); font-size: 0.85em; line-height: 1.4; }
@@ -252,7 +254,9 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-milestone, .tl-phase, .tl-dots > li { margin: 0; padding: 0; list-style: none; }
 .tl-milestone { position: absolute; }
 .tl-shades, .tl-ghosts { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
-.tl-past { position: absolute; background: color-mix(in srgb, var(--vscode-descriptionForeground) 8%, transparent); }
+.tl-past { position: absolute; transform-origin: left top; background: color-mix(in srgb, var(--vscode-descriptionForeground) 8%, transparent); }
+/* the Now marker glides to a new place and the past shade follows it (the amendment's motion table) */
+.tl-past.tl-glide, .tl-now-line.tl-glide, .tl-now-pill.tl-glide { transition-property: transform; transition-duration: 320ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
 .tl-lines { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; transition: opacity 200ms ease-out; }
 .tl-line { fill: none; stroke: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); stroke-width: 1; }
 .tl-line.emphasis { stroke: var(--vscode-foreground); stroke-width: 2; }
@@ -287,12 +291,20 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-phase-label { position: absolute; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85em; line-height: 16px; color: var(--vscode-foreground); font-variant-numeric: tabular-nums; }
 .tl-phase-bar { position: absolute; overflow: hidden; border-radius: 2px; background: color-mix(in srgb, var(--vscode-descriptionForeground) 40%, transparent); }
 /* timeline.js writes the fill's scale (scaleX along a horizontal bar, scaleY down a vertical one) from the phase's percent. */
-.tl-phase-fill { display: block; width: 100%; height: 100%; transform-origin: left center; background: var(--vscode-progressBar-background); transition: transform 400ms ease-out; }
+.tl-phase-fill { display: block; width: 100%; height: 100%; transform-origin: left center; background: var(--vscode-progressBar-background); }
+.tl-phase-fill.tl-filling, .tl-ms-head .bar.tl-filling { transition: transform 400ms ease-out; }
+.tl-ms-head .bar { transform-origin: left center; }
 #root[data-direction="vertical"] .tl-phase-fill { transform-origin: center top; }
 
 /* dots: state by colour, shape (hollow, dashed, filled) and glyph; the hit box is 28 px or more and never changes size */
 .tl-dot { position: absolute; display: flex; align-items: center; justify-content: flex-start; gap: 4px; min-width: 28px; min-height: 28px; padding: 0 0 0 4px; border: 0; border-radius: 14px; cursor: pointer; color: var(--vscode-foreground); background: none; }
 .tl-dot:hover { background: none; }
+/* the board's static 3 second outline on a dot whose state changed (not motion: it stays under reduced motion); the focus ring below wins */
+.tl-dot.changed { outline: 2px solid var(--vscode-editor-findMatchHighlightBackground); outline-offset: 2px; }
+/* the state change pulse: a 2 px ring in the new state colour (the colour rules below) grows from the mark and fades, once */
+.tl-dot.tl-pulse::after { content: ''; position: absolute; left: 4px; top: 4px; width: 20px; height: 20px; box-sizing: border-box; border: 2px solid currentColor; border-radius: 50%; pointer-events: none; animation: tl-pulse 600ms ease-out both; }
+.tl-square.tl-pulse::after { border-radius: 4px; }
+@keyframes tl-pulse { from { transform: scale(1); opacity: 1; } to { transform: scale(1.8); opacity: 0; } }
 .tl-dot:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .tl-mark { flex: none; width: 20px; height: 20px; overflow: visible; transform-origin: center; transition: transform 120ms ease-out; }
 .tl-dot:hover .tl-mark, .tl-dot:focus-visible .tl-mark { transform: scale(1.25); }
@@ -304,13 +316,13 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-mark .tl-pip { fill: var(--vscode-editorInfo-foreground); stroke: var(--vscode-editor-background); stroke-width: 2; }
 .tl-mark.tl-ring { outline: 2px solid var(--vscode-foreground); outline-offset: 2px; border-radius: 50%; }
 .tl-square .tl-mark.tl-ring { border-radius: 6px; }
-.tl-dot[data-state="ready"] .tl-mark, .tl-dot[data-state="claimed"] .tl-mark, .tl-dot[data-state="in-progress"] .tl-mark,
+.tl-dot[data-state="ready"] .tl-mark, .tl-dot[data-state="claimed"] .tl-mark, .tl-dot[data-state="in-progress"] .tl-mark, .tl-dot[data-state="ready"]::after, .tl-dot[data-state="claimed"]::after, .tl-dot[data-state="in-progress"]::after,
 .tl-legend-item[data-state="ready"] .tl-mark, .tl-legend-item[data-state="claimed"] .tl-mark, .tl-legend-item[data-state="in-progress"] .tl-mark { color: var(--vscode-charts-blue, var(--vscode-editorInfo-foreground)); }
-.tl-dot[data-state="in-review"] .tl-mark, .tl-dot[data-state="integrating"] .tl-mark,
+.tl-dot[data-state="in-review"] .tl-mark, .tl-dot[data-state="integrating"] .tl-mark, .tl-dot[data-state="in-review"]::after, .tl-dot[data-state="integrating"]::after,
 .tl-legend-item[data-state="in-review"] .tl-mark, .tl-legend-item[data-state="integrating"] .tl-mark { color: var(--vscode-charts-purple, var(--vscode-foreground)); }
-.tl-dot[data-state="done"] .tl-mark, .tl-legend-item[data-state="done"] .tl-mark { color: var(--vscode-testing-iconPassed); }
-.tl-dot[data-state="blocked"] .tl-mark, .tl-legend-item[data-state="blocked"] .tl-mark { color: var(--vscode-editorWarning-foreground); }
-.tl-dot[data-state="backlog"] .tl-mark, .tl-dot[data-state="cancelled"] .tl-mark, .tl-dot[data-state="held"] .tl-mark,
+.tl-dot[data-state="done"] .tl-mark, .tl-dot[data-state="done"]::after, .tl-legend-item[data-state="done"] .tl-mark { color: var(--vscode-testing-iconPassed); }
+.tl-dot[data-state="blocked"] .tl-mark, .tl-dot[data-state="blocked"]::after, .tl-legend-item[data-state="blocked"] .tl-mark { color: var(--vscode-editorWarning-foreground); }
+.tl-dot[data-state="backlog"] .tl-mark, .tl-dot[data-state="cancelled"] .tl-mark, .tl-dot[data-state="held"] .tl-mark, .tl-dot[data-state="backlog"]::after, .tl-dot[data-state="cancelled"]::after, .tl-dot[data-state="held"]::after,
 .tl-legend-item[data-state="backlog"] .tl-mark, .tl-legend-item[data-state="cancelled"] .tl-mark, .tl-legend-item[data-state="held"] .tl-mark { color: var(--vscode-descriptionForeground); }
 /* the person on the dot (D-05): a filled chip for the viewer's own cards, a hollow one for someone else's */
 .tl-initials { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; font-size: 0.85em; line-height: 1; color: var(--vscode-foreground); }
@@ -387,5 +399,8 @@ body.vscode-high-contrast .tl-phase-bar, body.vscode-high-contrast-light .tl-pha
 }
 @media (prefers-reduced-motion: reduce) {
   .tl-mark, .tl-phase-fill, .tl-ring-fill, .tl-lines { transition: none; animation: none; }
+  .tl-ring-fill.tl-filling, .tl-phase-fill.tl-filling, .tl-ms-head .bar.tl-filling, .tl-past.tl-glide, .tl-now-line.tl-glide, .tl-now-pill.tl-glide,
+  .tl-dot.tl-pulse::after { transition: none; animation: none; }
+  .tl-dot.tl-pulse::after { display: none; }
   .tl-dot:hover .tl-mark, .tl-dot:focus-visible .tl-mark { transform: none; }
 }

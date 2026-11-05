@@ -41,14 +41,15 @@ function modelOf(world: BoardWorld, viewerId: string): BoardModel {
 }
 
 // milestone:v1 (active) has phase 1 with 1-01 (done) at step 1 and 1-02 (done) and 1-03 (in progress) after it at step 2, and phase 2 with 2-01 and
-// 2-02 after both at step 3. The Now step is step 2 (1-03 is not finished yet).
+// 2-02 after both at step 3, then 2-03, 2-04 and 2-05 one after the other. The Now step is step 2 (1-03 is not finished yet).
 async function liveWorld(): Promise<BoardWorld> {
   const world = await boardWorld();
   const { owner } = world;
   for (const body of [
     milestone('v1', 'Version 1', true), phase('1', 'v1', 'First work'), phase('2', 'v1', 'Second work'),
     plan('1-01', { state: 'done' }), plan('1-02', { state: 'done', dependsOn: ['plan:1-01'] }), plan('1-03', { dependsOn: ['plan:1-01'] }),
-    plan('2-01', { dependsOn: ['plan:1-02', 'plan:1-03'] }), plan('2-02', { dependsOn: ['plan:1-02', 'plan:1-03'] })
+    plan('2-01', { dependsOn: ['plan:1-02', 'plan:1-03'] }), plan('2-02', { dependsOn: ['plan:1-02', 'plan:1-03'] }),
+    plan('2-03', { dependsOn: ['plan:2-01'] }), plan('2-04', { dependsOn: ['plan:2-03'] }), plan('2-05', { dependsOn: ['plan:2-04'] })
   ]) world.accept(owner, 'item.imported', body);
   setState(world.state, 'plan:1-03', 'in-progress');
   return world;
@@ -145,12 +146,13 @@ test('tracer: a teammate finishes the last open plan of the Now step while a car
   assert.deepEqual([s.scrollLeft, s.scrollTop], [120, 4], 'the scroll stays');
   assert.equal(dot(h, 'plan:1-03').getAttribute('data-state'), 'done', 'the new state is drawn');
 
-  // The changed dots pulse for 600 ms and keep the board's 3 second outline; the others do neither.
-  for (const id of ['plan:1-03', 'plan:2-02']) {
+  // The changed dots pulse for 600 ms and keep the board's 3 second outline (2-01 became Ready when what it waits for was done); the others do neither.
+  assert.equal(dot(h, 'plan:2-01').getAttribute('data-state'), 'ready');
+  for (const id of ['plan:1-03', 'plan:2-01', 'plan:2-02']) {
     assert.ok(has(dot(h, id), 'tl-pulse'), `${id} pulses`);
     assert.ok(has(dot(h, id), 'changed'), `${id} has the outline`);
   }
-  for (const id of ['plan:1-01', 'plan:1-02', 'plan:2-01']) assert.ok(!has(dot(h, id), 'tl-pulse') && !has(dot(h, id), 'changed'), `${id} did not change`);
+  for (const id of ['plan:1-01', 'plan:1-02']) assert.ok(!has(dot(h, id), 'tl-pulse') && !has(dot(h, id), 'changed'), `${id} did not change`);
 
   // The marker line and pill start at the old place (a transform from the new place) and glide 320 ms to the new one.
   const line = h.$('.tl-now-line')!;
@@ -168,10 +170,13 @@ test('tracer: a teammate finishes the last open plan of the Now step while a car
   const ratio = (before.now.line.x - band.x) / (after.now.line.x - band.x);
   assert.equal(styleOf(shade, 'transform'), `scaleX(${ratio})`, 'the shade starts at the old line');
 
-  // The fills: the toolbar ring, the band bar and the phase 1 fill move to the new values.
+  // The fills: the toolbar ring, the band bar and the phase 1 fill start at the old values and fill to the new ones.
   const ring = h.$('.tl-ring-fill')!;
   const p = second.timeline!.percent!.percent!;
+  const p0 = first.timeline!.percent!.percent!;
+  assert.notEqual(p, p0, 'the project percent changed');
   assert.equal(ring.getAttribute('stroke-dashoffset'), (RING * (1 - p / 100)).toFixed(2), 'the ring has the new value');
+  assert.equal(styleOf(ring, 'stroke-dashoffset'), `${(RING * (1 - p0 / 100)).toFixed(2)}px`, 'and starts at the old one');
   const bandBar = bandLi(h, 'milestone:v1').querySelector('.tl-ms-head .bar')!;
   const bandPct = second.timeline!.milestones.find((m) => m.id === 'milestone:v1')!.percent!.percent!;
   const oldBandPct = first.timeline!.milestones.find((m) => m.id === 'milestone:v1')!.percent!.percent!;
@@ -179,8 +184,9 @@ test('tracer: a teammate finishes the last open plan of the Now step while a car
   assert.equal(styleOf(bandBar, 'transform'), `scaleX(${oldBandPct / bandPct})`, 'and starts at the old width');
   const phaseFill = h.$('li.tl-phase[data-phase="phase:1"] .tl-phase-fill')!;
   const phasePct = second.timeline!.milestones[0]!.phases.find((x) => x.id === 'phase:1')!.percent!.percent!;
-  assert.equal(styleOf(phaseFill, 'transform'), `scaleX(${phasePct / 100})`);
-  assert.ok(has(ring, 'tl-filling') && has(phaseFill, 'tl-filling'), 'the ring and the phase fill animate to the new value');
+  const oldPhasePct = first.timeline!.milestones[0]!.phases.find((x) => x.id === 'phase:1')!.percent!.percent!;
+  assert.equal(styleOf(phaseFill, 'transform'), `scaleX(${oldPhasePct / 100})`, 'the phase fill starts at the old value');
+  assert.ok(!has(ring, 'tl-filling') && !has(phaseFill, 'tl-filling'), 'nothing moves before the start is drawn');
 
   // Two frames later every move runs (with will-change only while it runs), and the transforms are gone (the end state is the new place).
   h.advance(40);
@@ -189,8 +195,10 @@ test('tracer: a teammate finishes the last open plan of the Now step while a car
     assert.equal(styleOf(n, 'transform'), '', 'towards its own place');
     assert.equal(styleOf(n, 'will-change'), 'transform');
   }
-  assert.ok(has(bandBar, 'tl-filling'), 'the band bar fills');
-  assert.equal(styleOf(bandBar, 'transform'), '');
+  for (const n of [ring, bandBar, phaseFill]) assert.ok(has(n, 'tl-filling'), `${n.className} fills for 400 ms`);
+  assert.equal(styleOf(bandBar, 'transform'), '', 'the band bar fills to its width');
+  assert.equal(styleOf(ring, 'stroke-dashoffset'), '', 'the ring fills to its value');
+  assert.equal(styleOf(phaseFill, 'transform'), `scaleX(${phasePct / 100})`, 'the phase fill fills to the new value');
   h.advance(330);
   for (const n of [line, pill, shade]) { assert.ok(!has(n, 'tl-glide'), 'the glide ends after 320 ms'); assert.equal(styleOf(n, 'will-change'), ''); }
   h.advance(100);
@@ -208,7 +216,7 @@ test('tracer: a teammate finishes the last open plan of the Now step while a car
   const sentence = second.timeline!.now!.sentence;
   const summary = h.announcements.find((a) => /from your team/.test(a));
   assert.ok(summary, `the board's change summary is said: ${said}`);
-  assert.ok(summary!.startsWith('2 changes from your team: '), summary);
+  assert.ok(summary!.startsWith('3 changes from your team: '), summary);
   assert.ok(summary!.endsWith(sentence), `the Now sentence follows the summary: ${summary}`);
   assert.equal(h.announcements.filter((a) => a.includes(sentence)).length, 1, 'once');
   assert.equal(said.split(sentence).length - 1, 1, 'said once in all');
@@ -262,13 +270,13 @@ test('D-13: a model where the Now step did not change announces no Now sentence,
   const world = await liveWorld();
   const h = timelineOf(modelOf(world, world.lead.memberId));
   settle(h);
-  setState(world.state, 'plan:2-01', 'ready');
+  setState(world.state, 'plan:1-03', 'in-review');
   const third = modelOf(world, world.lead.memberId);
   assert.equal(third.timeline!.now!.step, 1, 'the Now step is the same');
   h.announcements.length = 0;
   h.deliver({ type: 'state', model: third });
   assert.equal(styleOf(h.$('.tl-now-line')!, 'transform'), '', 'the marker stays still');
-  assert.ok(has(dot(h, 'plan:2-01'), 'tl-pulse'), 'the changed dot pulses');
+  assert.ok(has(dot(h, 'plan:1-03'), 'tl-pulse'), 'the changed dot pulses');
   h.advance(6000);
   assert.ok(h.announcements.some((a) => /1 change from your team/.test(a)), `the change is said: ${h.announcements.join(' | ')}`);
   assert.deepEqual(h.announcements.filter((a) => a.includes('Now:')), [], 'no Now sentence');
