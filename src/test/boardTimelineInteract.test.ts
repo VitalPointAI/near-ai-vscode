@@ -878,3 +878,37 @@ test('62.1-08: a card that would cover a header, a phase label or the Now pill s
   assert.equal(card(h), null, 'the card is closed');
   assert.ok(px(h.$('.tl-canvas')!, 'height') < grown, 'the canvas is back to the timeline\'s own size');
 });
+
+// 62.1-09 (found in the real window, the screenshot matrix at 480 px): under 520 px the Now dot sits between the Now pill on one side and the phase
+// labels on the rail on the other, so a layer at the full view width had no clear side and covered the pill (probe rule 3 and the D-13 amendment:
+// the Now pill is never covered). With no clear side at the full width, the layer goes below or above from the dot's own left edge to the view's
+// right edge, clear of the rail, whole and uncovering.
+test('62.1-09: under 520 px, with no clear side at the full view width, the layer goes beside the rail from the dot to the view\'s right edge and covers neither the Now pill nor a phase label', () => {
+  const NARROW = { direction: 'vertical', narrow: true };
+  const view = { left: 8, top: 8, width: 440, height: 737 };
+  const dotBox = { left: 88, top: 400, width: 52, height: 28 };
+  const pill = { left: 88, top: 346, width: 320, height: 40 };
+  const labels = [{ left: 16, top: 400, width: 32, height: 16 }, { left: 16, top: 440, width: 32, height: 16 }, { left: 16, top: 480, width: 32, height: 16 }];
+  for (const [size, what] of [[{ width: 256, height: 141 }, 'the preview'], [{ width: 320, height: 300 }, 'the card']] as const) {
+    const r = place(dotBox, size, view, [pill, ...labels], NARROW);
+    assert.ok(!overlaps(r, pill), `${what} does not cover the Now pill: ${JSON.stringify(r)}`);
+    assert.ok(labels.every((l) => !overlaps(r, l)), `${what} covers no phase label: ${JSON.stringify(r)}`);
+    assert.ok(inside(r, view), `${what} is inside the view`);
+    assert.equal(r.capped, false, `${what} is whole`);
+    assert.equal(r.left, dotBox.left, `${what} starts at the dot's left edge`);
+    assert.equal(r.left + r.width, view.left + view.width, `${what} reaches the view's right edge`);
+  }
+  // With room at the full width the narrow rule is unchanged: below at the view width.
+  assert.deepEqual(place(dotBox, CARD, view, [], NARROW), { left: 8, top: 436, width: 440, height: 200, side: 'below', capped: false });
+});
+
+// 62.1-09 (found in the real window, the card at the right edge in dark at 900 px): the card's measured height left out its 1 px borders (a box's
+// scrollHeight is its content and padding only), so a card placed flush with the bottom of the view spilled 2 px past it (probe rule 3). A layer is
+// placed at its whole drawn height: its content height plus what its frame adds (offsetHeight less clientHeight: the borders and any scroll bar).
+test('62.1-09: a layer is placed at its whole drawn height, borders included', () => {
+  const outer = timelineApi(start(), 'layerHeight');
+  assert.equal(outer({ scrollHeight: 400, offsetHeight: 402, clientHeight: 400 }, 240), 402, 'a 400 px content height inside a 1 px border on each side is 402 px');
+  assert.equal(outer({ scrollHeight: 900, offsetHeight: 502, clientHeight: 500 }, 240), 902, 'a card taller than its stylesheet cap is placed at its whole height');
+  assert.equal(outer({ scrollHeight: 141, offsetHeight: 141, clientHeight: 141 }, 120), 141, 'a box without a border is its content height');
+  assert.equal(outer({}, 240), 240, 'where nothing is laid out, the estimate');
+});

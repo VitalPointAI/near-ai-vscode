@@ -710,7 +710,9 @@ test('D-05: each state colour is the UI-SPEC variable, held is a dashed 4 2 ring
   const PURPLE = 'var(--vscode-charts-purple, var(--vscode-foreground))';
   const MUTED = 'var(--vscode-descriptionForeground)';
   const expected: Record<string, string> = {
-    ready: BLUE, claimed: BLUE, 'in-progress': BLUE, 'in-review': PURPLE, integrating: PURPLE, done: 'var(--vscode-testing-iconPassed)',
+    // 62.1-09 (found in the real window, the light theme): testing.iconPassed is #73C991 in VS Code's light themes too, 2.0 to 1 on the white
+    // canvas (probe rule 9 asks 3 to 1), so done is the theme's chart green (#388A34 in light, 4.4 to 1), as ready is its chart blue.
+    ready: BLUE, claimed: BLUE, 'in-progress': BLUE, 'in-review': PURPLE, integrating: PURPLE, done: 'var(--vscode-charts-green, var(--vscode-testing-iconPassed))',
     blocked: 'var(--vscode-editorWarning-foreground)', backlog: MUTED, cancelled: MUTED, held: MUTED
   };
   for (const [state, colour] of Object.entries(expected)) {
