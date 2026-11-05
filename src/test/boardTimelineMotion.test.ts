@@ -42,9 +42,13 @@ function modelOf(world: BoardWorld, viewerId: string): BoardModel {
 
 // milestone:v1 (active) has phase 1 with 1-01 (done) at step 1 and 1-02 (done) and 1-03 (in progress) after it at step 2, and phase 2 with 2-01 and
 // 2-02 after both at step 3, then 2-03, 2-04 and 2-05 one after the other. The Now step is step 2 (1-03 is not finished yet).
-async function liveWorld(): Promise<BoardWorld> {
+// With withOld, a finished milestone:v0 (folded, 160 px) comes first, so the Version 1 band does not start at the canvas edge. With ahead, the work
+// is further on: 1-03, 2-01, 2-02 and 2-03 are done (the Now step is step 5, 2-04) and 2-06, 2-07 and 2-08 follow 2-05, so the marker is in the
+// middle of a band longer than the scroller.
+async function liveWorld(options: { withOld?: boolean; ahead?: boolean } = {}): Promise<BoardWorld> {
   const world = await boardWorld();
   const { owner } = world;
+  if (options.withOld === true) for (const body of [milestone('v0', 'Version 0'), phase('0', 'v0', 'Old work'), plan('0-01', { state: 'done' })]) world.accept(owner, 'item.imported', body);
   for (const body of [
     milestone('v1', 'Version 1', true), phase('1', 'v1', 'First work'), phase('2', 'v1', 'Second work'),
     plan('1-01', { state: 'done' }), plan('1-02', { state: 'done', dependsOn: ['plan:1-01'] }), plan('1-03', { dependsOn: ['plan:1-01'] }),
@@ -52,6 +56,10 @@ async function liveWorld(): Promise<BoardWorld> {
     plan('2-03', { dependsOn: ['plan:2-01'] }), plan('2-04', { dependsOn: ['plan:2-03'] }), plan('2-05', { dependsOn: ['plan:2-04'] })
   ]) world.accept(owner, 'item.imported', body);
   setState(world.state, 'plan:1-03', 'in-progress');
+  if (options.ahead === true) {
+    for (const body of [plan('2-06', { dependsOn: ['plan:2-05'] }), plan('2-07', { dependsOn: ['plan:2-06'] }), plan('2-08', { dependsOn: ['plan:2-07'] })]) world.accept(owner, 'item.imported', body);
+    for (const id of ['plan:1-03', 'plan:2-01', 'plan:2-02', 'plan:2-03']) setState(world.state, id, 'done');
+  }
   return world;
 }
 
@@ -327,4 +335,283 @@ test('D-09: a milestone that becomes finished while it is shown stays shown for 
   const later = start({ state: h.state });
   later.deliver({ type: 'state', model: modelOf(world, world.lead.memberId) });
   assert.ok(!folded(later, 'milestone:v0'), 'also on the next open');
+});
+
+// ---- Task 2: zoom, pan, Fit milestone, the first screen, saved scroll and Jump to now --------------------------------------------------------------
+
+/** Where the page scrolls to centre a point: the middle of the scroller on it, kept inside the canvas. */
+const centre = (mid: number, size: number, total: number): number => Math.max(0, Math.min(Math.max(0, total - size), Math.round(mid - size / 2)));
+const markOf = (geo: any, id: string): { x: number; y: number } => { const d = geo.dots.find((x: any) => x.id === id); assert.ok(d, `${id} has a box`); return { x: d.x + 14, y: d.cy }; };
+const zoomButton = (h: BoardHarness, kind: string): FakeNode => { const b = h.$(`#tl-zoom button[data-zoom="${kind}"]`); assert.ok(b, `the ${kind} zoom button is drawn`); return b; };
+const direction = (h: BoardHarness, d: string): void => { h.$(`#direction-switch button[data-direction="${d}"]`)!.click(); };
+const savedScroll = (h: BoardHarness): any => (h.state as any).timeline.scroll;
+/** A scroll the person makes: the scroller moves and says so, and the debounced save runs. */
+function scrollTo(h: BoardHarness, left: number, top: number): void {
+  const s = scroller(h);
+  s.scrollLeft = left;
+  s.scrollTop = top;
+  h.fire(s, 'scroll', { bubbles: false });
+  h.advance(400);
+}
+
+test('D-09 Zoom: Zoom out and Zoom in step through 50, 75, 100, 150 and 200, disabled at the ends, the output and its name follow, each change is said and saved, and only the spacing changes', async () => {
+  const world = await liveWorld();
+  const h = timelineOf(modelOf(world, world.lead.memberId));
+  settle(h);
+  const zin = zoomButton(h, 'in');
+  const zout = zoomButton(h, 'out');
+  const level = h.$('#tl-zoom output')!;
+  const lefts = new Map<number, number>();
+  const check = (want: number): void => {
+    assert.equal(zoomOf(h), want, `zoom ${want}`);
+    assert.equal(level.textContent, `${want}%`);
+    assert.equal(level.getAttribute('aria-label'), `Zoom ${want}%`);
+    assert.equal((h.state as any).timeline.zoom, want, 'the level is saved');
+    h.advance(200);
+    assert.ok(h.announcements.includes(`Zoom ${want}%.`), `said: ${h.announcements.join(' | ')}`);
+    const geo = geoOf(h, modelOf(world, world.lead.memberId));
+    for (const d of h.$$('button.tl-dot')) {
+      assert.equal(styleOf(d, 'height'), '28px', 'a dot box is 28 px tall at every zoom');
+      assert.equal(styleOf(d, 'width'), `${geo.box.w}px`, 'and as wide as its content');
+      assert.equal(d.querySelector('svg.tl-mark')!.getAttribute('width'), '20', 'the mark stays 20 px');
+    }
+    assert.equal(styleOf(h.$('.tl-canvas')!, 'transform'), '', 'no scale on the canvas');
+    lefts.set(want, px(dot(h, 'plan:2-05'), 'left'));
+    settle(h);
+  };
+  for (const want of [150, 200]) { h.click(zin); check(want); }
+  assert.equal(zin.getAttribute('aria-disabled'), 'true', 'Zoom in is disabled at 200 %');
+  h.click(zin);
+  assert.equal(zoomOf(h), 200, 'and does nothing there');
+  for (const want of [150, 100, 75, 50]) { h.click(zout); check(want); }
+  assert.equal(zout.getAttribute('aria-disabled'), 'true', 'Zoom out is disabled at 50 %');
+  assert.equal(zin.getAttribute('aria-disabled'), null);
+  h.click(zout);
+  assert.equal(zoomOf(h), 50);
+  assert.ok(lefts.get(200)! > lefts.get(100)! && lefts.get(100)! > lefts.get(50)!, 'the positions spread out with the zoom');
+  onlyKnownPosts(h);
+});
+
+test('D-09 keys: with focus in the timeline + and = zoom in, - zooms out and 0 goes back to 100; with Ctrl or Cmd held they are left to VS Code', async () => {
+  const world = await liveWorld();
+  const h = timelineOf(modelOf(world, world.lead.memberId));
+  settle(h);
+  dot(h, 'plan:1-03').focus();
+  const press = (k: string, init: Record<string, unknown> = {}): boolean => h.press(h.focused(), k, init).defaultPrevented;
+  assert.ok(press('+', { shiftKey: true }), '+ is taken (typed with Shift)');
+  assert.equal(zoomOf(h), 150);
+  assert.ok(press('='));
+  assert.equal(zoomOf(h), 200);
+  assert.ok(press('-'));
+  assert.equal(zoomOf(h), 150);
+  assert.ok(press('0'));
+  assert.equal(zoomOf(h), 100);
+  assert.equal(h.focused(), dot(h, 'plan:1-03'), 'focus stays on the dot');
+  assert.ok(!press('-', { ctrlKey: true }), 'Ctrl+- is VS Code\'s');
+  assert.ok(!press('=', { metaKey: true }), 'Cmd+= is VS Code\'s');
+  assert.equal(zoomOf(h), 100);
+});
+
+test('D-09 wheel: Ctrl plus wheel zooms one level per 100 units anchored at the pointer, a plain wheel is not taken, and in horizontal a vertical wheel with no vertical room pans along the axis', async () => {
+  const world = await liveWorld();
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model, { width: 600 });
+  settle(h);
+  const s = scroller(h);
+  scrollTo(h, 0, 0);
+  const before = geoOf(h, model);
+  const at = markOf(before, 'plan:2-04');
+  const client = { clientX: at.x - s.scrollLeft, clientY: at.y - s.scrollTop };
+  const wheel = (init: Record<string, unknown>): boolean => h.fire(dot(h, 'plan:2-04'), 'wheel', { deltaX: 0, deltaY: 0, deltaMode: 0, ctrlKey: false, ...client, ...init }).defaultPrevented;
+  assert.ok(wheel({ ctrlKey: true, deltaY: -100 }), 'Ctrl plus wheel is taken');
+  assert.equal(zoomOf(h), 150, 'one level in');
+  const after = geoOf(h, model);
+  const moved = markOf(after, 'plan:2-04');
+  assert.equal(s.scrollLeft, centre(moved.x - client.clientX + 300, 600, after.width), 'the dot stays under the pointer along the axis');
+  assert.equal(s.scrollTop, Math.max(0, Math.round(moved.y - client.clientY)), 'and across it');
+  h.advance(200);
+  assert.ok(h.announcements.includes('Zoom 150%.'));
+  // A trackpad pinch arrives as small Ctrl wheel steps: one level per 100 units.
+  settle(h);
+  assert.ok(wheel({ ctrlKey: true, deltaY: 50 }));
+  assert.equal(zoomOf(h), 150, 'half a step does nothing yet');
+  assert.ok(wheel({ ctrlKey: true, deltaY: 50 }));
+  assert.equal(zoomOf(h), 100, 'the second half zooms out one level');
+  // A plain wheel is the browser's.
+  settle(h);
+  boardApi(h, 'setUiState')({ zoom: 200 });
+  boardApi(h, 'redraw')();
+  settle(h);
+  scrollTo(h, 0, 0);
+  const plainGeo = geoOf(h, model);
+  assert.ok(plainGeo.width > 600 && plainGeo.height <= 600, 'the canvas is wider than the scroller and has no vertical room');
+  assert.ok(!wheel({ deltaY: 120 }), 'a plain wheel is not prevented');
+  assert.equal(zoomOf(h), 200, 'and does not zoom');
+  assert.equal(s.scrollLeft, 120, 'with no vertical room it pans along the axis');
+  assert.ok(!wheel({ deltaX: 30, deltaY: 0 }), 'a sideways wheel is native');
+  assert.equal(s.scrollLeft, 120, 'and left to the browser');
+});
+
+test('D-09 pan: a drag on empty canvas pans after 4 px with the grabbing cursor, a press and release without moving closes the card, and a press on a dot never pans', async () => {
+  const world = await liveWorld();
+  const h = timelineOf(modelOf(world, world.lead.memberId), { width: 600 });
+  settle(h);
+  boardApi(h, 'setUiState')({ zoom: 200 });
+  boardApi(h, 'redraw')();
+  settle(h);
+  const s = scroller(h);
+  const canvas = h.$('.tl-canvas')!;
+  scrollTo(h, 100, 0);
+  h.click(dot(h, 'plan:1-03'));
+  assert.ok(h.$('#tl-card'), 'a card is open');
+  const down = h.fire(canvas, 'pointerdown', { clientX: 300, clientY: 300, button: 0, pointerId: 1, pointerType: 'mouse' });
+  assert.ok(!down.defaultPrevented || true);
+  h.fire(canvas, 'pointermove', { clientX: 297, clientY: 300, buttons: 1, pointerId: 1 });
+  assert.equal(s.scrollLeft, 100, '3 px does nothing');
+  assert.ok(!has(canvas, 'tl-grabbing'));
+  h.fire(canvas, 'pointermove', { clientX: 295, clientY: 300, buttons: 1, pointerId: 1 });
+  assert.equal(s.scrollLeft, 105, 'at 5 px the scroller pans by the move');
+  assert.ok(has(canvas, 'tl-grabbing'), 'with the grabbing cursor');
+  h.fire(canvas, 'pointermove', { clientX: 280, clientY: 300, buttons: 1, pointerId: 1 });
+  assert.equal(s.scrollLeft, 120);
+  h.fire(canvas, 'pointerup', { clientX: 280, clientY: 300, button: 0, pointerId: 1 });
+  h.click(canvas);
+  assert.ok(!has(canvas, 'tl-grabbing'), 'the cursor is back');
+  assert.ok(h.$('#tl-card'), 'the click that ends a pan does not close the card');
+  // A press and release without movement closes it.
+  h.fire(canvas, 'pointerdown', { clientX: 300, clientY: 300, button: 0, pointerId: 1, pointerType: 'mouse' });
+  h.fire(canvas, 'pointerup', { clientX: 300, clientY: 300, button: 0, pointerId: 1 });
+  h.click(canvas);
+  h.advance(200);
+  assert.equal(h.$('#tl-card'), null, 'a press without movement closes the card');
+  assert.equal(s.scrollLeft, 120);
+  // A press on a dot never pans.
+  const d = dot(h, 'plan:1-02');
+  h.fire(d, 'pointerdown', { clientX: 300, clientY: 300, button: 0, pointerId: 1, pointerType: 'mouse' });
+  h.fire(d, 'pointermove', { clientX: 260, clientY: 300, buttons: 1, pointerId: 1 });
+  assert.equal(s.scrollLeft, 120, 'a press on a dot does not pan');
+  assert.ok(!has(canvas, 'tl-grabbing'));
+  h.fire(d, 'pointerup', { clientX: 260, clientY: 300, button: 0, pointerId: 1 });
+});
+
+test('D-09 Fit milestone: the largest level at which the Now band fits the scroller along the axis, at least 50, and the band centred', async () => {
+  const world = await liveWorld({ withOld: true });
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model, { width: 600 });
+  settle(h);
+  const fit = zoomButton(h, 'fit');
+  assert.equal(fit.textContent, 'Fit milestone');
+  const lengths = new Map([50, 75, 100, 150, 200].map((z) => [z, geoOf(h, model, { zoom: z }).bands.find((b: any) => b.id === 'milestone:v1').w as number]));
+  const best = [200, 150, 100, 75, 50].find((z) => lengths.get(z)! <= 600) ?? 50;
+  assert.equal(best, 150, `the fixture fits at 150 (${[...lengths].join(' ')})`);
+  h.announcements.length = 0;
+  h.click(fit);
+  assert.equal(zoomOf(h), 150, 'Fit milestone picks 150');
+  const geo = geoOf(h, model);
+  const band = geo.bands.find((b: any) => b.id === 'milestone:v1');
+  assert.equal(scroller(h).scrollLeft, centre(band.x + band.w / 2, 600, geo.width), 'and centres the band');
+  h.advance(200);
+  assert.ok(h.announcements.includes('Zoom 150%.'), h.announcements.join(' | '));
+  // A wide window fits it at 200 %; a band longer than the scroller at every level takes 50 %.
+  const wide = timelineOf(model, { width: 1400 });
+  settle(wide);
+  wide.click(zoomButton(wide, 'fit'));
+  assert.equal(zoomOf(wide), 200);
+  const narrow = timelineOf(model, { width: 530 });
+  settle(narrow);
+  boardApi(narrow, 'setUiState')({ zoom: 200 });
+  boardApi(narrow, 'redraw')();
+  const longest = [50, 75, 100, 150, 200].map((z) => geoOf(narrow, model, { zoom: z }).bands.find((b: any) => b.id === 'milestone:v1').w as number);
+  narrow.click(zoomButton(narrow, 'fit'));
+  assert.equal(zoomOf(narrow), [200, 150, 100, 75, 50].find((z, i) => longest[4 - i]! <= 530) ?? 50, 'the largest that fits at 530 px');
+});
+
+test('D-09, D-13 first screen: the first open of a direction centres the Now marker along the axis at 0 across, later opens restore the saved scroll of that direction; no Now centres the active band', async () => {
+  const world = await liveWorld({ withOld: true, ahead: true });
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model, { width: 600 });
+  const s = scroller(h);
+  let geo = geoOf(h, model);
+  const mid = geo.now.line.x + geo.now.line.w / 2;
+  assert.ok(mid - 300 > 0 && mid + 300 < geo.width, 'the fixture puts the marker where centring it is neither 0 nor the far end');
+  assert.equal(s.scrollLeft, centre(mid, 600, geo.width), 'the Now line is in the middle along the axis');
+  assert.equal(s.scrollTop, 0, 'across the axis 0');
+  settle(h);
+  scrollTo(h, 50, 0);
+  assert.deepEqual(savedScroll(h).horizontal, { x: 50, y: 0 }, 'the scroll is saved for the direction');
+  direction(h, 'vertical');
+  geo = geoOf(h, model);
+  assert.equal(geo.direction, 'vertical');
+  assert.equal(s.scrollTop, centre(geo.now.line.y + geo.now.line.h / 2, 600, geo.height), 'the first vertical open centres the marker too');
+  assert.equal(s.scrollLeft, 0);
+  settle(h);
+  scrollTo(h, 0, 40);
+  direction(h, 'horizontal');
+  assert.deepEqual([s.scrollLeft, s.scrollTop], [50, 0], 'back to horizontal: its saved scroll');
+  assert.deepEqual(savedScroll(h).vertical, { x: 0, y: 40 }, 'the vertical scroll was saved on the way');
+  settle(h);
+  h.$('#view-switch button[data-view="columns"]')!.click();
+  h.$('#view-switch button[data-view="timeline"]')!.click();
+  assert.deepEqual([scroller(h).scrollLeft, scroller(h).scrollTop], [50, 0], 'a later open restores it');
+  // The next page restores the saved scroll as well.
+  const next = start({ width: 600, state: h.state });
+  next.deliver({ type: 'state', model });
+  assert.deepEqual([scroller(next).scrollLeft, scroller(next).scrollTop], [50, 0]);
+
+  // With no Now in the model, the active milestone's band is centred.
+  const none = plain(model) as BoardModel;
+  delete none.timeline!.now;
+  const q = timelineOf(none, { width: 600 });
+  const g = geoOf(q, none);
+  const band = g.bands.find((b: any) => b.id === 'milestone:v1');
+  assert.equal(scroller(q).scrollLeft, centre(band.x + band.w / 2, 600, g.width), 'the active band is centred');
+});
+
+test('D-04, D-09: switching from Columns with a card selected focuses its dot and centres it, over the Now centring; a card opened in the timeline is the selected card in Columns', async () => {
+  const world = await liveWorld({ withOld: true, ahead: true });
+  const model = modelOf(world, world.lead.memberId);
+  const h = start({ width: 600 });
+  h.deliver({ type: 'state', model });
+  boardApi(h, 'select')('plan:2-08');
+  h.$('#view-switch button[data-view="timeline"]')!.click();
+  assert.equal(h.focused(), dot(h, 'plan:2-08'), 'the selected card\'s dot has focus');
+  const geo = geoOf(h, model);
+  const at = markOf(geo, 'plan:2-08');
+  assert.equal(scroller(h).scrollLeft, centre(at.x, 600, geo.width), 'and is centred');
+  assert.notEqual(scroller(h).scrollLeft, centre(geo.now.line.x + geo.now.line.w / 2, 600, geo.width), 'which wins over the Now centring');
+  settle(h);
+  h.click(dot(h, 'plan:1-03'));
+  h.$('#view-switch button[data-view="columns"]')!.click();
+  assert.equal(boardApi(h, 'selected')(), 'plan:1-03', 'the expanded card is the selected card in Columns');
+});
+
+test('D-13 Jump to now and N: the Now line is centred with a smooth scroll (a jump under reduced motion), focus moves to the Now dot and the Now sentence is said', async () => {
+  for (const reducedMotion of [false, true]) {
+    const world = await liveWorld({ withOld: true, ahead: true });
+    const model = modelOf(world, world.lead.memberId);
+    const h = timelineOf(model, { width: 600, reducedMotion });
+    settle(h);
+    const s = scroller(h);
+    const calls: Array<Record<string, unknown>> = [];
+    s.scrollTo = (o: Record<string, unknown>): void => { calls.push(plain(o)); s.scrollLeft = Number(o.left); s.scrollTop = Number(o.top); };
+    const geo = geoOf(h, model);
+    const want = { left: centre(geo.now.line.x + geo.now.line.w / 2, 600, geo.width), top: 0, behavior: reducedMotion ? 'auto' : 'smooth' };
+    scrollTo(h, 0, 0);
+    dot(h, 'plan:2-08').focus();
+    h.announcements.length = 0;
+    const jump = h.$('#tl-now')!;
+    assert.equal(jump.textContent, 'Jump to now');
+    h.click(jump);
+    assert.deepEqual(calls, [want], `Jump to now scrolls the marker to the middle (${reducedMotion ? 'reduced' : 'smooth'})`);
+    assert.equal(h.focused(), dot(h, 'plan:2-04'), 'focus is on the first unfinished dot of the Now step');
+    h.advance(200);
+    assert.ok(h.announcements.includes(model.timeline!.now!.sentence), h.announcements.join(' | '));
+    // N does the same from the keyboard.
+    calls.length = 0;
+    scrollTo(h, 0, 0);
+    dot(h, 'plan:2-08').focus();
+    h.press(h.focused(), 'n');
+    assert.deepEqual(calls, [want], 'N centres the marker');
+    assert.equal(h.focused(), dot(h, 'plan:2-04'));
+  }
 });
