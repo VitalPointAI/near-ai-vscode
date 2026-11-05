@@ -47,7 +47,16 @@
       ['done', 'Done'], ['cancelled', 'Cancelled'], ['blocked', 'Blocked'], ['held', 'On hold'], ['finished', 'Looks finished, please confirm'],
       ['mine', 'Mine: filled initials'], ['square', 'Square: a phase with no plans yet'], ['line', 'Line: waits for'], ['waiting', 'Dashed line: still waiting']
     ],
-    legendHint: 'Hover or focus a dot to preview it. Click it or press Enter to open the card.'
+    legendHint: 'Hover or focus a dot to preview it. Click it or press Enter to open the card.',
+    // The expanded card (62.1-05, UI-SPEC "Expanded card"); the face, Move to... and the pending and refusal lines are the board's own words.
+    closeCard: 'Close card',
+    openDetails: 'Open details',
+    factStep: 'Step',
+    factWaits: 'Waits for',
+    factNeeded: 'Needed by',
+    factFinished: 'Finished',
+    nothing: 'Nothing',
+    gone: 'That card is no longer on the board.'
   });
 
   // ---- the pure geometry (UI-SPEC "Timeline geometry", "Pitches by zoom", "Horizontal", "Vertical", "Stacks taller than the cap", "Folded finished
@@ -398,7 +407,39 @@
   const hintMove = el('span', '', T.hintMove); hintMove.id = 'tl-hint-move';
   const hintOpen = el('span', '', T.hintOpen); hintOpen.id = 'tl-hint-open';
   hints.append(hintMove, hintOpen);
-  canvas.append(shades, lines, ghosts, list);
+  // The expanded card (62.1-05, D-06): a non-modal dialog anchored to its dot inside the canvas, so it moves with its dot when the person pans. It
+  // follows the dots in the DOM, so Tab from the dot reaches it. Its face is the board card's own (board.cardFace), so the two views cannot drift.
+  const cardBox = el('section');
+  cardBox.id = 'tl-card';
+  cardBox.setAttribute('role', 'dialog');
+  cardBox.setAttribute('aria-modal', 'false');
+  cardBox.setAttribute('aria-labelledby', 'tl-card-title');
+  cardBox.hidden = true;
+  const cardHead = el('div', 'tl-card-head');
+  const cardTitle = el('h2', 'tl-card-title');
+  cardTitle.id = 'tl-card-title';
+  cardTitle.setAttribute('tabindex', '-1');
+  const cardClose = el('button', 'icon tl-card-close');
+  cardClose.setAttribute('type', 'button');
+  cardClose.setAttribute('aria-label', T.closeCard);
+  cardClose.setAttribute('title', T.closeCard);
+  cardClose.appendChild(board.icon('close'));
+  cardHead.append(cardTitle, cardClose);
+  const cardFaceBox = el('div', 'tl-card-face');
+  const cardFacts = el('dl', 'tl-card-facts');
+  const cardNotes = el('div', 'tl-card-notes');
+  const cardMsg = el('div', 'card-msg tl-card-msg');
+  const cardActions = el('div', 'tl-card-actions');
+  const cardMove = el('button', 'secondary move-btn');
+  cardMove.setAttribute('type', 'button');
+  cardMove.setAttribute('aria-haspopup', 'menu');
+  cardMove.setAttribute('aria-controls', 'menu');
+  cardMove.setAttribute('aria-expanded', 'false');
+  const cardDetails = el('button', 'secondary tl-card-details', T.openDetails);
+  cardDetails.setAttribute('type', 'button');
+  cardActions.append(cardMove, cardDetails);
+  cardBox.append(cardHead, cardFaceBox, cardFacts, cardNotes, cardMsg, cardActions);
+  canvas.append(shades, lines, ghosts, list, cardBox);
   scroll.append(canvas, hints);
   // The board's empty filter state, in an opaque band at the top of the scroller, the ghosts below it (UI-SPEC "Filters").
   const filterBand = el('div', 'tl-filter-empty');
@@ -630,7 +671,8 @@
     const state = stateOf(card);
     const square = card.kind === 'phase';
     const b = d.button;
-    setClass(b, 'tl-dot ' + shapeOf(state) + (square ? ' tl-square' : '') + (card.mine ? ' mine' : ''));
+    d.base = 'tl-dot ' + shapeOf(state) + (square ? ' tl-square' : '') + (card.mine ? ' mine' : '');
+    decorate(d, dot.cardId);
     attr(b, 'data-step', dot.step);
     attr(b, 'data-slot', dot.slot);
     attr(b, 'data-state', state);
@@ -798,6 +840,8 @@
   function forget() { bandEls.clear(); groupEls.clear(); dotEls.clear(); moreEls.clear(); }
 
   function render(container, shown) {
+    // Coming back to the timeline from Columns starts with no card open (the selected card stays selected).
+    if (!scroll.isConnected && open) { open = undefined; hide(cardBox, true); }
     const model = board.model();
     const timeline = model && model.timeline;
     const saved = board.uiState();
@@ -806,6 +850,7 @@
     if (!model || !timeline || model.timelineProblem === true || !Array.isArray(timeline.milestones) || !Array.isArray(timeline.dots)) {
       place(scroll, [errorBox]);
       forget();
+      open = undefined;
       return;
     }
     try {
@@ -814,6 +859,7 @@
       // The layout function threw: the error state, and Columns keeps working.
       place(scroll, [errorBox]);
       forget();
+      open = undefined;
     }
   }
 
@@ -952,7 +998,178 @@
     const order = Array.from(list.querySelectorAll('button.tl-dot, button.tl-folded, button.tl-more'));
     const stop = order.find((b) => b.getAttribute('data-id') === board.selected()) || order.find((b) => b.classList.contains('tl-dot')) || order[0];
     for (const b of order) attr(b, 'tabindex', b === stop ? 0 : -1);
+    drawn = { timeline, geo, cards, boxes, dotOf, matching };
+    followCard();
   }
 
-  board.registerView('timeline', { render });
+  // ---- the expanded card (62.1-05, D-06, D-01, UI-SPEC "Expanded card") -----------------------------------------------------------------------
+  // What the last draw put on the page: the model's timeline and cards, the geometry, the dot boxes and the filter rule, for the card and keys.
+  let drawn;
+  let open; // { id, faceSig, factsSig, at }
+  /** The dot's classes and attributes that follow the card: the selected halo and aria-expanded while its card is open, the dashed pending outline
+   * with aria-busy while a request waits, and the refusal mark until the refusal is dismissed or the card changes. */
+  function decorate(d, id) {
+    const expanded = !!open && open.id === id;
+    const busy = board.pendingText(id) !== '';
+    const refused = !busy && board.refusalText(id) !== '';
+    setClass(d.button, d.base + (expanded ? ' selected' : '') + (busy ? ' pending' : '') + (refused ? ' refused' : ''));
+    attr(d.button, 'aria-expanded', expanded ? 'true' : null);
+    attr(d.button, 'aria-controls', expanded ? 'tl-card' : null);
+    attr(d.button, 'aria-busy', busy ? 'true' : null);
+  }
+  function redecorate(id) { const d = dotEls.get(id); if (d) decorate(d, id); }
+  const dotButton = (id) => { const d = dotEls.get(id); return d && d.button.isConnected ? d.button : null; };
+  /** Focus on a dot without opening its preview (focus coming back from the card, the menu or the drawer). */
+  let quiet = false;
+  function focusDot(id) {
+    const b = dotButton(id);
+    if (!b) return false;
+    quiet = true;
+    try { b.focus(); } finally { quiet = false; }
+    return document.activeElement === b;
+  }
+
+  /** A Waits for or Needed by entry: a link button to a dot that is on the timeline and matches the filters, else the plain name. */
+  function linkNode(link) {
+    if (!drawn || !drawn.dotOf.has(link.id) || !drawn.matching(link.id)) return el('span', 'tl-card-name', link.label);
+    const b = el('button', 'link', link.label);
+    b.setAttribute('type', 'button');
+    b.addEventListener('click', () => goTo(link.id));
+    return b;
+  }
+  function factRow(term, nodes) {
+    const dd = el('dd');
+    dd.append(...nodes);
+    return [el('dt', '', term), dd];
+  }
+  /** Fills the card from the model: the board face, the timeline facts, the notes, the pending or refusal line and Move to... (as on the board). */
+  function fillCard(c, dot) {
+    const face = board.cardFace(c, { clampTitle: false });
+    const faceSig = JSON.stringify([c, board.pendingText(c.id), board.refusalText(c.id), face.move]);
+    if (open.faceSig !== faceSig) {
+      open.faceSig = faceSig;
+      cardTitle.replaceChildren(face.title);
+      cardFaceBox.replaceChildren(...[face.top, face.meta].concat(face.rule ? [face.rule] : []));
+      cardMsg.replaceChildren(...face.msg);
+      hide(cardMsg, face.msg.length === 0);
+      hide(cardMove, !face.move.visible);
+      if (cardMove.textContent !== face.move.label) cardMove.replaceChildren(board.icon('arrow-swap'), el('span', 'label', face.move.label));
+      attr(cardMove, 'aria-label', face.move.name);
+      attr(cardMove, 'aria-disabled', face.move.disabled ? 'true' : null);
+      attr(cardMove, 'title', face.move.title);
+    }
+    const finished = c.column === 'done' && typeof c.finishedText === 'string' && c.finishedText !== '' ? c.finishedText : '';
+    const factsSig = JSON.stringify([dot, finished, drawn.timeline.dots.length, drawn.matching(c.id)]);
+    if (open.factsSig !== factsSig) {
+      open.factsSig = factsSig;
+      const waits = Array.isArray(dot.waitsForLinks) ? dot.waitsForLinks : [];
+      const needed = Array.isArray(dot.neededByLinks) ? dot.neededByLinks : [];
+      // D-01: the Finished row is the only place a time appears, and only when the model gives it.
+      cardFacts.replaceChildren(
+        ...factRow(T.factStep, [document.createTextNode(dot.stepFact || '')]),
+        ...factRow(T.factWaits, waits.length ? waits.map(linkNode) : [document.createTextNode(T.nothing)]),
+        ...(needed.length ? factRow(T.factNeeded, needed.map(linkNode)) : []),
+        ...(finished ? factRow(T.factFinished, [document.createTextNode(finished)]) : [])
+      );
+      const notes = Array.isArray(dot.notes) ? dot.notes : [];
+      cardNotes.replaceChildren(...notes.map((n) => el('p', 'tl-card-note', n)));
+      hide(cardNotes, notes.length === 0);
+    }
+  }
+  /** Places the card next to its dot, again only when the dot moved, the window or the drawing changed (UI-SPEC "Placement"). */
+  function placeCard(box) {
+    const at = JSON.stringify([box.x, box.y, box.w, box.h, drawn.geo.direction, drawn.geo.zoom, drawn.geo.width]);
+    if (open.at === at) return;
+    open.at = at;
+    setStyle(cardBox, 'left', px(box.x));
+    setStyle(cardBox, 'top', px(box.y + box.h + 8));
+  }
+  function openCard(id) {
+    const c = board.cardData(id);
+    const dot = drawn && drawn.dotOf.get(id);
+    if (!c || !dot || !drawn.boxes.has(id) || !dotButton(id)) return;
+    const was = open ? open.id : undefined;
+    open = { id, faceSig: '', factsSig: '', at: '' };
+    attr(cardBox, 'data-id', id);
+    board.select(id);
+    fillCard(c, dot);
+    hide(cardBox, false);
+    placeCard(drawn.boxes.get(id));
+    if (was !== undefined && was !== id) redecorate(was);
+    redecorate(id);
+    cardTitle.focus();
+  }
+  /** Closes the card. With restore, focus goes back to the dot when it was inside the card (or nowhere). */
+  function closeCard(restore) {
+    if (!open) return;
+    const id = open.id;
+    const a = document.activeElement;
+    const inside = !a || a === document.body || !a.isConnected || cardBox.contains(a);
+    open = undefined;
+    hide(cardBox, true);
+    attr(cardBox, 'data-id', null);
+    redecorate(id);
+    if (restore && inside) focusDot(id);
+  }
+  /** After a draw: the card follows its dot, takes the new model's words, and closes when its card left the board or its dot is not drawn. */
+  function followCard() {
+    if (!open) return;
+    const c = board.cardData(open.id);
+    const dot = drawn.dotOf.get(open.id);
+    if (!c || !dot || !drawn.boxes.has(open.id) || !drawn.matching(open.id) || !dotButton(open.id)) {
+      const left = !c;
+      closeCard(false);
+      if (left) board.announce(T.gone);
+      return;
+    }
+    fillCard(c, dot);
+    placeCard(drawn.boxes.get(open.id));
+  }
+  /** A Waits for or Needed by link: the card switches to that dot. */
+  function goTo(id) {
+    if (!dotButton(id)) return;
+    focusDot(id);
+    openCard(id);
+  }
+  list.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('button.tl-dot') : null;
+    if (!b || !list.contains(b)) return;
+    const id = b.getAttribute('data-id');
+    if (open && open.id === id) { cardTitle.focus(); return; }
+    openCard(id);
+  });
+  cardClose.addEventListener('click', () => closeCard(true));
+  cardMove.addEventListener('click', () => { if (open && cardMove.getAttribute('aria-disabled') !== 'true') board.openMenu(open.id, cardMove); });
+  cardDetails.addEventListener('click', () => {
+    if (!open) return;
+    const id = open.id;
+    const opener = dotButton(id);
+    closeCard(false);
+    board.openDetail(id, opener);
+  });
+  cardBox.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    closeCard(true);
+  });
+  // A click or tap anywhere outside the card and the menu closes it; a click on another dot switches it (the list's handler).
+  document.addEventListener('click', (e) => {
+    if (!open) return;
+    const t = e.target;
+    // A menu item that just closed its menu is no longer on the page.
+    if (!t || !t.isConnected || cardBox.contains(t)) return;
+    const menu = document.getElementById('menu');
+    if (menu && menu.contains(t)) return;
+    const b = t.closest ? t.closest('button.tl-dot') : null;
+    if (b && list.contains(b)) return;
+    closeCard(true);
+  });
+
+  board.registerView('timeline', {
+    render,
+    /** The board changed a card's pending or refusal line: draw again so the dot and the card show it. */
+    refresh: () => board.redraw(),
+    /** The board gives focus back to a card (after the menu or the drawer): its dot. */
+    focus: (id) => focusDot(id)
+  });
 })();

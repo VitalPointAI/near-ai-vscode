@@ -606,13 +606,22 @@
     const assigns = Array.isArray(c.assignActions) && c.assignActions.length > 0 && !!role && role !== 'observer';
     return moves || assigns;
   }
-  function updateCard(c, li) {
-    const p = parts.get(c.id);
+  /** Whether the card's Move to... button shows for this viewer, whether it is disabled and why: the same rule for the kanban card and the
+   * timeline's expanded card (62.1-05). */
+  function moveOf(c) {
     const down = isDown();
-    const mvVisible = hasMenu(c) && (down || model.viewer.canWrite);
-    const sig = JSON.stringify([c, ui.selected === c.id, pending[c.id], refusals[c.id], mvVisible, down, model.viewer.readOnlyReason]);
-    if (sigs.get(c.id) === sig) return;
-    sigs.set(c.id, sig);
+    return {
+      visible: hasMenu(c) && (down || model.viewer.canWrite), disabled: down, label: T.moveTo, name: 'Move to... ' + labelOf(c) + ', ' + c.title,
+      title: down ? model.viewer.readOnlyReason || 'Cards cannot be moved right now.' : T.moveTo
+    };
+  }
+  /**
+   * The card face (62.1-05): the state row with the ID, the title, the meta row (assignee, badges, dependency count, estimate, age, created by), the
+   * Backlog rule, and the pending or refusal line. The kanban card and the timeline's expanded card are both built from it, so the two views can never
+   * drift apart. options.clampTitle false gives the title without the board's 3 line clamp.
+   */
+  function cardFace(c, options) {
+    const clampTitle = !options || options.clampTitle !== false;
     const meta = el('span', 'card-meta');
     // G-62-5 (62-UI-SPEC "Card face: the assignee"): the person comes first, initials in a round chip that is not read out, then the name as text.
     if (c.assignee) {
@@ -632,10 +641,28 @@
     if (c.createdByName) meta.appendChild(el('span', 'meta-item', 'Created by ' + c.createdByName));
     const top = el('span', 'card-top');
     top.append(iconText('state', COLUMN_ICONS[c.column] || 'circle-outline', c.stateLabel), el('span', 'did', c.displayId));
-    const titleNode = el('span', 'card-title', c.title);
-    titleNode.setAttribute('title', c.title);
+    const title = el('span', clampTitle ? 'card-title' : 'card-title-full', c.title);
+    if (clampTitle) title.setAttribute('title', c.title);
     // J-02: a card added on the board that cannot leave Backlog says why on its face, in normal text, not only in the detail.
-    p.main.replaceChildren(...[top, titleNode, meta].concat(c.backlogRule ? [iconText('card-rule', 'info', c.backlogRule)] : []));
+    const rule = c.backlogRule ? iconText('card-rule', 'info', c.backlogRule) : null;
+    let msg = [];
+    if (pending[c.id]) msg = [el('span', 'pending-line', pending[c.id])];
+    else if (refusals[c.id]) {
+      const dismiss = button('icon dismiss', '', () => api.clearRefusal(c.id), 'close');
+      dismiss.setAttribute('aria-label', T.dismiss); dismiss.setAttribute('title', T.dismiss);
+      msg = [icon('error'), el('span', 'refusal-line', refusals[c.id]), dismiss];
+    }
+    return { top, title, meta, rule, msg, move: moveOf(c) };
+  }
+  function updateCard(c, li) {
+    const p = parts.get(c.id);
+    const down = isDown();
+    const mvVisible = moveOf(c).visible;
+    const sig = JSON.stringify([c, ui.selected === c.id, pending[c.id], refusals[c.id], mvVisible, down, model.viewer.readOnlyReason]);
+    if (sigs.get(c.id) === sig) return;
+    sigs.set(c.id, sig);
+    const face = cardFace(c);
+    p.main.replaceChildren(...[face.top, face.title, face.meta].concat(face.rule ? [face.rule] : []));
     attr(p.main, 'aria-label', c.backlogRule ? c.a11yLabel + ' ' + c.backlogRule : c.a11yLabel);
     attr(p.main, 'aria-describedby', hasMenu(c) ? 'hint-move' : 'hint-open');
     attr(p.main, 'aria-current', ui.selected === c.id ? 'true' : null);
@@ -643,17 +670,12 @@
     li.setAttribute('data-column', c.column);
     attr(li, 'aria-busy', pending[c.id] ? 'true' : null);
     p.mv.hidden = !mvVisible;
-    p.mv.replaceChildren(icon('arrow-swap'), el('span', 'label move-text', T.moveTo));
-    attr(p.mv, 'aria-label', 'Move to... ' + labelOf(c) + ', ' + c.title);
-    attr(p.mv, 'aria-disabled', down ? 'true' : null);
-    attr(p.mv, 'title', down ? model.viewer.readOnlyReason || 'Cards cannot be moved right now.' : T.moveTo);
-    if (pending[c.id]) p.msg.replaceChildren(el('span', 'pending-line', pending[c.id]));
-    else if (refusals[c.id]) {
-      const dismiss = button('icon dismiss', '', () => api.clearRefusal(c.id), 'close');
-      dismiss.setAttribute('aria-label', T.dismiss); dismiss.setAttribute('title', T.dismiss);
-      p.msg.replaceChildren(icon('error'), el('span', 'refusal-line', refusals[c.id]), dismiss);
-    } else p.msg.replaceChildren();
-    p.msg.hidden = !pending[c.id] && !refusals[c.id];
+    p.mv.replaceChildren(icon('arrow-swap'), el('span', 'label move-text', face.move.label));
+    attr(p.mv, 'aria-label', face.move.name);
+    attr(p.mv, 'aria-disabled', face.move.disabled ? 'true' : null);
+    attr(p.mv, 'title', face.move.title);
+    p.msg.replaceChildren(...face.msg);
+    p.msg.hidden = face.msg.length === 0;
   }
   function cardList(cards, key, label) {
     const limit = showAll.has(key) ? cards.length : CELL_CAP;
@@ -1029,6 +1051,8 @@
   function refreshCard(id) {
     const c = cardData(id);
     if (c && cardEls.has(id)) { updateCard(c, cardEls.get(id)); applyRoving(); }
+    // 62.1-05: the timeline draws the pending outline, the refusal pip and the open card's lines from the same state.
+    if (timelineOn() && typeof registeredViews.timeline.refresh === 'function') registeredViews.timeline.refresh(id);
   }
   const api = {
     post, announce, icon, layout: () => layout, model: () => model, cardData, cardElement: (id) => cardEls.get(id), groupBy: () => ui.groupBy,
@@ -1057,7 +1081,19 @@
     },
     /** 62.1-04: true when the card has a Move to... menu for this viewer (moves or assignment items). */
     hasMenu: (c) => !!c && !!model && hasMenu(c),
-    focusCard: (id) => { const li = cardEls.get(id); return !!li && li.isConnected && focusEl(li); },
+    /** Focus the card: its kanban card, or in Timeline its dot (62.1-05), so the menu and the drawer give focus back to where the person was. */
+    focusCard: (id) => {
+      if (timelineOn() && typeof registeredViews.timeline.focus === 'function') return registeredViews.timeline.focus(id);
+      const li = cardEls.get(id);
+      return !!li && li.isConnected && focusEl(li);
+    },
+    /** 62.1-05: the board card face (cardFace above) for the timeline's expanded card and preview. */
+    cardFace: (c, options) => cardFace(c, options),
+    /** 62.1-05: selects a card (it stays selected across the views) and saves the choice. */
+    select(id) { if (typeof id === 'string' && ui.selected !== id) { ui.selected = id; persist(); } },
+    /** 62.1-05: the card's pending line ('Moving to Ready...') and refusal, as the board card shows them, or ''. */
+    pendingText: (id) => pending[id] || '',
+    refusalText: (id) => refusals[id] || '',
     setPending(id, text) { delete refusals[id]; pending[id] = text; refreshCard(id); },
     showRefusal(id, columnLabel, reason, action) {
       delete pending[id];
