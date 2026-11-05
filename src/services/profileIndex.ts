@@ -144,7 +144,8 @@ const KEY_NOT_HERE = 'Its key is not on this computer or browser.';
 export async function runUseSavedProfile(ui: SavedProfileUi, deps: UseSavedProfileDeps): Promise<'ready' | 'failed' | 'cancelled' | 'none'> {
   const entries = listSavedProfiles(deps.projectId);
   if (!entries.length) {
-    const next = await ui.info('There are no saved profiles from other projects yet. A profile you set up in a project is offered here in your other projects.', SET_UP_NEW);
+    // After an upgrade the list fills only as each older project is opened (it is written when a project's profiles are read), so say so.
+    const next = await ui.info('There are no saved profiles yet. Profiles from your other projects appear here after you open each of those projects once with this version of NEAR AI.', SET_UP_NEW);
     if (next === SET_UP_NEW) await deps.setUpNew();
     return 'none';
   }

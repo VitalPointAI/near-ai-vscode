@@ -473,6 +473,11 @@ Read the full [security and trust report](SECURITY.md).
   yet verify NEAR's per-response attestation signatures itself.
 - **No wallet, staking, or NEAR account sign-in yet.** They wait for a
   documented NEAR AI contract; sign-in uses API keys.
+- **Moving or renaming a project folder cuts it off from the keys saved for
+  it**, because NEAR AI keeps each project's keys under the folder's location.
+  After a move, choose **Use a saved profile** and pick the profile listed under
+  the folder's old name (its key is used where it was saved, not copied), or set
+  up a new profile.
 
 ## Troubleshooting
 

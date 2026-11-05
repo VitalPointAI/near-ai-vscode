@@ -228,7 +228,9 @@ export class ProfileStore {
     const source = findSavedProfile(entry.projectId, entry.profileId);
     if (!source || isTeamProfileId(source.profileId)) throw new Error(SOURCE_UNAVAILABLE);
     const existing = this.ledger.profiles.find((profile) => profile.profileId === source.profileId);
-    if (existing && existing.keySource?.projectId !== source.projectId) throw new Error('This project already has a profile with that name. Choose it from the list instead.');
+    // A profile of this project with no key here (as after the project folder was moved or renamed, 61-34) may be replaced by the copy:
+    // nothing is lost, and this is the way back to the key saved under the folder's old location.
+    if (existing && existing.keySource?.projectId !== source.projectId && !await this.hasNoKeyHere(existing)) throw new Error('This project already has a profile with that name. Choose it from the list instead.');
     const now = this.clock();
     const profile = normalizeProfile({
       version: AUTH_PROFILE_VERSION, profileId: source.profileId, displayName: source.displayName, organization: source.organization, provider: source.provider,
@@ -313,6 +315,13 @@ export class ProfileStore {
     } catch {
       return false;
     }
+  }
+
+  /** True for this project's own (not reused) profile whose key, sign-in token and local key are all absent from this storage. */
+  private async hasNoKeyHere(profile: OrganizationProfile): Promise<boolean> {
+    if (!this.auth || profile.keySource || profile.provider === 'local') return false;
+    const scope = this.getScope(profile.profileId);
+    return !await this.hasStoredKey(scope) && !await this.hasStoredKey(localKeyScope(scope));
   }
 
   /** Whether a key or token is stored for the scope; the value itself is not kept. */

@@ -270,3 +270,20 @@ test('a reused profile whose source is still listed but whose key is not here sa
     assert.equal(JSON.stringify(checked).includes(w.canary), false);
   } finally { await w.cleanup(); }
 });
+
+test('a saved profile never replaces this project\'s own profile of the same name while that profile has its key here', async () => {
+  const w = await twoProjects();
+  try {
+    const own = `sk-own-${randomUUID()}`;
+    await w.beta.create({ profileId: 'profile-alpha-cloud', displayName: 'Beta own', organization: 'Beta Co', baseUrl: 'https://example.test/v1', authMode: 'apiKey' });
+    await w.auth.saveScopedApiKey(w.beta.getScope('profile-alpha-cloud'), own, 'https://example.test/v1');
+    await assert.rejects(() => w.beta.useSavedProfile(listSavedProfiles(w.beta.projectScopeId)[0]), /already has a profile with that name/);
+    assert.equal((await w.beta.get('profile-alpha-cloud'))?.displayName, 'Beta own', 'the own profile stays');
+    assert.equal(await w.auth.getScopedApiKey(w.beta.getScope('profile-alpha-cloud')), own, 'and so does its key');
+    // With its key gone from this storage (as after the folder moved), the saved profile may take its place: nothing is lost.
+    await w.auth.removeScopedCredentials(w.beta.getScope('profile-alpha-cloud'));
+    const copy = await w.beta.useSavedProfile(listSavedProfiles(w.beta.projectScopeId).find((entry) => entry.projectId === w.alpha.projectScopeId)!);
+    assert.equal(copy.validation.status, 'valid');
+    assert.deepEqual(copy.keySource, { projectId: w.alpha.projectScopeId, profileId: 'profile-alpha-cloud' });
+  } finally { await w.cleanup(); }
+});
