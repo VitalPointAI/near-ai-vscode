@@ -81,11 +81,9 @@ async function setUpAlpha(w: World): Promise<ProfileStore> {
 
 function countCanary(w: World): number { return [...w.secrets.values.values()].filter((value) => value === w.canary).length; }
 
-/** ProfileStore.savedKeyHere (61-34), reached through a loose view so this file compiles before the method exists. */
-async function keyHere(store: ProfileStore, entry: SavedProfileEntry): Promise<boolean> {
-  const check = (store as unknown as { savedKeyHere?: (entry: SavedProfileEntry) => Promise<boolean> }).savedKeyHere;
-  assert.equal(typeof check, 'function', 'ProfileStore has savedKeyHere');
-  return check!.call(store, entry);
+/** ProfileStore.savedKeyHere (61-34): whether the entry's key is in this storage, as Use a Saved Profile asks it. */
+function keyHere(store: ProfileStore, entry: SavedProfileEntry): Promise<boolean> {
+  return store.savedKeyHere(entry);
 }
 
 test('tracer: a profile set up in one project is listed and used in another by reference, and serves a chat request with the original key', async () => {

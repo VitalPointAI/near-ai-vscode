@@ -219,11 +219,9 @@ test('a reused profile whose source is malformed in the profile file is dropped 
 // profile overwrote each other's keys) is told apart from one that was really removed, and its presence is checked without reading it out.
 type SavedEntry = import('../services/profileIndex').SavedProfileEntry;
 
-/** ProfileStore.savedKeyHere, reached through a loose view so this file compiles before the method exists. */
-async function savedKeyHere(store: ProfileStore, entry: SavedEntry): Promise<unknown> {
-  const check = (store as unknown as { savedKeyHere?: (entry: SavedEntry) => Promise<unknown> }).savedKeyHere;
-  assert.equal(typeof check, 'function', 'ProfileStore has savedKeyHere');
-  return check!.call(store, entry);
+/** ProfileStore.savedKeyHere, typed as unknown here so the tests check that the answer is a boolean and nothing else. */
+function savedKeyHere(store: ProfileStore, entry: SavedEntry): Promise<unknown> {
+  return store.savedKeyHere(entry);
 }
 
 test('savedKeyHere answers true or false only: whether the listed profile\'s key or token is in this computer\'s or browser\'s storage', async () => {

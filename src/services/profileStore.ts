@@ -26,6 +26,8 @@ const PROFILE_STORE_VERSION = 1 as const;
 const MAX_PROFILES = 50;
 const SOURCE_UNAVAILABLE = 'That saved profile is no longer available. Set up a new profile or choose another.';
 const SOURCE_REMOVED = 'The saved profile this one uses was removed. Set up a new profile or choose another.';
+/** The source is still listed but its key is not in this computer's or browser's storage (61-34, the owner's 0.6.4 re-test item 6a). */
+const KEY_NOT_HERE = 'Its key is not on this computer or browser. Set up a new profile here, or choose another.';
 const KEY_ELSEWHERE = 'This profile uses a key saved in another project. Set up a new profile to use a different key.';
 
 export interface CreateOrganizationProfileInput {
@@ -267,7 +269,11 @@ export class ProfileStore {
     if (profile.keySource) {
       // A copy works only through a source the person chose on this computer, and only while that source still has its key.
       if (!this.linkedSource(profileId)) return this.setValidation(profileId, { status: 'invalid', error: SOURCE_UNAVAILABLE });
-      if (this.auth && profile.provider !== 'local' && !await this.hasStoredKey(this.getScope(profileId))) return this.setValidation(profileId, { status: 'invalid', error: SOURCE_REMOVED });
+      if (this.auth && profile.provider !== 'local' && !await this.hasStoredKey(this.getScope(profileId))) {
+        // Still listed means the key was not removed: it is kept in another computer's or browser's storage, or this storage lost it.
+        const listed = findSavedProfile(profile.keySource.projectId, profile.keySource.profileId);
+        return this.setValidation(profileId, { status: 'invalid', error: listed ? KEY_NOT_HERE : SOURCE_REMOVED });
+      }
     }
     try {
       await probe(clone(profile), this.getScope(profileId));
@@ -292,6 +298,21 @@ export class ProfileStore {
   public async exportMetadata(): Promise<ProfileMetadataExport> {
     await this.load();
     return { version: PROFILE_STORE_VERSION, projectId: this.projectId, profiles: this.ledger.profiles.map(clone), activeProfileId: this.ledger.active?.profileId };
+  }
+
+  /**
+   * Whether the key of a listed saved profile is in this computer's or browser's storage. Answers true or false only: the stored value is
+   * turned into a boolean at once and never returned, logged or shown. A local-only profile counts as present, because its key is optional.
+   */
+  public async savedKeyHere(entry: SavedProfileEntry): Promise<boolean> {
+    if (!entry || typeof entry.projectId !== 'string' || !PROJECT_ID_PATTERN.test(entry.projectId)) return false;
+    if (!isProfileId(entry.profileId) || isTeamProfileId(entry.profileId)) return false;
+    if (entry.provider === 'local') return true;
+    try {
+      return await this.hasStoredKey({ version: PROJECT_SCOPE_VERSION, projectId: entry.projectId, profileId: entry.profileId });
+    } catch {
+      return false;
+    }
   }
 
   /** Whether a key or token is stored for the scope; the value itself is not kept. */

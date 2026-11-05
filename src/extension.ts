@@ -293,6 +293,7 @@ async function useSavedProfile(auth: AuthService, sidebar: NearAiPanelViewProvid
   await profiles.list();
   await runUseSavedProfile(savedProfileUi(), {
     projectId: profiles.projectScopeId,
+    hasKey: (entry) => profiles.savedKeyHere(entry),
     use: (entry) => profiles.useSavedProfile(entry),
     setUpNew: () => configureApiKey(auth, sidebar),
     refresh: async () => { clearProviderCache(); await sidebar.refresh(); }

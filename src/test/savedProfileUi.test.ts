@@ -35,6 +35,7 @@ function savedProfile(): OrganizationProfile {
 }
 
 // Two projects on this computer: the profile was set up in the first and is used in the second. Returns the second project's scope id.
+// Its key counts as here (hasKey answers true, 61-34): it is a local-only profile, whose key is optional.
 async function twoProjects(): Promise<{ thisProject: string; cleanup(): Promise<void> }> {
   const base = await mkdtemp(path.join(tmpdir(), 'near-ai-saved-ui-'));
   profileIndex.initProfileIndex(new MemoryMemento());
@@ -71,7 +72,7 @@ test('tracer: under the extension-host tests a script picks the saved profile an
     await withEnv('1', [{ match: 'Use a profile from another project', answer: 'E2E saved' }], async () => {
       const used: string[] = [];
       const outcome = await profileIndex.runUseSavedProfile(savedProfileUi(), {
-        projectId: world.thisProject,
+        projectId: world.thisProject, hasKey: async () => true,
         use: async (entry) => { used.push(entry.displayName); return savedProfile(); },
         setUpNew: async () => { assert.fail('Set up a new profile is not chosen'); },
         refresh: async () => undefined
@@ -99,7 +100,7 @@ test('outside the extension-host tests the pick and messages are VS Code\'s own,
     await withEnv(undefined, [{ match: 'Use a profile from another project', answer: 'E2E saved' }], async () => {
       stub.quickPickAnswers.push('E2E saved');
       const outcome = await profileIndex.runUseSavedProfile(savedProfileUi(), {
-        projectId: world.thisProject, use: async () => savedProfile(), setUpNew: async () => undefined, refresh: async () => undefined
+        projectId: world.thisProject, hasKey: async () => true, use: async () => savedProfile(), setUpNew: async () => undefined, refresh: async () => undefined
       });
       assert.equal(outcome, 'ready');
       assert.equal(stub.quickPickRequests.length, 1, 'VS Code showed the pick');

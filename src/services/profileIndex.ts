@@ -124,16 +124,22 @@ export interface SavedProfileUi {
 export interface UseSavedProfileDeps {
   projectId: string;
   use(entry: SavedProfileEntry): Promise<OrganizationProfile>;
+  /** Whether the entry's key is in this computer's or browser's storage: true or false only, never the key (ProfileStore.savedKeyHere). */
+  hasKey(entry: SavedProfileEntry): Promise<boolean>;
   setUpNew(): Promise<void>;
   refresh(): Promise<void>;
 }
 
 const SET_UP_NEW = 'Set up a new profile';
 const CHOOSE_ANOTHER = 'Choose another';
+const KEY_NOT_HERE = 'Its key is not on this computer or browser.';
 
 /**
  * Use a profile from another project: pick one by its name and folder, check its key where it is stored, and make it this project's
  * profile. The key is never shown; with nothing saved yet, or when the check fails, the person is offered Set up a new profile.
+ * The list is shared by everything that uses this VS Code's global state (on code-server, every browser profile), but keys are kept per
+ * computer or browser profile: a profile whose key is not here is listed as unavailable with the reason, after the usable ones, and is
+ * never used (61-34).
  */
 export async function runUseSavedProfile(ui: SavedProfileUi, deps: UseSavedProfileDeps): Promise<'ready' | 'failed' | 'cancelled' | 'none'> {
   const entries = listSavedProfiles(deps.projectId);
@@ -142,16 +148,30 @@ export async function runUseSavedProfile(ui: SavedProfileUi, deps: UseSavedProfi
     if (next === SET_UP_NEW) await deps.setUpNew();
     return 'none';
   }
-  const picked = await ui.pick(entries.map((entry) => ({ label: entry.displayName, description: `from ${entry.projectLabel}`, detail: checkText(entry), entry })), {
+  const checked = await Promise.all(entries.map(async (entry) => ({ entry, here: await Promise.resolve().then(() => deps.hasKey(entry)).then((answer) => answer === true, () => false) })));
+  const usable = checked.filter((item) => item.here);
+  if (!usable.length) {
+    const next = await ui.info('None of your saved profiles from other projects has its key on this computer or browser. Set up a new profile here.', SET_UP_NEW);
+    if (next === SET_UP_NEW) await deps.setUpNew();
+    return 'none';
+  }
+  const ordered = [...usable, ...checked.filter((item) => !item.here)];
+  const picked = await ui.pick(ordered.map(({ entry, here }) => ({ label: entry.displayName, description: `from ${entry.projectLabel}`, detail: here ? checkText(entry) : `${entry.organization}. ${KEY_NOT_HERE}`, entry, here })), {
     title: 'Use a profile from another project',
     placeHolder: 'Choose a saved profile. Its key stays where it was saved and is not shown.'
   });
   if (!picked) return 'cancelled';
+  if (!picked.here) {
+    const next = await ui.info(`${picked.entry.displayName}: its key is not on this computer or browser. Set up a new profile here, or choose another.`, SET_UP_NEW, CHOOSE_ANOTHER);
+    if (next === SET_UP_NEW) { await deps.setUpNew(); return 'failed'; }
+    if (next === CHOOSE_ANOTHER) return runUseSavedProfile(ui, deps);
+    return 'failed';
+  }
   let profile: OrganizationProfile | undefined;
   let reason: string;
   try {
     profile = await ui.progress('Checking your NEAR AI key', () => deps.use(picked.entry));
-    reason = profile.validation.error ?? 'The key did not pass its check.';
+    reason = redactSecrets(profile.validation.error ?? 'The key did not pass its check.');
   } catch (error) {
     reason = redactSecrets(error instanceof Error ? error.message : String(error));
   }
