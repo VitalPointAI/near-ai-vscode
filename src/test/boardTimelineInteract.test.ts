@@ -810,3 +810,39 @@ test('live updates: focus never falls to the page body; a focused dot that leave
   assert.notEqual(h.focused(), h.document.body, 'focus is not lost');
   assert.equal(focusedName(h), 'plan:2-01');
 });
+
+// 62.1-08 (found in the real window): a hovered, keyboard focused or open dot shows its mark at 1.25x, which reaches 2.5 px further on every side,
+// and the probe found that dot's lines starting 3 px from the grown mark (rule 8: within 2 px). The ends of the lines of a grown mark move out with
+// it, and come back when it settles; the other lines stay where they were.
+test('62.1-08: the lines of a hovered or open dot end on its grown mark, 2.5 px further out, and go back when it settles', async () => {
+  const world = await cardWorld();
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model);
+  const id = 'plan:1-02';
+  const ends = (): Map<string, { start: number[]; end: number[] }> => new Map(pathsOf(h).map((p) => {
+    const n = (p.getAttribute('d') ?? '').match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+    return [`${p.getAttribute('data-from')}>${p.getAttribute('data-to')}`, { start: n.slice(0, 2), end: n.slice(-2) }];
+  }));
+  const rest = ends();
+  const mine = linesOf(model, id);
+  assert.ok(mine.some((k) => k.startsWith(`${id}>`)), `${id} has a line out`);
+  const moved = (now: Map<string, { start: number[]; end: number[] }>): void => {
+    for (const [k, was] of rest) {
+      const at = now.get(k)!;
+      const [from, to] = k.split('>');
+      assert.deepEqual(at.start, from === id ? [was.start[0]! + 2.5, was.start[1]] : was.start, `${k} starts ${from === id ? 'on the grown mark' : 'where it was'}`);
+      assert.deepEqual(at.end, to === id ? [was.end[0]! - 2.5, was.end[1]] : was.end, `${k} ends ${to === id ? 'on the grown mark' : 'where it was'}`);
+    }
+  };
+  h.fire(dot(h, id), 'pointerenter');
+  moved(ends());
+  h.fire(dot(h, id), 'pointerleave');
+  assert.deepEqual([...ends()], [...rest], 'back on the mark at rest once the pointer leaves');
+  h.click(dot(h, id));
+  openCard(h);
+  h.fire(dot(h, id), 'pointerleave');
+  moved(ends());
+  h.press(h.$('#tl-card-title')!, 'Escape');
+  assert.equal(card(h), null, 'the card is closed');
+  assert.deepEqual([...ends()].filter(([k]) => !k.includes(id)), [...rest].filter(([k]) => !k.includes(id)), 'the other lines never moved');
+});
