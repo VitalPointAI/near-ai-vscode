@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 14
+open_count: 13
 waived_count: 0
-fixed_count: 6
+fixed_count: 7
 total_count: 20
-last_updated: 2026-11-05T00:45:25.161Z
+last_updated: 2026-11-05T02:06:04.481Z
 ---
 
 # Broken Windows Ledger
@@ -34,7 +34,7 @@ last_updated: 2026-11-05T00:45:25.161Z
 | 17 | 62.1 | stub | media/board/timeline.js | 366 | The timeline view draws only the screen reader lists (milestones, phases, dots) with no canvas, positions or visible marks until 62.1-04 draws them from NearAiTimeline.geometry | fixed |  | 2026-11-04T23:41:15.609Z | 2026-11-05T00:45:24.778Z |
 | 18 | 62.1 | stub | media/board/timeline.js | 350 | Folded finished milestones still list every dot and have no tile button in the page until 62.1-04 (the geometry already folds them) | fixed |  | 2026-11-04T23:41:15.742Z | 2026-11-05T00:45:24.903Z |
 | 19 | 62.1 | stub | media/board/board.js | 565 | In Timeline a filter that matches nothing shows the board's filtered state in place of the timeline, not the opaque band over ghost dots, until 62.1-04 | fixed |  | 2026-11-04T23:41:15.871Z | 2026-11-05T00:45:25.032Z |
-| 20 | 62.1 | stub | media/board/timeline.js | 440 | Zoom out, Zoom in, Fit milestone and Jump to now are drawn and follow the saved zoom, but do nothing when pressed until 62.1-06 wires them | open |  | 2026-11-05T00:45:25.161Z |  |
+| 20 | 62.1 | stub | media/board/timeline.js | 440 | Zoom out, Zoom in, Fit milestone and Jump to now are drawn and follow the saved zoom, but do nothing when pressed until 62.1-06 wires them | fixed |  | 2026-11-05T00:45:25.161Z | 2026-11-05T02:06:04.481Z |
 
 ````json
 [
@@ -292,10 +292,10 @@ last_updated: 2026-11-05T00:45:25.161Z
     "file": "media/board/timeline.js",
     "line": 440,
     "description": "Zoom out, Zoom in, Fit milestone and Jump to now are drawn and follow the saved zoom, but do nothing when pressed until 62.1-06 wires them",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-11-05T00:45:25.161Z",
-    "resolved_at": null,
+    "resolved_at": "2026-11-05T02:06:04.481Z",
     "milestone": "v0.6.0"
   }
 ]
