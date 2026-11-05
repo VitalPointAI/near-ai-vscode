@@ -114,3 +114,14 @@ test('62.1-08: the timeline\'s Small text is never under 0.85 of the editor font
     assert.ok(rule !== undefined && SMALL.test(rule[2] ?? ''), `${selector} takes the Small floor`);
   }
 });
+
+// 62.1-08 (found in the real window): a two line card title at the Heading line height (1.2) has glyph boxes about 2 px taller than its line
+// boxes, so the h2's scroll height passed its client height and the probe read the title as clamped (rule 3). The title keeps its words inside
+// its own box with a bottom padding of 0.15em, which holds a font whose glyph box is up to 1.5 times its size; the line height stays 1.2.
+test('62.1-08: the expanded card title keeps its two line glyph boxes inside its own box, at the Heading line height', () => {
+  const css = text('board.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((m) => (m[1] ?? '').split(',').map((s) => s.trim()).includes('.tl-card-title'));
+  assert.ok(rule !== undefined, 'the card title has its rule');
+  assert.match(rule[2] ?? '', /line-height:\s*1\.2\b/, 'the Heading line height');
+  assert.match(rule[2] ?? '', /padding-bottom:\s*0\.15em/, 'room under the last line for its glyph box');
+});
