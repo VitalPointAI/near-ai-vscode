@@ -389,6 +389,21 @@
       }
     }
 
+    // 62.1-08: what the real-window test of the rare states reads and aims at: the loop notices, the Fold milestone buttons, the focused stop (a
+    // dot, a folded tile or a +n button) and the layout failure with its buttons. The card title's heights say why it reads as clamped.
+    const notices = all(scrollEl, '.tl-cycle').filter(visibleEl).map((n) => ({ milestone: milestoneOf(n), text: textOf(n).slice(0, 200), box: rectOf(n) }));
+    const folds = all(scrollEl, '.tl-fold').filter(visibleEl).map((n) => ({ milestone: milestoneOf(n), text: textOf(n).slice(0, 40), box: rectOf(n) }));
+    const stopBtn = up(active, 'button.tl-dot') || up(active, 'button.tl-folded') || up(active, 'button.tl-more');
+    const focusedStop = stopBtn
+      ? { kind: stopBtn.classList.contains('tl-dot') ? 'dot' : stopBtn.classList.contains('tl-folded') ? 'tile' : 'more', id: stopBtn.getAttribute('data-id') || null, milestone: milestoneOf(stopBtn), step: stopBtn.hasAttribute('data-step') ? intAttr(stopBtn, 'data-step') : -1 }
+      : null;
+    const errorEl = one(scrollEl, '.tl-error');
+    const error = errorEl && visibleEl(errorEl) ? { text: textOf(errorEl).slice(0, 300), box: rectOf(errorEl), buttons: buttonsIn(errorEl) } : null;
+    if (card) {
+      const ct = document.getElementById('tl-card-title');
+      if (ct) card.titleHeights = { scrollHeight: num(ct.scrollHeight), clientHeight: num(ct.clientHeight), clamp: read(styleOf(ct), 'webkitLineClamp') || read(styleOf(ct), 'WebkitLineClamp') };
+    }
+
     const t = {
       view: 'timeline', direction: (rootEl && rootEl.getAttribute('data-direction')) || 'horizontal',
       horizontalDisabled: !!horizontalRadio && horizontalRadio.getAttribute('aria-disabled') === 'true',
@@ -398,7 +413,8 @@
       scroller: scrollEl
         ? { rect: rectOf(scrollEl), scrollTop: num(scrollEl.scrollTop), scrollLeft: num(scrollEl.scrollLeft), scrollWidth: num(scrollEl.scrollWidth), scrollHeight: num(scrollEl.scrollHeight), clientWidth: num(scrollEl.clientWidth), clientHeight: num(scrollEl.clientHeight) }
         : null,
-      otherScrollers, dots, more, tiles, phaseLabels, headers, percents, lines, now, overall, legend, preview, card, focusedDot, controls
+      otherScrollers, dots, more, tiles, phaseLabels, headers, percents, lines, now, overall, legend, preview, card, focusedDot, controls,
+      notices, folds, focusedStop, error
     };
     t.firstScreen = firstScreenOf(Object.assign({}, data, { timeline: t }));
     // 62.1-06 adds NearAiTimeline.metrics on test pages (draw time and frame timing); it is reported as given, and absent when there is none.
