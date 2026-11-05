@@ -19,7 +19,35 @@
     foldName: (title) => 'Fold ' + title,
     progressName: (title) => title + ' progress',
     hintMove: 'Use the arrow keys to move along the timeline. Press Enter to open the card. Press M to move it. Press N to jump to now.',
-    hintOpen: 'Use the arrow keys to move along the timeline. Press Enter to open the card. Press N to jump to now.'
+    hintOpen: 'Use the arrow keys to move along the timeline. Press Enter to open the card. Press N to jump to now.',
+    showMilestone: 'Show milestone',
+    more: (n) => '+' + n,
+    moreName: (n, step) => 'Show ' + n + ' more cards in step ' + step,
+    fewer: 'Show fewer',
+    fewerName: (step) => 'Show fewer cards in step ' + step,
+    errorHead: 'The timeline could not be drawn',
+    errorBody: 'Something went wrong while placing the cards. Nothing was changed. Switch to Columns to see every card, or try again.',
+    showColumns: 'Show columns',
+    drawAgain: 'Draw the timeline again',
+    overall: 'Project progress',
+    zoom: 'Zoom',
+    zoomOut: 'Zoom out',
+    zoomIn: 'Zoom in',
+    zoomLevel: (n) => n + '%',
+    zoomName: (n) => 'Zoom ' + n + '%',
+    fit: 'Fit milestone',
+    fitName: 'Fit the current milestone to the window',
+    jumpNow: 'Jump to now',
+    jumpNowTitle: 'Show where the work is now',
+    showLegend: 'Show legend',
+    hideLegend: 'Hide legend',
+    legendName: 'What the dots mean',
+    legend: [
+      ['backlog', 'Backlog'], ['ready', 'Ready'], ['claimed', 'Claimed'], ['in-progress', 'In progress'], ['in-review', 'In review'], ['integrating', 'Shipping'],
+      ['done', 'Done'], ['cancelled', 'Cancelled'], ['blocked', 'Blocked'], ['held', 'On hold'], ['finished', 'Looks finished, please confirm'],
+      ['mine', 'Mine: filled initials'], ['square', 'Square: a phase with no plans yet'], ['line', 'Line: waits for'], ['waiting', 'Dashed line: still waiting']
+    ],
+    legendHint: 'Hover or focus a dot to preview it. Click it or press Enter to open the card.'
   });
 
   // ---- the pure geometry (UI-SPEC "Timeline geometry", "Pitches by zoom", "Horizontal", "Vertical", "Stacks taller than the cap", "Folded finished
@@ -37,7 +65,7 @@
   const G = Object.freeze({
     bandGap: 48, padAlong: 24, padAcross: 16, head: 56, headMax: 320, gap: 8, railRow: 24, labelLine: 16, barOffset: 18, bar: 4, apart: 4,
     nowRow: 48, nowGap: 56, pillW: 320, pillH: 40, cap: 8, tile: 160, tileHeight: 112, emptyAlong: 160, emptyHeight: 96, emptyLine: 56,
-    canvasPad: 32, minBand: 368, barColumn: 8, minLabel: 24, narrow: 520
+    canvasPad: 32, minBand: 368, barColumn: 8, minLabel: 24, narrow: 520, notice: 80
   });
   const gutterFor = (width) => (width >= 900 ? 160 : width >= G.narrow ? 120 : 64);
   const rect = (x, y, w, h) => ({ x, y, w, h });
@@ -144,7 +172,11 @@
       // One rail height, Now row and axis for every band, so the axis is one straight line across the project.
       const packed = plans.map((p) => (p.folded || p.empty ? { phases: [], rows: 0 } : pack(p, (s) => s * along, bw)));
       const rows = Math.max(0, ...packed.map((k) => k.rows));
-      const railTop = G.padAcross + G.head + G.gap;
+      // A band whose cards wait for each other in a loop carries a notice at its start (UI-SPEC "States"); its row is kept in every band, like the
+      // Now row, so the axis stays one line.
+      const noticeTop = G.padAcross + G.head + G.gap;
+      const noticeRow = plans.some((p) => !p.folded && !p.empty && p.m.cycle === true) ? G.notice : 0;
+      const railTop = noticeTop + noticeRow;
       const nowTop = railTop + rows * G.railRow + G.gap;
       const y0 = nowTop + G.nowRow + G.gap;
       let x = 0;
@@ -179,6 +211,7 @@
             nowRow: rect(x, nowTop, w, G.nowRow), axis: rect(x, y0 + bh / 2 - 1, w, 2), phases,
             ticks: p.columns.map((col, s) => ({ step: s, at: start + s * along + bw / 2 }))
           };
+          if (p.m.cycle === true) band.notice = grow(rect(x + G.padAcross, noticeTop, w - 2 * G.padAcross, G.notice - G.gap));
           if (p.holdsNow) {
             // The line sits in the gap before the Now step, half a step pitch before its centre (after the last step when all is done), from the top of
             // the Now row to the bottom of the tallest stack; the pill's left edge is on the line, moved left to stay inside the band.
@@ -214,7 +247,9 @@
           const emptyBox = grow(rect(gx, y + G.head, W - gx - G.canvasPad, G.emptyLine));
           band = { id: p.id, x: 0, y, w: W, h: G.head + G.emptyLine, folded: false, empty: true, header: rect(0, y, W, G.head), emptyBox, phases: [] };
         } else {
-          const base = y + G.head + G.padAlong;
+          // The loop notice takes a row under the header of its own band.
+          const noticeH = p.m.cycle === true ? G.notice : 0;
+          const base = y + G.head + noticeH + G.padAlong;
           const alongAt = alongAtOf(p);
           const top = (s) => base + alongAt(s);
           const labelW = gutter - Math.max(1, packed[i].rows) * G.barColumn;
@@ -255,10 +290,11 @@
           }
           band = {
             id: p.id, x: 0, y, w: W, h: end + G.padAlong - y, folded: false, empty: false, header: rect(0, y, W, G.head),
-            gutter: rect(gx, y + G.head, gutter, end + G.padAlong - y - G.head), axis: rect(slot0 + bh / 2 - 1, base, 2, end - base), phases,
+            gutter: rect(gx, y + G.head + noticeH, gutter, end + G.padAlong - y - G.head - noticeH), axis: rect(slot0 + bh / 2 - 1, base, 2, end - base), phases,
             ticks: p.columns.map((col, s) => ({ step: s, at: top(s) + bh / 2 }))
           };
           if (nowGap) band.nowGap = nowGap;
+          if (noticeH) band.notice = grow(rect(gx, y + G.head + G.gap, W - gx - G.canvasPad, G.notice - G.gap));
         }
         out.bands.push(band);
         y += band.h + G.bandGap;
@@ -348,8 +384,12 @@
   scroll.setAttribute('role', 'region');
   scroll.setAttribute('aria-label', T.region);
   const canvas = el('div', 'tl-canvas');
-  const art = el('div', 'tl-art');
-  art.setAttribute('aria-hidden', 'true');
+  // Under everything: the past shade, then one SVG for every dependency line, then the ghost rings of the dots a filter leaves out (TD-14).
+  const shades = el('div', 'tl-shades');
+  shades.setAttribute('aria-hidden', 'true');
+  const lines = svgEl('svg', { class: 'tl-lines', 'aria-hidden': 'true', focusable: 'false' });
+  const ghosts = el('div', 'tl-ghosts');
+  ghosts.setAttribute('aria-hidden', 'true');
   const list = el('ol', 'tl-milestones');
   list.setAttribute('aria-label', T.milestones);
   // The hidden hints the dots point at (aria-describedby reads hidden text).
@@ -358,11 +398,118 @@
   const hintMove = el('span', '', T.hintMove); hintMove.id = 'tl-hint-move';
   const hintOpen = el('span', '', T.hintOpen); hintOpen.id = 'tl-hint-open';
   hints.append(hintMove, hintOpen);
-  canvas.append(art, list);
+  canvas.append(shades, lines, ghosts, list);
   scroll.append(canvas, hints);
+  // The board's empty filter state, in an opaque band at the top of the scroller, the ghosts below it (UI-SPEC "Filters").
+  const filterBand = el('div', 'tl-filter-empty');
+  // The layout failure (UI-SPEC "States"): the retry posts the board's existing message.
+  const errorBox = el('div', 'state-box tl-error');
+  errorBox.setAttribute('role', 'alert');
+  (function () {
+    const show = el('button', 'secondary', T.showColumns); show.setAttribute('type', 'button');
+    show.addEventListener('click', () => board.setView('columns'));
+    const again = el('button', 'secondary', T.drawAgain); again.setAttribute('type', 'button');
+    again.addEventListener('click', () => board.post({ type: 'retry' }));
+    errorBox.append(el('h2', 'state-head', T.errorHead), el('p', 'state-body', T.errorBody), show, again);
+  })();
+
+  // ---- the toolbar's timeline controls (in board.toolbarSlot(), after the Direction switch) and the legend band ------------------------------
+  const RING = 2 * Math.PI * 7;
+  const overall = el('div');
+  overall.id = 'tl-overall';
+  overall.setAttribute('role', 'progressbar');
+  overall.setAttribute('aria-valuemin', '0');
+  overall.setAttribute('aria-valuemax', '100');
+  overall.setAttribute('aria-label', T.overall);
+  const ringSvg = svgEl('svg', { class: 'tl-overall-ring', viewBox: '0 0 16 16', width: 16, height: 16, 'aria-hidden': 'true', focusable: 'false' });
+  const ringFill = svgEl('circle', { class: 'tl-ring-fill', cx: 8, cy: 8, r: 7, transform: 'rotate(-90 8 8)', 'stroke-dasharray': RING.toFixed(2), 'stroke-dashoffset': RING.toFixed(2) });
+  ringSvg.append(svgEl('circle', { class: 'tl-ring-track', cx: 8, cy: 8, r: 7 }), ringFill);
+  const overallText = el('span', 'tl-overall-text');
+  overall.append(ringSvg, overallText);
+  function zoomButton(kind, cls, label, iconName, words) {
+    const b = el('button', cls);
+    b.setAttribute('type', 'button');
+    b.setAttribute('data-zoom', kind);
+    b.setAttribute('aria-label', label);
+    b.setAttribute('title', label);
+    b.appendChild(board.icon(iconName));
+    if (words) b.appendChild(el('span', 'label', words));
+    return b;
+  }
+  // What the zoom buttons and Jump to now do comes with 62.1-06; here they are drawn and kept in step with the saved zoom.
+  const zoomGroup = el('div', 'zoom');
+  zoomGroup.id = 'tl-zoom';
+  zoomGroup.setAttribute('role', 'group');
+  zoomGroup.setAttribute('aria-label', T.zoom);
+  const zoomOut = zoomButton('out', 'icon', T.zoomOut, 'remove');
+  const zoomLevel = el('output', 'zoom-level');
+  const zoomIn = zoomButton('in', 'icon', T.zoomIn, 'add');
+  const zoomFit = zoomButton('fit', 'secondary', T.fitName, 'screen-full', T.fit);
+  zoomGroup.append(zoomOut, zoomLevel, zoomIn, zoomFit);
+  const nowBtn = el('button', 'secondary', T.jumpNow);
+  nowBtn.id = 'tl-now';
+  nowBtn.setAttribute('type', 'button');
+  nowBtn.setAttribute('title', T.jumpNowTitle);
+  const legendBtn = el('button', 'secondary', T.showLegend);
+  legendBtn.id = 'tl-legend-btn';
+  legendBtn.setAttribute('type', 'button');
+  legendBtn.setAttribute('aria-controls', 'tl-legend');
+  legendBtn.setAttribute('aria-expanded', 'false');
+  const legend = el('div');
+  legend.id = 'tl-legend';
+  legend.setAttribute('role', 'group');
+  legend.setAttribute('aria-label', T.legendName);
+  legend.hidden = true;
+  (function () {
+    const items = el('div', 'tl-legend-items');
+    for (const [key, word] of T.legend) {
+      const item = el('span', 'tl-legend-item');
+      let sign;
+      if (key === 'mine') { sign = el('span', 'tl-initials mine'); sign.setAttribute('aria-hidden', 'true'); sign.appendChild(board.icon('person')); }
+      else if (key === 'line' || key === 'waiting') {
+        sign = svgEl('svg', { class: 'tl-legend-line', viewBox: '0 0 20 20', width: 20, height: 20, 'aria-hidden': 'true', focusable: 'false' });
+        sign.appendChild(svgEl('path', { class: 'tl-line emphasis' + (key === 'waiting' ? ' waiting' : ''), d: 'M2 10L18 10' }));
+      } else {
+        const state = key === 'finished' || key === 'square' ? 'backlog' : key;
+        item.setAttribute('data-state', state);
+        sign = buildMark(state, key === 'square', key === 'finished');
+        attr(sign, 'class', 'tl-mark ' + shapeOf(state));
+      }
+      item.append(sign, el('span', 'label', word));
+      items.appendChild(item);
+    }
+    legend.append(items, el('p', 'tl-legend-hint', T.legendHint));
+  })();
+  function drawLegend(open) {
+    hide(legend, !open);
+    setText(legendBtn, open ? T.hideLegend : T.showLegend);
+    attr(legendBtn, 'aria-expanded', open ? 'true' : 'false');
+  }
+  legendBtn.addEventListener('click', () => drawLegend(board.setUiState({ legendOpen: !board.uiState().legendOpen }).legendOpen));
+  place(board.toolbarSlot(), [overall, zoomGroup, nowBtn, legendBtn]);
+  /** The overall ring and words (D-14) and the zoom level, from the model and the saved choices. */
+  function drawToolbar(timeline, saved) {
+    const p = timeline && timeline.percent;
+    hide(overall, !p);
+    const pct = p && typeof p.percent === 'number' ? p.percent : undefined;
+    attr(overall, 'aria-valuenow', pct === undefined ? null : pct);
+    attr(overall, 'aria-valuetext', p ? p.label : null);
+    setText(overallText, p ? p.text : '');
+    attr(ringFill, 'stroke-dashoffset', (RING * (1 - (pct || 0) / 100)).toFixed(2));
+    setText(zoomLevel, T.zoomLevel(saved.zoom));
+    attr(zoomLevel, 'aria-label', T.zoomName(saved.zoom));
+    attr(zoomOut, 'aria-disabled', saved.zoom === ZOOMS[0] ? 'true' : null);
+    attr(zoomIn, 'aria-disabled', saved.zoom === ZOOMS[ZOOMS.length - 1] ? 'true' : null);
+    drawLegend(saved.legendOpen === true);
+  }
+
+  // ---- bands, phases and dots ------------------------------------------------------------------------------------------------------------------
   const bandEls = new Map();
   const groupEls = new Map();
   const dotEls = new Map();
+  const moreEls = new Map();
+  // The stacks the person opened in this session (a key of milestone and step); folded milestones are saved, stacks are not.
+  const openStacks = {};
 
   function bandEl(band) {
     let b = bandEls.get(band.id);
@@ -382,20 +529,42 @@
       bar.appendChild(fill);
       const progress = el('span', 'progress-text');
       const fold = el('button', 'secondary tl-fold', T.fold); fold.setAttribute('type', 'button'); fold.setAttribute('aria-expanded', 'true');
-      fold.addEventListener('click', () => foldBand(b.id, false));
+      fold.addEventListener('click', () => { foldBand(b.id, false); const t = bandEls.get(b.id); if (t && t.tile.isConnected) t.tile.focus(); });
       row2.append(bar, progress);
       head.append(row1, row2);
       const axis = el('div', 'tl-axis');
+      axis.setAttribute('aria-hidden', 'true');
       const ticks = el('div', 'tl-ticks');
+      ticks.setAttribute('aria-hidden', 'true');
       const phases = el('ol', 'tl-phases');
+      // The folded tile (D-09): the whole tile is the button that shows the milestone.
+      const tile = el('button', 'tl-folded'); tile.setAttribute('type', 'button'); tile.setAttribute('aria-expanded', 'false');
+      const tileTitle = el('span', 'tl-tile-title');
+      const tileLine = el('span', 'tl-tile-line');
+      const tilePercent = el('span', 'tl-tile-percent');
+      tile.append(tileTitle, tileLine, tilePercent, el('span', 'tl-tile-action', T.showMilestone));
+      tile.addEventListener('click', () => {
+        foldBand(b.id, true);
+        const shownBand = bandEls.get(b.id);
+        const first = shownBand ? shownBand.li.querySelector('button.tl-dot') : null;
+        if (first) first.focus();
+      });
+      const empty = el('div', 'tl-empty');
+      const emptyText = el('p', 'tl-empty-text');
+      const emptyNext = el('p', 'tl-empty-next');
+      empty.append(emptyText, emptyNext);
+      const notice = el('div', 'banner banner-notice tl-cycle');
+      notice.setAttribute('role', 'note');
+      const noticeText = el('span', 'banner-text');
+      notice.append(board.icon('info'), noticeText);
       li.append(head, phases);
-      b = { id: band.id, li, head, row1, row2, h2, title, badge, percent, bar, fill, progress, fold, axis, ticks, phases };
+      b = { id: band.id, li, head, row1, row2, h2, title, badge, percent, bar, fill, progress, fold, axis, ticks, phases, tile, tileTitle, tileLine, tilePercent, empty, emptyText, emptyNext, notice, noticeText };
       bandEls.set(band.id, b);
     }
     return b;
   }
   /** The header's words from the model (D-14): the h2 is the model's heading, the rest is what the eye reads. */
-  function drawHead(b, band, place_, canFold) {
+  function drawHead(b, band, where, canFold) {
     setText(b.h2, band.heading);
     setText(b.title, band.title);
     attr(b.title, 'title', band.title);
@@ -410,10 +579,20 @@
     setText(b.progress, band.progressText || '');
     attr(b.fold, 'aria-label', T.foldName(band.title));
     // The header is in the band's flow so it can stick (left edge in horizontal, top edge in vertical); its size and offset come from the geometry.
-    setStyle(b.head, 'margin-left', px(place_.header.x - place_.x));
-    setStyle(b.head, 'margin-top', px(place_.header.y - place_.y));
-    setStyle(b.head, 'width', px(place_.header.w));
-    setStyle(b.head, 'height', px(place_.header.h));
+    setStyle(b.head, 'margin-left', px(where.header.x - where.x));
+    setStyle(b.head, 'margin-top', px(where.header.y - where.y));
+    setStyle(b.head, 'width', px(where.header.w));
+    setStyle(b.head, 'height', px(where.header.h));
+  }
+  /** A folded milestone: its h2 for screen readers and the tile that says what it holds. */
+  function drawTile(b, band, rect, ox, oy) {
+    setText(b.h2, band.heading);
+    setText(b.tileTitle, band.title);
+    attr(b.tileTitle, 'title', band.title);
+    setText(b.tileLine, band.tileText || '');
+    setText(b.tilePercent, band.percentText || '');
+    attr(b.tile, 'aria-label', band.tileName);
+    put(b.tile, rect, ox, oy);
   }
   // A phase's list entry, or the entry of the dots with no phase in their band (the cards added on the board), named after the band.
   function groupEl(band, group) {
@@ -479,9 +658,33 @@
     place(b, parts);
     return d;
   }
+  /** The +{n} button of a step taller than the cap, or Show fewer once the stack is open. */
+  function moreEl(band, m, ox, oy) {
+    const key = band.id + ':' + m.step;
+    let x = moreEls.get(key);
+    if (!x) {
+      const li = el('li');
+      const b = el('button', 'tl-more');
+      b.setAttribute('type', 'button');
+      b.setAttribute('data-step', m.step);
+      b.addEventListener('click', () => {
+        openStacks[key] = !openStacks[key];
+        board.redraw();
+        if (b.isConnected) b.focus();
+      });
+      li.appendChild(b);
+      x = { li, button: b };
+      moreEls.set(key, x);
+    }
+    const step = m.step + 1;
+    setText(x.button, m.hidden > 0 ? T.more(m.hidden) : T.fewer);
+    attr(x.button, 'aria-label', m.hidden > 0 ? T.moreName(m.hidden, step) : T.fewerName(step));
+    put(x.button, m.rect, ox, oy);
+    return x;
+  }
   // The phases of a band in the model's order (first step, then phase number), each with its dots in sequence order (step, then slot); dots whose
   // phase is not one of the band's go in one entry placed by its first step.
-  function groupsOf(band, dots) {
+  function groupsOf(band, dots, needLoose) {
     const groups = band.phases.map((phase) => ({ key: phase.id, phase, first: phase.firstStep, dots: [] }));
     const byId = new Map(groups.map((g) => [g.key, g]));
     let loose;
@@ -490,6 +693,7 @@
       if (g) g.dots.push(dot);
       else { if (!loose) loose = { key: 'none', phase: undefined, first: dot.step, dots: [] }; loose.dots.push(dot); }
     }
+    if (!loose && needLoose) loose = { key: 'none', phase: undefined, first: 0, dots: [] };
     if (loose) {
       const at = groups.findIndex((g) => g.first > loose.first);
       groups.splice(at < 0 ? groups.length : at, 0, loose);
@@ -516,65 +720,214 @@
     else setText(g.label, pickLabel(group.phase.labels, where.label.w, measureIn(g.label)));
   }
 
+  // ---- the Now marker (D-13) -----------------------------------------------------------------------------------------------------------------
+  const nowItem = el('li', 'tl-now');
+  const nowLine = el('div', 'tl-now-line');
+  nowLine.setAttribute('aria-hidden', 'true');
+  const nowPill = el('div', 'tl-now-pill');
+  nowPill.setAttribute('aria-hidden', 'true');
+  const nowTitle = el('span', 'tl-now-title');
+  const nowDetail = el('span', 'tl-now-detail');
+  nowPill.append(nowTitle, nowDetail);
+  const nowSentence = el('span', 'sr-only');
+  nowItem.append(nowLine, nowPill, nowSentence);
+  function drawNow(now, at, ox, oy) {
+    put(nowLine, at.line, ox, oy);
+    setStyle(nowPill, 'left', px(at.pill.x - ox));
+    setStyle(nowPill, 'top', px(at.pill.y - oy));
+    setStyle(nowPill, 'width', px(at.pill.w));
+    setStyle(nowPill, 'min-height', px(at.pill.h));
+    setText(nowTitle, now.title);
+    setText(nowDetail, now.detail);
+    setText(nowSentence, now.sentence);
+  }
+  /** The past shade: every band before the frontier band, and the frontier band up to the line. */
+  function drawShades(geo) {
+    const out = [];
+    const at = geo.now ? geo.bands.findIndex((b) => b.id === geo.now.milestoneId) : -1;
+    if (at >= 0) {
+      for (let i = 0; i < at; i += 1) out.push(geo.bands[i]);
+      const b = geo.bands[at];
+      const line = geo.now.line;
+      out.push(geo.direction === 'horizontal' ? rect(b.x, b.y, line.x - b.x, b.h) : rect(b.x, b.y, b.w, line.y - b.y));
+    }
+    place(shades, out.map((r, i) => { const n = shades.children[i] || el('div', 'tl-past'); put(n, r); return n; }));
+  }
+
+  // ---- dependency lines (D-07) ---------------------------------------------------------------------------------------------------------------
+  // Where a line ends: the mark of a drawn dot (its mark is the first 28 px of the box, the 20 px circle 4 px in), else the +{n} button of its step,
+  // else its folded milestone's tile. Lines leave along the direction of travel and arrive the same way.
+  function endOf(anchor, out, toward, horizontal) {
+    if (anchor.dot) {
+      const d = anchor.dot;
+      return horizontal ? { x: d.x + (out ? 24 : 4), y: d.cy } : { x: d.x + 14, y: d.y + (out ? 24 : 4) };
+    }
+    const r = anchor.rect;
+    return horizontal ? { x: out ? r.x + r.w : r.x, y: clamp(toward.y, r.y, r.y + r.h) } : { x: clamp(toward.x, r.x, r.x + r.w), y: out ? r.y + r.h : r.y };
+  }
+  const centreOf = (anchor) => (anchor.dot ? { x: anchor.dot.x + 14, y: anchor.dot.cy } : { x: anchor.rect.x + anchor.rect.w / 2, y: anchor.rect.y + anchor.rect.h / 2 });
+  function drawLines(timeline, geo, anchors) {
+    const horizontal = geo.direction === 'horizontal';
+    const h = geo.pitch.along / 2;
+    attr(lines, 'width', geo.width);
+    attr(lines, 'height', geo.height);
+    const paths = [];
+    for (const e of Array.isArray(timeline.edges) ? timeline.edges : []) {
+      const from = anchors.get(e.from);
+      const to = anchors.get(e.to);
+      if (!from || !to || (from.rect && from.rect === to.rect)) continue;
+      const a = endOf(from, true, centreOf(to), horizontal);
+      const b = endOf(to, false, centreOf(from), horizontal);
+      const straight = horizontal ? a.y === b.y : a.x === b.x;
+      const d = straight ? 'M' + a.x + ' ' + a.y + ' L' + b.x + ' ' + b.y
+        : horizontal ? 'M' + a.x + ' ' + a.y + ' C' + (a.x + h) + ' ' + a.y + ' ' + (b.x - h) + ' ' + b.y + ' ' + b.x + ' ' + b.y
+          : 'M' + a.x + ' ' + a.y + ' C' + a.x + ' ' + (a.y + h) + ' ' + b.x + ' ' + (b.y - h) + ' ' + b.x + ' ' + b.y;
+      paths.push(svgEl('path', { class: 'tl-line' + (e.waiting ? ' waiting' : ''), 'data-from': e.from, 'data-to': e.to, d }));
+    }
+    lines.replaceChildren(...paths);
+  }
+
   /** Shows or folds a finished milestone (the person's choice is saved), then draws again. */
   function foldBand(id, show) {
     board.setUiState({ shown: { [id]: show } });
     board.redraw();
   }
+  function forget() { bandEls.clear(); groupEls.clear(); dotEls.clear(); moreEls.clear(); }
 
   function render(container, shown) {
     const model = board.model();
     const timeline = model && model.timeline;
-    place(container, [scroll]);
-    if (!timeline || !Array.isArray(timeline.milestones)) { place(list, []); bandEls.clear(); groupEls.clear(); dotEls.clear(); return; }
     const saved = board.uiState();
+    drawToolbar(timeline, saved);
+    place(container, [legend, scroll]);
+    if (!model || !timeline || model.timelineProblem === true || !Array.isArray(timeline.milestones) || !Array.isArray(timeline.dots)) {
+      place(scroll, [errorBox]);
+      forget();
+      return;
+    }
+    try {
+      draw(model, timeline, saved, shown);
+    } catch (error) {
+      // The layout function threw: the error state, and Columns keeps working.
+      place(scroll, [errorBox]);
+      forget();
+    }
+  }
+
+  function draw(model, timeline, saved, shown) {
+    const nothing = model.cards.length > 0 && shown.length === 0;
+    place(scroll, nothing ? [filterBand, canvas, hints] : [canvas, hints]);
+    if (nothing) place(filterBand, [board.filterEmptyState()]);
     const width = scroll.clientWidth > 0 ? scroll.clientWidth : window.innerWidth || 800;
-    const geo = geometry(timeline, { direction: board.drawnDirection(), zoom: saved.zoom, width, shown: saved.shown, openStacks: {} });
+    const geo = geometry(timeline, { direction: board.drawnDirection(), zoom: saved.zoom, width, shown: saved.shown, openStacks });
+    const horizontal = geo.direction === 'horizontal';
     setStyle(canvas, 'width', px(geo.width));
     setStyle(canvas, 'height', px(geo.height));
     attr(canvas, 'data-zoom', geo.zoom);
-    const cards = new Map((model ? model.cards : []).map((c) => [c.id, c]));
-    const shownIds = new Set(shown.map((c) => c.id));
+    const cards = new Map(model.cards.map((c) => [c.id, c]));
+    const matching = (id) => cards.has(id) && board.matches(cards.get(id));
     const places = new Map(geo.bands.map((b) => [b.id, b]));
     const boxes = new Map(geo.dots.map((d) => [d.id, d]));
+    const dotOf = new Map(timeline.dots.map((d) => [d.cardId, d]));
+    // Every card's line end: its dot when it is drawn, else the +{n} of its step, else its milestone's tile. A card the filters leave out has none.
+    const anchors = new Map();
+    const moreAt = new Map(geo.more.map((m) => [m.milestoneId + ':' + m.step, m]));
+    const tileAt = new Map(geo.tiles.map((t) => [t.milestoneId, t.rect]));
+    for (const d of timeline.dots) {
+      if (!matching(d.cardId)) continue;
+      const box = boxes.get(d.cardId);
+      const m = moreAt.get(d.milestoneId + ':' + d.step);
+      if (box) anchors.set(d.cardId, { dot: box });
+      else if (m && m.hidden > 0) anchors.set(d.cardId, { rect: m.rect });
+      else if (tileAt.has(d.milestoneId)) anchors.set(d.cardId, { rect: tileAt.get(d.milestoneId) });
+    }
+    drawShades(geo);
+    drawLines(timeline, geo, anchors);
+    // Ghosts: the dots a filter leaves out stay at their place as 8 px rings on their mark, with no text, no button and no list entry (TD-14).
+    const ghostDots = geo.dots.filter((d) => !matching(d.id));
+    place(ghosts, ghostDots.map((d, i) => {
+      const n = ghosts.children[i] || el('span', 'tl-ghost');
+      attr(n, 'data-id', d.id);
+      put(n, rect(d.x + 10, d.cy - 4, 8, 8));
+      return n;
+    }));
+
     const byBand = new Map();
     for (const dot of timeline.dots) {
-      if (!shownIds.has(dot.cardId) || !cards.has(dot.cardId) || !boxes.has(dot.cardId)) continue;
+      if (!boxes.has(dot.cardId) || !matching(dot.cardId)) continue;
       if (!byBand.has(dot.milestoneId)) byBand.set(dot.milestoneId, []);
       byBand.get(dot.milestoneId).push(dot);
     }
-    const usedBands = new Set();
-    const usedGroups = new Set();
-    const usedDots = new Set();
+    const now = timeline.now && geo.now && geo.now.milestoneId === timeline.now.milestoneId ? timeline.now : undefined;
+    const used = { bands: new Set(), groups: new Set(), dots: new Set(), more: new Set() };
     const labels = [];
+    let nowPlaced = false;
     place(list, timeline.milestones.filter((band) => places.has(band.id)).map((band) => {
-      usedBands.add(band.id);
+      used.bands.add(band.id);
       const where = places.get(band.id);
       const b = bandEl(band);
       put(b.li, where);
-      const finished = band.finished === true && !(timeline.now && timeline.now.milestoneId === band.id);
-      drawHead(b, band, where, finished && !where.folded);
       const ox = where.x;
       const oy = where.y;
+      attr(b.li, 'data-folded', where.folded ? 'true' : null);
+      if (where.folded) {
+        drawTile(b, band, tileAt.get(band.id) || where.header, ox, oy);
+        place(b.li, [b.h2, b.tile]);
+        return b.li;
+      }
+      drawHead(b, band, where, band.finished === true && !(timeline.now && timeline.now.milestoneId === band.id));
       const parts = [b.head];
+      if (where.notice && band.cycleNote) {
+        setText(b.noticeText, band.cycleNote);
+        // The notice keeps its words whole: the geometry's row is its smallest height, never a clip.
+        setStyle(b.notice, 'left', px(where.notice.x - ox));
+        setStyle(b.notice, 'top', px(where.notice.y - oy));
+        setStyle(b.notice, 'width', px(where.notice.w));
+        setStyle(b.notice, 'min-height', px(where.notice.h));
+        parts.push(b.notice);
+      }
+      if (where.empty && where.emptyBox) {
+        setText(b.emptyText, band.emptyText || '');
+        setText(b.emptyNext, band.emptyNext || '');
+        place(b.empty, band.emptyNext ? [b.emptyText, b.emptyNext] : [b.emptyText]);
+        put(b.empty, where.emptyBox, ox, oy);
+        parts.push(b.empty);
+      }
       if (where.axis) {
         put(b.axis, where.axis, ox, oy);
-        const horizontal = geo.direction === 'horizontal';
         place(b.ticks, (where.ticks || []).map((t, i) => {
           const tick = b.ticks.children[i] || el('span', 'tl-tick');
           // A tick crosses the axis through the mark's centre, 14 px into the dot box.
           const at = horizontal ? t.at - geo.box.w / 2 + 14 : t.at;
-          put(tick, horizontal ? { x: at, y: where.axis.y - 3, w: 1, h: 8 } : { x: where.axis.x - 3, y: at, w: 8, h: 1 }, ox, oy);
+          put(tick, horizontal ? rect(at, where.axis.y - 3, 1, 8) : rect(where.axis.x - 3, at, 8, 1), ox, oy);
           return tick;
         }));
         parts.push(b.axis, b.ticks);
       }
+      const holdsNow = !!now && now.milestoneId === band.id;
+      const groups = groupsOf(band, byBand.get(band.id) || [], holdsNow && band.phases.length === 0);
+      // The +{n} of a step goes in the phase entry of the last dot that step draws, after it; the Now item in the named phase's entry (else the last
+      // entry), right before the first dot of the Now step.
+      const moreGroup = new Map();
+      for (const m of geo.more.filter((x) => x.milestoneId === band.id)) {
+        const inStep = timeline.dots.filter((d) => d.milestoneId === band.id && d.step === m.step && boxes.has(d.cardId)).sort((x, y) => x.slot - y.slot);
+        const last = inStep[inStep.length - 1];
+        const key = last && last.phaseId !== undefined && band.phases.some((p) => p.id === last.phaseId) ? last.phaseId : 'none';
+        const target = groups.find((g) => g.key === key) || groups[groups.length - 1];
+        if (!target) continue;
+        if (!moreGroup.has(target.key)) moreGroup.set(target.key, []);
+        moreGroup.get(target.key).push(m);
+      }
+      const nowGroup = holdsNow ? (groups.find((g) => now.phaseId !== undefined && g.key === now.phaseId) || groups[groups.length - 1]) : undefined;
       const rail = new Map(where.phases.map((p) => [p.id, p]));
-      place(b.phases, groupsOf(band, byBand.get(band.id) || []).map((group) => {
-        usedGroups.add(band.id + '|' + group.key);
+      place(b.phases, groups.map((group) => {
+        used.groups.add(band.id + '|' + group.key);
         const g = groupEl(band, group);
-        const nodes = group.dots.map((dot) => { usedDots.add(dot.cardId); return dotEl(dot, cards.get(dot.cardId), boxes.get(dot.cardId), ox, oy, geo.zoom).li; });
-        place(g.dots, nodes);
+        const items = group.dots.map((dot) => ({ step: dot.step, slot: dot.slot, node: () => { used.dots.add(dot.cardId); return dotEl(dot, cards.get(dot.cardId), boxes.get(dot.cardId), ox, oy, geo.zoom).li; } }));
+        for (const m of moreGroup.get(group.key) || []) items.push({ step: m.step, slot: m.slot, node: () => { used.more.add(band.id + ':' + m.step); return moreEl(band, m, ox, oy).li; } });
+        if (group === nowGroup) { nowPlaced = true; items.push({ step: now.step, slot: -1, node: () => { drawNow(now, geo.now, ox, oy); return nowItem; } }); }
+        items.sort((x, y) => x.step - y.step || x.slot - y.slot);
+        place(g.dots, items.map((item) => item.node()));
         const at = group.phase ? rail.get(group.phase.id) : undefined;
         if (at) labels.push([g, group, at, ox, oy]);
         place(g.li, at ? [g.h3, g.dots, g.label, g.bar] : [g.h3, g.dots]);
@@ -584,14 +937,17 @@
       place(b.li, parts);
       return b.li;
     }));
-    for (const [k] of bandEls) if (!usedBands.has(k)) bandEls.delete(k);
-    for (const [k] of groupEls) if (!usedGroups.has(k)) groupEls.delete(k);
-    for (const [k] of dotEls) if (!usedDots.has(k)) dotEls.delete(k);
+    if (!nowPlaced && nowItem.parentNode) nowItem.remove();
+    for (const [k] of bandEls) if (!used.bands.has(k)) bandEls.delete(k);
+    for (const [k] of groupEls) if (!used.groups.has(k)) groupEls.delete(k);
+    for (const [k] of dotEls) if (!used.dots.has(k)) dotEls.delete(k);
+    for (const [k] of moreEls) if (!used.more.has(k)) moreEls.delete(k);
     // Labels are measured once every box is on the page.
     for (const [g, group, at, ox, oy] of labels) drawRail(g, group, at, ox, oy);
-    // One tab stop for the dots: the selected card's dot when it is shown, else the first (the arrow keys come with 62.1-05).
-    const order = Array.from(list.querySelectorAll('button.tl-dot'));
-    const stop = order.find((b) => b.getAttribute('data-id') === board.selected()) || order[0];
+    // One tab stop for the dots, tiles and +{n} buttons: the selected card's dot when it is shown, else the first dot, else the first stop (the
+    // arrow keys come with 62.1-05).
+    const order = Array.from(list.querySelectorAll('button.tl-dot, button.tl-folded, button.tl-more'));
+    const stop = order.find((b) => b.getAttribute('data-id') === board.selected()) || order.find((b) => b.classList.contains('tl-dot')) || order[0];
     for (const b of order) attr(b, 'tabindex', b === stop ? 0 : -1);
   }
 

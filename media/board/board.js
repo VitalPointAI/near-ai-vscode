@@ -153,6 +153,8 @@
   let menuOpener, detailOpener, formOpener;
   // The views other scripts draw (62.1-03: timeline.js registers 'timeline'): name -> { render(container, shownCards), focus?(), leave?() }.
   const registeredViews = {};
+  // The empty filter state the timeline shows over its ghosts (62.1-04), built once for each wording.
+  let filteredBox;
 
   // ---- small helpers -------------------------------------------------------------------------------------------------------------------------
   const $ = (id) => document.getElementById(id);
@@ -564,7 +566,8 @@
     }
     const total = cardsInMilestone();
     const shown = total.filter(matches);
-    if (total.length > 0 && shown.length === 0) {
+    // 62.1-04 (TD-14): in Timeline a filter that matches nothing keeps the timeline, its ghosts under the same empty filter band (filterEmptyState).
+    if (total.length > 0 && shown.length === 0 && !timelineOn()) {
       place(board, [stateView('filtered', T.noMatch, ui.filters.mine ? T.mineBody : T.clearBody, [button('link', T.clear, clearFilters)])]);
       return;
     }
@@ -1046,6 +1049,12 @@
     matches: (c) => !!c && matches(c),
     /** 62.1-04: true while the board cannot change cards (offline, paused or removed). */
     isDown,
+    /** 62.1-04: the board's empty filter state (No cards match these filters, the hint and Clear filters), kept while the same words apply. */
+    filterEmptyState() {
+      const key = ui.filters.mine ? 'mine' : 'clear';
+      if (!filteredBox || filteredBox.key !== key) filteredBox = { key, node: stateView('filtered', T.noMatch, ui.filters.mine ? T.mineBody : T.clearBody, [button('link', T.clear, clearFilters)]) };
+      return filteredBox.node;
+    },
     /** 62.1-04: true when the card has a Move to... menu for this viewer (moves or assignment items). */
     hasMenu: (c) => !!c && !!model && hasMenu(c),
     focusCard: (id) => { const li = cardEls.get(id); return !!li && li.isConnected && focusEl(li); },

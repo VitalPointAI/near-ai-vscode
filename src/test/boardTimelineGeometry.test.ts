@@ -11,7 +11,7 @@ import { createBoardHarness } from './helpers/fakeDom';
 interface Rect { x: number; y: number; w: number; h: number }
 interface Geometry {
   width: number; height: number; direction: string; zoom: number;
-  bands: Array<Rect & { id: string; folded: boolean; empty: boolean; header: Rect; nowRow?: Rect; nowGap?: Rect; gutter?: Rect; emptyBox?: Rect; phases: Array<{ id: string; bar: Rect; label: Rect & { hidden?: boolean }; row: number }> }>;
+  bands: Array<Rect & { id: string; folded: boolean; empty: boolean; header: Rect; nowRow?: Rect; nowGap?: Rect; gutter?: Rect; emptyBox?: Rect; notice?: Rect; phases: Array<{ id: string; bar: Rect; label: Rect & { hidden?: boolean }; row: number }> }>;
   dots: Array<Rect & { id: string; cx: number; cy: number }>;
   more: Array<{ milestoneId: string; step: number; slot: number; rect: Rect; hidden: number }>;
   tiles: Array<{ milestoneId: string; rect: Rect }>;
@@ -168,7 +168,18 @@ function checkLayout(name: string, timeline: Timeline, options: Options, g: Geom
     }
     // The first step starts after the band's 24 px padding.
     if (horizontal) assert.equal(Math.min(...mine.map((d) => d.x)), b.x + 24, `${at}: ${b.id} starts 24 px in`);
-    else assert.equal(Math.min(...mine.map((d) => d.y)), b.y + 56 + 24 + (nowGap === 0 ? 56 : 0), `${at}: ${b.id} starts under its header and 24 px in`);
+    // 62.1-04: a band with a loop keeps an 80 px row for its notice under the header.
+    else assert.equal(Math.min(...mine.map((d) => d.y)), b.y + 56 + (b.notice ? 80 : 0) + 24 + (nowGap === 0 ? 56 : 0), `${at}: ${b.id} starts under its header and 24 px in`);
+  }
+  // 62.1-04: the loop notice is in its band, exactly for a drawn band with a loop, and touches no dot box or label.
+  for (const b of g.bands) {
+    const cycle = timeline.milestones.find((m) => m.id === b.id)!.cycle === true && !b.folded && !b.empty;
+    assert.equal(!!b.notice, cycle, `${at}: ${b.id} has a notice exactly when it is a drawn band with a loop`);
+    if (!b.notice) continue;
+    assert.ok(b.notice.x >= b.x && right(b.notice) <= right(b) && b.notice.y >= b.y && bottom(b.notice) <= bottom(b), `${at}: ${b.id} notice inside its band`);
+    assert.ok(right(b.notice) <= g.width - 32, `${at}: ${b.id} notice keeps 32 px from the far edge`);
+    for (const [n, r] of all) assert.ok(gap(b.notice, r) >= 4, `${at}: ${b.id} notice touches no ${label(n, r)}`);
+    if (g.now) assert.ok(gap(b.notice, g.now.pill) >= 4 && gap(b.notice, g.now.line) > 0, `${at}: ${b.id} notice is clear of the Now marker`);
   }
   // Folded tiles and empty bands.
   for (const b of g.bands) {

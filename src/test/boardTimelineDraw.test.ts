@@ -394,8 +394,9 @@ test('TD-14: filters keep every place; the rest become ghost rings that are not 
   assert.ok(h.$$('svg.tl-lines path').length > 0, 'lines without filters');
   boardApi(h, 'setFilter')('ready', true);
   const matching = new Set(model.cards.filter((c) => c.column === 'ready' && !c.blocked).map((c) => c.id));
-  assert.deepEqual([...matching], ['plan:1-02']);
-  assert.deepEqual(h.$$('button.tl-dot').map((b) => b.getAttribute('data-id')), ['plan:1-02'], 'only the matching dot is a button');
+  // plan:1-02 and plan:1-06 (whose summary is in, so it looks finished) are the Ready cards.
+  assert.deepEqual([...matching].sort(), ['plan:1-02', 'plan:1-06']);
+  assert.deepEqual(h.$$('button.tl-dot').map((b) => b.getAttribute('data-id')).sort(), [...matching].sort(), 'only the matching dots are buttons');
   assert.deepEqual(['left', 'top'].map((k) => styleOf(dot(h, 'plan:1-02'), k)), before, 'its place is unchanged');
   const ghosts = h.$('.tl-canvas .tl-ghosts')!;
   assert.ok(ghosts, 'the ghost layer is drawn');
