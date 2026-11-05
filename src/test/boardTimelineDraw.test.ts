@@ -637,3 +637,151 @@ test('D-14 and the toolbar: the overall ring with its percent, the zoom group, J
   for (const id of ['tl-overall', 'tl-zoom', 'tl-now', 'tl-legend-btn']) assert.ok(!visible(h.document.getElementById(id)), `${id} is not shown in Columns`);
   assert.ok(!visible(h.$('#tl-legend')), 'no legend in Columns');
 });
+
+// ---- Task 3: the timeline section of board.css ------------------------------------------------------------------------------------------------
+
+interface Rule { selectors: string[]; decls: Array<[string, string]>; media: string }
+/** The rules of a stylesheet (comments removed), each with the @media block it sits in ('' at the top level). */
+function rulesOf(css: string): Rule[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const out: Rule[] = [];
+  const walk = (body: string, media: string): void => {
+    let i = 0;
+    while (i < body.length) {
+      const open = body.indexOf('{', i);
+      if (open < 0) break;
+      const head = body.slice(i, open).trim();
+      // Find the matching close brace.
+      let depth = 1;
+      let j = open + 1;
+      while (j < body.length && depth > 0) { if (body[j] === '{') depth += 1; else if (body[j] === '}') depth -= 1; j += 1; }
+      const inner = body.slice(open + 1, j - 1);
+      if (head.startsWith('@media')) walk(inner, head);
+      else {
+        const decls = inner.split(';').map((d) => d.trim()).filter(Boolean).map((d) => { const k = d.indexOf(':'); return [d.slice(0, k).trim(), d.slice(k + 1).trim().replace(/\s*!important$/, '')] as [string, string]; });
+        out.push({ selectors: head.split(',').map((s) => s.trim().replace(/\s+/g, ' ')), decls, media });
+      }
+      i = j;
+    }
+  };
+  walk(text, '');
+  return out;
+}
+function timelineCss(): string {
+  const css = readFileSync(path.join(ROOT, 'media', 'board', 'board.css'), 'utf8');
+  const parts = css.split('/* timeline */');
+  assert.equal(parts.length, 2, 'board.css has exactly one /* timeline */ section');
+  return parts[1]!;
+}
+const declOf = (rules: Rule[], selector: string, prop: string, media = ''): string[] =>
+  rules.filter((r) => r.media === media && r.selectors.includes(selector)).flatMap((r) => r.decls.filter(([k]) => k === prop).map(([, v]) => v));
+
+const NAMED = /\b(black|white|red|green|blue|yellow|orange|purple|gray|grey|pink|brown|cyan|magenta|lime|navy|teal|silver|maroon|olive|aqua|fuchsia|gold|indigo|violet)\b/i;
+const SYSTEM = /\b(CanvasText|Canvas|Highlight|HighlightText|ButtonText|ButtonFace|LinkText|GrayText)\b/;
+
+test('D-12: the timeline section uses only --vscode-* variables and color-mix of them; system colours only under forced-colors; nothing timeline.js writes is a colour literal', () => {
+  const section = timelineCss();
+  const bare = section.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(bare), 'no hex colour');
+  assert.ok(!/\b(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch)\s*\(/i.test(bare), 'no colour function');
+  const rules = rulesOf(section);
+  assert.ok(rules.length > 40, 'the section has its rules');
+  for (const r of rules) {
+    for (const [prop, value] of r.decls) {
+      const at = `${r.selectors.join(', ')} { ${prop}: ${value} }`;
+      for (const m of value.matchAll(/var\(\s*--([\w-]+)/g)) assert.ok(m[1]!.startsWith('vscode-') || (m[1] === 'fill' && prop === 'transform'), `${at}: only theme variables (and --fill for a scale)`);
+      for (const m of value.matchAll(/color-mix\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) assert.match(m[1]!, /^in srgb, var\(--vscode-[\w-]+(, var\(--vscode-[\w-]+\))?\) \d+%, (transparent|var\(--vscode-[\w-]+\))$/, `${at}: color-mix of theme variables`);
+      assert.ok(!NAMED.test(value.replace(/var\([^)]*\)/g, '')), `${at}: no named colour`);
+      if (SYSTEM.test(value)) assert.equal(r.media, '@media (forced-colors: active)', `${at}: system colours only under forced colours`);
+    }
+  }
+  assert.ok(rules.some((r) => r.media === '@media (forced-colors: active)' && r.decls.some(([, v]) => /\bCanvasText\b/.test(v))), 'forced colours use CanvasText');
+  assert.ok(rules.some((r) => r.media === '@media (forced-colors: active)' && r.decls.some(([, v]) => /\bCanvas\b/.test(v))), 'and Canvas');
+  assert.ok(rules.some((r) => r.media === '@media (forced-colors: active)' && r.decls.some(([, v]) => /\bHighlight\b/.test(v))), 'and Highlight');
+  const page = readFileSync(path.join(ROOT, 'media', 'board', 'timeline.js'), 'utf8');
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(page), 'timeline.js writes no hex colour');
+  assert.ok(!/\b(rgb|rgba|hsl|hsla)\s*\(/i.test(page), 'timeline.js writes no colour function');
+  assert.ok(!/setProperty\(\s*'(color|background|background-color|fill|stroke|border-color)'/.test(page), 'timeline.js sets no colour property');
+});
+
+test('D-05: each state colour is the UI-SPEC variable, held is a dashed 4 2 ring, filled marks draw their glyph in the editor background, and the Mine ring is the foreground', () => {
+  const rules = rulesOf(timelineCss());
+  const BLUE = 'var(--vscode-charts-blue, var(--vscode-editorInfo-foreground))';
+  const PURPLE = 'var(--vscode-charts-purple, var(--vscode-foreground))';
+  const MUTED = 'var(--vscode-descriptionForeground)';
+  const expected: Record<string, string> = {
+    ready: BLUE, claimed: BLUE, 'in-progress': BLUE, 'in-review': PURPLE, integrating: PURPLE, done: 'var(--vscode-testing-iconPassed)',
+    blocked: 'var(--vscode-editorWarning-foreground)', backlog: MUTED, cancelled: MUTED, held: MUTED
+  };
+  for (const [state, colour] of Object.entries(expected)) {
+    assert.deepEqual(declOf(rules, `.tl-dot[data-state="${state}"] .tl-mark`, 'color'), [colour], `${state} dots`);
+    assert.deepEqual(declOf(rules, `.tl-legend-item[data-state="${state}"] .tl-mark`, 'color'), [colour], `${state} in the legend`);
+  }
+  assert.deepEqual(declOf(rules, '.tl-mark .tl-body', 'stroke'), ['currentColor']);
+  assert.deepEqual(declOf(rules, '.tl-mark .tl-body', 'stroke-width'), ['2']);
+  assert.deepEqual(declOf(rules, '.tl-mark .tl-body', 'fill'), ['var(--vscode-editor-background)'], 'a hollow ring is filled with the canvas colour');
+  assert.deepEqual(declOf(rules, '.tl-dot.dashed .tl-body', 'stroke-dasharray'), ['4 2'], 'On hold is a dashed ring, 4 px dash and 2 px gap');
+  assert.deepEqual(declOf(rules, '.tl-dot.filled .tl-body', 'fill'), ['currentColor']);
+  assert.deepEqual(declOf(rules, '.tl-dot.filled .tl-glyph', 'stroke'), ['var(--vscode-editor-background)']);
+  assert.deepEqual(declOf(rules, '.tl-mark .tl-pip', 'fill'), ['var(--vscode-editorInfo-foreground)']);
+  assert.deepEqual(declOf(rules, '.tl-mark .tl-pip', 'stroke'), ['var(--vscode-editor-background)'], 'the pip has its background gap ring');
+  assert.deepEqual(declOf(rules, '.tl-mark.tl-ring', 'outline'), ['2px solid var(--vscode-foreground)']);
+  assert.deepEqual(declOf(rules, '.tl-mark.tl-ring', 'outline-offset'), ['2px']);
+  assert.deepEqual(declOf(rules, '.tl-initials.mine', 'background'), ['var(--vscode-foreground)']);
+  assert.deepEqual(declOf(rules, '.tl-initials.mine', 'color'), ['var(--vscode-editor-background)']);
+  assert.deepEqual(declOf(rules, '.tl-line', 'stroke'), ['color-mix(in srgb, var(--vscode-foreground) 30%, transparent)'], 'lines at rest are faint');
+  assert.deepEqual(declOf(rules, '.tl-ghost', 'border'), ['1px solid var(--vscode-descriptionForeground)']);
+  assert.deepEqual(declOf(rules, '.tl-past', 'background'), ['color-mix(in srgb, var(--vscode-descriptionForeground) 8%, transparent)']);
+  assert.deepEqual(declOf(rules, '.tl-phase-fill', 'background'), ['var(--vscode-progressBar-background)']);
+  assert.deepEqual(declOf(rules, '.tl-ring-fill', 'stroke'), ['var(--vscode-progressBar-background)']);
+});
+
+test('TD-15, TD-16: opaque headers, pill, legend, preview and card, the shadow on the floating two only, the 2 px dot focus ring, high contrast rings and borders, the Now line and the layer order', () => {
+  const rules = rulesOf(timelineCss());
+  for (const selector of ['.tl-ms-head', '.tl-now-pill', '#tl-legend', '#tl-preview', '#tl-card', '.tl-filter-empty', '.tl-folded']) {
+    const backgrounds = declOf(rules, selector, 'background');
+    assert.equal(backgrounds.length, 1, `${selector} sets one background`);
+    assert.match(backgrounds[0]!, /^var\(--vscode-[\w-]+(, var\(--vscode-[\w-]+\))?\)$/, `${selector} has an opaque theme background`);
+  }
+  assert.deepEqual(declOf(rules, '.tl-ms-head', 'position'), ['sticky']);
+  const shadows = rules.filter((r) => r.decls.some(([k]) => k === 'box-shadow'));
+  assert.deepEqual(shadows.flatMap((r) => r.selectors).sort(), ['#tl-card', '#tl-preview'], 'only the preview and the card carry a shadow');
+  for (const r of shadows) assert.ok(r.decls.some(([k, v]) => k === 'box-shadow' && v.includes('var(--vscode-widget-shadow)')));
+  assert.deepEqual(declOf(rules, '.tl-dot:focus-visible', 'outline'), ['2px solid var(--vscode-focusBorder)']);
+  assert.deepEqual(declOf(rules, '.tl-dot:focus-visible', 'outline-offset'), ['2px']);
+  for (const theme of ['vscode-high-contrast', 'vscode-high-contrast-light']) {
+    assert.ok(declOf(rules, `body.${theme} .tl-mark`, 'outline').includes('1px solid var(--vscode-contrastBorder)'), `${theme}: marks get the 1 px contrast ring`);
+    for (const surface of ['.tl-ms-head', '.tl-now-pill', '#tl-legend', '.tl-folded', '.tl-more', '#tl-preview', '#tl-card', '.tl-filter-empty']) {
+      assert.ok(declOf(rules, `body.${theme} ${surface}`, 'border').includes('1px solid var(--vscode-contrastBorder)'), `${theme}: ${surface} has its border`);
+    }
+    assert.deepEqual(declOf(rules, `body.${theme} .tl-now-line`, 'background'), ['var(--vscode-contrastActiveBorder)'], `${theme}: the Now line`);
+  }
+  assert.deepEqual(declOf(rules, '.tl-now-line', 'background'), ['var(--vscode-progressBar-background)']);
+  assert.deepEqual(declOf(rules, '.tl-now-pill', 'border'), ['1px solid var(--vscode-progressBar-background)']);
+  assert.deepEqual(declOf(rules, '.tl-ms-head', 'z-index'), ['3']);
+  assert.deepEqual(declOf(rules, '#tl-card', 'z-index'), ['6']);
+  assert.deepEqual(declOf(rules, '#tl-preview', 'z-index'), ['7']);
+  assert.deepEqual(declOf(rules, '#tl-preview', 'pointer-events'), ['none']);
+  assert.ok(rules.every((r) => r.decls.every(([k, v]) => k !== 'z-index' || Number(v) < 10)), 'everything stays under the Move to... menu (10)');
+});
+
+test('motion: only transform, opacity and stroke-dashoffset are animated, and prefers-reduced-motion removes every timeline transition and animation', () => {
+  const rules = rulesOf(timelineCss());
+  const REDUCED = '@media (prefers-reduced-motion: reduce)';
+  const moving = rules.filter((r) => r.media !== REDUCED && r.decls.some(([k]) => k === 'transition' || k === 'animation' || k === 'transition-property'));
+  assert.ok(moving.length >= 3, 'the timeline declares its transitions');
+  for (const r of moving) {
+    for (const [k, v] of r.decls.filter(([key]) => key === 'transition' || key === 'transition-property')) {
+      for (const part of v.split(',')) assert.match(part.trim(), /^(transform|opacity|stroke-dashoffset)\b/, `${r.selectors.join(', ')} { ${k}: ${v} } animates only transform, opacity or stroke-dashoffset`);
+    }
+  }
+  const stilled = rules.filter((r) => r.media === REDUCED);
+  for (const r of moving) {
+    for (const selector of r.selectors) {
+      assert.ok(selector.includes('tl-'), `${selector} is a timeline selector`);
+      const off = stilled.filter((s) => s.selectors.includes(selector));
+      assert.ok(off.some((s) => s.decls.some(([k, v]) => k === 'transition' && v === 'none')), `${selector}: no transition under reduced motion`);
+      assert.ok(off.some((s) => s.decls.some(([k, v]) => k === 'animation' && v === 'none')), `${selector}: no animation under reduced motion`);
+    }
+  }
+});
