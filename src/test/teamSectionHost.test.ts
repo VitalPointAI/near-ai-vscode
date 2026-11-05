@@ -245,9 +245,10 @@ interface FakeOptions {
 
 // A session as the host reads it: the team state, this computer's member id, the removed flag, the connection chip, state change listeners, the
 // team storage folder and the listeners told when a team key was installed (61-29).
-function fakeSession(options: FakeOptions): { session: TeamSession; fire(): void; listeners(): number; fireKey(): void; keyListeners(): number } {
+function fakeSession(options: FakeOptions): { session: TeamSession; fire(): void; listeners(): number; fireKey(): void; keyListeners(): number; fireProfile(): void; profileListeners(): number } {
   const listeners = new Set<() => void>();
   const keyListeners = new Set<() => void>();
+  const profileListeners = new Set<() => void>();
   const name = options.name ?? 'Harbor';
   const members = new Map(options.members.map((member) => [member.id, { devices: [], emailHashes: [], skills: [], availability: 'available', wipLimit: 2, joinedAt: '', joinedEvent: 'e0', ...member }]));
   const teamFile = {
@@ -263,11 +264,17 @@ function fakeSession(options: FakeOptions): { session: TeamSession; fire(): void
     boardStatus: () => options.status ?? { kind: 'live', text: 'Live' },
     onStateChange(listener: () => void) { listeners.add(listener); return { dispose: () => { listeners.delete(listener); } }; },
     onKeyInstalled(listener: () => void) { keyListeners.add(listener); return { dispose: () => { keyListeners.delete(listener); } }; },
+    // 61-32: told when the session changed this project's profile (a delivered team key, the clean-up after the person's own removal).
+    onProfileChanged(listener: () => void) { profileListeners.add(listener); return { dispose: () => { profileListeners.delete(listener); } }; },
     storageDir: () => options.storageDir ?? path.join(tmpdir(), 'near-ai-section-no-storage', 'team-1')
   };
   return {
     session: session as unknown as TeamSession, fire: () => { for (const listener of [...listeners]) listener(); }, listeners: () => listeners.size,
-    fireKey: () => { for (const listener of [...keyListeners]) listener(); }, keyListeners: () => keyListeners.size
+    // An installed team key: production tells both the key listeners and the profile listeners (TeamSession.installKey), so the fake does too, and
+    // counts both as the listeners told about an installed key.
+    fireKey: () => { for (const listener of [...keyListeners, ...profileListeners]) listener(); }, keyListeners: () => keyListeners.size + profileListeners.size,
+    // A profile change with no key installed (the clean-up after the person's own removal).
+    fireProfile: () => { for (const listener of [...profileListeners]) listener(); }, profileListeners: () => profileListeners.size
   };
 }
 
@@ -854,6 +861,44 @@ test('when the team key is installed the host asks the page for a fresh profile 
     t.cleanup();
   }
   assert.equal(first.keyListeners() + 0, 0);
+});
+
+// 61-32 (0.6.4 re-test): every Team Mode change to the project's profile asks the page once for a fresh profile status, not only a delivered key.
+test('a profile change the session reports with no key installed (the clean-up after your own removal) asks the page once for a fresh profile status', async () => {
+  const fake = fakeSession({ me: 'dev', members: LEAD_TEAM, linked: false });
+  const t = fakeHost(fake.session);
+  try {
+    t.host.attach(t.webview);
+    await t.host.refresh();
+    assert.equal(fake.profileListeners(), 1, 'the session is followed for profile changes');
+    t.record.posted.length = 0;
+    fake.fireProfile();
+    await t.host.refresh();
+    const requests = t.record.posted.filter((message) => (message as { type: string }).type === 'host-request');
+    assert.deepEqual(requests, [{ type: 'host-request', payload: { type: 'refresh-status' } }], 'asked once');
+    assert.equal((t.record.posted[0] as { type: string }).type, 'host-request', 'refresh-status first, then the team state');
+  } finally {
+    t.cleanup();
+  }
+  assert.equal(fake.profileListeners(), 0, 'disposing the host lets the session go');
+});
+
+test('a profile change the member commands report (the own key at Join, the unfinished-join reset) asks the page once; a disposed host stops listening', async () => {
+  const fake = fakeSession({ me: 'dev', members: LEAD_TEAM, linked: false });
+  const t = fakeHost(fake.session);
+  try {
+    t.host.attach(t.webview);
+    await t.host.refresh();
+    assert.equal(t.handle.profileListeners(), 1, 'the host follows the handle\'s profile changes');
+    t.record.posted.length = 0;
+    t.handle.fireProfile();
+    await t.host.refresh();
+    const requests = t.record.posted.filter((message) => (message as { type: string }).type === 'host-request');
+    assert.deepEqual(requests, [{ type: 'host-request', payload: { type: 'refresh-status' } }], 'asked once');
+  } finally {
+    t.cleanup();
+  }
+  assert.equal(t.handle.profileListeners(), 0, 'a disposed host stops listening');
 });
 
 test('with no page attached an installed key asks nothing, and disposing the host lets the session go', async () => {
