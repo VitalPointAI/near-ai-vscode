@@ -87,3 +87,24 @@ test('the stylesheet has no colour literal: the VS Code theme variables supply e
   assert.ok(!/\b(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch)\s*\(/i.test(css), 'no colour function');
   assert.ok(css.includes('--vscode-'), 'the theme variables are used');
 });
+
+// 62.1-08 (found in the real window): the probe's rules 3, 11 and 12 ask that the Now pill, the percents, the phase labels, the preview and the
+// expanded card show no text under 0.85 of the editor font size. VS Code's editor font (14 px) is larger than its workbench font (13 px), so a bare
+// 0.85em of the page font gave 11.05 px where 11.9 px is the floor. Every Small size in the timeline's part of the stylesheet, and the board's own
+// card face inside the preview and the expanded card, take that floor; Columns keeps its sizes.
+test('62.1-08: the timeline\'s Small text is never under 0.85 of the editor font size, inside the preview and the expanded card too', () => {
+  const css = text('board.css').replace(/\/\*[\s\S]*?\*\//g, (comment) => (comment.startsWith('/* timeline */') ? '@@timeline@@' : ''));
+  const at = css.indexOf('@@timeline@@');
+  assert.ok(at > 0, 'the stylesheet has its timeline part');
+  const timeline = css.slice(at);
+  const floor = /--tl-small:\s*max\(0\.85em,\s*calc\(var\(--vscode-editor-font-size(?:,\s*0px)?\)\s*\*\s*0\.85\)\)/;
+  assert.match(css, floor, 'one Small size: 0.85em, and at least 0.85 of the editor font size');
+  const bare = [...timeline.matchAll(/([^{}]+)\{[^}]*font-size:\s*0\.8\d*em/g)].map((m) => (m[1] ?? '').trim());
+  assert.deepEqual(bare, [], 'no timeline rule sets a bare em Small size');
+  for (const face of ['.card-meta', '.card-top .state', '.badge', '.card-msg', '.did', '.assignee-initials', '.refusal-line', '.pending-line']) {
+    for (const layer of ['#tl-card', '#tl-preview']) {
+      const rule = [...timeline.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((m) => (m[1] ?? '').split(',').map((s) => s.trim()).includes(`${layer} ${face}`));
+      assert.ok(rule !== undefined && /font-size:\s*var\(--tl-small\)/.test(rule[2] ?? ''), `${layer} ${face} takes the Small floor`);
+    }
+  }
+});
