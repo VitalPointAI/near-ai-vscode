@@ -713,6 +713,157 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
       assert.deepEqual(wide.problems, [], problemsOf(wide));
       await sizeTo('full');
     }],
+    // ---- the rare states (62.1-08 Task 3): drawn on this roadmap through boardTap.shape, a test seam that exists only under the extension-host
+    // tests and reshapes a copy of the state; the host reads it on its next post, which the page's own retry asks for. Cleared after each case.
+    [`rare state (a): a loop between two v0.6.0 plans, made by the test seam, shows the cycle note "${CYCLE_TEXT}" in the band, the two dots in plan number order, and nothing is wrong`, async () => {
+      await noCard();
+      const model = latestModel();
+      const ms = model.timeline!.now!.milestoneId;
+      const kinds = new Map(model.cards.map((c) => [c.id, c.kind]));
+      const edge = model.timeline!.edges.find((e) => kinds.get(e.from) === 'plan' && kinds.get(e.to) === 'plan' && dotIn(model, e.from) === ms && dotIn(model, e.to) === ms);
+      assert.ok(edge !== undefined, 'two v0.6.0 plans where one waits for the other');
+      const [first, later] = [edge.from, edge.to].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+      await withShape({ state: (state) => { state.items.get(edge.from)!.dependsOn.push(edge.to); return state; } }, 'the loop', (m) => m.timeline?.milestones.some((x) => x.id === ms && x.cycle) === true, async (shaped) => {
+        const note = shaped.timeline!.milestones.find((x) => x.id === ms)!.cycleNote;
+        assert.equal(note, CYCLE_TEXT, 'the model carries the cycle note');
+        const report = await settled('the loop drawn', (r) => (r.timeline?.notices ?? []).some((n) => n.milestone === ms));
+        const t = timelineOf(report);
+        const shown = t.notices.find((n) => n.milestone === ms)!;
+        console.log(`(loop between ${edge.from} and ${edge.to}: the band says "${shown.text}")`);
+        assert.ok(shown.text.includes(CYCLE_TEXT), 'the band shows the cycle note');
+        const at = (id: string): [number, number] => { const d = t.dots.find((x) => x.id === id); assert.ok(d, `${id} is drawn`); return [d.step, d.slot]; };
+        const [a, b] = [at(first), at(later)];
+        assert.ok(a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]), `${first} (step ${a[0] + 1}, slot ${a[1] + 1}) comes before ${later} (step ${b[0] + 1}, slot ${b[1] + 1})`);
+        assert.deepEqual(report.problems, [], problemsOf(report));
+      });
+    }],
+    ['rare state (b): an earlier milestone whose three plans are done is a folded tile with 100%, real Enter shows its band, and Fold milestone folds it again', async () => {
+      await noCard();
+      const MS = 'milestone:v0.1.0';
+      const shape = (state: TeamStateT): TeamStateT => {
+        const items = [...state.items.values()];
+        const ms0 = items.find((i) => i.kind === 'milestone' && i.active === true)!;
+        const ph0 = items.find((i) => i.kind === 'phase' && i.parentId === ms0.id)!;
+        const pl0 = items.find((i) => i.kind === 'plan' && i.state === 'done')!;
+        const { active: _active, ...ms } = ms0;
+        void _active;
+        state.items.set(MS, { ...ms, id: MS, title: 'v0.1.0 First steps', dependsOn: [] });
+        state.items.set('phase:9', { ...ph0, id: 'phase:9', title: 'Early setup', parentId: MS, gsd: { phase: '9' }, dependsOn: [] });
+        for (const n of [1, 2, 3]) {
+          const { blocked: _b, hold: _h, claimId: _c, assignee: _a, assignedBy: _ab, ...plan } = pl0;
+          void _b; void _h; void _c; void _a; void _ab;
+          state.items.set(`plan:9-0${n}`, { ...plan, id: `plan:9-0${n}`, title: `Early plan ${n}`, parentId: 'phase:9', gsd: { ...pl0.gsd!, phase: '9', plan: `0${n}` }, dependsOn: n > 1 ? [`plan:9-0${n - 1}`] : [], state: 'done' });
+        }
+        return state;
+      };
+      await withShape({ state: shape }, 'the finished milestone', (m) => m.timeline?.milestones.some((x) => x.id === MS && x.finished) === true, async () => {
+        let report = await settled('the folded tile', (r) => (r.timeline?.tiles ?? []).some((x) => x.milestone === MS));
+        let t = timelineOf(report);
+        const tile = t.tiles.find((x) => x.milestone === MS)!;
+        console.log(`(the folded tile: "${tile.text}")`);
+        assert.ok(tile.text.includes('100%'), 'the tile says 100%');
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        // Real keys: from a v0.6.0 dot, Ctrl+Home goes to the first stop of the timeline, the tile; Enter shows the band.
+        await mouseClick(cdp!, await emptyPoint(report));
+        await ask({ action: 'focus', itemId: nowDotOf(latestModel()) });
+        await sleep(300);
+        report = await key('Home', { ctrl: true }, 500);
+        t = timelineOf(report);
+        assert.deepEqual(t.focusedStop && { kind: t.focusedStop.kind, milestone: t.focusedStop.milestone }, { kind: 'tile', milestone: MS }, 'Ctrl+Home reaches the folded tile');
+        report = await key('Enter', {}, 600);
+        report = await settled('the band shown', (r) => !(r.timeline?.tiles ?? []).some((x) => x.milestone === MS) && (r.timeline?.folds ?? []).some((x) => x.milestone === MS));
+        t = timelineOf(report);
+        assert.equal(t.dots.filter((d) => d.milestone === MS && d.rendered).length, 3, 'the band shows its three dots');
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        const fold = t.folds.find((x) => x.milestone === MS)!;
+        await click(report, fold.box, 'Fold milestone');
+        await sleep(600);
+        report = await settled('folded again', (r) => (r.timeline?.tiles ?? []).some((x) => x.milestone === MS));
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        console.log('(Enter showed the band, Fold milestone folded it again)');
+      });
+    }],
+    ['rare state (c): twelve plans that wait only for one plan make a stack over the cap: 8 dots and +n, real Enter shows all with Show fewer in the last slot, and Show fewer shows 8 again', async () => {
+      await noCard();
+      const model = latestModel();
+      const ms = model.timeline!.now!.milestoneId;
+      const kinds = new Map(model.cards.map((c) => [c.id, c.kind]));
+      const anchor = model.timeline!.dots.find((d) => d.milestoneId === ms && d.step === 0 && kinds.get(d.cardId) === 'plan');
+      assert.ok(anchor !== undefined, 'a plan at the first step of the current milestone');
+      const added = Array.from({ length: 12 }, (_, i) => `plan:62-${80 + i}`);
+      const shape = (state: TeamStateT): TeamStateT => {
+        const base = state.items.get(anchor.cardId)!;
+        const { blocked: _b, hold: _h, claimId: _c, assignee: _a, assignedBy: _ab, ...plan } = base;
+        void _b; void _h; void _c; void _a; void _ab;
+        added.forEach((id, i) => {
+          state.items.set(id, { ...plan, id, title: `Waits only for ${anchor.cardId.slice(5)}, number ${i + 1}`, gsd: { ...base.gsd!, phase: '62', plan: String(80 + i) }, parentId: state.items.get('phase:62') ? 'phase:62' : base.parentId, dependsOn: [anchor.cardId], state: 'backlog' });
+        });
+        return state;
+      };
+      await withShape({ state: shape }, 'the big stack', (m) => added.every((id) => m.cards.some((c) => c.id === id)), async (shaped) => {
+        const step = shaped.timeline!.dots.find((d) => d.cardId === added[0])!.step;
+        const inStep = shaped.timeline!.dots.filter((d) => d.milestoneId === ms && d.step === step);
+        const n = inStep.length - 8;
+        assert.ok(added.every((id) => shaped.timeline!.dots.find((d) => d.cardId === id)?.step === step), 'the twelve share one step');
+        const eighth = inStep.sort((a, b) => a.slot - b.slot)[7]!;
+        await ask({ action: 'focus', itemId: eighth.cardId });
+        await sleep(500);
+        let report = await settled('the stack in view', (r) => r.timeline?.focusedDot === eighth.cardId);
+        let t = timelineOf(report);
+        const more = t.more.find((x) => x.milestone === ms && x.step === step);
+        console.log(`(step ${step + 1}: ${inStep.length} cards, ${t.dots.filter((d) => d.milestone === ms && d.step === step && d.rendered).length} dots drawn and "${more?.text ?? 'no +n'}")`);
+        assert.equal(more?.text, `+${n}`, `the 9th slot is +${n}`);
+        assert.equal(t.dots.filter((d) => d.milestone === ms && d.step === step && d.rendered).length, 8, '8 dots are drawn');
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        report = await key('ArrowDown');
+        t = timelineOf(report);
+        assert.deepEqual(t.focusedStop && { kind: t.focusedStop.kind, step: t.focusedStop.step }, { kind: 'more', step }, 'Down from the 8th dot reaches +n');
+        report = await key('Enter', {}, 600);
+        report = await settled('the whole stack', (r) => (r.timeline?.more ?? []).some((x) => x.milestone === ms && x.step === step && x.text === 'Show fewer'));
+        t = timelineOf(report);
+        assert.equal(t.dots.filter((d) => d.milestone === ms && d.step === step && d.rendered).length, inStep.length, 'every card of the step is drawn');
+        // UI-SPEC "Keyboard Model": on +{n}, Enter shows the whole stack and focus stays on the same slot, which now holds the 9th card's dot.
+        assert.equal(t.focusedDot, inStep[8]!.cardId, 'focus stays on the 9th slot, now a dot');
+        assert.deepEqual(report.problems, [], problemsOf(report));
+        // Show fewer is the step's last stop: real Down keys reach it, and Enter shows 8 again.
+        for (let presses = 0; presses < inStep.length && timelineOf(report).focusedStop?.kind !== 'more'; presses += 1) report = await key('ArrowDown', {}, 250);
+        assert.equal(timelineOf(report).focusedStop?.kind, 'more', 'Down keys reach Show fewer');
+        report = await key('Enter', {}, 600);
+        report = await settled('the stack folded', (r) => (r.timeline?.more ?? []).some((x) => x.milestone === ms && x.step === step && x.text === `+${n}`));
+        assert.deepEqual(report.problems, [], problemsOf(report));
+      });
+    }],
+    ['rare state (d): a failed layout, made by the test seam, shows The timeline could not be drawn with Show columns and Draw the timeline again; with the seam cleared, a real click on Draw the timeline again posts retry and the timeline is back', async () => {
+      await noCard();
+      tap.shape = { failTimeline: true };
+      try {
+        await repost((m) => m.timelineProblem === true && m.timeline === undefined);
+        await sleep(600);
+        const failed = await settled('the failure shown', (r) => r.timeline?.error !== null && r.timeline?.error !== undefined);
+        const t = timelineOf(failed);
+        console.log(`(the failure: "${t.error!.text}"; buttons ${t.error!.buttons.map((b) => b.name).join(', ')})`);
+        assert.ok(t.error!.text.startsWith('The timeline could not be drawn'), 'the heading');
+        assert.deepEqual(t.error!.buttons.map((b) => b.name), ['Show columns', 'Draw the timeline again']);
+        assert.deepEqual(failed.problems, [], problemsOf(failed));
+        tap.shape = undefined;
+        const again = t.error!.buttons.find((b) => b.name === 'Draw the timeline again')!;
+        const wait = lastRetry + 2_200 - Date.now();
+        if (wait > 0) await sleep(wait);
+        lastRetry = Date.now();
+        const fromBefore = board.fromView.length;
+        const toBefore = board.toView.length;
+        await click(failed, again.box, 'Draw the timeline again');
+        await board.next('fromView', (m) => m.type === 'retry', fromBefore, 10_000);
+        await board.next('toView', (m) => m.type === 'state' && (m.model as ModelView | undefined)?.timeline !== undefined, toBefore, 20_000);
+        await sleep(1_000);
+        const back = await settled('the timeline back', (r) => (r.timeline?.dots.length ?? 0) > 0);
+        assert.equal(timelineOf(back).error, null, 'the failure is gone');
+        assert.deepEqual(back.problems, [], problemsOf(back));
+        console.log(`(Draw the timeline again: one retry, ${timelineOf(back).dots.length} dots drawn again)`);
+      } finally {
+        if (tap.shape !== undefined || latestModel().timeline === undefined) { tap.shape = undefined; await repost((m) => m.timeline !== undefined).catch(() => undefined); }
+      }
+    }],
     // Last, whatever happened above (run() runs every step): the second client's folders go, and the run says how many (T-62.1-19).
     ['the second client\'s folders are removed', async () => {
       const folders = secondFolders.splice(0);
