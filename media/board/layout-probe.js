@@ -5,6 +5,9 @@
 // overlapping or spilling headers, lanes, cells and cards, a focused card hidden under the headers, no work on the first screen, unreadable cards).
 // collect() only reads the page and returns plain numbers and strings; check(data) is pure, so every rule can be proven on hand-made measurements.
 // Same page rules as the board: an IIFE, text nodes only, no markup, no network, no colour literal; it posts through window.NearAiBoard.post.
+// 62.1-07: when #root shows the Timeline view, the report also has a timeline section (dots, labels, headers, lines, the Now marker, percents, the
+// preview, the card, focus, the toolbar controls, first-screen facts and, on test pages, NearAiTimeline.metrics) and check() judges it with the
+// 62.1-UI-SPEC probe rules 1 to 10 and the amendment's rules 11 and 12. It only reads and measures: it makes no event inside the page.
 (function () {
   'use strict';
   if (!document.body || document.body.getAttribute('data-e2e') !== '1') return;
@@ -330,7 +333,7 @@
       const from = p.getAttribute('data-from') || '';
       const to = p.getAttribute('data-to') || '';
       const ends = endsOf(p);
-      const out = { from, to, start: ends ? ends.start : null, end: ends ? ends.end : null };
+      const out = { from, to, fromLabel: dotLabel(from), toLabel: dotLabel(to), start: ends ? ends.start : null, end: ends ? ends.end : null };
       if (!drawn[from]) out.fromBox = anchorOf(from);
       if (!drawn[to]) out.toBox = anchorOf(to);
       return out;
@@ -407,6 +410,11 @@
       otherScrollers, dots, more, tiles, phaseLabels, headers, percents, lines, now, overall, legend, preview, card, focusedDot, controls
     };
     t.firstScreen = firstScreenOf(Object.assign({}, data, { timeline: t }));
+    // 62.1-06 adds NearAiTimeline.metrics on test pages (draw time and frame timing); it is reported as given, and absent when there is none.
+    const tlApi = window.NearAiTimeline;
+    if (tlApi && typeof tlApi.metrics === 'function') {
+      try { const m = tlApi.metrics(); if (m && typeof m === 'object') t.metrics = JSON.parse(JSON.stringify(m)); } catch (error) { t.metrics = { error: String((error && error.message) || error) }; }
+    }
     return t;
   }
 
@@ -469,6 +477,60 @@
   const cap = (text) => text.charAt(0).toUpperCase() + text.slice(1);
   const penetration = (a, b) => Math.min(overX(a, b), overY(a, b));
   const hasBox = (b) => !!b && typeof b.left === 'number' && typeof b.top === 'number' && b.right - b.left >= TOL && b.bottom - b.top >= TOL;
+  const EDGE = 8;
+  const FONT_SHARE = 0.85;
+  const TARGET = 24;
+  const APART = 4;
+  const LINE_GAP = 2;
+  const r1 = (v) => Math.round(v * 10) / 10;
+  // How far a point is from a rectangle's edge: outside it, the distance to the rectangle; inside it, the distance to the nearest edge.
+  function edgeDistance(p, b) {
+    const dx = Math.max(b.left - p.x, 0, p.x - b.right);
+    const dy = Math.max(b.top - p.y, 0, p.y - b.bottom);
+    if (dx > 0 || dy > 0) return Math.sqrt(dx * dx + dy * dy);
+    return Math.min(p.x - b.left, b.right - p.x, p.y - b.top, b.bottom - p.y);
+  }
+  // A computed colour as red, green and blue from 0 to 255 and an alpha: the legacy comma form, the space form with a slash, and the
+  // color(srgb r g b / a) form Chromium reports for color-mix. Null for anything else, so an unknown colour is never judged.
+  function rgbaOf(colour) {
+    const m = /^([a-z]+)\((.*)\)$/.exec(String(colour || '').trim().toLowerCase());
+    if (!m) return null;
+    const halves = m[2].split('/');
+    let parts = halves[0].split(/[\s,]+/).filter(Boolean);
+    let alphaPart = halves[1];
+    let channel;
+    if (m[1] === 'color') {
+      if (parts[0] !== 'srgb') return null;
+      parts = parts.slice(1);
+      channel = (p) => (/%$/.test(p) ? parseFloat(p) / 100 : parseFloat(p)) * 255;
+    } else if (m[1] === 'rgb' || m[1] === 'rgba') {
+      if (parts.length === 4 && alphaPart === undefined) alphaPart = parts[3];
+      channel = (p) => (/%$/.test(p) ? parseFloat(p) * 2.55 : parseFloat(p));
+    } else return null;
+    if (parts.length < 3) return null;
+    const [r, g, b] = parts.slice(0, 3).map(channel);
+    const a = alphaPart === undefined ? 1 : (/%$/.test(alphaPart.trim()) ? parseFloat(alphaPart) / 100 : parseFloat(alphaPart));
+    return [r, g, b, a].every((v) => isFinite(v)) ? { r, g, b, a } : null;
+  }
+  const luminance = (c) => {
+    const lin = (v) => { const s = Math.max(0, Math.min(255, v)) / 255; return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+    return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  };
+  /** The WCAG contrast ratio of a colour on an opaque background (a see-through colour is blended over it); null when either is unknown. */
+  function contrastOf(fg, bg) {
+    const f = rgbaOf(fg);
+    const b = rgbaOf(bg);
+    if (!f || !b || b.a < 1 - 0.001) return null;
+    const a = Math.max(0, Math.min(1, f.a));
+    const mix = { r: f.r * a + b.r * (1 - a), g: f.g * a + b.g * (1 - a), b: f.b * a + b.b * (1 - a) };
+    const x = luminance(mix);
+    const y = luminance(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  }
+  // Rounded down to one decimal, so a ratio just under a limit never reads as the limit.
+  const ratioWord = (ratio) => (Math.floor(ratio * 10) / 10).toFixed(1);
+  // The text parts of a measured element: its own leaf texts when the page gave them, else the element's own fields.
+  const textsOf = (x) => (Array.isArray(x.texts) && x.texts.length ? x.texts : [x]);
   // The scroller's visible rectangle (its client area) below a toolbar that stays put, in page pixels.
   function timelineView(data) {
     const t = data.timeline;
@@ -534,6 +596,176 @@
       overlaps.add(x.kind === y.kind && PLURAL[x.kind] ? PLURAL[x.kind] + ' ' + x.short + ' and ' + y.short + ' overlap by ' + r0(by) + ' px' : cap(x.name) + ' and ' + y.name + ' overlap by ' + r0(by) + ' px');
     }
     overlaps.end('overlaps on the timeline');
+
+    const view = timelineView(data);
+    const inset = { left: view.left + EDGE, top: view.top + EDGE, right: view.right - EDGE, bottom: view.bottom - EDGE };
+    const canvasBox = t.canvas && hasBox(t.canvas.box) ? t.canvas.box : null;
+    const canvasBg = t.canvas ? t.canvas.background : '';
+    const editor = typeof t.editorFontSize === 'number' && t.editorFontSize > 0 ? t.editorFontSize : null;
+    const dotById = {};
+    for (const d of t.dots || []) dotById[d.id] = d;
+    const held = headers.filter((h) => pinned(data, h));
+    const hits = dots.map((d) => ({ kind: 'dot', name: 'dot ' + d.label, short: d.label, box: d.box }))
+      .concat(more.map((m) => ({ kind: 'more', name: 'the ' + m.text + ' button at step ' + (m.step + 1), box: m })))
+      .concat((t.tiles || []).filter(hasBox).map((m) => ({ kind: 'tile', name: 'the folded milestone "' + String(m.text || m.milestone).slice(0, 40) + '"', box: m })));
+    const layers = [['preview', t.preview], ['expanded card', t.card]].filter(([, l]) => l && hasBox(l.box));
+    const small = (px) => editor !== null && typeof px === 'number' && px > 0 && px < editor * FONT_SHARE - 0.05;
+    const fontText = (px) => r1(px) + ' px, less than 85 percent of the ' + r1(editor) + ' px editor font';
+
+    // Rule 2, nothing clipped: every dot, label, header, +n and tile inside the canvas; a text wider than its box is cut only on purpose.
+    const outRule = rule();
+    if (canvasBox) {
+      const parts = dots.map((d) => ['dot ' + d.label, d.box]).concat(phaseLabels.map((p) => ['phase label "' + p.text + '"', p.box]), headers.filter((h) => hasBox(h.box)).map((h) => ['milestone header ' + h.title, h.box]), hits.filter((h) => h.kind !== 'dot').map((h) => [h.name, h.box]));
+      for (const [name, b] of parts) { const s = spill(b, canvasBox); if (s) outRule.add(cap(name) + ' spills ' + s.by + ' px ' + s.where + ' the canvas'); }
+    }
+    outRule.end('things outside the canvas');
+    const cutRule = rule();
+    const unmarked = (c) => !!c && c.by > TOL && !(c.ellipsis && c.title);
+    for (const p of phaseLabels) if (unmarked(p.cut)) cutRule.add('Phase label "' + p.text + '" is cut by ' + r0(p.cut.by) + ' px without an ellipsis and a title');
+    for (const h of headers) if (unmarked(h.cut)) cutRule.add('The title of milestone header ' + h.title + ' is cut by ' + r0(h.cut.by) + ' px without an ellipsis and a title');
+    for (const m of t.tiles || []) if (unmarked(m.cut)) cutRule.add('The folded milestone "' + String(m.text || m.milestone).slice(0, 40) + '" is cut by ' + r0(m.cut.by) + ' px without an ellipsis and a title');
+    cutRule.end('cut labels');
+
+    // Rule 3, a readable preview and card: inside the visible area less 8 px and below a header held at the edge, off its own dot, no cut line,
+    // the card title not clamped, text at least 0.85 of the editor font and buttons at least 24 by 24 px.
+    const readRule = rule();
+    for (const [name, l] of layers) {
+      const s = spill(l.box, inset);
+      if (s) readRule.add('The ' + name + ' spills ' + s.by + ' px ' + s.where + ' the visible timeline area');
+      for (const h of held) if (penetration(l.box, h.box) > TOL) readRule.add('The ' + name + ' is under the milestone header ' + h.title);
+      const own = l.dotId ? dotById[l.dotId] : undefined;
+      if (own && hasBox(own.box) && penetration(l.box, own.box) > TOL) readRule.add('The ' + name + ' covers its own dot ' + own.label);
+      for (const x of l.texts || []) {
+        if (x.cut && x.cut.by > TOL) readRule.add('A line in the ' + name + ' is cut by ' + r0(x.cut.by) + ' px: "' + x.text + '"');
+        if (small(x.fontSize)) readRule.add('Text "' + x.text + '" in the ' + name + ' is ' + fontText(x.fontSize));
+      }
+      if (l.titleClamped === true) readRule.add('The ' + name + ' title is clamped');
+      for (const b of l.buttons || []) if (b.width < TARGET - TOL || b.height < TARGET - TOL) readRule.add('The ' + b.name + ' button in the ' + name + ' is ' + r0(b.width) + ' by ' + r0(b.height) + ' px, smaller than 24 by 24 px');
+    }
+    readRule.end('problems in the preview and the card');
+
+    // Rule 4, opaque layers (the toolbar's own rule is the board's): milestone headers, the legend band, the preview and the card.
+    const opaqueRule = rule();
+    const alpha = (x) => (typeof x.alpha === 'number' ? x.alpha : alphaOf(x.background));
+    const seeThrough = (x) => alpha(x) < 1 - 0.001;
+    const alphaText = (x) => ' is not opaque (alpha ' + Math.round(alpha(x) * 100) / 100 + ')';
+    for (const h of headers) if (seeThrough(h)) opaqueRule.add('The milestone header ' + h.title + alphaText(h));
+    if (t.legend && seeThrough(t.legend)) opaqueRule.add('The legend band' + alphaText(t.legend));
+    for (const [name, l] of layers) if (seeThrough(l)) opaqueRule.add('The ' + name + alphaText(l));
+    opaqueRule.end('see-through layers');
+
+    // Rule 5, one scroller: the page itself never scrolls in the Timeline view; the timeline area is the only scrolling element.
+    const page = data.page || {};
+    const ONLY = '; only the timeline area may scroll';
+    if (page.scrollWidth - page.clientWidth > TOL) problems.push('The page scrolls sideways by ' + r0(page.scrollWidth - page.clientWidth) + ' px' + ONLY);
+    if (page.clientHeight > 0 && page.scrollHeight - page.clientHeight > TOL) problems.push('The page scrolls down by ' + r0(page.scrollHeight - page.clientHeight) + ' px' + ONLY);
+    const scrollRule = rule();
+    for (const o of t.otherScrollers || []) scrollRule.add(o.what + ' scrolls on its own' + ONLY);
+    scrollRule.end('other scrolling elements');
+
+    // Rule 6, focus visible: the focused dot is fully in the visible area and not under a header held at the edge.
+    const focused = t.focusedDot ? dotById[t.focusedDot] : undefined;
+    if (focused && hasBox(focused.box)) {
+      const over = held.find((h) => penetration(focused.box, h.box) > TOL);
+      if (over) problems.push('The focused dot ' + focused.label + ' is hidden under the milestone header ' + over.title + ' (' + r0(penetration(focused.box, over.box)) + ' px covered)');
+      else if (!inside(focused.box, view, 0)) problems.push('The focused dot ' + focused.label + ' is not fully visible in the timeline area');
+    }
+
+    // Rule 8, lines attached: each end within 2 px of its dot's mark edge, or of the +n button or tile that holds a hidden card.
+    const lineRule = rule();
+    const labelOf = (id, given) => (dotById[id] ? dotById[id].label : given && given !== id ? given : id);
+    const anchor = (id, given) => { const d = dotById[id]; return d && d.rendered !== false ? (d.mark && hasBox(d.mark.box) ? d.mark.box : d.box) : given && hasBox(given) ? given : null; };
+    for (const l of t.lines || []) {
+      if (!l.start || !l.end) continue;
+      const from = labelOf(l.from, l.fromLabel);
+      const to = labelOf(l.to, l.toLabel);
+      const name = 'The line from ' + from + ' to ' + to;
+      for (const [end, id, given, word] of [[l.start, l.from, l.fromBox, 'starts'], [l.end, l.to, l.toBox, 'ends']]) {
+        const b = anchor(id, given);
+        if (!b) { lineRule.add(name + (word === 'starts' ? ' starts at' : ' ends at') + ' no dot, +n button or tile'); continue; }
+        const away = edgeDistance(end, b);
+        if (away > LINE_GAP + 0.05) lineRule.add(name + ' ' + word + ' ' + r0(away) + ' px away from ' + (word === 'starts' ? from : to));
+      }
+    }
+    lineRule.end('lines off their dots');
+
+    // Rule 9, contrast: marks and glyphs at least 3 to 1 against the canvas (a glyph on a filled mark against that fill); initials, preview and
+    // card text at least 4.5 to 1 against their own background.
+    const markRule = rule();
+    const textRule = rule();
+    const below = (ratio, min) => ratio !== null && ratio < min - 0.0001;
+    const ratioText = (ratio, min) => ratioWord(ratio) + ' to 1, below ' + min + ' to 1';
+    for (const d of dots) {
+      const m = d.mark;
+      if (m && m.color) { const r = contrastOf(m.color, canvasBg); if (below(r, 3)) markRule.add('Dot ' + d.label + "'s mark has a contrast of " + ratioWord(r) + ' to 1 against the canvas, below 3 to 1'); }
+      if (m && m.glyph && m.glyph.color) { const r = contrastOf(m.glyph.color, m.glyph.background || canvasBg); if (below(r, 3)) markRule.add('Dot ' + d.label + "'s glyph has a contrast of " + ratioText(r, 3)); }
+      for (const [part, x, verb] of [['initials', d.chip, 'have'], ['ID label', d.idLabel, 'has']]) {
+        if (!x || !x.color) continue;
+        const r = contrastOf(x.color, x.background || canvasBg);
+        if (below(r, 4.5)) textRule.add('Dot ' + d.label + "'s " + part + ' ' + verb + ' a contrast of ' + ratioText(r, 4.5));
+      }
+    }
+    markRule.end('dot marks with too little contrast');
+    for (const [name, l] of layers) {
+      for (const x of l.texts || []) { const r = contrastOf(x.color, x.background || l.background); if (below(r, 4.5)) textRule.add('Text "' + x.text + '" in the ' + name + ' has a contrast of ' + ratioText(r, 4.5)); }
+    }
+    textRule.end('texts with too little contrast');
+
+    // Rule 10, hit targets: every dot, tile and +n at least 24 by 24 px, and neighbouring hit boxes at least 4 px apart (overlaps are rule 1).
+    const sizeRule = rule();
+    for (const h of hits) if (h.box.width < TARGET - TOL || h.box.height < TARGET - TOL) sizeRule.add(cap(h.name) + ' is ' + r0(h.box.width) + ' by ' + r0(h.box.height) + ' px, smaller than 24 by 24 px');
+    sizeRule.end('hit targets that are too small');
+    const apartRule = rule();
+    for (let i = 0; i < hits.length; i += 1) for (let j = i + 1; j < hits.length; j += 1) {
+      const a = hits[i];
+      const b = hits[j];
+      if (penetration(a.box, b.box) > TOL) continue;
+      const gap = Math.max(-overX(a.box, b.box), -overY(a.box, b.box));
+      if (gap >= APART - 0.05) continue;
+      const text = Math.max(0, r0(gap)) + ' px apart, less than 4 px';
+      apartRule.add(a.kind === 'dot' && b.kind === 'dot' ? 'Dots ' + a.short + ' and ' + b.short + ' are ' + text : cap(a.name) + ' and ' + b.name + ' are ' + text);
+    }
+    apartRule.end('hit targets too close together');
+
+    // Rule 11, the Now marker: the line crosses no dot or label; the pill overlaps none of those, no header (one held at the edge covers it on
+    // purpose), the preview or the card; the pill is opaque, its text whole, large enough and 4.5 to 1; the line 3 to 1 against the canvas.
+    const now = t.now;
+    if (now) {
+      const marks = items.filter((x) => x.kind !== 'head' && x.kind !== 'more');
+      const nowRule = rule();
+      if (now.line && hasBox(now.line)) for (const x of marks) if (penetration(now.line, x.box) > 0.5) nowRule.add('The Now line crosses ' + x.name);
+      if (now.pill && hasBox(now.pill)) {
+        const others = marks.concat(items.filter((x) => x.kind === 'head' && !x.pinned), layers.map(([name, l]) => ({ name: 'the ' + name, box: l.box })));
+        for (const x of others) if (penetration(now.pill, x.box) > TOL) nowRule.add('The Now pill overlaps ' + x.name);
+      }
+      if (seeThrough(now)) nowRule.add('The Now pill' + alphaText(now));
+      for (const x of textsOf(now)) {
+        if (x.cut && x.cut.by > TOL) nowRule.add('Text in the Now pill is cut by ' + r0(x.cut.by) + ' px');
+        if (small(x.fontSize)) nowRule.add('Text in the Now pill is ' + fontText(x.fontSize));
+        const r = x.color ? contrastOf(x.color, x.background || now.background) : null;
+        if (below(r, 4.5)) nowRule.add('Text in the Now pill has a contrast of ' + ratioText(r, 4.5));
+      }
+      if (now.lineColor) { const r = contrastOf(now.lineColor, canvasBg); if (below(r, 3)) nowRule.add('The Now line has a contrast of ' + ratioWord(r) + ' to 1 against the canvas, below 3 to 1'); }
+      nowRule.end('problems with the Now marker');
+    }
+
+    // Rule 12, percent labels: the project progress, each band's percent and progress text, and phase labels with a percent are whole (or cut
+    // on purpose), at least 0.85 of the editor font and 4.5 to 1, and never on a dot, the preview or the card. (A phase label's cut and its
+    // overlap with a dot are rules 2 and 1.)
+    const percentRule = rule();
+    const labels = (t.overall ? textsOf(t.overall).map((x) => Object.assign({ name: 'the project progress "' + x.text + '"', own: true }, x)) : [])
+      .concat((t.percents || []).map((x) => Object.assign({ name: 'the ' + x.what + ' "' + x.text + '"', own: true }, x)))
+      .concat(phaseLabels.filter((p) => p.percent).map((p) => Object.assign({ name: 'phase label "' + p.text + '"', own: false }, p)));
+    for (const x of labels) {
+      if (x.own && unmarked(x.cut)) percentRule.add(cap(x.name) + ' is cut by ' + r0(x.cut.by) + ' px');
+      if (small(x.fontSize)) percentRule.add(cap(x.name) + ' is ' + fontText(x.fontSize));
+      const r = x.color ? contrastOf(x.color, x.background || canvasBg) : null;
+      if (below(r, 4.5)) percentRule.add(cap(x.name) + ' has a contrast of ' + ratioText(r, 4.5));
+      if (!hasBox(x.box)) continue;
+      if (x.own) for (const d of dots) if (penetration(x.box, d.box) > TOL) percentRule.add(cap(x.name) + ' overlaps dot ' + d.label);
+      for (const [name, l] of layers) if (penetration(x.box, l.box) > TOL) percentRule.add(cap(x.name) + ' overlaps the ' + name);
+    }
+    percentRule.end('problems with the percent labels');
   }
 
   /** Every broken rule as one plain sentence; an empty list for a clean board. */
@@ -550,7 +782,8 @@
 
     // The page itself never scrolls sideways: in the kanban only the board region may.
     const sideways = page.scrollWidth - page.clientWidth;
-    if (sideways > TOL) {
+    // In the Timeline view the timeline's own rule 5 says this (one sentence per problem).
+    if (sideways > TOL && !data.timeline) {
       const where = kanban ? 'outside the board region' : 'in the list layout';
       const names = (data.outside || []).map((o) => o.what + ' ends at ' + r0(o.right) + ' px');
       problems.push('The page scrolls sideways by ' + r0(sideways) + ' px ' + where + (names.length ? ': ' + names.join(', ') : ''));
