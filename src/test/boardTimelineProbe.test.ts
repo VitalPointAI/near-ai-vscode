@@ -489,10 +489,25 @@ test('a measure that asks for the controls carries the View switch, Direction an
   const columns = (await ask(h, { id: 2, action: 'measure', controls: true }))[0].report as Record<string, any>;
   assert.ok(columns.controls && typeof columns.controls === 'object', 'the Columns report carries the controls when asked');
   for (const key of ['columns', 'timeline']) assert.ok(columns.controls.view[key] && typeof columns.controls.view[key].left === 'number', `the View switch's ${key} box`);
-  assert.deepEqual(Object.keys(columns.controls).sort(), ['direction', 'fit', 'legend', 'now', 'view', 'zoomIn', 'zoomOut']);
+  assert.deepEqual(Object.keys(columns.controls).sort(), ['direction', 'filters', 'fit', 'legend', 'now', 'view', 'zoomIn', 'zoomOut']);
   h.$('#view-switch button[data-view="timeline"]')!.click();
   const timeline = (await ask(h, { id: 3, action: 'measure', controls: true }))[0].report as Record<string, any>;
   assert.deepEqual(plainJson(timeline.controls), plainJson(timeline.timeline.controls), 'in the Timeline view the asked controls are the timeline section\'s');
+});
+
+// 62.1-09: the no-match frame turns on Ready and Blocked with real clicks, so the asked controls carry the filter chips' boxes too, found by their
+// own label, in either view.
+test('a measure that asks for the controls carries the Mine, Ready and Blocked filter chips\' boxes in Columns and in the Timeline view', async () => {
+  const model = await timelineModel();
+  const h = page(true);
+  h.deliver({ type: 'state', model });
+  for (const [id, view] of [[2, 'columns'], [3, 'timeline']] as const) {
+    if (view === 'timeline') h.$('#view-switch button[data-view="timeline"]')!.click();
+    const report = (await ask(h, { id, action: 'measure', controls: true }))[0].report as Record<string, any>;
+    assert.ok(report.controls.filters && typeof report.controls.filters === 'object', `the ${view} controls carry the filter chips`);
+    assert.deepEqual(Object.keys(report.controls.filters).sort(), ['blocked', 'mine', 'ready'], `the ${view} filter chips`);
+    for (const key of ['mine', 'ready', 'blocked']) assert.ok(report.controls.filters[key] && typeof report.controls.filters[key].left === 'number', `the ${key} chip's box in ${view}`);
+  }
 });
 
 // 62.1-08: the real-window test clicks Move to... inside the expanded card, so each button in the preview and the card is measured with its box.
