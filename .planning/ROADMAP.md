@@ -106,7 +106,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. After the full invite, join and remove flow, a privacy canary finds no secret (API key, session token, clear-text invite code) in the coordination branch, `team.json`, settings, audit or transcripts.
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint` and the full `npm test` pass.
 
-**Plans**: 31/31 plans executed in 19 waves (Waves 8 to 13 are the fix pass for the owner's 61-UAT findings, 2026-11-03; Wave 14 closes 61-UAT test 8; Wave 15 closes test 9; Waves 16 to 19 close test 10)
+**Plans**: 31/34 plans executed in 19 of 21 waves (Waves 8 to 13 are the fix pass for the owner's 61-UAT findings, 2026-11-03; Wave 14 closes 61-UAT test 8; Wave 15 closes test 9; Waves 16 to 19 close test 10; Waves 20 and 21 close the owner's 0.6.4 re-test, 2026-11-05, with the batch gate in 62-30)
 **UI hint**: yes
 
 **Wave 1**
@@ -178,6 +178,13 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 **Wave 19** *(blocked on Wave 18 completion)*
 - [x] 61-31-PLAN.md — Real-window e2e: Connect-screen join with a saved profile, Ask to join accepted in Members; full gate (TEAM-02)
 
+**Wave 20** *(gap closure for the owner's 0.6.4 re-test, 2026-11-05, G-61-10 to G-61-16; the two plans share no file)*
+- [ ] 61-32-PLAN.md — Own key at Join becomes the person's own profile (My NEAR AI key) and the sidebar refreshes at once; one profile-changed signal for every Team Mode profile change; space above the Connect screen's team group (TEAM-02)
+- [ ] 61-34-PLAN.md — Use a saved profile offers only profiles whose key is in this computer or browser; empty-list words; moved-folder limitation documented with its way back (stable project id deferred); one-time web UI notice about several tabs in one browser profile (TEAM-02)
+
+**Wave 21** *(blocked on Wave 20 completion)*
+- [ ] 61-33-PLAN.md — Automatic join after Ask to join: refresh failures logged and bounded, reproduced in real windows (VS Code with no nudge, code-server with the real extension), the confirmed cause fixed (TEAM-02)
+
 ### Phase 62: Work model, GSD import, Team Board (live, read and move)
 
 **Goal**: Every member sees one live Team Board built from the project's GSD roadmap, phases, plans and tasks, sees other members' changes within one poll, and can move cards only along permitted transitions.
@@ -191,7 +198,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
   4. Moves are permission-checked and follow only permitted transitions; an illegal drop snaps back and says why. (BOARD-03)
   5. Solo projects behave exactly as 0.4.8: the existing suite is unchanged and green, and `npm run lint`, the full `npm test` and `npm run test:e2e` pass.
 
-**Plans**: 27/27 plans executed in 16 waves (Waves 7 to 14 are the fix pass for the owner's 62-UAT findings, 2026-11-03, Wave 15 the 0.6.3 re-test finding on unassigning yourself and Wave 16 the decision that assignees move their own cards, 2026-11-04; they run after Phase 61's fix pass, 61-22)
+**Plans**: 27/30 plans executed in 16 of 19 waves (Waves 7 to 14 are the fix pass for the owner's 62-UAT findings, 2026-11-03, Wave 15 the 0.6.3 re-test finding on unassigning yourself and Wave 16 the decision that assignees move their own cards, 2026-11-04; they run after Phase 61's fix pass, 61-22; Waves 17 to 19 close the owner's 0.6.4 re-test, 2026-11-05, and Wave 19 is the gate of the whole 61 and 62 batch)
 **UI hint**: yes
 **Owner amendments (2026-11-03)**: the board opens only in its own editor tab and the sidebar Team section shows a summary; a lead assigns cards and any member who is not an observer assigns themselves (signed item.assigned and item.unassigned, claims stay in Phase 63); planless phases show as Backlog cards; Done folds by default; cards stay readable (folded columns hold no cards, titles wrap between words); layout and drag are proven in a real window on a hidden virtual screen with real screenshots the owner reviews (recorded in 62-CONTEXT.md and 62-UI-SPEC.md by 62-17).
 
@@ -253,6 +260,15 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 
 **Wave 16** *(owner decision 2026-11-04, assignees move their own cards; blocked on Wave 15 completion; each task waits until no debug session holds its files)*
 - [x] 62-27-PLAN.md — Assignees move their own cards: item.move-own on write and read (done, block, unblock, hold, release, reopen; cancel stays with leads), per-card moves in the model and the page, the developer's real drags in code-server (BOARD-03)
+
+**Wave 17** *(gap closure for the owner's 0.6.4 re-test, 2026-11-05, G-62-8; owner decision 2026-11-05: a reopened card stays in Backlog, held; timeline dots stay non-draggable)*
+- [ ] 62-28-PLAN.md — Reopen to Backlog holds the card there (item.reopened then item.updated hold in one append, no event or hash change), board and timeline Move to..., ready-shaped fixtures and a real-model code-server check (BOARD-03)
+
+**Wave 18** *(blocked on Wave 17 completion; shares the code-server board check)*
+- [ ] 62-29-PLAN.md — Lane header 'Nobody assigned · 45 cards (40 in Done)', a count in every cell, folded cells that say so, the screen-reader name, a layout-probe sum rule and real-window checks (BOARD-01)
+
+**Wave 19** *(blocked on 62-29, 61-33 and 61-34)*
+- [ ] 62-30-PLAN.md — Gate for the 0.6.4 re-test batch: full npm test, every e2e launch, both code-server checks, verify:release, invariants, secret scan; validation rows and the owner's re-test list (TEAM-02, BOARD-01, BOARD-03)
 
 ### Phase 62.1: Board timeline: milestones on one timeline with cards as dots in dependency order (INSERTED)
 
