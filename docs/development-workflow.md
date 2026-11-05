@@ -419,6 +419,12 @@ asking. It runs on `workflow_run` after CI succeeds for a PR, and on `workflow_d
   another commit, or a PASS whose recommendation is not MERGE all fail the gate. The workflow also
   requires the `## Recommendation:` heading (`requireRecommendation`); a hand-run
   `agent-review.mjs submit` does not.
+- **Time limits.** The model call gives up when nothing arrives for 2 minutes
+  (`REVIEW_IDLE_SECONDS`) and stops at 45 minutes in all (`REVIEW_TOTAL_SECONDS`), and it reads at
+  most 16 MB of reply. A quiet model is tried up to three times; the overall limit, the token
+  limit and an oversized reply are not retried. If the review job itself reaches its own limit
+  (150 minutes), it ends without posting, so the PR has no `agent-review` result and stays
+  blocked: start it again with `gh workflow run agent-review.yml -f pr=<n>`.
 - **Gate changes need the owner.** A PR that touches a path in `GATE_PATHS`
   (`scripts/lib/workflow.mjs`: `.github/`, `scripts/lib/`, the review, merge, release and
   secret-scan scripts, `scripts/ci-review-*.mjs`, `SECURITY.md`, `.claude/commands/`) is reviewed

@@ -64,13 +64,36 @@ function maxTokens() {
   return value;
 }
 
+// Limits on what is read, so an endpoint that misbehaves cannot fill the runner's memory. A whole
+// (non-streamed) body holds the reasoning too, so it gets more room than the answer itself. A
+// review comment is cut to fit GitHub (65,536 characters) long before either limit.
+const MAX_BODY_BYTES = 16 * 1024 * 1024;
+const MAX_ANSWER_CHARS = 1_000_000;
+const TOO_LONG = 'the model\'s reply was longer than the review can use';
+
+/** The whole body as text, refusing past `limit` bytes instead of buffering it all first. */
+async function readCapped(response, limit, alive) {
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = '';
+  for await (const chunk of response.body ?? []) {
+    alive();
+    size += chunk.byteLength;
+    if (size > limit) throw new FinalError(TOO_LONG);
+    text += decoder.decode(chunk, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
 /** Reads a streamed (server-sent events) reply, or a whole JSON reply from an endpoint that ignores `stream`. */
 async function readReply(response, alive = () => {}) {
   const type = response.headers.get('content-type') ?? '';
   if (!type.includes('text/event-stream')) {
-    const body = await response.json();
+    const body = JSON.parse(await readCapped(response, MAX_BODY_BYTES, alive));
     const choice = body?.choices?.[0];
-    return { text: choice?.message?.content, finishReason: choice?.finish_reason };
+    const content = choice?.message?.content;
+    if (typeof content === 'string' && content.length > MAX_ANSWER_CHARS) throw new FinalError(TOO_LONG);
+    return { text: content, finishReason: choice?.finish_reason };
   }
   const decoder = new TextDecoder();
   let buffer = '';
@@ -83,7 +106,10 @@ async function readReply(response, alive = () => {}) {
     let event;
     try { event = JSON.parse(data); } catch { return; }
     const choice = event?.choices?.[0];
-    if (typeof choice?.delta?.content === 'string') text += choice.delta.content;
+    if (typeof choice?.delta?.content === 'string') {
+      text += choice.delta.content;
+      if (text.length > MAX_ANSWER_CHARS) throw new FinalError(TOO_LONG);
+    }
     const reasoning = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
     if (typeof reasoning === 'string') thinking += reasoning.length;
     if (choice?.finish_reason) finishReason = choice.finish_reason;

@@ -306,6 +306,39 @@ test('the quiet and overall limits must be whole seconds', async () => {
   assert.match(bad.stderr, /REVIEW_IDLE_SECONDS must be/);
 });
 
+test('a reply longer than the review can use is refused, streamed or not, and not retried', async () => {
+  const { dir } = gathered();
+  const promptPath = path.join(dir, 'prompt.md');
+  writeFileSync(promptPath, 'prompt');
+  const huge = 'x'.repeat(1_000_001);
+  for (const streamed of [true, false]) {
+    let requests = 0;
+    const server = await new Promise((resolve) => {
+      const s = createServer((request, response) => {
+        requests += 1;
+        request.resume();
+        request.on('end', () => {
+          if (streamed) {
+            response.writeHead(200, { 'content-type': 'text/event-stream' });
+            response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: huge } }] })}\n\ndata: [DONE]\n\n`);
+          } else {
+            response.writeHead(200, { 'content-type': 'application/json' });
+            response.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: huge } }] }));
+          }
+        });
+      });
+      s.listen(0, '127.0.0.1', () => { servers.push(s); resolve(s); });
+    });
+    const result = await run('ci-review-call.mjs', [promptPath], {
+      REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${server.address().port}`
+    });
+    assert.notEqual(result.status, 0, `streamed=${streamed}`);
+    assert.match(result.stderr, /attempt 1 failed: the model's reply was longer than the review can use/, `streamed=${streamed}`);
+    assert.equal(requests, 1, `streamed=${streamed}: not retried`);
+    assert.equal(result.stdout, '', `streamed=${streamed}: nothing printed`);
+  }
+});
+
 test('a network failure names its cause instead of a bare fetch failed', async () => {
   const { dir } = gathered();
   const promptPath = path.join(dir, 'prompt.md');
