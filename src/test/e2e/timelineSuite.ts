@@ -54,6 +54,7 @@ interface Box { left: number; top: number; right: number; bottom: number; width:
 interface Controls {
   view: { columns: Box | null; timeline: Box | null }; direction: { horizontal: Box | null; vertical: Box | null };
   zoomOut: Box | null; zoomIn: Box | null; fit: Box | null; now: Box | null; legend: Box | null;
+  filters: { mine: Box | null; ready: Box | null; blocked: Box | null };
 }
 interface TimelineDotReport { id: string; label: string; milestone: string; step: number; slot: number; state: string; rendered: boolean; box: Box }
 interface Layer { box: Box; dotId: string | null; texts: Array<{ text: string; box: Box }>; buttons: Array<{ name: string; width: number; height: number; box: Box }>; titleHeights?: { scrollHeight: number; clientHeight: number; clamp: string } }
@@ -379,6 +380,109 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
     }
   };
 
+  // The rare states of 62.1-08 Task 3 as shapes for the test seam, shared by the real-window steps and the frames.
+  /** A loop between two plans of the current milestone where one already waits for the other. */
+  const loopCase = (model: ModelView) => {
+    const ms = model.timeline!.now!.milestoneId;
+    const kinds = new Map(model.cards.map((c) => [c.id, c.kind]));
+    const edge = model.timeline!.edges.find((e) => kinds.get(e.from) === 'plan' && kinds.get(e.to) === 'plan' && dotIn(model, e.from) === ms && dotIn(model, e.to) === ms);
+    assert.ok(edge !== undefined, 'two v0.6.0 plans where one waits for the other');
+    const [first, later] = [edge.from, edge.to].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+    const shape: ShapeT = { state: (state) => { state.items.get(edge.from)!.dependsOn.push(edge.to); return state; } };
+    const wanted = (m: ModelView): boolean => m.timeline?.milestones.some((x) => x.id === ms && x.cycle) === true;
+    return { ms, edge, first, later, shape, wanted };
+  };
+  /** An earlier milestone, v0.1.0, whose three plans are done: a finished milestone, which starts folded. */
+  const FOLD_MS = 'milestone:v0.1.0';
+  const foldShape = (state: TeamStateT): TeamStateT => {
+    const items = [...state.items.values()];
+    const ms0 = items.find((i) => i.kind === 'milestone' && i.active === true)!;
+    const ph0 = items.find((i) => i.kind === 'phase' && i.parentId === ms0.id)!;
+    const pl0 = items.find((i) => i.kind === 'plan' && i.state === 'done')!;
+    const { active: _active, ...ms } = ms0;
+    void _active;
+    state.items.set(FOLD_MS, { ...ms, id: FOLD_MS, title: 'v0.1.0 First steps', dependsOn: [] });
+    state.items.set('phase:9', { ...ph0, id: 'phase:9', title: 'Early setup', parentId: FOLD_MS, gsd: { phase: '9' }, dependsOn: [] });
+    for (const n of [1, 2, 3]) {
+      const { blocked: _b, hold: _h, claimId: _c, assignee: _a, assignedBy: _ab, ...plan } = pl0;
+      void _b; void _h; void _c; void _a; void _ab;
+      state.items.set(`plan:9-0${n}`, { ...plan, id: `plan:9-0${n}`, title: `Early plan ${n}`, parentId: 'phase:9', gsd: { ...pl0.gsd!, phase: '9', plan: `0${n}` }, dependsOn: n > 1 ? [`plan:9-0${n - 1}`] : [], state: 'done' });
+    }
+    return state;
+  };
+  const foldWanted = (m: ModelView): boolean => m.timeline?.milestones.some((x) => x.id === FOLD_MS && x.finished) === true;
+  /** Twelve plans that wait only for a plan at the first step of the current milestone: a stack over the cap of 8. */
+  const stackCase = (model: ModelView) => {
+    const ms = model.timeline!.now!.milestoneId;
+    const kinds = new Map(model.cards.map((c) => [c.id, c.kind]));
+    const anchor = model.timeline!.dots.find((d) => d.milestoneId === ms && d.step === 0 && kinds.get(d.cardId) === 'plan');
+    assert.ok(anchor !== undefined, 'a plan at the first step of the current milestone');
+    const added = Array.from({ length: 12 }, (_, i) => `plan:62-${80 + i}`);
+    const shape: ShapeT = {
+      state: (state: TeamStateT): TeamStateT => {
+        const base = state.items.get(anchor.cardId)!;
+        const { blocked: _b, hold: _h, claimId: _c, assignee: _a, assignedBy: _ab, ...plan } = base;
+        void _b; void _h; void _c; void _a; void _ab;
+        added.forEach((id, i) => {
+          state.items.set(id, { ...plan, id, title: `Waits only for ${anchor.cardId.slice(5)}, number ${i + 1}`, gsd: { ...base.gsd!, phase: '62', plan: String(80 + i) }, parentId: state.items.get('phase:62') ? 'phase:62' : base.parentId, dependsOn: [anchor.cardId], state: 'backlog' });
+        });
+        return state;
+      }
+    };
+    const wanted = (m: ModelView): boolean => added.every((id) => m.cards.some((c) => c.id === id));
+    return { ms, added, shape, wanted };
+  };
+  // A teammate moves the Now step (62.1-08, owner-accepted 2026-11-05): the second client finishes the Now step's cards, or, when this roadmap's
+  // Now step holds a phase without plans that the board cannot mark done, reopens the latest done plan before it, so the marker moves back.
+  const teammate = async (): Promise<LayoutReport> => {
+    await noCard();
+    const session = api.team.handle.session();
+    assert.ok(session && second, 'the session and the second client');
+    const model = latestModel();
+    const now = model.timeline!.now!;
+    const before = await settled('before the teammate\'s change');
+    const t0 = timelineOf(before);
+    const percentBefore = t0.overall?.text ?? '';
+    const cards = new Map(model.cards.map((c) => [c.id, c]));
+    const dots = model.timeline!.dots.filter((d) => d.milestoneId === now.milestoneId);
+    const open = dots.filter((d) => d.step === now.step).map((d) => cards.get(d.cardId)!).filter((c) => unfinished(c.column));
+    assert.ok(open.length > 0, 'the Now step has unfinished cards');
+    // The planned change: the second client marks done every unfinished card of the Now step with the board's own Mark done event, which needs
+    // each to be a plan or a board item that the board can mark done. When this repository's data breaks that (a phase without plans has no move
+    // on the board), the run says which card, and the teammate reopens the latest done plan before the Now step instead (the board's Reopen),
+    // which moves the Now marker back to that plan's step.
+    const notDone = open.filter((c) => !((c.kind === 'plan' || c.id.startsWith('item:')) && c.moves.some((m) => m.key === 'done')));
+    const toBefore = board.toView.length;
+    let expectLater: boolean;
+    if (notDone.length === 0) {
+      console.log(`(the Now step ${now.step + 1}: marking done ${open.map((c) => c.id).join(', ')})`);
+      for (const c of open) await appendOne(second, `${c.id} done`, { type: 'item.updated', body: { id: c.id, changes: { state: 'done' } } });
+      expectLater = true;
+    } else {
+      const back = dots.filter((d) => d.step < now.step).map((d) => ({ d, c: cards.get(d.cardId)! }))
+        .filter(({ c }) => c.kind === 'plan' && c.column === 'done' && c.moves.some((m) => m.key === 'reopen')).sort((a, b) => b.d.step - a.d.step || b.d.slot - a.d.slot)[0];
+      console.log(`(the Now step ${now.step + 1} cannot be finished from the board: ${notDone.map((c) => `${c.id} is a ${c.kind} in ${c.column} with moves ${c.moves.map((m) => m.key).join(', ') || 'none'}`).join('; ')}; the teammate reopens ${back?.c.id ?? 'nothing'} at step ${(back?.d.step ?? -1) + 1} instead)`);
+      assert.ok(back !== undefined, 'a done plan before the Now step can be reopened from the board');
+      await appendOne(second, `${back.c.id} reopened`, { type: 'item.reopened', body: { id: back.c.id } });
+      expectLater = false;
+    }
+    session.nudge();
+    const state = await board.next('toView', (message) => {
+      const n = (message.model as ModelView | undefined)?.timeline?.now;
+      return message.type === 'state' && n !== undefined && (n.milestoneId !== now.milestoneId || n.step !== now.step);
+    }, toBefore, 30_000);
+    const moved = (state.model as ModelView).timeline!.now!;
+    const said = await until('the new Now sentence said', async () => { const f = await act({ action: 'facts' }); return String(f.live ?? '').includes(moved.sentence) ? String(f.live) : undefined; }, 10_000);
+    // The marker glides 320 ms; the reading waits for it.
+    await sleep(600);
+    const after = await settled('the Now marker moved', (r) => r.timeline?.now?.step === moved.step && r.timeline.now.milestone === moved.milestoneId);
+    const t1 = timelineOf(after);
+    console.log(`(after one poll: ${t1.now?.text ?? 'none'}, ${t1.overall?.text ?? ''}; said: ${said})`);
+    assert.ok(t1.now !== null && (t1.now.milestone !== now.milestoneId || (expectLater ? t1.now.step > now.step : t1.now.step < now.step)), `the Now marker moved to ${expectLater ? 'a later' : 'an earlier'} step`);
+    assert.notEqual(t1.overall?.text ?? '', percentBefore, 'the overall percent changed');
+    assert.deepEqual(after.problems, [], problemsOf(after));
+    return after;
+  };
   // ---- the screenshot frames (62.1-09) --------------------------------------------------------------------------------------------------------
   const fbdir = process.env.NEAR_AI_E2E_FBDIR ?? '';
   const screens = process.env.NEAR_AI_E2E_SCREENS ?? '';
@@ -507,11 +611,224 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
     const { at, id } = await hoverFrame(asked, theme, rest);
     await cardFrame(asked, theme, at, id);
   };
+  /** Jump to now (D-13): scrolled 2000 px away along the axis, a real click on Jump to now, focus on the Now dot and the marker in view, the frame. */
+  const nowFrame = async (theme: string): Promise<void> => {
+    await noCard();
+    await act({ action: 'blur' });
+    const r0 = await settled('before Jump to now');
+    const t0 = timelineOf(r0);
+    const s0 = t0.scroller!;
+    const horizontal = t0.direction === 'horizontal';
+    const room = horizontal ? s0.scrollWidth - s0.clientWidth : s0.scrollHeight - s0.clientHeight;
+    const at = horizontal ? s0.scrollLeft : s0.scrollTop;
+    const away = at + 2000 <= room ? at + 2000 : Math.max(0, at - 2000);
+    await ask({ action: 'scroll', ...(horizontal ? { left: away } : { top: away }) });
+    const far = await settled('scrolled away from Now');
+    const tf = timelineOf(far);
+    console.log(`(Jump to now in ${theme}: scrolled from ${at} to ${horizontal ? tf.scroller!.scrollLeft : tf.scroller!.scrollTop} px along the axis; the Now pill ${tf.firstScreen.nowVisible ? 'still' : 'not'} in view)`);
+    await park(far);
+    await click(far, tf.controls.now, 'Jump to now');
+    await sleep(600);
+    const id = nowDotOf(latestModel());
+    const report = await settled('after Jump to now', (r) => r.timeline?.focusedDot === id);
+    const t = timelineOf(report);
+    assert.equal(t.firstScreen.nowVisible, true, 'the Now pill is in view after Jump to now');
+    assert.equal(t.firstScreen.nowStepDotVisible, true, 'a dot of the Now step is in view after Jump to now');
+    await photograph(`tl-${letter}-${theme}-1400-now.png`, 'now', 1400, report);
+    await act({ action: 'blur' });
+  };
+  /** Scrolls so a box (in page pixels) is in the middle of the scroller along the axis, and reads once the page is still. */
+  const reveal = async (report: LayoutReport, box: Box, what: string): Promise<LayoutReport> => {
+    const t = timelineOf(report);
+    const s0 = t.scroller!;
+    if (within(box, s0.rect, 8) && !t.headers.some((h) => h.sticky && overlaps(h.box, box))) return report;
+    const left = Math.max(0, Math.round(s0.scrollLeft + (box.left + box.right) / 2 - (s0.rect.left + s0.clientWidth / 2)));
+    const top = Math.max(0, Math.round(s0.scrollTop + (box.top + box.bottom) / 2 - (s0.rect.top + s0.clientHeight / 2)));
+    await ask({ action: 'scroll', ...(t.direction === 'horizontal' ? { left } : { top }) });
+    return settled(`${what} in view`);
+  };
+  /** An extra frame in dark at 1400 px, at rest with the pointer parked, after the given state is drawn. */
+  const extraFrame = async (view: string, report: LayoutReport): Promise<void> => {
+    await park(report);
+    const still = await settled(`${view} at rest`, (r) => r.timeline?.preview === null && r.timeline.card === null);
+    await photograph(`tl-${letter}-dark-1400-${view}.png`, view, 1400, still);
+  };
+  const dark = MATRIX_THEMES[0];
+  const atDark1400 = async (): Promise<void> => {
+    await applyTheme(dark);
+    const sized = await sizeTo(1400);
+    assert.ok(Math.abs(sized.width - 1400) <= 40, `the board is ${sized.width} px`);
+    await sleep(600);
+    await noCard();
+    await act({ action: 'blur' });
+  };
+  const extras: Array<[string, () => Promise<void>]> = [
+    ['frames, zoom: real clicks on Zoom out reach 50% and on Zoom in reach 200%, in dark at 1400 px, each on the first screen', async () => {
+      await atDark1400();
+      const zoomTo = async (level: number): Promise<LayoutReport> => {
+        for (let clicks = 0; clicks < 6; clicks += 1) {
+          const r = await ask({ action: 'measure' });
+          const z = timelineOf(r).zoom;
+          if (z === level) break;
+          await click(r, timelineOf(r).controls[z > level ? 'zoomOut' : 'zoomIn'], z > level ? 'Zoom out' : 'Zoom in');
+          await sleep(700);
+        }
+        return settled(`zoom ${level}%`, (r) => r.timeline?.zoom === level);
+      };
+      try {
+        await zoomTo(50);
+        await act({ action: 'blur' });
+        await extraFrame('zoom50', await toFirstScreen('at 50%'));
+        await zoomTo(200);
+        await act({ action: 'blur' });
+        await extraFrame('zoom200', await toFirstScreen('at 200%'));
+      } finally {
+        await zoomTo(100);
+        await act({ action: 'blur' });
+      }
+    }],
+    ['frames, the folded tile: a finished earlier milestone, made by the test seam, is one tile with 100%, in dark at 1400 px', async () => {
+      await atDark1400();
+      await withShape({ state: foldShape }, 'the finished milestone', foldWanted, async () => {
+        const r = await settled('the folded tile', (x) => (x.timeline?.tiles ?? []).some((tile) => tile.milestone === FOLD_MS));
+        const tile = timelineOf(r).tiles.find((x) => x.milestone === FOLD_MS)!;
+        assert.ok(tile.text.includes('100%'), `the tile says 100% (${tile.text})`);
+        const shown = await reveal(r, tile, 'the folded tile');
+        assert.ok(timelineOf(shown).tiles.some((x) => x.milestone === FOLD_MS && within(x, timelineOf(shown).scroller!.rect)), 'the tile is in view');
+        await extraFrame('folded', shown);
+      });
+    }],
+    ['frames, the +n stack: twelve plans that wait only for one plan, made by the test seam, are 8 dots and +n, in dark at 1400 px', async () => {
+      await atDark1400();
+      const { ms, added, shape, wanted } = stackCase(latestModel());
+      await withShape(shape, 'the big stack', wanted, async (shaped) => {
+        const step = shaped.timeline!.dots.find((d) => d.cardId === added[0])!.step;
+        const inStep = shaped.timeline!.dots.filter((d) => d.milestoneId === ms && d.step === step).sort((a, b) => a.slot - b.slot);
+        await ask({ action: 'focus', itemId: inStep[7]!.cardId });
+        await sleep(500);
+        await act({ action: 'blur' });
+        let r = await settled('the stack in view');
+        const more = timelineOf(r).more.find((x) => x.milestone === ms && x.step === step);
+        assert.equal(more?.text, `+${inStep.length - 8}`, 'the 9th slot is +n');
+        r = await reveal(r, more, 'the +n button');
+        assert.ok(timelineOf(r).more.some((x) => x.milestone === ms && x.step === step && within(x, timelineOf(r).scroller!.rect)), '+n is in view');
+        await extraFrame('stack', r);
+      });
+    }],
+    [`frames, the cycle note: a loop made by the test seam shows "${CYCLE_TEXT}", in dark at 1400 px`, async () => {
+      await atDark1400();
+      const { ms, shape, wanted } = loopCase(latestModel());
+      await withShape(shape, 'the loop', wanted, async () => {
+        const r = await settled('the loop drawn', (x) => (x.timeline?.notices ?? []).some((n) => n.milestone === ms));
+        const note = timelineOf(r).notices.find((n) => n.milestone === ms)!;
+        assert.ok(note.text.includes(CYCLE_TEXT), 'the band shows the cycle note');
+        await extraFrame('cycle', await reveal(r, note.box, 'the cycle note'));
+      });
+    }],
+    ['frames, no match: Ready and Blocked both on match no card, so every dot is a ghost under the empty filter message, in dark at 1400 px', async () => {
+      await atDark1400();
+      const before = await toFirstScreen('before the filters');
+      assert.ok(timelineOf(before).dots.length > 0, 'dots are drawn before the filters');
+      // Real clicks on the Ready and Blocked chips, aimed with the probe's boxes.
+      const chips = async (): Promise<void> => {
+        for (const name of ['ready', 'blocked'] as const) {
+          const r = await ask({ action: 'measure' });
+          await click(r, timelineOf(r).controls.filters[name], `the ${name === 'ready' ? 'Ready' : 'Blocked'} filter chip`);
+          await sleep(400);
+        }
+      };
+      await chips();
+      try {
+        await sleep(600);
+        const r = await settled('no card matches', (x) => (x.timeline?.dots ?? []).every((d) => !d.rendered || d.box.width === 0));
+        const facts = await act({ action: 'facts' });
+        console.log(`(Ready and Blocked on: ${timelineOf(r).dots.filter((d) => d.rendered).length} dots drawn; the page says ${JSON.stringify(facts.live ?? '')})`);
+        await extraFrame('nomatch', r);
+      } finally {
+        await chips();
+        await act({ action: 'blur' });
+        await settled('the filters off', (x) => (x.timeline?.dots ?? []).some((d) => d.rendered));
+      }
+    }],
+    ['frames, the error state: a failed layout made by the test seam shows The timeline could not be drawn, in dark at 1400 px', async () => {
+      await atDark1400();
+      tap.shape = { failTimeline: true };
+      try {
+        await repost((m) => m.timelineProblem === true && m.timeline === undefined);
+        await sleep(600);
+        const r = await settled('the failure shown', (x) => !!x.timeline?.error);
+        assert.deepEqual(timelineOf(r).error!.buttons.map((b) => b.name), ['Show columns', 'Draw the timeline again']);
+        await extraFrame('error', r);
+      } finally {
+        tap.shape = undefined;
+        await repost((m) => m.timeline !== undefined);
+        await sleep(1_000);
+        await settled('the timeline back', (x) => (x.timeline?.dots.length ?? 0) > 0);
+      }
+    }]
+  ];
+  const EXPECTED_FRAMES = { horizontal: 4 * 13 + 4 + 7 + 1, vertical: 4 * 13 + 4 + 1 } as const;
   const frames: Array<[string, () => Promise<void>]> = [
-    ['frames, the tracer row: horizontal in dark at 1400 px at rest, with a hover preview and with the card open, each after a reading with no problem', async () => {
-      assert.equal(part, 'horizontal', 'the tracer row is in the horizontal part');
-      await applyTheme(MATRIX_THEMES[0]);
-      await widthRow(1400, 'dark');
+    ...(part === 'vertical' ? [['frames: a real click on Vertical chooses the direction for the whole part', async () => {
+      await noCard();
+      const r = await direction('vertical');
+      assert.deepEqual(r.problems, [], problemsOf(r));
+    }] as [string, () => Promise<void>]] : []),
+    ...MATRIX_THEMES.map((theme): [string, () => Promise<void>] => [`frames, ${part ?? ''} in ${theme.name}: at 480, 900, 1400 px and full width, at rest, with a hover preview and with the card open, and Jump to now at 1400 px`, async () => {
+      await noCard();
+      await applyTheme(theme);
+      // Every width is tried even when one fails, so one run shows every problem of the row; the step still fails with all of them.
+      const failed: string[] = [];
+      for (const asked of MATRIX_WIDTHS) {
+        try {
+          await widthRow(asked, theme.name);
+          if (asked === 1400) await nowFrame(theme.name);
+        } catch (error) {
+          failed.push(`${theme.name} at ${asked}: ${(error as Error).message}`);
+          console.log(`(${theme.name} at ${asked} failed; the row goes on)`);
+          await noCard().catch(() => undefined);
+        }
+      }
+      assert.deepEqual(failed, [], failed.join('\n'));
+    }]),
+    ['frames, the card at the four edges: dark at 900 px, the card on the dot nearest the right, bottom, left and top edge of the view, each placed inside it', async () => {
+      await applyTheme(dark);
+      await sizeTo(900);
+      await sleep(600);
+      const pick: Record<'right' | 'bottom' | 'left' | 'top', (b: Box) => number> = { right: (b) => b.right, bottom: (b) => b.bottom, left: (b) => -b.left, top: (b) => -b.top };
+      const failed: string[] = [];
+      for (const edge of ['right', 'bottom', 'left', 'top'] as const) try {
+        await noCard();
+        await act({ action: 'blur' });
+        const first = await toFirstScreen(`the ${edge} edge`);
+        await park(first);
+        const r = await settled(`the ${edge} edge at rest`, (x) => x.timeline?.preview === null);
+        const t = timelineOf(r);
+        const area = t.scroller!.rect;
+        const pill = t.now?.pill;
+        const candidates = t.dots.filter((d) => d.rendered && within(d.box, area, 4) && !t.headers.some((h) => overlaps(h.box, d.box)) && !(pill && overlaps(pill, d.box, 4)));
+        const dot = candidates.sort((a, b) => pick[edge](b.box) - pick[edge](a.box))[0];
+        assert.ok(dot !== undefined, `a dot fully in view near the ${edge} edge`);
+        console.log(`(the ${edge} edge: ${dot.id} at ${Math.round(dot.box.left)},${Math.round(dot.box.top)} in a view of ${Math.round(area.left)},${Math.round(area.top)} to ${Math.round(area.right)},${Math.round(area.bottom)})`);
+        await cardFrame(900, 'dark', await aim(r, dot.box, `the dot ${dot.id}`), dot.id, `tl-${letter}-dark-900-edge-${edge}.png`, `edge-${edge}`);
+      } catch (error) {
+        failed.push(`the ${edge} edge: ${(error as Error).message}`);
+        await noCard().catch(() => undefined);
+      }
+      await act({ action: 'blur' });
+      assert.deepEqual(failed, [], failed.join('\n'));
+    }],
+    ...(part === 'horizontal' ? extras : []),
+    ['frames, now moved: in dark at 1400 px, a teammate\'s change moves the Now marker and the percents within one poll, then the frame', async () => {
+      await atDark1400();
+      await toFirstScreen('before the teammate\'s change');
+      await teammate();
+      let r = await settled('after the teammate\'s change');
+      if (!timelineOf(r).firstScreen.nowVisible) r = await toFirstScreen('the moved Now marker');
+      await park(r);
+      r = await settled('the moved Now at rest', (x) => x.timeline?.preview === null && x.timeline.card === null);
+      assert.equal(timelineOf(r).firstScreen.nowVisible, true, 'the moved Now pill is in view');
+      await photograph(`tl-${letter}-dark-1400-now-moved.png`, 'now-moved', 1400, r);
       await sizeTo('full');
     }],
     [`the ${part ?? 'screenshot'} index lists every frame of the part, one line per PNG, each with no problem and with what to look at`, async () => {
@@ -520,6 +837,8 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
       assert.deepEqual(listed.map((e) => e.file).sort(), pngs, 'one index line per PNG of the part');
       assert.ok(listed.every((e) => e.problems === 0 && e.lookFor.length > 0), 'no frame with a problem, and each says what to look at');
       console.log(`(${pngs.length} frames of the ${part} part in ${screens})`);
+      assert.equal(pngs.length, part === undefined ? -1 : EXPECTED_FRAMES[part], `the ${part} part has every frame`);
+      assert.equal(new Set(listed.map((e) => e.theme)).size, 4, 'four themes');
     }]
   ];
   const setup: Array<[string, () => Promise<void>]> = [
@@ -808,52 +1127,7 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
       assert.deepEqual(closed.problems, [], problemsOf(closed));
     }],
     ['a teammate moves the Now step: a change from the second client moves the Now marker within one poll, the percent changes and the new Now sentence is said, with no probe problem', async () => {
-      await noCard();
-      const session = api.team.handle.session();
-      assert.ok(session && second, 'the session and the second client');
-      const model = latestModel();
-      const now = model.timeline!.now!;
-      const before = await settled('before the teammate\'s change');
-      const t0 = timelineOf(before);
-      const percentBefore = t0.overall?.text ?? '';
-      const cards = new Map(model.cards.map((c) => [c.id, c]));
-      const dots = model.timeline!.dots.filter((d) => d.milestoneId === now.milestoneId);
-      const open = dots.filter((d) => d.step === now.step).map((d) => cards.get(d.cardId)!).filter((c) => unfinished(c.column));
-      assert.ok(open.length > 0, 'the Now step has unfinished cards');
-      // The planned change: the second client marks done every unfinished card of the Now step with the board's own Mark done event, which needs
-      // each to be a plan or a board item that the board can mark done. When this repository's data breaks that (a phase without plans has no move
-      // on the board), the run says which card, and the teammate reopens the latest done plan before the Now step instead (the board's Reopen),
-      // which moves the Now marker back to that plan's step.
-      const notDone = open.filter((c) => !((c.kind === 'plan' || c.id.startsWith('item:')) && c.moves.some((m) => m.key === 'done')));
-      const toBefore = board.toView.length;
-      let expectLater: boolean;
-      if (notDone.length === 0) {
-        console.log(`(the Now step ${now.step + 1}: marking done ${open.map((c) => c.id).join(', ')})`);
-        for (const c of open) await appendOne(second, `${c.id} done`, { type: 'item.updated', body: { id: c.id, changes: { state: 'done' } } });
-        expectLater = true;
-      } else {
-        const back = dots.filter((d) => d.step < now.step).map((d) => ({ d, c: cards.get(d.cardId)! }))
-          .filter(({ c }) => c.kind === 'plan' && c.column === 'done' && c.moves.some((m) => m.key === 'reopen')).sort((a, b) => b.d.step - a.d.step || b.d.slot - a.d.slot)[0];
-        console.log(`(the Now step ${now.step + 1} cannot be finished from the board: ${notDone.map((c) => `${c.id} is a ${c.kind} in ${c.column} with moves ${c.moves.map((m) => m.key).join(', ') || 'none'}`).join('; ')}; the teammate reopens ${back?.c.id ?? 'nothing'} at step ${(back?.d.step ?? -1) + 1} instead)`);
-        assert.ok(back !== undefined, 'a done plan before the Now step can be reopened from the board');
-        await appendOne(second, `${back.c.id} reopened`, { type: 'item.reopened', body: { id: back.c.id } });
-        expectLater = false;
-      }
-      session.nudge();
-      const state = await board.next('toView', (message) => {
-        const n = (message.model as ModelView | undefined)?.timeline?.now;
-        return message.type === 'state' && n !== undefined && (n.milestoneId !== now.milestoneId || n.step !== now.step);
-      }, toBefore, 30_000);
-      const moved = (state.model as ModelView).timeline!.now!;
-      const said = await until('the new Now sentence said', async () => { const f = await act({ action: 'facts' }); return String(f.live ?? '').includes(moved.sentence) ? String(f.live) : undefined; }, 10_000);
-      // The marker glides 320 ms; the reading waits for it.
-      await sleep(600);
-      const after = await settled('the Now marker moved', (r) => r.timeline?.now?.step === moved.step && r.timeline.now.milestone === moved.milestoneId);
-      const t1 = timelineOf(after);
-      console.log(`(after one poll: ${t1.now?.text ?? 'none'}, ${t1.overall?.text ?? ''}; said: ${said})`);
-      assert.ok(t1.now !== null && (t1.now.milestone !== now.milestoneId || (expectLater ? t1.now.step > now.step : t1.now.step < now.step)), `the Now marker moved to ${expectLater ? 'a later' : 'an earlier'} step`);
-      assert.notEqual(t1.overall?.text ?? '', percentBefore, 'the overall percent changed');
-      assert.deepEqual(after.problems, [], problemsOf(after));
+      await teammate();
     }],
     [`frame timing: a pan by a real drag on empty canvas, four Zoom clicks and two direction switches keep the frame interval p95 at or under ${FRAME_FAIL_MS} ms (target ${FRAME_TARGET_MS} ms)`, async () => {
       await noCard();
@@ -912,13 +1186,8 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
     // tests and reshapes a copy of the state; the host reads it on its next post, which the page's own retry asks for. Cleared after each case.
     [`rare state (a): a loop between two v0.6.0 plans, made by the test seam, shows the cycle note "${CYCLE_TEXT}" in the band, the two dots in plan number order, and nothing is wrong`, async () => {
       await noCard();
-      const model = latestModel();
-      const ms = model.timeline!.now!.milestoneId;
-      const kinds = new Map(model.cards.map((c) => [c.id, c.kind]));
-      const edge = model.timeline!.edges.find((e) => kinds.get(e.from) === 'plan' && kinds.get(e.to) === 'plan' && dotIn(model, e.from) === ms && dotIn(model, e.to) === ms);
-      assert.ok(edge !== undefined, 'two v0.6.0 plans where one waits for the other');
-      const [first, later] = [edge.from, edge.to].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
-      await withShape({ state: (state) => { state.items.get(edge.from)!.dependsOn.push(edge.to); return state; } }, 'the loop', (m) => m.timeline?.milestones.some((x) => x.id === ms && x.cycle) === true, async (shaped) => {
+      const { ms, edge, first, later, shape, wanted } = loopCase(latestModel());
+      await withShape(shape, 'the loop', wanted, async (shaped) => {
         const note = shaped.timeline!.milestones.find((x) => x.id === ms)!.cycleNote;
         assert.equal(note, CYCLE_TEXT, 'the model carries the cycle note');
         const report = await settled('the loop drawn', (r) => (r.timeline?.notices ?? []).some((n) => n.milestone === ms));
@@ -934,24 +1203,8 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
     }],
     ['rare state (b): an earlier milestone whose three plans are done is a folded tile with 100%, real Enter shows its band, and Fold milestone folds it again', async () => {
       await noCard();
-      const MS = 'milestone:v0.1.0';
-      const shape = (state: TeamStateT): TeamStateT => {
-        const items = [...state.items.values()];
-        const ms0 = items.find((i) => i.kind === 'milestone' && i.active === true)!;
-        const ph0 = items.find((i) => i.kind === 'phase' && i.parentId === ms0.id)!;
-        const pl0 = items.find((i) => i.kind === 'plan' && i.state === 'done')!;
-        const { active: _active, ...ms } = ms0;
-        void _active;
-        state.items.set(MS, { ...ms, id: MS, title: 'v0.1.0 First steps', dependsOn: [] });
-        state.items.set('phase:9', { ...ph0, id: 'phase:9', title: 'Early setup', parentId: MS, gsd: { phase: '9' }, dependsOn: [] });
-        for (const n of [1, 2, 3]) {
-          const { blocked: _b, hold: _h, claimId: _c, assignee: _a, assignedBy: _ab, ...plan } = pl0;
-          void _b; void _h; void _c; void _a; void _ab;
-          state.items.set(`plan:9-0${n}`, { ...plan, id: `plan:9-0${n}`, title: `Early plan ${n}`, parentId: 'phase:9', gsd: { ...pl0.gsd!, phase: '9', plan: `0${n}` }, dependsOn: n > 1 ? [`plan:9-0${n - 1}`] : [], state: 'done' });
-        }
-        return state;
-      };
-      await withShape({ state: shape }, 'the finished milestone', (m) => m.timeline?.milestones.some((x) => x.id === MS && x.finished) === true, async () => {
+      const MS = FOLD_MS;
+      await withShape({ state: foldShape }, 'the finished milestone', foldWanted, async () => {
         let report = await settled('the folded tile', (r) => (r.timeline?.tiles ?? []).some((x) => x.milestone === MS));
         let t = timelineOf(report);
         const tile = t.tiles.find((x) => x.milestone === MS)!;
@@ -980,22 +1233,8 @@ export function timelineTests(): Array<[string, () => Promise<void>]> {
     }],
     ['rare state (c): twelve plans that wait only for one plan make a stack over the cap: 8 dots and +n, real Enter shows all with Show fewer in the last slot, and Show fewer shows 8 again', async () => {
       await noCard();
-      const model = latestModel();
-      const ms = model.timeline!.now!.milestoneId;
-      const kinds = new Map(model.cards.map((c) => [c.id, c.kind]));
-      const anchor = model.timeline!.dots.find((d) => d.milestoneId === ms && d.step === 0 && kinds.get(d.cardId) === 'plan');
-      assert.ok(anchor !== undefined, 'a plan at the first step of the current milestone');
-      const added = Array.from({ length: 12 }, (_, i) => `plan:62-${80 + i}`);
-      const shape = (state: TeamStateT): TeamStateT => {
-        const base = state.items.get(anchor.cardId)!;
-        const { blocked: _b, hold: _h, claimId: _c, assignee: _a, assignedBy: _ab, ...plan } = base;
-        void _b; void _h; void _c; void _a; void _ab;
-        added.forEach((id, i) => {
-          state.items.set(id, { ...plan, id, title: `Waits only for ${anchor.cardId.slice(5)}, number ${i + 1}`, gsd: { ...base.gsd!, phase: '62', plan: String(80 + i) }, parentId: state.items.get('phase:62') ? 'phase:62' : base.parentId, dependsOn: [anchor.cardId], state: 'backlog' });
-        });
-        return state;
-      };
-      await withShape({ state: shape }, 'the big stack', (m) => added.every((id) => m.cards.some((c) => c.id === id)), async (shaped) => {
+      const { ms, added, shape, wanted } = stackCase(latestModel());
+      await withShape(shape, 'the big stack', wanted, async (shaped) => {
         const step = shaped.timeline!.dots.find((d) => d.cardId === added[0])!.step;
         const inStep = shaped.timeline!.dots.filter((d) => d.milestoneId === ms && d.step === step);
         const n = inStep.length - 8;
