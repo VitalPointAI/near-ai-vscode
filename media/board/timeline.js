@@ -705,7 +705,7 @@
     if (words) b.appendChild(el('span', 'label', words));
     return b;
   }
-  // What the zoom buttons and Jump to now do comes with 62.1-06; here they are drawn and kept in step with the saved zoom.
+  // The zoom group and Jump to now, kept in step with the saved zoom here; what they do is in the zoom and pan section below (62.1-06).
   const zoomGroup = el('div', 'zoom');
   zoomGroup.id = 'tl-zoom';
   zoomGroup.setAttribute('role', 'group');
