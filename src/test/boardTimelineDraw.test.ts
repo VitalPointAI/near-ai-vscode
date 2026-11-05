@@ -292,7 +292,7 @@ test('phase labels: pickLabel takes the longest label that fits its room, and th
       const bar = li.querySelector('.tl-phase-bar')!;
       assert.equal(bar.getAttribute('aria-hidden'), 'true');
       assert.deepEqual(['left', 'top', 'width', 'height'].map((k) => styleOf(bar, k)), [px(ph.bar.x - band.x), px(ph.bar.y - band.y), px(ph.bar.w), px(ph.bar.h)], `${ph.id} bar place`);
-      assert.equal(styleOf(bar.querySelector('.tl-phase-fill')!, '--fill'), String((phaseModel.percent?.percent ?? 0) / 100), `${ph.id} fill`);
+      assert.equal(styleOf(bar.querySelector('.tl-phase-fill')!, 'transform'), `scaleX(${(phaseModel.percent?.percent ?? 0) / 100})`, `${ph.id} fill`);
       checked += 1;
     }
   }
@@ -689,7 +689,7 @@ test('D-12: the timeline section uses only --vscode-* variables and color-mix of
   for (const r of rules) {
     for (const [prop, value] of r.decls) {
       const at = `${r.selectors.join(', ')} { ${prop}: ${value} }`;
-      for (const m of value.matchAll(/var\(\s*--([\w-]+)/g)) assert.ok(m[1]!.startsWith('vscode-') || (m[1] === 'fill' && prop === 'transform'), `${at}: only theme variables (and --fill for a scale)`);
+      for (const m of value.matchAll(/var\(\s*--([\w-]+)/g)) assert.ok(m[1]!.startsWith('vscode-'), `${at}: only theme variables`);
       for (const m of value.matchAll(/color-mix\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) assert.match(m[1]!, /^in srgb, var\(--vscode-[\w-]+(, var\(--vscode-[\w-]+\))?\) \d+%, (transparent|var\(--vscode-[\w-]+\))$/, `${at}: color-mix of theme variables`);
       assert.ok(!NAMED.test(value.replace(/var\([^)]*\)/g, '')), `${at}: no named colour`);
       if (SYSTEM.test(value)) assert.equal(r.media, '@media (forced-colors: active)', `${at}: system colours only under forced colours`);

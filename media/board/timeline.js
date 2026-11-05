@@ -677,8 +677,11 @@
       moreEls.set(key, x);
     }
     const step = m.step + 1;
+    const name = m.hidden > 0 ? T.moreName(m.hidden, step) : T.fewerName(step);
     setText(x.button, m.hidden > 0 ? T.more(m.hidden) : T.fewer);
-    attr(x.button, 'aria-label', m.hidden > 0 ? T.moreName(m.hidden, step) : T.fewerName(step));
+    attr(x.button, 'aria-label', name);
+    // Show fewer is wider than a 28 px box at 50 and 75 %: a cut label is on purpose, with the whole name in title.
+    attr(x.button, 'title', name);
     put(x.button, m.rect, ox, oy);
     return x;
   }
@@ -709,12 +712,12 @@
     };
   }
   /** The phase rail: the label with the longest variant that fits its segment, and the bar filled to the phase's percent. */
-  function drawRail(g, group, where, ox, oy) {
+  function drawRail(g, group, where, ox, oy, horizontal) {
     put(g.label, where.label, ox, oy);
     attr(g.label, 'title', group.phase.heading);
     put(g.bar, where.bar, ox, oy);
     const pct = group.phase.percent && typeof group.phase.percent.percent === 'number' ? group.phase.percent.percent : 0;
-    setStyle(g.fill, '--fill', String(pct / 100));
+    setStyle(g.fill, 'transform', (horizontal ? 'scaleX(' : 'scaleY(') + pct / 100 + ')');
     hide(g.label, !!where.label.hidden);
     if (where.label.hidden) setText(g.label, '');
     else setText(g.label, pickLabel(group.phase.labels, where.label.w, measureIn(g.label)));
@@ -943,7 +946,7 @@
     for (const [k] of dotEls) if (!used.dots.has(k)) dotEls.delete(k);
     for (const [k] of moreEls) if (!used.more.has(k)) moreEls.delete(k);
     // Labels are measured once every box is on the page.
-    for (const [g, group, at, ox, oy] of labels) drawRail(g, group, at, ox, oy);
+    for (const [g, group, at, ox, oy] of labels) drawRail(g, group, at, ox, oy, horizontal);
     // One tab stop for the dots, tiles and +{n} buttons: the selected card's dot when it is shown, else the first dot, else the first stop (the
     // arrow keys come with 62.1-05).
     const order = Array.from(list.querySelectorAll('button.tl-dot, button.tl-folded, button.tl-more'));
