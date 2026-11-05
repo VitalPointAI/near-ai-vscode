@@ -213,3 +213,62 @@ test('a reused profile whose source is malformed in the profile file is dropped 
     assert.equal(checked.validation.error, 'That saved profile is no longer available. Set up a new profile or choose another.');
   } finally { await w.cleanup(); }
 });
+
+// 61-34 (the owner's 0.6.4 re-test, item 6a): the saved-profile list is computer-wide (on code-server it is kept on the server), but keys are
+// kept per computer or browser profile. A listed profile whose key is not here (for the same person after two code-server tabs of one browser
+// profile overwrote each other's keys) is told apart from one that was really removed, and its presence is checked without reading it out.
+type SavedEntry = import('../services/profileIndex').SavedProfileEntry;
+
+/** ProfileStore.savedKeyHere, reached through a loose view so this file compiles before the method exists. */
+async function savedKeyHere(store: ProfileStore, entry: SavedEntry): Promise<unknown> {
+  const check = (store as unknown as { savedKeyHere?: (entry: SavedEntry) => Promise<unknown> }).savedKeyHere;
+  assert.equal(typeof check, 'function', 'ProfileStore has savedKeyHere');
+  return check!.call(store, entry);
+}
+
+test('savedKeyHere answers true or false only: whether the listed profile\'s key or token is in this computer\'s or browser\'s storage', async () => {
+  const w = await twoProjects();
+  try {
+    const [entry] = listSavedProfiles(w.beta.projectScopeId);
+    const here = await savedKeyHere(w.beta, entry);
+    assert.equal(here, true, 'the key is here: the answer is the boolean true, never the key');
+    assert.equal(typeof here, 'boolean');
+
+    await w.auth.removeScopedCredentials(w.alpha.getScope('profile-alpha-cloud'));
+    assert.equal(await savedKeyHere(w.beta, entry), false, 'the key is gone from this storage');
+    assert.equal(listSavedProfiles(w.beta.projectScopeId).length, 1, 'the list still names the profile');
+
+    await w.auth.saveScopedRefreshToken(w.alpha.getScope('profile-alpha-cloud'), `rt-canary-${randomUUID()}`);
+    assert.equal(await savedKeyHere(w.beta, entry), true, 'a stored sign-in token counts as present');
+
+    assert.equal(await savedKeyHere(w.beta, { ...entry, projectId: `project-${'0'.repeat(32)}` }), false, 'nothing stored under another scope');
+    assert.equal(await savedKeyHere(w.beta, { ...entry, projectId: '../alpha' }), false, 'a malformed entry reaches no key');
+    assert.equal(await savedKeyHere(new ProfileStore(w.rootB), entry), false, 'without secure storage nothing is here');
+  } finally { await w.cleanup(); }
+});
+
+test('savedKeyHere counts a local-only profile as available, because its key is optional', async () => {
+  const w = await twoProjects();
+  try {
+    const gamma = w.store(path.join(w.base, 'gamma-local'));
+    await gamma.create({ profileId: 'profile-gamma-local', displayName: 'Gamma Local', organization: 'Gamma', baseUrl: 'http://127.0.0.1:9/v1', authMode: 'apiKey', provider: 'local' });
+    const entry = listSavedProfiles(w.beta.projectScopeId).find((candidate) => candidate.profileId === 'profile-gamma-local');
+    assert.ok(entry, 'the local profile is listed');
+    assert.equal(await savedKeyHere(w.beta, entry), true);
+  } finally { await w.cleanup(); }
+});
+
+test('a reused profile whose source is still listed but whose key is not here says so, not that it was removed', async () => {
+  const w = await twoProjects();
+  try {
+    const copy = await w.beta.useSavedProfile(listSavedProfiles(w.beta.projectScopeId)[0]);
+    assert.equal(copy.validation.status, 'valid');
+    // The key is lost from this storage (as when two code-server tabs of one browser profile overwrite each other's keys); the list keeps the entry.
+    await w.auth.removeScopedCredentials(w.alpha.getScope('profile-alpha-cloud'));
+    assert.equal(listSavedProfiles(w.beta.projectScopeId).length, 1);
+    const checked = await w.store(w.rootB).validate(copy.profileId);
+    assert.equal(checked.validation.status, 'invalid');
+    assert.equal(checked.validation.error, 'Its key is not on this computer or browser. Set up a new profile here, or choose another.');
+    assert.equal(JSON.stringify(checked).includes(w.canary), false);
+  } finally { await w.cleanup(); }
+});

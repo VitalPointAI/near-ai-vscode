@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AuthService, SecretStorageLike } from '../services/auth';
-import { initProfileIndex, listSavedProfiles, runUseSavedProfile, SavedProfileUi } from '../services/profileIndex';
+import { initProfileIndex, listSavedProfiles, runUseSavedProfile, SavedProfileEntry, SavedProfileUi } from '../services/profileIndex';
 import { ProfileStore } from '../services/profileStore';
 import { createNearAiProvider } from '../services/providerFactory';
 
@@ -80,6 +80,13 @@ async function setUpAlpha(w: World): Promise<ProfileStore> {
 }
 
 function countCanary(w: World): number { return [...w.secrets.values.values()].filter((value) => value === w.canary).length; }
+
+/** ProfileStore.savedKeyHere (61-34), reached through a loose view so this file compiles before the method exists. */
+async function keyHere(store: ProfileStore, entry: SavedProfileEntry): Promise<boolean> {
+  const check = (store as unknown as { savedKeyHere?: (entry: SavedProfileEntry) => Promise<boolean> }).savedKeyHere;
+  assert.equal(typeof check, 'function', 'ProfileStore has savedKeyHere');
+  return check!.call(store, entry);
+}
 
 test('tracer: a profile set up in one project is listed and used in another by reference, and serves a chat request with the original key', async () => {
   const w = await world();
@@ -205,11 +212,13 @@ test('Use a Saved Profile lists each saved profile by name and folder with its c
     const ui = recordingUi();
     let refreshed = 0;
     let setUp = 0;
-    const outcome = await runUseSavedProfile(ui, { projectId: beta.projectScopeId, use: (entry) => beta.useSavedProfile(entry), setUpNew: async () => { setUp += 1; }, refresh: async () => { refreshed += 1; } });
+    const deps = { projectId: beta.projectScopeId, use: (entry: SavedProfileEntry) => beta.useSavedProfile(entry), hasKey: (entry: SavedProfileEntry) => keyHere(beta, entry), setUpNew: async () => { setUp += 1; }, refresh: async () => { refreshed += 1; } };
+    const outcome = await runUseSavedProfile(ui, deps);
     assert.equal(outcome, 'ready');
     assert.equal(ui.picks.length, 1);
     assert.deepEqual(ui.picks[0].items.map((item) => [item.label, item.description]), [['Alpha Cloud', 'from alpha-site']]);
     assert.match(ui.picks[0].items[0].detail, /checked/i, 'the check status is shown');
+    assert.doesNotMatch(ui.picks[0].items[0].detail, /not on this computer or browser/, 'its key is here, so it is offered as usable');
     assert.deepEqual(ui.progressTitles, ['Checking your NEAR AI key']);
     assert.deepEqual(ui.infos, [{ message: 'Alpha Cloud is ready for this project.', actions: [] }]);
     assert.deepEqual(ui.errors, []);
@@ -226,7 +235,8 @@ test('with no saved profiles, Use a Saved Profile says so plainly and offers Set
     const beta = w.store(w.rootB);
     const ui = recordingUi({ info: 'Set up a new profile' });
     let setUp = 0;
-    const outcome = await runUseSavedProfile(ui, { projectId: beta.projectScopeId, use: (entry) => beta.useSavedProfile(entry), setUpNew: async () => { setUp += 1; }, refresh: async () => undefined });
+    const deps = { projectId: beta.projectScopeId, use: (entry: SavedProfileEntry) => beta.useSavedProfile(entry), hasKey: (entry: SavedProfileEntry) => keyHere(beta, entry), setUpNew: async () => { setUp += 1; }, refresh: async () => undefined };
+    const outcome = await runUseSavedProfile(ui, deps);
     assert.equal(outcome, 'none');
     assert.deepEqual(ui.picks, [], 'there is nothing to pick');
     assert.equal(ui.infos.length, 1);
@@ -240,20 +250,83 @@ test('a saved profile that does not pass the check says why and offers Set up a 
   const w = await world();
   try {
     const alpha = await setUpAlpha(w);
-    // The key is gone from secure storage while the list still names the profile.
-    await w.auth.removeScopedCredentials(alpha.getScope('profile-alpha-cloud'));
     const beta = w.store(w.rootB);
     const ui = recordingUi({ error: 'Set up a new profile' });
     let setUp = 0;
     let refreshed = 0;
-    const outcome = await runUseSavedProfile(ui, { projectId: beta.projectScopeId, use: (entry) => beta.useSavedProfile(entry), setUpNew: async () => { setUp += 1; }, refresh: async () => { refreshed += 1; } });
+    // The key is gone from secure storage after the list was drawn (the presence check still saw it), while the list still names the profile.
+    const deps = {
+      projectId: beta.projectScopeId, use: async (entry: SavedProfileEntry) => { await w.auth.removeScopedCredentials(alpha.getScope('profile-alpha-cloud')); return beta.useSavedProfile(entry); },
+      hasKey: (entry: SavedProfileEntry) => keyHere(beta, entry), setUpNew: async () => { setUp += 1; }, refresh: async () => { refreshed += 1; }
+    };
+    const outcome = await runUseSavedProfile(ui, deps);
     assert.equal(outcome, 'failed');
     assert.equal(ui.errors.length, 1);
-    assert.match(ui.errors[0].message, /The saved profile this one uses was removed/);
+    // Changed by the owner's 0.6.4 re-test (item 6a): a key that is not here is not called removed. The source is still listed, so the
+    // reason is that its key is not on this computer or browser; a source that was really removed still says so (profileStore.test.ts).
+    assert.match(ui.errors[0].message, /^Alpha Cloud could not be used: Its key is not on this computer or browser\. Set up a new profile here, or choose another\.$/);
     assert.equal(ui.errors[0].actions.includes('Set up a new profile'), true);
     assert.equal(setUp, 1);
     assert.equal(refreshed, 1, 'the sidebar still shows the current state');
     assert.equal(await beta.getActiveSelection(), undefined, 'a profile that did not pass is not made active');
+  } finally { await w.cleanup(); }
+});
+
+// 61-34 (the owner's 0.6.4 re-test, item 6a): the list is computer-wide (on code-server it is kept on the server) but keys are kept per computer
+// or browser profile. A profile whose key is not here (for the same person, after two code-server tabs of one browser profile overwrote each
+// other's keys) is listed as unavailable with the reason, is never used, and the person is told why in plain words.
+test('tracer: Use a saved profile lists a profile whose key is not on this computer or browser as unavailable, never uses it, and says why', async () => {
+  const w = await world();
+  try {
+    const gamma = w.store(path.join(w.base, 'gamma-web'));
+    const ready = await gamma.configure({ profileId: 'profile-gamma-cloud', displayName: 'Gamma Cloud', organization: 'Gamma Co', baseUrl: BASE_URL, authMode: 'apiKey' }, w.canary);
+    assert.equal(ready.validation.status, 'valid');
+    const alpha = await setUpAlpha(w);
+    assert.deepEqual(listSavedProfiles().map((entry) => entry.displayName), ['Alpha Cloud', 'Gamma Cloud'], 'newest first, the profile about to lose its key is listed first');
+    await w.auth.removeScopedCredentials(alpha.getScope('profile-alpha-cloud'));
+    const beta = w.store(w.rootB);
+    const choices = ['Alpha Cloud', 'Gamma Cloud'];
+    const ui = recordingUi({ pick: (labels) => labels.indexOf(choices.shift() ?? ''), info: 'Choose another' });
+    const used: string[] = [];
+    let setUp = 0;
+    const deps = {
+      projectId: beta.projectScopeId, use: async (entry: SavedProfileEntry) => { used.push(entry.displayName); return beta.useSavedProfile(entry); },
+      hasKey: (entry: SavedProfileEntry) => keyHere(beta, entry), setUpNew: async () => { setUp += 1; }, refresh: async () => undefined
+    };
+    const outcome = await runUseSavedProfile(ui, deps);
+    assert.deepEqual(ui.picks[0].items.map((item) => [item.label, item.description]), [['Gamma Cloud', 'from gamma-web'], ['Alpha Cloud', 'from alpha-site']], 'usable profiles come first');
+    assert.equal(ui.picks[0].items[1].detail, 'Alpha Co. Its key is not on this computer or browser.');
+    assert.doesNotMatch(ui.picks[0].items[0].detail, /not on this computer or browser/);
+    assert.deepEqual(ui.infos[0], { message: 'Alpha Cloud: its key is not on this computer or browser. Set up a new profile here, or choose another.', actions: ['Set up a new profile', 'Choose another'] });
+    assert.deepEqual(used, ['Gamma Cloud'], 'the profile whose key is not here was never used');
+    assert.equal(ui.picks.length, 2, 'Choose another opens the list again');
+    assert.equal(outcome, 'ready');
+    assert.equal((await beta.getActiveProfile())?.displayName, 'Gamma Cloud');
+    assert.equal(setUp, 0);
+    assert.deepEqual(ui.errors, []);
+    assert.equal(JSON.stringify(ui).includes(w.canary), false, 'no message or picker item shows a key');
+    assert.equal(w.memento.dump().includes(w.canary), false, 'the saved-profile list holds no key');
+  } finally { await w.cleanup(); }
+});
+
+test('with only profiles whose key is not here, Use a saved profile says so and offers Set up a new profile, and uses nothing', async () => {
+  const w = await world();
+  try {
+    const alpha = await setUpAlpha(w);
+    await w.auth.removeScopedCredentials(alpha.getScope('profile-alpha-cloud'));
+    const beta = w.store(w.rootB);
+    for (const hasKey of [(entry: SavedProfileEntry) => keyHere(beta, entry), async (): Promise<boolean> => { throw new Error('storage unavailable'); }]) {
+      const ui = recordingUi({ info: 'Set up a new profile' });
+      const used: string[] = [];
+      let setUp = 0;
+      const deps = { projectId: beta.projectScopeId, use: async (entry: SavedProfileEntry) => { used.push(entry.displayName); return beta.useSavedProfile(entry); }, hasKey, setUpNew: async () => { setUp += 1; }, refresh: async () => undefined };
+      const outcome = await runUseSavedProfile(ui, deps);
+      assert.equal(outcome, 'none');
+      assert.deepEqual(ui.picks, [], 'there is nothing usable to pick');
+      assert.deepEqual(ui.infos, [{ message: 'None of your saved profiles from other projects has its key on this computer or browser. Set up a new profile here.', actions: ['Set up a new profile'] }]);
+      assert.deepEqual(used, [], 'nothing is used');
+      assert.equal(setUp, 1, 'the button runs the profile setup');
+    }
   } finally { await w.cleanup(); }
 });
 
@@ -269,6 +342,8 @@ test('activation sets up the saved-profile list first, and Select Profile and Us
   }
   assert.match(extension, /registerCommand\('nearAi\.useSavedProfile'/, 'the command is registered');
   assert.match(extension, /Use a profile from another project/, 'Select Profile offers the choice');
+  const useSaved = extension.slice(extension.indexOf('async function useSavedProfile'));
+  assert.match(useSaved.slice(0, useSaved.indexOf('\n}\n')), /hasKey: \(entry\) => profiles\.savedKeyHere\(entry\)/, 'Use a Saved Profile checks each key is here before offering it (61-34)');
   const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   const contributed = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.useSavedProfile');
   assert.deepEqual(contributed && { title: contributed.title, category: contributed.category }, { title: 'Use a Saved Profile', category: 'NEAR AI' });
