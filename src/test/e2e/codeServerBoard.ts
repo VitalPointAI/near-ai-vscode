@@ -10,7 +10,11 @@
 //   4. as the developer (owner decision 2026-11-04, 62-27: assignees move their own cards), on the same board plus a Ready plan a lead assigned to the
 //      developer and one the lead assigned to themselves: a real drop of the developer's plan on Cancelled is refused with the cancel sentence, a real
 //      drag of the lead's plan is picked up and refused with the not-assignee sentence, and a real drag of the developer's plan onto Backlog of its row
-//      sends exactly one hold request. None of the refused drops sends anything.
+//      sends exactly one hold request. None of the refused drops sends anything;
+//   5. the timeline (62.1-09, D-11, UI-SPEC browser backstop), on the owner's board again with the timeline the host builds (buildTimeline): a real
+//      click on Timeline draws the dots, a real hover on the phase card's dot shows the preview within 1 s, a real click opens the card with focus on
+//      its title, a real Escape closes it with focus back on the dot, and a real click on a done plan's dot, its Move to... and Backlog (reopen) sends
+//      exactly one reopen request and the dot is drawn in Backlog.
 //
 // Not part of npm test: it needs a code-server install and a Chromium-based browser, and runs only on a hidden xvfb-run screen. For example:
 //   npm run compile && NEAR_AI_CODE_SERVER=/path/to/code-server NEAR_AI_E2E_BROWSER=/path/to/chrome xvfb-run -a node dist/test/e2e/codeServerBoard.js
@@ -24,14 +28,24 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { buildBoardModel } from '../../domain/team/board';
+import { buildTimeline } from '../../domain/team/timeline';
 import { REFUSALS } from '../../domain/team/boardText';
 import { boardWorld, seedRetestBoard } from '../helpers/teamBoardWorld';
-import { connectCdp, mouseDrag, originTarget } from './cdp';
+import { connectCdp, mouseDrag, mouseMove, originTarget, pressKey } from './cdp';
 import type { CdpSession, Point } from './cdp';
 
 const USAGE = 'Set NEAR_AI_CODE_SERVER to a code-server folder (with bin/code-server) and NEAR_AI_E2E_BROWSER to a Chromium-based browser, then run under xvfb-run, for example: NEAR_AI_CODE_SERVER=/path/to/code-server NEAR_AI_E2E_BROWSER=/path/to/chrome xvfb-run -a node dist/test/e2e/codeServerBoard.js';
 const HIDDEN_SCREEN_ONLY = 'This test runs only on a hidden virtual screen. Start it with xvfb-run, for example: xvfb-run -a node dist/test/e2e/codeServerBoard.js';
 const MEDIA = path.resolve(__dirname, '../../../media/board');
+// The page's scripts are boardView.ts's own BOARD_SCRIPTS (timeline.js included since 62.1), read from its source because boardView.ts needs the
+// vscode module, which this test does not run in. A list that cannot be read stops the run.
+function boardScripts(): string[] {
+  const source = readFileSync(path.resolve(__dirname, '../../../src/services/team/boardView.ts'), 'utf8');
+  const list = /export const BOARD_SCRIPTS = \[([^\]]*)\]/.exec(source)?.[1];
+  const files = list === undefined ? [] : [...list.matchAll(/'([a-z-]+\.js)'/g)].map((m) => m[1]!);
+  if (files.length === 0 || !files.includes('board.js')) throw new Error('BOARD_SCRIPTS could not be read from src/services/team/boardView.ts');
+  return files;
+}
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 // The same rule as run.ts (owner, 2026-11-03): only a screen xvfb-run made, never the person's own screen; DISPLAY alone is never trusted.
@@ -87,7 +101,7 @@ function activate(context) {
   const panel = vscode.window.createWebviewPanel('nearAiTeamBoard', 'Team Board', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media] });
   const nonce = crypto.randomBytes(16).toString('base64');
   const asset = (f) => panel.webview.asWebviewUri(vscode.Uri.joinPath(media, f)).toString();
-  const scripts = ['board.js', 'menu.js', 'drag.js', 'detail.js', 'form.js'].map((f) => '<script nonce="' + nonce + '" src="' + asset(f) + '"></script>').join('\\n');
+  const scripts = JSON.parse(process.env.HARNESS_SCRIPTS).map((f) => '<script nonce="' + nonce + '" src="' + asset(f) + '"></script>').join('\\n');
   panel.webview.html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     + '<meta http-equiv="Content-Security-Policy" content="default-src \\'none\\'; style-src ' + panel.webview.cspSource + '; script-src \\'nonce-' + nonce + '\\';">'
     + '<link rel="stylesheet" href="' + asset('board.css') + '"><title>Team Board</title></head><body data-e2e="1"><div id="root"></div>'
@@ -130,6 +144,39 @@ const FACTS = `(() => {
     view: box(document.querySelector('.board-scroll') || document.body)
   };
 })()`;
+
+// Runs in the board page for the timeline steps (62.1-09): the Timeline button, the dots with their state, the preview and the card when shown, the
+// card's buttons, the open menu's items, and what has focus, all in window pixels as in FACTS.
+const TIMELINE_FACTS = `(() => {
+  let x = 0, y = 0, w = window, n = 0;
+  for (; w.frameElement && n < 5; n += 1) { const f = w.frameElement; const r = f.getBoundingClientRect(); x += r.left + f.clientLeft; y += r.top + f.clientTop; w = f.ownerDocument.defaultView; }
+  const box = (n) => { const r = n.getBoundingClientRect(); return { left: r.left + x, top: r.top + y, width: r.width, height: r.height }; };
+  const all = (s) => Array.from(document.querySelectorAll(s));
+  const shown = (n) => !!n && n.isConnected && !n.hidden && n.getBoundingClientRect().width > 0;
+  const named = (b) => ((b.textContent || '').trim() || b.getAttribute('aria-label') || '').trim();
+  const button = document.querySelector('#view-switch button[data-view="timeline"]');
+  const preview = document.getElementById('tl-preview');
+  const card = document.getElementById('tl-card');
+  const a = document.activeElement;
+  return {
+    timelineButton: button ? box(button) : null,
+    dots: all('.tl-dot').map((d) => Object.assign({ id: d.getAttribute('data-id'), state: d.getAttribute('data-state') || '' }, box(d))),
+    preview: shown(preview) ? box(preview) : null,
+    card: shown(card) ? Object.assign({ buttons: all('#tl-card button').map((b) => Object.assign({ name: named(b) }, box(b))) }, box(card)) : null,
+    menu: all('#menu [role="menuitem"]').filter(shown).map((m) => Object.assign({ text: (m.textContent || '').trim() }, box(m))),
+    focus: a ? { id: a.id || '', dot: a.classList && a.classList.contains('tl-dot') ? a.getAttribute('data-id') : null } : null,
+    live: (document.getElementById('live') || {}).textContent || ''
+  };
+})()`;
+interface TimelineFacts {
+  timelineButton: Box | null;
+  dots: Array<Box & { id: string; state: string }>;
+  preview: Box | null;
+  card: (Box & { buttons: Array<Box & { name: string }> }) | null;
+  menu: Array<Box & { text: string }>;
+  focus: { id: string; dot: string | null } | null;
+  live: string;
+}
 
 interface Box { left: number; top: number; width: number; height: number }
 interface Facts {
@@ -206,7 +253,7 @@ async function main(): Promise<void> {
     const origin = `http://127.0.0.1:${port}`;
     server = spawn(path.join(codeServer, 'bin', 'code-server'), ['--config', path.join(root, 'config.yaml'), '--auth', 'none', '--bind-addr', `127.0.0.1:${port}`, '--user-data-dir', path.join(root, 'user'),
       '--extensions-dir', path.join(root, 'extensions'), '--disable-telemetry', '--disable-update-check', '--disable-workspace-trust', '--disable-getting-started-override', path.join(root, 'project')],
-    { env: { ...env, HARNESS_MODEL: modelFile, HARNESS_LOG: logFile }, detached: true, stdio: 'ignore' });
+    { env: { ...env, HARNESS_MODEL: modelFile, HARNESS_LOG: logFile, HARNESS_SCRIPTS: JSON.stringify(boardScripts()) }, detached: true, stdio: 'ignore' });
     await until('code-server to answer', async () => ((await healthy(`${origin}/healthz`)) ? true : undefined), 60_000);
     const version = (await new Promise<string>((resolve) => { const p = spawn(path.join(codeServer, 'bin', 'code-server'), ['--version'], { env }); let out = ''; p.stdout.on('data', (d) => { out += String(d); }); p.on('close', () => resolve(out.split('\n').find((line) => /^\d+\.\d+\.\d+ /.test(line)) ?? 'unknown')); }));
     console.log(`(code-server ${version} on ${origin})`);
@@ -377,6 +424,72 @@ async function main(): Promise<void> {
       check(f.dragLog.some((e) => e.event === 'drop' && e.column === 'backlog' && e.lane === mineLane && e.verdict === 'ok'), 'the drop on Backlog of the developer\'s row was offered', JSON.stringify(f.dragLog.slice(-4)));
       check(cellOf(f, 'backlog', mineLane)?.cards.includes('plan:64-01') === true, 'the plan is drawn in Backlog of the developer\'s row');
     } else check(false, 'the developer\'s plan and the Backlog cell of its row are on screen', JSON.stringify({ own, mineBacklog, view: f.view }));
+
+    // 5. The timeline (62.1-09): the owner's board again, now with the timeline the host builds from the same state and viewer.
+    const tlWorld = await boardWorld();
+    seedRetestBoard(tlWorld, 3);
+    const tlModel = buildBoardModel(tlWorld.state, { nowMs: Date.now(), status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: tlWorld.owner.memberId });
+    tlModel.timeline = buildTimeline(tlWorld.state, tlModel, { viewerId: tlWorld.owner.memberId });
+    writeFileSync(modelFile, JSON.stringify(tlModel));
+    await until('the owner\'s board again', async () => { const now = await facts(); return now.cards.some((c) => c.id === 'phase:63') && !now.cards.some((c) => c.id === 'plan:64-01') ? now : undefined; }, 15_000);
+    const tl = async (): Promise<TimelineFacts> => evaluate<TimelineFacts>(boardContext, TIMELINE_FACTS);
+    const centre = (b: Box): Point => ({ x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) });
+    let t = await tl();
+    check(t.timelineButton !== null, 'the Timeline button is drawn');
+    if (t.timelineButton) await click(centre(t.timelineButton));
+    t = await until('the timeline\'s dots', async () => { const now = await tl(); return now.dots.length > 0 ? now : undefined; }, 10_000).catch(async () => tl());
+    // The first draw staggers the dots in and fades the lines in after them (62.1-06).
+    await sleep(1_200);
+    t = await tl();
+    await photo('codeserver-8-timeline.png');
+    const expected = tlModel.timeline.dots.map((d) => d.cardId).sort();
+    check(JSON.stringify(t.dots.map((d) => d.id).sort()) === JSON.stringify(expected), `a real click on Timeline draws every card as a dot (${expected.length})`, JSON.stringify(t.dots.map((d) => d.id)));
+    const phaseDot = t.dots.find((d) => d.id === 'phase:63');
+    if (phaseDot) {
+      const away = { x: Math.round(phaseDot.left + phaseDot.width / 2), y: Math.round(phaseDot.top + phaseDot.height + 80) };
+      await mouseMove(session, away);
+      await sleep(300);
+      await mouseMove(session, centre(phaseDot), { from: away, steps: 8 });
+      const hovered = Date.now();
+      t = await until('the preview', async () => { const now = await tl(); return now.preview ? now : undefined; }, 1_000).catch(async () => tl());
+      const tookMs = Date.now() - hovered;
+      await photo('codeserver-9-timeline-preview.png');
+      check(t.preview !== null && tookMs <= 1_000, `a real hover on the phase card's dot shows the preview within 1 s (${tookMs} ms)`, JSON.stringify(t.preview));
+      await click(centre(phaseDot));
+      await until('the card', async () => { const now = await tl(); return now.card ? now : undefined; }, 5_000).catch(async () => tl());
+      await sleep(500);
+      t = await tl();
+      await photo('codeserver-10-timeline-card.png');
+      check(t.card !== null, 'a real click on the dot opens its card');
+      check(t.focus?.id === 'tl-card-title', 'focus is on the card\'s title', JSON.stringify(t.focus));
+      await pressKey(session, 'Escape');
+      t = await until('the card closed', async () => { const now = await tl(); return now.card === null ? now : undefined; }, 5_000).catch(async () => tl());
+      check(t.card === null && t.focus?.dot === 'phase:63', 'a real Escape closes the card and focus is back on the phase card\'s dot', JSON.stringify(t.focus));
+    } else check(false, 'the phase card\'s dot is drawn', JSON.stringify(t.dots));
+    const planDot = t.dots.find((d) => d.id === 'plan:60-01');
+    const sentBeforeTimeline = messages().filter((m) => m.type === 'move').length;
+    if (planDot) {
+      await click(centre(planDot));
+      await until('the plan\'s card', async () => { const now = await tl(); return now.card ? now : undefined; }, 5_000).catch(async () => tl());
+      // The card springs open from its corner for 200 ms (UI-SPEC "Motion"); its buttons are measured once it has its size.
+      await sleep(500);
+      t = await tl();
+      const moveTo = t.card?.buttons.find((b) => b.name.startsWith('Move to'));
+      check(moveTo !== undefined, 'the done plan\'s card has Move to...', JSON.stringify(t.card?.buttons.map((b) => b.name)));
+      if (moveTo) await click(centre(moveTo));
+      await sleep(300);
+      t = await until('the Move to... menu', async () => { const now = await tl(); return now.menu.length > 0 ? now : undefined; }, 5_000).catch(async () => tl());
+      await photo('codeserver-11-timeline-move-menu.png');
+      const reopen = t.menu.find((m) => m.text === 'Backlog (reopen)');
+      check(reopen !== undefined, 'the menu offers Backlog (reopen)', JSON.stringify(t.menu.map((m) => m.text)));
+      if (reopen) await click(centre(reopen));
+      t = await until('the dot in Backlog', async () => { const now = await tl(); return now.dots.find((d) => d.id === 'plan:60-01')?.state === 'backlog' ? now : undefined; }, 10_000).catch(async () => tl());
+      await sleep(500);
+      await photo('codeserver-12-timeline-reopened.png');
+      const sent = messages().filter((m) => m.type === 'move').slice(sentBeforeTimeline);
+      check(sent.length === 1 && sent[0]?.itemId === 'plan:60-01' && sent[0]?.target === 'reopen', 'Backlog (reopen) from the card sent exactly one reopen request for plan 60-01', JSON.stringify(sent));
+      check(t.dots.find((d) => d.id === 'plan:60-01')?.state === 'backlog', 'the dot is drawn in Backlog', JSON.stringify(t.dots.find((d) => d.id === 'plan:60-01')));
+    } else check(false, 'the done plan\'s dot is drawn', JSON.stringify(t.dots));
   } catch (error) {
     check(false, 'the run finished', (error as Error).stack ?? String(error));
   } finally {
