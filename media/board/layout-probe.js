@@ -425,14 +425,21 @@
     return t;
   }
 
-  // The toolbar's controls as boxes (null when not shown): the View switch, the Direction switch, the zoom group, Jump to now and Show legend.
-  // In the Timeline view they are part of the timeline section; a question that asks for them (62.1-08) gets them in Columns too.
+  // The toolbar's controls as boxes (null when not shown): the View switch, the Direction switch, the zoom group, Jump to now, Show legend and the
+  // Mine, Ready and Blocked filter chips (62.1-09, found by their own label). In the Timeline view they are part of the timeline section; a question
+  // that asks for them (62.1-08) gets them in Columns too.
   function controlsOf() {
     const q = (scope, selector) => { const n = one(scope, selector); return n && visibleEl(n) ? rectOf(n) : null; };
     const viewSw = document.getElementById('view-switch');
     const dirSw = document.getElementById('direction-switch');
     const zoomEl = document.getElementById('tl-zoom');
+    const filtersEl = document.getElementById('filters');
+    const chip = (label) => {
+      const n = filtersEl ? Array.from(filtersEl.querySelectorAll('button.chip')).find((b) => (b.textContent || '').trim() === label) : undefined;
+      return n && visibleEl(n) ? rectOf(n) : null;
+    };
     return {
+      filters: { mine: chip('Mine'), ready: chip('Ready'), blocked: chip('Blocked') },
       view: { columns: q(viewSw, 'button[data-view="columns"]'), timeline: q(viewSw, 'button[data-view="timeline"]') },
       direction: { horizontal: q(dirSw, 'button[data-direction="horizontal"]'), vertical: q(dirSw, 'button[data-direction="vertical"]') },
       zoomOut: q(zoomEl, '[data-zoom="out"]'), zoomIn: q(zoomEl, '[data-zoom="in"]'), fit: q(zoomEl, '[data-zoom="fit"]'),
