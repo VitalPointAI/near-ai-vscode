@@ -375,16 +375,7 @@
       const clamp = read(ts, 'webkitLineClamp') || read(ts, 'WebkitLineClamp');
       card.titleClamped = !!t && ((clamp !== '' && clamp !== 'none' && clamp !== '0') || (typeof t.scrollHeight === 'number' && typeof t.clientHeight === 'number' && t.clientHeight > 0 && t.scrollHeight > t.clientHeight + TOL));
     }
-    const q = (scope, selector) => { const n = one(scope, selector); return n && visibleEl(n) ? rectOf(n) : null; };
-    const viewSw = document.getElementById('view-switch');
-    const dirSw = document.getElementById('direction-switch');
-    const zoomEl = document.getElementById('tl-zoom');
-    const controls = {
-      view: { columns: q(viewSw, 'button[data-view="columns"]'), timeline: q(viewSw, 'button[data-view="timeline"]') },
-      direction: { horizontal: q(dirSw, 'button[data-direction="horizontal"]'), vertical: q(dirSw, 'button[data-direction="vertical"]') },
-      zoomOut: q(zoomEl, '[data-zoom="out"]'), zoomIn: q(zoomEl, '[data-zoom="in"]'), fit: q(zoomEl, '[data-zoom="fit"]'),
-      now: q(document, '#tl-now'), legend: q(document, '#tl-legend-btn')
-    };
+    const controls = controlsOf();
     // Other elements in the board region that scroll on their own (the expanded card may: it is capped and scrolls inside).
     const otherScrollers = [];
     const boardEl = document.getElementById('board');
@@ -416,6 +407,21 @@
       try { const m = tlApi.metrics(); if (m && typeof m === 'object') t.metrics = JSON.parse(JSON.stringify(m)); } catch (error) { t.metrics = { error: String((error && error.message) || error) }; }
     }
     return t;
+  }
+
+  // The toolbar's controls as boxes (null when not shown): the View switch, the Direction switch, the zoom group, Jump to now and Show legend.
+  // In the Timeline view they are part of the timeline section; a question that asks for them (62.1-08) gets them in Columns too.
+  function controlsOf() {
+    const q = (scope, selector) => { const n = one(scope, selector); return n && visibleEl(n) ? rectOf(n) : null; };
+    const viewSw = document.getElementById('view-switch');
+    const dirSw = document.getElementById('direction-switch');
+    const zoomEl = document.getElementById('tl-zoom');
+    return {
+      view: { columns: q(viewSw, 'button[data-view="columns"]'), timeline: q(viewSw, 'button[data-view="timeline"]') },
+      direction: { horizontal: q(dirSw, 'button[data-direction="horizontal"]'), vertical: q(dirSw, 'button[data-direction="vertical"]') },
+      zoomOut: q(zoomEl, '[data-zoom="out"]'), zoomIn: q(zoomEl, '[data-zoom="in"]'), fit: q(zoomEl, '[data-zoom="fit"]'),
+      now: q(document, '#tl-now'), legend: q(document, '#tl-legend-btn')
+    };
   }
 
   // ---- checking the measurements (pure) --------------------------------------------------------------------------------------------------------
@@ -1003,7 +1009,9 @@
     else if (kind === 'focus' && typeof a.itemId === 'string' && board && typeof board.focusCard === 'function') board.focusCard(a.itemId);
     return frame().then(frame).then(() => {
       const data = collect(kind !== 'rects');
-      return reportOf(data, kind === 'rects' ? [] : check(data));
+      const out = reportOf(data, kind === 'rects' ? [] : check(data));
+      if (a.controls === true) out.controls = JSON.parse(JSON.stringify(controlsOf()));
+      return out;
     });
   }
 
