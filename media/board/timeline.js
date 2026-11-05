@@ -1055,6 +1055,43 @@
     return horizontal ? { x: out ? r.x + r.w : r.x, y: clamp(toward.y, r.y, r.y + r.h) } : { x: clamp(toward.x, r.x, r.x + r.w), y: out ? r.y + r.h : r.y };
   }
   const centreOf = (anchor) => (anchor.dot ? { x: anchor.dot.x + 14, y: anchor.dot.cy } : { x: anchor.rect.x + anchor.rect.w / 2, y: anchor.rect.y + anchor.rect.h / 2 });
+  // 62.1-08 (probe rule 8, found in the real window): a hovered, keyboard focused or open dot shows its 20 px mark at 1.25x (board.css), which
+  // reaches 2.5 px further on every side, so the ends of its lines move out with it and come back when it settles. Each path keeps its ends here.
+  const GROW = 2.5;
+  const lineEnds = new WeakMap();
+  function lineD(r, growFrom, growTo) {
+    const a = { x: r.a.x, y: r.a.y };
+    const b = { x: r.b.x, y: r.b.y };
+    if (growFrom) { if (r.horizontal) a.x += GROW; else a.y += GROW; }
+    if (growTo) { if (r.horizontal) b.x -= GROW; else b.y -= GROW; }
+    const h = r.h;
+    const straight = r.horizontal ? a.y === b.y : a.x === b.x;
+    return straight ? 'M' + a.x + ' ' + a.y + ' L' + b.x + ' ' + b.y
+      : r.horizontal ? 'M' + a.x + ' ' + a.y + ' C' + (a.x + h) + ' ' + a.y + ' ' + (b.x - h) + ' ' + b.y + ' ' + b.x + ' ' + b.y
+        : 'M' + a.x + ' ' + a.y + ' C' + a.x + ' ' + (a.y + h) + ' ' + b.x + ' ' + (b.y - h) + ' ' + b.x + ' ' + b.y;
+  }
+  /** The dots whose mark is grown now: the open card's (the selected halo), and with motion on the hovered one and the keyboard focused one. */
+  function grownIds() {
+    const out = new Set();
+    for (const id of [hoverId, focusId, open ? open.id : undefined]) {
+      if (id === undefined || out.has(id)) continue;
+      const b = dotButton(id);
+      if (!b) continue;
+      let focusVisible = false;
+      try { focusVisible = id === focusId && typeof b.matches === 'function' && b.matches(':focus-visible'); } catch (error) { focusVisible = false; }
+      if (b.classList.contains('selected') || (!reduced && (id === hoverId || focusVisible))) out.add(id);
+    }
+    return out;
+  }
+  function fitLines() {
+    const grown = grownIds();
+    for (const p of Array.from(lines.children)) {
+      const r = lineEnds.get(p);
+      if (!r) continue;
+      const d = lineD(r, r.fromDot && grown.has(r.from), r.toDot && grown.has(r.to));
+      if (p.getAttribute('d') !== d) p.setAttribute('d', d);
+    }
+  }
   function drawLines(timeline, geo, anchors) {
     const horizontal = geo.direction === 'horizontal';
     const h = geo.pitch.along / 2;
@@ -1065,13 +1102,10 @@
       const from = anchors.get(e.from);
       const to = anchors.get(e.to);
       if (!from || !to || (from.rect && from.rect === to.rect)) continue;
-      const a = endOf(from, true, centreOf(to), horizontal);
-      const b = endOf(to, false, centreOf(from), horizontal);
-      const straight = horizontal ? a.y === b.y : a.x === b.x;
-      const d = straight ? 'M' + a.x + ' ' + a.y + ' L' + b.x + ' ' + b.y
-        : horizontal ? 'M' + a.x + ' ' + a.y + ' C' + (a.x + h) + ' ' + a.y + ' ' + (b.x - h) + ' ' + b.y + ' ' + b.x + ' ' + b.y
-          : 'M' + a.x + ' ' + a.y + ' C' + a.x + ' ' + (a.y + h) + ' ' + b.x + ' ' + (b.y - h) + ' ' + b.x + ' ' + b.y;
-      paths.push(svgEl('path', { class: 'tl-line' + (e.waiting ? ' waiting' : ''), 'data-from': e.from, 'data-to': e.to, d }));
+      const r = { a: endOf(from, true, centreOf(to), horizontal), b: endOf(to, false, centreOf(from), horizontal), horizontal, h, from: e.from, to: e.to, fromDot: !!from.dot, toDot: !!to.dot };
+      const p = svgEl('path', { class: 'tl-line' + (e.waiting ? ' waiting' : ''), 'data-from': e.from, 'data-to': e.to, d: lineD(r, false, false) });
+      lineEnds.set(p, r);
+      paths.push(p);
     }
     lines.replaceChildren(...paths);
   }
@@ -1785,6 +1819,7 @@
         motion(p, 'tl-draw', DRAW.ms, { done: () => p.removeAttribute('pathLength') });
       }
     }
+    fitLines();
   }
   // ---- the keyboard model (62.1-05, D-10, D-13, TD-19, UI-SPEC "Keyboard Model") -----------------------------------------------------------------
   // One tab stop for every dot, folded tile and +{n} button (roving tabindex). The sequence is band by band, step by step, then slot; along the axis
