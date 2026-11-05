@@ -346,12 +346,32 @@
     if (input && typeof input.focus === 'function') input.focus();
   }
 
+  // Whether a node takes up space on the screen (a hidden or empty one does not).
+  function laidOut(node) {
+    if (!node || node.hidden === true || typeof node.getBoundingClientRect !== 'function') return false;
+    const box = node.getBoundingClientRect();
+    return Boolean(box) && box.height > 0;
+  }
+
+  // 61-32: the space in whole pixels above the team group, for the real-window check. Inside PR #7's panel the group is measured from the element
+  // before it; in this branch's Connect block the status (or the row, while there is no status) is measured from the element before it. Null when
+  // nothing is laid out.
+  function gapAbove() {
+    const first = connect.inPanel ? connect.node : [connect.status, connect.row].find(laidOut);
+    if (!laidOut(first) || !first.parentNode) return null;
+    const siblings = Array.from(first.parentNode.children);
+    let above = null;
+    for (let at = siblings.indexOf(first) - 1; at >= 0 && above === null; at -= 1) if (laidOut(siblings[at])) above = siblings[at];
+    if (above === null) return null;
+    return Math.round(first.getBoundingClientRect().top - above.getBoundingClientRect().bottom);
+  }
+
   // What the Connect part shows, or null when it is not drawn or not shown, by the same rule as a click on it.
   function describeConnect() {
     if (connect === null || !shown(connect.node)) return null;
     const actions = [];
     for (const entry of connect.drawn.values()) actions.push({ id: entry.id, label: entry.label.textContent });
-    return { status: connect.status.textContent, actions, inPanel: connect.inPanel };
+    return { status: connect.status.textContent, actions, inPanel: connect.inPanel, gapAbovePx: gapAbove() };
   }
 
   // What the quiet empty-chat line shows, or null when it is not drawn or not shown: the same rule as a click on it, so a line the facts report
