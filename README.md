@@ -36,7 +36,8 @@ suggests this as your next step in the chat when the project has no team yet.
 **NEAR AI: Project Setup** shows every setup step again: your project team, a
 spending limit and web search. **NEAR AI: Set Up a New Profile** connects
 another NEAR AI key or local runtime, and **NEAR AI: Select Profile** picks the
-one this project uses.
+one this project uses. **NEAR AI: Use a Saved Profile** uses a profile you set
+up in another project, without entering the key again.
 
 ## Why choose NEAR AI
 

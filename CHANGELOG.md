@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Use a profile from another project.** **NEAR AI: Use a Saved Profile**,
+  and a new choice in **NEAR AI: Select Profile**, list the profiles you set
+  up in your other projects. Pick one and this project uses it, without
+  entering the key again; the key stays where it was saved and is never
+  shown. Removing it from this project leaves the original alone, and if the
+  original was removed, the project says so and asks you to set up a new
+  profile or choose another.
+- **A setup step that fails says so.** If **Review project team** or **More
+  setup steps** in the ready message cannot open, you now see why instead of
+  nothing happening.
+- **The loop guard also ignores `cd -- <folder>`**, like `cd <folder>`.
+
 ## 0.4.14
 
 NEAR AI can now test your own systems for security problems. A new
