@@ -195,7 +195,16 @@ export function planMove(state: TeamState, viewerId: string | undefined, itemId:
     // Past the card check the viewer is the assignee, so the only moves left to refuse are a cancel and bringing back a cancelled card.
     return { ok: false, reason: item.assignee === viewerId ? REFUSALS.cancelManagersOnly : REFUSALS.notAssigneeMove };
   }
-  return { ok: true, intent, intents: [intent] };
+  return { ok: true, intent, intents: intentsFor(itemId, move, intent) };
+}
+
+// Owner decision 2026-11-05: a reopen also holds the card, so it lands in Backlog and stays there until someone releases it. The reopen alone clears
+// the hold (materialize.settle deletes it), so the reopen is written as the pair item.reopened then item.updated { hold: true }, in one append. Both
+// events answer the same permission row (moveBy), and holding a card that is open again is always allowed, so a pair that is planned is a pair the
+// log takes.
+function intentsFor(itemId: string, move: MoveKey, intent: MoveIntent): MoveIntent[] {
+  if (move !== 'reopen') return [intent];
+  return [intent, { type: 'item.updated', body: { id: itemId, changes: { hold: true } } }];
 }
 
 // How many unfinished plans wait for this card, so the host can ask for a second confirmation before a cancel leaves them waiting.

@@ -14,7 +14,7 @@
 //   5. the timeline (62.1-09, D-11, UI-SPEC browser backstop), on the owner's board again with the timeline the host builds (buildTimeline): a real
 //      click on Timeline draws the dots, a real hover on the phase card's dot shows the preview within 1 s, a real click opens the card with focus on
 //      its title, a real Escape closes it with focus back on the dot, and a real click on a done plan's dot, its Move to... and Backlog (reopen) sends
-//      exactly one reopen request and the dot is drawn in Backlog.
+//      exactly one reopen request, the card is held in Backlog and its dot shows the hold.
 //
 // Not part of npm test: it needs a code-server install and a Chromium-based browser, and runs only on a hidden xvfb-run screen. For example:
 //   npm run compile && NEAR_AI_CODE_SERVER=/path/to/code-server NEAR_AI_E2E_BROWSER=/path/to/chrome xvfb-run -a node dist/test/e2e/codeServerBoard.js
@@ -522,12 +522,16 @@ async function main(): Promise<void> {
       if (reopen) await click(centre(reopen));
       await until('the reopen request from the timeline', async () => (messages().filter((m) => m.type === 'move').length > sentBeforeTimeline ? await tl() : undefined), 10_000).catch(async () => tl());
       applyMoves(tlWorld, tlWorld.owner, tlWorld.owner.memberId, tlView);
-      t = await until('the dot in Backlog', async () => { const now = await tl(); return now.dots.find((d) => d.id === 'plan:60-01')?.state === 'backlog' ? now : undefined; }, 10_000).catch(async () => tl());
+      // A reopened card is held, and the dot draws a held card as on hold (timeline.js: blocked, then on hold, then the column). The column is
+      // checked on the board model below, so the dot's state and the card's column are both proven.
+      t = await until('the dot marked on hold', async () => { const now = await tl(); return now.dots.find((d) => d.id === 'plan:60-01')?.state === 'held' ? now : undefined; }, 10_000).catch(async () => tl());
       await sleep(500);
       await photo('codeserver-12-timeline-reopened.png');
       const sent = messages().filter((m) => m.type === 'move').slice(sentBeforeTimeline);
       check(sent.length === 1 && sent[0]?.itemId === 'plan:60-01' && sent[0]?.target === 'reopen', 'Backlog (reopen) from the card sent exactly one reopen request for plan 60-01', JSON.stringify(sent));
-      check(t.dots.find((d) => d.id === 'plan:60-01')?.state === 'backlog', 'the dot is drawn in Backlog', JSON.stringify(t.dots.find((d) => d.id === 'plan:60-01')));
+      const reopenedDot = t.dots.find((d) => d.id === 'plan:60-01');
+      const reopenedCard = buildBoardModel(tlWorld.state, { nowMs: Date.now(), status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: tlWorld.owner.memberId }).cards.find((c) => c.id === 'plan:60-01');
+      check(reopenedDot?.state === 'held' && reopenedCard?.column === 'backlog' && reopenedCard.held === true, 'the reopened card is held and drawn in Backlog, and its dot shows the hold', JSON.stringify({ dot: reopenedDot, column: reopenedCard?.column, held: reopenedCard?.held }));
     } else check(false, 'the done plan\'s dot is drawn', JSON.stringify(t.dots));
   } catch (error) {
     check(false, 'the run finished', (error as Error).stack ?? String(error));
