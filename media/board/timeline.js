@@ -846,6 +846,8 @@
     attr(b.bar, 'aria-label', T.progressName(band.title));
     setStyle(b.fill, 'width', (pct || 0) + '%');
     setText(b.progress, band.progressText || '');
+    // 62.1-08: in a short band the words can be cut beside Fold milestone; the full words are in title, so the cut is on purpose (probe rule 12).
+    attr(b.progress, 'title', band.progressText || null);
     attr(b.fold, 'aria-label', T.foldName(band.title));
     // The header is in the band's flow so it can stick (left edge in horizontal, top edge in vertical); its size and offset come from the geometry.
     setStyle(b.head, 'margin-left', px(where.header.x - where.x));
