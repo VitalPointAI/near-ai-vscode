@@ -346,6 +346,31 @@ test('after setup in a project that has a team, a short ready message offers to 
   assert.deepEqual(executed, [], 'dismissing the message does nothing more');
 });
 
+test('a step picked from the ready message that fails says so, with no key in the message', async () => {
+  reset();
+  const root = await emptyProject();
+  await withTeam(root, 'team.md');
+  infoChoice = 'Review project team';
+  const errors: string[] = [];
+  const { executeCommand } = vscodeStub.commands;
+  const { showErrorMessage } = vscodeStub.window;
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  process.on('unhandledRejection', onUnhandled);
+  vscodeStub.commands.executeCommand = async () => { throw new Error('the team could not open: Bearer secret-token-123'); };
+  vscodeStub.window.showErrorMessage = async (text: string) => { errors.push(text); return undefined as never; };
+  try {
+    await runSetUp(root);
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    vscodeStub.commands.executeCommand = executeCommand;
+    vscodeStub.window.showErrorMessage = showErrorMessage;
+    process.off('unhandledRejection', onUnhandled);
+  }
+  assert.deepEqual(errors, ['the team could not open: Bearer [REDACTED]']);
+  assert.deepEqual(unhandled, [], 'no unhandled rejection');
+});
+
 test('a caller with its own next steps (offerNextStep: false) gets only the ready message', async () => {
   reset();
   await runSetUp(await emptyProject(), { offerNextStep: false });

@@ -135,6 +135,12 @@ test('the chat loads the card helper before chat.js, draws it in the welcome sec
   const script = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.js'), 'utf8');
   assert.match(script, /case 'setup-nudge': setupKit\.renderSetupNudge\(document, welcomeReady, m\.show === true, post, \(\) => input\.focus\(\)\); break;/);
   assert.match(script, /window\.nearSetup \|\| \{ renderSetupNudge: \(\) => undefined,/);
+  // The card and the Connect panel ship hidden, and the host's first post at attach can arrive before
+  // the page is listening. So the page asks for both itself once its listeners are in place: the host
+  // answers refresh-status with the profile status and the card (see the host tests below).
+  const listening = script.indexOf("window.addEventListener('message'");
+  const asks = script.lastIndexOf("post({ type: 'refresh-status' });");
+  assert.ok(listening > 0 && asks > listening, 'the page asks for the profile status and the card after it starts listening');
   const css = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.css'), 'utf8');
   const rules = css.split('\n').filter((line) => line.includes('setup-nudge')).join('\n');
   assert.match(rules, /\.setup-nudge \{/);
