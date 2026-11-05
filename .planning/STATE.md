@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62.1-06-PLAN.md
-last_updated: "2026-11-05T02:12:09.129Z"
+stopped_at: Completed 62.1-08-PLAN.md
+last_updated: "2026-11-05T03:17:47.354Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 4199953d1a1885b2a239aec7ad21885820d7e212
+state_head: a27c8297af5f0da60c4b9de62b14ae3f0cef6920
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 77
+  completed_plans: 78
   percent: 11
 ---
 
@@ -131,6 +131,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 62.1 P04 | 30min | 3 tasks | 6 files |
 | Phase 62.1 P05 | 21min | 3 tasks | 4 files |
 | Phase 62.1 P06 | 55min | 3 tasks | 7 files |
+| Phase 62.1 P08 | 60min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -316,6 +317,12 @@ Recent decisions affecting current work:
 - [Phase 62.1]: 62.1-06: Motion is a class plus FLIP start values let go two frames later; any press or key ends it (capture listener on the scroller), prefers-reduced-motion skips it with a change listener; the closing card stays 120 ms as an inert, aria-hidden picture
 - [Phase 62.1]: 62.1-06: Zoom keeps the point under the pointer (or the focused dot) by the nearest dot's mark; the first open of a direction centres the Now marker, later opens restore the per-direction scroll; Jump to now and N focus quietly after a smooth scroll
 - [Phase 62.1]: 62.1-06: NearAiTimeline.metrics exists only with data-e2e (drawMs, frame count and p95; reset returns then clears); the fake DOM now runs capture listeners first, as a browser does
+- [Phase 62.1]: 62.1-08: timeline Small text is max(0.85em, 0.85 x the editor font size), so it meets the probe's 0.85-of-the-editor-font rule and follows a person's editor font; Columns keeps its sizes
+- [Phase 62.1]: 62.1-08: a grown mark (hover, keyboard focus, open card) moves its lines' ends 2.5 px out; under reduced motion only the open card's
+- [Phase 62.1]: 62.1-08: a card that would cover a header, a phase label or the Now pill centres its dot first; near the timeline's end the canvas grows while that card is open
+- [Phase 62.1]: 62.1-08: probe rule 12 does not judge percents inside a held header against the dots it hides (rule 1's reading); preview and card still judged everywhere (owner to review)
+- [Phase 62.1]: 62.1-08: boardTap.shape (test seams only, on a structuredClone) draws the rare states; a retry also flushes the page so Draw the timeline again recovers
+- [Phase 62.1]: 62.1-08: on this roadmap the Now step holds a planless phase the board cannot mark done, so the e2e teammate reopens the latest done plan before it (owner to confirm)
 
 ### Pending Todos
 
@@ -337,8 +344,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T02:12:08.683Z
-Stopped at: Completed 62.1-06-PLAN.md
+Last session: 2026-11-05T03:17:46.889Z
+Stopped at: Completed 62.1-08-PLAN.md
 Resume file: None
 
 ## Notes
