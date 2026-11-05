@@ -26,6 +26,7 @@ const check = (data: unknown): string[] => [...(probeHarness.window.NearAiBoardL
 
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number };
 type Point = { x: number; y: number };
+const plainJson = (value: unknown): unknown => JSON.parse(JSON.stringify(value)) as unknown;
 const box = (left: number, top: number, right: number, bottom: number): Box => ({ left, top, right, bottom, width: right - left, height: bottom - top });
 const moved = (b: Box, dx: number, dy: number): Box => box(b.left + dx, b.top + dy, b.right + dx, b.bottom + dy);
 const FG = 'rgb(204, 204, 204)';
@@ -474,4 +475,22 @@ test('on test pages the report carries NearAiTimeline.metrics when it exists, an
   assert.equal(measured.card.alpha, 1);
   assert.deepEqual((measured.card.texts as Array<Record<string, unknown>>).map((t) => [t.text, t.background, t.color, t.fontSize]), [['Alpha slice', WIDGET, FG, 13], ['Ready', WIDGET, FG, 13]]);
   assert.equal(measured.card.titleClamped, false);
+});
+
+// 62.1-08: the real-window test aims its first click at the View switch while the page is still in Columns, where the report keeps its 62-16 keys.
+// A question that asks for the controls gets the toolbar's View, Direction, zoom, Jump to now and legend boxes in either view; one that does not,
+// gets none in Columns.
+test('a measure that asks for the controls carries the View switch, Direction and zoom boxes in Columns and in the Timeline view', async () => {
+  const model = await timelineModel();
+  const h = page(true);
+  h.deliver({ type: 'state', model });
+  const plain = (await ask(h, { id: 1, action: 'measure' }))[0].report as Record<string, any>;
+  assert.equal('controls' in plain, false, 'a plain Columns report has no controls');
+  const columns = (await ask(h, { id: 2, action: 'measure', controls: true }))[0].report as Record<string, any>;
+  assert.ok(columns.controls && typeof columns.controls === 'object', 'the Columns report carries the controls when asked');
+  for (const key of ['columns', 'timeline']) assert.ok(columns.controls.view[key] && typeof columns.controls.view[key].left === 'number', `the View switch's ${key} box`);
+  assert.deepEqual(Object.keys(columns.controls).sort(), ['direction', 'fit', 'legend', 'now', 'view', 'zoomIn', 'zoomOut']);
+  h.$('#view-switch button[data-view="timeline"]')!.click();
+  const timeline = (await ask(h, { id: 3, action: 'measure', controls: true }))[0].report as Record<string, any>;
+  assert.deepEqual(plainJson(timeline.controls), plainJson(timeline.timeline.controls), 'in the Timeline view the asked controls are the timeline section\'s');
 });
