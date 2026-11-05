@@ -29,14 +29,15 @@ function columnOf(world: BoardWorld, id: string): string {
   return effectiveColumn(world.state.items, item);
 }
 
-// The owner drops the card on a column: the drop's move is planned and written exactly as the host writes it.
+// The owner drops the card on a column: the drop's move is planned and written exactly as the host writes it, every intent in order (owner decision
+// 2026-11-05: a reopen is item.reopened then item.updated { hold: true } in one append, not the first intent alone).
 function drop(world: BoardWorld, id: string, column: 'backlog'): void {
   const owner = world.owner.memberId;
   const verdict = columnMove(world.state, owner, id, column);
   assert.ok(verdict.ok && verdict.move !== undefined, `the drop on ${column} is a move: ${JSON.stringify(verdict)}`);
   const planned = planMove(world.state, owner, id, verdict.move);
   assert.ok(planned.ok, planned.ok ? '' : planned.reason);
-  world.accept(world.owner, planned.intent.type, planned.intent.body as never);
+  for (const intent of planned.intents) world.accept(world.owner, intent.type, intent.body as never);
 }
 
 test('the owner drops a finished, ready-shaped plan on Backlog: it is drawn in Backlog afterwards', async () => {
@@ -55,7 +56,7 @@ test('Move to... on a finished plan: the column the menu names is the column the
   assert.equal(reopen.column, 'backlog', 'the menu names Backlog');
   const planned = planMove(world.state, owner, READY_SHAPED, 'reopen');
   assert.ok(planned.ok, planned.ok ? '' : planned.reason);
-  world.accept(world.owner, planned.intent.type, planned.intent.body as never);
+  for (const intent of planned.intents) world.accept(world.owner, intent.type, intent.body as never);
   assert.equal(columnOf(world, READY_SHAPED), reopen.column, `the menu said ${reopen.column}`);
 });
 

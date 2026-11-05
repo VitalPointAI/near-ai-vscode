@@ -89,13 +89,18 @@ export function seedStandardBoard(world: BoardWorld): void {
 // and nobody is assigned: milestone:v0.6.0 (active), phase:60 with `donePlans` done plans plan:60-01..., and the planless phase:63.
 // assignedPlans (owner decision 2026-11-04, 62-27; off by default, so the board above is unchanged): phase:64 "Board work" with two Ready plans, plan:64-01
 // that the lead assigned to the developer and plan:64-02 that the lead assigned to themselves.
-export function seedRetestBoard(world: BoardWorld, donePlans = 3, options: { assignedPlans?: boolean } = {}): void {
+// readyShaped (62-28, owner decision 2026-11-05; off by default, so every existing seed is unchanged): each finished plan gets files, an estimate and a
+// dependency on the plan before it, so it would be ready to start the moment it is open again, as the scratch project's imported plans are.
+export function seedRetestBoard(world: BoardWorld, donePlans = 3, options: { assignedPlans?: boolean; readyShaped?: boolean } = {}): void {
   const { owner, lead, dev } = world;
   world.accept(owner, 'item.imported', importedBody({ id: 'milestone:v0.6.0', kind: 'milestone', title: 'Team Mode', active: true }));
   world.accept(owner, 'item.imported', importedBody({ id: 'phase:60', kind: 'phase', title: 'Team core', parentId: 'milestone:v0.6.0' }));
   for (let i = 1; i <= donePlans; i += 1) {
     const n = String(i).padStart(2, '0');
-    world.accept(owner, 'item.imported', importedBody({ id: `plan:60-${n}`, kind: 'plan', title: `Core slice ${n}`, parentId: 'phase:60', state: 'done', summary: true, gsd: { phase: '60', plan: n, wave: 1 } }));
+    const shaped = options.readyShaped === true
+      ? { scope: [`src/core/${n}/**`], estimate: { tokens: 20000 }, ...(i > 1 ? { dependsOn: [`plan:60-${String(i - 1).padStart(2, '0')}`] } : {}) }
+      : {};
+    world.accept(owner, 'item.imported', importedBody({ id: `plan:60-${n}`, kind: 'plan', title: `Core slice ${n}`, parentId: 'phase:60', state: 'done', summary: true, gsd: { phase: '60', plan: n, wave: 1 }, ...shaped }));
   }
   world.accept(owner, 'item.imported', importedBody({ id: 'phase:63', kind: 'phase', title: 'Claims', parentId: 'milestone:v0.6.0' }));
   if (options.assignedPlans !== true) return;

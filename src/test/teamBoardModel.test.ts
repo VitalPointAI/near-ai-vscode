@@ -54,7 +54,7 @@ test('tracer: a model from real events, a hold planned with planMove and applied
   });
 
   const plan = planMove(world.state, world.owner.memberId, 'plan:90-01', 'hold');
-  assert.deepEqual(plan, { ok: true, intent: { type: 'item.updated', body: { id: 'plan:90-01', changes: { hold: true } } } });
+  assert.deepEqual(plan, { ok: true, intent: { type: 'item.updated', body: { id: 'plan:90-01', changes: { hold: true } } }, intents: [{ type: 'item.updated', body: { id: 'plan:90-01', changes: { hold: true } } }] });
   if (!plan.ok) return;
   world.accept(world.owner, plan.intent.type, plan.intent.body as never);
 

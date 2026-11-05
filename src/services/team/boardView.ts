@@ -797,12 +797,14 @@ export class BoardController {
       return;
     }
 
-    // The write plans a third time inside the append, on the state fetched just before it, so a page that was behind gets a fresh refusal.
+    // The write plans a third time inside the append, on the state fetched just before it, so a page that was behind gets a fresh refusal. Every
+    // intent the move writes is appended in order (owner decision 2026-11-05, 62-28: a reopen also holds the card), so the pair lands together or not
+    // at all.
     let builderRefusal: string | undefined;
     try {
       const result = await session.currentLog().append((fresh) => {
         const planned = planMove(fresh, viewerId, itemId, target, input);
-        if (planned.ok) return [planned.intent];
+        if (planned.ok) return planned.intents;
         builderRefusal = planned.reason;
         return { conflict: planned.reason };
       });

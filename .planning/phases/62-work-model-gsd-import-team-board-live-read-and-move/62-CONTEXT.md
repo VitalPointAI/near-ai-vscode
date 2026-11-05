@@ -152,3 +152,13 @@ Found in the owner's re-test on 0.6.3 (62-UAT "Re-test on 0.6.3"): "Bob shouldn'
 ## Owner decision (2026-11-04): assignees move their own cards
 
 "developers should be able to move cards they have been assigned." Any confirmed non-observer member who is the current assignee of a card (assigned by a lead or by themselves) may make the board moves on that card: mark done, block/unblock, hold/release, reopen. Cancel (and reopen from Cancelled) stays with the owner and leads (orchestrator default, owner may override). Owners and leads may still move any card. Enforced on write and read (actionForEvent with state), signed events unchanged. Drag follows the same rule.
+
+## Owner decision (2026-11-05): a reopened card stays in Backlog
+
+Found in the owner's re-test on 0.6.4 (62-UAT "Re-test on 0.6.4", board steps 12 and 16; debug session board-reopen-lands-in-ready): "Every reopen lands in Backlog" (owner decision A, 2026-11-05). Refines D-12 and uses D-11's hold.
+
+- Every reopen lands in Backlog and is held there, whatever the card's readiness: a done card, a card that is not ready to start, and a cancelled card the owner or a lead brings back. It stays in Backlog until someone moves it to Ready.
+- The card leaves Backlog only when a person moves it on: a drop on Ready, or Move to... and Release. Release of a card that is not ready to start names what is still in the way, as it does today.
+- The reopen is the existing pair of signed events, item.reopened then item.updated { hold: true }, written in one append, so a reopen and its hold land together or not at all. No event body, no stored state shape, no permission row and no hash changes: STATE_HASH_VERSION stays 1 and no pinned hash moves. Changing the materialiser so that a reopen holds by itself was rejected, because clients on 0.6.4 would then draw the same log differently and the snapshot hashes would disagree.
+- Timeline dots stay non-draggable (owner decision of 2026-11-05 on 62.1); Move to... is how a card moves on the timeline, and it makes the same reopen.
+- Plan: 62-28.

@@ -27,10 +27,13 @@ import * as http from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { buildBoardModel } from '../../domain/team/board';
+import { buildBoardModel, planMove } from '../../domain/team/board';
+import type { BoardModel, MoveKey } from '../../domain/team/board';
 import { buildTimeline } from '../../domain/team/timeline';
 import { REFUSALS } from '../../domain/team/boardText';
 import { boardWorld, seedRetestBoard } from '../helpers/teamBoardWorld';
+import type { BoardWorld } from '../helpers/teamBoardWorld';
+import type { TestActor } from '../helpers/teamEvents';
 import { connectCdp, mouseDrag, mouseMove, originTarget, pressKey } from './cdp';
 import type { CdpSession, Point } from './cdp';
 
@@ -88,9 +91,9 @@ async function until<T>(what: string, probe: () => Promise<T | undefined> | T | 
 }
 
 // The test extension: a webview panel with the board's own files, the page markup boardView.ts writes (nonce CSP, one script tag per file, data-e2e
-// so the page keeps its drag log), the recorded model on 'ready', and every message from the page written to a log. A move is answered with the card
-// in its new column, as the host would after the signed event. When the test writes another model to the file (the developer's view, step 4) the
-// harness posts it, as the host does when the session changes.
+// so the page keeps its drag log), the recorded model on 'ready', and every message from the page written to a log. A move is only logged: the test
+// plans it with the real model for the step's viewer and accepts its intents into the step's signed world (owner decision 2026-11-05, 62-28), then
+// writes the rebuilt model to the file, which the harness posts as the host does when the session changes. The harness never moves a card itself.
 const HARNESS_JS = `const vscode = require('vscode');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -114,13 +117,6 @@ function activate(context) {
   panel.webview.onDidReceiveMessage((m) => {
     log(m);
     if (m && m.type === 'ready') panel.webview.postMessage({ type: 'state', model });
-    if (m && m.type === 'move') {
-      const c = model.cards.find((x) => x.id === m.itemId);
-      const mv = c && c.moves.find((x) => x.key === m.target);
-      const col = mv && model.columns.find((x) => x.key === mv.column);
-      if (c && mv) { c.column = mv.column; c.stateLabel = col ? col.label : c.stateLabel; c.moves = []; }
-      panel.webview.postMessage({ type: 'state', model });
-    }
   });
 }
 module.exports = { activate, deactivate() {} };
@@ -231,8 +227,10 @@ async function main(): Promise<void> {
   try {
     // The owner's board shape, built by the real model over a signed in-memory log, seen by the owner.
     const world = await boardWorld();
-    seedRetestBoard(world, 3);
-    const model = buildBoardModel(world.state, { nowMs: Date.now(), status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: world.owner.memberId });
+    seedRetestBoard(world, 3, { readyShaped: true });
+    // The owner's view of the stepped world, rebuilt after every accepted move so the page draws what the signed log now says.
+    const ownerView = (): BoardModel => buildBoardModel(world.state, { nowMs: Date.now(), status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: world.owner.memberId });
+    const model = ownerView();
     const ext = path.join(root, 'extensions', 'test.near-ai-board-harness-0.0.1');
     mkdirSync(path.join(ext, 'media', 'board'), { recursive: true });
     for (const file of readdirSync(MEDIA)) if (/\.(js|css)$/.test(file) && file !== 'layout-probe.js') copyFileSync(path.join(MEDIA, file), path.join(ext, 'media', 'board', file));
@@ -298,6 +296,22 @@ async function main(): Promise<void> {
       writeFileSync(path.join(shots, name), Buffer.from(picture.data, 'base64'));
     };
     const messages = (): Array<Record<string, unknown>> => readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    // A move request from the page is planned with the real model for the step's viewer and accepted into the step's signed world, every intent in
+    // order (owner decision 2026-11-05, 62-28), then the rebuilt model is written for the harness to post, as the host does after the signed event.
+    // The harness never moves a card itself, so a move the log would refuse fails the step instead of being drawn.
+    let handledMoves = 0;
+    const applyMoves = (source: BoardWorld, actor: TestActor, viewerId: string, rebuild: () => BoardModel): void => {
+      const pending = messages().filter((m) => m.type === 'move').slice(handledMoves);
+      handledMoves += pending.length;
+      for (const request of pending) {
+        const itemId = String(request.itemId);
+        const target = String(request.target) as MoveKey;
+        const planned = planMove(source.state, viewerId, itemId, target);
+        if (!planned.ok) throw new Error(`the page asked for ${target} on ${itemId} and the model refused it: ${planned.reason}`);
+        for (const intent of planned.intents) source.accept(actor, intent.type, intent.body as never);
+      }
+      if (pending.length > 0) writeFileSync(modelFile, JSON.stringify(rebuild()));
+    };
     const middle = (b: Box): Point => ({ x: b.left + b.width / 2, y: b.top + Math.min(40, b.height / 2) });
     const grip = (b: Box): Point => ({ x: b.left + Math.min(40, b.width / 2), y: b.top + 20 });
     const click = async (at: Point): Promise<void> => {
@@ -344,7 +358,8 @@ async function main(): Promise<void> {
       check(!messages().some((m) => m.type === 'move'), 'no move request was sent');
     }
 
-    // 3. A real click opens Done, then a real drag reopens a done plan in Backlog.
+    // 3. A real click opens Done, then a real drag reopens a finished plan in Backlog, and a second real drag releases it to Ready. The plans are
+    // ready-shaped (files, an estimate, a finished dependency), so the reopen has to hold the card in Backlog to stay where it was dropped.
     const done = head(f, 'done');
     if (done) await click({ x: done.left + done.width / 2, y: done.top + 24 });
     f = await until('Done open with its cards', async () => { const now = await facts(); return (cellOf(now, 'done')?.cards.length ?? 0) === 3 ? now : undefined; }, 10_000).catch(async () => facts());
@@ -353,18 +368,34 @@ async function main(): Promise<void> {
     const backlog = cellOf(f, 'backlog');
     if (plan && backlog) {
       await mouseDrag(session, grip(plan), middle(backlog), { steps: 15, pauseMs: 20 });
+      f = await until('the reopen request', async () => (messages().filter((m) => m.type === 'move').length > 0 ? await facts() : undefined), 10_000).catch(async () => facts());
+      applyMoves(world, world.owner, world.owner.memberId, ownerView);
       f = await until('the reopened plan in Backlog', async () => { const now = await facts(); return cellOf(now, 'backlog')?.cards.includes('plan:60-03') && now.live !== '' ? now : undefined; }, 10_000).catch(async () => facts());
       await photo('codeserver-3-plan-reopened.png');
       const moves = messages().filter((m) => m.type === 'move');
       check(moves.length === 1 && moves[0]?.itemId === 'plan:60-03' && moves[0]?.target === 'reopen', 'the drop sent exactly one reopen request for plan 60-03', JSON.stringify(moves));
       check(f.dragLog.some((e) => e.event === 'drop' && e.column === 'backlog' && e.verdict === 'ok'), 'the drop on Backlog was offered', JSON.stringify(f.dragLog));
-      check(cellOf(f, 'backlog')?.cards.includes('plan:60-03') === true && f.live === 'Reopened plan 60-03 in Backlog.', 'the plan is drawn in Backlog and the page says it was reopened', `live: ${f.live}`);
+      check(cellOf(f, 'backlog')?.cards.includes('plan:60-03') === true && f.live === 'Reopened plan 60-03 in Backlog.', 'the finished, ready-shaped plan is drawn in Backlog and the page says it was reopened', `live: ${f.live}`);
+      // 3b. A real drag of the reopened card from Backlog to Ready: one release, and the card is drawn in Ready.
+      const reopened = f.cards.find((c) => c.id === 'plan:60-03');
+      const readyCell = cellOf(f, 'ready');
+      if (reopened && readyCell) {
+        await mouseDrag(session, grip(reopened), middle(readyCell), { steps: 15, pauseMs: 20 });
+        f = await until('the release request', async () => (messages().filter((m) => m.type === 'move').length > 1 ? await facts() : undefined), 10_000).catch(async () => facts());
+        applyMoves(world, world.owner, world.owner.memberId, ownerView);
+        f = await until('the released plan in Ready', async () => { const now = await facts(); return cellOf(now, 'ready')?.cards.includes('plan:60-03') ? now : undefined; }, 10_000).catch(async () => facts());
+        await photo('codeserver-3b-plan-released.png');
+        const sent = messages().filter((m) => m.type === 'move').slice(1);
+        check(sent.length === 1 && sent[0]?.itemId === 'plan:60-03' && sent[0]?.target === 'release', 'a real drag of the reopened plan to Ready sent exactly one release request', JSON.stringify(sent));
+        check(cellOf(f, 'ready')?.cards.includes('plan:60-03') === true, 'the released plan is drawn in Ready', JSON.stringify(cellOf(f, 'ready')));
+      } else check(false, 'the reopened plan and the Ready cell are drawn', JSON.stringify({ reopened, readyCell }));
     } else check(false, 'a done plan and the Backlog cell are drawn', JSON.stringify({ plan, backlog }));
 
     // 4. The developer's view (owner decision 2026-11-04, 62-27): the same board plus a Ready plan the lead gave the developer and one the lead kept.
     const devWorld = await boardWorld();
     seedRetestBoard(devWorld, 3, { assignedPlans: true });
-    const devModel = buildBoardModel(devWorld.state, { nowMs: Date.now(), status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: devWorld.dev.memberId });
+    const devView = (): BoardModel => buildBoardModel(devWorld.state, { nowMs: Date.now(), status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: devWorld.dev.memberId });
+    const devModel = devView();
     const mineLane = devModel.cards.find((c) => c.id === 'plan:64-01')?.lane.member ?? '';
     const leadLane = devModel.cards.find((c) => c.id === 'plan:64-02')?.lane.member ?? '';
     const sentBefore = messages().filter((m) => m.type === 'move').length;
@@ -417,6 +448,8 @@ async function main(): Promise<void> {
     const mineBacklog = cellOf(f, 'backlog', mineLane);
     if (own && mineBacklog && onScreen(grip(own), f.view) && onScreen(middle(mineBacklog), f.view)) {
       await mouseDrag(session, grip(own), middle(mineBacklog), { steps: 15, pauseMs: 20 });
+      f = await until('the hold request', async () => (messages().filter((m) => m.type === 'move').length > sentBefore ? await facts() : undefined), 10_000).catch(async () => facts());
+      applyMoves(devWorld, devWorld.dev, devWorld.dev.memberId, devView);
       f = await until('the developer\'s plan in Backlog', async () => { const now = await facts(); return cellOf(now, 'backlog', mineLane)?.cards.includes('plan:64-01') ? now : undefined; }, 10_000).catch(async () => facts());
       await photo('codeserver-7-developer-plan-held.png');
       const sent = messages().filter((m) => m.type === 'move').slice(sentBefore);
@@ -427,9 +460,13 @@ async function main(): Promise<void> {
 
     // 5. The timeline (62.1-09): the owner's board again, now with the timeline the host builds from the same state and viewer.
     const tlWorld = await boardWorld();
-    seedRetestBoard(tlWorld, 3);
-    const tlModel = buildBoardModel(tlWorld.state, { nowMs: Date.now(), status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: tlWorld.owner.memberId });
-    tlModel.timeline = buildTimeline(tlWorld.state, tlModel, { viewerId: tlWorld.owner.memberId });
+    seedRetestBoard(tlWorld, 3, { readyShaped: true });
+    const tlView = (): BoardModel => {
+      const ownerModel = buildBoardModel(tlWorld.state, { nowMs: Date.now(), status: { kind: 'live', text: 'Live' }, canWrite: true, viewerId: tlWorld.owner.memberId });
+      ownerModel.timeline = buildTimeline(tlWorld.state, ownerModel, { viewerId: tlWorld.owner.memberId });
+      return ownerModel;
+    };
+    const tlModel = tlView();
     writeFileSync(modelFile, JSON.stringify(tlModel));
     await until('the owner\'s board again', async () => { const now = await facts(); return now.cards.some((c) => c.id === 'phase:63') && !now.cards.some((c) => c.id === 'plan:64-01') ? now : undefined; }, 15_000);
     const tl = async (): Promise<TimelineFacts> => evaluate<TimelineFacts>(boardContext, TIMELINE_FACTS);
@@ -442,7 +479,7 @@ async function main(): Promise<void> {
     await sleep(1_200);
     t = await tl();
     await photo('codeserver-8-timeline.png');
-    const expected = tlModel.timeline.dots.map((d) => d.cardId).sort();
+    const expected = (tlModel.timeline?.dots ?? []).map((d) => d.cardId).sort();
     check(JSON.stringify(t.dots.map((d) => d.id).sort()) === JSON.stringify(expected), `a real click on Timeline draws every card as a dot (${expected.length})`, JSON.stringify(t.dots.map((d) => d.id)));
     const phaseDot = t.dots.find((d) => d.id === 'phase:63');
     if (phaseDot) {
@@ -483,6 +520,8 @@ async function main(): Promise<void> {
       const reopen = t.menu.find((m) => m.text === 'Backlog (reopen)');
       check(reopen !== undefined, 'the menu offers Backlog (reopen)', JSON.stringify(t.menu.map((m) => m.text)));
       if (reopen) await click(centre(reopen));
+      await until('the reopen request from the timeline', async () => (messages().filter((m) => m.type === 'move').length > sentBeforeTimeline ? await tl() : undefined), 10_000).catch(async () => tl());
+      applyMoves(tlWorld, tlWorld.owner, tlWorld.owner.memberId, tlView);
       t = await until('the dot in Backlog', async () => { const now = await tl(); return now.dots.find((d) => d.id === 'plan:60-01')?.state === 'backlog' ? now : undefined; }, 10_000).catch(async () => tl());
       await sleep(500);
       await photo('codeserver-12-timeline-reopened.png');

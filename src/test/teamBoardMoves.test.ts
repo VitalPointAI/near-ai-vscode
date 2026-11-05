@@ -257,9 +257,9 @@ test('a block or cancel reason is trimmed into the intent, flattened to one line
   for (const move of REASON_MOVES) {
     const id = 'plan:91-01';
     const type = move === 'block' ? 'item.blocked' : 'item.cancelled';
-    assert.deepEqual(planMove(world.state, owner, id, move, { reason: '  waiting for the API key  ' }), { ok: true, intent: { type, body: { id, reason: 'waiting for the API key' } } }, move);
-    assert.deepEqual(planMove(world.state, owner, id, move, { reason: 'first line\nsecond line' }), { ok: true, intent: { type, body: { id, reason: 'first line second line' } } }, `${move} one line`);
-    assert.deepEqual(planMove(world.state, owner, id, move, { reason: 'wait for \u202Eyek\u202C\u200B' }), { ok: true, intent: { type, body: { id, reason: 'wait for yek' } } }, `${move} without bidi characters (IN-01)`);
+    assert.deepEqual(planMove(world.state, owner, id, move, { reason: '  waiting for the API key  ' }), { ok: true, intent: { type, body: { id, reason: 'waiting for the API key' } }, intents: [{ type, body: { id, reason: 'waiting for the API key' } }] }, move);
+    assert.deepEqual(planMove(world.state, owner, id, move, { reason: 'first line\nsecond line' }), { ok: true, intent: { type, body: { id, reason: 'first line second line' } }, intents: [{ type, body: { id, reason: 'first line second line' } }] }, `${move} one line`);
+    assert.deepEqual(planMove(world.state, owner, id, move, { reason: 'wait for \u202Eyek\u202C\u200B' }), { ok: true, intent: { type, body: { id, reason: 'wait for yek' } }, intents: [{ type, body: { id, reason: 'wait for yek' } }] }, `${move} without bidi characters (IN-01)`);
     assert.equal(planMove(world.state, owner, id, move, { reason: 'x'.repeat(200) }).ok, true, `${move} 200 characters`);
     for (const bad of [undefined, '', '   ', '\n\t', 'x'.repeat(201)]) {
       const input = bad === undefined ? {} : { reason: bad };
@@ -268,8 +268,8 @@ test('a block or cancel reason is trimmed into the intent, flattened to one line
     assert.deepEqual(planMove(world.state, owner, id, move, { reason: secret }), { ok: false, reason: 'This text looks like a password or key, so it was not saved. Remove it and try again.' }, `${move} secret`);
   }
   // The moves that need no reason ignore one, so a stray reason never reaches the log.
-  assert.deepEqual(planMove(world.state, owner, 'plan:91-01', 'hold', { reason: secret }), { ok: true, intent: { type: 'item.updated', body: { id: 'plan:91-01', changes: { hold: true } } } });
-  assert.deepEqual(planMove(world.state, owner, 'plan:91-03', 'unblock', { reason: secret }), { ok: true, intent: { type: 'item.unblocked', body: { id: 'plan:91-03' } } });
+  assert.deepEqual(planMove(world.state, owner, 'plan:91-01', 'hold', { reason: secret }), { ok: true, intent: { type: 'item.updated', body: { id: 'plan:91-01', changes: { hold: true } } }, intents: [{ type: 'item.updated', body: { id: 'plan:91-01', changes: { hold: true } } }] });
+  assert.deepEqual(planMove(world.state, owner, 'plan:91-03', 'unblock', { reason: secret }), { ok: true, intent: { type: 'item.unblocked', body: { id: 'plan:91-03' } }, intents: [{ type: 'item.unblocked', body: { id: 'plan:91-03' } }] });
 });
 
 test('each move says what kind of prompt follows, and a cancel reports how many unfinished plans wait for the card', async () => {

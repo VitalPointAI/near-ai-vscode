@@ -44,7 +44,9 @@ export interface CardMove { key: MoveKey; label: string; column?: BoardColumn; p
 export type MoveIntent =
   | { type: 'item.updated'; body: ItemUpdatedBody } | { type: 'item.blocked'; body: ItemBlockedBody } | { type: 'item.unblocked'; body: ItemUnblockedBody }
   | { type: 'item.cancelled'; body: ItemCancelledBody } | { type: 'item.reopened'; body: ItemReopenedBody };
-export type MoveResult = { ok: true; intent: MoveIntent } | { ok: false; reason: string };
+// Owner decision 2026-11-05 (62-28): a reopen is two events, item.reopened then item.updated { hold: true }, written in one append, so a move is
+// planned as the list of intents it writes in order. intent is always intents[0], so every reader of a single move stays correct.
+export type MoveResult = { ok: true; intent: MoveIntent; intents: MoveIntent[] } | { ok: false; reason: string };
 // G-62-5 (62-19): assign and unassign for the owner and leads (the person list), assign-me and unassign-me for any other member who is not an
 // observer (62-25). memberId undefined in planAssign means unassign.
 export type AssignAction = 'assign' | 'unassign' | 'assign-me' | 'unassign-me';
@@ -193,7 +195,7 @@ export function planMove(state: TeamState, viewerId: string | undefined, itemId:
     // Past the card check the viewer is the assignee, so the only moves left to refuse are a cancel and bringing back a cancelled card.
     return { ok: false, reason: item.assignee === viewerId ? REFUSALS.cancelManagersOnly : REFUSALS.notAssigneeMove };
   }
-  return { ok: true, intent };
+  return { ok: true, intent, intents: [intent] };
 }
 
 // How many unfinished plans wait for this card, so the host can ask for a second confirmation before a cancel leaves them waiting.
