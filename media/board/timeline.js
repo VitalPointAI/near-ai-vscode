@@ -1166,8 +1166,7 @@
     const width = scroll.clientWidth > 0 ? scroll.clientWidth : window.innerWidth || 800;
     const geo = geometry(timeline, geoOptions(saved, width));
     const horizontal = geo.direction === 'horizontal';
-    setStyle(canvas, 'width', px(geo.width));
-    setStyle(canvas, 'height', px(geo.height));
+    sizeCanvas(geo);
     attr(canvas, 'data-zoom', geo.zoom);
     // Where the scroller goes (D-09, D-13): the place a zoom or Fit milestone asked for, else on an open or a direction switch the first screen or
     // the saved scroll of the direction. A live update leaves it where it is.
@@ -1601,6 +1600,14 @@
     attr(node, 'data-side', r.side);
     return r;
   }
+  /** The canvas is the geometry's size, plus, while a card is open that needed it, the room past the end that let its dot come to the middle. */
+  function sizeCanvas(geo) {
+    const room = open && open.room ? open.room : { w: 0, h: 0 };
+    setStyle(canvas, 'width', px(geo.width + room.w));
+    setStyle(canvas, 'height', px(geo.height + room.h));
+  }
+  /** Whether a placed layer covers its own dot or anything placement keeps clear (the Now pill, the headers where they stick, the phase labels). */
+  const covers = (r, box) => overlaps(boxOf(r), asBox(box)) || obstaclesOf(drawn.geo).some((o) => overlaps(boxOf(r), boxOf(o)));
   // The expanded card is 320 px wide (the view width under 520 px), its height its content's, at most the scroller less 16 px.
   const CARD = Object.freeze({ width: 320, estimate: 240, open: 200, close: 120 });
   /** Places the card next to its dot, again only when the dot moved or the window or the drawing changed (UI-SPEC "Placement"): panning keeps it where
@@ -1621,12 +1628,30 @@
     endOn(cardBox);
     const was = open ? open.id : undefined;
     open = { id, faceSig: '', factsSig: '', at: '' };
+    // A card switched to from one that grew the canvas starts from the timeline's own size.
+    sizeCanvas(drawn.geo);
     attr(cardBox, 'data-id', id);
     board.select(id);
     fillCard(c, dot);
     showLayer(cardBox, true);
     const box = drawn.boxes.get(id);
-    const r = placeCard(box);
+    let r = placeCard(box);
+    // 62.1-08 (probe rule 12, found in the real window): when no side had room without covering a header with its percent, a phase label or the
+    // Now pill (a dot near the edge of the view, under its band's header), the timeline first scrolls the dot to the middle of the view, then the
+    // card is placed again beside it.
+    // Near the end of the timeline there is no canvas left to scroll, so while the card is open the canvas grows past its end along the axis by
+    // what centring the dot needs.
+    if (r && covers(r, box)) {
+      const size = scrollerSize();
+      const g = drawn.geo;
+      const along = g.direction === 'vertical' ? { w: 0, h: Math.max(0, Math.ceil(box.y + box.h / 2 + size.height / 2 - g.height)) } : { w: Math.max(0, Math.ceil(box.x + box.w / 2 + size.width / 2 - g.width)), h: 0 };
+      open.room = along;
+      sizeCanvas(g);
+      scroll.scrollLeft = fitScroll(box.x + box.w / 2 - size.width / 2, g.width + along.w - size.width);
+      scroll.scrollTop = fitScroll(box.y + box.h / 2 - size.height / 2, g.height + along.h - size.height);
+      open.at = '';
+      r = placeCard(box) || r;
+    }
     // The card springs open from its corner nearest the dot (UI-SPEC "Motion").
     if (r) setStyle(cardBox, 'transform-origin', (box.x + box.w / 2 <= r.left + r.width / 2 ? 'left' : 'right') + ' ' + (box.cy <= r.top + r.height / 2 ? 'top' : 'bottom'));
     motion(cardBox, 'tl-card-in', CARD.open);
@@ -1642,7 +1667,9 @@
     const id = open.id;
     const a = document.activeElement;
     const inside = !a || a === document.body || !a.isConnected || cardBox.contains(a);
+    const grew = !!open.room && (open.room.w > 0 || open.room.h > 0);
     open = undefined;
+    if (grew && drawn) sizeCanvas(drawn.geo);
     attr(cardBox, 'data-id', null);
     if (restore && inside) focusDot(id);
     hideCard();

@@ -857,19 +857,24 @@ test('62.1-08: a card that would cover a header, a phase label or the Now pill s
   h.$('#direction-switch button[data-direction="vertical"]')!.click();
   const scroller = h.$('.tl-scroll')!;
   scroller.clientWidth = 1384;
-  scroller.clientHeight = 300;
+  scroller.clientHeight = 392;
   const b = dot(h, CHORE);
   const band = b.closest('li.tl-milestone')!;
   const at = { left: px(b, 'left') + px(band, 'left'), top: px(b, 'top') + px(band, 'top'), width: px(b, 'width'), height: px(b, 'height') };
   const head = { left: px(band, 'left'), top: px(band, 'top'), width: px(band, 'width'), height: 56 };
   // The dot sits at the bottom edge of the view, its band's header just above it.
-  scroller.scrollTop = Math.max(0, at.top + at.height + 8 - 300);
+  scroller.scrollTop = Math.max(0, at.top + at.height + 8 - 392);
   const before = scroller.scrollTop;
   h.click(b);
   const c = openCard(h);
   const rect = { left: px(c, 'left'), top: px(c, 'top'), width: px(c, 'width'), height: c.style.getPropertyValue('max-height') ? px(c, 'max-height') : 240 };
   assert.notEqual(scroller.scrollTop, before, 'the timeline scrolled to make room');
-  assert.ok(at.top >= scroller.scrollTop && at.top + at.height <= scroller.scrollTop + 300, 'the dot stays in view');
+  assert.ok(at.top >= scroller.scrollTop && at.top + at.height <= scroller.scrollTop + 392, 'the dot stays in view');
   assert.ok(!overlaps(rect, head), `the card (${JSON.stringify(rect)}) covers no part of its band's header (${JSON.stringify(head)})`);
   assert.ok(!overlaps(rect, at), 'nor its own dot');
+  // The dot is near the end of the timeline, so the canvas grew past its end while the card is open, and is back to its size once it closes.
+  const grown = px(h.$('.tl-canvas')!, 'height');
+  h.press(h.$('#tl-card-title')!, 'Escape');
+  assert.equal(card(h), null, 'the card is closed');
+  assert.ok(px(h.$('.tl-canvas')!, 'height') < grown, 'the canvas is back to the timeline\'s own size');
 });
