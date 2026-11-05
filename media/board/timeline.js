@@ -343,7 +343,8 @@
   /**
    * Where a layer of this size goes next to its dot. The sides are tried in the direction's order (horizontal: below, above, right, left; vertical:
    * right, left, below, above; narrow: below, above at the full view width). The first side where the whole layer fits inside the view and covers
-   * neither the dot nor an obstacle wins. Otherwise a side with at least 160 px of room that covers neither wins, its height capped to that room. Otherwise
+   * neither the dot nor an obstacle wins. Under 520 px, when no side is clear at the full width (the Now dot between the Now pill and the rail's
+   * phase labels, 62.1-09), below and above are tried again from the dot's own left edge to the view's right edge, clear of the rail. Otherwise a side with at least 160 px of room that covers neither wins, its height capped to that room. Otherwise
    * the side with the most room that covers nothing, else the side with the most room, capped. Below and above put the layer's left edge at the dot's
    * left edge, right and left its top at the dot's top, each shifted to stay inside the view. The layer is never over its own dot.
    * Returns { left, top, width, height, side, capped }.
@@ -356,12 +357,13 @@
     const narrow = m.narrow === true;
     const sides = narrow ? ['below', 'above'] : m.direction === 'vertical' ? ['right', 'left', 'below', 'above'] : ['below', 'above', 'right', 'left'];
     const obs = (Array.isArray(obstacles) ? obstacles : []).filter(isObj).map(boxOf).filter((o) => o.width > 0 && o.height > 0);
-    const w = narrow ? v.width : Math.min(s.width, v.width);
+    let w = narrow ? v.width : Math.min(s.width, v.width);
+    let besideRail = false;
     const h = s.height;
     const gap = LAYER.gap;
     const right = v.left + v.width;
     const bottom = v.top + v.height;
-    const alongX = () => clamp(a.left, v.left, Math.max(v.left, right - w));
+    const alongX = () => (besideRail ? a.left : clamp(a.left, v.left, Math.max(v.left, right - w)));
     const alongY = (hh) => clamp(a.top, v.top, Math.max(v.top, bottom - hh));
     const vertical = (side) => side === 'below' || side === 'above';
     function at(side, hh) {
@@ -397,6 +399,14 @@
     }
     const done = (r, side) => ({ left: r.left, top: r.top, width: r.width, height: r.height, side, capped: r.height < h || r.width < s.width && !narrow });
     for (const side of sides) { const r = at(side, h); if (within(r) && clear(r)) return done(r, side); }
+    if (narrow && a.left >= v.left && right - a.left >= Math.min(s.width, v.width)) {
+      const full = w;
+      w = right - a.left;
+      besideRail = true;
+      for (const side of sides) { const r = at(side, h); if (within(r) && clear(r)) return done(r, side); }
+      w = full;
+      besideRail = false;
+    }
     for (const side of sides) {
       const free = roomOf(side, true);
       if (free < LAYER.room) continue;
@@ -430,7 +440,7 @@
     if (isObj(options) && options.reset === true) perf.frames = [];
     return out;
   }
-  const exported = { geometry, pickLabel, place: placeLayer, sizes: G };
+  const exported = { geometry, pickLabel, place: placeLayer, layerHeight: (node, fallback) => heightOf(node, fallback), sizes: G };
   if (E2E) exported.metrics = metrics;
   window.NearAiTimeline = Object.freeze(exported);
 
@@ -1582,19 +1592,29 @@
     }
     return out;
   }
-  /** The drawn height of a layer at its width, or an estimate where nothing is laid out (the vm). */
+  /** The whole drawn height of a layer at its width: its content height (scrollHeight, which leaves out the frame) plus what its frame adds
+   * (offsetHeight less clientHeight: the 1 px borders, 62.1-09), or an estimate where nothing is laid out (the vm). */
   function heightOf(node, fallback) {
-    const hgt = node.scrollHeight || node.offsetHeight;
-    return typeof hgt === 'number' && isFinite(hgt) && hgt > 0 ? hgt : fallback;
+    const num = (x) => typeof x === 'number' && isFinite(x) && x > 0;
+    const frame = num(node.offsetHeight) && typeof node.clientHeight === 'number' && node.offsetHeight >= node.clientHeight ? node.offsetHeight - node.clientHeight : 0;
+    const hgt = num(node.scrollHeight) ? node.scrollHeight + frame : node.offsetHeight;
+    return num(hgt) ? hgt : fallback;
   }
   /** Places a layer (the preview or the card) next to the dot's box with the one placement function, and writes where it went. */
   function putLayer(node, box, width, maxHeight, fallback) {
     const view = viewOf();
     const narrow = scrollerSize().width < G.narrow;
-    setStyle(node, 'width', px(narrow ? view.width : Math.min(width, view.width)));
-    node.style.removeProperty('max-height');
-    const size = { width, height: Math.min(heightOf(node, fallback), maxHeight(view)) };
-    const r = placeLayer(asBox(box), size, view, obstaclesOf(drawn.geo), { direction: drawn.geo.direction, narrow });
+    // Measured at the width it is tried at; a narrow layer placed beside the rail is narrower, so it is measured and placed once more at that width.
+    let w = narrow ? view.width : Math.min(width, view.width);
+    let r;
+    for (let pass = 0; pass < 2; pass += 1) {
+      setStyle(node, 'width', px(w));
+      node.style.removeProperty('max-height');
+      const size = { width, height: Math.min(heightOf(node, fallback), maxHeight(view)) };
+      r = placeLayer(asBox(box), size, view, obstaclesOf(drawn.geo), { direction: drawn.geo.direction, narrow });
+      if (r.width === w) break;
+      w = r.width;
+    }
     setStyle(node, 'left', px(r.left));
     setStyle(node, 'top', px(r.top));
     setStyle(node, 'width', px(r.width));

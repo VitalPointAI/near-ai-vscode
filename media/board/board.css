@@ -329,7 +329,8 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-legend-item[data-state="ready"] .tl-mark, .tl-legend-item[data-state="claimed"] .tl-mark, .tl-legend-item[data-state="in-progress"] .tl-mark { color: var(--vscode-charts-blue, var(--vscode-editorInfo-foreground)); }
 .tl-dot[data-state="in-review"] .tl-mark, .tl-dot[data-state="integrating"] .tl-mark, .tl-dot[data-state="in-review"]::after, .tl-dot[data-state="integrating"]::after,
 .tl-legend-item[data-state="in-review"] .tl-mark, .tl-legend-item[data-state="integrating"] .tl-mark { color: var(--vscode-charts-purple, var(--vscode-foreground)); }
-.tl-dot[data-state="done"] .tl-mark, .tl-dot[data-state="done"]::after, .tl-legend-item[data-state="done"] .tl-mark { color: var(--vscode-testing-iconPassed); }
+/* done is the theme's chart colour for finished work (62.1-09: the test-passed colour reads only 2.0 to 1 on the light themes' canvas) */
+.tl-dot[data-state="done"] .tl-mark, .tl-dot[data-state="done"]::after, .tl-legend-item[data-state="done"] .tl-mark { color: var(--vscode-charts-green, var(--vscode-testing-iconPassed)); }
 .tl-dot[data-state="blocked"] .tl-mark, .tl-dot[data-state="blocked"]::after, .tl-legend-item[data-state="blocked"] .tl-mark { color: var(--vscode-editorWarning-foreground); }
 .tl-dot[data-state="backlog"] .tl-mark, .tl-dot[data-state="cancelled"] .tl-mark, .tl-dot[data-state="held"] .tl-mark, .tl-dot[data-state="backlog"]::after, .tl-dot[data-state="cancelled"]::after, .tl-dot[data-state="held"]::after,
 .tl-legend-item[data-state="backlog"] .tl-mark, .tl-legend-item[data-state="cancelled"] .tl-mark, .tl-legend-item[data-state="held"] .tl-mark { color: var(--vscode-descriptionForeground); }
