@@ -97,3 +97,20 @@ test('a GSD workflow in a red-team project gets the stage and can spawn the red-
   assert.equal(posted.find((message) => message.type === 'tool-end' && message.callId === 'r1')?.output, '3 findings; RED-TEAM.md written');
   assert.match(childSystem, /Attack the change like an adversary/);
 });
+
+test('the software team has a devops member who sets up the protected workflow and never handles secrets or bypasses a gate', () => {
+  const software = projectType('software')!;
+  const devops = software.members.find((member) => member.name === 'devops');
+  assert.ok(devops, 'software has a devops member');
+  for (const tool of ['Read', 'Write', 'Edit', 'Bash', 'SecurityScan']) assert.ok(devops!.tools!.includes(tool), `devops can use ${tool}`);
+  // What it sets up: CI on every pull request, a protected default branch with required checks, and gated releases.
+  assert.match(devops!.instructions, /CI workflow[\s\S]*secret scan[\s\S]*dependency audit/);
+  assert.match(devops!.instructions, /required checks/);
+  assert.match(devops!.instructions, /publishing behind a manual approval/);
+  // The safety rules: no tokens, no bypass, and settings outside the repository are left for a person to run.
+  assert.match(devops!.instructions, /Never ask for, print or store a token or key/);
+  assert.match(devops!.instructions, /Never weaken, disable or bypass/);
+  assert.match(devops!.instructions, /leave them for a person to approve and run/);
+  // Every other agent follows the same flow.
+  assert.match(software.guidance, /\*\*Workflow:\*\*[^\n]*pull requests[^\n]*protected[^\n]*approval/);
+});

@@ -185,8 +185,9 @@ run a workflow and stays current; your `~/.claude` setup is never touched.
 **NEAR AI: Set Up Project Team** first asks what kind of project this is:
 software development, research and analysis, presales and solution design,
 writing and content, data analysis, or general. Each type gets a tailored team
-(for example architect, developer, reviewer, QA, and security for software;
-investigator, source verifier, analyst, writer, and editor for research) and
+(for example architect, developer, reviewer, QA, security, and DevOps for
+software; investigator, source verifier, analyst, writer, and editor for
+research) and
 guidance in `AGENTS.md`, which every agent reads, on how this kind of work goes
 through the same Open-GSD cycle: plan, execute, **red team**, verify, audit,
 release. The red-team member attacks the work before it is verified and
@@ -194,6 +195,14 @@ writes `RED-TEAM.md`; every finding is fixed or given a disposition with a
 reason (accepted risk, deferred, disregarded), and verification and release
 notes list the items not fixed. In these projects `/gsd-execute-phase`,
 `/gsd-verify-work`, and `/gsd-autonomous` include the red-team step.
+
+In a software project, the **DevOps** member sets up a protected way of
+working: a CI workflow on every pull request (tests, a secret scan, and a
+dependency audit), required checks and a review before anything reaches the
+default branch, and releases that wait for your approval before publishing.
+It never asks for or stores a token, and it never changes settings outside
+the repository itself: for branch protection, environments, or secrets it
+writes the exact commands and leaves them for you to approve and run.
 
 ### MCP connections
 
