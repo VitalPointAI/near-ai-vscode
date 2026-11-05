@@ -151,7 +151,7 @@ export async function runUseSavedProfile(ui: SavedProfileUi, deps: UseSavedProfi
   let reason: string;
   try {
     profile = await ui.progress('Checking your NEAR AI key', () => deps.use(picked.entry));
-    reason = profile.validation.error ?? 'The key did not pass its check.';
+    reason = redactSecrets(profile.validation.error ?? 'The key did not pass its check.');
   } catch (error) {
     reason = redactSecrets(error instanceof Error ? error.message : String(error));
   }

@@ -3,14 +3,14 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AuthService, SecretStorageLike } from '../services/auth';
 import { initProfileIndex, listSavedProfiles, runUseSavedProfile, SavedProfileUi } from '../services/profileIndex';
 import { ProfileStore } from '../services/profileStore';
-import { createNearAiProvider } from '../services/providerFactory';
+import { createNearAiProvider, validateNearAiProvider } from '../services/providerFactory';
 
 class MemorySecrets implements SecretStorageLike {
   public readonly values = new Map<string, string>();
@@ -128,6 +128,43 @@ test('tracer: a profile set up in one project is listed and used in another by r
     // The copy is not offered again (no chains), and the first project still sees nothing of its own.
     assert.deepEqual(listSavedProfiles().map((entry) => entry.projectId), [alpha.projectScopeId], 'only the original is listed');
     assert.deepEqual(listSavedProfiles(alpha.projectScopeId), []);
+  } finally { await w.cleanup(); }
+});
+
+test('a reused profile whose project file is changed to another address never sends the original key there', async () => {
+  // The workspace file can be changed by a pull, a clone or a script. The key stays bound to the
+  // address it was saved for (in secure storage, under the original project), so a copy pointed at
+  // another host is refused before anything is sent, by the check and by a chat request alike.
+  const w = await world();
+  try {
+    const alpha = await setUpAlpha(w);
+    const beta = w.store(w.rootB);
+    const copy = await beta.useSavedProfile(listSavedProfiles(beta.projectScopeId)[0]);
+    assert.equal(copy.validation.status, 'valid');
+
+    const file = JSON.parse(await readFile(beta.filePath, 'utf8')) as { profiles: Array<{ profileId: string; baseUrl: string }> };
+    const entry = file.profiles.find((profile) => profile.profileId === copy.profileId)!;
+    entry.baseUrl = 'https://attacker.example/v1';
+    await writeFile(beta.filePath, JSON.stringify(file, null, 2), 'utf8');
+
+    const sent: string[] = [];
+    const fetchFn = (async (url: unknown, init?: RequestInit) => {
+      sent.push(`${String(url)} ${String((init?.headers as Record<string, string> | undefined)?.authorization ?? '')}`);
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }) as typeof fetch;
+    const tampered = new ProfileStore(w.rootB, w.auth, { validator: (profile, scope) => validateNearAiProvider({ auth: w.auth, profile, scope, fetchFn }) });
+    const checked = await tampered.validate(copy.profileId);
+    assert.equal(checked.baseUrl, 'https://attacker.example/v1', 'the store read the changed address');
+    assert.equal(checked.validation.status, 'invalid', 'the check refuses the changed address');
+    assert.match(checked.validation.error ?? '', /not the one its key was saved for/);
+    // A chat request refuses a profile that failed its check, and even a profile claiming to have
+    // passed is refused by the key's own address binding.
+    await assert.rejects(createNearAiProvider({ auth: w.auth, profile: checked, scope: tampered.getScope(copy.profileId), fetchFn }));
+    const claimsValid = { ...checked, validation: { status: 'valid' as const, validatedAt: new Date().toISOString() } };
+    await assert.rejects(createNearAiProvider({ auth: w.auth, profile: claimsValid, scope: tampered.getScope(copy.profileId), fetchFn }), /not the one its key was saved for/);
+    assert.deepEqual(sent, [], 'nothing was sent anywhere');
+    assert.equal(sent.join('').includes(w.canary), false);
+    assert.equal(await w.auth.getScopedApiKey(alpha.getScope('profile-alpha-cloud')), w.canary, 'the original key is untouched');
   } finally { await w.cleanup(); }
 });
 
