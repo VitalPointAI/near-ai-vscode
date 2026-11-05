@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -238,7 +238,8 @@ test('with no saved profiles, Use a Saved Profile says so plainly and offers Set
     assert.equal(outcome, 'none');
     assert.deepEqual(ui.picks, [], 'there is nothing to pick');
     assert.equal(ui.infos.length, 1);
-    assert.match(ui.infos[0].message, /no saved profiles/i);
+    // Changed by the owner's 0.6.4 re-test (item 6b): after an upgrade the list fills only as each older project is opened, so the message says so.
+    assert.equal(ui.infos[0].message, 'There are no saved profiles yet. Profiles from your other projects appear here after you open each of those projects once with this version of NEAR AI.');
     assert.deepEqual(ui.infos[0].actions, ['Set up a new profile']);
     assert.equal(setUp, 1, 'the button runs the profile setup');
   } finally { await w.cleanup(); }
@@ -326,6 +327,39 @@ test('with only profiles whose key is not here, Use a saved profile says so and 
       assert.equal(setUp, 1, 'the button runs the profile setup');
     }
   } finally { await w.cleanup(); }
+});
+
+// 61-34 (the owner's 0.6.4 re-test, item 6c): keys are kept under the project folder's location, so moving or renaming a project folder
+// cuts it off from its saved key. Until a stable project id exists (deferred), the README gives the way back: Use a saved profile and pick
+// the profile listed under the folder's old name. This proves that way back works, with the original key by reference.
+test('after a project folder is moved or renamed, Use a saved profile lists its profile under the old folder name and using it works with the original key', async () => {
+  for (const moveTo of [path.join('moved', 'alpha-site'), 'alpha-renamed']) {
+    const w = await world();
+    try {
+      const alpha = await setUpAlpha(w);
+      const oldId = alpha.projectScopeId;
+      const newRoot = path.join(w.base, moveTo);
+      await mkdir(path.dirname(newRoot), { recursive: true });
+      await rename(w.rootA, newRoot);
+      const moved = w.store(newRoot);
+      assert.notEqual(moved.projectScopeId, oldId, 'the moved folder has a new project id');
+      assert.equal(await w.auth.getScopedApiKey(moved.getScope('profile-alpha-cloud')), undefined, `${moveTo}: no key under the new location`);
+      assert.equal((await moved.validate('profile-alpha-cloud')).validation.status, 'invalid', `${moveTo}: its profile does not work as it is`);
+
+      const ui = recordingUi({ pick: (labels) => labels.indexOf('Alpha Cloud') });
+      const deps = { projectId: moved.projectScopeId, use: (entry: SavedProfileEntry) => moved.useSavedProfile(entry), hasKey: (entry: SavedProfileEntry) => keyHere(moved, entry), setUpNew: async () => undefined, refresh: async () => undefined };
+      const outcome = await runUseSavedProfile(ui, deps);
+      assert.deepEqual(ui.picks[0]?.items.map((item) => [item.label, item.description]), [['Alpha Cloud', 'from alpha-site']], `${moveTo}: listed under the old folder name`);
+      assert.deepEqual(ui.errors, [], `${moveTo}: no error`);
+      assert.equal(outcome, 'ready', `${moveTo}: the way back works`);
+      const active = await moved.getActiveProfile();
+      assert.equal(active?.validation.status, 'valid');
+      assert.deepEqual(active?.keySource, { projectId: oldId, profileId: 'profile-alpha-cloud' }, `${moveTo}: by reference to the key saved under the old location`);
+      assert.deepEqual(w.checked.at(-1), { projectId: oldId, profileId: 'profile-alpha-cloud', key: w.canary }, `${moveTo}: checked with the original key`);
+      assert.equal(countCanary(w), 1, `${moveTo}: the key is stored once and never copied`);
+      assert.equal(JSON.stringify(ui).includes(w.canary), false);
+    } finally { await w.cleanup(); }
+  }
 });
 
 test('activation sets up the saved-profile list first, and Select Profile and Use a Saved Profile offer the choice', () => {
