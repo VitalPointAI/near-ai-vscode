@@ -785,3 +785,18 @@ test('motion: only transform, opacity and stroke-dashoffset are animated, and pr
     }
   }
 });
+
+// 62.1-08 (found in the real window): a shown finished milestone has Fold milestone in its header's second row, and in a short band the progress
+// words were cut with an ellipsis but no title (probe rule 12: cut only on purpose, with the full words in title). The progress words always carry
+// their full text in title, as the milestone title does.
+test('62.1-08: the header\'s progress words carry their full text in title, so a cut in a short band is on purpose', async () => {
+  const world = await statesWorld();
+  const model = modelOf(world, world.dev.memberId);
+  const h = timelineOf(model);
+  boardApi(h, 'setUiState')({ shown: { 'milestone:v0': true } });
+  boardApi(h, 'redraw')();
+  for (const band of model.timeline!.milestones) {
+    const words = h.$(`li.tl-milestone[data-milestone="${band.id}"] .tl-ms-head .progress-text`)!;
+    assert.equal(words.getAttribute('title'), band.progressText, `${band.id}: the full progress words are in title`);
+  }
+});
