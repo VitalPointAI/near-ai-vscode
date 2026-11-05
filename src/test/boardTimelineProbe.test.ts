@@ -494,3 +494,24 @@ test('a measure that asks for the controls carries the View switch, Direction an
   const timeline = (await ask(h, { id: 3, action: 'measure', controls: true }))[0].report as Record<string, any>;
   assert.deepEqual(plainJson(timeline.controls), plainJson(timeline.timeline.controls), 'in the Timeline view the asked controls are the timeline section\'s');
 });
+
+// 62.1-08: the real-window test clicks Move to... inside the expanded card, so each button in the preview and the card is measured with its box.
+test('each button in the expanded card is reported with its box, so a real click can aim at it', async () => {
+  const model = await timelineModel();
+  const h = page(true);
+  h.deliver({ type: 'state', model });
+  h.$('#view-switch button[data-view="timeline"]')!.click();
+  const doc = h.document;
+  const card = doc.createElement('section');
+  card.id = 'tl-card';
+  const move = doc.createElement('button');
+  move.textContent = 'Move to...';
+  card.appendChild(move);
+  h.$('.tl-scroll')!.appendChild(card);
+  const measured = (await ask(h, { id: 1, action: 'measure' }))[0].report.timeline as Record<string, any>;
+  assert.ok(measured.card, 'the card is measured');
+  const button = (measured.card.buttons as Array<Record<string, any>>).find((b) => b.name === 'Move to...');
+  assert.ok(button, 'Move to... is listed');
+  assert.ok(button.box && typeof button.box === 'object', 'Move to... has its box');
+  assert.deepEqual(Object.keys(button.box).sort(), ['bottom', 'height', 'left', 'right', 'top', 'width']);
+});
