@@ -432,6 +432,73 @@ test('the layout hook exists only under the extension-host tests and asks only t
   });
 });
 
+// 62.1-08 (T-62.1-17): the real-window test draws the timeline's rare states (a loop, a finished milestone, a stack over the cap, a failed layout) on
+// this repository's roadmap through boardTap.shape. It is read only when the controller has its test seams (NEAR_AI_E2E=1), it works on a copy of
+// the state, and the layout failure is the 62.1-01 path. "Draw the timeline again" posts retry, which must bring the timeline back even when no
+// event arrived, so a retry also sends the page the model again when it changed.
+test('62.1-08: the shape seam reshapes a copy of the state for both builds or fails the layout, only under the extension-host tests, and a retry draws the timeline again', async () => {
+  resetStub();
+  const tap = boardTap as Record<string, unknown>;
+  type Posted = { type: 'state'; model: { cards: Array<{ id: string }>; timeline?: { dots: Array<{ cardId: string }> }; timelineProblem?: boolean } };
+  const posted = (record: RecordedWebview): Posted[] => record.posted.filter((m): m is Posted => (m as { type?: string }).type === 'state');
+  await withLiveTeam(async (rig) => {
+    await importFixture(rig);
+    const a = await startSession(rig, 'owner');
+    const EXTRA = 'plan:90-77';
+    const shape = (state: import('../domain/team/types').TeamState): import('../domain/team/types').TeamState => {
+      const base = state.items.get(READY_PLAN)!;
+      state.items.set(EXTRA, { ...base, id: EXTRA, title: 'A plan only the seam adds', gsd: { ...base.gsd!, plan: '77' }, dependsOn: [] });
+      return state;
+    };
+    const output = { appendLine: (line: string) => { a.lines.push(line); }, show: () => undefined };
+    tap.shape = { state: shape, failTimeline: true };
+    try {
+      // A normal board never reads the seam.
+      const plain = openBoard(a.session, new LiveTimers(), a.lines);
+      await plain.panel.receive({ type: 'ready' });
+      const first = posted(plain.panel)[0]!;
+      assert.equal(first.model.cards.some((c) => c.id === EXTRA), false, 'a normal board is not reshaped');
+      assert.ok(first.model.timeline !== undefined && first.model.timelineProblem === undefined, 'nor is its layout failed');
+      plain.board.controller.dispose();
+
+      const board = registerTeamBoard(createFakeContext(EXTENSION_ROOT, {}) as never, {
+        session: () => a.session, output, timers: new LiveTimers(), testSeams: true, requestLimits: { coolDownMs: 0, writeBurst: 10, writeRefillMs: 500 }
+      });
+      tap.shape = { state: shape };
+      board.openPanel();
+      const panel = stub.webviewPanels[stub.webviewPanels.length - 1] as RecordedWebviewPanel;
+      try {
+        await panel.receive({ type: 'ready' });
+        const shaped = posted(panel).at(-1)!;
+        assert.ok(shaped.model.cards.some((c) => c.id === EXTRA), 'the board model is built from the shaped state');
+        assert.ok(shaped.model.timeline?.dots.some((d) => d.cardId === EXTRA), 'and so is the timeline');
+        assert.equal(a.session.state().items.has(EXTRA), false, 'the session\'s own state is never changed');
+        // The layout fails: the 62.1-01 path (no timeline, the flag, one line in the output).
+        tap.shape = { failTimeline: true };
+        await panel.receive({ type: 'retry' });
+        const failed = posted(panel).at(-1)!;
+        assert.equal(failed.model.timelineProblem, true, 'a retry sends the failed layout');
+        assert.equal(failed.model.timeline, undefined);
+        assert.equal(failed.model.cards.some((c) => c.id === EXTRA), false, 'only the layout fails; the state is the session\'s');
+        assert.equal(a.lines.filter((line) => line.startsWith('Team Board: the timeline could not be drawn:')).length, 1, 'one line in the output');
+        // Cleared, the next retry draws the timeline again, with no new event in between.
+        tap.shape = undefined;
+        await panel.receive({ type: 'retry' });
+        const back = posted(panel).at(-1)!;
+        assert.ok(back.model.timeline !== undefined && back.model.timelineProblem === undefined, 'Draw the timeline again brings the timeline back');
+        const count = posted(panel).length;
+        await panel.receive({ type: 'retry' });
+        assert.equal(posted(panel).length, count, 'a retry with nothing changed sends nothing');
+      } finally {
+        board.controller.dispose();
+      }
+    } finally {
+      tap.shape = undefined;
+      a.session.dispose();
+    }
+  });
+});
+
 // ---- the parser ------------------------------------------------------------------------------------------------------------------------------
 
 const BOARD_ITEM = 'item:01HZX3Q7VY8M2K4N6P9R0S1T2W';
