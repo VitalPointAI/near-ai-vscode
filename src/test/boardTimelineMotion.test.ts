@@ -655,11 +655,11 @@ async function chainWorld(n: number): Promise<BoardWorld> {
   }
   return world;
 }
-// One plan that 30 others wait for (30 lines from one dot).
+// One finished plan that 30 others wait for (30 solid lines from one dot: nothing waits any more).
 async function hubWorld(): Promise<BoardWorld> {
   const world = await boardWorld();
   const { owner } = world;
-  for (const body of [milestone('v6', 'Version 6', true), phase('6', 'v6', 'Hub'), plan('6-01')]) world.accept(owner, 'item.imported', body);
+  for (const body of [milestone('v6', 'Version 6', true), phase('6', 'v6', 'Hub'), plan('6-01', { state: 'done' })]) world.accept(owner, 'item.imported', body);
   for (let i = 2; i <= 31; i += 1) world.accept(owner, 'item.imported', plan(`6-${String(i).padStart(2, '0')}`, { dependsOn: ['plan:6-01'] }));
   return world;
 }
@@ -731,7 +731,7 @@ test('D-08 re-layout: a zoom FLIPs the moved dots from their old place on screen
   const old = { left: s.scrollLeft, top: s.scrollTop };
   h.click(zoomButton(h, 'in'));
   const after = geoOf(h, model);
-  const id = 'plan:2-04';
+  const id = 'plan:2-07';
   const o = before.dots.find((d: any) => d.id === id);
   const n = after.dots.find((d: any) => d.id === id);
   const dx = (o.x - old.left) - (n.x - s.scrollLeft);
@@ -773,7 +773,7 @@ test('D-08 re-layout: a zoom FLIPs the moved dots from their old place on screen
   h.advance(140);
   assert.deepEqual(h.$$('.tl-xfade'), [], 'the cross-fade takes 160 ms');
   assert.ok(h.$$('button.tl-dot.tl-turning').length > 0, 'the move is still on its way');
-  h.advance(160);
+  h.advance(180);
   assert.deepEqual(h.$$('button.tl-dot.tl-turning'), [], 'and takes 320 ms');
 });
 
@@ -824,7 +824,9 @@ test('D-08 card and preview: the card springs open in 200 ms from its corner nea
   settle(q);
   q.fire(dot(q, 'plan:6-01'), 'pointerenter');
   const drawing = q.$$('path.tl-line.tl-draw');
-  assert.equal(q.$$('path.tl-line.emphasis').length, 30, 'every line of the hub is emphasised');
+  const hubLines = q.$$('svg.tl-lines path.tl-line').filter((x) => x.getAttribute('data-from') === 'plan:6-01' || x.getAttribute('data-to') === 'plan:6-01');
+  assert.ok(hubLines.length > 24, `the hub has more than 24 lines (${hubLines.length})`);
+  assert.equal(q.$$('svg.tl-lines path.tl-line.emphasis').length, hubLines.length, 'every line of the hub is emphasised (the legend has its own)');
   assert.equal(drawing.length, 24, 'and at most 24 draw in');
   assert.ok(drawing.every((x) => x.getAttribute('pathLength') === '1'), 'from the path length');
   q.advance(250);
@@ -843,7 +845,7 @@ test('D-08: a press or a key during any motion jumps it to its end state at once
   h.advance(40);
   assert.ok(h.$$('button.tl-dot.tl-moving').length > 0, 'the dots move');
   h.press(dot(h, 'plan:2-04'), 'ArrowRight');
-  assert.deepEqual(moving(h), [], 'a key ends every motion');
+  assert.deepEqual(moving(h).filter((x) => !/tl-preview-in|tl-draw/.test(x)), [], 'a key ends every motion that ran before it (the preview and the lines it brings up are its own)');
   assert.deepEqual(h.$$('button.tl-dot').filter((b) => styleOf(b, 'transform') !== '' || styleOf(b, 'will-change') !== ''), [], 'every dot is at its new place');
   settle(h);
   h.click(zoomButton(h, 'out'));

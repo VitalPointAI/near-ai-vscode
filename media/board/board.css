@@ -249,7 +249,10 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 
 /* the one scroller, the canvas and its layers */
 .tl-scroll { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--vscode-editor-background); }
-.tl-canvas { position: relative; z-index: 0; min-width: 100%; }
+.tl-canvas { position: relative; z-index: 0; min-width: 100%; cursor: grab; }
+/* a drag on empty canvas pans (timeline.js adds tl-grabbing after 4 px); the card keeps the normal pointer */
+.tl-canvas.tl-grabbing, .tl-canvas.tl-grabbing * { cursor: grabbing; }
+#tl-card { cursor: auto; }
 .tl-milestones, .tl-phases, .tl-dots { margin: 0; padding: 0; list-style: none; }
 .tl-milestone, .tl-phase, .tl-dots > li { margin: 0; padding: 0; list-style: none; }
 .tl-milestone { position: absolute; }
@@ -257,7 +260,7 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-past { position: absolute; transform-origin: left top; background: color-mix(in srgb, var(--vscode-descriptionForeground) 8%, transparent); }
 /* the Now marker glides to a new place and the past shade follows it (the amendment's motion table) */
 .tl-past.tl-glide, .tl-now-line.tl-glide, .tl-now-pill.tl-glide { transition-property: transform; transition-duration: 320ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
-.tl-lines { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; transition: opacity 200ms ease-out; }
+.tl-lines { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .tl-line { fill: none; stroke: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); stroke-width: 1; }
 .tl-line.emphasis { stroke: var(--vscode-foreground); stroke-width: 2; }
 .tl-line.emphasis.waiting { stroke-dasharray: 4 4; }
@@ -369,6 +372,38 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-mark .tl-pip.tl-pip-error { fill: var(--vscode-errorForeground); }
 .tl-dot, .tl-folded, .tl-more { scroll-margin: 48px; }
 
+/* the Motion table (62.1-06, D-08): timeline.js adds each class only while its motion runs, and none under reduced motion */
+/* the first draw: dots in or near the view appear in sequence (timeline.js writes each delay), then the lines fade in */
+.tl-dot.tl-appear { animation: tl-appear 160ms cubic-bezier(0.2, 0, 0, 1) both; }
+@keyframes tl-appear { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+.tl-lines.tl-lines-in { animation: tl-fade-in 200ms ease-out both; }
+@keyframes tl-fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* dots move to new places from where they were (FLIP); the lines are hidden meanwhile and fade back after */
+.tl-dot.tl-moving { transition-property: transform; transition-duration: 240ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+.tl-dot.tl-turning { transition-property: transform; transition-duration: 320ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+.tl-lines.tl-lines-off { opacity: 0; }
+.tl-lines.tl-lines-back { animation: tl-fade-in 120ms ease-out both; }
+/* a direction switch cross-fades the headers, the axis, the rail and the Now marker; the view switch fades the timeline in */
+.tl-xfade { animation: tl-fade-in 160ms ease-out both; }
+.tl-scroll.tl-view-in { animation: tl-fade-in 160ms ease-out both; }
+/* the card springs open from its corner nearest the dot (timeline.js writes transform-origin) and closes as a picture that takes no input */
+#tl-card.tl-card-in { animation: tl-card-in 200ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes tl-card-in { from { opacity: 0; transform: scale(0.85); } to { opacity: 1; transform: none; } }
+#tl-card.tl-card-out { pointer-events: none; animation: tl-card-out 120ms ease-in both; }
+@keyframes tl-card-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.95); } }
+/* the preview fades in and slides 4 px away from the dot, on the side it was placed */
+#tl-preview.tl-preview-in { animation: tl-slide-below 120ms ease-out both; }
+#tl-preview.tl-preview-in[data-side="above"] { animation-name: tl-slide-above; }
+#tl-preview.tl-preview-in[data-side="right"] { animation-name: tl-slide-right; }
+#tl-preview.tl-preview-in[data-side="left"] { animation-name: tl-slide-left; }
+@keyframes tl-slide-below { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes tl-slide-above { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes tl-slide-right { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+@keyframes tl-slide-left { from { opacity: 0; transform: translateX(4px); } to { opacity: 1; transform: none; } }
+/* emphasised lines draw in from their length (timeline.js sets pathLength 1 while they draw) */
+.tl-line.tl-draw { stroke-dasharray: 1; animation: tl-draw 240ms ease-out both; }
+@keyframes tl-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+
 /* high contrast: a contrast ring on every mark and a border on every surface */
 body.vscode-high-contrast .tl-mark, body.vscode-high-contrast-light .tl-mark { outline: 1px solid var(--vscode-contrastBorder); border-radius: 50%; }
 body.vscode-high-contrast .tl-ms-head, body.vscode-high-contrast-light .tl-ms-head, body.vscode-high-contrast .tl-now-pill, body.vscode-high-contrast-light .tl-now-pill,
@@ -402,5 +437,8 @@ body.vscode-high-contrast .tl-phase-bar, body.vscode-high-contrast-light .tl-pha
   .tl-ring-fill.tl-filling, .tl-phase-fill.tl-filling, .tl-ms-head .bar.tl-filling, .tl-past.tl-glide, .tl-now-line.tl-glide, .tl-now-pill.tl-glide,
   .tl-dot.tl-pulse::after { transition: none; animation: none; }
   .tl-dot.tl-pulse::after { display: none; }
+  .tl-dot.tl-appear, .tl-lines.tl-lines-in, .tl-dot.tl-moving, .tl-dot.tl-turning, .tl-lines.tl-lines-back, .tl-xfade, .tl-scroll.tl-view-in, #tl-card.tl-card-in,
+  #tl-card.tl-card-out, #tl-preview.tl-preview-in, .tl-line.tl-draw { transition: none; animation: none; }
+  .tl-lines.tl-lines-off { opacity: 1; }
   .tl-dot:hover .tl-mark, .tl-dot:focus-visible .tl-mark { transform: none; }
 }

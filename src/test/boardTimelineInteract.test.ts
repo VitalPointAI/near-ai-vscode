@@ -96,7 +96,9 @@ function boardApi(h: BoardHarness, name: string): Fn {
 const classes = (node: FakeNode | null): string[] => (node === null ? [] : node.className.split(/\s+/).filter(Boolean));
 const visible = (node: FakeNode | null): boolean => { for (let n = node; n !== null && n.nodeType === 1; n = n.parentNode) if (n.hidden) return false; return node !== null; };
 const dot = (h: BoardHarness, id: string): FakeNode => { const found = h.$(`button.tl-dot[data-id="${id}"]`); assert.ok(found, `the dot of ${id} is drawn`); return found; };
-const card = (h: BoardHarness): FakeNode | null => { const c = h.$('#tl-card'); return c !== null && visible(c) ? c : null; };
+// 62.1-06: a closed card stays on the page for its 120 ms closing motion as a picture only (aria-hidden and inert, its dot no longer expanded), so an
+// open card is one that is shown and is neither.
+const card = (h: BoardHarness): FakeNode | null => { const c = h.$('#tl-card'); return c !== null && visible(c) && c.getAttribute('aria-hidden') !== 'true' && !c.hasAttribute('inert') ? c : null; };
 const openCard = (h: BoardHarness): FakeNode => { const c = card(h); assert.ok(c, 'the expanded card is open'); return c; };
 const isMenuOpen = (h: BoardHarness): boolean => h.$('#menu') !== null && !h.$('#menu')!.hidden;
 /** The menu's items in order, with a bar for each separator. */

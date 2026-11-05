@@ -434,10 +434,19 @@ test('on test pages the report carries NearAiTimeline.metrics when it exists, an
   const h = page(true);
   h.deliver({ type: 'state', model });
   h.$('#view-switch button[data-view="timeline"]')!.click();
-  const before = (await ask(h, { id: 1, action: 'measure' }))[0].report.timeline as Record<string, unknown>;
-  assert.equal('metrics' in before, false, 'no metrics while the timeline offers none');
+  // 62.1-06: on a test page the timeline offers its own metrics, and the report carries them.
+  const real = (await ask(h, { id: 1, action: 'measure' }))[0].report.timeline as Record<string, any>;
+  assert.ok(real.metrics && typeof real.metrics === 'object', 'the timeline\'s own metrics are carried');
+  assert.equal(typeof real.metrics.frames.count, 'number');
+  assert.ok(real.metrics.drawMs === null || typeof real.metrics.drawMs === 'number');
 
   const base = h.window.NearAiTimeline as Record<string, unknown>;
+  const { metrics: _own, ...without } = base;
+  void _own;
+  h.window.NearAiTimeline = Object.freeze(without);
+  const before = (await ask(h, { id: 4, action: 'measure' }))[0].report.timeline as Record<string, unknown>;
+  assert.equal('metrics' in before, false, 'no metrics while the timeline offers none');
+
   h.window.NearAiTimeline = Object.freeze({ ...base, metrics: () => ({ drawMs: 42, frames: { count: 3, p95: 16 } }) });
   const withMetrics = (await ask(h, { id: 2, action: 'measure' }))[0].report.timeline as Record<string, unknown>;
   assert.deepEqual(withMetrics.metrics, { drawMs: 42, frames: { count: 3, p95: 16 } });

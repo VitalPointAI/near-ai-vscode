@@ -135,7 +135,9 @@ const FOCUSABLE = new Set(['button', 'input', 'select', 'textarea', 'a']);
 // The links from a node to the rest of the page. They are kept out of what util.inspect prints: a failing strict assertion prints both sides at
 // depth 1000 and diffs the lines with a diff whose memory grows with the square of the line count, and while these links were enumerable one
 // node printed the whole page again from every node on the way, millions of lines, until the process ran out of memory (62-12 incident).
-const INSPECT_HIDDEN = ['doc', 'parentNode', 'kids', 'listeners', 'onText'];
+const INSPECT_HIDDEN = ['doc', 'parentNode', 'kids', 'listeners', 'captures', 'onText'];
+/** True when addEventListener's third argument asks for the capture phase (true, or { capture: true }). */
+const isCapture = (options: unknown): boolean => options === true || (typeof options === 'object' && options !== null && (options as { capture?: unknown }).capture === true);
 
 // What a browser hands back from querySelectorAll, childNodes and children (WR-05). A real NodeList has length, index access, item, forEach,
 // entries, keys, values and iteration, and an HTMLCollection has no forEach either. Neither has map, filter, find, indexOf or some, so page
@@ -168,6 +170,8 @@ export class FakeNode {
   /** The child nodes as an Array, for the fake's own bookkeeping. Page code sees them only through childNodes and children (browser shapes). */
   kids: FakeNode[] = [];
   listeners = new Map<string, Listener[]>();
+  /** The capture-phase listeners (62.1-06): they run from the root down to the target before the target's own and the bubbling ones, as in a browser. */
+  captures = new Map<string, Listener[]>();
   attrs = new Map<string, string>();
   localName: string;
   tagName: string;
@@ -305,10 +309,26 @@ export class FakeNode {
   scrollIntoView(): void { /* nothing to scroll */ }
 
   // Events.
-  addEventListener(type: string, listener: Listener): void { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
-  removeEventListener(type: string, listener: Listener): void { this.listeners.set(type, (this.listeners.get(type) ?? []).filter((entry) => entry !== listener)); }
+  addEventListener(type: string, listener: Listener, options?: unknown): void {
+    const map = isCapture(options) ? this.captures : this.listeners;
+    map.set(type, [...(map.get(type) ?? []), listener]);
+  }
+  removeEventListener(type: string, listener: Listener, options?: unknown): void {
+    const map = isCapture(options) ? this.captures : this.listeners;
+    map.set(type, (map.get(type) ?? []).filter((entry) => entry !== listener));
+  }
   dispatchEvent(event: FakeEvent): boolean {
     event.target = this;
+    // The capture phase, from the root down to the target (every event has one, also those that do not bubble).
+    const path: FakeNode[] = [];
+    for (let up: FakeNode | null = this; up !== null; up = up.parentNode) path.unshift(up);
+    for (const node of path) {
+      if (event.propagationStopped) break;
+      const capturing = node.captures.get(event.type);
+      if (capturing === undefined || capturing.length === 0) continue;
+      event.currentTarget = node;
+      for (const listener of [...capturing]) listener(event);
+    }
     for (let node: FakeNode | null = this; node !== null && !event.propagationStopped; node = node.parentNode) {
       event.currentTarget = node;
       for (const listener of [...(node.listeners.get(event.type) ?? [])]) listener(event);

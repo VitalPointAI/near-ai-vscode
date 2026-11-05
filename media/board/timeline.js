@@ -414,7 +414,25 @@
     return done(at(best, Math.min(h, Math.max(most, LAYER.min))), best);
   }
 
-  window.NearAiTimeline = Object.freeze({ geometry, pickLabel, place: placeLayer, sizes: G });
+  // ---- the test-only metrics (62.1-06, D-08 performance budget, T-62.1-14) ----------------------------------------------------------------------
+  // Only on a page the host marked for the extension-host tests (data-e2e, set only under NEAR_AI_E2E=1): the time from the start of the first
+  // timeline render to the first animation frame after it, and the frame intervals sampled while the first-draw stagger, a pan or a zoom runs.
+  // Nothing of this exists on a person's page.
+  const E2E = !!document.body && document.body.getAttribute('data-e2e') === '1';
+  const clockNow = () => (window.performance && typeof window.performance.now === 'function' ? window.performance.now() : Date.now());
+  const FRAME_MAX = 600;
+  const perf = { start: undefined, drawMs: undefined, armed: false, frames: [], loop: undefined, last: undefined, extra: 0 };
+  /** { drawMs, frames: { count, p95 } }; with { reset: true } the frame sample is cleared after it is read. */
+  function metrics(options) {
+    const list = perf.frames.slice().sort((a, b) => a - b);
+    const p95 = list.length ? list[Math.min(list.length - 1, Math.max(0, Math.ceil(list.length * 0.95) - 1))] : null;
+    const out = { drawMs: typeof perf.drawMs === 'number' ? Math.round(perf.drawMs * 10) / 10 : null, frames: { count: list.length, p95 } };
+    if (isObj(options) && options.reset === true) perf.frames = [];
+    return out;
+  }
+  const exported = { geometry, pickLabel, place: placeLayer, sizes: G };
+  if (E2E) exported.metrics = metrics;
+  window.NearAiTimeline = Object.freeze(exported);
 
   const board = window.NearAiBoard;
   if (!board) return;
@@ -474,13 +492,13 @@
     toEnd(m);
     setFx(m.node, m.cls, false);
     if (m.will) m.node.style.removeProperty('will-change');
-    if (m.delay) m.node.style.removeProperty('animation-delay');
+    if (m.hasDelay) m.node.style.removeProperty('animation-delay');
     if (m.done) m.done();
   }
   function startMotion(m) {
     if (!running.has(m)) return;
     setFx(m.node, m.cls, true);
-    if (m.delay) setStyle(m.node, 'animation-delay', m.delay + 'ms');
+    if (m.hasDelay) setStyle(m.node, 'animation-delay', m.delay + 'ms');
     toEnd(m);
     m.timer = setTimeout(() => endMotion(m), m.delay + m.ms);
   }
@@ -506,7 +524,7 @@
       if (o.done) o.done();
       return undefined;
     }
-    const m = { node, cls, ms, from, to, delay: o.delay || 0, done: o.done, timer: undefined, will: own(from, 'transform') || o.will === true };
+    const m = { node, cls, ms, from, to, delay: o.delay || 0, hasDelay: typeof o.delay === 'number', done: o.done, timer: undefined, will: own(from, 'transform') || o.will === true };
     running.add(m);
     if (m.will) setStyle(node, 'will-change', 'transform');
     if (Object.keys(from).length) {
@@ -520,18 +538,41 @@
     return m;
   }
   /** A new interaction (a press, a key, a wheel, a toolbar action): every running motion jumps to its end state. */
+  let finishing = false;
   function finishMotion() {
     if (playFrame !== undefined) { caf(playFrame); playFrame = undefined; }
     waiting = [];
-    for (const m of Array.from(running)) endMotion(m);
+    finishing = true;
+    try { for (const m of Array.from(running)) endMotion(m); } finally { finishing = false; }
   }
+  /** Ends the running motions of one node (a layer that opens again while it closes). */
+  function endOn(node) { for (const m of Array.from(running)) if (m.node === node) endMotion(m); }
   function onReduce(e) { reduced = !!(e && e.matches); if (reduced) finishMotion(); }
   if (reduceQuery) {
     if (typeof reduceQuery.addEventListener === 'function') reduceQuery.addEventListener('change', onReduce);
     else if (typeof reduceQuery.addListener === 'function') reduceQuery.addListener(onReduce);
   }
-  // The frame sample for the real-window budget check (62.1-08); it samples only on a page the host marked for the extension-host tests.
-  function sampleFrames() { /* filled in with the metrics */ }
+  // The frame sample for the real-window budget check (62.1-08): one animation frame loop while a motion, a pan or a zoom runs (and 30 frames
+  // after a pan or zoom step), only on a page the host marked for the extension-host tests. The sample keeps the last 600 intervals.
+  function sampleFrames(extra) {
+    if (!E2E) return;
+    if (extra) perf.extra = Math.max(perf.extra, 30);
+    if (perf.loop !== undefined) return;
+    perf.last = undefined;
+    const tick = (ts) => {
+      perf.loop = undefined;
+      const t = typeof ts === 'number' && isFinite(ts) ? ts : clockNow();
+      if (perf.last !== undefined) {
+        perf.frames.push(t - perf.last);
+        if (perf.frames.length > FRAME_MAX) perf.frames.splice(0, perf.frames.length - FRAME_MAX);
+      }
+      perf.last = t;
+      if (perf.extra > 0) perf.extra -= 1;
+      if (running.size || playFrame !== undefined || pan || perf.extra > 0) perf.loop = raf(tick);
+      else perf.last = undefined;
+    };
+    perf.loop = raf(tick);
+  }
 
   // ---- dots: state by colour, shape and glyph (UI-SPEC "State colours", D-05) ------------------------------------------------------------------
   // The main appearance of a dot: blocked, then on hold, then the column.
@@ -1056,6 +1097,7 @@
       dropLayers();
       return;
     }
+    if (E2E && perf.start === undefined) perf.start = clockNow();
     // Where focus was before the draw (D-10: focus is never lost to the page body on a live update).
     const a = document.activeElement;
     const was = a && a !== document.body && scroll.contains(a) ? (a.closest && a.closest(STOPS) && list.contains(a) ? stopKey(a.closest(STOPS)) : cardBox.contains(a) && open ? 'dot:' + open.id : 'scroll') : null;
@@ -1102,6 +1144,9 @@
     let focusAfter;
     pendingScroll = undefined;
     if (!target && (opening || turned)) { const first = firstScreen(geo, timeline, saved); target = first.target; focusAfter = first.focus; }
+    // An open draws the first screen in place (the view switch fades it in); only the draws after it move what changed.
+    const opened = opening;
+    const switched = opening && fromColumns;
     opening = false;
     fromColumns = false;
     seenColumns = false;
@@ -1237,7 +1282,10 @@
     followPreview();
     applyEmphasis();
     keepShown(prev, timeline);
-    if (prev) liveMotion(prev, drawn, oldScroll);
+    if (prev && !opened) liveMotion(prev, drawn, oldScroll);
+    else if (!prev && !wasHidden) appear(geo, timeline);
+    if (switched) motion(scroll, 'tl-view-in', VIEW_IN);
+    if (E2E && !perf.armed) { perf.armed = true; raf((ts) => { perf.drawMs = (typeof ts === 'number' && isFinite(ts) ? ts : clockNow()) - perf.start; }); }
     // Switching from Columns with a card selected: its dot has focus (D-04), without popping its preview up.
     if (focusAfter) focusDot(focusAfter, true);
   }
@@ -1288,7 +1336,8 @@
       if (now && prev.timeline.now && nowKey(prev.timeline.now) !== nowKey(now) && typeof board.announceAfter === 'function') board.announceAfter(now.sentence);
       fills(prev, next);
     }
-    if (turned) return;
+    moveDots(prev, next, oldScroll, turned);
+    if (turned) { crossFade(); return; }
     const a = prev.geo.now;
     const b = next.geo.now;
     if (a && b && nowItem.isConnected) {
@@ -1309,6 +1358,67 @@
       if (lo === ln || !(ln > 0)) return;
       motion(n, 'tl-glide', GLIDE, { from: { transform: (horizontal ? 'scaleX(' : 'scaleY(') + lo / ln + ')' } });
     });
+  }
+  // The rest of the Motion table (D-08): the first-draw stagger, dots moving to new places (FLIP from where they were on the screen), the direction
+  // switch with its cross-fade, and the view switch.
+  const APPEAR = Object.freeze({ ms: 160, step: 24, max: 600, lines: 200 });
+  const MOVE = 240;
+  const TURN = 320;
+  const LINES_BACK = 120;
+  const XFADE = 160;
+  const VIEW_IN = 160;
+  // A page that was hidden before its first draw does not stagger when it comes back (UI-SPEC "Live Updates").
+  let wasHidden = document.visibilityState === 'hidden';
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') wasHidden = true; });
+  /** The view and half of it again on every side: what is in or near the view. */
+  function nearView(at) {
+    const size = scrollerSize();
+    return { l: at.left - size.width / 2, r: at.left + size.width * 1.5, t: at.top - size.height / 2, b: at.top + size.height * 1.5 };
+  }
+  const inView = (v, d) => d.x + d.w > v.l && d.x < v.r && d.y + d.h > v.t && d.y < v.b;
+  /** The first draw of the timeline in this page: the dots in or near the view appear in sequence (min(step x 24, 600) ms, then 160 ms), the rest at
+   * once, and the lines fade in after the last dot. Every dot is a working button from the first frame. */
+  function appear(geo, timeline) {
+    if (reduced) return;
+    const v = nearView({ left: scroll.scrollLeft || 0, top: scroll.scrollTop || 0 });
+    const steps = new Map(timeline.dots.map((d) => [d.cardId, d.step]));
+    let last = -1;
+    for (const d of geo.dots) {
+      const b = dotButton(d.id);
+      if (!b || !inView(v, d)) continue;
+      const delay = Math.min((steps.get(d.id) || 0) * APPEAR.step, APPEAR.max);
+      motion(b, 'tl-appear', APPEAR.ms, { delay });
+      last = Math.max(last, delay);
+    }
+    if (last >= 0) motion(lines, 'tl-lines-in', APPEAR.lines, { delay: last + APPEAR.ms });
+  }
+  /** Dots that moved (a live re-layout, a zoom, a fold, a stack, a direction switch) start where they were on the screen and move to their new place;
+   * only those in or near the view, old or new, move, the rest jump. The lines hide while they move and fade back after. */
+  function moveDots(prev, next, oldScroll, turned) {
+    if (reduced) return;
+    const vNew = nearView(next.scroll);
+    const vOld = nearView(oldScroll);
+    const ms = turned ? TURN : MOVE;
+    let moved = 0;
+    for (const n of next.geo.dots) {
+      const o = prev.boxes.get(n.id);
+      const b = o ? dotButton(n.id) : null;
+      if (!b) continue;
+      const dx = (o.x - oldScroll.left) - (n.x - next.scroll.left);
+      const dy = (o.y - oldScroll.top) - (n.y - next.scroll.top);
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+      if (!inView(vNew, n) && !inView(vOld, o)) continue;
+      motion(b, turned ? 'tl-turning' : 'tl-moving', ms, { from: { transform: translate(dx, dy) } });
+      moved += 1;
+    }
+    if (moved) motion(lines, 'tl-lines-off', ms + 32, { done: () => { if (!finishing && !reduced && lines.isConnected) motion(lines, 'tl-lines-back', LINES_BACK); } });
+  }
+  /** A direction switch: the headers, the axis, the rail and the Now marker cross-fade while the dots move. */
+  function crossFade() {
+    const nodes = [nowLine, nowPill];
+    for (const b of bandEls.values()) nodes.push(b.head, b.axis, b.ticks);
+    for (const g of groupEls.values()) nodes.push(g.label, g.bar);
+    for (const n of nodes) if (n.isConnected) motion(n, 'tl-xfade', XFADE);
   }
   /** The toolbar ring, each band's bar and each phase fill move from the old percent to the new one in 400 ms (D-14); the first draw shows the value. */
   function fills(prev, next) {
@@ -1458,45 +1568,68 @@
     return r;
   }
   // The expanded card is 320 px wide (the view width under 520 px), its height its content's, at most the scroller less 16 px.
-  const CARD = Object.freeze({ width: 320, estimate: 240 });
+  const CARD = Object.freeze({ width: 320, estimate: 240, open: 200, close: 120 });
   /** Places the card next to its dot, again only when the dot moved or the window or the drawing changed (UI-SPEC "Placement"): panning keeps it where
    * it is, beside its dot. */
   function placeCard(box) {
     const size = scrollerSize();
     const at = JSON.stringify([box.x, box.y, box.w, box.h, drawn.geo.direction, drawn.geo.zoom, size.width, size.height]);
-    if (open.at === at) return;
+    if (open.at === at) return undefined;
     open.at = at;
-    putLayer(cardBox, box, CARD.width, (view) => view.height, CARD.estimate);
+    return putLayer(cardBox, box, CARD.width, (view) => view.height, CARD.estimate);
   }
   function openCard(id, options) {
     const c = board.cardData(id);
     const dot = drawn && drawn.dotOf.get(id);
     if (!c || !dot || !drawn.boxes.has(id) || !dotButton(id)) return;
     hidePreview();
+    // A card still closing (a picture) goes at once: this one is real.
+    endOn(cardBox);
     const was = open ? open.id : undefined;
     open = { id, faceSig: '', factsSig: '', at: '' };
     attr(cardBox, 'data-id', id);
     board.select(id);
     fillCard(c, dot);
     showLayer(cardBox, true);
-    placeCard(drawn.boxes.get(id));
+    const box = drawn.boxes.get(id);
+    const r = placeCard(box);
+    // The card springs open from its corner nearest the dot (UI-SPEC "Motion").
+    if (r) setStyle(cardBox, 'transform-origin', (box.x + box.w / 2 <= r.left + r.width / 2 ? 'left' : 'right') + ' ' + (box.cy <= r.top + r.height / 2 ? 'top' : 'bottom'));
+    motion(cardBox, 'tl-card-in', CARD.open);
     if (was !== undefined && was !== id) redecorate(was);
     redecorate(id);
     applyEmphasis();
     if (!options || options.focus !== false) cardTitle.focus();
   }
-  /** Closes the card. With restore, focus goes back to the dot when it was inside the card (or nowhere). */
+  /** Closes the card. With restore, focus goes back to the dot when it was inside the card (or nowhere). The card is closed at once (no id is open,
+   * focus is back on the dot); for 120 ms it stays on the page as a picture that fades and shrinks, hidden from screen readers and inert. */
   function closeCard(restore) {
     if (!open) return;
     const id = open.id;
     const a = document.activeElement;
     const inside = !a || a === document.body || !a.isConnected || cardBox.contains(a);
     open = undefined;
-    showLayer(cardBox, false);
     attr(cardBox, 'data-id', null);
+    if (restore && inside) focusDot(id);
+    hideCard();
     redecorate(id);
     applyEmphasis();
-    if (restore && inside) focusDot(id);
+  }
+  function hideCard() {
+    endOn(cardBox);
+    if (!cardBox.isConnected) return;
+    // Focus never stays in the picture: whoever closed the card puts it where it belongs (the dot, the drawer, the next stop).
+    const a = document.activeElement;
+    if (a && a !== document.body && cardBox.contains(a) && typeof a.blur === 'function') a.blur();
+    attr(cardBox, 'aria-hidden', 'true');
+    attr(cardBox, 'inert', '');
+    motion(cardBox, 'tl-card-out', CARD.close, {
+      done: () => {
+        attr(cardBox, 'aria-hidden', null);
+        attr(cardBox, 'inert', null);
+        if (!open) showLayer(cardBox, false);
+      }
+    });
   }
   /** After a draw: the card follows its dot, takes the new model's words, and closes when its card left the board or its dot is not drawn. */
   function followCard() {
@@ -1532,6 +1665,7 @@
   /** The timeline is gone from the page or could not be drawn: no card, no preview and no emphasis survive it. */
   function dropLayers() {
     open = undefined;
+    endOn(cardBox);
     showLayer(cardBox, false);
     hidePreview();
     hoverId = undefined;
@@ -1552,7 +1686,7 @@
   let leaveTimer;
   let warmTimer;
   let warm = false;
-  const PREVIEW = Object.freeze({ delay: 300, linger: 100, warm: 600, width: 256, estimate: 160 });
+  const PREVIEW = Object.freeze({ delay: 300, linger: 100, warm: 600, width: 256, estimate: 160, open: 120 });
   /** The preview's words: the state and display ID and the badges from the board face, the title (clamped to 3 lines by the stylesheet), who, the
    * step, what it waits for and how to open the card. */
   function fillPreview(c, dot, how) {
@@ -1574,8 +1708,11 @@
     shownPreview = { id, how };
     attr(previewBox, 'data-id', id);
     fillPreview(c, dot, how);
+    const fresh = !previewBox.isConnected;
     showLayer(previewBox, true);
     putLayer(previewBox, drawn.boxes.get(id), PREVIEW.width, (view) => (view.height + 2 * LAYER.gap) / 2, PREVIEW.estimate);
+    // It fades in and slides 4 px away from the dot, on the side it was placed (the stylesheet reads data-side).
+    if (fresh) motion(previewBox, 'tl-preview-in', PREVIEW.open);
   }
   /** Closes the preview; for 600 ms after, the next dot's preview opens with no delay. */
   function hidePreview() {
@@ -1583,6 +1720,7 @@
     clearTimeout(leaveTimer); leaveTimer = undefined;
     if (!shownPreview) return;
     shownPreview = undefined;
+    endOn(previewBox);
     showLayer(previewBox, false);
     attr(previewBox, 'data-id', null);
     warm = true;
@@ -1629,11 +1767,23 @@
     if (shownPreview && shownPreview.id === id) hidePreview();
   }
   /** Emphasises the in and out lines of one card: the hovered dot, else the focused dot, else the open card (D-07). Other lines stay at rest. */
+  // Lines draw in (stroke-dashoffset from the path length to 0, over 240 ms) when the emphasis moves to another card; at most 24 paths at a time,
+  // and not the dashed waiting lines, whose dashes would be lost while they draw. The same emphasis after a redraw does not draw in again.
+  const DRAW = Object.freeze({ ms: 240, max: 24 });
+  let emphasised;
   function applyEmphasis() {
     const id = hoverId || (focusId && dotButton(focusId) ? focusId : undefined) || (open ? open.id : undefined);
+    const fresh = id !== undefined && id !== emphasised;
+    emphasised = id;
+    let drawing = 0;
     for (const p of Array.from(lines.children)) {
       const on = id !== undefined && (p.getAttribute('data-from') === id || p.getAttribute('data-to') === id);
       if (p.classList.contains('emphasis') !== on) p.classList.toggle('emphasis', on);
+      if (on && fresh && !reduced && drawing < DRAW.max && !p.classList.contains('waiting')) {
+        drawing += 1;
+        p.setAttribute('pathLength', '1');
+        motion(p, 'tl-draw', DRAW.ms, { done: () => p.removeAttribute('pathLength') });
+      }
     }
   }
   // ---- the keyboard model (62.1-05, D-10, D-13, TD-19, UI-SPEC "Keyboard Model") -----------------------------------------------------------------
