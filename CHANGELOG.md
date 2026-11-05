@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.15
 
 - **Use a profile from another project.** **NEAR AI: Use a Saved Profile**,
   and a new choice in **NEAR AI: Select Profile**, list the profiles you set
