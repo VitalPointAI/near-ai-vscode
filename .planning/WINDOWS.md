@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 13
+open_count: 15
 waived_count: 0
 fixed_count: 7
-total_count: 20
-last_updated: 2026-11-05T02:06:04.481Z
+total_count: 22
+last_updated: 2026-11-05T03:15:45.489Z
 ---
 
 # Broken Windows Ledger
@@ -35,6 +35,8 @@ last_updated: 2026-11-05T02:06:04.481Z
 | 18 | 62.1 | stub | media/board/timeline.js | 350 | Folded finished milestones still list every dot and have no tile button in the page until 62.1-04 (the geometry already folds them) | fixed |  | 2026-11-04T23:41:15.742Z | 2026-11-05T00:45:24.903Z |
 | 19 | 62.1 | stub | media/board/board.js | 565 | In Timeline a filter that matches nothing shows the board's filtered state in place of the timeline, not the opaque band over ghost dots, until 62.1-04 | fixed |  | 2026-11-04T23:41:15.871Z | 2026-11-05T00:45:25.032Z |
 | 20 | 62.1 | stub | media/board/timeline.js | 440 | Zoom out, Zoom in, Fit milestone and Jump to now are drawn and follow the saved zoom, but do nothing when pressed until 62.1-06 wires them | fixed |  | 2026-11-05T00:45:25.161Z | 2026-11-05T02:06:04.481Z |
+| 21 | 62.1 | deviation | media/board/board.js | 1226 | 62.1-08: crossing the 520 px breakpoint, board.js redraws inside its ResizeObserver callback and Chromium reports a ResizeObserver loop notice as a page error (pre-existing since 62-21, seen by 62-23); the timeline e2e logs it in its narrow step rather than failing on it | open |  | 2026-11-05T03:15:45.357Z |  |
+| 22 | 62.1 | deviation | src/test/e2e/timelineSuite.ts |  | 62.1-08: this roadmap's Now step holds phase:63, a phase without plans that the board cannot mark done, so the teammate step reopens the latest done plan before it (the Now marker moves back) instead of finishing the Now step; owner to confirm, or let a planless phase be marked done | open |  | 2026-11-05T03:15:45.489Z |  |
 
 ````json
 [
@@ -296,6 +298,32 @@ last_updated: 2026-11-05T02:06:04.481Z
     "reason": "",
     "recorded_at": "2026-11-05T00:45:25.161Z",
     "resolved_at": "2026-11-05T02:06:04.481Z",
+    "milestone": "v0.6.0"
+  },
+  {
+    "id": 21,
+    "kind": "deviation",
+    "phase": "62.1",
+    "file": "media/board/board.js",
+    "line": 1226,
+    "description": "62.1-08: crossing the 520 px breakpoint, board.js redraws inside its ResizeObserver callback and Chromium reports a ResizeObserver loop notice as a page error (pre-existing since 62-21, seen by 62-23); the timeline e2e logs it in its narrow step rather than failing on it",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-05T03:15:45.357Z",
+    "resolved_at": null,
+    "milestone": "v0.6.0"
+  },
+  {
+    "id": 22,
+    "kind": "deviation",
+    "phase": "62.1",
+    "file": "src/test/e2e/timelineSuite.ts",
+    "line": null,
+    "description": "62.1-08: this roadmap's Now step holds phase:63, a phase without plans that the board cannot mark done, so the teammate step reopens the latest done plan before it (the Now marker moves back) instead of finishing the Now step; owner to confirm, or let a planless phase be marked done",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-05T03:15:45.489Z",
+    "resolved_at": null,
     "milestone": "v0.6.0"
   }
 ]
