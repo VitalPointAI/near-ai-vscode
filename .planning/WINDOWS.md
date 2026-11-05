@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 15
-waived_count: 0
+open_count: 17
+waived_count: 2
 fixed_count: 7
-total_count: 22
-last_updated: 2026-11-05T03:15:45.489Z
+total_count: 26
+last_updated: 2026-11-05T04:05:17.121Z
 ---
 
 # Broken Windows Ledger
@@ -36,7 +36,11 @@ last_updated: 2026-11-05T03:15:45.489Z
 | 19 | 62.1 | stub | media/board/board.js | 565 | In Timeline a filter that matches nothing shows the board's filtered state in place of the timeline, not the opaque band over ghost dots, until 62.1-04 | fixed |  | 2026-11-04T23:41:15.871Z | 2026-11-05T00:45:25.032Z |
 | 20 | 62.1 | stub | media/board/timeline.js | 440 | Zoom out, Zoom in, Fit milestone and Jump to now are drawn and follow the saved zoom, but do nothing when pressed until 62.1-06 wires them | fixed |  | 2026-11-05T00:45:25.161Z | 2026-11-05T02:06:04.481Z |
 | 21 | 62.1 | deviation | media/board/board.js | 1226 | 62.1-08: crossing the 520 px breakpoint, board.js redraws inside its ResizeObserver callback and Chromium reports a ResizeObserver loop notice as a page error (pre-existing since 62-21, seen by 62-23); the timeline e2e logs it in its narrow step rather than failing on it | open |  | 2026-11-05T03:15:45.357Z |  |
-| 22 | 62.1 | deviation | src/test/e2e/timelineSuite.ts |  | 62.1-08: this roadmap's Now step holds phase:63, a phase without plans that the board cannot mark done, so the teammate step reopens the latest done plan before it (the Now marker moves back) instead of finishing the Now step; owner to confirm, or let a planless phase be marked done | open |  | 2026-11-05T03:15:45.489Z |  |
+| 22 | 62.1 | deviation | src/test/e2e/timelineSuite.ts |  | 62.1-08: this roadmap's Now step holds phase:63, a phase without plans that the board cannot mark done, so the teammate step reopens the latest done plan before it (the Now marker moves back) instead of finishing the Now step; owner to confirm, or let a planless phase be marked done | waived | Owner accepted on 2026-11-05 (relayed by the orchestrator): the teammate step reopens plan:62-27 so the Now marker moves back, and planless phases stay unmarkable as done | 2026-11-05T03:15:45.489Z | 2026-11-05T04:04:58.343Z |
+| 23 | 62.1 | deviation | media/board/layout-probe.js |  | 62.1-08 (4c6c710): probe rule 12 does not judge a percent inside a milestone header held at the scroller edge against the dots that header hides (rule 1's held-header reading); the preview and the card are still judged against every percent | waived | Owner accepted on 2026-11-05 (relayed by the orchestrator): the rule 12 held-header reading of 4c6c710 stays | 2026-11-05T04:05:03.450Z | 2026-11-05T04:05:07.702Z |
+| 24 | 62.1 | deviation | src/test/e2e/run.ts |  | 62.1-09: a timeline run without NEAR_AI_E2E_TIMELINE_PART empties .vscode-test/screens-timeline (62.1-08 design), so the full e2e removes the review frames; the 62.1-09 gate restored them from a copy. Run the two screenshot parts again after any full e2e, or keep frames when no part is given | open |  | 2026-11-05T04:05:07.866Z |  |
+| 25 | 62.1 | deviation | media/board/board.css | 333 | 62.1-09: done dots use var(--vscode-charts-green, var(--vscode-testing-iconPassed)) instead of the UI-SPEC's testing.iconPassed, which is 2.0 to 1 on the light theme's canvas (probe rule 9 asks 3 to 1); owner to confirm the colour in the light and dark frames | open |  | 2026-11-05T04:05:16.961Z |  |
+| 26 | 62.1 | deviation | media/board/timeline.js |  | 62.1-09: under 520 px, when no side is clear at the full view width (the Now dot between the Now pill and the rail's phase labels), the preview and the card go below or above from the dot's left edge to the view's right edge instead of the UI-SPEC's full view width; owner to confirm in the 480 px frames | open |  | 2026-11-05T04:05:17.121Z |  |
 
 ````json
 [
@@ -320,9 +324,61 @@ last_updated: 2026-11-05T03:15:45.489Z
     "file": "src/test/e2e/timelineSuite.ts",
     "line": null,
     "description": "62.1-08: this roadmap's Now step holds phase:63, a phase without plans that the board cannot mark done, so the teammate step reopens the latest done plan before it (the Now marker moves back) instead of finishing the Now step; owner to confirm, or let a planless phase be marked done",
+    "status": "waived",
+    "reason": "Owner accepted on 2026-11-05 (relayed by the orchestrator): the teammate step reopens plan:62-27 so the Now marker moves back, and planless phases stay unmarkable as done",
+    "recorded_at": "2026-11-05T03:15:45.489Z",
+    "resolved_at": "2026-11-05T04:04:58.343Z",
+    "milestone": "v0.6.0"
+  },
+  {
+    "id": 23,
+    "kind": "deviation",
+    "phase": "62.1",
+    "file": "media/board/layout-probe.js",
+    "line": null,
+    "description": "62.1-08 (4c6c710): probe rule 12 does not judge a percent inside a milestone header held at the scroller edge against the dots that header hides (rule 1's held-header reading); the preview and the card are still judged against every percent",
+    "status": "waived",
+    "reason": "Owner accepted on 2026-11-05 (relayed by the orchestrator): the rule 12 held-header reading of 4c6c710 stays",
+    "recorded_at": "2026-11-05T04:05:03.450Z",
+    "resolved_at": "2026-11-05T04:05:07.702Z",
+    "milestone": "v0.6.0"
+  },
+  {
+    "id": 24,
+    "kind": "deviation",
+    "phase": "62.1",
+    "file": "src/test/e2e/run.ts",
+    "line": null,
+    "description": "62.1-09: a timeline run without NEAR_AI_E2E_TIMELINE_PART empties .vscode-test/screens-timeline (62.1-08 design), so the full e2e removes the review frames; the 62.1-09 gate restored them from a copy. Run the two screenshot parts again after any full e2e, or keep frames when no part is given",
     "status": "open",
     "reason": "",
-    "recorded_at": "2026-11-05T03:15:45.489Z",
+    "recorded_at": "2026-11-05T04:05:07.866Z",
+    "resolved_at": null,
+    "milestone": "v0.6.0"
+  },
+  {
+    "id": 25,
+    "kind": "deviation",
+    "phase": "62.1",
+    "file": "media/board/board.css",
+    "line": 333,
+    "description": "62.1-09: done dots use var(--vscode-charts-green, var(--vscode-testing-iconPassed)) instead of the UI-SPEC's testing.iconPassed, which is 2.0 to 1 on the light theme's canvas (probe rule 9 asks 3 to 1); owner to confirm the colour in the light and dark frames",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-05T04:05:16.961Z",
+    "resolved_at": null,
+    "milestone": "v0.6.0"
+  },
+  {
+    "id": 26,
+    "kind": "deviation",
+    "phase": "62.1",
+    "file": "media/board/timeline.js",
+    "line": null,
+    "description": "62.1-09: under 520 px, when no side is clear at the full view width (the Now dot between the Now pill and the rail's phase labels), the preview and the card go below or above from the dot's left edge to the view's right edge instead of the UI-SPEC's full view width; owner to confirm in the 480 px frames",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-11-05T04:05:17.121Z",
     "resolved_at": null,
     "milestone": "v0.6.0"
   }
