@@ -636,7 +636,9 @@ test('D-10: one tab stop for every dot, tile and +n, and in horizontal Right and
   assert.equal(key(h, 'ArrowDown'), 'more:3:+2', 'the +n button is a stop in its step');
   assert.equal(key(h, 'ArrowRight'), CHORE, 'Right crosses into the next band');
   assert.equal(key(h, 'ArrowRight'), CHORE, 'nothing after the last step');
-  assert.equal(key(h, 'ArrowLeft'), 'more:3:+2', 'Left keeps the slot, else the last slot');
+  assert.equal(key(h, 'ArrowLeft'), 'plan:2-01', 'Left keeps the slot index (the chore is in slot 0)');
+  h.$('button.tl-more')!.focus();
+  assert.equal(key(h, 'ArrowRight'), CHORE, 'from slot 8 into a step of one: its last slot');
   dot(h, 'plan:1-01').focus();
   assert.equal(key(h, 'ArrowLeft'), 'tile:milestone:v0', 'a folded tile is a stop');
   assert.equal(key(h, 'ArrowLeft'), 'tile:milestone:v0', 'nothing before the first stop');
@@ -762,6 +764,7 @@ test('D-13: N moves focus to the first unfinished dot of the Now step and announ
   dot(h, CHORE).focus();
   h.announcements.length = 0;
   assert.equal(key(h, 'n'), 'plan:1-02', 'the first unfinished dot of the Now step');
+  h.advance(100);
   assert.ok(h.announcements.includes(now.sentence), `announced: ${h.announcements.join(' | ')}`);
   dot(h, CHORE).focus();
   assert.equal(key(h, 'N'), 'plan:1-02');
@@ -770,8 +773,10 @@ test('D-13: N moves focus to the first unfinished dot of the Now step and announ
   delete none.timeline!.now;
   const q = timelineOf(none);
   dot(q, CHORE).focus();
+  q.advance(200);
   q.announcements.length = 0;
   assert.equal(key(q, 'n'), CHORE, 'no Now: nothing happens');
+  q.advance(100);
   assert.deepEqual(q.announcements, []);
 });
 

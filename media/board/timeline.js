@@ -18,8 +18,10 @@
     fold: 'Fold milestone',
     foldName: (title) => 'Fold ' + title,
     progressName: (title) => title + ' progress',
-    hintMove: 'Use the arrow keys to move along the timeline. Press Enter to open the card. Press M to move it. Press N to jump to now.',
-    hintOpen: 'Use the arrow keys to move along the timeline. Press Enter to open the card. Press N to jump to now.',
+    // The dots' hidden hint (UI-SPEC "Accessible name of a dot" and the D-13 amendment), without the M sentence when the card has no menu.
+    hintKeys: 'Use the arrow keys to move along the timeline. Press Enter to open the card.',
+    hintM: 'Press M to move it.',
+    hintN: 'Press N to jump to now.',
     showMilestone: 'Show milestone',
     more: (n) => '+' + n,
     moreName: (n, step) => 'Show ' + n + ' more cards in step ' + step,
@@ -489,8 +491,8 @@
   // The hidden hints the dots point at (aria-describedby reads hidden text).
   const hints = el('div', 'tl-hints');
   hints.hidden = true;
-  const hintMove = el('span', '', T.hintMove); hintMove.id = 'tl-hint-move';
-  const hintOpen = el('span', '', T.hintOpen); hintOpen.id = 'tl-hint-open';
+  const hintMove = el('span', '', [T.hintKeys, T.hintM, T.hintN].join(' ')); hintMove.id = 'tl-hint-move';
+  const hintOpen = el('span', '', [T.hintKeys, T.hintN].join(' ')); hintOpen.id = 'tl-hint-open';
   hints.append(hintMove, hintOpen);
   // The expanded card (62.1-05, D-06): a non-modal dialog anchored to its dot inside the canvas, so it moves with its dot when the person pans. It
   // follows the dots in the DOM, so Tab from the dot reaches it. Its face is the board card's own (board.cardFace), so the two views cannot drift.
@@ -811,14 +813,20 @@
       b.setAttribute('type', 'button');
       b.setAttribute('data-step', m.step);
       b.addEventListener('click', () => {
-        openStacks[key] = !openStacks[key];
+        const opening = !openStacks[key];
+        const slot = x.slot;
+        openStacks[key] = opening;
         board.redraw();
-        if (b.isConnected) b.focus();
+        // Showing the whole stack keeps focus on the same slot, now a dot; Show fewer keeps it on the button, back in the 9th slot.
+        const col = opening ? columns().find((c) => c.band === band.id && c.step === m.step) : undefined;
+        const target = col && col.items[slot] ? col.items[slot] : b;
+        if (target.isConnected) moveTo(target);
       });
       li.appendChild(b);
-      x = { li, button: b };
+      x = { li, button: b, slot: m.slot };
       moreEls.set(key, x);
     }
+    x.slot = m.slot;
     const step = m.step + 1;
     const name = m.hidden > 0 ? T.moreName(m.hidden, step) : T.fewerName(step);
     setText(x.button, m.hidden > 0 ? T.more(m.hidden) : T.fewer);
@@ -954,8 +962,13 @@
       dropLayers();
       return;
     }
+    // Where focus was before the draw (D-10: focus is never lost to the page body on a live update).
+    const a = document.activeElement;
+    const was = a && a !== document.body && scroll.contains(a) ? (a.closest && a.closest(STOPS) && list.contains(a) ? stopKey(a.closest(STOPS)) : cardBox.contains(a) && open ? 'dot:' + open.id : 'scroll') : null;
+    const before = lastOrder;
     try {
       draw(model, timeline, saved, shown);
+      if (was) keepFocus(was, before);
     } catch (error) {
       // The layout function threw: the error state, and Columns keeps working.
       place(scroll, [errorBox]);
@@ -1096,9 +1109,10 @@
     for (const [g, group, at, ox, oy] of labels) drawRail(g, group, at, ox, oy, horizontal);
     // One tab stop for the dots, tiles and +{n} buttons: the selected card's dot when it is shown, else the first dot, else the first stop (the
     // arrow keys come with 62.1-05).
-    const order = Array.from(list.querySelectorAll('button.tl-dot, button.tl-folded, button.tl-more'));
-    const stop = order.find((b) => b.getAttribute('data-id') === board.selected()) || order.find((b) => b.classList.contains('tl-dot')) || order[0];
+    const order = Array.from(list.querySelectorAll(STOPS));
+    const stop = order.find((b) => stopKey(b) === activeKey) || order.find((b) => b.getAttribute('data-id') === board.selected()) || order.find((b) => b.classList.contains('tl-dot')) || order[0];
     for (const b of order) attr(b, 'tabindex', b === stop ? 0 : -1);
+    lastOrder = order.map(stopKey);
     drawn = { timeline, geo, cards, boxes, dotOf, matching };
     followCard();
     followPreview();
@@ -1279,6 +1293,23 @@
     fillCard(c, dot);
     placeCard(drawn.boxes.get(open.id));
   }
+  /** After a draw: when focus fell to the page body, it goes to the same stop, else the next stop in the old sequence that is still drawn, else the
+   * one before it, else the scroller. The open card keeps focus as long as it stays open. */
+  function keepFocus(was, before) {
+    const a = document.activeElement;
+    if (a && a !== document.body && a.isConnected) return;
+    if (open && cardBox.isConnected && was === 'dot:' + open.id) { cardTitle.focus(); return; }
+    const now = new Map(Array.from(list.querySelectorAll(STOPS)).map((b) => [stopKey(b), b]));
+    if (now.has(was)) { moveTo(now.get(was)); return; }
+    const at = before.indexOf(was);
+    if (at >= 0) {
+      for (let i = at + 1; i < before.length; i += 1) if (now.has(before[i])) { moveTo(now.get(before[i])); return; }
+      for (let i = at - 1; i >= 0; i -= 1) if (now.has(before[i])) { moveTo(now.get(before[i])); return; }
+    }
+    const first = now.values().next().value;
+    if (first) moveTo(first);
+    else { attr(scroll, 'tabindex', '-1'); scroll.focus(); }
+  }
   /** The timeline is gone from the page or could not be drawn: no card, no preview and no emphasis survive it. */
   function dropLayers() {
     open = undefined;
@@ -1386,12 +1417,119 @@
       if (p.classList.contains('emphasis') !== on) p.classList.toggle('emphasis', on);
     }
   }
-  // Escape on a dot backs out one level: the card, else the preview (the menu takes its own Escape).
+  // ---- the keyboard model (62.1-05, D-10, D-13, TD-19, UI-SPEC "Keyboard Model") -----------------------------------------------------------------
+  // One tab stop for every dot, folded tile and +{n} button (roving tabindex). The sequence is band by band, step by step, then slot; along the axis
+  // means Right and Left in horizontal and Down and Up in vertical, across means the other two.
+  const STOPS = 'button.tl-dot, button.tl-folded, button.tl-more';
+  let activeKey;
+  let lastOrder = [];
+  function stopKey(b) {
+    if (b.classList.contains('tl-dot')) return 'dot:' + b.getAttribute('data-id');
+    const li = b.closest('li.tl-milestone');
+    const band = li ? li.getAttribute('data-milestone') : '';
+    return b.classList.contains('tl-folded') ? 'tile:' + band : 'more:' + band + ':' + b.getAttribute('data-step');
+  }
+  /** The stops by column: one column per step of a drawn band, its stops in slot order (the +{n} button last), and one column for a folded tile. */
+  function columns() {
+    const out = [];
+    for (const li of Array.from(list.children)) {
+      const band = li.getAttribute('data-milestone');
+      if (li.getAttribute('data-folded') === 'true') {
+        const tile = li.querySelector('button.tl-folded');
+        if (tile) out.push({ band, step: 0, items: [tile] });
+        continue;
+      }
+      const steps = new Map();
+      for (const b of Array.from(li.querySelectorAll('button.tl-dot, button.tl-more'))) {
+        const step = Number(b.getAttribute('data-step'));
+        if (!steps.has(step)) steps.set(step, []);
+        steps.get(step).push(b);
+      }
+      const order = (b) => (b.classList.contains('tl-more') ? Infinity : Number(b.getAttribute('data-slot')));
+      for (const step of Array.from(steps.keys()).sort((x, y) => x - y)) out.push({ band, step, items: steps.get(step).sort((x, y) => order(x) - order(y)) });
+    }
+    return out;
+  }
+  /** Moves focus to a stop: the roving tab stop follows it and the scroller brings it into view (the 48 px margin is its scroll-margin). */
+  function moveTo(b) {
+    if (!b || !b.isConnected) return;
+    b.focus();
+    if (typeof b.scrollIntoView === 'function') b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  list.addEventListener('focusin', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest(STOPS) : null;
+    if (!b || !list.contains(b)) return;
+    activeKey = stopKey(b);
+    for (const n of Array.from(list.querySelectorAll(STOPS))) attr(n, 'tabindex', n === b ? 0 : -1);
+  });
+  const unfinished = (id) => { const c = board.cardData(id); return !!c && c.column !== 'done' && c.column !== 'cancelled'; };
+  /** N and Jump to now (D-13): focus on the first unfinished dot of the Now step (the +{n} when it is hidden there, the band's last stop when all is
+   * done), and the Now sentence said once. */
+  function jumpToNow() {
+    const now = drawn && drawn.timeline.now;
+    if (!now || !drawn.geo.now) return false;
+    const cols = columns().filter((c) => c.band === now.milestoneId);
+    const col = cols.find((c) => c.step === now.step);
+    let target = col ? col.items.find((b) => b.classList.contains('tl-dot') && unfinished(b.getAttribute('data-id'))) || col.items.find((b) => b.classList.contains('tl-more')) || col.items[0] : undefined;
+    if (!target && cols.length) { const last = cols[cols.length - 1]; target = last.items[last.items.length - 1]; }
+    if (!target) return false;
+    moveTo(target);
+    board.announce(now.sentence);
+    return true;
+  }
+  /** The stop a navigation key leads to from b, null when there is nowhere to go, undefined when the key is not navigation. */
+  function navTarget(b, key, ctrl) {
+    const cols = columns();
+    const ci = cols.findIndex((c) => c.items.indexOf(b) >= 0);
+    if (ci < 0) return undefined;
+    const col = cols[ci];
+    const k = col.items.indexOf(b);
+    const horizontal = !drawn || drawn.geo.direction === 'horizontal';
+    const along = horizontal ? { ArrowRight: 1, ArrowLeft: -1 } : { ArrowDown: 1, ArrowUp: -1 };
+    const across = horizontal ? { ArrowDown: 1, ArrowUp: -1 } : { ArrowRight: 1, ArrowLeft: -1 };
+    if (own(along, key)) { const next = cols[ci + along[key]]; return next ? next.items[Math.min(k, next.items.length - 1)] : null; }
+    if (own(across, key)) return col.items[k + across[key]] || null;
+    if (key === 'Home' || key === 'End') {
+      const scope = ctrl ? cols : cols.filter((c) => c.band === col.band);
+      if (!scope.length) return null;
+      return key === 'Home' ? scope[0].items[0] : scope[scope.length - 1].items[scope[scope.length - 1].items.length - 1];
+    }
+    if (key === 'PageDown' || key === 'PageUp') {
+      // The phases in sequence, each with its first stop; a folded tile stands for its milestone.
+      const units = Array.from(list.querySelectorAll('li.tl-phase, button.tl-folded')).map((u) => (u.classList.contains('tl-folded') ? u : u.querySelector(STOPS))).filter(Boolean);
+      const mine = b.classList.contains('tl-folded') ? b : b.closest('li.tl-phase');
+      const at = units.findIndex((first) => first === b || (mine && mine.contains(first)));
+      if (at < 0) return null;
+      return units[at + (key === 'PageDown' ? 1 : -1)] || null;
+    }
+    return undefined;
+  }
   list.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
-    if (!e.target || !e.target.closest || !e.target.closest('button.tl-dot, button.tl-folded, button.tl-more')) return;
-    if (open) { e.preventDefault(); closeCard(false); return; }
-    if (shownPreview) { e.preventDefault(); hidePreview(); }
+    const b = e.target && e.target.closest ? e.target.closest(STOPS) : null;
+    if (!b || !list.contains(b) || e.altKey || e.metaKey) return;
+    const k = e.key;
+    // Keys with a modifier are VS Code's (its own Ctrl+= and Ctrl+- zoom among them), except Ctrl+Home and Ctrl+End, and Shift+F10.
+    if (e.ctrlKey && k !== 'Home' && k !== 'End') return;
+    if (e.shiftKey && k !== 'F10') return;
+    if (k === 'Escape') {
+      // Back out one level: the card, else the preview (the menu takes its own Escape first).
+      if (open) { e.preventDefault(); closeCard(false); if (document.activeElement !== b) moveTo(b); }
+      else if (shownPreview) { e.preventDefault(); hidePreview(); }
+      return;
+    }
+    const menuKey = (!e.shiftKey && (k === 'm' || k === 'M')) || (e.shiftKey && k === 'F10') || k === 'ContextMenu';
+    if (menuKey) {
+      if (!b.classList.contains('tl-dot')) return;
+      const id = b.getAttribute('data-id');
+      const c = board.cardData(id);
+      if (c && board.hasMenu(c) && !board.isDown()) { e.preventDefault(); hidePreview(); board.openMenu(id, b); }
+      return;
+    }
+    if (k === 'n' || k === 'N') { if (drawn && drawn.timeline.now) { e.preventDefault(); jumpToNow(); } return; }
+    const next = navTarget(b, k, e.ctrlKey);
+    if (next === undefined) return;
+    e.preventDefault();
+    if (next && next !== b) moveTo(next);
   });
   // A width change re-places the card and the preview (the drawing itself redraws on the board's breakpoint).
   if (typeof window.ResizeObserver === 'function') {
