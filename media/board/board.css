@@ -362,7 +362,8 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-preview-step, .tl-preview-hint { color: var(--vscode-descriptionForeground); }
 /* the card's title row stays at the top while a capped card scrolls inside; the title is never clamped */
 .tl-card-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: flex-start; gap: 8px; background: var(--vscode-editorWidget-background); }
-.tl-card-title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 1.2em; font-weight: 600; line-height: 1.2; overflow-wrap: break-word; word-break: normal; }
+/* 62.1-08: the bottom padding holds the glyph box of the last line (taller than the 1.2 line box in most UI fonts), so the title never scrolls */
+.tl-card-title { flex: 1 1 auto; min-width: 0; margin: 0; padding-bottom: 0.15em; font-size: 1.2em; font-weight: 600; line-height: 1.2; overflow-wrap: break-word; word-break: normal; }
 .tl-card-close { flex: none; min-width: 28px; min-height: 28px; }
 .tl-card-face { display: flex; flex-direction: column; gap: 4px; }
 .tl-card-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; margin: 0; font-size: max(0.85em, calc(var(--vscode-editor-font-size, 0px) * 0.85)); line-height: 1.4; }
