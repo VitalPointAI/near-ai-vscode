@@ -240,7 +240,7 @@
     return all(container, '*').filter((n) => !up(n, 'svg') && visibleEl(n) && Array.from(n.childNodes || []).some((c) => c.nodeType === 3 && String(c.textContent || '').trim() !== '')).slice(0, 40).map(textItem);
   }
   function buttonsIn(container) {
-    return all(container, 'button').filter(visibleEl).slice(0, 20).map((b) => { const r = rectOf(b); return { name: b.getAttribute('aria-label') || textOf(b).slice(0, 40) || describe(b), width: r.width, height: r.height }; });
+    return all(container, 'button').filter(visibleEl).slice(0, 20).map((b) => { const r = rectOf(b); return { name: b.getAttribute('aria-label') || textOf(b).slice(0, 40) || describe(b), width: r.width, height: r.height, box: r }; });
   }
   // The paint of an icon shape: its colour, or empty when it paints nothing.
   const paintOf = (n, key) => { const v = read(styleOf(n), key); return v && v !== 'none' && alphaOf(v) > 0 ? v : ''; };
