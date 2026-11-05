@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62.1-04-PLAN.md
-last_updated: "2026-11-05T00:47:42.869Z"
+stopped_at: Completed 62.1-05-PLAN.md
+last_updated: "2026-11-05T01:17:00.351Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: fb1c60949cf9156a7cc303bf37be2c7af99ecb0a
+state_head: 275f1a1bbd4bc77b82bee1107b2bc2124c4af370
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 75
+  completed_plans: 76
   percent: 11
 ---
 
@@ -129,6 +129,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 62.1 P03 | 26min | 3 tasks | 8 files |
 | Phase 62.1 P07 | 22min | 3 tasks | 4 files |
 | Phase 62.1 P04 | 30min | 3 tasks | 6 files |
+| Phase 62.1 P05 | 21min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -307,6 +308,9 @@ Recent decisions affecting current work:
 - [Phase 62.1]: 62.1-04: a band with a loop gets an 80 px notice row from the geometry (shared across horizontal bands, own band in vertical) so the notice never covers a dot or label
 - [Phase 62.1]: 62.1-04: timeline.js writes the phase fill's scaleX or scaleY itself; board.css keeps only the board's two layout variables
 - [Phase 62.1]: 62.1-04: in Timeline a filter that matches nothing keeps the drawing, with the board's own empty filter state (api.filterEmptyState) in a sticky band over the ghosts
+- [Phase 62.1]: 62.1-05: The kanban card and the timeline's expanded card share one face builder (board.js cardFace, moveOf); the timeline registers focus(id) and refresh(id) so the menu and drawer return focus to the dot and pending or refusal lines reach it
+- [Phase 62.1]: 62.1-05: Placement obstacles are the Now pill, the stuck milestone headers plus 8 px (their percent and progress words) and the visible phase labels, so probe rules 11 and 12 hold; right and left never squeeze the card width
+- [Phase 62.1]: 62.1-05: #tl-preview and #tl-card are in the canvas only while shown; a Waits for link focuses the target dot and opens its card; focus returning to a dot does not reopen the preview
 
 ### Pending Todos
 
@@ -328,8 +332,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T00:47:42.426Z
-Stopped at: Completed 62.1-04-PLAN.md
+Last session: 2026-11-05T01:16:59.874Z
+Stopped at: Completed 62.1-05-PLAN.md
 Resume file: None
 
 ## Notes
