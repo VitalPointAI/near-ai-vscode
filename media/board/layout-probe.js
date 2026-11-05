@@ -1011,6 +1011,9 @@
       const data = collect(kind !== 'rects');
       const out = reportOf(data, kind === 'rects' ? [] : check(data));
       if (a.controls === true) out.controls = JSON.parse(JSON.stringify(controlsOf()));
+      // 62.1-08: the frame budget is read over one set of actions, so a question may clear the sample once this report has read it.
+      const tlApi = window.NearAiTimeline;
+      if (a.resetMetrics === true && tlApi && typeof tlApi.metrics === 'function') { try { tlApi.metrics({ reset: true }); } catch (error) { /* the report already says what metrics gave */ } }
       return out;
     });
   }

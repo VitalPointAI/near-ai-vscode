@@ -108,7 +108,7 @@ export const boardTap: { toView?: (message: unknown) => void; fromView?: (messag
  * Extension-host tests only (NEAR_AI_E2E=1, 62-21): asks the real page's layout probe (media/board/layout-probe.js) to scroll, focus or just measure, and
  * the page answers with one 'e2e-layout-report' the tests see through `fromView`. Like `probe`, the hook exists only under the test seams.
  */
-export interface BoardLayoutRequest { id: number; action: 'measure' | 'scroll' | 'focus' | 'rects'; top?: number; left?: number; itemId?: string; controls?: boolean }
+export interface BoardLayoutRequest { id: number; action: 'measure' | 'scroll' | 'focus' | 'rects'; top?: number; left?: number; itemId?: string; controls?: boolean; resetMetrics?: boolean }
 
 /**
  * Extension-host tests only (NEAR_AI_E2E=1): asks the real page to report what it drew. The page acts (focus a card, press a key on the focused element,
