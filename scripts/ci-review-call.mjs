@@ -64,8 +64,8 @@ function maxTokens() {
   return value;
 }
 
-// Limits on what is read, so an endpoint that misbehaves cannot fill the runner's memory. A whole
-// (non-streamed) body holds the reasoning too, so it gets more room than the answer itself. A
+// Limits on what is read, so an endpoint that misbehaves cannot fill the runner's memory. The body
+// (streamed or whole) holds the reasoning too, so it gets more room than the answer itself. A
 // review comment is cut to fit GitHub (65,536 characters) long before either limit.
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
 const MAX_ANSWER_CHARS = 1_000_000;
@@ -124,8 +124,12 @@ async function readReply(response, alive = () => {}) {
   }, 30_000);
   progress.unref();
   try {
+  let size = 0;
   for await (const chunk of response.body) {
     alive();
+    // Counted as it arrives, so one event that never ends cannot grow without limit either.
+    size += chunk.byteLength;
+    if (size > MAX_BODY_BYTES) throw new FinalError(TOO_LONG);
     buffer += decoder.decode(chunk, { stream: true });
     let newline;
     while ((newline = buffer.indexOf('\n')) !== -1) {
