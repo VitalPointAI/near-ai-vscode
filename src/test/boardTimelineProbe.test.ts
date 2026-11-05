@@ -162,6 +162,190 @@ test('rule 1: a dot and a phase label, two phase labels, a +n button and a dot, 
   expectOne((d) => { d.timeline.headers[1].box = box(300, 116, 620, 172); }, /^Milestone headers v0\.5 and v0\.6 overlap by 20 px$/);
 });
 
+// ---- Task 2: every other rule -------------------------------------------------------------------------------------------------------------------
+
+// The clean timeline with the expanded card open on plan 2-05, placed below its dot (a step with nothing under it), and with the preview of plan 1-05.
+function withCard(): Data {
+  const d = clean();
+  d.timeline.card = {
+    box: box(664, 304, 984, 504), alpha: 1, background: WIDGET, dotId: 'plan:2-05', titleClamped: false,
+    texts: [
+      { text: 'Plan 2-05', box: box(680, 316, 800, 336), cut: noCut(), color: FG, background: WIDGET, fontSize: 13 },
+      { text: 'Ready', box: box(680, 344, 760, 360), cut: noCut(), color: FG, background: WIDGET, fontSize: 12 }
+    ],
+    buttons: [{ name: 'Close card', width: 28, height: 28 }, { name: 'Move to...', width: 88, height: 28 }]
+  };
+  return d;
+}
+function withPreview(): Data {
+  const d = clean();
+  d.timeline.preview = {
+    box: box(216, 304, 472, 404), alpha: 1, background: WIDGET, dotId: 'plan:1-05',
+    texts: [{ text: 'Done plan 1-05', box: box(228, 312, 400, 328), cut: noCut(), color: FG, background: WIDGET, fontSize: 12 }], buttons: []
+  };
+  return d;
+}
+const GREY_2_1 = 'rgb(81, 81, 81)';
+const GREY_3_9 = 'rgb(129, 129, 129)';
+
+test('the clean timeline stays clean with the expanded card open and with the preview shown', () => {
+  assert.deepEqual(check(withCard()), []);
+  assert.deepEqual(check(withPreview()), []);
+});
+
+test('rule 2: a dot outside the canvas, and a phase label cut without an ellipsis and a title', () => {
+  expectOne((d) => { shift(d, 'plan:1-05', 0, 410); }, /^Dot plan 1-05 spills 6 px below the canvas$/);
+  expectOne((d) => { d.timeline.phaseLabels[0].cut = { by: 14, ellipsis: false, title: false }; }, /^Phase label "Phase 1: First · 100%" is cut by 14 px without an ellipsis and a title$/);
+  expectOne((d) => { d.timeline.phaseLabels[0].cut = { by: 14, ellipsis: true, title: false }; }, /^Phase label "Phase 1: First · 100%" is cut by 14 px without an ellipsis and a title$/);
+  assert.deepEqual(check((() => { const d = clean(); d.timeline.phaseLabels[0].cut = { by: 14, ellipsis: true, title: true }; return d; })()), [], 'a cut on purpose (ellipsis and title) is fine');
+  expectOne((d) => { d.timeline.headers[0].cut = { by: 30, ellipsis: false, title: false }; }, /^The title of milestone header v0\.5 is cut by 30 px without an ellipsis and a title$/);
+});
+
+test('rule 3: the expanded card partly outside the visible timeline area, or under a header held at the edge', () => {
+  expectOne((d) => { d.timeline.card!.box = box(664, 304, 984, 820); }, /^The expanded card spills 28 px below the visible timeline area$/, withCard);
+  expectOne((d) => { d.timeline.scroller.scrollLeft = 10; d.timeline.card!.box = box(300, 110, 440, 176); }, /^The expanded card is under the milestone header v0\.5$/, withCard);
+});
+
+test('rule 3: the preview may not cover its own dot', () => {
+  expectOne((d) => { d.timeline.preview!.box = box(216, 280, 472, 380); }, /^The preview covers its own dot plan 1-05$/, withPreview);
+});
+
+test('rule 3: the expanded card title is never clamped', () => {
+  expectOne((d) => { d.timeline.card!.titleClamped = true; }, /^The expanded card title is clamped$/, withCard);
+});
+
+test('rule 3: no text line in the expanded card is cut, and its text is at least 0.85 of the editor font size', () => {
+  expectOne((d) => { d.timeline.card!.texts[0].cut = { by: 9, ellipsis: false, title: false }; }, /^A line in the expanded card is cut by 9 px: "Plan 2-05"$/, withCard);
+  expectOne((d) => { d.timeline.preview!.texts[0].fontSize = 10; }, /^Text "Done plan 1-05" in the preview is 10 px, less than 85 percent of the 14 px editor font$/, withPreview);
+});
+
+test('rule 3: every button in the expanded card is at least 24 by 24 px', () => {
+  expectOne((d) => { d.timeline.card!.buttons[0].height = 20; }, /^The Close card button in the expanded card is 28 by 20 px, smaller than 24 by 24 px$/, withCard);
+});
+
+test('rule 4: milestone headers, the legend band, the preview and the expanded card are opaque, read from rgba and color(srgb) values', () => {
+  expectOne((d) => { d.timeline.headers[0].alpha = 0.6; }, /^The milestone header v0\.5 is not opaque \(alpha 0\.6\)$/);
+  expectOne((d) => { const h = d.timeline.headers[0] as Record<string, unknown>; delete h.alpha; h.background = 'color(srgb 0.1 0.1 0.1 / 0.6)'; }, /^The milestone header v0\.5 is not opaque \(alpha 0\.6\)$/);
+  expectOne((d) => { d.timeline.legend = { box: box(0, 100, 1400, 140), alpha: 0.95, background: 'rgba(30, 30, 30, 0.95)' }; }, /^The legend band is not opaque \(alpha 0\.95\)$/);
+  expectOne((d) => { d.timeline.preview!.alpha = 0.9; }, /^The preview is not opaque \(alpha 0\.9\)$/, withPreview);
+  expectOne((d) => { d.timeline.card!.alpha = 0; }, /^The expanded card is not opaque \(alpha 0\)$/, withCard);
+});
+
+test('rule 5: the page never scrolls in the Timeline view; the timeline area is the only scroller', () => {
+  expectOne((d) => { d.page.scrollWidth = 1500; }, /^The page scrolls sideways by 100 px; only the timeline area may scroll$/);
+  expectOne((d) => { d.page.scrollHeight = 900; }, /^The page scrolls down by 100 px; only the timeline area may scroll$/);
+  expectOne((d) => { d.timeline.otherScrollers.push({ what: 'div.tl-legend' }); }, /^div\.tl-legend scrolls on its own; only the timeline area may scroll$/);
+});
+
+test('rule 6: the focused dot is fully visible and not under a sticky milestone header', () => {
+  assert.deepEqual(check((() => { const d = clean(); d.timeline.focusedDot = 'plan:1-02'; return d; })()), [], 'a visible focused dot is fine');
+  expectOne((d) => { d.timeline.scroller.scrollLeft = 10; shift(d, 'plan:1-01', 0, -118); d.timeline.focusedDot = 'plan:1-01'; }, /^The focused dot plan 1-01 is hidden under the milestone header v0\.5 \(22 px covered\)$/);
+  expectOne((d) => { d.timeline.scroller.clientWidth = 700; d.timeline.focusedDot = 'plan:2-05'; }, /^The focused dot plan 2-05 is not fully visible in the timeline area$/);
+});
+
+test('rule 8: each line starts and ends within 2 px of its dots\' marks, or of the +n button or tile that holds a hidden card', () => {
+  expectOne((d) => { d.timeline.lines[0].end = { x: 87, y: 282 }; }, /^The line from plan 1-01 to plan 1-02 ends 5 px away from plan 1-02$/);
+  expectOne((d) => { d.timeline.lines[0].start = { x: 51, y: 282 }; }, /^The line from plan 1-01 to plan 1-02 starts 3 px away from plan 1-01$/);
+  assert.deepEqual(check((() => { const d = clean(); d.timeline.lines[0].end = { x: 93.5, y: 282 }; return d; })()), [], 'within 2 px is attached');
+  // A line to a card hidden in a stack ends at that step's +n button.
+  const toStack = (d: Data): void => {
+    d.timeline.more.push({ ...box(216, 308, 268, 336), milestone: 'm1', step: 3, text: '+2' });
+    (d.timeline.lines as Array<Record<string, unknown>>).push({ from: 'plan:1-04', to: 'plan:1-09', start: rightMid(dotOf(d, 'plan:1-04').mark.box), end: { x: 216, y: 322 }, toBox: box(216, 308, 268, 336) });
+  };
+  assert.deepEqual(check((() => { const d = clean(); toStack(d); return d; })()), [], 'a line ending at the +n button of a hidden card is attached');
+  expectOne((d) => { toStack(d); (d.timeline.lines[3] as Record<string, unknown>).toBox = null; }, /^The line from plan 1-04 to plan:1-09 ends at no dot, \+n button or tile$/);
+});
+
+test('rule 9: dot marks and glyphs are at least 3 to 1 against the canvas, read from rgb and color(srgb) values', () => {
+  expectOne((d) => { dotOf(d, 'plan:1-01').mark.color = GREY_2_1; }, /^Dot plan 1-01's mark has a contrast of 2\.1 to 1 against the canvas, below 3 to 1$/);
+  expectOne((d) => { dotOf(d, 'plan:1-01').mark.color = 'color(srgb 0.318 0.318 0.318)'; }, /^Dot plan 1-01's mark has a contrast of 2\.1 to 1 against the canvas, below 3 to 1$/);
+  expectOne((d) => { dotOf(d, 'plan:1-02').mark.glyph = { color: GREY_2_1, background: SOLID }; }, /^Dot plan 1-02's glyph has a contrast of 2\.1 to 1, below 3 to 1$/);
+});
+
+test('rule 9: initials, preview and card text are at least 4.5 to 1 against their own background', () => {
+  expectOne((d) => { d.timeline.card!.texts[1].color = GREY_3_9; }, /^Text "Ready" in the expanded card has a contrast of 3\.9 to 1, below 4\.5 to 1$/, withCard);
+  expectOne((d) => { d.timeline.preview!.texts[0].color = 'color(srgb 0.506 0.506 0.506 / 1)'; }, /^Text "Done plan 1-05" in the preview has a contrast of 3\.9 to 1, below 4\.5 to 1$/, (() => { const d = withPreview(); d.timeline.preview!.texts[0].background = WIDGET; return d; }));
+  expectOne((d) => { dotOf(d, 'plan:2-01').chip!.color = GREY_3_9; dotOf(d, 'plan:2-01').chip!.background = WIDGET; }, /^Dot plan 2-01's initials have a contrast of 3\.9 to 1, below 4\.5 to 1$/);
+});
+
+test('rule 10: every dot, tile and +n is at least 24 by 24 px, and neighbouring hit boxes are at least 4 px apart', () => {
+  expectOne((d) => { shift(d, 'plan:1-04', -10, 0); }, /^Dots plan 1-02 and plan 1-04 are 2 px apart, less than 4 px$/);
+  expectOne((d) => { const x = dotOf(d, 'plan:1-05'); x.box = box(216, 268, 236, 296); x.mark.box = box(216, 272, 236, 292); delete x.chip; }, /^Dot plan 1-05 is 20 by 28 px, smaller than 24 by 24 px$/);
+  expectOne((d) => { d.timeline.more.push({ ...box(216, 308, 268, 330), milestone: 'm1', step: 3, text: '+2' }); }, /^The \+2 button at step 4 is 52 by 22 px, smaller than 24 by 24 px$/);
+});
+
+test('rule 11: the Now line crosses no dot and no label', () => {
+  expectOne((d) => { d.timeline.now!.line = box(560, 212, 562, 336); }, /^The Now line crosses dot plan 2-02$/);
+  expectOne((d) => { d.timeline.now!.line = box(593, 176, 595, 336); }, /^The Now line crosses phase label "Phase 2: Second · 40%"$/);
+});
+
+test('rule 11: the Now pill overlaps no dot, label, header, preview or expanded card', () => {
+  expectOne((d) => { d.timeline.card!.box = box(720, 200, 1040, 400); }, /^The Now pill overlaps the expanded card$/, withCard);
+  expectOne((d) => { d.timeline.now!.pill = box(480, 240, 530, 280); }, /^The Now pill overlaps dot plan 2-01$/);
+  expectAmong((d) => { d.timeline.now!.pill = box(504, 160, 824, 200); }, /^The Now pill overlaps milestone header v0\.6$/);
+});
+
+test('rule 11: the Now pill is opaque', () => {
+  expectOne((d) => { d.timeline.now!.alpha = 0.9; }, /^The Now pill is not opaque \(alpha 0\.9\)$/);
+});
+
+test('rule 11: the Now pill text is not cut, at least 0.85 of the editor font size and 4.5 to 1, and the Now line is 3 to 1 against the canvas', () => {
+  expectOne((d) => { d.timeline.now!.fontSize = 9.8; }, /^Text in the Now pill is 9\.8 px, less than 85 percent of the 14 px editor font$/);
+  expectOne((d) => { d.timeline.now!.cut = { by: 6, ellipsis: false, title: false }; }, /^Text in the Now pill is cut by 6 px$/);
+  expectOne((d) => { d.timeline.now!.color = GREY_3_9; }, /^Text in the Now pill has a contrast of 3\.9 to 1, below 4\.5 to 1$/);
+  expectOne((d) => { d.timeline.now!.lineColor = GREY_2_1; }, /^The Now line has a contrast of 2\.1 to 1 against the canvas, below 3 to 1$/);
+});
+
+test('rule 12: the overall progress text is not cut', () => {
+  expectOne((d) => { d.timeline.overall!.cut = { by: 6, ellipsis: false, title: false }; }, /^The project progress "70% done" is cut by 6 px$/);
+});
+
+test('rule 12: a band percent never overlaps a dot, the preview or the expanded card, and every percent is readable', () => {
+  expectOne((d) => { d.timeline.percents[2].box = box(472, 270, 512, 286); }, /^The band percent "40%" overlaps dot plan 2-01$/);
+  expectOne((d) => { d.timeline.preview!.box = box(216, 304, 472, 404); d.timeline.percents[1].box = box(300, 380, 400, 396); }, /^The band progress "5 of 5 cards finished" overlaps the preview$/, withPreview);
+  expectOne((d) => { d.timeline.percents[0].fontSize = 10; }, /^The band percent "100%" is 10 px, less than 85 percent of the 14 px editor font$/);
+  expectOne((d) => { d.timeline.percents[3].color = GREY_3_9; d.timeline.percents[3].background = WIDGET; }, /^The band progress "2 of 5 cards finished" has a contrast of 3\.9 to 1, below 4\.5 to 1$/);
+  expectOne((d) => { d.timeline.phaseLabels[1].fontSize = 10; }, /^Phase label "Phase 2: Second · 40%" is 10 px, less than 85 percent of the 14 px editor font$/);
+  expectOne((d) => { d.timeline.card!.box = box(472, 150, 792, 250); }, /^Phase label "Phase 2: Second · 40%" overlaps the expanded card$/, (() => { const d = withCard(); d.timeline.now = null; d.timeline.percents.splice(2, 2); return d; }));
+});
+
+test('a badly broken timeline lists at most 12 sentences per rule and then one "And N more" line', () => {
+  const d = clean();
+  for (let i = 0; i < 20; i += 1) {
+    const x = dot(`plan:9-${String(i + 1).padStart(2, '0')}`, `plan 9-${String(i + 1).padStart(2, '0')}`, 'm2', 5, i, 24 + i * 60, 500);
+    x.mark.color = GREY_2_1;
+    d.timeline.dots.push(x);
+  }
+  const problems = check(d);
+  assert.equal(problems.length, 13, problems.join(' | '));
+  assert.ok(problems.slice(0, 12).every((p) => /mark has a contrast of 2\.1 to 1/.test(p)));
+  assert.equal(problems[12], 'And 8 more dot marks with too little contrast.');
+});
+
+test('first-screen facts: the Now pill and a dot of the Now step inside the visible timeline area (not a standing rule)', () => {
+  const firstScreen = (data: Data) => JSON.parse(JSON.stringify(probeHarness.window.NearAiBoardLayout.firstScreenOf(JSON.parse(JSON.stringify(data)))));
+  assert.deepEqual(firstScreen(clean()), { nowVisible: true, nowStepDotVisible: true });
+  const narrow = clean();
+  narrow.timeline.scroller.clientWidth = 700;
+  assert.deepEqual(firstScreen(narrow), { nowVisible: false, nowStepDotVisible: true }, 'the pill reaches past the right edge, the Now step dot is in view');
+  narrow.timeline.scroller.clientWidth = 500;
+  assert.deepEqual(firstScreen(narrow), { nowVisible: false, nowStepDotVisible: false });
+  assert.deepEqual(check(narrow), [], 'scrolled away from now is not a problem');
+  const none = clean();
+  none.timeline.now = null;
+  assert.deepEqual(firstScreen(none), { nowVisible: false, nowStepDotVisible: false });
+});
+
+/** Breaks a rule that cannot break alone and expects exactly one problem matching this rule's sentence among the rest. */
+function expectAmong(mutate: (data: Data) => void, pattern: RegExp, start: () => Data = clean): string {
+  const data = start();
+  mutate(data);
+  const problems = check(data);
+  const hits = problems.filter((problem) => pattern.test(problem));
+  assert.equal(hits.length, 1, `exactly one problem matching ${pattern}, got: ${problems.join(' | ') || 'none'}`);
+  return hits[0];
+}
+
 // ---- the page answer ----------------------------------------------------------------------------------------------------------------------------
 
 // The probe waits two animation frames (each a fake timer) with a promise step between them, so time and the microtask queue take turns a few times.
@@ -243,4 +427,42 @@ test('the page answers with a timeline section in the Timeline view (view, direc
   plain.deliver({ type: 'state', model });
   plain.$('#view-switch button[data-view="timeline"]')!.click();
   assert.equal((await ask(plain, { id: 5, action: 'measure' })).length, 0, 'no answer without data-e2e');
+});
+
+test('on test pages the report carries NearAiTimeline.metrics when it exists, and card text is judged on the first opaque background up the tree', async () => {
+  const model = await timelineModel();
+  const h = page(true);
+  h.deliver({ type: 'state', model });
+  h.$('#view-switch button[data-view="timeline"]')!.click();
+  const before = (await ask(h, { id: 1, action: 'measure' }))[0].report.timeline as Record<string, unknown>;
+  assert.equal('metrics' in before, false, 'no metrics while the timeline offers none');
+
+  const base = h.window.NearAiTimeline as Record<string, unknown>;
+  h.window.NearAiTimeline = Object.freeze({ ...base, metrics: () => ({ drawMs: 42, frames: { count: 3, p95: 16 } }) });
+  const withMetrics = (await ask(h, { id: 2, action: 'measure' }))[0].report.timeline as Record<string, unknown>;
+  assert.deepEqual(withMetrics.metrics, { drawMs: 42, frames: { count: 3, p95: 16 } });
+
+  // A computed style for the fake page: only the expanded card paints a background; its text elements are transparent.
+  h.window.getComputedStyle = (n: { id?: string }) => ({
+    backgroundColor: n.id === 'tl-card' ? WIDGET : 'rgba(0, 0, 0, 0)', color: FG, fontSize: '13px', position: 'static', visibility: 'visible', display: 'block',
+    textOverflow: 'clip', overflowX: 'visible', overflowY: 'visible', getPropertyValue: (key: string) => (key === '--vscode-editor-font-size' ? '14px' : '')
+  });
+  const doc = h.document;
+  const card = doc.createElement('section');
+  card.id = 'tl-card';
+  const title = doc.createElement('h2');
+  title.id = 'tl-card-title';
+  title.textContent = 'Alpha slice';
+  const row = doc.createElement('div');
+  const state = doc.createElement('span');
+  state.textContent = 'Ready';
+  row.appendChild(state);
+  card.append(title, row);
+  h.$('.tl-scroll')!.appendChild(card);
+  const measured = (await ask(h, { id: 3, action: 'measure' }))[0].report.timeline as Record<string, any>;
+  assert.equal(measured.editorFontSize, 14);
+  assert.ok(measured.card, 'the open card is measured');
+  assert.equal(measured.card.alpha, 1);
+  assert.deepEqual((measured.card.texts as Array<Record<string, unknown>>).map((t) => [t.text, t.background, t.color, t.fontSize]), [['Alpha slice', WIDGET, FG, 13], ['Ready', WIDGET, FG, 13]]);
+  assert.equal(measured.card.titleClamped, false);
 });
