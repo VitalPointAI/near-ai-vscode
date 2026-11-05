@@ -558,3 +558,26 @@ test('rule 12: a percent in a milestone header held at the edge is not said to o
   assert.deepEqual(heldOver(true).filter((p) => /^The band percent "100%" overlaps dot/.test(p)), [], 'held at the edge: the header hides the dot');
   assert.ok(heldOver(false).some((p) => /^The band percent "100%" overlaps dot plan 1-01$/.test(p)), 'not held: the overlap is a problem');
 });
+
+// 62.1-08: the real-window test of the rare states reads the loop notice, aims at Fold milestone, follows focus onto a folded tile or a +n button,
+// and clicks Draw the timeline again, so the timeline section reports each of them.
+test('the timeline section reports the loop notices, the Fold milestone buttons, the focused stop and the layout failure with its buttons', async () => {
+  const model = await timelineModel();
+  const h = page(true);
+  h.deliver({ type: 'state', model });
+  h.$('#view-switch button[data-view="timeline"]')!.click();
+  let tl = (await ask(h, { id: 1, action: 'measure' }))[0].report.timeline as Record<string, any>;
+  assert.ok(Array.isArray(tl.notices), 'the loop notices are listed');
+  assert.ok(Array.isArray(tl.folds), 'the Fold milestone buttons are listed');
+  assert.equal(tl.error, null, 'no layout failure');
+  assert.equal(tl.focusedStop, null, 'nothing is focused');
+  const first = h.$$('button.tl-dot')[0]!;
+  const target = first.getAttribute('data-id')!;
+  tl = (await ask(h, { id: 2, action: 'focus', itemId: target }))[0].report.timeline as Record<string, any>;
+  assert.deepEqual(tl.focusedStop, { kind: 'dot', id: target, milestone: first.closest('.tl-milestone')!.getAttribute('data-milestone'), step: Number(first.getAttribute('data-step')) });
+  h.deliver({ type: 'state', model: { ...model, timeline: undefined, timelineProblem: true } });
+  tl = (await ask(h, { id: 3, action: 'measure' }))[0].report.timeline as Record<string, any>;
+  assert.ok(tl.error && /^The timeline could not be drawn/.test(tl.error.text), 'the layout failure is reported with its words');
+  assert.deepEqual((tl.error.buttons as Array<{ name: string }>).map((b) => b.name), ['Show columns', 'Draw the timeline again']);
+  assert.ok((tl.error.buttons as Array<{ box?: { left: number } }>).every((b) => b.box && typeof b.box.left === 'number'), 'each button has its box');
+});
