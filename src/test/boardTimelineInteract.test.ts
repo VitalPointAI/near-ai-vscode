@@ -574,3 +574,232 @@ test('a Waits for link moves focus to that dot and opens its card', async () => 
   assert.equal(preview(h), null, 'the open card is not previewed');
   onlyKnownPosts(h);
 });
+
+// ---- Task 3: the keyboard model, folding and stacks, N for now, and focus that survives live updates ---------------------------------------------
+
+// milestone:v0 is finished (it starts folded); milestone:v1 (active) has phase 1 with 1-01 (done) at step 1, 1-02 and 1-03 after it at step 2, 1-04
+// after 1-02 at step 3, and phase 2 with ten plans after 1-04 at step 4 (8 dots and +2); Dana added a chore on the board.
+async function keyWorld(): Promise<BoardWorld> {
+  const world = await boardWorld();
+  const { owner, dev } = world;
+  const two = Array.from({ length: 10 }, (_, i) => plan(`2-${String(i + 1).padStart(2, '0')}`, { dependsOn: ['plan:1-04'] }));
+  for (const body of [
+    milestone('v0', 'Version 0'), phase('0', 'v0', 'Old work'), plan('0-01', { state: 'done' }),
+    milestone('v1', 'Version 1', true), phase('1', 'v1', 'First work'), phase('2', 'v1', 'Second work'),
+    plan('1-01', { state: 'done' }), plan('1-02', { dependsOn: ['plan:1-01'] }), plan('1-03', { dependsOn: ['plan:1-01'] }), plan('1-04', { dependsOn: ['plan:1-02'] }),
+    ...two
+  ]) world.accept(owner, 'item.imported', body);
+  world.accept(dev, 'item.created', { id: CHORE, kind: 'chore', title: 'Tidy the notes', scope: [], requirements: [], mustHaves: [] });
+  return world;
+}
+const STOPS = 'button.tl-dot, button.tl-folded, button.tl-more';
+/** What a stop is, for reading test failures: a dot's card, a tile's milestone, or a +n's step. */
+function nameOf(n: FakeNode): string {
+  if (classes(n).includes('tl-dot')) return n.getAttribute('data-id')!;
+  if (classes(n).includes('tl-folded')) return `tile:${n.closest('li.tl-milestone')!.getAttribute('data-milestone')}`;
+  if (classes(n).includes('tl-more')) return `more:${n.getAttribute('data-step')}:${n.textContent}`;
+  return n.localName;
+}
+const focusedName = (h: BoardHarness): string => nameOf(h.focused());
+/** Presses a key on the focused element and says where focus went. */
+function key(h: BoardHarness, k: string, init: Record<string, unknown> = {}): string {
+  h.press(h.focused(), k, init);
+  return focusedName(h);
+}
+/** A copy of the model without this card (it left the board): its card, its dot and its lines. */
+function without(model: BoardModel, id: string): BoardModel {
+  const next = JSON.parse(JSON.stringify(model)) as BoardModel;
+  next.cards = next.cards.filter((c) => c.id !== id);
+  next.timeline!.dots = next.timeline!.dots.filter((d) => d.cardId !== id);
+  next.timeline!.edges = next.timeline!.edges.filter((e) => e.from !== id && e.to !== id);
+  return next;
+}
+
+test('D-10: one tab stop for every dot, tile and +n, and in horizontal Right and Left move along the steps (keeping the slot) while Down and Up move within a step', async () => {
+  const world = await keyWorld();
+  const h = timelineOf(modelOf(world, world.lead.memberId));
+  const stops = h.$$(STOPS);
+  assert.equal(stops.filter((b) => b.getAttribute('tabindex') === '0').length, 1, 'exactly one stop is in the tab order');
+  assert.ok(stops.every((b) => ['0', '-1'].includes(b.getAttribute('tabindex') ?? '')), 'every other stop is -1');
+  assert.ok(h.$$('button.tl-fold').every((b) => b.getAttribute('tabindex') === null), 'Fold milestone buttons stay in the tab order');
+
+  dot(h, 'plan:1-01').focus();
+  assert.equal(key(h, 'ArrowRight'), 'plan:1-02', 'Right: the next step');
+  assert.equal(dot(h, 'plan:1-02').getAttribute('tabindex'), '0', 'the tab stop follows the focus');
+  assert.equal(h.$$(STOPS).filter((b) => b.getAttribute('tabindex') === '0').length, 1);
+  assert.equal(key(h, 'ArrowUp'), 'plan:1-02', 'Up at the start of a step does nothing');
+  assert.equal(key(h, 'ArrowDown'), 'plan:1-03', 'Down: within the step');
+  assert.equal(key(h, 'ArrowDown'), 'plan:1-03', 'Down at the end of a step does nothing');
+  assert.equal(key(h, 'ArrowRight'), 'plan:1-04', 'Right from slot 1 into a step of one: its last slot');
+  assert.equal(key(h, 'ArrowRight'), 'plan:2-01');
+  for (let i = 2; i <= 8; i += 1) assert.equal(key(h, 'ArrowDown'), `plan:2-0${i}`);
+  assert.equal(key(h, 'ArrowDown'), 'more:3:+2', 'the +n button is a stop in its step');
+  assert.equal(key(h, 'ArrowRight'), CHORE, 'Right crosses into the next band');
+  assert.equal(key(h, 'ArrowRight'), CHORE, 'nothing after the last step');
+  assert.equal(key(h, 'ArrowLeft'), 'more:3:+2', 'Left keeps the slot, else the last slot');
+  dot(h, 'plan:1-01').focus();
+  assert.equal(key(h, 'ArrowLeft'), 'tile:milestone:v0', 'a folded tile is a stop');
+  assert.equal(key(h, 'ArrowLeft'), 'tile:milestone:v0', 'nothing before the first stop');
+
+  // The scroller follows the focused dot with the 48 px margin (scroll-margin in the stylesheet).
+  const asked: unknown[] = [];
+  (dot(h, 'plan:1-02') as unknown as Record<string, unknown>).scrollIntoView = (options: unknown) => { asked.push(JSON.parse(JSON.stringify(options))); };
+  dot(h, 'plan:1-01').focus();
+  key(h, 'ArrowRight');
+  assert.deepEqual(asked, [{ block: 'nearest', inline: 'nearest' }]);
+});
+
+test('TD-19: in vertical, Down and Up move along the steps and Right and Left within a step; Home, End, the Ctrl and Page keys jump', async () => {
+  const world = await keyWorld();
+  const h = timelineOf(modelOf(world, world.lead.memberId));
+  dot(h, 'plan:1-04').focus();
+  assert.equal(key(h, 'Home'), 'plan:1-01', 'Home: the first dot of the milestone');
+  assert.equal(key(h, 'End'), 'more:3:+2', 'End: the last stop of the milestone');
+  assert.equal(key(h, 'Home', { ctrlKey: true }), 'tile:milestone:v0', 'Ctrl+Home: the first stop of the timeline');
+  assert.equal(key(h, 'End', { ctrlKey: true }), CHORE, 'Ctrl+End: the last');
+  dot(h, 'plan:1-03').focus();
+  assert.equal(key(h, 'PageDown'), 'plan:2-01', 'Page Down: the first dot of the next phase');
+  assert.equal(key(h, 'PageDown'), CHORE, 'the cards added on the board come next');
+  assert.equal(key(h, 'PageUp'), 'plan:2-01');
+  assert.equal(key(h, 'PageUp'), 'plan:1-01', 'Page Up: the first dot of the previous phase');
+  assert.equal(key(h, 'PageUp'), 'tile:milestone:v0');
+
+  h.$('#direction-switch button[data-direction="vertical"]')!.click();
+  assert.equal(h.root.getAttribute('data-direction'), 'vertical');
+  dot(h, 'plan:1-01').focus();
+  assert.equal(key(h, 'ArrowDown'), 'plan:1-02', 'Down: the next step');
+  assert.equal(key(h, 'ArrowRight'), 'plan:1-03', 'Right: within the step');
+  assert.equal(key(h, 'ArrowLeft'), 'plan:1-02', 'Left: back within the step');
+  assert.equal(key(h, 'ArrowLeft'), 'plan:1-02', 'nothing before slot 0');
+  assert.equal(key(h, 'ArrowUp'), 'plan:1-01', 'Up: the previous step');
+});
+
+test('the folded tile and +n are stops: Enter shows the milestone (saved) and focuses its first dot, +n shows the whole stack and keeps the slot, Show fewer folds it back', async () => {
+  const world = await keyWorld();
+  const h = timelineOf(modelOf(world, world.lead.memberId));
+  const tile = h.$('button.tl-folded')!;
+  assert.equal(tile.getAttribute('aria-expanded'), 'false');
+  tile.focus();
+  h.press(tile, 'Enter');
+  assert.equal(focusedName(h), 'plan:0-01', 'focus on the first dot of the shown milestone');
+  assert.equal((h.state as any).timeline.shown['milestone:v0'], true, 'the choice is saved');
+  const fold = h.$('li.tl-milestone[data-milestone="milestone:v0"] button.tl-fold')!;
+  assert.equal(fold.getAttribute('aria-expanded'), 'true');
+  h.click(fold);
+  assert.equal(focusedName(h), 'tile:milestone:v0', 'Fold milestone folds it again, focus on the tile');
+  assert.equal((h.state as any).timeline.shown['milestone:v0'], false);
+
+  const more = h.$('button.tl-more')!;
+  more.focus();
+  h.press(more, 'Enter');
+  assert.equal(focusedName(h), 'plan:2-09', 'the whole stack, focus on the same slot');
+  assert.equal(h.$$('li.tl-milestone[data-milestone="milestone:v1"] button.tl-dot[data-step="3"]').length, 10);
+  const fewer = h.$('button.tl-more')!;
+  assert.equal(fewer.textContent, 'Show fewer');
+  assert.equal(fewer.getAttribute('aria-label'), 'Show fewer cards in step 4');
+  dot(h, 'plan:2-10').focus();
+  assert.equal(key(h, 'ArrowDown'), 'more:3:Show fewer', 'Show fewer is the last slot');
+  h.press(h.focused(), 'Enter');
+  assert.equal(focusedName(h), 'more:3:+2', 'Show fewer folds the stack back, focus on +n');
+});
+
+test('D-06, D-10: M, Shift+F10 and ContextMenu open Move to... anchored to the dot, and Escape backs out one level: the menu, the card, then the preview', async () => {
+  const world = await keyWorld();
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model);
+  const b = dot(h, 'plan:1-02');
+  assert.equal(h.$(`#${b.getAttribute('aria-describedby')}`)!.textContent, 'Use the arrow keys to move along the timeline. Press Enter to open the card. Press M to move it. Press N to jump to now.');
+  for (const [k, init] of [['m', {}], ['M', {}], ['F10', { shiftKey: true }], ['ContextMenu', {}]] as Array<[string, Record<string, unknown>]>) {
+    b.focus();
+    h.press(b, k, init);
+    assert.ok(isMenuOpen(h), `${k} opens the menu`);
+    h.press(h.focused(), 'Escape');
+    assert.ok(!isMenuOpen(h));
+    assert.equal(h.focused(), b, 'Escape gives focus back to the dot');
+  }
+  // The ladder: menu, then card, then preview.
+  h.click(b);
+  b.focus();
+  assert.equal(preview(h), null, 'no preview of the open card');
+  h.press(b, 'm');
+  assert.ok(isMenuOpen(h));
+  h.press(h.focused(), 'Escape');
+  assert.ok(!isMenuOpen(h), 'first the menu');
+  assert.ok(card(h), 'the card is still open');
+  h.press(h.focused(), 'Escape');
+  assert.equal(card(h), null, 'then the card');
+  assert.equal(h.focused(), b, 'focus stays on the dot');
+  b.blur();
+  b.focus();
+  assert.ok(preview(h));
+  h.press(b, 'Escape');
+  assert.equal(preview(h), null, 'then the preview');
+
+  // No menu for an observer: M does nothing and the hint leaves it out.
+  const o = timelineOf(modelOf(world, world.observer.memberId, false));
+  const ob = dot(o, 'plan:1-02');
+  assert.equal(o.$(`#${ob.getAttribute('aria-describedby')}`)!.textContent, 'Use the arrow keys to move along the timeline. Press Enter to open the card. Press N to jump to now.');
+  ob.focus();
+  o.press(ob, 'm');
+  assert.ok(!isMenuOpen(o));
+  // Keys with modifiers are left to VS Code.
+  dot(h, 'plan:1-01').focus();
+  for (const init of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }, { shiftKey: true }]) {
+    const e = h.press(h.focused(), 'ArrowRight', init);
+    assert.equal(e.defaultPrevented, false, `${JSON.stringify(init)} + Right is not taken`);
+    assert.equal(focusedName(h), 'plan:1-01');
+  }
+  for (const k of ['=', '-']) assert.equal(h.press(h.focused(), k, { ctrlKey: true }).defaultPrevented, false, `Ctrl+${k} is VS Code's zoom`);
+  onlyKnownPosts(h);
+});
+
+test('D-13: N moves focus to the first unfinished dot of the Now step and announces the Now sentence; with no Now it does nothing', async () => {
+  const world = await keyWorld();
+  const model = modelOf(world, world.lead.memberId);
+  const now = model.timeline!.now!;
+  assert.ok(now, 'the model has a Now step');
+  const h = timelineOf(model);
+  dot(h, CHORE).focus();
+  h.announcements.length = 0;
+  assert.equal(key(h, 'n'), 'plan:1-02', 'the first unfinished dot of the Now step');
+  assert.ok(h.announcements.includes(now.sentence), `announced: ${h.announcements.join(' | ')}`);
+  dot(h, CHORE).focus();
+  assert.equal(key(h, 'N'), 'plan:1-02');
+
+  const none = JSON.parse(JSON.stringify(model)) as BoardModel;
+  delete none.timeline!.now;
+  const q = timelineOf(none);
+  dot(q, CHORE).focus();
+  q.announcements.length = 0;
+  assert.equal(key(q, 'n'), CHORE, 'no Now: nothing happens');
+  assert.deepEqual(q.announcements, []);
+});
+
+test('live updates: focus never falls to the page body; a focused dot that leaves goes to the next stop, else the previous; an open card that leaves closes and says so', async () => {
+  const world = await keyWorld();
+  const model = modelOf(world, world.lead.memberId);
+  const h = timelineOf(model);
+  dot(h, 'plan:1-02').focus();
+  h.deliver({ type: 'state', model });
+  assert.equal(focusedName(h), 'plan:1-02', 'a new model keeps focus where it was');
+
+  dot(h, 'plan:1-03').focus();
+  const less = without(model, 'plan:1-03');
+  h.deliver({ type: 'state', model: less });
+  assert.equal(focusedName(h), 'plan:1-04', 'the next stop in sequence');
+  dot(h, CHORE).focus();
+  const fewer = without(less, CHORE);
+  h.deliver({ type: 'state', model: fewer });
+  assert.equal(focusedName(h), 'more:3:+2', 'the last one left: the previous stop');
+
+  // The open card's card leaves the board: the card closes, it is said, and focus goes to the next stop.
+  h.click(dot(h, 'plan:1-04'));
+  assert.equal(h.focused(), h.$('#tl-card-title'));
+  h.announcements.length = 0;
+  h.deliver({ type: 'state', model: without(fewer, 'plan:1-04') });
+  assert.equal(card(h), null, 'the card closes');
+  h.advance(600);
+  assert.ok(h.announcements.includes('That card is no longer on the board.'), `announced: ${h.announcements.join(' | ')}`);
+  assert.notEqual(h.focused(), h.document.body, 'focus is not lost');
+  assert.equal(focusedName(h), 'plan:2-01');
+});
