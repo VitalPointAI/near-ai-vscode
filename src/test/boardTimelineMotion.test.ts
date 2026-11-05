@@ -947,3 +947,18 @@ test('62.1-04 follow-up: in vertical a width change across 900 px draws again, s
   const geo = geoOf(h, model);
   assert.equal(narrow, geo.dots.find((d: any) => d.id === 'plan:1-01').x - geo.bands[0].x);
 });
+
+test('D-08 view switch: switching back to Columns fades the columns in over 160 ms too, and at once under reduced motion', async () => {
+  const world = await liveWorld();
+  const model = modelOf(world, world.lead.memberId);
+  for (const reducedMotion of [false, true]) {
+    const h = timelineOf(model, { reducedMotion });
+    settle(h);
+    h.$('#view-switch button[data-view="columns"]')!.click();
+    const columns = h.$('.board-scroll')!;
+    assert.ok(columns, 'the columns are drawn');
+    assert.equal(has(columns, 'tl-view-in'), !reducedMotion, reducedMotion ? 'no fade under reduced motion' : 'the columns fade in');
+    h.advance(170);
+    assert.ok(!has(columns, 'tl-view-in'), 'for 160 ms');
+  }
+});
