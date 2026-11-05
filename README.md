@@ -510,6 +510,12 @@ Read the full [security and trust report](SECURITY.md).
   connects, code-server closes the window's extension host after about 5
   minutes, which stops every run in it. Keep the tab open and in front during
   long runs; if a run is cut off, **Resume** it from the chat.
+- **Keep one code-server tab per browser profile.** code-server keeps saved
+  keys in the browser's storage, and each tab writes its own copy back, so two
+  tabs in one browser profile can overwrite each other's keys. If a profile's
+  key is lost, set the profile up again. If a team's approval of this browser
+  is lost, ask your lead to invite you again. NEAR AI says this once when it
+  runs in a browser.
 - **The agent changed something you didn't want:** click **Revert** under the
   run. Changes made by shell commands it ran are not included; use git for
   those.

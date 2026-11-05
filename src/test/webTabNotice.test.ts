@@ -5,31 +5,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { GOT_IT, offerWebTabNotice, WEB_TAB_NOTICE_KEY, WEB_TAB_NOTICE_TEXT, WebTabNoticeHost } from '../domain/webTabNotice';
 
-interface NoticeHost {
-  web: boolean;
-  state: { get(key: string): unknown; update(key: string, value: unknown): PromiseLike<void> };
-  tell(text: string, ...items: string[]): PromiseLike<string | undefined>;
-}
-interface NoticeModule {
-  WEB_TAB_NOTICE_KEY: string;
-  WEB_TAB_NOTICE_TEXT: string;
-  GOT_IT: string;
-  offerWebTabNotice(host: NoticeHost): Promise<'not-web' | 'already-shown' | 'shown'>;
-}
-
-/** src/domain/webTabNotice.ts, loaded at run time so this file compiles before the module exists. */
-function notice(): NoticeModule {
-  let loaded: Partial<NoticeModule> = {};
-  try { loaded = require('../domain/webTabNotice') as Partial<NoticeModule>; } catch { /* reported by the assertion below */ }
-  assert.equal(typeof loaded.offerWebTabNotice, 'function', 'src/domain/webTabNotice.ts exports offerWebTabNotice');
-  return loaded as NoticeModule;
+/** src/domain/webTabNotice.ts, as one object so each test reads what it uses. */
+function notice() {
+  return { offerWebTabNotice, WEB_TAB_NOTICE_KEY, WEB_TAB_NOTICE_TEXT, GOT_IT };
 }
 
 function host(web: boolean, answer: () => PromiseLike<string | undefined> = async () => undefined) {
   const values = new Map<string, unknown>();
   const told: Array<{ text: string; items: string[] }> = [];
-  const value: NoticeHost = {
+  const value: WebTabNoticeHost = {
     web,
     state: { get: (key) => values.get(key), update: async (key, next) => { if (next === undefined) values.delete(key); else values.set(key, next); } },
     tell: (text, ...items) => { told.push({ text, items }); return answer(); }

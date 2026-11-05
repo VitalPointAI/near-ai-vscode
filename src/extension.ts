@@ -33,6 +33,7 @@ import { clearProviderCache } from './services/providerCache';
 import { setNearAiDiagnostics } from './services/nearAiClient';
 import { closeInterruptedRuns } from './services/activityStore';
 import { offerProxyAdvice } from './domain/proxyAdvice';
+import { offerWebTabNotice } from './domain/webTabNotice';
 
 /** Returned only to the extension-host tests, which set NEAR_AI_E2E=1. */
 export interface NearAiTestApi {
@@ -63,6 +64,8 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   // In code-server and remote windows, suggest turning off VS Code's proxy support when no proxy is
   // used: a background browser tab otherwise stalls agent runs. Asked once; changed only on the click.
   void suggestProxySupportOff(context);
+  // In a web UI, two tabs of the editor in one browser profile can overwrite each other's saved keys: say so once (61-34).
+  void offerWebTabNotice({ web: vscode.env.uiKind === vscode.UIKind.Web, state: context.globalState, tell: (text, ...items) => vscode.window.showInformationMessage(text, ...items) }).catch(() => undefined);
 
   const sidebar = new NearAiPanelViewProvider(context, auth);
   registerAgentActivity(context, sidebar);
