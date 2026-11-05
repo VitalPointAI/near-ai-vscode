@@ -358,7 +358,8 @@ type TeamActionName = 'invite' | 'join' | 'ask' | 'solo' | 'share' | 'members' |
 // hidden and profile (61-25): whether the whole section is hidden, and the readiness state the page last read from profile-status (null before any).
 // soloLine (61-26): the quiet line on the empty chat after Just me for now, or null; board: the board line while it is drawn.
 // connect (61-30): the team part of the Connect screen while no profile works, or null; inPanel says whether it sits inside PR #7's Connect panel.
-interface ConnectFacts { status: string; actions: Array<{ id: TeamActionName; label: string }>; inPanel: boolean }
+// gapAbovePx (61-32): the measured space above the team group in pixels, or null when nothing is laid out.
+interface ConnectFacts { status: string; actions: Array<{ id: TeamActionName; label: string }>; inPanel: boolean; gapAbovePx: number | null }
 interface SectionFacts {
   id: number; heading: string; status: string; actions: Array<{ id: TeamActionName; label: string; badge?: string }>; hidden?: boolean; profile?: string | null;
   soloLine?: { text: string; actions: Array<{ id: TeamActionName; label: string }> } | null; board?: string; connect?: ConnectFacts | null; error?: string;
@@ -651,6 +652,8 @@ function teamJoinTests(): Array<[string, () => Promise<void>]> {
       assert.equal(connect.inPanel, false, 'on this branch the Connect block is drawn on its own, not inside a panel');
       assert.deepEqual(ids(connect), ['join', 'ask'], 'Join a team, then Ask to join');
       assert.equal(connect.status, '', 'no team yet, so no status line');
+      // 61-32 (0.6.4 re-test item 5): clear space above the team group, measured in this real window.
+      assert.ok(connect.gapAbovePx !== null && connect.gapAbovePx >= 10, `at least 10px above the team group: ${String(connect.gapAbovePx)}`);
     }],
     ['a profile set up in another folder on this computer is offered as a saved profile, and this project still has none', async () => {
       await kit.saveProfileElsewhere(api, SAVED_PROFILE);

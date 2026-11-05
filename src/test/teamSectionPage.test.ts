@@ -192,7 +192,7 @@ test('while hidden the probe reports hidden and the profile state, and a click p
   h.deliver({ type: 'profile-status', value: { projectScope: 'No workspace', activeProfileId: undefined, configured: false, profiles: [] } });
   h.deliver({ type: 'team-e2e', id: 2, click: 'invite' });
   // 61-30: with no profile the Connect screen offers the team way in, so the facts report it; Invite someone is not there, so it is refused.
-  const connect = { status: '', actions: [{ id: 'join', label: 'Join a team' }, { id: 'ask', label: 'Ask to join' }], inPanel: false };
+  const connect = { status: '', actions: [{ id: 'join', label: 'Join a team' }, { id: 'ask', label: 'Ask to join' }], inPanel: false, gapAbovePx: null };
   assert.deepEqual(h.posts, [{ type: 'team-e2e-facts', id: 2, heading: '', status: '', actions: [], hidden: true, profile: 'connect', soloLine: null, connect, error: 'hidden' }]);
   h.posts.length = 0;
   h.deliver(READY);
@@ -680,7 +680,8 @@ test('the probe reports the Connect part and a click probe reaches a team action
     h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
     h.deliver({ type: 'team-e2e', id: 21 });
     const facts: Record<string, any> = h.posts[0];
-    assert.deepEqual(facts.connect, { status: '', actions: [{ id: 'join', label: 'Join a team' }, { id: 'ask', label: 'Ask to join' }], inPanel });
+    // 61-32: gapAbovePx is null while nothing is laid out (this fake DOM lays nothing out).
+    assert.deepEqual(facts.connect, { status: '', actions: [{ id: 'join', label: 'Join a team' }, { id: 'ask', label: 'Ask to join' }], inPanel, gapAbovePx: null });
     h.posts.length = 0;
     h.deliver({ type: 'team-e2e', id: 22, click: 'ask' });
     assert.deepEqual(h.posts.map((post) => [post.type, post.action ?? post.error]), [['team-action', 'ask'], ['team-e2e-facts', undefined]]);
@@ -689,6 +690,80 @@ test('the probe reports the Connect part and a click probe reaches a team action
     h.deliver({ type: 'team-e2e', id: 23 });
     assert.equal(h.posts[0]?.connect, null, 'nothing reported once the profile works');
   }
+});
+
+// ---- the space above the team group (61-32, 0.6.4 re-test item 5) ----------------------------------------------------------------------------
+// The owner asked for clear space between PR #7's Set up a new profile row and the team group below it. The rules live in the team part of
+// chat.css (so merging with main touches no line of PR #7's rules), and the probe reports the measured gap for the real-window check.
+
+function cssRule(css: string, selector: string): string | undefined {
+  for (const [, selectors, body] of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    if (selectors.split(',').map((part) => part.trim()).includes(selector)) return body;
+  }
+  return undefined;
+}
+
+function declared(body: string | undefined, property: string): string | undefined {
+  if (body === undefined) return undefined;
+  for (const declaration of body.split(';')) {
+    const [name, ...value] = declaration.split(':');
+    if (name?.trim() === property) return value.join(':').trim();
+  }
+  return undefined;
+}
+
+function px(value: string | undefined): number {
+  const match = /^(\d+(?:\.\d+)?)px$/.exec(value ?? '');
+  return match ? Number(match[1]) : Number.NaN;
+}
+
+// The top and bottom margins of a margin shorthand (one to four values).
+function margins(value: string | undefined): { top: number; bottom: number } {
+  const parts = (value ?? '').split(/\s+/).filter(Boolean).map((part) => (part === '0' ? 0 : px(part)));
+  return { top: parts[0] ?? Number.NaN, bottom: parts.length >= 3 ? (parts[2] as number) : (parts[0] ?? Number.NaN) };
+}
+
+test('chat.css sets the team group apart inside PR #7\'s panel and in this branch\'s Connect block, with actions spaced like PR #7\'s row', () => {
+  const css = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const group = cssRule(css, '#welcome-connect .team-connect');
+  assert.ok(group !== undefined, 'a rule for the group inside PR #7\'s panel');
+  assert.ok(px(declared(group, 'margin-top')) >= 12, `at least 12px above the group: ${declared(group, 'margin-top')}`);
+  assert.match(declared(group, 'border-top') ?? '', /^1px solid var\(--vscode-panel-border/, 'a thin top line in the panel border colour');
+  const actions = cssRule(css, '.team-connect-actions');
+  assert.equal(declared(actions, 'display'), 'flex');
+  assert.equal(declared(actions, 'flex-wrap'), 'wrap');
+  assert.equal(declared(actions, 'gap'), '6px 10px', 'the gap of PR #7\'s .welcome-connect-actions');
+  const status = cssRule(css, '#welcome .team-connect-status');
+  assert.ok(margins(declared(status, 'margin')).bottom > 0, `the status has a bottom margin: ${declared(status, 'margin')}`);
+  const blockStatus = cssRule(css, '#team-connect .team-connect-status');
+  assert.ok(px(declared(blockStatus, 'margin-top')) >= 12, `at least 12px above the status in this branch's Connect block: ${declared(blockStatus, 'margin-top')}`);
+  // The block's rule comes after the general status rule, so its top margin wins at the same specificity.
+  assert.ok(css.indexOf('#team-connect .team-connect-status') > css.indexOf('#welcome .team-connect-status'));
+});
+
+// Lays out a node at the given vertical place, as a browser would report it.
+function layOut(node: FakeNode | null, top: number, bottom: number): void {
+  assert.ok(node !== null);
+  (node as unknown as { getBoundingClientRect(): Record<string, number> }).getBoundingClientRect = () => ({ x: 0, y: top, left: 0, top, right: 200, bottom, width: 200, height: bottom - top });
+}
+
+test('the probe reports the space above the team group: inside PR #7\'s panel from the row before it, in the Connect block from the element before the status', () => {
+  const h = withPanel();
+  h.deliver(NO_PROFILE);
+  h.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  layOut(h.$('#welcome-connect .welcome-connect-actions'), 100, 128);
+  layOut(h.$('#welcome-connect .team-connect'), 140.4, 190);
+  h.deliver({ type: 'team-e2e', id: 31 });
+  assert.equal(h.posts[0]?.connect?.gapAbovePx, 12, 'rounded to whole pixels');
+
+  const b = bare();
+  b.deliver(NO_PROFILE);
+  b.deliver({ type: 'team-state', model: model({ folderOpen: true }) });
+  // No team yet, so the status is empty and not laid out: the row is the first thing of the team group, measured from the body above it.
+  layOut(b.$('#team-connect .team-connect-body'), 40, 60);
+  layOut(b.$('#team-connect .team-connect-actions'), 72, 96);
+  b.deliver({ type: 'team-e2e', id: 32 });
+  assert.equal(b.posts[0]?.connect?.gapAbovePx, 12);
 });
 
 test('when the Connect part goes away with focus on one of its buttons, focus moves to the message box', () => {
