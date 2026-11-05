@@ -92,7 +92,7 @@ function onHiddenScreen(env: NodeJS.ProcessEnv): boolean {
   return fbdir !== '' && existsSync(path.join(fbdir, 'Xvfb_screen0'));
 }
 
-const LAUNCHES = ['project', 'plain', 'team', 'invite', 'board'] as const;
+const LAUNCHES = ['project', 'plain', 'team', 'invite', 'board', 'timeline'] as const;
 
 // NEAR_AI_E2E_ONLY names the launches to run (unset or empty runs all of them); an unknown name stops the run, so a typo never passes by running nothing.
 function launchesToRun(value: string | undefined): Set<string> {
@@ -163,7 +163,8 @@ async function boardUserData(): Promise<string> {
 // keyring (no keyring prompt on a desktop display). Last, the board window (62-21): this repository's own committed roadmap on a test project, a
 // maximized window, and the board measured by the layout probe at the full editor width and at a list width, with screenshots when the screen allows.
 // It runs only on a hidden virtual screen made by xvfb-run (owner, 2026-11-03: test windows must never appear on a person's real screen), for example
-// `xvfb-run -a node dist/test/e2e/run.js`. NEAR_AI_E2E_ONLY (a comma list of project, plain, team, invite and board) runs only those launches.
+// `xvfb-run -a node dist/test/e2e/run.js`. Then the timeline window (62.1-08) on the same kind of project. NEAR_AI_E2E_ONLY (a comma list of project,
+// plain, team, invite, board and timeline) runs only those launches.
 async function main(): Promise<void> {
   if (!onHiddenScreen(process.env)) {
     console.error(HIDDEN_SCREEN_ONLY);
@@ -208,6 +209,29 @@ async function main(): Promise<void> {
       }
     });
   }
+  if (only.has('timeline')) await timelineWindow(launch, extensionDevelopmentPath);
+}
+
+// The timeline window (62.1-08): the board's own launch shape on a fresh copy of this repository's committed roadmap, with its own user data (a
+// first open, so the timeline's first screen is the Now-centred one), its own screens folder (emptied at the start of each timeline run, so frames
+// from an earlier run are never mixed in) and its own DevTools port on 127.0.0.1 for real mouse and keyboard input (T-62.1-18). The port is a free
+// one chosen now and closes with this VS Code. NEAR_AI_E2E_TIMELINE_PART (the screenshot parts of 62.1-09) is passed on when given.
+async function timelineWindow(launch: Launch, extensionDevelopmentPath: string): Promise<void> {
+  const { workspace, remote } = await prepareBoardProject(extensionDevelopmentPath);
+  const screens = path.join(extensionDevelopmentPath, '.vscode-test', 'screens-timeline');
+  await rm(screens, { recursive: true, force: true });
+  await mkdir(screens, { recursive: true });
+  const fbdir = process.env.NEAR_AI_E2E_FBDIR;
+  const part = process.env.NEAR_AI_E2E_TIMELINE_PART;
+  const cdpPort = await freeLocalPort();
+  await launch('timeline', workspace, await boardUserData(), {
+    args: ['--force-device-scale-factor=1', `--remote-debugging-port=${cdpPort}`],
+    env: {
+      NEAR_AI_E2E_SCREENS: screens, NEAR_AI_E2E_CDP_PORT: String(cdpPort), NEAR_AI_E2E_BOARD_URL: BOARD_URL, NEAR_AI_E2E_BOARD_REMOTE: remote,
+      ...(fbdir === undefined || fbdir === '' ? {} : { NEAR_AI_E2E_FBDIR: fbdir }),
+      ...(part === undefined || part === '' ? {} : { NEAR_AI_E2E_TIMELINE_PART: part })
+    }
+  });
 }
 
 type Launch = (scenario: string, workspace: string, userData: string, extra?: { args?: string[]; env?: Record<string, string> }) => Promise<number>;

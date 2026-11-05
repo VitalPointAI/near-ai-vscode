@@ -44,7 +44,8 @@ export async function run(): Promise<void> {
     for (const scenario of scenarios) {
       const tests: Array<[string, () => Promise<void>]> = scenario === 'plain' ? plainTests() : scenario === 'team' ? teamTests() : scenario === 'board' ? boardTests()
         : scenario === 'team-lead' ? teamLeadTests() : scenario === 'team-join' ? teamJoinTests() : scenario === 'team-confirm' ? teamConfirmTests()
-          : scenario === 'team-accept' ? teamAcceptTests() : scenario === 'team-ask' ? teamAskTests() : projectTests();
+          : scenario === 'team-accept' ? teamAcceptTests() : scenario === 'team-ask' ? teamAskTests()
+            : scenario === 'timeline' ? (require('./timelineSuite') as typeof import('./timelineSuite')).timelineTests() : projectTests();
       for (const [name, body] of tests) {
         try { await body(); console.log(`✔ [${scenario}] ${name}`); } catch (error) { failed += 1; console.error(`✖ [${scenario}] ${name}\n`, error); }
       }
