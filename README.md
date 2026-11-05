@@ -115,6 +115,10 @@ as a row in the chat.
 - Streaming answers with formatted code and tables, plus **Copy** and
   **Insert at cursor** on every code block. Wide tables scroll sideways inside
   the message.
+- **Panels fit narrow widths.** Make the chat or any NEAR AI panel narrow and
+  it wraps, stacks or hides less important columns instead of scrolling
+  sideways; on a very narrow panel each table row becomes a small card. Code
+  and diffs keep their own sideways scroll so lines are never wrapped.
 - Pick any model NEAR AI offers, or one from a local runtime such as Ollama or
   LM Studio, from the input box, with pricing and privacy shown.
 - **Several conversations at once**, as in Claude Code. Start a new one with

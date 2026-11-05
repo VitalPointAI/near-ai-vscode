@@ -150,12 +150,12 @@
       },
       {
         "command": "nearAi.newProfile",
-        "title": "Set Up a New Profile\u2026",
+        "title": "Set Up a New Profile…",
         "category": "NEAR AI"
       },
       {
         "command": "nearAi.projectSetup",
-        "title": "Project Setup\u2026",
+        "title": "Project Setup…",
         "category": "NEAR AI"
       },
       {

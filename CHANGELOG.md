@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.14
 
 NEAR AI can now test your own systems for security problems. A new
 **NEAR AI: Cybersecurity** panel takes a target, records who authorized the
