@@ -317,3 +317,322 @@ test('T-62.1-09: a card and a phase titled with markup, a format control and a s
   assert.equal(h.$('li.tl-phase[data-phase="phase:1"] h3')!.textContent, heading);
   assert.equal(h.$('li.tl-phase[data-phase="phase:1"] .tl-phase-label')!.getAttribute('title'), heading);
 });
+
+// ---- Task 2: lines, ghosts, tiles, stacks, states, the Now marker and the toolbar ------------------------------------------------------------
+
+// milestone:v0 (finished: plan:0-01) folds to its tile; milestone:v1 (active) has plan:1-01 done, waiting for plan:0-01 across the milestones, and
+// plan:1-02 and plan:1-03 both waiting for it, so Now is at step 2 of v1; milestone:v2 has plan:20-01, thirty plans that wait for it, and plan:20-32
+// that waits for plan:20-30, which is hidden in the stack.
+async function linesWorld(): Promise<BoardWorld> {
+  const world = await boardWorld();
+  const bodies: Body[] = [
+    milestone('v0', 'Version 0'), phase('0', 'v0', 'Old work'), plan('0-01', { state: 'done' }),
+    milestone('v1', 'Version 1', true), phase('1', 'v1', 'First work'),
+    plan('1-01', { state: 'done', dependsOn: ['plan:0-01'] }), plan('1-02', { dependsOn: ['plan:1-01'] }), plan('1-03', { dependsOn: ['plan:1-01'] }),
+    milestone('v2', 'Version 2'), phase('20', 'v2', 'Wide work'), plan('20-01')
+  ];
+  for (let i = 2; i <= 31; i += 1) bodies.push(plan(`20-${String(i).padStart(2, '0')}`, { dependsOn: ['plan:20-01'] }));
+  bodies.push(plan('20-32', { dependsOn: ['plan:20-30'] }));
+  bodies.push(milestone('v3', 'Version 3'));
+  for (const body of bodies) world.accept(world.owner, 'item.imported', body);
+  return world;
+}
+const numbers = (d: string): number[] => (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+const clampTo = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+
+test('lines: one path per dependency under the dots, straight in a row and curved across rows, ending at mark edges, the +n button of a hidden card and a folded milestone\'s tile', async () => {
+  const world = await linesWorld();
+  const model = modelOf(world, world.lead.memberId);
+  const timeline = model.timeline!;
+  const h = timelineOf(model);
+  const g = geometryOf(h, timeline, { direction: 'horizontal', zoom: 100, width: 1400, shown: {}, openStacks: {} });
+  const svg = h.$('.tl-canvas svg.tl-lines');
+  assert.ok(svg, 'one line layer');
+  assert.equal(h.$$('svg.tl-lines').length, 1);
+  assert.equal(svg.getAttribute('aria-hidden'), 'true');
+  const canvas = h.$('.tl-canvas')!;
+  assert.ok(Array.from(canvas.children).indexOf(svg) < Array.from(canvas.children).indexOf(h.$('ol.tl-milestones')!), 'the lines are under the dots');
+  const paths = Array.from(svg.querySelectorAll('path.tl-line'));
+  assert.deepEqual(paths.map((p) => `${p.getAttribute('data-from')}>${p.getAttribute('data-to')}`).sort(), timeline.edges.map((e) => `${e.from}>${e.to}`).sort(), 'one path per dependency');
+
+  const box = new Map(g.dots.map((d) => [d.id, d]));
+  const dotOf = new Map(timeline.dots.map((d) => [d.cardId, d]));
+  const half = g.pitch.along / 2;
+  const pathOf = (from: string, to: string): number[] => numbers(paths.find((p) => p.getAttribute('data-from') === from && p.getAttribute('data-to') === to)!.getAttribute('d')!);
+  // Same row: straight from the right edge of the source mark to the left edge of the target mark.
+  const a = box.get('plan:1-01')!;
+  const b = box.get('plan:1-02')!;
+  assert.equal(dotOf.get('plan:1-02')!.slot, 0);
+  assert.deepEqual(pathOf('plan:1-01', 'plan:1-02'), [a.x + 24, a.cy, b.x + 4, b.cy]);
+  // Another row: a cubic curve, both control points half a step pitch along the axis from the ends.
+  const c = box.get('plan:1-03')!;
+  assert.notEqual(c.cy, a.cy);
+  assert.deepEqual(pathOf('plan:1-01', 'plan:1-03'), [a.x + 24, a.cy, a.x + 24 + half, a.cy, c.x + 4 - half, c.cy, c.x + 4, c.cy]);
+  // From the folded milestone: the tile's right edge.
+  const tile = g.tiles.find((t) => t.milestoneId === 'milestone:v0')!.rect;
+  const fromTile = pathOf('plan:0-01', 'plan:1-01');
+  assert.deepEqual([fromTile[0], fromTile[1]], [tile.x + tile.w, clampTo(a.cy, tile.y, tile.y + tile.h)]);
+  assert.deepEqual(fromTile.slice(-2), [a.x + 4, a.cy]);
+  // From a card hidden in the stack: the +n button's right edge; to a hidden card: its left edge.
+  const more = g.more.find((m) => m.milestoneId === 'milestone:v2')!.rect;
+  const z = box.get('plan:20-32')!;
+  const fromMore = pathOf('plan:20-30', 'plan:20-32');
+  assert.deepEqual([fromMore[0], fromMore[1]], [more.x + more.w, clampTo(z.cy, more.y, more.y + more.h)]);
+  const root = box.get('plan:20-01')!;
+  const toMore = pathOf('plan:20-01', 'plan:20-25');
+  assert.deepEqual(toMore.slice(-2), [more.x, clampTo(root.cy, more.y, more.y + more.h)]);
+  for (const p of paths) assert.equal(p.getAttribute('class'), timeline.edges.find((e) => e.from === p.getAttribute('data-from') && e.to === p.getAttribute('data-to'))!.waiting ? 'tl-line waiting' : 'tl-line');
+});
+
+test('TD-14: filters keep every place; the rest become ghost rings that are not buttons, not listed and have no lines; nothing matching shows the board\'s band over the ghosts', async () => {
+  const world = await statesWorld();
+  const model = modelOf(world, world.dev.memberId);
+  const timeline = model.timeline!;
+  const h = timelineOf(model);
+  const g = geometryOf(h, timeline, { direction: 'horizontal', zoom: 100, width: 1400, shown: {}, openStacks: {} });
+  const before = ['left', 'top'].map((k) => styleOf(dot(h, 'plan:1-02'), k));
+  assert.ok(h.$$('svg.tl-lines path').length > 0, 'lines without filters');
+  boardApi(h, 'setFilter')('ready', true);
+  const matching = new Set(model.cards.filter((c) => c.column === 'ready' && !c.blocked).map((c) => c.id));
+  assert.deepEqual([...matching], ['plan:1-02']);
+  assert.deepEqual(h.$$('button.tl-dot').map((b) => b.getAttribute('data-id')), ['plan:1-02'], 'only the matching dot is a button');
+  assert.deepEqual(['left', 'top'].map((k) => styleOf(dot(h, 'plan:1-02'), k)), before, 'its place is unchanged');
+  const ghosts = h.$('.tl-canvas .tl-ghosts')!;
+  assert.ok(ghosts, 'the ghost layer is drawn');
+  assert.equal(ghosts.getAttribute('aria-hidden'), 'true');
+  const rings = Array.from(ghosts.querySelectorAll('.tl-ghost'));
+  assert.deepEqual(rings.map((r) => r.getAttribute('data-id')).sort(), g.dots.map((d) => d.id).filter((id) => !matching.has(id)).sort(), 'every other drawn dot is a ghost');
+  for (const ring of rings) {
+    const d = g.dots.find((x) => x.id === ring.getAttribute('data-id'))!;
+    assert.deepEqual(['left', 'top', 'width', 'height'].map((k) => styleOf(ring, k)), [px(d.x + 10), px(d.cy - 4), px(8), px(8)], `${d.id} ghost on its mark`);
+    assert.equal(ring.textContent, '', 'a ghost carries no text');
+    assert.notEqual(ring.localName, 'button');
+  }
+  assert.equal(h.$$('ol.tl-dots li').filter((li) => li.querySelector('.tl-dot') === null && !classes(li).includes('tl-now')).length, 0, 'ghosts are not in the list');
+  assert.equal(h.$$('svg.tl-lines path').length, 0, 'a line needs two matching dots');
+  assert.equal(h.$('.tl-filter-empty'), null);
+
+  boardApi(h, 'setFilter')('blocked', true);
+  const band = h.$('.tl-scroll .tl-filter-empty');
+  assert.ok(band && visible(band), 'nothing matches: the board\'s empty filter band is at the top of the scroller');
+  assert.equal(h.$('.tl-scroll')!.firstElementChild, band);
+  assert.ok(band.textContent.includes('No cards match these filters'));
+  assert.ok(band.textContent.includes('Clear the filters to see every card.'));
+  assert.equal(h.$$('button.tl-dot').length, 0);
+  assert.equal(h.$$('.tl-ghosts .tl-ghost').length, g.dots.length, 'every dot is a ghost below the band');
+  const clear = Array.from(band.querySelectorAll('button')).find((x) => x.textContent === 'Clear filters');
+  assert.ok(clear, 'Clear filters');
+  clear.click();
+  assert.equal(h.$('.tl-filter-empty'), null);
+  assert.equal(h.$$('button.tl-dot').length, g.dots.length, 'every dot is back');
+});
+
+test('D-09: a finished milestone is a tile that says what it holds; a stack of 30 shows 8 dots and +22, then all and Show fewer; an empty milestone and a loop say so in their band', async () => {
+  const world = await linesWorld();
+  const model = modelOf(world, world.lead.memberId);
+  const timeline = model.timeline!;
+  const v0 = timeline.milestones.find((m) => m.id === 'milestone:v0')!;
+  const h = timelineOf(model);
+  const g = geometryOf(h, timeline, { direction: 'horizontal', zoom: 100, width: 1400, shown: {}, openStacks: {} });
+  const li = h.$('li.tl-milestone[data-milestone="milestone:v0"]')!;
+  const tile = li.querySelector('button.tl-folded');
+  assert.ok(tile, 'the finished milestone is a tile');
+  assert.equal(tile.getAttribute('aria-label'), v0.tileName);
+  assert.equal(tile.getAttribute('aria-expanded'), 'false');
+  for (const words of [v0.title, v0.tileText, '100%', 'Show milestone']) assert.ok(tile.textContent.includes(words), `the tile says ${words}`);
+  const where = g.tiles.find((t) => t.milestoneId === 'milestone:v0')!.rect;
+  const bandAt = g.bands.find((b) => b.id === 'milestone:v0')!;
+  assert.deepEqual(['left', 'top', 'width', 'height'].map((k) => styleOf(tile, k)), [px(where.x - bandAt.x), px(where.y - bandAt.y), px(where.w), px(where.h)]);
+  assert.equal(li.querySelector('h2')!.textContent, v0.heading, 'the folded band keeps its h2');
+  assert.equal(li.querySelectorAll('.tl-dot').length, 0, 'its cards are not listed until it is shown');
+  tile.click();
+  assert.equal(h.$('li.tl-milestone[data-milestone="milestone:v0"] button.tl-folded'), null);
+  assert.ok(dot(h, 'plan:0-01'));
+  const fold = h.$('li.tl-milestone[data-milestone="milestone:v0"] button.tl-fold')!;
+  assert.ok(fold, 'shown, it offers Fold milestone');
+  fold.click();
+  assert.ok(h.$('li.tl-milestone[data-milestone="milestone:v0"] button.tl-folded'), 'folded again');
+  assert.equal((h.state as any).timeline.shown['milestone:v0'], false, 'the choice is saved');
+
+  // The stack: step 2 of v2 holds 30 cards.
+  const stackStep = timeline.dots.find((d) => d.cardId === 'plan:20-02')!.step;
+  const more = h.$(`li.tl-milestone[data-milestone="milestone:v2"] button.tl-more[data-step="${stackStep}"]`);
+  assert.ok(more, 'the +n button');
+  assert.equal(more.textContent, '+22');
+  assert.equal(more.getAttribute('aria-label'), `Show 22 more cards in step ${stackStep + 1}`);
+  assert.equal(h.$$('li.tl-milestone[data-milestone="milestone:v2"] button.tl-dot').filter((b) => b.getAttribute('data-step') === String(stackStep)).length, 8);
+  more.click();
+  assert.equal(h.$$('li.tl-milestone[data-milestone="milestone:v2"] button.tl-dot').filter((b) => b.getAttribute('data-step') === String(stackStep)).length, 30, 'shown, the whole stack');
+  const fewer = h.$(`button.tl-more[data-step="${stackStep}"]`)!;
+  assert.equal(fewer.textContent, 'Show fewer');
+  assert.equal(fewer.getAttribute('aria-label'), `Show fewer cards in step ${stackStep + 1}`);
+  fewer.click();
+  assert.equal(h.$(`button.tl-more[data-step="${stackStep}"]`)!.textContent, '+22');
+
+  // The empty milestone.
+  const v3 = timeline.milestones.find((m) => m.id === 'milestone:v3')!;
+  const empty = h.$('li.tl-milestone[data-milestone="milestone:v3"] .tl-empty');
+  assert.ok(empty, 'the empty band says so');
+  assert.ok(v3.emptyText && empty.textContent.includes(v3.emptyText));
+  assert.ok(v3.emptyNext && empty.textContent.includes(v3.emptyNext));
+
+  // A loop: plan:1-02 and plan:1-03 wait for each other.
+  world.state.items.get('plan:1-02')!.dependsOn = ['plan:1-01', 'plan:1-03'];
+  world.state.items.get('plan:1-03')!.dependsOn = ['plan:1-01', 'plan:1-02'];
+  const looped = modelOf(world, world.lead.memberId);
+  const band = looped.timeline!.milestones.find((m) => m.id === 'milestone:v1')!;
+  assert.equal(band.cycle, true);
+  h.deliver({ type: 'state', model: looped });
+  const note = h.$('li.tl-milestone[data-milestone="milestone:v1"] .tl-cycle');
+  assert.ok(note, 'the loop band carries its notice');
+  assert.ok(classes(note).includes('banner'), 'an opaque notice');
+  assert.ok(note.textContent.includes(band.cycleNote!));
+  const lg = geometryOf(h, looped.timeline!, { direction: 'horizontal', zoom: 100, width: 1400, shown: {}, openStacks: {} });
+  const lb = lg.bands.find((b) => b.id === 'milestone:v1')!;
+  assert.ok(lb.notice, 'the geometry keeps room for the notice');
+  assert.deepEqual(['left', 'top', 'width'].map((k) => styleOf(note, k)), [px(lb.notice.x - lb.x), px(lb.notice.y - lb.y), px(lb.notice.w)]);
+  for (const d of lg.dots) {
+    const gap = Math.max(d.x - (lb.notice.x + lb.notice.w), lb.notice.x - (d.x + d.w), d.y - (lb.notice.y + lb.notice.h), lb.notice.y - (d.y + d.h));
+    assert.ok(gap >= 4, `the notice is clear of ${d.id}`);
+  }
+  for (const p of lg.bands.flatMap((x) => x.phases)) {
+    const r = p.label;
+    if (r.hidden) continue;
+    const gap = Math.max(r.x - (lb.notice.x + lb.notice.w), lb.notice.x - (r.x + r.w), r.y - (lb.notice.y + lb.notice.h), lb.notice.y - (r.y + r.h));
+    assert.ok(gap >= 4, `the notice is clear of the ${p.id} label`);
+  }
+});
+
+test('the timeline could not be drawn: no timeline or timelineProblem shows the heading, the body, Show columns and Draw the timeline again (the board\'s retry)', async () => {
+  const world = await statesWorld();
+  for (const broken of ['missing', 'problem'] as const) {
+    const model = modelOf(world, world.dev.memberId);
+    delete model.timeline;
+    if (broken === 'problem') model.timelineProblem = true;
+    const h = timelineOf(model);
+    const box = h.$('.tl-scroll .tl-error');
+    assert.ok(box, `${broken}: the error state`);
+    assert.equal(box.getAttribute('role'), 'alert');
+    assert.equal(box.querySelector('h2')!.textContent, 'The timeline could not be drawn');
+    assert.equal(box.querySelector('p')!.textContent, 'Something went wrong while placing the cards. Nothing was changed. Switch to Columns to see every card, or try again.');
+    const buttons = Array.from(box.querySelectorAll('button'));
+    assert.deepEqual(buttons.map((b) => b.textContent), ['Show columns', 'Draw the timeline again']);
+    assert.equal(h.$$('button.primary').filter((b) => h.$('.tl-scroll')!.contains(b)).length, 0, 'the timeline adds no primary button');
+    buttons[1]!.click();
+    assert.deepEqual(h.posts.at(-1), { type: 'retry' });
+    buttons[0]!.click();
+    assert.equal(h.root.getAttribute('data-view'), 'columns', 'Show columns switches the view');
+  }
+});
+
+test('D-13: the Now line and pill at their geometry places, the screen reader item right before the Now step, the past shade, the all-done pill, and no marker without Now', async () => {
+  const world = await linesWorld();
+  const model = modelOf(world, world.lead.memberId);
+  const timeline = model.timeline!;
+  const now = timeline.now!;
+  assert.equal(now.milestoneId, 'milestone:v1');
+  const h = timelineOf(model);
+  const g = geometryOf(h, timeline, { direction: 'horizontal', zoom: 100, width: 1400, shown: {}, openStacks: {} });
+  const band = g.bands.find((b) => b.id === now.milestoneId)!;
+  const line = h.$(`li.tl-milestone[data-milestone="${now.milestoneId}"] .tl-now-line`)!;
+  const pill = h.$(`li.tl-milestone[data-milestone="${now.milestoneId}"] .tl-now-pill`)!;
+  assert.ok(line && pill, 'the line and the pill are in the Now band');
+  assert.deepEqual(['left', 'top', 'width', 'height'].map((k) => styleOf(line, k)), [px(g.now!.line.x - band.x), px(g.now!.line.y - band.y), px(g.now!.line.w), px(g.now!.line.h)]);
+  assert.deepEqual(['left', 'top', 'width'].map((k) => styleOf(pill, k)), [px(g.now!.pill.x - band.x), px(g.now!.pill.y - band.y), px(g.now!.pill.w)]);
+  assert.equal(pill.getAttribute('aria-hidden'), 'true');
+  assert.equal(line.getAttribute('aria-hidden'), 'true');
+  assert.deepEqual(Array.from(pill.children).map((n) => n.textContent), [now.title, now.detail]);
+  const item = h.$('li.tl-now')!;
+  assert.ok(item, 'the screen reader item');
+  assert.equal(item.closest('li.tl-phase')!.getAttribute('data-phase'), now.phaseId);
+  const next = item.nextSibling!;
+  assert.equal(next.querySelector('.tl-dot')!.getAttribute('data-step'), String(now.step), 'right before the first dot of the Now step');
+  assert.equal(next.querySelector('.tl-dot')!.getAttribute('data-id'), 'plan:1-02');
+  assert.equal(item.querySelector('.sr-only')!.textContent, now.sentence);
+  assert.equal(item.getAttribute('tabindex'), null);
+  assert.equal(h.$$('li.tl-now [tabindex]').length, 0, 'not focusable');
+  // The past shade: the folded milestone before the frontier band, and the frontier band up to the line.
+  const shades = h.$$('.tl-canvas .tl-past').map((n) => ['left', 'top', 'width', 'height'].map((k) => styleOf(n, k)));
+  const v0 = g.bands.find((b) => b.id === 'milestone:v0')!;
+  assert.deepEqual(shades, [[px(v0.x), px(v0.y), px(v0.w), px(v0.h)], [px(band.x), px(band.y), px(g.now!.line.x - band.x), px(band.h)]]);
+  assert.equal(h.$('.tl-past')!.parentNode!.getAttribute('aria-hidden'), 'true');
+
+  // All done: the pill reads the all-done title after the last step.
+  for (const id of ['plan:1-02', 'plan:1-03']) setState(world.state, id, 'done');
+  for (let i = 1; i <= 32; i += 1) setState(world.state, `plan:20-${String(i).padStart(2, '0')}`, 'done');
+  const finished = modelOf(world, world.lead.memberId);
+  assert.equal(finished.timeline!.now!.allDone, true);
+  h.deliver({ type: 'state', model: finished });
+  assert.equal(h.$('.tl-now-pill')!.firstElementChild!.textContent, finished.timeline!.now!.title);
+  assert.equal(h.$$('li.tl-now').length, 1);
+  // No Now: no marker, no item, no shade.
+  delete finished.timeline!.now;
+  h.deliver({ type: 'state', model: finished });
+  assert.equal(h.$('.tl-now-line'), null);
+  assert.equal(h.$('.tl-now-pill'), null);
+  assert.equal(h.$('li.tl-now'), null);
+  assert.equal(h.$('.tl-past'), null);
+});
+
+test('D-14 and the toolbar: the overall ring with its percent, the zoom group, Jump to now and the legend toggle (saved), all in Timeline only', async () => {
+  const world = await statesWorld();
+  const model = modelOf(world, world.dev.memberId);
+  const percent = model.timeline!.percent!;
+  const h = timelineOf(model);
+  const slot = h.$('#toolbar .tl-tools')!;
+  assert.ok(visible(slot), 'the timeline controls show in Timeline');
+  assert.deepEqual(Array.from(slot.children).map((n) => n.id), ['tl-overall', 'tl-zoom', 'tl-now', 'tl-legend-btn'], 'in the toolbar order');
+  const overall = h.$('#tl-overall')!;
+  assert.equal(overall.getAttribute('role'), 'progressbar');
+  assert.deepEqual(['aria-valuemin', 'aria-valuemax', 'aria-valuenow', 'aria-label', 'aria-valuetext'].map((k) => overall.getAttribute(k)), ['0', '100', String(percent.percent), 'Project progress', percent.label]);
+  assert.equal(overall.textContent, percent.text);
+  assert.ok(overall.querySelector('svg'), 'the ring');
+  assert.equal(overall.getAttribute('tabindex'), null, 'not focusable');
+
+  const zoom = h.$('#tl-zoom')!;
+  assert.ok(classes(zoom).includes('zoom'));
+  assert.deepEqual([zoom.getAttribute('role'), zoom.getAttribute('aria-label')], ['group', 'Zoom']);
+  const out = zoom.querySelector('button[data-zoom="out"]')!;
+  const inn = zoom.querySelector('button[data-zoom="in"]')!;
+  const fit = zoom.querySelector('button[data-zoom="fit"]')!;
+  const level = zoom.querySelector('output.zoom-level')!;
+  assert.deepEqual(Array.from(zoom.children).map((n) => n.localName + (n.getAttribute('data-zoom') ?? '')), ['buttonout', 'output', 'buttonin', 'buttonfit']);
+  assert.deepEqual([out.getAttribute('aria-label'), out.getAttribute('title'), inn.getAttribute('aria-label'), inn.getAttribute('title')], ['Zoom out', 'Zoom out', 'Zoom in', 'Zoom in']);
+  assert.ok(classes(out).includes('icon') && classes(inn).includes('icon') && classes(fit).includes('secondary'));
+  assert.deepEqual([level.textContent, level.getAttribute('aria-label')], ['100%', 'Zoom 100%']);
+  assert.deepEqual([fit.textContent, fit.getAttribute('title'), fit.getAttribute('aria-label')], ['Fit milestone', 'Fit the current milestone to the window', 'Fit the current milestone to the window']);
+  boardApi(h, 'setUiState')({ zoom: 50 });
+  boardApi(h, 'redraw')();
+  assert.deepEqual([level.textContent, level.getAttribute('aria-label'), out.getAttribute('aria-disabled'), inn.getAttribute('aria-disabled')], ['50%', 'Zoom 50%', 'true', null], 'the end of the range is aria-disabled');
+  boardApi(h, 'setUiState')({ zoom: 200 });
+  boardApi(h, 'redraw')();
+  assert.deepEqual([out.getAttribute('aria-disabled'), inn.getAttribute('aria-disabled')], [null, 'true']);
+
+  const jump = h.$('#tl-now')!;
+  assert.deepEqual([jump.localName, jump.textContent, jump.getAttribute('title')], ['button', 'Jump to now', 'Show where the work is now']);
+  assert.ok(classes(jump).includes('secondary'));
+
+  const legendBtn = h.$('#tl-legend-btn')!;
+  assert.deepEqual([legendBtn.textContent, legendBtn.getAttribute('aria-expanded'), legendBtn.getAttribute('aria-controls')], ['Show legend', 'false', 'tl-legend']);
+  assert.ok(!visible(h.$('#tl-legend')), 'the legend starts closed');
+  legendBtn.click();
+  const legend = h.$('#tl-legend')!;
+  assert.ok(visible(legend), 'the legend opens');
+  assert.deepEqual([legend.getAttribute('role'), legend.getAttribute('aria-label')], ['group', 'What the dots mean']);
+  assert.ok(h.$('#board')!.contains(legend) && !h.$('.tl-scroll')!.contains(legend), 'a band above the scroller, never over the canvas');
+  assert.deepEqual(Array.from(legend.querySelectorAll('.tl-legend-item')).map((n) => n.textContent), [
+    'Backlog', 'Ready', 'Claimed', 'In progress', 'In review', 'Shipping', 'Done', 'Cancelled', 'Blocked', 'On hold', 'Looks finished, please confirm',
+    'Mine: filled initials', 'Square: a phase with no plans yet', 'Line: waits for', 'Dashed line: still waiting'
+  ]);
+  assert.equal(legend.querySelector('.tl-legend-hint')!.textContent, 'Hover or focus a dot to preview it. Click it or press Enter to open the card.');
+  assert.equal(legend.querySelectorAll('button, [tabindex]').length, 0, 'no stops inside the legend');
+  assert.deepEqual([legendBtn.textContent, legendBtn.getAttribute('aria-expanded')], ['Hide legend', 'true']);
+  assert.equal((h.state as any).timeline.legendOpen, true, 'the choice is saved');
+  legendBtn.click();
+  assert.ok(!visible(h.$('#tl-legend')));
+  assert.equal((h.state as any).timeline.legendOpen, false);
+
+  h.$('#view-switch button[data-view="columns"]')!.click();
+  for (const id of ['tl-overall', 'tl-zoom', 'tl-now', 'tl-legend-btn']) assert.ok(!visible(h.document.getElementById(id)), `${id} is not shown in Columns`);
+  assert.ok(!visible(h.$('#tl-legend')), 'no legend in Columns');
+});
