@@ -229,19 +229,25 @@ body.vscode-high-contrast button.chip[aria-pressed="true"], body.vscode-high-con
    lines and the ghosts, then the dots; the Now line 1, the pill and the loop notice 2, headers 3, the empty filter band 4, the card 6, the preview
    7, all under the Move to... menu (10). */
 body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
+/* 62.1-08 (probe rules 3, 11 and 12): Small text in the timeline is 0.85em, and never under 0.85 of the editor font size, which follows the
+   person's own editor font setting (14 px by default, larger than the workbench's 13 px, so a bare 0.85em gave 11.05 px under the 11.9 px floor).
+   The board's own card face inside the preview and the expanded card takes the same floor; Columns keeps its sizes. */
+#root { --tl-small: max(0.85em, calc(var(--vscode-editor-font-size, 0px) * 0.85)); }
+#tl-card .card-meta, #tl-card .card-top .state, #tl-card .badge, #tl-card .card-msg, #tl-card .did, #tl-card .assignee-initials, #tl-card .refusal-line, #tl-card .pending-line,
+#tl-preview .card-meta, #tl-preview .card-top .state, #tl-preview .badge, #tl-preview .card-msg, #tl-preview .did, #tl-preview .assignee-initials, #tl-preview .refusal-line, #tl-preview .pending-line { font-size: var(--tl-small); }
 #root[data-view="timeline"] { display: flex; flex-direction: column; height: 100vh; }
 #root[data-view="timeline"] > #toolbar, #root[data-view="timeline"] > #banner { flex: none; }
 #root[data-view="timeline"] > #board { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .tl-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-#tl-overall { display: inline-flex; align-items: center; gap: 4px; font-size: 0.85em; line-height: 1.4; font-variant-numeric: tabular-nums; }
+#tl-overall { display: inline-flex; align-items: center; gap: 4px; font-size: var(--tl-small); line-height: 1.4; font-variant-numeric: tabular-nums; }
 .tl-overall-ring { flex: none; width: 16px; height: 16px; }
 .tl-ring-track { fill: none; stroke: var(--vscode-panel-border, var(--vscode-widget-border)); stroke-width: 2; }
 .tl-ring-fill { fill: none; stroke: var(--vscode-progressBar-background); stroke-width: 2; }
 /* 62.1-06: a fill moves only on a change from a live update (timeline.js adds tl-filling for 400 ms); the first draw shows the value at once */
 .tl-ring-fill.tl-filling { transition: stroke-dashoffset 400ms ease-out; }
 .zoom { display: inline-flex; align-items: center; gap: 4px; }
-.zoom-level { min-width: 4ch; text-align: center; font-size: 0.85em; font-variant-numeric: tabular-nums; }
-#tl-legend { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 8px; padding: 8px 12px; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px; background: var(--vscode-editorWidget-background); font-size: 0.85em; line-height: 1.4; }
+.zoom-level { min-width: 4ch; text-align: center; font-size: var(--tl-small); font-variant-numeric: tabular-nums; }
+#tl-legend { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 8px; padding: 8px 12px; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px; background: var(--vscode-editorWidget-background); font-size: var(--tl-small); line-height: 1.4; }
 .tl-legend-items { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .tl-legend-item { display: inline-flex; align-items: center; gap: 4px; }
 .tl-legend-line { flex: none; width: 20px; height: 20px; }
@@ -272,26 +278,27 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-ms-head { position: sticky; left: 0; top: 0; z-index: 3; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 4px 8px; overflow: hidden; border-radius: 4px; background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background)); }
 .tl-ms-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tl-ms-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.2em; font-weight: 600; line-height: 1.2; }
-.tl-ms-percent { flex: none; font-size: 0.85em; font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.tl-ms-percent { flex: none; font-size: var(--tl-small); font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums; }
 .tl-ms-head .progress { flex: none; }
+.tl-ms-head .progress-text, .tl-ms-head .badge { font-size: var(--tl-small); }
 .tl-ms-head .progress-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-foreground); font-variant-numeric: tabular-nums; }
 .tl-fold { flex: none; margin-left: auto; padding: 0 8px; }
-.tl-cycle { position: absolute; z-index: 2; font-size: 0.85em; line-height: 1.4; }
+.tl-cycle { position: absolute; z-index: 2; font-size: var(--tl-small); line-height: 1.4; }
 .tl-empty { position: absolute; display: flex; flex-direction: column; gap: 4px; }
 .tl-empty-text { margin: 0; color: var(--vscode-descriptionForeground); }
-.tl-empty-next { margin: 0; font-size: 0.85em; line-height: 1.4; color: var(--vscode-descriptionForeground); }
+.tl-empty-next { margin: 0; font-size: var(--tl-small); line-height: 1.4; color: var(--vscode-descriptionForeground); }
 
 /* the folded tile of a finished milestone (the whole tile is the button) */
 .tl-folded { position: absolute; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 8px 12px; overflow: hidden; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px; text-align: left; white-space: normal; color: var(--vscode-foreground); background: var(--vscode-editorWidget-background); }
 .tl-folded:hover { background-color: var(--vscode-editorWidget-background); }
 .tl-tile-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: 100%; font-size: 1.2em; font-weight: 600; line-height: 1.2; }
-.tl-tile-line, .tl-tile-percent, .tl-tile-action { font-size: 0.85em; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.tl-tile-line, .tl-tile-percent, .tl-tile-action { font-size: var(--tl-small); line-height: 1.4; font-variant-numeric: tabular-nums; }
 .tl-tile-action { color: var(--vscode-textLink-foreground); }
 #root[data-direction="vertical"] .tl-folded { flex-direction: row; align-items: center; gap: 12px; }
 #root[data-direction="vertical"] .tl-tile-title { -webkit-line-clamp: 1; }
 
 /* the phase rail */
-.tl-phase-label { position: absolute; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85em; line-height: 16px; color: var(--vscode-foreground); font-variant-numeric: tabular-nums; }
+.tl-phase-label { position: absolute; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--tl-small); line-height: 16px; color: var(--vscode-foreground); font-variant-numeric: tabular-nums; }
 .tl-phase-bar { position: absolute; overflow: hidden; border-radius: 2px; background: color-mix(in srgb, var(--vscode-descriptionForeground) 40%, transparent); }
 /* timeline.js writes the fill's scale (scaleX along a horizontal bar, scaleY down a vertical one) from the phase's percent. */
 .tl-phase-fill { display: block; width: 100%; height: 100%; transform-origin: left center; background: var(--vscode-progressBar-background); }
@@ -328,18 +335,18 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-dot[data-state="backlog"] .tl-mark, .tl-dot[data-state="cancelled"] .tl-mark, .tl-dot[data-state="held"] .tl-mark, .tl-dot[data-state="backlog"]::after, .tl-dot[data-state="cancelled"]::after, .tl-dot[data-state="held"]::after,
 .tl-legend-item[data-state="backlog"] .tl-mark, .tl-legend-item[data-state="cancelled"] .tl-mark, .tl-legend-item[data-state="held"] .tl-mark { color: var(--vscode-descriptionForeground); }
 /* the person on the dot (D-05): a filled chip for the viewer's own cards, a hollow one for someone else's */
-.tl-initials { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; font-size: 0.85em; line-height: 1; color: var(--vscode-foreground); }
+.tl-initials { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid currentColor; border-radius: 50%; font-size: var(--tl-small); line-height: 1; color: var(--vscode-foreground); }
 .tl-initials.mine { border-color: var(--vscode-foreground); background: var(--vscode-foreground); color: var(--vscode-editor-background); }
 .tl-initials .icon { width: 10px; height: 10px; }
-.tl-id { white-space: nowrap; font-family: var(--vscode-editor-font-family); font-size: 0.85em; line-height: 1.4; font-variant-numeric: tabular-nums; color: var(--vscode-foreground); }
+.tl-id { white-space: nowrap; font-family: var(--vscode-editor-font-family); font-size: var(--tl-small); line-height: 1.4; font-variant-numeric: tabular-nums; color: var(--vscode-foreground); }
 /* the +{n} of a stack taller than the cap, a stop in the sequence like a dot */
-.tl-more { position: absolute; display: block; min-width: 28px; min-height: 28px; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 14px; font-size: 0.85em; line-height: 26px; font-variant-numeric: tabular-nums; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+.tl-more { position: absolute; display: block; min-width: 28px; min-height: 28px; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 14px; font-size: var(--tl-small); line-height: 26px; font-variant-numeric: tabular-nums; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
 .tl-more:hover { background-color: var(--vscode-editor-background); }
 .tl-more:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
 
 /* the Now marker (D-13) */
 .tl-now-line { position: absolute; z-index: 1; pointer-events: none; background: var(--vscode-progressBar-background); }
-.tl-now-pill { position: absolute; z-index: 2; display: flex; flex-direction: column; max-width: 320px; padding: 4px 8px; overflow-wrap: break-word; word-break: normal; border: 1px solid var(--vscode-progressBar-background); border-radius: 4px; font-size: 0.85em; line-height: 1.3; color: var(--vscode-foreground); background: var(--vscode-editorWidget-background); }
+.tl-now-pill { position: absolute; z-index: 2; display: flex; flex-direction: column; max-width: 320px; padding: 4px 8px; overflow-wrap: break-word; word-break: normal; border: 1px solid var(--vscode-progressBar-background); border-radius: 4px; font-size: var(--tl-small); line-height: 1.3; color: var(--vscode-foreground); background: var(--vscode-editorWidget-background); }
 .tl-now-title { font-weight: 600; }
 .tl-now-detail { font-variant-numeric: tabular-nums; }
 
@@ -351,7 +358,7 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 #tl-preview { gap: 4px; }
 .tl-preview-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin: 0; line-height: 1.5; }
 .tl-preview-badges { display: flex; flex-wrap: wrap; gap: 4px; }
-.tl-preview-who, .tl-preview-step, .tl-preview-hint { margin: 0; font-size: 0.85em; line-height: 1.4; }
+.tl-preview-who, .tl-preview-step, .tl-preview-hint { margin: 0; font-size: var(--tl-small); line-height: 1.4; }
 .tl-preview-step { display: flex; flex-wrap: wrap; gap: 0 8px; font-variant-numeric: tabular-nums; }
 .tl-preview-step, .tl-preview-hint { color: var(--vscode-descriptionForeground); }
 /* the card's title row stays at the top while a capped card scrolls inside; the title is never clamped */
@@ -359,11 +366,11 @@ body:has(> #root[data-view="timeline"]) { padding-bottom: 0; }
 .tl-card-title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 1.2em; font-weight: 600; line-height: 1.2; overflow-wrap: break-word; word-break: normal; }
 .tl-card-close { flex: none; min-width: 28px; min-height: 28px; }
 .tl-card-face { display: flex; flex-direction: column; gap: 4px; }
-.tl-card-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; margin: 0; font-size: 0.85em; line-height: 1.4; }
+.tl-card-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; margin: 0; font-size: var(--tl-small); line-height: 1.4; }
 .tl-card-facts dt { color: var(--vscode-descriptionForeground); }
 .tl-card-facts dd { display: flex; flex-wrap: wrap; gap: 0 4px; min-width: 0; margin: 0; }
 .tl-card-notes { display: flex; flex-direction: column; gap: 4px; }
-.tl-card-note { margin: 0; font-size: 0.85em; line-height: 1.4; }
+.tl-card-note { margin: 0; font-size: var(--tl-small); line-height: 1.4; }
 .tl-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* the dot whose card is open (the selected halo), a dot waiting for the host (dashed outline) and a refused dot (the error pip) */
 .tl-dot.selected::before { content: ''; position: absolute; left: -4px; top: -4px; z-index: -1; width: 36px; height: 36px; border-radius: 50%; pointer-events: none; background: color-mix(in srgb, var(--vscode-focusBorder) 20%, transparent); }

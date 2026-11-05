@@ -107,4 +107,9 @@ test('62.1-08: the timeline\'s Small text is never under 0.85 of the editor font
       assert.ok(rule !== undefined && /font-size:\s*var\(--tl-small\)/.test(rule[2] ?? ''), `${layer} ${face} takes the Small floor`);
     }
   }
+  // The milestone header's progress text and Current badge are the board's own classes, floored inside the header.
+  for (const selector of ['.tl-ms-head .progress-text', '.tl-ms-head .badge']) {
+    const rule = [...timeline.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((m) => (m[1] ?? '').split(',').map((s) => s.trim()).includes(selector) && /font-size/.test(m[2] ?? ''));
+    assert.ok(rule !== undefined && /font-size:\s*var\(--tl-small\)/.test(rule[2] ?? ''), `${selector} takes the Small floor`);
+  }
 });
