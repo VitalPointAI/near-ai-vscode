@@ -169,6 +169,9 @@ export interface MemberCommandDeps {
   session(): TeamSession | undefined;
   startSession(projectRoot: string): Promise<'solo' | 'team' | 'error'>;
   restartSession(projectRoot: string): Promise<void>;
+  // 61-32: Team Mode changed this project's profile outside the running session (the own key at Join, the unfinished-join reset), so the sidebar
+  // is asked once for a fresh profile status.
+  profileChanged(): void;
   // G-61-8: Invite someone in a project with no team sets the team up first (the Enable flow in invite mode: the same connect, online-home and
   // existing-team checks, the team name and your name filled in, no closing message). True when the team's session runs afterwards.
   startTeam(): Promise<boolean>;
@@ -824,6 +827,8 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
       return;
     }
     await deps.restartSession(projectRoot);
+    // The own key the person pasted is now this project's selected profile: the sidebar leaves the Connect screen at once (0.6.4 re-test, step 5).
+    if (ownKey === 'paste' && result.key === 'installed') deps.profileChanged();
     deps.report('info', `You joined ${teamName} as ${article(result.role)}.${nextAfterJoin(result)}`);
     if (result.nearInvitation === 'accepted') deps.report('info', 'You joined your organization, the account that pays for your team\'s AI.');
     else if (result.nearInvitation === 'already-member') deps.report('info', 'You are already in your organization.');
@@ -901,12 +906,13 @@ export function registerMemberCommands(deps: MemberCommandDeps): vscode.Disposab
   // What comes next after a join, the same for Join Team and Ask to Join a Team. In a team that pays through its organization the lead-made team key
   // becomes this project's profile by itself (61-30).
   function nextAfterJoin(result: { role: Role; pendingRole?: Role; key: string }): string {
+    // Only the person's own key, pasted at Join, is installed by the join itself (D-21 as amended in the 0.6.4 re-test).
+    const ownKey = result.key === 'installed' ? ' Your NEAR AI key is now this project\'s profile.' : '';
     if (result.pendingRole !== undefined) {
-      return result.key === 'awaiting-lead' ? ' Once a lead confirms you, your team key becomes this project\'s profile.' : ` Your lead confirms you as ${article(result.pendingRole)}.`;
+      return result.key === 'awaiting-lead' ? ' Once a lead confirms you, your team key becomes this project\'s profile.' : ` Your lead confirms you as ${article(result.pendingRole)}.${ownKey}`;
     }
     if (result.key === 'awaiting-lead') return ' Once a lead sends your team key, it becomes this project\'s profile.';
-    if (result.key === 'installed') return ' Your team key is installed for this project.';
-    return '';
+    return ownKey;
   }
 
   // The requester's computer joins by itself once its request was accepted (the session runs this on a sync, and Ask to join runs it when the

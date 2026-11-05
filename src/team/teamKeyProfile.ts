@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { TEAM_PROFILE_PREFIX } from '../domain/auth';
+import { TEAM_PROFILE_PREFIX, deriveProfileId } from '../domain/auth';
 import { AuthService } from '../services/auth';
 import type { SecretStorageLike } from '../services/auth';
 import { ProfileStore } from '../services/profileStore';
@@ -146,6 +146,65 @@ export async function installTeamKey(input: InstallTeamKeyInput): Promise<TeamKe
     }
     if (input.keyId) await writeJson(path.join(dir, KEY_FILE), { keyId: input.keyId });
     return { ok: true, profileId, capped: first.capped };
+  } finally {
+    input.apiKey.fill(0);
+  }
+}
+
+// ---- the person's own key, pasted at Join in a team without an organization (D-21 as amended by the owner, 0.6.4 re-test 2026-11-05) -------------
+
+/** The name of the profile a key pasted at Join becomes: the person's own profile, never the team key profile. */
+export const OWN_KEY_PROFILE_NAME = 'My NEAR AI key';
+
+const OWN_KEY_MESSAGES = {
+  invalid: 'NEAR AI did not accept this key. Check it and try again.',
+  unavailable: 'Could not reach NEAR AI Cloud to check your key. Try again in a moment.'
+} as const;
+
+export type OwnKeyInstallResult = { ok: true; profileId: string; capped: boolean } | { ok: false; code: 'invalid' | 'unavailable'; message: string };
+
+export interface InstallOwnKeyInput {
+  projectRoot: string;
+  secrets: SecretStorageLike;
+  /** The key, wiped (zero-filled) before this returns, whatever the outcome. */
+  apiKey: Buffer;
+  baseUrl: string;
+  fetch?: FetchLike;
+  sleep?: (ms: number) => Promise<void>;
+  /** One try by default: a key that already exists needs no activation wait (D-12 as amended by D-21). */
+  attempts?: number;
+}
+
+/**
+ * Checks the person's own key once with NEAR AI (check_api_key only, no organization or workspace check), then makes it this project's own
+ * profile 'My NEAR AI key' through the normal profile store: selected, in the saved-profile list, kept when the person leaves the team and
+ * counted as personal spend. The key goes only to secure storage, bound to the address it was checked against. No team file is written.
+ */
+export async function installOwnKey(input: InstallOwnKeyInput): Promise<OwnKeyInstallResult> {
+  try {
+    const attempts = Math.max(1, Math.floor(input.attempts ?? 1));
+    const sleep = input.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+    let checked: Awaited<ReturnType<typeof checkApiKey>> = { status: 'unavailable', reason: '' };
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      checked = await checkApiKey(input.baseUrl, input.apiKey, input.fetch);
+      if (checked.status === 'valid' || checked.status === 'capped') break;
+      if (attempt < attempts) await sleep(RETRY_WAIT_MS);
+    }
+    if (checked.status !== 'valid' && checked.status !== 'capped') {
+      const code = checked.status === 'invalid' ? 'invalid' : 'unavailable';
+      return { ok: false, code, message: OWN_KEY_MESSAGES[code] };
+    }
+    const capped = checked.status === 'capped';
+    const organization = checked.organizationId.trim() || OWN_KEY_PROFILE_NAME;
+    // The probe ProfileStore runs is the check just made against this very key, not a second one.
+    const store = new ProfileStore(input.projectRoot, new AuthService(input.secrets), { validator: async () => undefined });
+    const profileId = deriveProfileId(input.projectRoot, OWN_KEY_PROFILE_NAME);
+    const configured = await store.configure(
+      { profileId, displayName: OWN_KEY_PROFILE_NAME, organization, baseUrl: input.baseUrl, authMode: 'apiKey' },
+      input.apiKey.toString('utf8')
+    );
+    if (configured.validation.status !== 'valid') return { ok: false, code: 'unavailable', message: OWN_KEY_MESSAGES.unavailable };
+    return { ok: true, profileId, capped };
   } finally {
     input.apiKey.fill(0);
   }

@@ -83,6 +83,11 @@ export interface TeamModeHandle {
   ready: Promise<TeamModeState>;
   session(): TeamSession | undefined;
   onDidChange(listener: () => void): { dispose(): void };
+  /**
+   * 61-32: Team Mode changed this project's profile outside the running session (the own key pasted at Join, the unfinished-join reset). The
+   * Team section host asks the sidebar once for a fresh profile status. A running session's own profile changes come from its onProfileChanged.
+   */
+  onProfileChanged(listener: () => void): { dispose(): void };
   boardSummary(): { ready: number; blocked: number; mine: number } | undefined;
   justMe(): boolean;
   setJustMe(value: boolean): Promise<void>;
@@ -182,6 +187,7 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   let summarize: typeof import('../../domain/team/board').boardSummary | undefined;
   let contextKeySet = false;
   const changeListeners = new Set<() => void>();
+  const profileListeners = new Set<() => void>();
 
   // Created on first use, so a solo project never gets one.
   const output = {
@@ -235,6 +241,17 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
   // Tells every listener that Team Mode may have changed. A listener that throws never stops the others; its failure goes to the channel.
   function changed(): void {
     for (const listener of [...changeListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        void describe(error).then((reason) => { output.appendLine(`A Team Mode listener failed: ${reason}`); });
+      }
+    }
+  }
+
+  // Tells every profile listener that this project's profile changed. A listener that throws never stops the others; its failure goes to the channel.
+  function profileChanged(): void {
+    for (const listener of [...profileListeners]) {
       try {
         listener();
       } catch (error) {
@@ -628,14 +645,14 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     vscode.commands.registerCommand(IMPORT_PLANS_COMMAND, guarded('Import Plans to Team Board', importPlansCommand)),
     vscode.commands.registerCommand(SHARE_COMMAND, guarded('Share Team Setup', shareCommand)),
     ...registerMemberCommands({
-      context, output, report, announce, soloText: SOLO_TEXT, firstFolder, session: () => slot.current(), startSession, restartSession,
+      context, output, report, announce, soloText: SOLO_TEXT, firstFolder, session: () => slot.current(), startSession, restartSession, profileChanged,
       startTeam: () => enable('invite'),
       ...(options.nearBaseUrl === undefined ? {} : { nearBaseUrl: options.nearBaseUrl }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.signIn === undefined ? {} : { signIn: options.signIn }),
       ...(options.now === undefined ? {} : { now: options.now })
     }),
-    { dispose: (): void => { disposed = true; slot.clear(); if (contextKeySet) setContextKey(false); changed(); changeListeners.clear(); } }
+    { dispose: (): void => { disposed = true; slot.clear(); if (contextKeySet) setContextKey(false); changed(); changeListeners.clear(); profileListeners.clear(); } }
   );
 
   const ready = detect().catch(async (error: unknown): Promise<TeamModeState> => {
@@ -648,6 +665,10 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     onDidChange(listener: () => void): { dispose(): void } {
       changeListeners.add(listener);
       return { dispose: (): void => { changeListeners.delete(listener); } };
+    },
+    onProfileChanged(listener: () => void): { dispose(): void } {
+      profileListeners.add(listener);
+      return { dispose: (): void => { profileListeners.delete(listener); } };
     },
     boardSummary(): { ready: number; blocked: number; mine: number } | undefined {
       const session = slot.current();

@@ -39,6 +39,8 @@ function soloHandle(): TeamModeHandle & { fire(): void; listeners: number; justM
     ready: Promise.resolve('solo'),
     session: () => undefined,
     onDidChange(listener: () => void) { listeners.add(listener); return { dispose: () => { listeners.delete(listener); } }; },
+    // 61-32: a solo project's Team Mode never changes its profile.
+    onProfileChanged: () => ({ dispose: () => undefined }),
     boardSummary: () => undefined,
     justMe: () => justMe,
     async setJustMe(value: boolean) { justMeCalls.push(value); justMe = value; fire(); },
@@ -269,16 +271,21 @@ function fakeSession(options: FakeOptions): { session: TeamSession; fire(): void
   };
 }
 
-function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire(): void; setSession(session: TeamSession | undefined): void; setRequestPending(value: boolean): void } {
+function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire(): void; fireProfile(): void; profileListeners(): number; setSession(session: TeamSession | undefined): void; setRequestPending(value: boolean): void } {
   let current = initial;
   let requestPending = false;
   let justMe = false;
   const listeners = new Set<() => void>();
+  const profileListeners = new Set<() => void>();
   const fire = (): void => { for (const listener of [...listeners]) listener(); };
   return {
     ready: Promise.resolve(current === undefined ? 'solo' : 'team'),
     session: () => current,
     onDidChange(listener: () => void) { listeners.add(listener); return { dispose: () => { listeners.delete(listener); } }; },
+    // 61-32: the member commands changed this project's profile (the own key at Join, the unfinished-join reset).
+    onProfileChanged(listener: () => void) { profileListeners.add(listener); return { dispose: () => { profileListeners.delete(listener); } }; },
+    fireProfile: () => { for (const listener of [...profileListeners]) listener(); },
+    profileListeners: () => profileListeners.size,
     boardSummary: () => undefined,
     justMe: () => justMe,
     async setJustMe(value: boolean) { justMe = value; fire(); },

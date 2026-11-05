@@ -145,15 +145,15 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
     followedSubscriptions = [];
     followed = session;
     if (session === undefined) return;
-    followedSubscriptions = [session.onStateChange(() => { void refresh(); }), session.onKeyInstalled(() => { void keyInstalled(session); })];
+    followedSubscriptions = [session.onStateChange(() => { void refresh(); }), session.onKeyInstalled(() => { if (session === followed) void profileChanged(); })];
   }
 
-  // 61-30: a team key was installed for this project, so it is now the project's profile. The page is asked once for a fresh profile status (chat.js
-  // posts refresh-status back and chat.ts answers with profile-status), so the Connect screen gives way to the chat and the Team section without a
-  // reload; then the section's own model follows.
-  async function keyInstalled(session: TeamSession): Promise<void> {
+  // 61-30, 61-32: Team Mode changed this project's profile (a team key a lead delivered, the own key pasted at Join, ...), so it is now the project's
+  // profile. The page is asked once for a fresh profile status (chat.js posts refresh-status back and chat.ts answers with profile-status), so the
+  // Connect screen gives way to the chat and the Team section without a reload; then the section's own model follows.
+  async function profileChanged(): Promise<void> {
     const target = webview;
-    if (disposed || target === undefined || session !== followed) return;
+    if (disposed || target === undefined) return;
     try {
       await target.postMessage({ type: 'host-request', payload: { type: 'refresh-status' } });
     } catch {
@@ -163,6 +163,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
   }
 
   const handleSubscription = deps.team.onDidChange(() => { void refresh(); });
+  const profileSubscription = deps.team.onProfileChanged(() => { void profileChanged(); });
 
   // What is known of this person and this team, from the running session. Names pass through displayText; counts come from the log.
   async function teamInput(session: TeamSession, projectRoot: string, run: RefreshRun): Promise<NonNullable<TeamSectionInput['team']>> {
@@ -374,6 +375,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
       disposed = true;
       webview = undefined;
       handleSubscription.dispose();
+      profileSubscription.dispose();
       follow(undefined);
       if (teamSectionTap.probe === probe) delete teamSectionTap.probe;
     }

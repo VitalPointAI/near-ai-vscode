@@ -28,7 +28,7 @@ import { saveNearSession } from './nearSession';
 import { redactGitMessage } from './runGit';
 import type { GitRunner } from './runGit';
 import { TeamFileError, TrustPinError, checkNearPin, checkTrustPin, readTeamFile, teamStorageDir } from './teamFile';
-import { installTeamKey } from './teamKeyProfile';
+import { installOwnKey } from './teamKeyProfile';
 
 export const NO_ORG_NOTICE = 'No organization linked, so everyone uses their own key and spending is not capped.';
 /** Said when a person in a team without an organization joined without adding a key; the sidebar's Join a team replaces it with its own next step. */
@@ -306,7 +306,7 @@ async function acceptAsLead(input: JoinInput, near: NearLink, teamId: string): P
 
 const KEY_SHAPE = /^[\x21-\x7e]{8,512}$/;
 
-async function installPastedKey(input: JoinInput, teamId: string): Promise<{ key: 'installed' | 'skipped'; notices: string[] }> {
+async function installPastedKey(input: JoinInput): Promise<{ key: 'installed' | 'skipped'; notices: string[] }> {
   const notices = [NO_ORG_NOTICE];
   if (input.pasteOwnKey === undefined) return { key: 'skipped', notices: [...notices, NO_KEY_NOTICE] };
   let pasted: string | undefined;
@@ -319,9 +319,10 @@ async function installPastedKey(input: JoinInput, teamId: string): Promise<{ key
   if (trimmed === '') return { key: 'skipped', notices: [...notices, NO_KEY_NOTICE] };
   if (!KEY_SHAPE.test(trimmed)) return { key: 'skipped', notices: [...notices, 'That does not look like an API key, so it was not used. Add your own NEAR AI API key from the NEAR AI settings.'] };
   // D-12 as amended by D-21: check_api_key only, no organization or workspace check, one try because a key that already exists needs no activation wait.
-  const installed = await installTeamKey({
-    projectRoot: input.projectRoot, globalStorageDir: input.globalStorageDir, teamId, teamName: input.teamFile.name, secrets: input.secrets,
-    apiKey: Buffer.from(trimmed, 'utf8'), baseUrl: input.nearBaseUrl ?? DEFAULT_BASE_URL, attempts: 1,
+  // D-21 as amended by the owner (0.6.4 re-test, 2026-11-05): the pasted key is the person's own, so it becomes their own profile 'My NEAR AI key'
+  // (saved-profile list, kept on removal, personal spend), never the team key profile.
+  const installed = await installOwnKey({
+    projectRoot: input.projectRoot, secrets: input.secrets, apiKey: Buffer.from(trimmed, 'utf8'), baseUrl: input.nearBaseUrl ?? DEFAULT_BASE_URL, attempts: 1,
     ...(input.fetch === undefined ? {} : { fetch: input.fetch })
   });
   if (!installed.ok) return { key: 'skipped', notices: [...notices, `${installed.message} You are on the team; add your own NEAR AI API key from the NEAR AI settings.`] };
@@ -466,7 +467,7 @@ export async function joinTeam(input: JoinInput): Promise<JoinResult> {
     }
   } else {
     input.onStep?.('key');
-    const pasted = await installPastedKey(input, teamId);
+    const pasted = await installPastedKey(input);
     keyOutcome = pasted.key;
     notices.push(...pasted.notices);
   }
