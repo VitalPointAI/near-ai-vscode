@@ -37,6 +37,7 @@
     zoomIn: 'Zoom in',
     zoomLevel: (n) => n + '%',
     zoomName: (n) => 'Zoom ' + n + '%',
+    zoomSaid: (n) => 'Zoom ' + n + '%.',
     fit: 'Fit milestone',
     fitName: 'Fit the current milestone to the window',
     jumpNow: 'Jump to now',
@@ -1042,8 +1043,8 @@
   function forget() { bandEls.clear(); groupEls.clear(); dotEls.clear(); moreEls.clear(); }
 
   function render(container, shown) {
-    // Coming back to the timeline from Columns starts with no card open (the selected card stays selected).
-    if (!scroll.isConnected) dropLayers();
+    // Coming back to the timeline from Columns starts with no card open (the selected card stays selected), and the next draw sets the first screen.
+    if (!scroll.isConnected) { dropLayers(); opening = true; fromColumns = seenColumns; }
     const model = board.model();
     const timeline = model && model.timeline;
     const saved = board.uiState();
@@ -1092,6 +1093,19 @@
     setStyle(canvas, 'width', px(geo.width));
     setStyle(canvas, 'height', px(geo.height));
     attr(canvas, 'data-zoom', geo.zoom);
+    // Where the scroller goes (D-09, D-13): the place a zoom or Fit milestone asked for, else on an open or a direction switch the first screen or
+    // the saved scroll of the direction. A live update leaves it where it is.
+    const turned = !!prev && prev.geo.direction !== geo.direction;
+    const oldScroll = { left: scroll.scrollLeft || 0, top: scroll.scrollTop || 0 };
+    if (turned) { clearTimeout(saveTimer); saveTimer = undefined; saveScroll(prev.geo.direction, oldScroll); }
+    let target = pendingScroll;
+    let focusAfter;
+    pendingScroll = undefined;
+    if (!target && (opening || turned)) { const first = firstScreen(geo, timeline, saved); target = first.target; focusAfter = first.focus; }
+    opening = false;
+    fromColumns = false;
+    seenColumns = false;
+    if (target) { scroll.scrollLeft = target.left; scroll.scrollTop = target.top; }
     const cards = new Map(model.cards.map((c) => [c.id, c]));
     const matching = (id) => cards.has(id) && board.matches(cards.get(id));
     const places = new Map(geo.bands.map((b) => [b.id, b]));
@@ -1218,12 +1232,14 @@
     const stop = order.find((b) => stopKey(b) === activeKey) || order.find((b) => b.getAttribute('data-id') === board.selected()) || order.find((b) => b.classList.contains('tl-dot')) || order[0];
     for (const b of order) attr(b, 'tabindex', b === stop ? 0 : -1);
     lastOrder = order.map(stopKey);
-    drawn = { model, timeline, geo, cards, boxes, dotOf, matching, width };
+    drawn = { model, timeline, geo, cards, boxes, dotOf, matching, width, scroll: { left: scroll.scrollLeft || 0, top: scroll.scrollTop || 0 } };
     followCard();
     followPreview();
     applyEmphasis();
     keepShown(prev, timeline);
-    if (prev) liveMotion(prev, drawn);
+    if (prev) liveMotion(prev, drawn, oldScroll);
+    // Switching from Columns with a card selected: its dot has focus (D-04), without popping its preview up.
+    if (focusAfter) focusDot(focusAfter, true);
   }
 
   /** The session's open milestones, and a milestone that stops being finished stays unfolded from now on (saved, UI-SPEC "Folded finished milestones"). */
@@ -1256,9 +1272,11 @@
   const translate = (dx, dy) => 'translate(' + dx + 'px, ' + dy + 'px)';
   /** Applies the motions to what changed between two draws: the changed dots pulse and get the outline, the Now marker glides to its new place with
    * the past shade following it, the percents fill to their new values, and a moved Now step is said once after the board's change summary. */
-  function liveMotion(prev, next) {
+  function liveMotion(prev, next, oldScroll) {
     const live = prev.model !== next.model;
     const turned = prev.geo.direction !== next.geo.direction;
+    // What the eye sees moved: the canvas move, less what the scroller moved with it (a zoom anchored at the pointer moves both).
+    const shift = { x: next.scroll.left - oldScroll.left, y: next.scroll.top - oldScroll.top };
     if (live) {
       for (const [id, c] of next.cards) {
         const old = prev.cards.get(id);
@@ -1274,14 +1292,14 @@
     const a = prev.geo.now;
     const b = next.geo.now;
     if (a && b && nowItem.isConnected) {
-      const lineFrom = { x: a.line.x - b.line.x, y: a.line.y - b.line.y };
-      const pillFrom = { x: a.pill.x - b.pill.x, y: a.pill.y - b.pill.y };
+      const lineFrom = { x: a.line.x - b.line.x + shift.x, y: a.line.y - b.line.y + shift.y };
+      const pillFrom = { x: a.pill.x - b.pill.x + shift.x, y: a.pill.y - b.pill.y + shift.y };
       if (lineFrom.x || lineFrom.y) motion(nowLine, 'tl-glide', GLIDE, { from: { transform: translate(lineFrom.x, lineFrom.y) } });
       if (pillFrom.x || pillFrom.y) motion(nowPill, 'tl-glide', GLIDE, { from: { transform: translate(pillFrom.x, pillFrom.y) } });
     }
     // The past shade: a shade that keeps its start and changes its length grows (or shrinks) from the band start.
     const horizontal = next.geo.direction === 'horizontal';
-    const oldShades = shadesOf(prev.geo);
+    const oldShades = shift.x || shift.y || prev.geo.zoom !== next.geo.zoom ? [] : shadesOf(prev.geo);
     shadesOf(next.geo).forEach((r, i) => {
       const o = oldShades[i];
       const n = shades.children[i];
@@ -1339,11 +1357,11 @@
   const dotButton = (id) => { const d = dotEls.get(id); return d && d.button.isConnected ? d.button : null; };
   /** Focus on a dot without opening its preview (focus coming back from the card, the menu or the drawer). */
   let quiet = false;
-  function focusDot(id) {
+  function focusDot(id, noScroll) {
     const b = dotButton(id);
     if (!b) return false;
     quiet = true;
-    try { b.focus(); } finally { quiet = false; }
+    try { if (noScroll) b.focus({ preventScroll: true }); else b.focus(); } finally { quiet = false; }
     return document.activeElement === b;
   }
 
@@ -1674,9 +1692,32 @@
     let target = col ? col.items.find((b) => b.classList.contains('tl-dot') && unfinished(b.getAttribute('data-id'))) || col.items.find((b) => b.classList.contains('tl-more')) || col.items[0] : undefined;
     if (!target && cols.length) { const last = cols[cols.length - 1]; target = last.items[last.items.length - 1]; }
     if (!target) return false;
-    moveTo(target);
+    finishMotion();
+    // The marker to the middle of the scroller (a smooth scroll, a jump under reduced motion), then focus on the stop without a second scroll and
+    // without its preview, which would be placed for the view the smooth scroll is leaving.
+    const size = scrollerSize();
+    const g = drawn.geo;
+    const line = g.now.line;
+    const box = target.classList.contains('tl-dot') ? drawn.boxes.get(target.getAttribute('data-id')) : undefined;
+    let left;
+    let top;
+    if (g.direction === 'horizontal') {
+      left = fitScroll(line.x + line.w / 2 - size.width / 2, g.width - size.width);
+      top = !box || box.y + box.h + 48 <= size.height ? 0 : fitScroll(box.cy - size.height / 2, g.height - size.height);
+    } else {
+      top = fitScroll(line.y + line.h / 2 - size.height / 2, g.height - size.height);
+      left = !box || box.x + box.w + 48 <= size.width ? 0 : fitScroll(box.cx - size.width / 2, g.width - size.width);
+    }
+    smoothScroll(left, top);
+    if (target.classList.contains('tl-dot')) focusDot(target.getAttribute('data-id'), true);
+    else { quiet = true; try { target.focus({ preventScroll: true }); } finally { quiet = false; } }
     board.announce(now.sentence);
     return true;
+  }
+  const fitScroll = (v, max) => Math.max(0, Math.min(Math.max(0, max), Math.round(v)));
+  function smoothScroll(left, top) {
+    if (typeof scroll.scrollTo === 'function') scroll.scrollTo({ left, top, behavior: reduced ? 'auto' : 'smooth' });
+    else { scroll.scrollLeft = left; scroll.scrollTop = top; }
   }
   /** The stop a navigation key leads to from b, null when there is nowhere to go, undefined when the key is not navigation. */
   function navTarget(b, key, ctrl) {
@@ -1732,14 +1773,223 @@
     e.preventDefault();
     if (next && next !== b) moveTo(next);
   });
-  // A width change re-places the card and the preview (the drawing itself redraws on the board's breakpoint).
+  // A width change re-places the card and the preview (the board redraws on its 520 px breakpoint). In vertical the geometry follows the width (the
+  // gutter at 900 px and the band width), so a width change there draws again, once per frame at most.
+  let resizeFrame;
   if (typeof window.ResizeObserver === 'function') {
     new window.ResizeObserver(() => {
       if (!drawn || !scroll.isConnected) return;
       if (open && drawn.boxes.has(open.id)) placeCard(drawn.boxes.get(open.id));
       if (shownPreview && drawn.boxes.has(shownPreview.id)) putLayer(previewBox, drawn.boxes.get(shownPreview.id), PREVIEW.width, (view) => (view.height + 2 * LAYER.gap) / 2, PREVIEW.estimate);
+      if (drawn.geo.direction === 'vertical' && scrollerSize().width !== drawn.width && resizeFrame === undefined) {
+        resizeFrame = raf(() => { resizeFrame = undefined; if (drawn && scroll.isConnected && drawn.geo.direction === 'vertical' && scrollerSize().width !== drawn.width) board.redraw(); });
+      }
     }).observe(scroll);
   }
+
+  // ---- zoom, pan, Fit milestone, the first screen and the saved scroll (62.1-06, D-09, D-13, UI-SPEC "Zoom and Pan", "First screen") -------------
+  let opening = true;
+  let fromColumns = false;
+  let seenColumns = false;
+  let pendingScroll;
+  let saveTimer;
+  // The directions opened in this session: a later open restores the saved scroll even when it is 0, 0.
+  const visited = {};
+  board.onRender(() => { if (board.view() !== 'timeline') seenColumns = true; });
+  const maxScroll = (geo, size) => ({ left: Math.max(0, geo.width - size.width), top: Math.max(0, geo.height - size.height) });
+  function saveScroll(direction, at) {
+    visited[direction] = true;
+    board.setUiState({ scroll: { [direction]: { x: Math.max(0, Math.round(at.left)), y: Math.max(0, Math.round(at.top)) } } });
+  }
+  function flushScroll() {
+    if (saveTimer === undefined) return;
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    if (drawn && scroll.isConnected) saveScroll(drawn.geo.direction, { left: scroll.scrollLeft || 0, top: scroll.scrollTop || 0 });
+  }
+  scroll.addEventListener('scroll', () => {
+    if (!drawn || !scroll.isConnected) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { saveTimer = undefined; if (drawn && scroll.isConnected) saveScroll(drawn.geo.direction, { left: scroll.scrollLeft || 0, top: scroll.scrollTop || 0 }); }, 250);
+  });
+  /** The first screen of a direction (D-09, D-13): coming from Columns with a card selected, its dot centred (and focused); else the saved scroll of
+   * the direction once it has one; else the Now marker centred along the axis (the end marker when all is done), or the active band when there is
+   * no marker, at 0 across. */
+  function firstScreen(geo, timeline, saved) {
+    const size = scrollerSize();
+    const max = maxScroll(geo, size);
+    const dir = geo.direction;
+    const horizontal = dir === 'horizontal';
+    const id = board.selected();
+    const box = fromColumns && id ? geo.dots.find((d) => d.id === id) : undefined;
+    if (box && board.matches(board.cardData(id))) {
+      visited[dir] = true;
+      return { target: { left: fitScroll(box.x + 14 - size.width / 2, max.left), top: fitScroll(box.cy - size.height / 2, max.top) }, focus: id };
+    }
+    const at = saved.scroll && saved.scroll[dir];
+    if (at && (visited[dir] || at.x > 0 || at.y > 0)) { visited[dir] = true; return { target: { left: fitScroll(at.x, max.left), top: fitScroll(at.y, max.top) } }; }
+    visited[dir] = true;
+    let mid;
+    if (geo.now) mid = horizontal ? geo.now.line.x + geo.now.line.w / 2 : geo.now.line.y + geo.now.line.h / 2;
+    else {
+      const m = timeline.milestones.find((x) => x.active === true) || timeline.milestones.find((x) => x.finished !== true) || timeline.milestones[timeline.milestones.length - 1];
+      const band = m ? geo.bands.find((b) => b.id === m.id) : undefined;
+      if (band) mid = horizontal ? band.x + band.w / 2 : band.y + band.h / 2;
+    }
+    if (mid === undefined) return { target: { left: 0, top: 0 } };
+    return { target: horizontal ? { left: fitScroll(mid - size.width / 2, max.left), top: 0 } : { left: 0, top: fitScroll(mid - size.height / 2, max.top) } };
+  }
+  /** Where a canvas point of one geometry is in another: by the nearest dot's mark, so a dot under the pointer stays under it, else by scale. */
+  function mapPoint(from, to, p) {
+    let best;
+    let dist = Infinity;
+    for (const d of from.dots) { const dd = Math.hypot(d.x + 14 - p.x, d.cy - p.y); if (dd < dist) { dist = dd; best = d; } }
+    const there = best ? to.dots.find((d) => d.id === best.id) : undefined;
+    if (best && there) return { x: there.x + 14 + (p.x - best.x - 14), y: there.cy + (p.y - best.cy) };
+    return { x: from.width > 0 ? p.x * to.width / from.width : p.x, y: from.height > 0 ? p.y * to.height / from.height : p.y };
+  }
+  /** Zooms to a level (D-09): only the spacing changes; the point at the anchor (in scroller pixels, the middle by default) stays where it is. Saved
+   * and said. */
+  function zoomTo(level, anchor) {
+    if (!drawn || !scroll.isConnected || ZOOMS.indexOf(level) < 0) return false;
+    const saved = board.uiState();
+    if (level === saved.zoom) return false;
+    finishMotion();
+    const size = scrollerSize();
+    const a = anchor || { x: size.width / 2, y: size.height / 2 };
+    const next = geometry(drawn.timeline, geoOptions(saved, drawn.width, level));
+    const q = mapPoint(drawn.geo, next, { x: (scroll.scrollLeft || 0) + a.x, y: (scroll.scrollTop || 0) + a.y });
+    const max = maxScroll(next, size);
+    pendingScroll = { left: fitScroll(q.x - a.x, max.left), top: fitScroll(q.y - a.y, max.top) };
+    board.setUiState({ zoom: level });
+    board.redraw();
+    pendingScroll = undefined;
+    board.announce(T.zoomSaid(level));
+    sampleFrames(true);
+    return true;
+  }
+  function stepZoom(steps, anchor) {
+    const at = ZOOMS.indexOf(board.uiState().zoom);
+    return zoomTo(ZOOMS[clamp((at < 0 ? 2 : at) + steps, 0, ZOOMS.length - 1)], anchor);
+  }
+  /** Fit milestone (D-09): the largest level at which the Now band (else the active one) fits the scroller along the axis, at least 50 %, centred. */
+  function fitMilestone() {
+    if (!drawn || !scroll.isConnected) return;
+    finishMotion();
+    const t = drawn.timeline;
+    const m = (t.now && t.milestones.find((x) => x.id === t.now.milestoneId)) || t.milestones.find((x) => x.active === true) || t.milestones[0];
+    if (!m) return;
+    const saved = board.uiState();
+    const size = scrollerSize();
+    const horizontal = drawn.geo.direction === 'horizontal';
+    const room = horizontal ? size.width : size.height;
+    let level = ZOOMS[0];
+    let geo;
+    for (const z of ZOOMS.slice().reverse()) {
+      const g = geometry(t, geoOptions(saved, drawn.width, z));
+      const band = g.bands.find((b) => b.id === m.id);
+      if (band && (horizontal ? band.w : band.h) <= room) { level = z; geo = g; break; }
+    }
+    if (!geo) geo = geometry(t, geoOptions(saved, drawn.width, level));
+    const band = geo.bands.find((b) => b.id === m.id);
+    if (!band) return;
+    const max = maxScroll(geo, size);
+    const target = horizontal ? { left: fitScroll(band.x + band.w / 2 - size.width / 2, max.left), top: fitScroll(scroll.scrollTop || 0, max.top) }
+      : { left: fitScroll(scroll.scrollLeft || 0, max.left), top: fitScroll(band.y + band.h / 2 - size.height / 2, max.top) };
+    if (level !== saved.zoom) {
+      pendingScroll = target;
+      board.setUiState({ zoom: level });
+      board.redraw();
+      pendingScroll = undefined;
+      board.announce(T.zoomSaid(level));
+    } else smoothScroll(target.left, target.top);
+  }
+  zoomIn.addEventListener('click', () => { if (zoomIn.getAttribute('aria-disabled') !== 'true') stepZoom(1); });
+  zoomOut.addEventListener('click', () => { if (zoomOut.getAttribute('aria-disabled') !== 'true') stepZoom(-1); });
+  zoomFit.addEventListener('click', () => fitMilestone());
+  nowBtn.addEventListener('click', () => { if (drawn && drawn.timeline.now) jumpToNow(); });
+  // + and = zoom in, - zooms out, 0 goes back to 100 % with focus in the timeline, and never with a modifier (VS Code's own Ctrl+= and Ctrl+-). The
+  // focused dot stays where it is on the screen.
+  scroll.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key;
+    if (k !== '+' && k !== '=' && k !== '-' && k !== '0') return;
+    const t = e.target;
+    if (!t || (t !== scroll && !list.contains(t))) return;
+    e.preventDefault();
+    let anchor;
+    const id = t.classList && t.classList.contains('tl-dot') ? t.getAttribute('data-id') : undefined;
+    const box = id && drawn ? drawn.boxes.get(id) : undefined;
+    if (box) anchor = { x: box.x + 14 - (scroll.scrollLeft || 0), y: box.cy - (scroll.scrollTop || 0) };
+    if (k === '0') zoomTo(100, anchor);
+    else stepZoom(k === '-' ? -1 : 1, anchor);
+  });
+  // Ctrl or Cmd plus wheel (a trackpad pinch arrives as one) zooms one level per 100 units, anchored at the pointer (T-62.1-13: a wheel storm
+  // cannot step faster). A plain wheel is the browser's; in horizontal a vertical wheel with no vertical room left pans along the axis.
+  let wheelSum = 0;
+  scroll.addEventListener('wheel', (e) => {
+    if (!drawn) return;
+    const unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 100 : 1;
+    const dx = (Number(e.deltaX) || 0) * unit;
+    const dy = (Number(e.deltaY) || 0) * unit;
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      if (wheelSum && dy && Math.sign(wheelSum) !== Math.sign(dy)) wheelSum = 0;
+      wheelSum += dy;
+      const steps = Math.trunc(wheelSum / 100);
+      if (!steps) return;
+      wheelSum -= steps * 100;
+      const r = scroll.getBoundingClientRect();
+      stepZoom(-steps, { x: (Number(e.clientX) || 0) - (r.left || 0), y: (Number(e.clientY) || 0) - (r.top || 0) });
+      return;
+    }
+    if (drawn.geo.direction !== 'horizontal' || !dy || Math.abs(dx) >= Math.abs(dy)) return;
+    const size = scrollerSize();
+    const st = scroll.scrollTop || 0;
+    if (dy > 0 ? drawn.geo.height - size.height - st > 0 : st > 0) return;
+    scroll.scrollLeft = fitScroll((scroll.scrollLeft || 0) + dy, maxScroll(drawn.geo, size).left);
+  }, { passive: false });
+  // A drag on empty canvas pans after 4 px (grab, then grabbing); a press and release without movement closes the card. A press on a dot, a button,
+  // the card or the preview never pans, and nor does one on the scroller itself (its scrollbars).
+  const PAN = 4;
+  let pan;
+  let swallowClick = false;
+  const emptyCanvas = (t) => !!t && t !== scroll && canvas.contains(t) && !(t.closest && t.closest('button, a, input, select, textarea, #tl-card, #tl-preview'));
+  scroll.addEventListener('pointerdown', (e) => {
+    finishMotion();
+    if (e.button !== 0 || !drawn || !emptyCanvas(e.target)) return;
+    pan = { id: e.pointerId, x: Number(e.clientX) || 0, y: Number(e.clientY) || 0, left: scroll.scrollLeft || 0, top: scroll.scrollTop || 0, moved: false };
+  }, true);
+  scroll.addEventListener('pointermove', (e) => {
+    if (!pan || e.pointerId !== pan.id) return;
+    const dx = (Number(e.clientX) || 0) - pan.x;
+    const dy = (Number(e.clientY) || 0) - pan.y;
+    if (!pan.moved) {
+      if (Math.hypot(dx, dy) <= PAN) return;
+      pan.moved = true;
+      canvas.classList.add('tl-grabbing');
+      if (typeof scroll.setPointerCapture === 'function') { try { scroll.setPointerCapture(pan.id); } catch (error) { /* the pointer is gone */ } }
+      hidePreview();
+      sampleFrames(true);
+    }
+    const max = maxScroll(drawn.geo, scrollerSize());
+    scroll.scrollLeft = fitScroll(pan.left - dx, max.left);
+    scroll.scrollTop = fitScroll(pan.top - dy, max.top);
+  });
+  function endPan(e) {
+    if (!pan || (e && e.pointerId !== pan.id)) return;
+    const moved = pan.moved;
+    pan = undefined;
+    canvas.classList.remove('tl-grabbing');
+    if (moved) { swallowClick = true; setTimeout(() => { swallowClick = false; }, 0); }
+    else if (open && e && e.type === 'pointerup' && emptyCanvas(e.target)) closeCard(true);
+  }
+  scroll.addEventListener('pointerup', endPan);
+  scroll.addEventListener('pointercancel', endPan);
+  // The click that ends a pan is not a click away.
+  scroll.addEventListener('click', (e) => { if (swallowClick) { swallowClick = false; e.stopPropagation(); e.preventDefault(); } }, true);
+  // A key press during a motion jumps it to its end state.
+  scroll.addEventListener('keydown', () => finishMotion(), true);
   list.addEventListener('click', (e) => {
     const b = e.target && e.target.closest ? e.target.closest('button.tl-dot') : null;
     if (!b || !list.contains(b)) return;
@@ -1779,6 +2029,8 @@
     /** The board changed a card's pending or refusal line: draw again so the dot and the card show it. */
     refresh: () => board.redraw(),
     /** The board gives focus back to a card (after the menu or the drawer): its dot. */
-    focus: (id) => focusDot(id)
+    focus: (id) => focusDot(id),
+    /** The person leaves the timeline: its scroll is saved now, before the scroller leaves the page. */
+    leave: () => { flushScroll(); finishMotion(); }
   });
 })();
