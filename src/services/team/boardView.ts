@@ -102,7 +102,18 @@ const CARD_STATE_REFUSALS: ReadonlySet<string> = new Set([
  * those tests (NEAR_AI_E2E=1, IN-05): `request` posts { type: 'host-request', payload } to every visible surface, which the real board.js re-posts to
  * the host (the chat sidebar's precedent) only on a page the host marked with data-e2e.
  */
-export const boardTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void; request?: (payload: unknown) => Promise<void>; probe?: (probe: BoardProbe) => Promise<void>; layout?: (request: BoardLayoutRequest) => Promise<void> } = {};
+export const boardTap: {
+  toView?: (message: unknown) => void; fromView?: (message: unknown) => void; request?: (payload: unknown) => Promise<void>; probe?: (probe: BoardProbe) => Promise<void>;
+  layout?: (request: BoardLayoutRequest) => Promise<void>; shape?: BoardShape;
+} = {};
+
+/**
+ * Extension-host tests only (62.1-08, T-62.1-17): the real-window test draws the timeline's rare states on a real roadmap. state reshapes a copy of
+ * the session's state before both the board model and the timeline are built from it; failTimeline makes the timeline layout throw, so the 62.1-01
+ * failure path runs. The controller reads it only when it has its test seams (NEAR_AI_E2E=1), which the extension never sets; the tests clear it by
+ * setting boardTap.shape to undefined. The session's own state is never changed.
+ */
+export interface BoardShape { state?: (state: TeamState) => TeamState; failTimeline?: boolean }
 
 /**
  * Extension-host tests only (NEAR_AI_E2E=1, 62-21): asks the real page's layout probe (media/board/layout-probe.js) to scroll, focus or just measure, and
@@ -432,6 +443,7 @@ export class BoardController {
     boardTap.request = undefined;
     boardTap.probe = undefined;
     boardTap.layout = undefined;
+    if (this.deps.testSeams === true) boardTap.shape = undefined;
   }
 
   // ---- visibility ---------------------------------------------------------------------------------------------------------------------------
@@ -481,7 +493,9 @@ export class BoardController {
     const open = status.kind === 'live' || status.kind === 'syncing';
     const readOnlyReason = status.kind === 'offline' ? REFUSALS.offline : status.kind === 'paused' ? PAUSED_TEXT : undefined;
     const viewerId = session.memberId();
-    const state = session.state();
+    // 62.1-08: the test seam reshapes a copy (structuredClone keeps the maps and sets), never the session's state, and only under the test seams.
+    const shape = this.deps.testSeams === true ? boardTap.shape : undefined;
+    const state = shape?.state !== undefined ? shape.state(structuredClone(session.state())) : session.state();
     const model = buildBoardModel(state, {
       nowMs: (this.deps.nowMs ?? Date.now)(), status, canWrite: session.canWrite() && open,
       ...(viewerId === undefined ? {} : { viewerId }), ...(readOnlyReason === undefined ? {} : { readOnlyReason })
@@ -494,7 +508,8 @@ export class BoardController {
     // 62.1 (D-02, D-03): the timeline of the same state and viewer travels with every board state, so the page draws both views from one model.
     // A layout that throws never takes the board down (T-62.1-03): the state goes without it, flagged, and Columns keeps working.
     try {
-      model.timeline = (this.deps.buildTimeline ?? buildTimeline)(state, model, viewerId === undefined ? {} : { viewerId });
+      const build = shape?.failTimeline === true ? (): never => { throw new Error('the test seam fails the timeline layout'); } : (this.deps.buildTimeline ?? buildTimeline);
+      model.timeline = build(state, model, viewerId === undefined ? {} : { viewerId });
       this.timelineFailed = false;
     } catch (error) {
       model.timelineProblem = true;
@@ -590,7 +605,9 @@ export class BoardController {
         await this.limited(state, 'import', BUSY_IMPORT_TEXT, () => vscode.commands.executeCommand(IMPORT_PLANS_COMMAND, { milestone: 'current' }));
         return;
       case 'retry':
-        await this.limited(state, 'retry', BUSY_RETRY_TEXT, () => { this.deps.session()?.nudge(); });
+        // 62.1-08: the retry also sends this page the model again when it changed without any event (Draw the timeline again after a layout
+        // failure); an unchanged model is not sent twice.
+        await this.limited(state, 'retry', BUSY_RETRY_TEXT, () => { this.deps.session()?.nudge(); this.flush(state); });
         return;
       case 'show-details':
         this.deps.output.show(true);
