@@ -541,3 +541,19 @@ test('a measure that asks to reset the metrics reports the sample, then clears i
   const after = (await ask(h, { id: 3, action: 'measure' }))[0].report.timeline as Record<string, any>;
   assert.equal(after.metrics.frames.count, 0, 'the next reading starts a new sample');
 });
+
+// 62.1-08 (found in the real window): in vertical, scrolled down, the current milestone's header is held at the top edge and dots scroll under it on
+// purpose (the 62.1-07 decision for rule 1); its percent and progress words then lie over dots the opaque header hides. A percent in a header held
+// at the edge is not judged against the dots under it; a percent anywhere else still is, and the preview and the card are judged everywhere.
+test('rule 12: a percent in a milestone header held at the edge is not said to overlap the dots hidden under that header', () => {
+  const heldOver = (holding: boolean): string[] => {
+    const d = clean();
+    const target = dotOf(d, 'plan:1-01').box;
+    d.timeline.scroller.scrollTop = holding ? 300 : 0;
+    d.timeline.headers[0].box = box(0, target.top - 8, 320, target.top + 48);
+    d.timeline.percents[0].box = box(target.left, target.top, target.left + 40, target.top + 16);
+    return check(d);
+  };
+  assert.deepEqual(heldOver(true).filter((p) => /^The band percent "100%" overlaps dot/.test(p)), [], 'held at the edge: the header hides the dot');
+  assert.ok(heldOver(false).some((p) => /^The band percent "100%" overlaps dot plan 1-01$/.test(p)), 'not held: the overlap is a problem');
+});
