@@ -550,7 +550,8 @@ test('rule 12: a percent in a milestone header held at the edge is not said to o
     const d = clean();
     const target = dotOf(d, 'plan:1-01').box;
     d.timeline.scroller.scrollTop = holding ? 300 : 0;
-    d.timeline.headers[0].box = box(0, target.top - 8, 320, target.top + 48);
+    // Held at the top edge of the timeline area (y 100) while the timeline is scrolled down, tall enough to hide the dot under its percent.
+    d.timeline.headers[0].box = box(0, 100, 320, Math.max(156, target.bottom + 8));
     d.timeline.percents[0].box = box(target.left, target.top, target.left + 40, target.top + 16);
     return check(d);
   };

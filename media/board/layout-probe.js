@@ -768,7 +768,10 @@
       const r = x.color ? contrastOf(x.color, x.background || canvasBg) : null;
       if (below(r, 4.5)) percentRule.add(cap(x.name) + ' has a contrast of ' + ratioText(r, 4.5));
       if (!hasBox(x.box)) continue;
-      if (x.own) for (const d of dots) if (penetration(x.box, d.box) > TOL) percentRule.add(cap(x.name) + ' overlaps dot ' + d.label);
+      // 62.1-08: a header held at the edge hides what scrolls under it on purpose (rule 1), so the percent words in it are not judged against the
+      // dots it hides; the preview and the card, which sit above it, still are.
+      const inHeld = x.own && held.some((h) => h.id === x.milestone && penetration(x.box, h.box) > TOL);
+      if (x.own && !inHeld) for (const d of dots) if (penetration(x.box, d.box) > TOL) percentRule.add(cap(x.name) + ' overlaps dot ' + d.label);
       for (const [name, l] of layers) if (penetration(x.box, l.box) > TOL) percentRule.add(cap(x.name) + ' overlaps the ' + name);
     }
     percentRule.end('problems with the percent labels');
