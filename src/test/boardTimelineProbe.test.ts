@@ -515,3 +515,29 @@ test('each button in the expanded card is reported with its box, so a real click
   assert.ok(button.box && typeof button.box === 'object', 'Move to... has its box');
   assert.deepEqual(Object.keys(button.box).sort(), ['bottom', 'height', 'left', 'right', 'top', 'width']);
 });
+
+// 62.1-08: the frame budget is read over one set of actions only (a pan, four zooms and two direction switches), so a question can ask the page to
+// clear the timeline's frame sample once the report has read it.
+test('a measure that asks to reset the metrics reports the sample, then clears it with NearAiTimeline.metrics({ reset: true })', async () => {
+  const model = await timelineModel();
+  const h = page(true);
+  h.deliver({ type: 'state', model });
+  h.$('#view-switch button[data-view="timeline"]')!.click();
+  const base = h.window.NearAiTimeline as Record<string, unknown>;
+  const calls: unknown[] = [];
+  let sample = { drawMs: 12, frames: { count: 5, p95: 20 } };
+  h.window.NearAiTimeline = Object.freeze({ ...base, metrics: (options?: unknown) => {
+    calls.push(options === undefined ? 'read' : JSON.parse(JSON.stringify(options)));
+    const out = sample;
+    if (options && (options as { reset?: boolean }).reset === true) sample = { drawMs: 12, frames: { count: 0, p95: null as unknown as number } };
+    return out;
+  } });
+  const plain = (await ask(h, { id: 1, action: 'measure' }))[0].report.timeline as Record<string, any>;
+  assert.deepEqual(plain.metrics, { drawMs: 12, frames: { count: 5, p95: 20 } });
+  assert.deepEqual(calls, ['read'], 'a plain measure only reads');
+  const reset = (await ask(h, { id: 2, action: 'measure', resetMetrics: true }))[0].report.timeline as Record<string, any>;
+  assert.deepEqual(reset.metrics, { drawMs: 12, frames: { count: 5, p95: 20 } }, 'the report carries the sample read before the reset');
+  assert.deepEqual(calls, ['read', 'read', { reset: true }], 'then the sample is cleared');
+  const after = (await ask(h, { id: 3, action: 'measure' }))[0].report.timeline as Record<string, any>;
+  assert.equal(after.metrics.frames.count, 0, 'the next reading starts a new sample');
+});
