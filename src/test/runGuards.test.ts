@@ -77,6 +77,14 @@ test('0.4.14, the owner\'s case: a bare `cd <worktree>` repeated between real co
   assert.equal(transcripts.at(-1)!.some((message) => message.role === 'user' && String(message.content).startsWith('<loop-guard>')), false, 'never nudged');
 });
 
+test('a failing command repeated in the real shell is caught, although each error names a new temporary script', async () => {
+  // bash names the script it runs in a "command not found" error, and that name changes on every
+  // call, so this only stops if the names are really ignored when results are compared.
+  const { result } = await runScript(() => [call('x', 'Bash', { command: 'near-ai-no-such-command-for-tests' })]);
+  assert.equal(result.outcome, 'stuck');
+  assert.equal(result.stop?.kind, 'loop');
+});
+
 test('a failing `cd` to a missing folder, repeated, is still caught as a loop', async () => {
   const { result } = await runScript(() => [call('m', 'Bash', { command: 'cd /no/such/folder/near-ai-test' })]);
   assert.equal(result.outcome, 'stuck');
@@ -86,7 +94,7 @@ test('a failing `cd` to a missing folder, repeated, is still caught as a loop', 
 test('only changing folder or printing it counts as navigation; anything that does work still counts', async () => {
   const { isNavigationOnly, loopActionKey, resultSignature } = await import('../agent/loop');
   assert.equal(resultSignature('/tmp/near-ai-shell-Ab12/__NEAR_AI_5cf008d4f1dcaa47__.sh: line 1: cd: /x: No such file or directory\n\n[exit code 1]'), resultSignature('/tmp/near-ai-shell-Zz99/__NEAR_AI_f98ce07e3fb093e1__.sh: line 1: cd: /x: No such file or directory\n\n[exit code 1]'), 'the random script name in shell errors is ignored');
-  for (const command of ['cd /a/b', 'cd "/a b"', "cd '/a b'", 'cd', 'pwd', 'cd /a/b && pwd', 'cd /a ;']) assert.equal(isNavigationOnly(loopActionKey(call('n', 'Bash', { command }))), true, command);
+  for (const command of ['cd /a/b', 'cd "/a b"', "cd '/a b'", 'cd', 'pwd', 'cd /a/b && pwd', 'cd /a ;', 'cd -- /a', 'cd --', 'cd -- /a && pwd', 'cd /a && cd /b']) assert.equal(isNavigationOnly(loopActionKey(call('n', 'Bash', { command }))), true, command);
   for (const command of ['cd /a && npm test', 'cat missing-file.txt', 'cd /a || exit 1', 'pwd && ls', 'cd /a\nnpm test', 'cd "$(npm test)"', 'cd $(make build)', 'cd `touch x`', 'cd /a>out.txt', 'cd (x)', 'cd "/a`id`"']) assert.equal(isNavigationOnly(loopActionKey(call('w', 'Bash', { command }))), false, command);
   assert.equal(isNavigationOnly(loopActionKey(call('r', 'Read', { file_path: 'cd' }))), false, 'other tools never count as navigation');
   // A tool call exactly as the model sends it: the arguments are a JSON string, not an object.
