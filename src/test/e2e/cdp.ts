@@ -1,6 +1,7 @@
 // Test-only DevTools Protocol client (Phase 62 plan 16, G-62-6). The board e2e (62-23) starts VS Code with a debugging port on 127.0.0.1, finds the
 // workbench window here, locates the board's webview frame in it and drags a card with real mouse input (Input.dispatchMouseEvent), so the drag goes
 // through Chromium's own input handling the way a person's mouse does. Nothing here makes or sends events inside the page.
+// 62.1-07 adds real hover moves, clicks, wheel turns (with Ctrl for zoom) and the timeline's keys with Ctrl and Shift, for the timeline e2e.
 // Node built-ins only: the global WebSocket (Node 22 and later) and node:http. Every wait is bounded. This file lives under src/test, which never
 // ships (the release check forbids dist/test).
 import * as http from 'node:http';
@@ -159,6 +160,31 @@ const mouseEvent = (cdp: CdpSession, type: 'mousePressed' | 'mouseMoved' | 'mous
 
 const along = (from: Point, to: Point, share: number): Point => ({ x: from.x + (to.x - from.x) * share, y: from.y + (to.y - from.y) * share });
 
+// The DevTools Protocol's modifier bits: Alt 1, Ctrl 2, Meta 4, Shift 8.
+const MODIFIER = { ctrl: 2, shift: 8 } as const;
+
+// 62.1-07: a hover with no button held (Chromium's own hover, so the page sees pointer and mouse moves as from a person).
+const hoverEvent = (cdp: CdpSession, at: Point): Promise<unknown> => cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y, button: 'none', buttons: 0 });
+
+/** A hover move with real mouse input: from the start point to exactly the target in steps along a straight line, or one move to the target. */
+export async function mouseMove(cdp: CdpSession, to: Point, options: { from?: Point; steps?: number } = {}): Promise<void> {
+  if (!options.from) { await hoverEvent(cdp, to); return; }
+  const steps = Math.max(1, Math.floor(options.steps ?? 8));
+  for (let step = 1; step <= steps; step += 1) await hoverEvent(cdp, step === steps ? to : along(options.from, to, step / steps));
+}
+
+/** A click with real mouse input: move to the point, press and release the left button there. */
+export async function mouseClick(cdp: CdpSession, at: Point): Promise<void> {
+  await hoverEvent(cdp, at);
+  await mouseEvent(cdp, 'mousePressed', at, 1);
+  await mouseEvent(cdp, 'mouseReleased', at, 0);
+}
+
+/** One wheel turn with real input at the point: deltaY scrolls down when positive, deltaX right; ctrl holds Ctrl (Ctrl+wheel zooms the timeline). */
+export async function wheel(cdp: CdpSession, at: Point, options: { deltaX?: number; deltaY: number; ctrl?: boolean }): Promise<void> {
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.x, y: at.y, deltaX: options.deltaX ?? 0, deltaY: options.deltaY, modifiers: options.ctrl ? MODIFIER.ctrl : 0 });
+}
+
 /** A drag with real mouse input: press at from, move in steps with the button held to exactly to, run whileOver, release at to. */
 export async function mouseDrag(cdp: CdpSession, from: Point, to: Point, options: { steps?: number; pauseMs?: number; whileOver?: () => Promise<void> } = {}): Promise<void> {
   const steps = Math.max(1, Math.floor(options.steps ?? 12));
@@ -224,13 +250,34 @@ const KEYS = {
   m: { key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, text: 'm' },
   a: { key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, text: 'a' },
   u: { key: 'u', code: 'KeyU', windowsVirtualKeyCode: 85, text: 'u' },
-  ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 }
+  ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 },
+  // 62.1-07: the timeline's keys (62.1-UI-SPEC "Keyboard Model" and the amendment's N).
+  ArrowUp: { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 },
+  ArrowLeft: { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 },
+  ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 },
+  Home: { key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 },
+  End: { key: 'End', code: 'End', windowsVirtualKeyCode: 35 },
+  PageUp: { key: 'PageUp', code: 'PageUp', windowsVirtualKeyCode: 33 },
+  PageDown: { key: 'PageDown', code: 'PageDown', windowsVirtualKeyCode: 34 },
+  Tab: { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 },
+  Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' ' },
+  F10: { key: 'F10', code: 'F10', windowsVirtualKeyCode: 121 },
+  n: { key: 'n', code: 'KeyN', windowsVirtualKeyCode: 78, text: 'n' },
+  '+': { key: '+', code: 'Equal', windowsVirtualKeyCode: 187, text: '+' },
+  '=': { key: '=', code: 'Equal', windowsVirtualKeyCode: 187, text: '=' },
+  '-': { key: '-', code: 'Minus', windowsVirtualKeyCode: 189, text: '-' },
+  '0': { key: '0', code: 'Digit0', windowsVirtualKeyCode: 48, text: '0' }
 } as const;
 
-/** A key press with real keyboard input: keyDown then keyUp. */
-export async function pressKey(cdp: CdpSession, key: keyof typeof KEYS): Promise<void> {
-  const k = KEYS[key];
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...k });
-  const { text: _text, ...up } = k as { text?: string } & typeof k;
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...up });
+/**
+ * A key press with real keyboard input: keyDown then keyUp. With ctrl or shift the modifier is held on both events (Ctrl+Home, Shift+F10); a
+ * key held with Ctrl types no text.
+ */
+export async function pressKey(cdp: CdpSession, key: keyof typeof KEYS, options: { ctrl?: boolean; shift?: boolean } = {}): Promise<void> {
+  const k = KEYS[key] as { key: string; code: string; windowsVirtualKeyCode: number; text?: string };
+  const modifiers = (options.ctrl ? MODIFIER.ctrl : 0) | (options.shift ? MODIFIER.shift : 0);
+  const { text, ...base } = k;
+  const held = modifiers ? { modifiers } : {};
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, ...(text !== undefined && !options.ctrl ? { text } : {}), ...held });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base, ...held });
 }
