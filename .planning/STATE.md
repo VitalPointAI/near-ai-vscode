@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62.1-07-PLAN.md
-last_updated: "2026-11-05T00:10:44.231Z"
+stopped_at: Completed 62.1-04-PLAN.md
+last_updated: "2026-11-05T00:47:42.869Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 34177b6cf68600c814422490c7c80a0d87415d63
+state_head: fb1c60949cf9156a7cc303bf37be2c7af99ecb0a
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 74
+  completed_plans: 75
   percent: 11
 ---
 
@@ -128,6 +128,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 62.1 P02 | 13min | 3 tasks | 6 files |
 | Phase 62.1 P03 | 26min | 3 tasks | 8 files |
 | Phase 62.1 P07 | 22min | 3 tasks | 4 files |
+| Phase 62.1 P04 | 30min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -302,6 +303,10 @@ Recent decisions affecting current work:
 - [Phase 62.1]: 62.1-07: in Columns the layout report has no timeline key (reads as null), keeping the 62-16 keys; in Timeline the board's sideways and first-screen card rules give way to timeline rule 5 and the firstScreen facts
 - [Phase 62.1]: 62.1-07: a glyph is judged against its mark's fill when the mark is filled, else against the canvas; contrast reads rgb, rgba and color(srgb) and skips unknown colours
 - [Phase 62.1]: 62.1-07: pressKey sends modifiers only when asked and no text while Ctrl is held
+- [Phase 62.1]: 62.1-04: the h2 and h3 are sr-only and carry the model's heading; the visible .tl-ms-title and .tl-phase-label are aria-hidden, so the probe measures only visible labels
+- [Phase 62.1]: 62.1-04: a band with a loop gets an 80 px notice row from the geometry (shared across horizontal bands, own band in vertical) so the notice never covers a dot or label
+- [Phase 62.1]: 62.1-04: timeline.js writes the phase fill's scaleX or scaleY itself; board.css keeps only the board's two layout variables
+- [Phase 62.1]: 62.1-04: in Timeline a filter that matches nothing keeps the drawing, with the board's own empty filter state (api.filterEmptyState) in a sticky band over the ghosts
 
 ### Pending Todos
 
@@ -323,8 +328,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T00:10:43.794Z
-Stopped at: Completed 62.1-07-PLAN.md
+Last session: 2026-11-05T00:47:42.426Z
+Stopped at: Completed 62.1-04-PLAN.md
 Resume file: None
 
 ## Notes
