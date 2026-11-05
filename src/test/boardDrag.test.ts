@@ -243,17 +243,25 @@ test('62-23: without data-e2e no drag log is kept', async () => {
   assert.equal(h.posts.filter((p) => p.type === 'e2e-facts').length, 0, 'and the page answers no probe');
 });
 
-test('62-23: only the board e2e launch opens a DevTools port, on a free port of this computer, and no shipped file mentions remote debugging', () => {
+// 62.1-08 (T-62.1-18): the timeline launch is the second, and only other, launch with a DevTools port, for its real mouse and keyboard input.
+test('62-23, 62.1-08: only the board and the timeline e2e launches open a DevTools port, each on a free port of this computer, and no shipped file mentions remote debugging', () => {
   const root = path.resolve(__dirname, '../..');
   const run = readFileSync(path.join(root, 'src/test/e2e/run.ts'), 'utf8');
   const board = run.indexOf("if (only.has('board'))");
   assert.ok(board > 0, 'run.ts has the board launch');
   const end = run.indexOf('\n  }\n', board);
+  const timeline = run.indexOf('async function timelineWindow(');
+  assert.ok(timeline > 0, 'run.ts has the timeline launch');
+  const timelineEnd = run.indexOf('\n}\n', timeline);
   const uses = [...run.matchAll(/remote-debugging-port/g)].map((m) => m.index!);
-  assert.ok(uses.length >= 1, 'the board launch passes --remote-debugging-port');
-  assert.ok(uses.every((at) => at > board && at < end), 'and no other launch does');
+  assert.ok(uses.some((at) => at > board && at < end), 'the board launch passes --remote-debugging-port');
+  assert.ok(uses.some((at) => at > timeline && at < timelineEnd), 'the timeline launch passes --remote-debugging-port');
+  assert.ok(uses.every((at) => (at > board && at < end) || (at > timeline && at < timelineEnd)), 'and no other launch does');
   assert.match(run, /listen\(0, '127\.0\.0\.1'/, 'the port is a free one on 127.0.0.1');
-  assert.match(run.slice(board, end), /NEAR_AI_E2E_CDP_PORT/, 'the suite is told the port');
+  for (const [name, body] of [['board', run.slice(board, end)], ['timeline', run.slice(timeline, timelineEnd)]] as const) {
+    assert.match(body, /freeLocalPort\(\)/, `the ${name} launch asks for a free local port`);
+    assert.match(body, /NEAR_AI_E2E_CDP_PORT/, `the ${name} suite is told the port`);
+  }
   const shipped: string[] = [];
   const walk = (dir: string): void => {
     for (const name of readdirSync(dir)) {
