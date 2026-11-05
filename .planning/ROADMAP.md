@@ -259,7 +259,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 **Goal:** As part of the Team Board, a person sees the whole project on one timeline they can view left to right or top to bottom: milestones in order, phases as segments, every card a small dot in dependency order that opens into the full card with the board's own actions, a Now marker showing where the work is, and the percent complete, proven in a real window and in code-server for the owner to review.
 **Requirements**: BOARD-01, BOARD-02, BOARD-03
 **Depends on:** Phase 62 (runs after 62-27 and Phase 61's 61-31, the last planned plans of both)
-**Plans:** 8/9 plans executed in 7 waves (decisions D-01 to D-14 in 62.1-CONTEXT.md, including the owner's Now indicator D-13 and percent complete D-14 of 2026-11-04; design contract 62.1-UI-SPEC.md with its 2026-11-04 amendment)
+**Plans:** 9/9 plans executed in 7 waves (decisions D-01 to D-14 in 62.1-CONTEXT.md, including the owner's Now indicator D-13 and percent complete D-14 of 2026-11-04; design contract 62.1-UI-SPEC.md with its 2026-11-04 amendment)
 **UI hint**: yes
 
 Plans:
@@ -285,7 +285,7 @@ Plans:
 - [x] 62.1-08-PLAN.md — Real VS Code window: the timeline launch, real keys and mouse, a move from the card, a teammate moving the Now step, frame timing, narrow width, and the rare states through a test-only seam (BOARD-01, BOARD-02, BOARD-03)
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 62.1-09-PLAN.md — The 121-frame screenshot matrix, the code-server browser test, the full gate, the validation map, and the owner's review (BOARD-01, BOARD-02, BOARD-03)
+- [x] 62.1-09-PLAN.md — The 121-frame screenshot matrix, the code-server browser test, the full gate, the validation map, and the owner's review (BOARD-01, BOARD-02, BOARD-03)
 
 ### Phase 63: Claims, leases, claim workspaces, LeaseGuard, duplicate checks
 

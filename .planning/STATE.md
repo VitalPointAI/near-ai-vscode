@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 62.1-08-PLAN.md
-last_updated: "2026-11-05T03:17:47.354Z"
+stopped_at: Completed 62.1-09-PLAN.md (phase gate; awaiting the owner's review of the frames)
+last_updated: "2026-11-05T04:07:40.652Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: a27c8297af5f0da60c4b9de62b14ae3f0cef6920
+state_head: a4f3b78e38728b6b3ef1a14dfab280cc7bf22bb9
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 79
-  completed_plans: 78
+  completed_plans: 79
   percent: 11
 ---
 
@@ -132,6 +132,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 62.1 P05 | 21min | 3 tasks | 4 files |
 | Phase 62.1 P06 | 55min | 3 tasks | 7 files |
 | Phase 62.1 P08 | 60min | 3 tasks | 12 files |
+| Phase 62.1 P09 | 45min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -323,6 +324,9 @@ Recent decisions affecting current work:
 - [Phase 62.1]: 62.1-08: probe rule 12 does not judge percents inside a held header against the dots it hides (rule 1's reading); preview and card still judged everywhere (owner to review)
 - [Phase 62.1]: 62.1-08: boardTap.shape (test seams only, on a structuredClone) draws the rare states; a retry also flushes the page so Draw the timeline again recovers
 - [Phase 62.1]: 62.1-08: on this roadmap the Now step holds a planless phase the board cannot mark done, so the e2e teammate reopens the latest done plan before it (owner to confirm)
+- [Phase 62.1]: 62.1-09: done dots use var(--vscode-charts-green, var(--vscode-testing-iconPassed)); the test-passed colour is 2.0 to 1 on the light canvas (owner to confirm, WINDOWS 25)
+- [Phase 62.1]: 62.1-09: under 520 px, with no clear side at the full width, the preview and card go beside the rail from the dot to the view's right edge (owner to confirm, WINDOWS 26)
+- [Phase 62.1]: 62.1-09: owner accepted (2026-11-05, relayed) probe rule 12's held-header reading and the teammate step's reopen of plan:62-27; the ResizeObserver notice stays deferred
 
 ### Pending Todos
 
@@ -344,8 +348,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T03:17:46.889Z
-Stopped at: Completed 62.1-08-PLAN.md
+Last session: 2026-11-05T04:07:40.137Z
+Stopped at: Completed 62.1-09-PLAN.md (phase gate; awaiting the owner's review of the frames)
 Resume file: None
 
 ## Notes
