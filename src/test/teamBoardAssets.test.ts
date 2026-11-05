@@ -97,19 +97,20 @@ test('62.1-08: the timeline\'s Small text is never under 0.85 of the editor font
   const at = css.indexOf('@@timeline@@');
   assert.ok(at > 0, 'the stylesheet has its timeline part');
   const timeline = css.slice(at);
-  const floor = /--tl-small:\s*max\(0\.85em,\s*calc\(var\(--vscode-editor-font-size(?:,\s*0px)?\)\s*\*\s*0\.85\)\)/;
-  assert.match(css, floor, 'one Small size: 0.85em, and at least 0.85 of the editor font size');
+  // One Small size: 0.85em, and at least 0.85 of the editor font size (only theme variables, as the stylesheet's colour rules ask).
+  const SMALL = /font-size:\s*max\(0\.85em,\s*calc\(var\(--vscode-editor-font-size(?:,\s*0px)?\)\s*\*\s*0\.85\)\)/;
+  assert.match(timeline, SMALL, 'the timeline has the floored Small size');
   const bare = [...timeline.matchAll(/([^{}]+)\{[^}]*font-size:\s*0\.8\d*em/g)].map((m) => (m[1] ?? '').trim());
   assert.deepEqual(bare, [], 'no timeline rule sets a bare em Small size');
   for (const face of ['.card-meta', '.card-top .state', '.badge', '.card-msg', '.did', '.assignee-initials', '.refusal-line', '.pending-line']) {
     for (const layer of ['#tl-card', '#tl-preview']) {
       const rule = [...timeline.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((m) => (m[1] ?? '').split(',').map((s) => s.trim()).includes(`${layer} ${face}`));
-      assert.ok(rule !== undefined && /font-size:\s*var\(--tl-small\)/.test(rule[2] ?? ''), `${layer} ${face} takes the Small floor`);
+      assert.ok(rule !== undefined && SMALL.test(rule[2] ?? ''), `${layer} ${face} takes the Small floor`);
     }
   }
   // The milestone header's progress text and Current badge are the board's own classes, floored inside the header.
   for (const selector of ['.tl-ms-head .progress-text', '.tl-ms-head .badge']) {
     const rule = [...timeline.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((m) => (m[1] ?? '').split(',').map((s) => s.trim()).includes(selector) && /font-size/.test(m[2] ?? ''));
-    assert.ok(rule !== undefined && /font-size:\s*var\(--tl-small\)/.test(rule[2] ?? ''), `${selector} takes the Small floor`);
+    assert.ok(rule !== undefined && SMALL.test(rule[2] ?? ''), `${selector} takes the Small floor`);
   }
 });
