@@ -87,6 +87,8 @@ export function isAutoAllowed(command: string, allowCommands: string[]): boolean
   if (allowRuleBlocker(raw) !== undefined) return false;
   if (NEVER_IN_AN_ENTRY.has(raw.split(/ +/)[0] ?? '')) return false;
   const words = raw.split(/ +/);
+  // 0.4.17 review: an entry whose first word is a program no entry may name (`rm`, `curl`, an interpreter) is never honoured, so a person's own
+  // allowCommands entry for one of those is ignored by design. The setting's own description says so.
   const entry = allowCommands.map((prefix) => prefix.trim().split(/\s+/)).find((prefix) => prefix[0] && prefix.every((word, index) => words[index] === word));
   if (!entry) return false;
   const rest = words.slice(entry.length);

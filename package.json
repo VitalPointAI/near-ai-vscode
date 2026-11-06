@@ -410,7 +410,7 @@
             "node --version",
             "npm --version"
           ],
-          "description": "Shell commands the agent may run without asking, matched by their leading words (\"git push\" covers \"git push origin main\", but never --force or a URL). The approval card's \"Always allow\" adds entries here. In Auto approve mode each part of a chained command (cd app && git push) is matched on its own; in other modes, commands that chain, redirect, or substitute always ask. The deny list is checked first."
+          "description": "Shell commands the agent may run without asking, matched by their leading words (\"git push\" covers \"git push origin main\", but never --force or a URL). The approval card's \"Always allow\" adds entries here. In Auto approve mode each part of a chained command (cd app && git push) is matched on its own; in other modes, commands that chain, redirect, or substitute always ask. The deny list is checked first. An entry whose first word is a program that can do almost anything (rm, curl, wget, ssh, sudo, node, python, bash and the other interpreters) is never honoured, because allowing it would allow almost anything."
         },
         "nearAi.agent.autoAllowOutsideWorkspace": {
           "type": "boolean",

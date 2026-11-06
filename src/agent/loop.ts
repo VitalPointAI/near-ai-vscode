@@ -35,7 +35,8 @@ export function narrowRuleFor(command: string, allowCommands: string[]): string 
   // command and be accepted by the real matcher, so an entry is never wider than what was approved and never one that could not match.
   for (const candidate of [exactRuleFor(command), whole]) {
     if (candidate === '' || !coversOnlyThisCommand(candidate, command)) continue;
-    if (isAutoAllowed(command, [...allowCommands, candidate])) return candidate;
+    // The candidate is judged alone, so an existing entry cannot make a candidate pass that the matcher would not honour on its own.
+    if (isAutoAllowed(command, [candidate])) return candidate;
   }
   return undefined;
 }
@@ -538,7 +539,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       // "always allow" for every command, a held one included, because a held command is exactly the one a project should learn about. The entry
       // names the exact command up to its first option (exactRuleFor), so the same command is never asked again and a different one still is.
       // `reason` stays whole: the page and the tests read it, and the card cuts only what it shows as its short line (`reasonShort`).
-      const risk = riskSentence(reason, risky ? 'destructive' : command && LEAVES_WORKSPACE_REASON.test(reason ?? '') ? 'outside-workspace' : undefined);
+      // The kind is read from the reason's own words (0.4.17 review: a tool-declared risky result is not always destruction, so WebFetch's
+      // exfiltration hold was being labelled as destruction). Only a command reason the patterns miss falls back to the fact the caller knows.
+      const risk = riskSentence(reason, command !== undefined && LEAVES_WORKSPACE_REASON.test(reason ?? '') && !risky ? 'outside-workspace' : undefined);
       // The offer and the matcher must agree, in both directions: the saved entry must cover this command (or it would never match, which is what
       // made the old offer look like it had no effect) and must not cover anything wider (or one approval would quietly allow every install, every
       // push and every reset). The candidate is therefore round-tripped through the real matcher, and a command with no honest narrow entry, or one

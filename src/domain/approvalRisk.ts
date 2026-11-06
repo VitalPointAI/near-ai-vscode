@@ -26,7 +26,7 @@ const PATTERNS: ReadonlyArray<{ kind: RiskKind; pattern: RegExp }> = [
   { kind: 'credentials', pattern: /credential|secret|knowledge-base|\bkeys?\b|\.env\b|token/i },
   { kind: 'destructive', pattern: /destroy|cannot be recovered|deletes?|removes?|overwrit|force|rm -rf|reset --hard|clean -[a-z]*[fd]/i },
   { kind: 'installs', pattern: /install|downloads? (?:a |an )?(?:package|binary|script)|from the network|runs? code the rules cannot check/i },
-  { kind: 'leaves-machine', pattern: /publish|deploy|release|push|send (?:data|it) off|sends data with it|reach(?:es)? the network|exfiltration|carry data out/i },
+  { kind: 'leaves-machine', pattern: /publish|deploy|release|push|send (?:data|it) off|sends data with it|reach(?:es)? the network|exfiltration|carry data out|carry data|URL could carry/i },
   { kind: 'outside-workspace', pattern: /outside the workspace|leaves the workspace|another user's home|outside this project/i }
 ];
 

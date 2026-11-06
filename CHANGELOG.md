@@ -3,10 +3,12 @@
 ## Unreleased
 
 - **Auto approve stops asking about research work.** Web search and web fetch
-  now run by themselves in Auto mode, and the rule that made any command able
-  to reach the network ask once the run had read a web page is gone. A command
-  that runs or reads outside this project is still held, and a safety model's
-  approval can no longer wave it through.
+  now run by themselves in Auto mode, so a research run is not a stream of
+  questions. Shell commands that can reach the network still ask once the run
+  has read a web page, because that page may have asked for them, but the web
+  tools themselves do not ask again. A command that runs or reads outside this
+  project is still held, and a safety model's approval can no longer wave it
+  through.
 - **An approval card says what the risk is, and shows the command.** The card
   names the kind of risk in one plain sentence, then the rule's reason, with
   **Show what will run** to expand the whole reason and the exact command or
