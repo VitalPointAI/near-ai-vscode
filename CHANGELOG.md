@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.16
 
 - **A cybersecurity scan runs on an abliterated model.** A scan sends exploits,
   payloads and attack strings, which a safety-tuned model refuses or waters
@@ -11,7 +11,6 @@
   remembers your answer for it. If it offers none, the panel keeps your chat
   model and says a scan may be refused. A scan handed to the chat keeps the
   abliterated model, so its follow-up messages stay on it.
-
 - **The Software development team has a DevOps member.** It sets up a
   protected way of working for the project: a CI workflow that runs the
   tests, a secret scan, and a dependency audit on every pull request,
