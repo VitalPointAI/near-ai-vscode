@@ -72,6 +72,14 @@ The extension cannot do this alone: it runs inside VS Code and has no inbound en
 - **A relay service is the real product.** An HTTP API over an agentic team (start a run, continue it, ask its status, stream updates), with the
   security and limits in one place. Teams is then one adapter over it, and a web page, Slack, or a plain API can use the same team. This is the piece
   that gives end users the team without installing VS Code or the extension.
+- **Signal is another adapter over the same relay.** Signal has no bot platform, so the options are signal-cli (a Java client that can register a
+  number and send and receive messages) or a small self-hosted bridge. Two options are worth weighing: **link a dedicated number** (signal-cli or a
+  bridge, full support including group chats and attachments, the owner runs one process), or **the Signal bot API** where a provider hosts the number
+  for you (less to run, less control, and messages leave the owner's infrastructure). Recommendation: signal-cli linked to a dedicated number on a
+  machine the owner controls, because nothing then depends on a third party and the relay stays the only outward surface. Group chats are addressed by
+  the Signal group id, and the same "reply privately to the requestor" rule holds: the group gets the result, the requestor gets the working thread
+  over Signal direct message. Signal's end-to-end encryption stops at the bridge, so the relay must treat every incoming message as untrusted content,
+  and the bridge must never hold a NEAR AI key.
 - **The Teams bot is a thin adapter.** Registered with the Bot Framework for group chats, it receives an @mention, starts a run, and replies in the
   same thread when the work is done. On the first mention it opens the bot's 1:1 conversation with the requestor and continues the work there, so each
   person gets a private thread. Sessions are keyed on tenant, conversation, thread and requestor, so two people asking the same team get isolated runs.
