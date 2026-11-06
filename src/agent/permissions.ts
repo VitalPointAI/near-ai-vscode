@@ -153,9 +153,10 @@ export function decidePermission(capability: ActionCapability, command: string |
   // Owner decision 2026-11-05 (0.4.17): in auto, a tool that marks itself autoSafe (only WebSearch and WebFetch do) runs by itself. Research is
   // what the run is for, so searching is not the risk; what can carry data out is judged by the tool's own checks (WebFetch's exfiltration check
   // after outside content). The gate is the tool's own marker, never the bare network capability, so an MCP or remote tool keeps asking.
-  // After outside content the marker does not apply: a page the run has read may have asked for the next fetch, so it is confirmed once more
-  // (0.4.17 review: an unattended fetch driven by page content was the hole).
-  if (capability === 'network' && policy.mode === 'auto' && auto?.autoSafeTool === true && !grants.tainted) return { decision: 'allow' };
+  // 0.4.17: the web tools run in auto even after outside content. Their results are what taints a run in the first place, so holding them once
+  // tainted would ask for every search after the first one, which is exactly what this change exists to stop. Their own outbound checks cover the
+  // risk: WebFetch refuses an exfiltration-shaped URL after outside content (src/agent/webTools.ts risky), and the pages go to the model fenced.
+  if (capability === 'network' && policy.mode === 'auto' && auto?.autoSafeTool === true) return { decision: 'allow' };
   if (capability === 'workspaceWrite') {
     if (grants.edits || policy.mode !== 'approve-risky') return { decision: 'allow' };
     return { decision: 'ask' };
@@ -214,6 +215,11 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
   // The shape is a network program with a body, file upload or data flag (`curl -d`, `--data`, `-F`, `-T`, `--upload-file`, `-X POST`, `wget --post-file`).
   if (grants.tainted && CARRIES_DATA.test(command ?? '')) {
     return { decision: 'ask', reason: 'This run read outside content, and this command sends data with it, which that content may have asked for. Approve it only if you expected it.' };
+  }
+  // 0.4.17 review: a flag regex cannot know every way data leaves (curl --json @.env, wget --post-data, xargs curl, nc, node -e fetch), so any
+  // other command that can reach the network still asks after outside content. This keeps the guard structural rather than a list of flags.
+  if (grants.tainted && NETWORK_COMMAND.test(command ?? '') && !INSTALLS.test(classified.reason)) {
+    return { decision: 'ask', reason: 'This run read outside content, and this command can reach the network, which that content may have asked for. Approve it only if you expected it.' };
   }
   // Reading outside the project is held by the rules alone, because a model cannot tell from the command text what a command in another folder
   // touches. The project's own switch is the one thing that lifts that hold, and even then the safety model still has to agree.

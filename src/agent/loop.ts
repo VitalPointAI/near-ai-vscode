@@ -14,6 +14,19 @@ import type { AgentTool, SecurityEvent, Todo, ToolContext, ToolPreview } from '.
 import { resolveInWorkspace, ToolError } from './workspace';
 
 
+
+/** The kinds of risk whose card never offers "always allow", because the docs promise those always ask (0.4.17). */
+const ALWAYS_ASKS_KINDS: ReadonlySet<string> = new Set(['credentials', 'destructive', 'leaves-machine']);
+
+/**
+ * The "always allow" entry a card offers, or undefined. Nothing is offered for a kind of risk that always asks, so one click can never make a key
+ * file, a destructive command or anything that sends data out run silently for good.
+ */
+export function offeredRule(command: string, kind: string, allowCommands: string[]): string | undefined {
+  if (ALWAYS_ASKS_KINDS.has(kind)) return undefined;
+  return narrowRuleFor(command, allowCommands);
+}
+
 /** The narrowest entry that covers exactly this command, or undefined when there is none the matcher would honour. */
 export function narrowRuleFor(command: string, allowCommands: string[]): string | undefined {
   if (allowRuleBlocker(command) !== undefined) return undefined;
@@ -532,8 +545,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       // the matcher refuses anyway (an address on the line, `rm`, an interpreter, a risky option), offers no "always allow" at all.
       // The offer is silenced for the three kinds of risk the docs say always ask: a key file, destruction, and sending data out. One click there
       // would let that command run silently for good, which is exactly what "reading keys always asks" forbids (0.4.17 review).
-      const alwaysAsks = risk.kind === 'credentials' || risk.kind === 'destructive' || risk.kind === 'leaves-machine';
-      const allowRule = command === undefined || this.options.rememberAllowRule === undefined || alwaysAsks ? undefined : narrowRuleFor(command, [...this.options.rules.allowCommands, ...this.grants.allowRules]);
+      const allowRule = command === undefined || this.options.rememberAllowRule === undefined
+        ? undefined
+        : offeredRule(command, risk.kind, [...this.options.rules.allowCommands, ...this.grants.allowRules]);
       const reply = await this.options.requestApproval({
         callId: call.id, tool: tool.name, title, capability: tool.capability, preview,
         ...(reason ? { reason } : {}),

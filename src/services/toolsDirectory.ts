@@ -26,7 +26,7 @@ export type ToolStatus = 'runs' | 'asks' | 'auto-checked' | 'off' | 'stopped';
 export interface DirectorySkill { name: string; description: string; argumentHint?: string; group: string; insert: string }
 export interface DirectoryAgent { name: string; description: string; tier: string; model: string; source: 'role setting' | 'definition' | 'default'; tools: string[] }
 export interface DirectoryTeam { name: string; description: string; command: string; insert: string; project: boolean; members: Array<{ name: string; role?: string; tier: string; model: string; tools: string[] }> }
-export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; setup?: { label: string; command: string } }
+export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; setup?: { label: string; command: string }; /** 0.4.17: the tool runs in Auto by its own marker (the web tools). */ autoSafe?: boolean }
 export interface DirectoryMcpServer { id: string; name: string; transport: string; host: string; enabledHere: boolean; state: string; error?: string; approval: string; tools: Array<{ name: string; agentName: string; description: string; enabled: boolean; status: ToolStatus; statusText: string }> }
 export interface DirectoryModel { id: string; privacy: 'tee' | 'local' | 'forwarded' | 'unknown'; privacyText: string; contextLength?: number; inputPerMillion?: number; outputPerMillion?: number; imagePrice?: number; kinds: string[]; usedFor: string[] }
 
@@ -143,7 +143,10 @@ function toolEntry(tool: AgentTool<any>, input: DirectoryInput, available: { off
   if (tool.sensitive) notes.push('Some paths always ask first (files that look like credentials, or protected locations).');
   if (tool.risky) notes.push('Can ask in any mode once the run has read outside content.');
   if (tool.untrusted) notes.push('Its results are outside content.');
-  return { name: tool.name, description: firstSentence(tool.description), capability: CAPABILITY_LABEL[tool.capability], status, statusText: STATUS_TEXT[status], notes, ...(available.setup ? { setup: available.setup } : {}) };
+  return {
+    name: tool.name, description: firstSentence(tool.description), capability: CAPABILITY_LABEL[tool.capability], status, statusText: STATUS_TEXT[status], notes,
+    ...(available.setup ? { setup: available.setup } : {}), ...(tool.autoSafe === true ? { autoSafe: true } : {})
+  };
 }
 
 export function privacyOf(model: ModelInfo): DirectoryModel['privacy'] {

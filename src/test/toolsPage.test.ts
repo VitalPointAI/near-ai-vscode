@@ -153,9 +153,9 @@ test('each tool\'s runs/asks column follows decidePermission in every approval m
       for (const tool of directory.tools) {
         if (tool.status === 'off') continue;
         const capability = capabilityOf.get(tool.name) ?? ({ read: 'read', plan: 'plan', edit: 'workspaceWrite', shell: 'shell', network: 'network', generate: 'mediaGeneration' } as const)[tool.capability as 'read'];
-        // The directory lists the provider-bound web tools, whose names are its own, so the marker is matched on the tool the entry stands for.
-        const autoSafe = everyTool.find((candidate) => candidate.name === tool.name)?.autoSafe === true
-          || (capability === 'network' && /^Web(?:Search|Fetch)$/.test(tool.name));
+        // The directory now carries the tool's own marker, so this reads it rather than reconstructing it from a name: dropping the marker from
+        // the directory fails here. A tool the list does not hold (an MCP one) has no marker and keeps asking.
+        const autoSafe = tool.autoSafe === true;
         const decided = decidePermission(capability, undefined, policy, DEFAULT_RULES, new RunGrants(), { root: '', cwd: '', autoSafeTool: autoSafe });
         const expected = decided.decision === 'deny' ? 'stopped' : decided.decision === 'allow' ? 'runs' : capability === 'shell' && mode === 'auto' ? 'auto-checked' : 'asks';
         assert.equal(tool.status, expected, `${tool.name} under ${mode}${stopped ? ' (stopped)' : ''}`);
