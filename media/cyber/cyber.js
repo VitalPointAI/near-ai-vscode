@@ -209,6 +209,13 @@
     const label = payload.engagement.target.kind + ': ' + payload.engagement.target.value;
     status('Engagement ' + payload.engagement.id + ' created for ' + label + '.');
     if (payload.model) $('model').value = payload.model;
+    // The host names the model this scan runs on and, when it applies, why (owner decision 2026-11-05: a scan runs on an
+    // abliterated model, chosen for it when more than one is offered, and the panel says so when none is).
+    const note = $('model-note');
+    if (note) {
+      note.textContent = payload.modelNote || '';
+      note.hidden = !payload.modelNote;
+    }
   }
 
   function renderModels(models, defaultModel) {

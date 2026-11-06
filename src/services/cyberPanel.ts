@@ -48,6 +48,8 @@ export interface CyberPanelServiceDeps {
   /** The model the chat would use, for an engagement with no stored choice. */
   defaultModel(): string;
   availableModels(): Promise<string[]>;
+  /** Asks the person which of several abliterated models an engagement should use (owner decision 2026-11-05). */
+  chooseModel?(models: string[]): Promise<string | undefined>;
   /** The engagement's sandbox tier; detection only, nothing is installed (D-08). */
   sandboxTier(): Promise<{ tier: SandboxTier; reason?: string }>;
   /** Exports and replays are the 25-07 / 25-05 implementations. */
@@ -124,7 +126,8 @@ async function depsFor(context: vscode.ExtensionContext, service: CyberPanelServ
       read: (engagementId) => context.globalState.get<string>(modelKeyFor(engagementId)),
       write: async (engagementId, model) => { await context.globalState.update(modelKeyFor(engagementId), model); },
       defaultModel: () => service.defaultModel(),
-      available: () => service.availableModels()
+      available: () => service.availableModels(),
+      ...(service.chooseModel ? { choose: service.chooseModel } : {})
     },
     ...(service.now ? { now: service.now } : {})
   };

@@ -15,6 +15,8 @@ export interface CyberHostServices {
   /** The model the chat composer would use right now. */
   defaultModel(): string;
   availableModels(): Promise<string[]>;
+  /** Asks the person which abliterated model a scan should use, when more than one is offered. */
+  chooseModel(models: string[]): Promise<string | undefined>;
   /** Starts a cyber run inside the panel. */
   startRun: CyberPanelServiceDeps['startRun'];
   /** Hands a run to a chat conversation so it survives the panel closing (deep runs). */
@@ -35,6 +37,7 @@ export function cyberPanelService(context: vscode.ExtensionContext, host: CyberH
     },
     defaultModel: host.defaultModel,
     availableModels: host.availableModels,
+    chooseModel: host.chooseModel,
     sandboxTier: async () => chooseTier({ allowTempTier: true })
   };
 }

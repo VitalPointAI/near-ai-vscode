@@ -9,6 +9,7 @@ import type { AcceptanceSnapshot } from '../domain/cyberLegal';
 import type { CyberRunEvent } from './cyberRun';
 import { defaultVehicle, type RunVehicle } from '../domain/cyberLimits';
 import type { InstallAdvice } from './cyberInstallAdvice';
+import { CHOOSE_ABLITERATED_TEXT, NO_ABLITERATED_TEXT, chooseCyberModel } from '../domain/cyberModel';
 
 // The Cybersecurity panel's page: the HTML shell, the message handling, and the payloads the client
 // renders. No client logic lives in the HTML string (the CONCERNS.md debt this page must not
@@ -134,6 +135,8 @@ export interface CyberPanelDeps {
     write(engagementId: string, model: string): Promise<void>;
     defaultModel(): string;
     available(): Promise<string[]>;
+    /** Asks the person which abliterated model to use, when several are offered. */
+    choose?(models: string[]): Promise<string | undefined>;
   };
   now?(): Date;
 }
@@ -171,6 +174,7 @@ export function cyberPanelHtml(options: { cspSource: string; nonce: string; scri
 <div id="disclaimer-modal" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title"></div></section>
 <section id="run-section" aria-labelledby="run-title" hidden><h2 id="run-title">Run</h2>
 <label for="model">Model</label><select id="model" aria-label="Model for this engagement"></select>
+<p id="model-note" class="hint" role="note" hidden></p>
 <label for="vehicle">Run in</label><select id="vehicle" aria-label="Where the run is driven from"><option value="panel">This panel</option><option value="chat">The chat (survives closing this panel)</option></select>
 <p id="vehicle-note" class="hint" role="note"></p>
 <button id="run" type="button">Run</button>
@@ -247,6 +251,22 @@ export function attachCyberPanel(host: CyberPageHost, deps: CyberPanelDeps): { d
   const now = () => isoTimestamp(deps.now?.() ?? new Date());
   const timeZone = () => { try { return deps.timeZone(); } catch { return undefined; } };
 
+  /**
+   * The model an engagement runs on (owner decision 2026-11-05): the engagement's own choice, else the only abliterated model
+   * offered, else a question when several are offered, else the default with a plain note. A person's answer is remembered for the
+   * engagement, so the question is asked once. Resolves to the model and an optional sentence for the panel.
+   */
+  const modelFor = async (engagementId: string): Promise<{ model: string; note?: string }> => {
+    const available = await deps.models.available().catch(() => [] as string[]);
+    const choice = chooseCyberModel(available, deps.models.read(engagementId), deps.models.defaultModel());
+    if (choice.kind === 'use') return { model: choice.model };
+    if (choice.kind === 'none') return { model: choice.fallback, note: NO_ABLITERATED_TEXT };
+    const picked = await deps.models.choose?.(choice.models);
+    if (!picked) return { model: deps.models.defaultModel(), note: CHOOSE_ABLITERATED_TEXT };
+    await deps.models.write(engagementId, picked);
+    return { model: picked };
+  };
+
   const subscriptions = [host.webview.onDidReceiveMessage(async (value) => {
     const message = parseCyberMessage(value);
     if (!message) return;
@@ -303,7 +323,8 @@ export function attachCyberPanel(host: CyberPageHost, deps: CyberPanelDeps): { d
           }
           const created = await deps.engagements.create(engagement);
           state.engagementId = created.id;
-          await post({ type: 'engagement', engagement: { id: created.id, target: created.target, region: created.region, modes: created.allowedModes, sandbox: created.sandbox }, model: deps.models.read(created.id) ?? deps.models.defaultModel() });
+          const wanted = await modelFor(created.id);
+          await post({ type: 'engagement', engagement: { id: created.id, target: created.target, region: created.region, modes: created.allowedModes, sandbox: created.sandbox }, model: wanted.model, ...(wanted.note ? { modelNote: wanted.note } : {}) });
           break;
         }
         case 'decline-disclaimer': {
@@ -323,10 +344,13 @@ export function attachCyberPanel(host: CyberPageHost, deps: CyberPanelDeps): { d
           const engagement = await deps.engagements.get(message.engagementId);
           if (!engagement) { await post({ type: 'error', text: 'That engagement no longer exists.' }); break; }
           const vehicle = message.vehicle ?? defaultVehicle(message.depth).vehicle;
+          // The run's model is the one the page names, or the engagement's own choice by this rule: a scan never falls back to a
+          // safety-tuned chat model just because the page did not send one.
+          const runModel = message.model ?? (await modelFor(engagement.id)).model;
           // The chat vehicle hands the run to a conversation, so it outlives this panel and can be
           // steered by typing; the panel vehicle keeps the tighter timeline but dies with the panel.
           if (vehicle === 'chat') {
-            await deps.handToChat({ engagement, mode: message.mode, depth: message.depth, ...(message.model ? { model: message.model } : {}) });
+            await deps.handToChat({ engagement, mode: message.mode, depth: message.depth, model: runModel });
             await post({ type: 'handed-to-chat', engagementId: engagement.id, survivesPanelClose: true });
             break;
           }
@@ -336,7 +360,7 @@ export function attachCyberPanel(host: CyberPageHost, deps: CyberPanelDeps): { d
             engagement,
             mode: message.mode,
             depth: message.depth,
-            ...(message.model ? { model: message.model } : {}),
+            model: runModel,
             signal: controller.signal,
             onEvent: (event) => {
               if (!focused) { focused = true; host.reveal?.(); }
