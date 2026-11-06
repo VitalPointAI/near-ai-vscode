@@ -1,8 +1,8 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "0.6.4 re-test (owner, 2026-11-05), board steps 12 and 16: a finished (Done) plan card will not move to Backlog, by drag or by Move to..., for alice (team owner)"
 created: 2026-11-05T17:00:00Z
-updated: 2026-11-05T19:30:00Z
+updated: 2026-11-05T23:30:00Z
 ---
 
 ## Current Focus
@@ -75,9 +75,10 @@ started: 0.6.4 preview (62-27 made every kanban card draggable; first time the o
 ## Resolution
 
 root_cause: "src/domain/team/board.ts:338 maps a drop on Backlog of a done or cancelled card to 'reopen', and board.ts:100 plus boardText.ts:21 ('Backlog (reopen)') promise Backlog; src/domain/team/materialize.ts:483 settles the item to state 'backlog'; src/domain/team/work.ts:239-240 then draws any stored backlog item that passes readiness in Ready. A reopened plan with files, an estimate and finished dependencies (every imported plan in the scratch project) is therefore drawn in Ready, not Backlog, and the host says nothing (boardView.ts move() has no success notice). The move is not refused: both of alice's reopens are accepted in the log."
-fix: ""
-verification: ""
-files_changed: []
+fix: "Owner decision 2026-11-05 (62-CONTEXT.md, 'Owner decision (2026-11-05): a reopened card stays in Backlog'): every reopen lands in Backlog and is held there. planMove's 'reopen' now plans the existing signed pair item.reopened then item.updated { hold: true } in one append (board.ts intentsFor), and the host appends every planned intent (boardView.ts planned.intents). A held card is drawn in Backlog by work.ts columnOf, so the move's promise and the drawn column agree. Release (a drop on Ready, or Move to... then Release) moves it on. No event body, stored shape, permission row or hash changed: STATE_HASH_VERSION stays 1."
+verification: "the two RED tests of 6ff8876 pass with their assertions unchanged; src/test/teamBoardReopenColumn.test.ts grows to 8 tests (pair shape, replay, Release to Ready, a plan with no estimate staying in Backlog, the pair accepted for the owner, a lead and the assignee, a cancelled card brought back held, and both events answering one permission row); the code-server board check passes all 37 checks with the moves planned by the real model, including the reopen in Backlog and the release to Ready; the timeline set passes 47 tests; the board and timeline launches pass 75 window checks; the invariant command finds no change to types, validate, materialize, permissions, canonical, work, eventLog or timeline.js and STATE_HASH_VERSION is 1."
+files_changed: ["src/domain/team/board.ts", "src/services/team/boardView.ts", "src/test/teamBoardReopenColumn.test.ts", "src/test/teamTimeline.test.ts", "src/test/teamBoardMoves.test.ts", "src/test/teamBoardModel.test.ts", "src/test/helpers/teamBoardWorld.ts", "src/test/e2e/codeServerBoard.ts", ".planning/phases/62-work-model-gsd-import-team-board-live-read-and-move/62-CONTEXT.md"]
+note: "RETEST step 16 should use a reopened plan for steps 13 to 16: step 13's card was phase:63, a planless phase card, which cannot move (G-62-3). Status: resolved, awaiting the owner's re-test in 0.6.5.
 correct_behaviour_options: "Owner to choose. (A) A drop on Backlog, or Move to... -> Backlog, reopens and holds the card in one append (item.reopened then item.updated {hold:true}), so it is drawn in Backlog and Release moves it to Ready; a drop on Ready reopens it and it is drawn in Ready when ready (refused with the not-ready reason when it is not). (B) Keep one reopen, but the menu and the drop name the real destination ('Reopen (goes to Ready)') and the board says where the card went. A matches the owner's expectation in step 12."
 red_commit: 6ff8876
 red_tests: ["src/test/teamBoardReopenColumn.test.ts: the owner drops a finished, ready-shaped plan on Backlog: it is drawn in Backlog afterwards", "src/test/teamBoardReopenColumn.test.ts: Move to... on a finished plan: the column the menu names is the column the card is drawn in afterwards"]

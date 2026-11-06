@@ -5,16 +5,16 @@ milestone_name: Team Mode
 current_phase: 62
 current_phase_name: Work model, GSD import, Team Board (live, read and move)
 status: verifying
-stopped_at: Completed 61-34-PLAN.md
-last_updated: "2026-11-05T20:45:00.000Z"
+stopped_at: Completed 62-28-PLAN.md
+last_updated: "2026-11-05T23:45:00.000Z"
 last_activity: 2026-11-02
 last_activity_desc: Phase 62 execution started
-state_head: 87f3d04aafd24dbd20f5d1f0f4cabd2eac33767d
+state_head: a9e9f5b
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 86
-  completed_plans: 81
+  completed_plans: 82
   percent: 11
 ---
 
@@ -135,6 +135,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 62.1 P09 | 45min | 3 tasks | 12 files |
 | Phase 61 P32 | 18min | 3 tasks | 16 files |
 | Phase 61 P34 | 8min | 3 tasks | 10 files |
+| Phase 62 P28 | 130min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -335,6 +336,8 @@ Recent decisions affecting current work:
 - [Phase 61]: 61-34: a reused profile whose source is still listed but has no key here says 'Its key is not on this computer or browser...' instead of 'was removed'; a removed source keeps its old sentence
 - [Phase 61]: 61-34: useSavedProfile may replace this project's own profile of the same name only when that profile has no key, sign-in token or local key here, which is the tested way back after a folder move; the stable project id stays deferred
 - [Phase 61]: 61-34: a web UI is told once, with Got it, to keep one tab of the editor per browser profile; the shown flag is written as soon as the notice is shown and cleared if showing it failed, so a notice that could not be shown is retried next start (owner decision C)
+- [Phase 62]: 62-28: a reopen is the existing signed pair item.reopened then item.updated { hold: true } in one append, planned as MoveResult.intents, so every reopen lands held in Backlog and Release moves it on; the materialiser, event shapes and STATE_HASH_VERSION 1 are untouched (owner decision A, 2026-11-05)
+- [Phase 62]: 62-28: the code-server board check plans every move with planMove on the step's signed world instead of moving the card itself, so a move the log would refuse fails the step; its finished plans are ready-shaped, which is what hid the bug
 
 ### Pending Todos
 
@@ -356,8 +359,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-05T20:45:00.000Z
-Stopped at: Completed 61-34-PLAN.md
+Last session: 2026-11-05T23:45:00.000Z
+Stopped at: Completed 62-28-PLAN.md
 Resume file: None
 
 ## Notes

@@ -267,7 +267,7 @@ Next phases are added here (integer numbering continues from 25) when 0.4.x work
 - [x] 62-27-PLAN.md — Assignees move their own cards: item.move-own on write and read (done, block, unblock, hold, release, reopen; cancel stays with leads), per-card moves in the model and the page, the developer's real drags in code-server (BOARD-03)
 
 **Wave 22** *(after 61-34, Wave 21 in Phase 61; owner decision A, 2026-11-05: every reopen lands in Backlog, held; timeline dots stay non-draggable)*
-- [ ] 62-28-PLAN.md — Reopen to Backlog holds the card there (item.reopened then item.updated hold in one append, no event or hash change), board and timeline Move to..., ready-shaped fixtures and a real-model code-server check (BOARD-03)
+- [x] 62-28-PLAN.md — Reopen to Backlog holds the card there (item.reopened then item.updated hold in one append, no event or hash change), board and timeline Move to..., ready-shaped fixtures and a real-model code-server check (BOARD-03)
 
 **Wave 25** *(after 61-35, Wave 24 in Phase 61)*
 - [ ] 62-29-PLAN.md — Lane header 'Nobody assigned · 45 cards (40 in Done)', a count in every cell, folded cells that say so, the screen-reader name, a layout-probe sum rule and real-window checks (BOARD-01)
@@ -404,7 +404,7 @@ Phases execute in numeric order: 60 → 61 → 62 → 63 → 64 → 65 → 66 �
 |-------|-----------|----------------|--------|-----------|
 | 60. Team core | v0.6.0 | 12/12 | Complete    | 2026-11-01 |
 | 61. Invitations, joining, removal, NEAR org and key integration | v0.6.0 | 33/35 | In Progress (61-27 to 61-31 planned) | - |
-| 62. Work model, GSD import, Team Board | v0.6.0 | 27/27 | In Progress (0.6.3 re-test fixes: 62-26 and 62-27 planned) | - |
+| 62. Work model, GSD import, Team Board | v0.6.0 | 28/28 | In Progress (0.6.4 re-test fixes: 62-28 done, 62-29 and the 62-30 gate planned) | - |
 | 63. Claims, leases, claim workspaces, LeaseGuard, duplicate checks | v0.6.0 | 0/TBD | Not started | - |
 | 64. Dispatcher, offers, Next Task | v0.6.0 | 0/TBD | Not started | - |
 | 65. Integration merge train | v0.6.0 | 0/TBD | Not started | - |
