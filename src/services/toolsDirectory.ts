@@ -89,9 +89,9 @@ export function skillGroup(name: string): string {
   return (match(parts[0]) ?? match(words) ?? parts.slice(1).map(match).find(Boolean))?.group ?? 'Other';
 }
 
-/** What the permission logic does for this capability under the policy, with no grants yet in the run. */
-export function capabilityStatus(capability: ActionCapability, policy: ActionPolicy, rules: PermissionRules): ToolStatus {
-  const decided = decidePermission(capability, undefined, policy, rules, new RunGrants());
+/** What the permission logic does for this capability under the policy, with no grants yet in the run. `autoSafe` is the tool's own marker (0.4.17). */
+export function capabilityStatus(capability: ActionCapability, policy: ActionPolicy, rules: PermissionRules, autoSafe = false): ToolStatus {
+  const decided = decidePermission(capability, undefined, policy, rules, new RunGrants(), { root: '', cwd: '', autoSafeTool: autoSafe });
   if (decided.decision === 'deny') return 'stopped';
   if (decided.decision === 'allow') return 'runs';
   // In auto mode a shell command goes through the safety check rather than straight to you.
@@ -135,7 +135,8 @@ const stubClient = {} as NearAiClient;
 const stubMemory = {} as ContextGraphMemory;
 
 function toolEntry(tool: AgentTool<any>, input: DirectoryInput, available: { off?: string; setup?: { label: string; command: string } } = {}): DirectoryTool {
-  const status: ToolStatus = available.off && !input.policy.emergencyStop ? 'off' : capabilityStatus(tool.capability, input.policy, input.rules);
+  // A tool that marks itself autoSafe (the web tools) runs in auto; an MCP tool never sets the marker, so it keeps asking.
+  const status: ToolStatus = available.off && !input.policy.emergencyStop ? 'off' : capabilityStatus(tool.capability, input.policy, input.rules, tool.autoSafe === true);
   const notes: string[] = [];
   if (available.off) notes.push(available.off);
   if (tool.capability === 'shell' && tool.name === 'Bash' && input.rules.allowCommands.length && status !== 'runs' && status !== 'stopped') notes.push(`Allow-listed commands run without asking: ${input.rules.allowCommands.slice(0, 8).join(', ')}${input.rules.allowCommands.length > 8 ? ', …' : ''}.`);

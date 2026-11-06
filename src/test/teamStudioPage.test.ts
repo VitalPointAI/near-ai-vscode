@@ -189,7 +189,9 @@ test('each tool\'s runs/asks badge follows decidePermission in every approval mo
       for (const tool of studio.tools) {
         if (tool.status === 'off') continue;
         const capability = capabilityOf[tool.capability];
-        const decided = decidePermission(capability, undefined, policy, DEFAULT_RULES, new RunGrants());
+        // 0.4.17: the web tools mark themselves autoSafe, so auto runs them; every other network tool still asks.
+        const autoSafe = capability === 'network' && /^Web(?:Search|Fetch)$/.test(tool.name);
+        const decided = decidePermission(capability, undefined, policy, DEFAULT_RULES, new RunGrants(), { root: '', cwd: '', autoSafeTool: autoSafe });
         const expected = decided.decision === 'deny' ? 'stopped' : decided.decision === 'allow' ? 'runs' : capability === 'shell' && mode === 'auto' ? 'auto-checked' : 'asks';
         assert.equal(tool.status, expected, `${tool.name} under ${mode}${stopped ? ' (stopped)' : ''}`);
       }

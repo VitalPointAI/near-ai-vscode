@@ -66,6 +66,8 @@ export function makeWebFetchTool(deps: { lookup?: (host: string) => Promise<stri
   capability: 'network',
   concurrent: true,
   untrusted: true,
+  // 0.4.17: research runs these constantly, so Auto runs them by themselves (owner decision, 2026-11-05).
+  autoSafe: true,
   parse: (raw) => {
     if (typeof raw.url !== 'string') throw new ToolError('Missing required parameter "url".');
     let url: URL;
@@ -123,6 +125,8 @@ export function webSearchTool(provider: SearchProvider | undefined): AgentTool<{
     capability: 'network',
     concurrent: true,
     untrusted: true,
+    // 0.4.17: research runs these constantly, so Auto runs them by themselves (owner decision, 2026-11-05).
+    autoSafe: true,
     parse: (raw) => {
       if (typeof raw.query !== 'string' || !raw.query.trim()) throw new ToolError('Missing required parameter "query".');
       const freshness = raw.freshness;

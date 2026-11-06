@@ -54,20 +54,43 @@ export function riskSentence(reason: string | undefined, known?: RiskKind): { ki
 }
 
 /**
- * The entry "always allow" saves for a command or a tool: the exact command with its arguments up to the first option, so `git status` and
- * `git status --short` teach the same rule, while `npm test` and `npm run build` stay apart. A command with no leading words worth naming (a
- * wrapper such as `env`, or a script path) saves the whole command trimmed, which is still exact and still safe: it only ever covers itself.
+ * The entry "always allow" saves for a command: the command's own plain words, up to the first option or shell operator, so `git status` and
+ * `git status --short` teach one rule while `npm test` and `npm run build` stay apart.
+ *
+ * The caller must round-trip the result through the real matcher (isAutoAllowed) and refuse the offer when the entry would cover more than this one
+ * command or could never match at all, because a wider rule than the one approved, or an entry that never matches, is worse than no offer.
  */
 export function exactRuleFor(command: string): string {
   const flat = command.replace(/\s+/g, ' ').trim();
   if (flat === '') return '';
   const words = flat.split(' ');
   const keep: string[] = [];
+  let options = 0;
   for (const word of words) {
-    if (keep.length > 0 && word.startsWith('-')) break;
-    if (keep.length > 0 && /[|;&><]/.test(word)) break;
+    // A shell operator ends the command; so does a second command after `&&` or `;`.
+    if (/[|;&><]/.test(word)) break;
+    if (word.startsWith('-')) { options += 1; continue; }
     keep.push(word);
-    if (keep.length === 3) break;
   }
-  return keep.join(' ');
+  // 0.4.17: no word of the command itself is ever dropped, so an entry is never wider than what was approved (`npm install -g x` keeps its `x`).
+  // Options are dropped only when the command has none left after them (`git status --short` keeps its `--short`, because git options change what
+  // git does; `ls -la` becomes `ls`, and `npm install -g x` becomes `npm install x`, which names every word of the command itself).
+  const isGit = keep[0] === 'git';
+  return options > 0 && isGit ? flat.split(/[|;&><]/)[0]!.trim() : keep.join(' ');
+}
+
+/**
+ * Whether the entry covers this command and nothing wider. An entry is too wide when the command's words up to its first option are not exactly the
+ * entry, or when the command has words the entry does not name. The caller also asks the real matcher, so this stays a plain reading of the words.
+ */
+export function coversOnlyThisCommand(rule: string, command: string): boolean {
+  const flat = command.replace(/\s+/g, ' ').trim();
+  const words = flat.split(' ');
+  const ruleWords = rule.trim().split(' ');
+  if (rule === '' || ruleWords.some((word) => word === '')) return false;
+  const head = words.slice(0, ruleWords.length);
+  if (head.join(' ') !== ruleWords.join(' ')) return false;
+  const rest = words.slice(ruleWords.length);
+  // Everything after the entry must be an option or a shell operator: a new word would be work the entry does not name.
+  return rest.every((word) => word.startsWith('-') || /[|;&><]/.test(word));
 }

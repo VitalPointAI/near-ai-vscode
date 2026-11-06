@@ -4,14 +4,28 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
-import { AutoApprovalContext, allowRuleBlocker, decidePermissionAsync, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
+import { AutoApprovalContext, allowRuleBlocker, decidePermissionAsync, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
 import { truncate } from './shell';
 import { describeWeakened, isTestFile, weakenedTests } from './testIntegrity';
-import { exactRuleFor, riskSentence } from '../domain/approvalRisk';
+import { coversOnlyThisCommand, exactRuleFor, riskSentence } from '../domain/approvalRisk';
 import type { AgentTool, SecurityEvent, Todo, ToolContext, ToolPreview } from './tools';
 import { resolveInWorkspace, ToolError } from './workspace';
+
+
+/** The narrowest entry that covers exactly this command, or undefined when there is none the matcher would honour. */
+export function narrowRuleFor(command: string, allowCommands: string[]): string | undefined {
+  if (allowRuleBlocker(command) !== undefined) return undefined;
+  const whole = command.replace(/\s+/g, ' ').trim();
+  // Two candidates are tried, narrowest first: the command with its harmless options dropped, and the whole command. Each must cover exactly this
+  // command and be accepted by the real matcher, so an entry is never wider than what was approved and never one that could not match.
+  for (const candidate of [exactRuleFor(command), whole]) {
+    if (candidate === '' || !coversOnlyThisCommand(candidate, command)) continue;
+    if (isAutoAllowed(command, [...allowCommands, candidate])) return candidate;
+  }
+  return undefined;
+}
 
 /** The rules' own words for a command that runs outside the workspace (0.4.17): the card names that kind of risk. */
 const LEAVES_WORKSPACE_REASON = /outside the workspace|leaves the workspace|another user's home directory/;
@@ -485,7 +499,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     let sensitive: string | undefined;
     let risky: string | undefined;
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
-    const decided = await decidePermissionAsync(tool.capability, command, this.options.policy, this.options.rules, this.grants, command !== undefined && this.options.policy.mode === 'auto' ? await this.autoContext(context, command) : undefined);
+    // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
+    const autoCtx = this.options.policy.mode === 'auto' ? { ...(await this.autoContext(context, command ?? '')), autoSafeTool: tool.autoSafe === true } : undefined;
+    const decided = await decidePermissionAsync(tool.capability, command, this.options.policy, this.options.rules, this.grants, autoCtx);
     // A risky action asks in every mode, and an earlier "allow this command" does not cover it.
     const permission = decided.decision === 'deny' ? decided : risky ? { decision: 'ask' as const } : sensitive && decided.decision === 'allow' && this.options.policy.mode !== 'fully-autonomous' ? { decision: 'ask' as const } : decided;
     if (risky) context.onSecurity?.({ kind: 'held', source: title, detail: risky });
@@ -510,9 +526,11 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       // names the exact command up to its first option (exactRuleFor), so the same command is never asked again and a different one still is.
       // `reason` stays whole: the page and the tests read it, and the card cuts only what it shows as its short line (`reasonShort`).
       const risk = riskSentence(reason, risky ? 'destructive' : command && LEAVES_WORKSPACE_REASON.test(reason ?? '') ? 'outside-workspace' : undefined);
-      // The offer and the matcher must agree: a command an entry can never cover (an address on the command line, a chain, an absolute path) offers
-      // no "always allow", instead of saving an entry that will never match (which is what made the old offer look like it had no effect).
-      const allowRule = command && this.options.rememberAllowRule && allowRuleBlocker(command) === undefined ? exactRuleFor(command) || suggestAllowRule(command) : undefined;
+      // The offer and the matcher must agree, in both directions: the saved entry must cover this command (or it would never match, which is what
+      // made the old offer look like it had no effect) and must not cover anything wider (or one approval would quietly allow every install, every
+      // push and every reset). The candidate is therefore round-tripped through the real matcher, and a command with no honest narrow entry, or one
+      // the matcher refuses anyway (an address on the line, `rm`, an interpreter, a risky option), offers no "always allow" at all.
+      const allowRule = command === undefined || this.options.rememberAllowRule === undefined ? undefined : narrowRuleFor(command, [...this.options.rules.allowCommands, ...this.grants.allowRules]);
       const reply = await this.options.requestApproval({
         callId: call.id, tool: tool.name, title, capability: tool.capability, preview,
         ...(reason ? { reason } : {}),

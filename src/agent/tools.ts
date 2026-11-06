@@ -59,6 +59,12 @@ export interface AgentTool<I = Record<string, unknown>> {
   risky?(input: I, context: ToolContext): string | undefined | Promise<string | undefined>;
   /** Its result is outside content: the run is treated as having read untrusted input from then on. */
   untrusted?: boolean;
+  /**
+   * 0.4.17: in Auto mode this tool runs without asking, and its own checks still apply (WebFetch's exfiltration check after outside content). Only the
+   * two web tools set it, by the owner's decision that research must not be a stream of questions; an MCP or remote tool with the network
+   * capability keeps asking, because nothing here knows what it sends.
+   */
+  autoSafe?: boolean;
   run(input: I, context: ToolContext): Promise<string>;
 }
 

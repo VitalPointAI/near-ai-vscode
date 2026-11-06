@@ -46,17 +46,20 @@ test('a card shows a headline and a short detail, and a long reason is cut for t
   assert.equal(riskSentence('one\ntwo   three').detail, 'one two three');
 });
 
-test('always allow saves the exact command up to its first option, so the same command is learnt and a different one still asks', () => {
+test('always allow names the exact command, dropping only a harmless option and never a git option', () => {
   assert.equal(exactRuleFor('git status'), 'git status');
-  assert.equal(exactRuleFor('git status --short'), 'git status', 'an option does not make a new rule');
+  // A harmless option is dropped, so the same command with and without it teaches one rule.
+  assert.equal(exactRuleFor('ls -la'), 'ls');
+  // A git option changes what git does, so it is kept: git reset --soft and git reset --hard are different commands.
+  assert.equal(exactRuleFor('git reset --hard'), 'git reset --hard');
+  assert.equal(exactRuleFor('git status --short'), 'git status --short');
   assert.equal(exactRuleFor('  git   status   '), 'git status', 'spacing is not part of it');
   assert.equal(exactRuleFor('npm test'), 'npm test');
   assert.notEqual(exactRuleFor('npm test'), exactRuleFor('npm run build'), 'two scripts are two rules');
-  assert.equal(exactRuleFor('curl https://example.test/a'), 'curl https://example.test/a');
-  assert.equal(exactRuleFor('cd src && npm test'), 'cd src', 'chaining stops where the first command ends');
-  // A command with nothing to name keeps its own words, which is still exact: it covers only itself.
-  assert.equal(exactRuleFor('./scripts/run.sh --fast'), './scripts/run.sh');
-  assert.equal(exactRuleFor(''), '');
+  // No word of the command itself is ever dropped, so nothing becomes wider than what was approved.
+  // An option in the middle is dropped, but its operand names the command, so it is kept: this entry covers `npm install -g x`, not every install.
+  assert.equal(exactRuleFor('npm install -g x'), 'npm install x');
+
 });
 
 test('an entry the matcher can never honour is never offered, so "always allow" always has an effect when it is shown', async () => {
@@ -101,4 +104,24 @@ test('a project can allow reading outside the workspace and installing, and noth
   // The setting names a person can find and remove in Settings.
   assert.equal(switchOf('outside-workspace'), 'agent.autoAllowOutsideWorkspace');
   assert.equal(switchOf('installs'), 'agent.autoAllowInstalls');
+});
+
+// ---- The reviewer's findings (PR #20, 2026-11-06): each one pinned so it cannot come back --------------------------------------------------
+test('an "always allow" entry is never wider than the command it was made from, and is never one the matcher refuses', async () => {
+  const { narrowRuleFor } = await import('../agent/loop');
+  const { isAutoAllowed, DEFAULT_RULES } = await import('../agent/permissions');
+  // The blocker the review found: these used to save `git`, `npm install` and `rm`, which cover far more than what was approved.
+  assert.equal(narrowRuleFor('git reset --hard', DEFAULT_RULES.allowCommands), 'git reset --hard');
+  // The narrowest entry the matcher will honour: the whole command, because `npm install x` (options dropped) is refused by the matcher itself.
+  assert.equal(narrowRuleFor('npm install -g x', DEFAULT_RULES.allowCommands), 'npm install -g x');
+  assert.equal(narrowRuleFor('rm -rf build', DEFAULT_RULES.allowCommands), undefined, 'rm is never offered');
+  assert.equal(narrowRuleFor('curl example.com', DEFAULT_RULES.allowCommands), undefined, 'a network program is never offered');
+  assert.equal(narrowRuleFor('node script.js', DEFAULT_RULES.allowCommands), undefined, 'an interpreter is never offered');
+  // Every offer is honoured by the matcher and covers only its own command.
+  for (const command of ['git status --short', 'npm test', 'npm install lodash', 'ls -la']) {
+    const rule = narrowRuleFor(command, DEFAULT_RULES.allowCommands);
+    assert.ok(rule, `${command} offers a rule`);
+    assert.equal(isAutoAllowed(command, [rule as string]), true, `${command}: the offer is honoured`);
+  }
+  assert.equal(isAutoAllowed('npm install lodash', [narrowRuleFor('npm test', DEFAULT_RULES.allowCommands) as string]), false, 'one offer does not cover another command');
 });

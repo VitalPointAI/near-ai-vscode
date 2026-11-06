@@ -15,6 +15,8 @@ export interface AutoApprovalContext extends CommandContext {
   signal?: AbortSignal;
   /** 0.4.17: the kinds of risk this project has already allowed (read outside the project, install). */
   riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
+  /** 0.4.17: the tool that is asking marked itself autoSafe (WebSearch, WebFetch), so Auto may run it without a question. */
+  autoSafeTool?: boolean;
 }
 
 export interface PermissionRules {
@@ -40,8 +42,15 @@ const RISKY_GIT_ARG = /^(?:--output(?:=|$)|-o$|--no-index$|--ext-diff$|--textcon
 const SAFE_GIT_BRANCH_ARGS = new Set(['-a', '-r', '-v', '-vv', '--list', '--show-current', '--all', '--remotes']);
 /** The classifier's own words for a command that runs or reads outside the workspace (0.4.17: a fact the safety model cannot overturn). */
 const LEAVES_WORKSPACE = /outside the workspace|leaves the workspace|another user's home directory/;
+/** A network command that sends data of its own accord (0.4.17: held after outside content, so a safety-model "allow" cannot leak it). */
+const CARRIES_DATA = /\b(?:curl|wget|http|httpie)\b[^|;&]*?(?:\s-d\s|--data|-F\s|--form|-T\s|--upload-file|--post-file|-X\s*(?:POST|PUT|PATCH))/i;
 /** The classifier's own words for a command that installs or downloads software (0.4.17: only covered by a project's own switch). */
-const INSTALLS = /install|downloads? (?:a |an )?(?:package|binary|script)|from the network/i;
+const INSTALLS = /can install or run code the rules cannot check|installs a package from the network/i;
+/** A command that only reads: no cd out of the workspace, no redirect that writes, no mutation verb. Used so the outside-workspace switch covers reads. */
+function readsOnly(command: string): boolean {
+  if (/(?:^|&&|;|\|)\s*cd\s+(?!\.?\/?[\w.\/-]*\s*$)/.test(command)) return false;
+  return !/\bcp\b|\bmv\b|\btee\b|>\s*[^&]|\brm\b|\bchmod\b|\bnpm (?:i|install|publish)\b/.test(command);
+}
 
 /** Why a command can never be covered by an allow-list entry, or undefined when it can be. One rule, asked by the matcher and by the card's offer. */
 export function allowRuleBlocker(command: string): string | undefined {
@@ -54,10 +63,14 @@ export function allowRuleBlocker(command: string): string | undefined {
   return undefined;
 }
 
+/** Programs an entry must never name, because allowing them allows almost anything (0.4.17: the offer and the match share this list). */
+const NEVER_IN_AN_ENTRY = new Set(['rm', 'rmdir', 'sh', 'bash', 'zsh', 'python', 'python3', 'node', 'perl', 'ruby', 'eval', 'exec', 'sudo', 'su', 'curl', 'wget', 'ssh', 'scp', 'nc', 'dd']);
+
 /** Whether a command matches an allow-list entry and is simple enough to run without asking. */
 export function isAutoAllowed(command: string, allowCommands: string[]): boolean {
   const raw = command.trim();
   if (allowRuleBlocker(raw) !== undefined) return false;
+  if (NEVER_IN_AN_ENTRY.has(raw.split(/ +/)[0] ?? '')) return false;
   const words = raw.split(/ +/);
   const entry = allowCommands.map((prefix) => prefix.trim().split(/\s+/)).find((prefix) => prefix[0] && prefix.every((word, index) => words[index] === word));
   if (!entry) return false;
@@ -119,12 +132,13 @@ export function intrusiveGrantDecision(grants: RunGrants, step: IntrusiveStep | 
  * only when the run holds an engagement grant, only after the deny list, and never changes a
  * decision for a run without one.
  */
-export function decidePermission(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: CommandContext, intrusive?: IntrusiveStep): PermissionDecision {
+export function decidePermission(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: AutoApprovalContext, intrusive?: IntrusiveStep): PermissionDecision {
   if (policy.emergencyStop) return { decision: 'deny', reason: 'Emergency stop is on.' };
   if (capability === 'read' || capability === 'plan') return { decision: 'allow' };
-  // Owner decision 2026-11-05 (0.4.17): in auto, a web search or fetch runs by itself. Research is what the run is for, so searching is not the
-  // risk; what can carry data out is judged by the tool's own checks (WebFetch's exfiltration check after outside content) and by the shell rules.
-  if (capability === 'network' && policy.mode === 'auto') return { decision: 'allow' };
+  // Owner decision 2026-11-05 (0.4.17): in auto, a tool that marks itself autoSafe (only WebSearch and WebFetch do) runs by itself. Research is
+  // what the run is for, so searching is not the risk; what can carry data out is judged by the tool's own checks (WebFetch's exfiltration check
+  // after outside content). The gate is the tool's own marker, never the bare network capability, so an MCP or remote tool keeps asking.
+  if (capability === 'network' && policy.mode === 'auto' && auto?.autoSafeTool === true) return { decision: 'allow' };
   if (capability === 'workspaceWrite') {
     if (grants.edits || policy.mode !== 'approve-risky') return { decision: 'allow' };
     return { decision: 'ask' };
@@ -179,13 +193,22 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
   // model itself allows it (a deliberate, per-command approval); with the switch on, the ordinary safety-model path decides, as it did before the
   // switch existed. Nothing gets weaker than it was before 0.4.17.
   const switches = auto.riskSwitches ?? { outsideWorkspace: false, installs: false };
+  // After outside content, a command that carries data out on its own flags is held, whatever the safety model says: a page could have asked for it.
+  // The shape is a network program with a body, file upload or data flag (`curl -d`, `--data`, `-F`, `-T`, `--upload-file`, `-X POST`, `wget --post-file`).
+  if (grants.tainted && CARRIES_DATA.test(command ?? '')) {
+    return { decision: 'ask', reason: 'This run read outside content, and this command sends data with it, which that content may have asked for. Approve it only if you expected it.' };
+  }
   // Reading outside the project is held by the rules alone, because a model cannot tell from the command text what a command in another folder
   // touches. The project's own switch is the one thing that lifts that hold, and even then the safety model still has to agree.
-  if (LEAVES_WORKSPACE.test(classified.reason) && !riskAllowed('outside-workspace', switches)) {
+  if (LEAVES_WORKSPACE.test(classified.reason) && readsOnly(command ?? '') && !riskAllowed('outside-workspace', switches)) {
     return { decision: 'ask', reason: `Auto approve held this: ${classified.reason}. Nothing outside this project is touched without your say.` };
   }
   // Installing is decided by the safety model as it always was, so a project that changes no switch sees no new question. Turning the switch on
   // means the project has decided for itself, so the model is not asked at all.
+  // A command that runs in another folder is never covered by the outside-workspace switch, whatever it does there: the switch is about reading.
+  if (LEAVES_WORKSPACE.test(classified.reason) && !readsOnly(command ?? '')) {
+    return { decision: 'ask', reason: `Auto approve held this: ${classified.reason}. Nothing runs outside this project without your say.` };
+  }
   if (INSTALLS.test(classified.reason) && riskAllowed('installs', switches)) return { decision: 'allow' };
   if (!auto.safety) return { decision: 'ask', reason: `No private (TEE) safety model is available to check it, and ${unplaced}.` };
   const verdict = await auto.safety.check((command ?? '').trim(), { root: auto.root, cwd: auto.cwd ?? auto.root, outsideContent: grants.tainted }, auto.signal);
