@@ -117,6 +117,13 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
         const active = root ? await activeProvider(root, auth).catch(() => undefined) : undefined;
         return active ? modelOptions(active.models, readSettings().defaultModel).map((option) => option.id) : [];
       },
+      // Several abliterated models: the person picks the one this scan runs on. The rule in domain/cyberModel picks one
+      // silently when there is exactly one, so this is only reached when the choice is genuinely theirs.
+      chooseModel: async (models) => vscode.window.showQuickPick(models, {
+        title: 'Model for this scan',
+        placeHolder: 'Choose the abliterated model this scan runs on. Safety-tuned models may refuse payloads.',
+        ignoreFocusOut: true
+      }),
       stopped: () => readSettings().actionPolicy.emergencyStop
     }))),
     vscode.commands.registerCommand('nearAi.showHistory', () => showHistory(context, sidebar)),

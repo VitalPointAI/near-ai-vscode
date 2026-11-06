@@ -446,3 +446,104 @@ test('the chat handoff sends the run prompt as a chat message, naming the engage
   assert.match(sent[0].text, /example\.test/);
   assert.equal(sent[0].model, 'z-ai/glm-5.3');
 });
+
+// ---- A scan runs on an abliterated model (owner decision 2026-11-05) ------------------------------------------------------------------------
+// A scan sends exploits and attack strings, which safety-tuned chat models refuse, so the panel runs it on an abliterated model: the only one
+// offered is used silently, several ask once per engagement, and none falls back to the chat tier with a plain note.
+
+function abliteratedModels(list: string[], options: { picked?: string } = {}) {
+  const stored = new Map<string, string>();
+  const asked: string[][] = [];
+  const models = {
+    read: (engagementId: string) => stored.get(engagementId),
+    write: async (engagementId: string, model: string) => { stored.set(engagementId, model); },
+    defaultModel: () => 'chat-standard',
+    available: async () => list,
+    choose: async (offered: string[]) => { asked.push(offered); return options.picked; }
+  };
+  return { models, stored, asked };
+}
+
+async function engagementModel(box: ReturnType<typeof attach>): Promise<{ model?: string; modelNote?: string }> {
+  const message = box.posted.filter((entry) => entry.type === 'engagement').pop() as { model?: string; modelNote?: string } | undefined;
+  assert.ok(message !== undefined, 'the engagement was posted');
+  const { model, modelNote } = message;
+  return { ...(model === undefined ? {} : { model }), ...(modelNote === undefined ? {} : { modelNote }) };
+}
+
+// The messages that create an engagement, in the order the panel expects them.
+async function createEngagement(box: ReturnType<typeof attach>): Promise<void> {
+  await box.send({ type: 'ready' });
+  await box.send({ type: 'resolve-target', kind: 'url', value: 'https://example.test/' });
+  await box.send({ type: 'create-engagement', draft: { kind: 'url', value: 'https://example.test/', modes: ['defensive'], depth: 'standard' } });
+  await box.send({ type: 'accept-disclaimer', acceptor: 'Example Org', region: 'us' });
+}
+
+test('with one abliterated model offered, a new engagement runs on it and nothing is asked', async () => {
+  const { models, asked } = abliteratedModels(['chat-standard', 'deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated']);
+  const box = attach({ models });
+  try {
+    await createEngagement(box);
+    assert.deepEqual(await engagementModel(box), { model: 'deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated' });
+    assert.deepEqual(asked, [], 'no question was asked');
+  } finally {
+    box.panel.dispose();
+  }
+});
+
+test('with several abliterated models the person is asked once, the answer is remembered, and a declined question says so', async () => {
+  const { models, stored, asked } = abliteratedModels(['chat-standard', 'a-abliterated', 'b-abliterated'], { picked: 'b-abliterated' });
+  const box = attach({ models });
+  try {
+    await createEngagement(box);
+    assert.deepEqual(asked, [['a-abliterated', 'b-abliterated']], 'the person was asked, with only the abliterated models');
+    const created = (box.posted.filter((entry) => entry.type === 'engagement').pop() as unknown as { engagement: { id: string } }).engagement.id;
+    assert.equal(stored.get(created), 'b-abliterated', 'the answer is remembered for this engagement');
+    assert.deepEqual(await engagementModel(box), { model: 'b-abliterated' }, 'and that is the model the scan uses');
+  } finally {
+    box.panel.dispose();
+  }
+
+  // A question the person closes falls back to the chat tier and says so, so a scan is never silently started on a model that may refuse it.
+  const declined = abliteratedModels(['chat-standard', 'a-abliterated', 'b-abliterated']);
+  const box2 = attach({ models: declined.models });
+  try {
+    await createEngagement(box2);
+    const posted = await engagementModel(box2);
+    assert.equal(posted.model, 'chat-standard');
+    assert.match(posted.modelNote ?? '', /Several abliterated models are offered/);
+  } finally {
+    box2.panel.dispose();
+  }
+});
+
+test('with no abliterated model offered the chat tier stands and the panel says a scan may be refused', async () => {
+  const { models, asked } = abliteratedModels(['chat-standard', 'other-model']);
+  const box = attach({ models });
+  try {
+    await createEngagement(box);
+    const posted = await engagementModel(box);
+    assert.equal(posted.model, 'chat-standard');
+    assert.match(posted.modelNote ?? '', /no abliterated model/);
+    assert.deepEqual(asked, []);
+  } finally {
+    box.panel.dispose();
+  }
+});
+
+test('a run with no model named by the page still uses the engagement\'s abliterated model, in the panel and in the chat', async () => {
+  const { models } = abliteratedModels(['chat-standard', 'deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated']);
+  const started: Array<{ model?: string }> = [];
+  const handed: Array<{ model?: string }> = [];
+  const box = attach({ models, startRun: async (input) => { started.push({ model: input.model }); return { runId: 'run-0001-abcdef', outcome: 'completed', findings: [] }; }, handToChat: async (input) => { handed.push({ model: input.model }); } });
+  try {
+    await createEngagement(box);
+    const engagementId = (box.posted.filter((entry) => entry.type === 'engagement').pop() as unknown as { engagement: { id: string } }).engagement.id;
+    await box.send({ type: 'run', engagementId, mode: 'defensive', depth: 'quick', vehicle: 'panel' });
+    await box.send({ type: 'run', engagementId, mode: 'defensive', depth: 'quick', vehicle: 'chat' });
+    assert.deepEqual(started, [{ model: 'deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated' }], 'the panel run used the abliterated model');
+    assert.deepEqual(handed, [{ model: 'deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated' }], 'and so did the chat run');
+  } finally {
+    box.panel.dispose();
+  }
+});
