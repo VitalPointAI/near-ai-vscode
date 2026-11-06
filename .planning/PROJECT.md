@@ -137,6 +137,22 @@ approval and policy layer (`src/agent/permissions.ts`, `src/domain/policy.ts`) a
 DID is anchored in the confidential-intents format, what happens when the chain is unreachable, and how a run works with no chain at all.
 
 
+### A new project asks what kind it is, then offers a team for it (0.4.19)
+
+Owner, 2026-11-06: "when someone opens the extension and clicks the button to start a new project, it initiates /gsd-new-project which is ok, but the next
+question should be what kind of project it is with option to choose from one of our templates - research, software dev, etc... and then whether or not the
+user wants to attach an agent team to carry it out." Today a newcomer has no way to know that teams designed for exactly their kind of work already exist.
+
+- **The second step of Start a New Project asks what kind of project it is**, offering the shipped templates (research, software development, and the
+  others the library already has), each with a one-line description of what it produces.
+- **The third step offers the team that fits that kind**, showing each candidate's members and what it is good at, with "no team for now" as a real
+  choice, so a person can start solo and add a team later.
+- **The choice is written where the project keeps it**: the project's kind in its planning state, and a chosen team as the project's own
+  `.planning/.near-ai/team.md` (the mechanism that already exists), so the first message can use it without being told again.
+- **A newcomer learns the teams exist** without opening Team Studio first. The wording stays plain and says what the team will do for them.
+- Open questions for the owner when this starts: whether the template list is fixed or read from the team library, whether the team step can offer a
+  team the person has already saved, and how the flow behaves when Open-GSD is not installed yet.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.

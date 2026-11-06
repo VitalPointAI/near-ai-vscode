@@ -899,6 +899,9 @@ test('host path: Manage Teams opens one Team Studio tab; Set Up Project Team sta
   await writeFile(path.join(storage, 'teams', 'web.md'), teamMarkdown(draft()));
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (request: string | URL | Request) => { throw new Error(`Team Studio must not call the network: ${String(request)}`); }) as typeof fetch;
+  // 0.4.18: teams live in the person's home folder now, so this test points that folder at its own storage rather than at the real home directory.
+  const previousTeamsDir = process.env.NEAR_AI_TEAMS_DIR;
+  process.env.NEAR_AI_TEAMS_DIR = storage;
   const posted: Array<Record<string, any>> = [];
   const commands = new Map<string, () => unknown>();
   const watchers: string[] = [];
@@ -955,6 +958,7 @@ test('host path: Manage Teams opens one Team Studio tab; Set Up Project Team sta
   } finally {
     nodeModule._load = originalLoad;
     globalThis.fetch = originalFetch;
+    if (previousTeamsDir === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeamsDir;
   }
 });
 

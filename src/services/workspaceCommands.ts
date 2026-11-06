@@ -7,11 +7,12 @@ import { parseTeam, TeamLibrary } from '../agent/teams';
 import type { MemoryScope } from '../domain/contextGraph';
 import { ContextGraphMemory } from './contextGraphMemory';
 import { MemoryApprovalRegistry } from './memoryApproval';
+import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 
 // Team commands (which open Team Studio), the team-file save hook, and the memory flow.
 
 export function registerWorkspaceCommands(context: vscode.ExtensionContext, openStudio: (options: { wizard?: 'project' }) => void): void {
-  const library = new TeamLibrary(context.globalStorageUri.fsPath);
+  const library = new TeamLibrary(teamLibraryDir(homeFolder()));
   context.subscriptions.push(
     // Teams are built and managed in Team Studio; the Markdown files stay editable as before.
     vscode.commands.registerCommand('nearAi.manageTeams', () => openStudio({})),

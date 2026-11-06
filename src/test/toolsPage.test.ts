@@ -307,6 +307,9 @@ test('host path: the Tools tab loads real data, prefills the sidebar, and refres
   await writeFile(path.join(home, 'agents', 'gsd-planner.md'), '---\nname: gsd-planner\ndescription: Creates plans.\nmodel: opus\n---\nYou plan.');
   await mkdir(path.join(storage, 'teams'), { recursive: true });
   await writeFile(path.join(storage, 'teams', 'web.md'), '---\nname: Web team\ndescription: Builds pages\n---\n## lead\nrole: planner\nmodel: fast\n\nLead it.\n');
+  // 0.4.18: teams live in the person's home folder now, so this test points that folder at its own storage instead of the real home directory.
+  const previousTeamsDir = process.env.NEAR_AI_TEAMS_DIR;
+  process.env.NEAR_AI_TEAMS_DIR = storage;
   const auth = new AuthService(new MemorySecrets());
   await new ProfileStore(root, auth, { validator: async () => undefined }).configure({ profileId: deriveProfileId(root, 'Demo'), displayName: 'Demo', organization: 'Demo', baseUrl: 'https://cloud-api.near.ai/v1', authMode: 'apiKey' }, 'sk-test-key');
 
@@ -407,6 +410,7 @@ test('host path: the Tools tab loads real data, prefills the sidebar, and refres
   } finally {
     nodeModule._load = originalLoad;
     globalThis.fetch = originalFetch;
+    if (previousTeamsDir === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeamsDir;
   }
 });
 

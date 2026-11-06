@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Your agent teams survive an uninstall.** Teams made in Team Studio now live
+  in `.near-ai-teams` in your home folder instead of inside the extension, so
+  uninstalling the extension, reinstalling it, or installing it in another
+  VS Code keeps them. Teams saved by an earlier version are copied across the
+  first time this version starts, and the old copies stay where they were.
+- **A new project asks what kind it is.** Recorded for 0.4.19: the second step
+  of Start a New Project offers the templates (research, software development
+  and the rest), then offers the team that fits, so a newcomer can see the
+  teams designed for their kind of work.
+
 ## 0.4.17
 
 - **Auto approve stops asking about research work.** Web search and web fetch

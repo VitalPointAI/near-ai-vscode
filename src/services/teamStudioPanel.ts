@@ -9,6 +9,7 @@ import { AuthService } from './auth';
 import { attachTeamStudio, StudioTarget, teamStudioHtml } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { onDidChangeEmergencyStop } from './emergencyStop';
+import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 
 // The NEAR AI Team Studio tab. One tab at a time; opening it again shows it (and, for the project
 // team setup, starts the guided builder).
@@ -25,7 +26,7 @@ export function openTeamStudio(context: vscode.ExtensionContext, auth: AuthServi
     return;
   }
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const library = new TeamLibrary(context.globalStorageUri.fsPath);
+  const library = new TeamLibrary(teamLibraryDir(homeFolder()));
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'teams');
   const shared = sharedMedia(context.extensionUri);
   const panel = vscode.window.createWebviewPanel('nearAiTeamStudio', 'NEAR AI Team Studio', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media, shared] });
