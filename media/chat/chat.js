@@ -541,7 +541,9 @@
     // sentence, and the expander holds the whole reason and the exact command or code, so nothing has to be guessed from a one-line title.
     if (m.risk && m.risk.headline) {
       card.append(el('p', 'approval-why', m.risk.headline));
-      card.append(el('div', 'meta approval-reason', m.reasonShort || m.reason));
+      // 0.4.17: a card with a headline always has a reason; one without says only the rule's own words.
+      const line = m.reasonShort || m.reason;
+      if (line) card.append(el('div', 'meta approval-reason', line));
     } else if (m.reason) {
       card.append(el('div', 'meta approval-reason', 'Why this asks: ' + m.reason));
     }

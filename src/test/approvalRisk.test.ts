@@ -155,3 +155,14 @@ test('the card offers no "always allow" for the three kinds of risk that always 
   assert.equal(offeredRule('npm test', 'unsure', DEFAULT_RULES.allowCommands), 'npm test');
   assert.equal(offeredRule('rm -rf build', 'unsure', DEFAULT_RULES.allowCommands), undefined, 'and nothing when no narrow entry exists');
 });
+
+test('the shipped node --version entry still works, while an entry for an interpreter itself never covers a script', async () => {
+  const { isAutoAllowed, DEFAULT_RULES } = await import('../agent/permissions');
+  // 0.4.17 review: the never-in-an-entry rule made the shipped default dead. A bare version question has no side effect, so it is still honoured.
+  assert.equal(DEFAULT_RULES.allowCommands.includes('node --version'), true, 'the default entry is still shipped');
+  assert.equal(isAutoAllowed('node --version', DEFAULT_RULES.allowCommands), true);
+  assert.equal(isAutoAllowed('python3 --version', ['python3 --version']), true);
+  // A script through an interpreter is still refused, which is what the rule is for.
+  assert.equal(isAutoAllowed('node script.js', ['node']), false);
+  assert.equal(isAutoAllowed('node --version extra', ['node --version extra']), false);
+});

@@ -45,18 +45,24 @@ const LEAVES_WORKSPACE = /outside the workspace|leaves the workspace|another use
 /** A network command that sends data of its own accord (0.4.17: held after outside content, so a safety-model "allow" cannot leak it). */
 const CARRIES_DATA = /\b(?:curl|wget|http|httpie)\b[^|;&]*?(?:\s-d\s|--data|-F\s|--form|-T\s|--upload-file|--post-file|-X\s*(?:POST|PUT|PATCH))/i;
 /** The classifier's own words for a command that installs or downloads software (0.4.17: only covered by a project's own switch). */
-const INSTALLS = /can install or run code the rules cannot check|installs a package from the network/i;
+const INSTALLS = /(?:^|\W)(?:npm|pnpm|yarn|bun|pip|pip3|uv|poetry|cargo|go|gem|composer|apt|apt-get|brew|dnf|yum|apk|pacman)\s+(?:i|install|add|get)\b|installs a package from the network/i;
 /** Programs that only read, so the outside-workspace switch can cover them. Anything not named here is treated as a change. */
-const READ_ONLY_PROGRAMS = new Set(['cat', 'head', 'tail', 'less', 'more', 'wc', 'ls', 'stat', 'file', 'find', 'grep', 'rg', 'zcat', 'jq', 'diff', 'tree', 'du', 'df', 'pwd', 'echo', 'sed']);
+const READ_ONLY_PROGRAMS = new Set(['cat', 'head', 'tail', 'less', 'more', 'wc', 'ls', 'stat', 'file', 'grep', 'rg', 'zcat', 'jq', 'diff', 'du', 'df', 'pwd', 'echo', 'sed', 'find']);
+/**
+ * Options that turn an otherwise read-only program into a write: find's -fprint/-fls/-fprintf, sed's `w`/`W` commands and -i, tree's -o. A
+ * program whose options can write is not read-only for this purpose, which is what the 0.4.17 review found.
+ */
+const WRITING_OPTION = /\s(?:-i|--in-place|-fprint0?|-fprintf|-fls|-o\b)|(?:^|[\s'"])(?:[0-9]*w)\s/i;
 /** A command that only reads its operands: a read-only program, walked one segment at a time, with no in-place edit, delete or redirect that writes. */
 function readsOnly(command: string): boolean {
-  // A mutating option turns an otherwise read-only program into a change: sed -i edits in place, find -delete removes, ln -sf replaces.
-  if (/\s-[a-zA-Z]*i\b|--in-place|\s-(?:delete|exec|execdir|ok|okdir)\b|^\s*ln\b|\btruncate\b|\btee\b/.test(command)) return false;
-  if (/>\s*[^&|]/.test(command)) return false;
+  // A mutating option turns an otherwise read-only program into a change.
+  if (WRITING_OPTION.test(command)) return false;
+  if (/\s-(?:delete|exec|execdir|ok|okdir)\b|^\s*ln\b|\btruncate\b|\btee\b/.test(command)) return false;
+  // Any redirect that writes, `>|` and `&>` included.
+  if (/(?:^|[^0-9])>\|?|&>/.test(command)) return false;
   for (const segment of command.split(/&&|;|\|/)) {
     const words = segment.trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) continue;
-    // A cd that leaves the workspace means the command runs elsewhere, which the switch never covers. A cd that stays inside is ordinary work.
     if (words[0] === 'cd') {
       const target = words[1];
       if (target !== undefined && (target.startsWith('/') || target.startsWith('~') || target.split('/').includes('..'))) return false;
@@ -79,13 +85,17 @@ export function allowRuleBlocker(command: string): string | undefined {
 }
 
 /** Programs an entry must never name, because allowing them allows almost anything (0.4.17: the offer and the match share this list). */
+/** `node --version`, `python3 --version`: no side effect at all, so an entry naming one is still honoured. */
+const VERSION_QUESTION = /^(?:node|python3?|npm|npx|ruby|perl|go|cargo|java|deno|bun)\s+(?:--version|-v|--help|-h)$/;
 const NEVER_IN_AN_ENTRY = new Set(['rm', 'rmdir', 'sh', 'bash', 'zsh', 'python', 'python3', 'node', 'perl', 'ruby', 'eval', 'exec', 'sudo', 'su', 'curl', 'wget', 'ssh', 'scp', 'nc', 'dd']);
 
 /** Whether a command matches an allow-list entry and is simple enough to run without asking. */
 export function isAutoAllowed(command: string, allowCommands: string[]): boolean {
   const raw = command.trim();
   if (allowRuleBlocker(raw) !== undefined) return false;
-  if (NEVER_IN_AN_ENTRY.has(raw.split(/ +/)[0] ?? '')) return false;
+  // 0.4.17 review: an entry whose first word is one of these is never honoured, but the shipped `node --version` must still work, so a command that
+  // is exactly the plain version question is let through as the safe, side-effect-free thing it is.
+  if (NEVER_IN_AN_ENTRY.has(raw.split(/ +/)[0] ?? '') && !VERSION_QUESTION.test(raw)) return false;
   const words = raw.split(/ +/);
   // 0.4.17 review: an entry whose first word is a program no entry may name (`rm`, `curl`, an interpreter) is never honoured, so a person's own
   // allowCommands entry for one of those is ignored by design. The setting's own description says so.

@@ -555,7 +555,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         callId: call.id, tool: tool.name, title, capability: tool.capability, preview,
         ...(reason ? { reason } : {}),
         ...(reason && risk.detail !== reason ? { reasonShort: risk.detail } : {}),
-        risk: { kind: risk.kind, headline: risk.headline },
+        // 0.4.17: only a card with a reason says what kind of risk it is. A plain file edit in "ask for changes" has no reason, and telling the
+        // person "NEAR AI was not sure this is safe" about it would be untrue.
+        ...(reason ? { risk: { kind: risk.kind, headline: risk.headline } } : {}),
         ...(allowRule ? { allowRule } : {}),
         ...(command ? { subject: command } : {})
       });

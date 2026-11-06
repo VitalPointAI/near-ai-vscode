@@ -503,7 +503,7 @@ test('auto: the outside-workspace switch lifts the hold for reading only, never 
   assert.match(runs.decision === 'ask' ? runs.reason ?? '' : '', /Nothing runs outside this project without your say/);
 });
 
-test('auto: the web tools ask again once the run has read outside content, and a read-only switch covers no command that changes a file', async () => {
+test('auto: the web tools keep running after the run has read outside content, and a read-only switch covers no command that changes a file', async () => {
   const grants = new RunGrants();
   // A page the run read may have asked for the next fetch, so the marker does not apply after outside content (review finding).
   assert.deepEqual(await decide('fetch https://example.test/page', { capability: 'network', autoSafeTool: true }), { decision: 'allow' });
@@ -520,4 +520,19 @@ test('auto: the web tools ask again once the run has read outside content, and a
     const decided = await decidePermissionAsync('shell', changing, auto, DEFAULT_RULES, new RunGrants(), ctx);
     assert.equal(decided.decision, 'ask', `${changing} still asks`);
   }
+});
+
+// ---- The fifth review (PR #20, 2026-11-06) ----------------------------------------------------------------------------------------------
+test('auto: the installs switch covers an install and nothing else, and the shipped node --version entry still works', async () => {
+  const safety = fakeSafety(false, 'Safety model: no.');
+  const on = { ...where, safety: safety.check, riskSwitches: { outsideWorkspace: false, installs: true } } as AutoApprovalContext;
+  const off = { ...where, safety: safety.check, riskSwitches: { outsideWorkspace: false, installs: false } } as AutoApprovalContext;
+  // The switch is what changes the answer for an install.
+  assert.equal((await decidePermissionAsync('shell', 'npm install lodash', auto, DEFAULT_RULES, new RunGrants(), off)).decision, 'ask');
+  assert.deepEqual(await decidePermissionAsync('shell', 'npm install lodash', auto, DEFAULT_RULES, new RunGrants(), on), { decision: 'allow' });
+  // It covers nothing that merely runs code: npx asks with the switch on, and npm run build is decided by the rules, the same either way.
+  assert.equal((await decidePermissionAsync('shell', 'npx some-package', auto, DEFAULT_RULES, new RunGrants(), on)).decision, 'ask');
+  const buildOff = (await decidePermissionAsync('shell', 'npm run build', auto, DEFAULT_RULES, new RunGrants(), off)).decision;
+  const buildOn = (await decidePermissionAsync('shell', 'npm run build', auto, DEFAULT_RULES, new RunGrants(), on)).decision;
+  assert.equal(buildOn, buildOff, 'the installs switch does not decide an npm script');
 });
