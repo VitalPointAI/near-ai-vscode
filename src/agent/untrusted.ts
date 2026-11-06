@@ -118,4 +118,6 @@ export function looksLikeExfiltration(url: string): string | undefined {
 }
 
 /** Shell commands that can send data off this machine. */
-export const NETWORK_COMMAND = /(?:^|[\s;&|(`$])(?:curl|wget|nc|ncat|netcat|socat|telnet|ftp|sftp|scp|rsync|ssh|aria2c|httpie|http|https|invoke-webrequest|iwr|invoke-restmethod|irm)(?=$|[\s;&|)`])|\b(?:requests|urllib|http\.client|fetch|axios|net\.connect|socket)\b.{0,40}(?:post|get|send|connect|request)|\/dev\/tcp\//i;
+// 0.4.17 review: a bare interpreter call that fetches or opens a socket counts too (`node -e "fetch(1)"`), which the old pattern missed because it
+// wanted a verb near the library name.
+export const NETWORK_COMMAND = /(?:^|[\s;&|(`$])(?:curl|wget|nc|ncat|netcat|socat|telnet|ftp|sftp|scp|rsync|ssh|aria2c|httpie|http|https|invoke-webrequest|iwr|invoke-restmethod|irm)(?=$|[\s;&|)`])|\b(?:requests|urllib|http\.client|fetch|axios|net\.connect|socket)\b.{0,40}(?:post|get|send|connect|request|\(|https?:)|\/dev\/tcp\//i;
