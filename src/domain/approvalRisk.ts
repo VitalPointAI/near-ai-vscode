@@ -75,8 +75,8 @@ export function exactRuleFor(command: string): string {
   // 0.4.17: no word of the command itself is ever dropped, so an entry is never wider than what was approved (`npm install -g x` keeps its `x`).
   // Options are dropped only when the command has none left after them (`git status --short` keeps its `--short`, because git options change what
   // git does; `ls -la` becomes `ls`, and `npm install -g x` becomes `npm install x`, which names every word of the command itself).
-  const isGit = keep[0] === 'git';
-  return options > 0 && isGit ? flat.split(/[|;&><]/)[0]!.trim() : keep.join(' ');
+  // 0.4.17 review: options are kept for every program, not just git, so `make -j8` never becomes the wider `make` and `ls -la` never becomes `ls`.
+  return options > 0 ? flat.split(/[|;&><]/)[0]!.trim() : keep.join(' ');
 }
 
 /**

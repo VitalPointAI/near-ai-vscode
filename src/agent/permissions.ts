@@ -46,10 +46,25 @@ const LEAVES_WORKSPACE = /outside the workspace|leaves the workspace|another use
 const CARRIES_DATA = /\b(?:curl|wget|http|httpie)\b[^|;&]*?(?:\s-d\s|--data|-F\s|--form|-T\s|--upload-file|--post-file|-X\s*(?:POST|PUT|PATCH))/i;
 /** The classifier's own words for a command that installs or downloads software (0.4.17: only covered by a project's own switch). */
 const INSTALLS = /can install or run code the rules cannot check|installs a package from the network/i;
-/** A command that only reads: no cd out of the workspace, no redirect that writes, no mutation verb. Used so the outside-workspace switch covers reads. */
+/** Programs that only read, so the outside-workspace switch can cover them. Anything not named here is treated as a change. */
+const READ_ONLY_PROGRAMS = new Set(['cat', 'head', 'tail', 'less', 'more', 'wc', 'ls', 'stat', 'file', 'find', 'grep', 'rg', 'zcat', 'jq', 'diff', 'tree', 'du', 'df', 'pwd', 'echo', 'sed']);
+/** A command that only reads its operands: a read-only program, walked one segment at a time, with no in-place edit, delete or redirect that writes. */
 function readsOnly(command: string): boolean {
-  if (/(?:^|&&|;|\|)\s*cd\s+(?!\.?\/?[\w.\/-]*\s*$)/.test(command)) return false;
-  return !/\bcp\b|\bmv\b|\btee\b|>\s*[^&]|\brm\b|\bchmod\b|\bnpm (?:i|install|publish)\b/.test(command);
+  // A mutating option turns an otherwise read-only program into a change: sed -i edits in place, find -delete removes, ln -sf replaces.
+  if (/\s-[a-zA-Z]*i\b|--in-place|\s-(?:delete|exec|execdir|ok|okdir)\b|^\s*ln\b|\btruncate\b|\btee\b/.test(command)) return false;
+  if (/>\s*[^&|]/.test(command)) return false;
+  for (const segment of command.split(/&&|;|\|/)) {
+    const words = segment.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+    // A cd that leaves the workspace means the command runs elsewhere, which the switch never covers. A cd that stays inside is ordinary work.
+    if (words[0] === 'cd') {
+      const target = words[1];
+      if (target !== undefined && (target.startsWith('/') || target.startsWith('~') || target.split('/').includes('..'))) return false;
+      continue;
+    }
+    if (!READ_ONLY_PROGRAMS.has(words[0] as string)) return false;
+  }
+  return true;
 }
 
 /** Why a command can never be covered by an allow-list entry, or undefined when it can be. One rule, asked by the matcher and by the card's offer. */
@@ -57,7 +72,7 @@ export function allowRuleBlocker(command: string): string | undefined {
   const raw = command.trim();
   if (!raw || !PLAIN_COMMAND.test(raw)) return 'it chains, quotes, redirects or substitutes, so no entry can name it';
   const words = raw.split(/ +/);
-  if (words.some((word) => word.startsWith('/') || word.split('/').includes('..'))) return 'it names an absolute path or steps up out of the folder';
+  if (words.some((word) => word.startsWith('/') || word.startsWith('~') || word.split('/').includes('..'))) return 'it names an absolute path, a home folder or steps up out of the folder';
   // An allow-list entry covers named remotes and local paths, never an address typed on the command line.
   if (words.some((word) => /:\/\/|^[\w.-]+@[\w.-]+:/.test(word))) return 'it names an address on the command line';
   return undefined;
@@ -138,7 +153,9 @@ export function decidePermission(capability: ActionCapability, command: string |
   // Owner decision 2026-11-05 (0.4.17): in auto, a tool that marks itself autoSafe (only WebSearch and WebFetch do) runs by itself. Research is
   // what the run is for, so searching is not the risk; what can carry data out is judged by the tool's own checks (WebFetch's exfiltration check
   // after outside content). The gate is the tool's own marker, never the bare network capability, so an MCP or remote tool keeps asking.
-  if (capability === 'network' && policy.mode === 'auto' && auto?.autoSafeTool === true) return { decision: 'allow' };
+  // After outside content the marker does not apply: a page the run has read may have asked for the next fetch, so it is confirmed once more
+  // (0.4.17 review: an unattended fetch driven by page content was the hole).
+  if (capability === 'network' && policy.mode === 'auto' && auto?.autoSafeTool === true && !grants.tainted) return { decision: 'allow' };
   if (capability === 'workspaceWrite') {
     if (grants.edits || policy.mode !== 'approve-risky') return { decision: 'allow' };
     return { decision: 'ask' };

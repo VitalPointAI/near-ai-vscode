@@ -530,7 +530,10 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       // made the old offer look like it had no effect) and must not cover anything wider (or one approval would quietly allow every install, every
       // push and every reset). The candidate is therefore round-tripped through the real matcher, and a command with no honest narrow entry, or one
       // the matcher refuses anyway (an address on the line, `rm`, an interpreter, a risky option), offers no "always allow" at all.
-      const allowRule = command === undefined || this.options.rememberAllowRule === undefined ? undefined : narrowRuleFor(command, [...this.options.rules.allowCommands, ...this.grants.allowRules]);
+      // The offer is silenced for the three kinds of risk the docs say always ask: a key file, destruction, and sending data out. One click there
+      // would let that command run silently for good, which is exactly what "reading keys always asks" forbids (0.4.17 review).
+      const alwaysAsks = risk.kind === 'credentials' || risk.kind === 'destructive' || risk.kind === 'leaves-machine';
+      const allowRule = command === undefined || this.options.rememberAllowRule === undefined || alwaysAsks ? undefined : narrowRuleFor(command, [...this.options.rules.allowCommands, ...this.grants.allowRules]);
       const reply = await this.options.requestApproval({
         callId: call.id, tool: tool.name, title, capability: tool.capability, preview,
         ...(reason ? { reason } : {}),

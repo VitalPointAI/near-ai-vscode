@@ -503,3 +503,20 @@ test('auto: the outside-workspace switch lifts the hold for reading only, never 
   assert.equal(runs.decision, 'ask');
   assert.match(runs.decision === 'ask' ? runs.reason ?? '' : '', /Nothing runs outside this project without your say/);
 });
+
+test('auto: the web tools ask again once the run has read outside content, and a read-only switch covers no command that changes a file', async () => {
+  const grants = new RunGrants();
+  // A page the run read may have asked for the next fetch, so the marker does not apply after outside content (review finding).
+  assert.deepEqual(await decide('fetch https://example.test/page', { capability: 'network', autoSafeTool: true }), { decision: 'allow' });
+  grants.tainted = true;
+  assert.equal((await decide('fetch https://example.test/page', { capability: 'network', autoSafeTool: true, grants })).decision, 'ask');
+  // The outside-workspace switch covers only programs that read: sed -i, find -delete and ln -sf change files and keep their hold.
+  const switches = { outsideWorkspace: true, installs: false };
+  const ctx = { ...where, safety: fakeSafety(true).check, riskSwitches: switches } as AutoApprovalContext;
+  const reads = await decidePermissionAsync('shell', 'cat /etc/hosts', auto, DEFAULT_RULES, new RunGrants(), ctx);
+  assert.deepEqual(reads, { decision: 'allow' }, 'a read outside is covered by the switch');
+  for (const changing of ['sed -i s/a/b/ /etc/hosts', 'find /etc -delete', 'ln -sf /etc/hosts /tmp/h', 'truncate -s 0 /etc/hosts', 'echo x > /etc/hosts']) {
+    const decided = await decidePermissionAsync('shell', changing, auto, DEFAULT_RULES, new RunGrants(), ctx);
+    assert.equal(decided.decision, 'ask', `${changing} still asks`);
+  }
+});

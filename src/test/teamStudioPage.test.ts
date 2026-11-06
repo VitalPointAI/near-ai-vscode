@@ -6,6 +6,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 import test from 'node:test';
 import { decidePermission, DEFAULT_RULES, RunGrants } from '../agent/permissions';
+import { CORE_TOOLS } from '../agent/tools';
+import { webFetchTool, webSearchTool } from '../agent/webTools';
 import { checkDraft, draftFromMarkdown, lineDiff, teamMarkdown, type TeamDraft } from '../agent/teamMarkdown';
 import { DEFAULT_TOOLS, parseTeam, renderTeam, TeamLibrary } from '../agent/teams';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
@@ -189,8 +191,8 @@ test('each tool\'s runs/asks badge follows decidePermission in every approval mo
       for (const tool of studio.tools) {
         if (tool.status === 'off') continue;
         const capability = capabilityOf[tool.capability];
-        // 0.4.17: the web tools mark themselves autoSafe, so auto runs them; every other network tool still asks.
-        const autoSafe = capability === 'network' && /^Web(?:Search|Fetch)$/.test(tool.name);
+        // 0.4.17: read the marker from the tool itself, so a tool that gains autoSafe later is judged by it here too.
+        const autoSafe = [...CORE_TOOLS, webFetchTool, webSearchTool(undefined)].some((candidate) => candidate.name === tool.name && candidate.autoSafe === true);
         const decided = decidePermission(capability, undefined, policy, DEFAULT_RULES, new RunGrants(), { root: '', cwd: '', autoSafeTool: autoSafe });
         const expected = decided.decision === 'deny' ? 'stopped' : decided.decision === 'allow' ? 'runs' : capability === 'shell' && mode === 'auto' ? 'auto-checked' : 'asks';
         assert.equal(tool.status, expected, `${tool.name} under ${mode}${stopped ? ' (stopped)' : ''}`);
