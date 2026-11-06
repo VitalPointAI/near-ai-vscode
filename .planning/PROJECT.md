@@ -43,6 +43,24 @@ v0.5.0 (trusted-source knowledge base) was paused on 2026-10-29 and is moving to
 
 Not started. Recorded so they are not lost; each becomes its own milestone and phase set when the owner starts it.
 
+### Autonomous GSD phases, and a Steer that interrupts now (0.4.18)
+
+Owner, 2026-11-06: "before each GSD phase, the agent typically stops and asks user to do a /clear ... I'd rather it just autonomously do the clear if
+it's time to clear context and then move right into the next phase or plan or execution or verification. If the user needs to interrupt, they should be
+able to send a message ... similar to Codex where the user can click Steer and have that message injected immediately."
+
+- **A phase boundary no longer waits for a person.** The `/clear` step at a GSD phase, plan, execution or verification boundary is done by the agent
+  when the context is actually full enough to warrant it, and the next step starts on its own. A summary and a handoff are written before the context
+  is reset, so nothing is lost. It happens only in Auto (or the mode the owner names), and a person can still ask to be stopped at boundaries.
+- **Steer interrupts now.** A message the person sends mid-run can either queue (today's behaviour, taken at the next safe point, never cutting off a
+  streaming reply or a running tool) or **Steer**, which injects it at once: the current turn is cut, the message is taken as the newest direction,
+  and the tool in flight is cancelled cleanly and said so. The existing `RunInput` seam (`pending`/`take`/`subscribe` in `src/agent/loop.ts`)
+  already carries queued messages; Steer needs a second channel that aborts the in-flight request and a card/button in the chat composer
+  (`media/chat/chat.js`), matching how the composer already posts `send`.
+- Open questions for the owner when this starts: whether a cleared boundary keeps the visible transcript (so the person still reads the history) while
+  only the model's context is reset, how much context is "time to clear" (a percentage of the model's window, or a token count), and whether Steer is a
+  button or a modifier on send.
+
 ### Decision agents on teams
 
 The team builder gains a decision agent configuration, so a decision agent can be put on a team and use a model configured for deciding. Sage 2
