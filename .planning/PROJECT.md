@@ -54,9 +54,25 @@ able to send a message ... similar to Codex where the user can click Steer and h
   is reset, so nothing is lost. It happens only in Auto (or the mode the owner names), and a person can still ask to be stopped at boundaries.
 - **Steer interrupts now.** A message the person sends mid-run can either queue (today's behaviour, taken at the next safe point, never cutting off a
   streaming reply or a running tool) or **Steer**, which injects it at once: the current turn is cut, the message is taken as the newest direction,
-  and the tool in flight is cancelled cleanly and said so. The existing `RunInput` seam (`pending`/`take`/`subscribe` in `src/agent/loop.ts`)
-  already carries queued messages; Steer needs a second channel that aborts the in-flight request and a card/button in the chat composer
-  (`media/chat/chat.js`), matching how the composer already posts `send`.
+  and the tool in flight is cancelled cleanly and said so.
+
+  **Confirmed cause (owner report, 2026-11-06: "a message sent is still only queued").** The queue-and-cut machinery is built: the composer already
+  posts `steer` when the chat is busy (`media/chat/chat.js:771`), the host forwards it to the running agent (`src/services/chat.ts:601`), and the
+  loop subscribes and can abort the in-flight request (`src/agent/loop.ts:337`). But the subscription is gated:
+
+  ```ts
+  // src/agent/loop.ts:337
+  const unsubscribe = input?.subscribe(() => {
+    if (received || !(this.options.client.cooldownRemainingMs?.(this.options.model) ?? 0)) return;
+    cutForInput = true;
+    attemptAbort.abort();
+  });
+  ```
+
+  It cuts only when **nothing has streamed yet** (`!received`) **and** the model is in a rate-limit cooldown. In normal use neither holds, so a steer
+  can only ever queue. The fix is to make interruption an explicit request from the person, not a side effect of those two conditions: a `steer` with
+  `interrupt: true` (a Steer button, or Ctrl+Enter on the composer) aborts the in-flight attempt whatever `received` says, the loop then takes the
+  queued messages as the newest direction, and the chat says the reply was interrupted and the tool in flight was stopped.
 - Open questions for the owner when this starts: whether a cleared boundary keeps the visible transcript (so the person still reads the history) while
   only the model's context is reset, how much context is "time to clear" (a percentage of the model's window, or a token count), and whether Steer is a
   button or a modifier on send.
