@@ -924,7 +924,13 @@ export class AgentConversation {
           settle({ decision: 'deny', feedback: `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'} (the user may be away). Continue without this action if you can, and report what still needs their approval.` });
         }, this.approvalTimeoutMs);
       }
-      this.openPrompt(request.callId, { type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview, ...(request.reason ? { reason: request.reason } : {}), ...(request.allowRule ? { allowRule: request.allowRule } : {}), ...(agent ? { agent } : {}) });
+      // 0.4.17: the card also carries the plain risk headline and the whole reason, and the exact command or code, so it can say why in one
+      // sentence and let the person expand to see exactly what will run.
+      this.openPrompt(request.callId, {
+        type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview,
+        ...(request.reason ? { reason: request.reason } : {}), ...(request.allowRule ? { allowRule: request.allowRule } : {}), ...(agent ? { agent } : {}),
+        ...(request.risk ? { risk: request.risk } : {}), ...(request.reasonShort ? { reasonShort: request.reasonShort } : {}), ...(request.subject ? { subject: request.subject } : {})
+      });
     });
   }
 

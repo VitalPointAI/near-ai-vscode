@@ -38,14 +38,22 @@ const SAFE_GIT_BRANCH_ARGS = new Set(['-a', '-r', '-v', '-vv', '--list', '--show
 /** The classifier's own words for a command that runs or reads outside the workspace (0.4.17: a fact the safety model cannot overturn). */
 const LEAVES_WORKSPACE = /outside the workspace|leaves the workspace|another user's home directory/;
 
+/** Why a command can never be covered by an allow-list entry, or undefined when it can be. One rule, asked by the matcher and by the card's offer. */
+export function allowRuleBlocker(command: string): string | undefined {
+  const raw = command.trim();
+  if (!raw || !PLAIN_COMMAND.test(raw)) return 'it chains, quotes, redirects or substitutes, so no entry can name it';
+  const words = raw.split(/ +/);
+  if (words.some((word) => word.startsWith('/') || word.split('/').includes('..'))) return 'it names an absolute path or steps up out of the folder';
+  // An allow-list entry covers named remotes and local paths, never an address typed on the command line.
+  if (words.some((word) => /:\/\/|^[\w.-]+@[\w.-]+:/.test(word))) return 'it names an address on the command line';
+  return undefined;
+}
+
 /** Whether a command matches an allow-list entry and is simple enough to run without asking. */
 export function isAutoAllowed(command: string, allowCommands: string[]): boolean {
   const raw = command.trim();
-  if (!raw || !PLAIN_COMMAND.test(raw)) return false;
+  if (allowRuleBlocker(raw) !== undefined) return false;
   const words = raw.split(/ +/);
-  if (words.some((word) => word.startsWith('/') || word.split('/').includes('..'))) return false;
-  // An allow-list entry covers named remotes and local paths, never an address typed on the command line.
-  if (words.some((word) => /:\/\/|^[\w.-]+@[\w.-]+:/.test(word))) return false;
   const entry = allowCommands.map((prefix) => prefix.trim().split(/\s+/)).find((prefix) => prefix[0] && prefix.every((word, index) => words[index] === word));
   if (!entry) return false;
   const rest = words.slice(entry.length);

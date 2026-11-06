@@ -537,8 +537,26 @@
     } else if (preview.kind === 'note') {
       card.append(el('div', 'meta', preview.text));
     }
-    // Why it was not run automatically (auto approve's rules or safety model).
-    if (m.reason) card.append(el('div', 'meta approval-reason', 'Why this asks: ' + m.reason));
+    // Why it was not run automatically (auto approve's rules or safety model). 0.4.17: the headline says what kind of risk it is in one plain
+    // sentence, and the expander holds the whole reason and the exact command or code, so nothing has to be guessed from a one-line title.
+    if (m.risk && m.risk.headline) {
+      card.append(el('p', 'approval-why', m.risk.headline));
+      card.append(el('div', 'meta approval-reason', m.reasonShort || m.reason));
+    } else if (m.reason) {
+      card.append(el('div', 'meta approval-reason', 'Why this asks: ' + m.reason));
+    }
+    const subject = m.subject || (preview.kind === 'command' ? preview.command : undefined);
+    if (m.reason || (subject && m.risk)) {
+      const more = el('details', 'approval-more');
+      more.append(el('summary', '', m.risk && m.risk.kind === 'outside-workspace' ? 'Show the whole reason' : 'Show what will run'));
+      if (m.reason && m.reason !== m.reasonShort) more.append(el('div', 'meta approval-reason', m.reason));
+      if (subject) {
+        const pre = el('pre', 'command');
+        pre.append(el('code', '', subject));
+        more.append(pre);
+      }
+      card.append(more);
+    }
     const feedback = el('input');
     feedback.placeholder = 'Optional: tell NEAR AI what to do instead';
     feedback.setAttribute('aria-label', 'Instructions if you decline');

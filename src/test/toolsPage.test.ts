@@ -159,7 +159,8 @@ test('each tool\'s runs/asks column follows decidePermission in every approval m
         assert.equal(by('Read'), 'runs');
         assert.equal(by('Edit'), mode === 'approve-risky' ? 'asks' : 'runs');
         assert.equal(by('Bash'), mode === 'fully-autonomous' ? 'runs' : mode === 'auto' ? 'auto-checked' : 'asks');
-        assert.equal(by('WebFetch'), mode === 'fully-autonomous' ? 'runs' : 'asks');
+        // Owner decision 2026-11-05 (0.4.17): the web tools run in auto as well, because research needs them.
+        assert.equal(by('WebFetch'), mode === 'fully-autonomous' || mode === 'auto' ? 'runs' : 'asks');
         // An MCP tool that changes data asks under "ask for changes" even in full auto (it is flagged risky).
         assert.equal(directory.mcp[0].tools.find((tool) => tool.name === 'update')?.status, 'asks');
       }
