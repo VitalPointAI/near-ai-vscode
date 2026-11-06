@@ -30,9 +30,10 @@ type SharedView = import('../domain/team/teamSection').SharedView;
 
 // A Team Mode handle with no session (a project without a team, or Team Mode not started), whose change listeners the test can fire. Just me for
 // now is kept in memory here, as the real handle keeps it in VS Code's workspace state, and setJustMe tells the listeners.
-function soloHandle(): TeamModeHandle & { fire(): void; listeners: number; justMeCalls: boolean[] } {
+function soloHandle(): TeamModeHandle & { fire(): void; listeners: number; justMeCalls: boolean[]; logLines: string[] } {
   const listeners = new Set<() => void>();
   const justMeCalls: boolean[] = [];
+  const logLines: string[] = [];
   let justMe = false;
   const fire = (): void => { for (const listener of [...listeners]) listener(); };
   return {
@@ -46,8 +47,11 @@ function soloHandle(): TeamModeHandle & { fire(): void; listeners: number; justM
     async setJustMe(value: boolean) { justMeCalls.push(value); justMe = value; fire(); },
     // 61-29: whether this computer's request to join waits; these fakes never have one.
     joinRequestPending: async () => false,
+    // 61-33: the channel lines the host writes; a solo project writes none.
+    log(line: string) { logLines.push(line); },
     fire,
     justMeCalls,
+    logLines,
     get listeners() { return listeners.size; }
   };
 }
@@ -278,12 +282,15 @@ function fakeSession(options: FakeOptions): { session: TeamSession; fire(): void
   };
 }
 
-function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire(): void; fireProfile(): void; profileListeners(): number; setSession(session: TeamSession | undefined): void; setRequestPending(value: boolean): void } {
+function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire(): void; fireProfile(): void; profileListeners(): number; setSession(session: TeamSession | undefined): void; setRequestPending(value: boolean): void; logLines: string[]; setPendingError(fn: (() => Error | undefined) | undefined): void; setPendingGate(fn: (() => Promise<void>) | undefined): void } {
   let current = initial;
   let requestPending = false;
   let justMe = false;
   const listeners = new Set<() => void>();
   const profileListeners = new Set<() => void>();
+  const logLines: string[] = [];
+  let pendingError: (() => Error | undefined) | undefined;
+  let pendingGate: (() => Promise<void>) | undefined;
   const fire = (): void => { for (const listener of [...listeners]) listener(); };
   return {
     ready: Promise.resolve(current === undefined ? 'solo' : 'team'),
@@ -296,11 +303,22 @@ function teamHandle(initial: TeamSession | undefined): TeamModeHandle & { fire()
     boardSummary: () => undefined,
     justMe: () => justMe,
     async setJustMe(value: boolean) { justMe = value; fire(); },
-    // 61-29: whether this computer's request to join waits; false unless the test says otherwise.
-    joinRequestPending: async () => requestPending,
+    // 61-29: whether this computer's request to join waits; false unless the test says otherwise. 61-33: the test may make this step throw or
+    // hang, because it is the step the 0.6.4 re-test left no trace of.
+    joinRequestPending: async () => {
+      if (pendingGate !== undefined) await pendingGate();
+      const failure = pendingError?.();
+      if (failure !== undefined) throw failure;
+      return requestPending;
+    },
+    // 61-33: the channel lines the host writes (a failed or slow refresh, once per reason).
+    log(line: string) { logLines.push(line); },
     fire,
     setSession(session: TeamSession | undefined) { current = session; },
-    setRequestPending(value: boolean) { requestPending = value; }
+    setRequestPending(value: boolean) { requestPending = value; },
+    setPendingError(fn: (() => Error | undefined) | undefined) { pendingError = fn; },
+    setPendingGate(fn: (() => Promise<void>) | undefined) { pendingGate = fn; },
+    logLines
   };
 }
 
@@ -913,4 +931,83 @@ test('with no page attached an installed key asks nothing, and disposing the hos
   assert.deepEqual(t.record.posted, [], 'nothing posted to a page that is gone');
   t.cleanup();
   assert.equal(fake.keyListeners(), 0);
+});
+
+// ---- 61-33: a refresh that fails or drags on leaves one plain line, and cannot block the next refresh -------------------------------
+// The owner's re-test (0.6.4 step 9) could not say why the Connect screen stayed put, because the host dropped every refresh failure without a
+// trace (teamSectionHost.ts:296) and one step that never settled froze the chain behind it.
+
+async function waitFor(predicate: () => boolean, what: string, timeoutMs = 2_000): Promise<void> {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    if (predicate()) return;
+    await new Promise((resolve) => { setTimeout(resolve, 5); });
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+test('a refresh whose step throws writes one plain line naming the step, once per reason, and the next refresh still posts', async () => {
+  const fake = fakeSession({ me: 'dev', members: LEAD_TEAM });
+  const t = fakeHost(fake.session);
+  try {
+    t.host.attach(t.webview);
+    // The person has no profile yet and a request to join waits, so the section asks the handle whether a request is pending: that step throws.
+    let fail = true;
+    const canary = `sk-${'a1B2c3D4'.repeat(8)}`;
+    t.handle.setPendingError(() => (fail ? new Error(`NEAR said no to ${canary} for https://aaron:${canary}@git.example.test/repo.git`) : undefined));
+    await t.host.refresh();
+    await waitFor(() => t.handle.logLines.length === 1, 'the failure line');
+    const line = t.handle.logLines[0] ?? '';
+    assert.match(line, /^The Team section could not update while checking for a request to join: /, line);
+    assert.equal(line.includes(canary), false, 'no key reaches the channel');
+    assert.equal(line.includes('aaron:'), false, 'no address with a user part reaches the channel');
+    assert.ok(line.length <= 400, `the line is short (${line.length})`);
+
+    // The same failure again writes nothing more.
+    await t.host.refresh();
+    await new Promise((resolve) => { setTimeout(resolve, 20); });
+    assert.equal(t.handle.logLines.length, 1, 'the same reason is written once');
+
+    // A different reason gets its own line.
+    t.handle.setPendingError(() => new Error('a second, different failure'));
+    await t.host.refresh();
+    await waitFor(() => t.handle.logLines.length === 2, 'the second failure line');
+    assert.match(t.handle.logLines[1] ?? '', /a second, different failure/);
+
+    // Once the step works, the section is drawn as usual.
+    fail = false;
+    await t.host.refresh();
+    await waitFor(() => t.record.posted.some((message) => (message as { type?: string }).type === 'team-state'), 'a state after the failure');
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('a step that never settles says it is taking longer, and after the limit the next refresh draws while the stuck one never overwrites it', async () => {
+  const fake = fakeSession({ me: 'dev', members: LEAD_TEAM });
+  let release: (() => void) | undefined;
+  const t = fakeHost(fake.session, { slowRefreshMs: 20, refreshLimitMs: 60 });
+  try {
+    t.host.attach(t.webview);
+    t.handle.setPendingError(() => undefined);
+    t.handle.setPendingGate(() => new Promise<void>((resolve) => { release = resolve; }));
+    const stuck = t.host.refresh();
+    await waitFor(() => t.handle.logLines.length === 1, 'the slow line', 2_000);
+    assert.match(t.handle.logLines[0] ?? '', /taking longer than \d+ seconds to update \(still /, t.handle.logLines[0]);
+
+    // The bound passes and a refresh asked for meanwhile runs and draws.
+    await waitFor(() => release !== undefined, 'the stuck step to start');
+    const later = t.host.refresh();
+    await waitFor(() => t.record.posted.some((message) => (message as { type?: string }).type === 'team-state'), 'the newer refresh to draw', 2_000);
+    const drawn = t.record.posted.filter((message) => (message as { type?: string }).type === 'team-state').length;
+
+    // The stuck step settles late: its model is older, so it must not be drawn over the newer one.
+    release?.();
+    await stuck.catch(() => undefined);
+    await later.catch(() => undefined);
+    await new Promise((resolve) => { setTimeout(resolve, 40); });
+    assert.equal(t.record.posted.filter((message) => (message as { type?: string }).type === 'team-state').length, drawn, 'the late answer is not posted');
+  } finally {
+    t.cleanup();
+  }
 });

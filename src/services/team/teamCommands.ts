@@ -92,6 +92,8 @@ export interface TeamModeHandle {
   justMe(): boolean;
   setJustMe(value: boolean): Promise<void>;
   joinRequestPending(): Promise<boolean>;
+  /** 61-33: one plain line for the NEAR AI Team channel, created only when a line is written, so a solo project never gets one. */
+  log(line: string): void;
 }
 // The extension passes connectNearAi, the same key setup the chat's Set up button runs. Tests point the NEAR calls at a fake server and replace the
 // browser sign-in and the key setup.
@@ -681,6 +683,9 @@ export function registerTeamMode(context: vscode.ExtensionContext, options: Team
     },
     justMe,
     setJustMe,
-    joinRequestPending
+    joinRequestPending,
+    // 61-33: the sidebar's Team section writes what went wrong here, so a stale section leaves a trace in the details view. The channel is created
+    // on first use, as every other line is, so a project without a team still gets none.
+    log(line: string): void { output.appendLine(line); }
   };
 }
