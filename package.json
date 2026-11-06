@@ -412,6 +412,16 @@
           ],
           "description": "Shell commands the agent may run without asking, matched by their leading words (\"git push\" covers \"git push origin main\", but never --force or a URL). The approval card's \"Always allow\" adds entries here. In Auto approve mode each part of a chained command (cd app && git push) is matched on its own; in other modes, commands that chain, redirect, or substitute always ask. The deny list is checked first."
         },
+        "nearAi.agent.autoAllowOutsideWorkspace": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "In Auto approve mode, let the agent read outside this project without asking (a file elsewhere on this computer, a folder above it). Reading outside the project is what research does. It never covers writing outside the project, running a command in another folder, or anything that can send data out, and none of those is affected by this switch. The project remembers this, so the same read is not asked again."
+        },
+        "nearAi.agent.autoAllowInstalls": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "In Auto approve mode, let the agent install or download software without asking (a package manager install, a downloaded script). Off by default, because installing changes this machine. It never covers publishing, deleting, or reading keys, which always ask."
+        },
         "nearAi.agent.denyCommands": {
           "type": "array",
           "items": {

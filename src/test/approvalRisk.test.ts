@@ -82,3 +82,23 @@ test('always allow keeps the command next time: the saved entry is read back and
   assert.equal(isAutoAllowed('npm test', local), true, 'the saved entry covers the command it was made from');
   assert.equal(isAutoAllowed('npm run build', local), false, 'and nothing broader');
 });
+
+// ---- The second way a project learns: a whole kind of risk allowed once (owner, 2026-11-05) --------------------------------------------
+test('a project can allow reading outside the workspace and installing, and nothing that loses work or sends data out', async () => {
+  const { RISK_SWITCH, SWITCHABLE_KINDS, riskAllowed, switchOf } = await import('../domain/riskSwitches');
+  assert.deepEqual(SWITCHABLE_KINDS, ['outside-workspace', 'installs'], 'only these two have a switch');
+  for (const kind of ['destructive', 'leaves-machine', 'credentials', 'unsure'] as const) {
+    assert.equal(RISK_SWITCH[kind], undefined, `${kind} always asks`);
+    assert.equal(switchOf(kind), undefined);
+  }
+  const off = { outsideWorkspace: false, installs: false };
+  const on = { outsideWorkspace: true, installs: true };
+  assert.equal(riskAllowed('outside-workspace', off), false);
+  assert.equal(riskAllowed('outside-workspace', on), true);
+  assert.equal(riskAllowed('installs', on), true);
+  // A kind without a switch is never allowed, even when both switches are on.
+  for (const kind of ['destructive', 'leaves-machine', 'credentials', 'unsure'] as const) assert.equal(riskAllowed(kind, on), false, kind);
+  // The setting names a person can find and remove in Settings.
+  assert.equal(switchOf('outside-workspace'), 'agent.autoAllowOutsideWorkspace');
+  assert.equal(switchOf('installs'), 'agent.autoAllowInstalls');
+});

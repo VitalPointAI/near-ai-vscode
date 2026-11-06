@@ -111,6 +111,8 @@ export interface AgentRunOptions {
   grants?: RunGrants;
   /** The `auto` mode's private safety model, for commands the rules cannot decide (shared with sub-agents). */
   safety?: CommandSafetyCheck;
+  /** 0.4.17: the kinds of risk this project has already allowed, read once per run (shared with sub-agents). */
+  riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
   /**
    * Called before every model turn with the transcript and the last turn's usage. May wait (a
    * paused agent) and may return a replacement transcript (compaction, injected notifications).
@@ -556,7 +558,10 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const gsd = runtime?.preambles.length && command.trimStart().startsWith(PREAMBLE_START)
       ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
-    return { root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, ...gsd, safety: this.options.safety, signal: context.signal };
+    return {
+      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, ...gsd, safety: this.options.safety, signal: context.signal,
+      ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {})
+    };
   }
 
   private finish(callId: string, ok: boolean, output: string): string {

@@ -1,6 +1,7 @@
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
 import { classifyCommand, CommandContext } from './commandSafety';
 import { NETWORK_COMMAND } from './untrusted';
+import { riskAllowed } from '../domain/riskSwitches';
 import type { CommandSafetyCheck } from './safetyModel';
 
 /** `reason` on an allow names the grant that let it run (the engagement grant names its
@@ -12,6 +13,8 @@ export interface AutoApprovalContext extends CommandContext {
   /** The private safety model, for commands the rules cannot decide; without it they ask. */
   safety?: CommandSafetyCheck;
   signal?: AbortSignal;
+  /** 0.4.17: the kinds of risk this project has already allowed (read outside the project, install). */
+  riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
 }
 
 export interface PermissionRules {
@@ -37,6 +40,8 @@ const RISKY_GIT_ARG = /^(?:--output(?:=|$)|-o$|--no-index$|--ext-diff$|--textcon
 const SAFE_GIT_BRANCH_ARGS = new Set(['-a', '-r', '-v', '-vv', '--list', '--show-current', '--all', '--remotes']);
 /** The classifier's own words for a command that runs or reads outside the workspace (0.4.17: a fact the safety model cannot overturn). */
 const LEAVES_WORKSPACE = /outside the workspace|leaves the workspace|another user's home directory/;
+/** The classifier's own words for a command that installs or downloads software (0.4.17: only covered by a project's own switch). */
+const INSTALLS = /install|downloads? (?:a |an )?(?:package|binary|script)|from the network/i;
 
 /** Why a command can never be covered by an allow-list entry, or undefined when it can be. One rule, asked by the matcher and by the card's offer. */
 export function allowRuleBlocker(command: string): string | undefined {
@@ -167,10 +172,25 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
   //
   // A command that leaves the workspace is a structural fact, not a judgement call: the safety model is not asked about it, because a command
   // that runs in another folder can do anything there and a model cannot check that from the command text alone.
-  if (LEAVES_WORKSPACE.test(classified.reason)) return { decision: 'ask', reason: `Auto approve held this: ${classified.reason}. Nothing outside this project is touched without your say.` };
+  // 0.4.17: the project may have allowed this kind of risk once (nearAi.agent.autoAllowOutsideWorkspace, or ...autoAllowInstalls). Only a read or an
+  // install is covered by a switch; nothing that writes outside, runs elsewhere, or sends data out is.
+  //
+  // Which kind a command is, and whether its switch is on, is remembered here and used below: with the switch off the command asks unless the safety
+  // model itself allows it (a deliberate, per-command approval); with the switch on, the ordinary safety-model path decides, as it did before the
+  // switch existed. Nothing gets weaker than it was before 0.4.17.
+  const switches = auto.riskSwitches ?? { outsideWorkspace: false, installs: false };
+  // Reading outside the project is held by the rules alone, because a model cannot tell from the command text what a command in another folder
+  // touches. The project's own switch is the one thing that lifts that hold, and even then the safety model still has to agree.
+  if (LEAVES_WORKSPACE.test(classified.reason) && !riskAllowed('outside-workspace', switches)) {
+    return { decision: 'ask', reason: `Auto approve held this: ${classified.reason}. Nothing outside this project is touched without your say.` };
+  }
+  // Installing is decided by the safety model as it always was, so a project that changes no switch sees no new question. Turning the switch on
+  // means the project has decided for itself, so the model is not asked at all.
+  if (INSTALLS.test(classified.reason) && riskAllowed('installs', switches)) return { decision: 'allow' };
   if (!auto.safety) return { decision: 'ask', reason: `No private (TEE) safety model is available to check it, and ${unplaced}.` };
   const verdict = await auto.safety.check((command ?? '').trim(), { root: auto.root, cwd: auto.cwd ?? auto.root, outsideContent: grants.tainted }, auto.signal);
   if (verdict.allow) return { decision: 'allow' };
+  // The safety model said no: its own reason is the card's, and a kind the project has not allowed says so too.
   return { decision: 'ask', reason: verdict.reason.startsWith('Safety model:') ? verdict.reason : `${verdict.reason} Without it, ${unplaced}.` };
 }
 
