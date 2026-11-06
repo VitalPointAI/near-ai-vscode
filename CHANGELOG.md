@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- **Auto approve stops asking about research work.** Web search and web fetch
+  now run by themselves in Auto mode, so a research run is not a stream of
+  questions. Shell commands that can reach the network still ask once the run
+  has read a web page, because that page may have asked for them, but the web
+  tools themselves do not ask again. A command that runs or reads outside this
+  project is still held, and a safety model's approval can no longer wave it
+  through.
+- **An approval card says what the risk is, and shows the command.** The card
+  names the kind of risk in one plain sentence, then the rule's reason, with
+  **Show what will run** to expand the whole reason and the exact command or
+  code.
+- **Always allow now works.** It is offered for every command that a rule can
+  cover, including the ones held for review, and it saves that exact command.
+  Before, a command naming a web address offered a rule that could never match,
+  which is why it seemed to do nothing.
+- **A project can allow a whole kind of risk once.** **Auto allow outside the
+  workspace** and **Auto allow installs** let a project stop asking about
+  reading elsewhere and about installing. Destruction, publishing and reading
+  keys still always ask.
+
 ## 0.4.16
 
 - **A cybersecurity scan runs on an abliterated model.** A scan sends exploits,

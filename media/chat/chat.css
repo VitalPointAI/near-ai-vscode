@@ -259,6 +259,11 @@ details.agent-tool .state { color: var(--vscode-errorForeground); }
 #pending .question { margin: 0; border: 0; border-radius: 0; padding: 8px 10px; }
 #pending .question p { overflow-wrap: anywhere; }
 #pending .approval pre { max-height: min(260px, 30vh); }
+/* 0.4.17: the card leads with one plain sentence about the risk, and the whole reason and the exact command sit in an expander. */
+.question .approval-why { margin: 0 0 6px; font-weight: 600; overflow-wrap: anywhere; }
+.question details.approval-more { margin: 0 0 8px; }
+.question details.approval-more summary { cursor: pointer; color: var(--vscode-textLink-foreground); font-size: 12px; }
+.question details.approval-more pre { margin: 6px 0 0; max-height: min(260px, 30vh); overflow: auto; }
 .pending-line { font-size: 12px; color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; overflow-wrap: anywhere; }
 .pending-line::before { content: '⏸'; }
 .pending-line.resolved { color: var(--vscode-descriptionForeground); }

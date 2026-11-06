@@ -105,6 +105,8 @@ export interface AgentTurnRequest {
   safetyModel?: string;
   /** A second private model for the safety check, asked when the first is busy or gives no readable answer. */
   safetyFallbackModel?: string;
+  /** 0.4.17: the kinds of risk this project has already allowed, so the same kind is not asked about twice. */
+  riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
   /** Saves an approval card's "always allow" entry to the workspace allow list. */
   rememberAllowRule?(rule: string): void | Promise<void>;
   /** Model or tier per agent role (nearAi.agent.roleModels); a team member's own model line wins. */
@@ -293,6 +295,7 @@ export class AgentConversation {
       rules: request.rules,
       grants,
       safety,
+      ...(request.riskSwitches ? { riskSwitches: request.riskSwitches } : {}),
       maxTurns: request.maxTurns,
       maxOutputTokens: request.maxOutputTokens,
       beforeTurn: async (transcript, lastUsage, signal) => {
@@ -924,7 +927,13 @@ export class AgentConversation {
           settle({ decision: 'deny', feedback: `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'} (the user may be away). Continue without this action if you can, and report what still needs their approval.` });
         }, this.approvalTimeoutMs);
       }
-      this.openPrompt(request.callId, { type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview, ...(request.reason ? { reason: request.reason } : {}), ...(request.allowRule ? { allowRule: request.allowRule } : {}), ...(agent ? { agent } : {}) });
+      // 0.4.17: the card also carries the plain risk headline and the whole reason, and the exact command or code, so it can say why in one
+      // sentence and let the person expand to see exactly what will run.
+      this.openPrompt(request.callId, {
+        type: 'approval-request', callId: request.callId, tool: request.tool, title: request.title, preview: request.preview,
+        ...(request.reason ? { reason: request.reason } : {}), ...(request.allowRule ? { allowRule: request.allowRule } : {}), ...(agent ? { agent } : {}),
+        ...(request.risk ? { risk: request.risk } : {}), ...(request.reasonShort ? { reasonShort: request.reasonShort } : {}), ...(request.subject ? { subject: request.subject } : {})
+      });
     });
   }
 

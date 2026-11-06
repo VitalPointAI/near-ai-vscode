@@ -7,6 +7,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import { decidePermission, DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { CORE_TOOLS } from '../agent/tools';
+import { webFetchTool, webSearchTool } from '../agent/webTools';
 import type { ActionPolicyMode } from '../domain/policy';
 import { AuthService, SecretStorageLike } from '../services/auth';
 import { deriveProfileId } from '../domain/auth';
@@ -145,11 +146,17 @@ test('each tool\'s runs/asks column follows decidePermission in every approval m
       const directory = buildToolsDirectory(input({ policy, webSearch: true }));
       assert.equal(directory.policy.mode, mode);
       assert.equal(directory.policy.stopped, stopped);
-      const capabilityOf = new Map([...CORE_TOOLS].map((tool) => [tool.name, tool.capability]));
+      // Every tool the directory lists, by name: the web tools are listed on their own, not in CORE_TOOLS.
+      // webSearchTool is a factory (the provider is fixed at run time), so its instance is made here for the name and marker.
+      const everyTool = [...CORE_TOOLS, webFetchTool, webSearchTool(undefined)];
+      const capabilityOf = new Map(everyTool.map((tool) => [tool.name, tool.capability]));
       for (const tool of directory.tools) {
         if (tool.status === 'off') continue;
         const capability = capabilityOf.get(tool.name) ?? ({ read: 'read', plan: 'plan', edit: 'workspaceWrite', shell: 'shell', network: 'network', generate: 'mediaGeneration' } as const)[tool.capability as 'read'];
-        const decided = decidePermission(capability, undefined, policy, DEFAULT_RULES, new RunGrants());
+        // The directory now carries the tool's own marker, so this reads it rather than reconstructing it from a name: dropping the marker from
+        // the directory fails here. A tool the list does not hold (an MCP one) has no marker and keeps asking.
+        const autoSafe = tool.autoSafe === true;
+        const decided = decidePermission(capability, undefined, policy, DEFAULT_RULES, new RunGrants(), { root: '', cwd: '', autoSafeTool: autoSafe });
         const expected = decided.decision === 'deny' ? 'stopped' : decided.decision === 'allow' ? 'runs' : capability === 'shell' && mode === 'auto' ? 'auto-checked' : 'asks';
         assert.equal(tool.status, expected, `${tool.name} under ${mode}${stopped ? ' (stopped)' : ''}`);
       }
@@ -159,7 +166,9 @@ test('each tool\'s runs/asks column follows decidePermission in every approval m
         assert.equal(by('Read'), 'runs');
         assert.equal(by('Edit'), mode === 'approve-risky' ? 'asks' : 'runs');
         assert.equal(by('Bash'), mode === 'fully-autonomous' ? 'runs' : mode === 'auto' ? 'auto-checked' : 'asks');
-        assert.equal(by('WebFetch'), mode === 'fully-autonomous' ? 'runs' : 'asks');
+        // Owner decision 2026-11-05 (0.4.17): the web tools mark themselves autoSafe, so auto runs them; an MCP tool with the network capability
+        // does not, and still asks.
+        assert.equal(by('WebFetch'), mode === 'fully-autonomous' || mode === 'auto' ? 'runs' : 'asks');
         // An MCP tool that changes data asks under "ask for changes" even in full auto (it is flagged risky).
         assert.equal(directory.mcp[0].tools.find((tool) => tool.name === 'update')?.status, 'asks');
       }

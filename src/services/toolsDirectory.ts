@@ -26,7 +26,7 @@ export type ToolStatus = 'runs' | 'asks' | 'auto-checked' | 'off' | 'stopped';
 export interface DirectorySkill { name: string; description: string; argumentHint?: string; group: string; insert: string }
 export interface DirectoryAgent { name: string; description: string; tier: string; model: string; source: 'role setting' | 'definition' | 'default'; tools: string[] }
 export interface DirectoryTeam { name: string; description: string; command: string; insert: string; project: boolean; members: Array<{ name: string; role?: string; tier: string; model: string; tools: string[] }> }
-export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; setup?: { label: string; command: string } }
+export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; setup?: { label: string; command: string }; /** 0.4.17: the tool runs in Auto by its own marker (the web tools). */ autoSafe?: boolean }
 export interface DirectoryMcpServer { id: string; name: string; transport: string; host: string; enabledHere: boolean; state: string; error?: string; approval: string; tools: Array<{ name: string; agentName: string; description: string; enabled: boolean; status: ToolStatus; statusText: string }> }
 export interface DirectoryModel { id: string; privacy: 'tee' | 'local' | 'forwarded' | 'unknown'; privacyText: string; contextLength?: number; inputPerMillion?: number; outputPerMillion?: number; imagePrice?: number; kinds: string[]; usedFor: string[] }
 
@@ -89,9 +89,9 @@ export function skillGroup(name: string): string {
   return (match(parts[0]) ?? match(words) ?? parts.slice(1).map(match).find(Boolean))?.group ?? 'Other';
 }
 
-/** What the permission logic does for this capability under the policy, with no grants yet in the run. */
-export function capabilityStatus(capability: ActionCapability, policy: ActionPolicy, rules: PermissionRules): ToolStatus {
-  const decided = decidePermission(capability, undefined, policy, rules, new RunGrants());
+/** What the permission logic does for this capability under the policy, with no grants yet in the run. `autoSafe` is the tool's own marker (0.4.17). */
+export function capabilityStatus(capability: ActionCapability, policy: ActionPolicy, rules: PermissionRules, autoSafe = false): ToolStatus {
+  const decided = decidePermission(capability, undefined, policy, rules, new RunGrants(), { root: '', cwd: '', autoSafeTool: autoSafe });
   if (decided.decision === 'deny') return 'stopped';
   if (decided.decision === 'allow') return 'runs';
   // In auto mode a shell command goes through the safety check rather than straight to you.
@@ -135,14 +135,18 @@ const stubClient = {} as NearAiClient;
 const stubMemory = {} as ContextGraphMemory;
 
 function toolEntry(tool: AgentTool<any>, input: DirectoryInput, available: { off?: string; setup?: { label: string; command: string } } = {}): DirectoryTool {
-  const status: ToolStatus = available.off && !input.policy.emergencyStop ? 'off' : capabilityStatus(tool.capability, input.policy, input.rules);
+  // A tool that marks itself autoSafe (the web tools) runs in auto; an MCP tool never sets the marker, so it keeps asking.
+  const status: ToolStatus = available.off && !input.policy.emergencyStop ? 'off' : capabilityStatus(tool.capability, input.policy, input.rules, tool.autoSafe === true);
   const notes: string[] = [];
   if (available.off) notes.push(available.off);
   if (tool.capability === 'shell' && tool.name === 'Bash' && input.rules.allowCommands.length && status !== 'runs' && status !== 'stopped') notes.push(`Allow-listed commands run without asking: ${input.rules.allowCommands.slice(0, 8).join(', ')}${input.rules.allowCommands.length > 8 ? ', …' : ''}.`);
   if (tool.sensitive) notes.push('Some paths always ask first (files that look like credentials, or protected locations).');
   if (tool.risky) notes.push('Can ask in any mode once the run has read outside content.');
   if (tool.untrusted) notes.push('Its results are outside content.');
-  return { name: tool.name, description: firstSentence(tool.description), capability: CAPABILITY_LABEL[tool.capability], status, statusText: STATUS_TEXT[status], notes, ...(available.setup ? { setup: available.setup } : {}) };
+  return {
+    name: tool.name, description: firstSentence(tool.description), capability: CAPABILITY_LABEL[tool.capability], status, statusText: STATUS_TEXT[status], notes,
+    ...(available.setup ? { setup: available.setup } : {}), ...(tool.autoSafe === true ? { autoSafe: true } : {})
+  };
 }
 
 export function privacyOf(model: ModelInfo): DirectoryModel['privacy'] {

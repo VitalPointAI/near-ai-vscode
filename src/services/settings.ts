@@ -60,6 +60,15 @@ export function readSafetyModel(tiers: { fast: string } = readModelTiers()): str
   return typeof value === 'string' && value.trim() ? value.trim() : tiers.fast;
 }
 
+/** 0.4.17: the two kinds of risk a project can allow once, so the same kind is not asked again. */
+export function readRiskSwitches(): { outsideWorkspace: boolean; installs: boolean } {
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  return {
+    outsideWorkspace: configuration.get<boolean>('agent.autoAllowOutsideWorkspace', false) === true,
+    installs: configuration.get<boolean>('agent.autoAllowInstalls', false) === true
+  };
+}
+
 /** Limits for agent runs and whether conversations are saved for resuming. */
 /** Caps for one run, including its sub-agents. */
 export function readRunBudget(): { maxCostUsd: number; maxTokens: number } {
