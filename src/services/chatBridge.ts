@@ -35,7 +35,7 @@ export type ChatWebviewMessage =
   | { type: 'open-artifact'; path: string; kind: GsdArtifactKind }
   | { type: 'send'; text: string; model?: string; overrideToken?: string; attachmentIds?: string[]; conversationId?: string }
   /** A message typed while a run is going: queued for the running agent, or sent as a new turn if it has ended. */
-  | { type: 'steer'; id: string; text: string; conversationId?: string }
+  | { type: 'steer'; id: string; text: string; conversationId?: string; /** 0.4.18: take effect now, cutting the turn in flight (the Steer button). */ interrupt?: boolean }
   | { type: 'attach-files' }
   | { type: 'attachment-remove'; id: string }
   /** Stops one conversation's run (the emergency stop stops them all). */
@@ -321,7 +321,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'id' && key !== 'text' && key !== 'conversationId')) return undefined;
     if (typeof message.id !== 'string' || !/^steer-[a-f0-9]{12}$/.test(message.id)) return undefined;
     if (typeof message.text !== 'string' || !message.text.trim() || message.text.length > MAX_MESSAGE_CHARS) return undefined;
-    return { type: 'steer', id: message.id, text: message.text.trim(), ...scoped };
+    return { type: 'steer', id: message.id, text: message.text.trim(), ...scoped, ...(message.interrupt === true ? { interrupt: true } : {}) };
   }
   if (message.type !== 'send' || typeof message.text !== 'string' || !message.text.trim()) return undefined;
   if (Object.keys(message).some((key) => key !== 'type' && key !== 'text' && key !== 'model' && key !== 'overrideToken' && key !== 'attachmentIds' && key !== 'conversationId')) return undefined;

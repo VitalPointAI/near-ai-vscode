@@ -68,3 +68,22 @@ test('when the new folder is the old one, nothing is copied onto itself', async 
   assert.deepEqual(result, { moved: 0, skipped: 0 }, 'nothing is copied onto itself');
   assert.deepEqual((await readdir(path.join(globalStorage, 'teams'))).sort(), ['one.md'], 'and the file is untouched');
 });
+
+test('reading a team the extension wrote never asks for approval, and any other file outside still does', async () => {
+  const { classifyCommand } = await import('../agent/commandSafety');
+  const home = '/home/dev';
+  const teams = teamsDirectory(home);
+  const root = '/work/app';
+  const trusted = { root, cwd: root, home, trustedToolRoots: [teams] };
+  const untrusted = { root, cwd: root, home };
+  // Owner report, 2026-11-06: an agent reading its own team definition was held as "outside the workspace". It is NEAR AI's own file.
+  const read = classifyCommand(`cat ${path.join(teams, 'teams', 'researchx.md')}`, trusted);
+  assert.equal(read.verdict, 'safe', JSON.stringify(read));
+  // The same read without the trusted root still asks, so the fix is the root and not a blanket change.
+  assert.equal(classifyCommand(`cat ${path.join(teams, 'teams', 'researchx.md')}`, untrusted).verdict, 'unknown');
+  // An unrelated file outside the workspace is still held.
+  assert.equal(classifyCommand('cat /etc/hosts', trusted).verdict, 'unknown');
+  // A team file is never written to by an agent, even though it may be read.
+  const write = classifyCommand(`echo x > ${path.join(teams, 'teams', 'researchx.md')}`, trusted);
+  assert.notEqual(write.verdict, 'safe', JSON.stringify(write));
+});

@@ -102,8 +102,13 @@ export interface RunInput {
   pending(): boolean;
   /** The queued messages, oldest first, as transcript entries; taking them marks them delivered. */
   take(): AgentMessage[];
-  /** Called whenever a message is queued; returns an unsubscribe. */
-  subscribe(listener: () => void): () => void;
+  /**
+   * Called whenever a message is queued; returns an unsubscribe. `interrupt` is true when the person asked that the message take effect now (the
+   * Steer button) rather than at the next safe point, so the loop cuts the turn in flight instead of waiting for it.
+   */
+  subscribe(listener: (notice: { interrupt: boolean }) => void): () => void;
+  /** Whether the newest queued message asked to interrupt, since the last take. */
+  interruptRequested?(): boolean;
 }
 
 export interface AgentRunOptions {
@@ -333,8 +338,12 @@ export class AgentRun {
       let cutForInput = false;
       const onAbort = () => attemptAbort.abort();
       signal.addEventListener('abort', onAbort, { once: true });
-      const unsubscribe = input?.subscribe(() => {
-        if (received || !(this.options.client.cooldownRemainingMs?.(this.options.model) ?? 0)) return;
+      // A person who presses Steer is asking for the reply to stop now, so that is what happens: the attempt is cut whatever has streamed, and the
+      // queued message becomes the newest direction. Without that request, a cut only happens where it always has: before anything streamed, to save
+      // a doomed request when the model is cooling down from a rate limit.
+      const unsubscribe = input?.subscribe((notice) => {
+        const urgent = notice.interrupt || input.interruptRequested?.() === true;
+        if (!urgent && (received || !(this.options.client.cooldownRemainingMs?.(this.options.model) ?? 0))) return;
         cutForInput = true;
         attemptAbort.abort();
       });

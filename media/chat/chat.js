@@ -19,6 +19,7 @@
   const input = $('input');
   const send = $('send');
   const stopButton = $('stop');
+  const steerButton = $('steer');
   const model = $('model');
   const policy = $('policy');
   const profile = $('profile');
@@ -226,32 +227,37 @@
   function setBusy(value) {
     busy = value;
     stopButton.hidden = !value;
-    send.title = value ? 'Send to the running agent (Enter): it sees the message after its current step' : 'Send (Enter)';
+    // 0.4.18: while a run is going there are two ways to send. Enter queues the message for the next safe point; Steer (or Ctrl+Enter) interrupts
+    // the reply in flight, so the message is the agent's newest direction now. Each button says which it does.
+    steerButton.hidden = !value;
+    send.title = value ? 'Queue for the running agent (Enter): it sees the message after its current step; Ctrl+Enter or Steer interrupts it now' : 'Send (Enter)';
     send.setAttribute('aria-label', value ? 'Send to the running agent' : 'Send');
     updateSendState();
   }
   function updateSendState() { send.disabled = !input.value.trim(); }
   function stopRun() { if (busy) postFor({ type: 'stop' }); }
+  // 0.4.18: Steer sends the message and interrupts the reply in flight. It needs text like Send does.
+  steerButton.addEventListener('click', () => { const text = input.value.trim(); if (busy && text) sendSteer(text, { interrupt: true }); });
 
   // Messages sent during a run, by id: the bubble's state line says queued, delivered, or sent as a new message.
   const steerBubbles = new Map();
-  const STEER_LABELS = { queued: 'Queued — the agent sees it after its current step', delivered: 'Delivered to the running agent', 'sent-new': 'Sent as a new message (the run had ended)', returned: 'Not sent — the run was stopped; it is back in the message box', blocked: 'Not sent' };
+  const STEER_LABELS = { queued: 'Queued — the agent sees it after its current step', interrupting: 'Interrupting the reply now…', delivered: 'Delivered to the running agent', 'sent-new': 'Sent as a new message (the run had ended)', returned: 'Not sent — the run was stopped; it is back in the message box', blocked: 'Not sent' };
   function steerId() {
     const bytes = new Uint8Array(6);
     crypto.getRandomValues(bytes);
     return 'steer-' + [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
   }
-  function sendSteer(text) {
+  function sendSteer(text, options = {}) {
     const id = steerId();
     const node = append(el('div', 'turn user steer', text));
-    const line = el('span', 'steer-state', 'Sending…');
+    const line = el('span', 'steer-state', options.interrupt ? 'Interrupting…' : 'Sending…');
     node.append(line);
     steerBubbles.set(id, { node, line });
     input.value = '';
     autosize();
     updateSendState();
     if (staged.size) notice('Attachments stay staged: they go with your next message once this run ends.', []);
-    postFor({ type: 'steer', id, text });
+    postFor({ type: 'steer', id, text, ...(options.interrupt ? { interrupt: true } : {}) });
   }
   function onSteerState(m) {
     // A conversation shown again brings back the messages still queued for its run.
@@ -802,6 +808,14 @@
       }
       if ((event.key === 'Enter' || event.key === 'Tab') && matches[menuIndex]) { event.preventDefault(); chooseCommand(matches[menuIndex]); return; }
       if (event.key === 'Escape') { menu.hidden = true; return; }
+    }
+    // Ctrl+Enter (Cmd+Enter on a Mac) sends the message as a Steer, interrupting the reply in flight; plain Enter queues it as before.
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (busy && text) sendSteer(text, { interrupt: true });
+      else submit();
+      return;
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); }
     // Esc in an empty message box stops the run, as in Claude Code; with text in it, Esc does nothing.

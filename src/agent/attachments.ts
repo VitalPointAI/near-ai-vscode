@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ModelInfo, NearAiClient, UsageMetadata } from '../services/nearAiClient';
 import { DocumentFormat, documentText } from './documents';
@@ -39,6 +39,51 @@ export async function stageAttachment(file: string): Promise<StagedAttachment> {
   if (type.kind === 'text' && bytes.subarray(0, 8000).includes(0)) throw new ToolError(`${name} looks binary, not text.`);
   const extracted = type.kind === 'document' ? await documentText(bytes, last as DocumentFormat, name) : undefined;
   return { id: `att-${randomBytes(6).toString('hex')}`, name, kind: type.kind, mime: type.mime, size: info.size, bytes, ...(extracted ? { text: extracted.text, ...(extracted.note ? { note: extracted.note } : {}), ...(extracted.hiddenParts ? { hiddenParts: extracted.hiddenParts } : {}) } : {}) };
+}
+
+
+/**
+ * Copies a staged attachment into the project so the agent's own file tools can reach it (owner, 2026-11-06: "fix the upload so attachments get saved to
+ * the project workspace and used from there"). Before this an attachment was only read into memory, so a PDF picked from outside the project had no path
+ * the agent could open and it went looking for it on disk.
+ *
+ * The copy goes to `.near-ai/attachments/` in the project, keeps the original name, and never overwrites a different file: a name that is taken gets a
+ * short suffix. Returns the path inside the project (relative, as a person or an agent sees it) or undefined when the copy failed, which never fails the
+ * message: the attachment is still read into the message itself.
+ */
+export async function copyAttachmentIntoProject(attachment: StagedAttachment, root: string): Promise<string | undefined> {
+  const folder = path.join(root, '.near-ai', 'attachments');
+  const safeName = path.basename(attachment.name).replace(/[^\w.\- ]+/g, '_') || 'attachment';
+  const extension = path.extname(safeName);
+  const stem = safeName.slice(0, safeName.length - extension.length);
+  try {
+    await mkdir(folder, { recursive: true });
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const name = attempt === 0 ? safeName : `${stem}-${attempt}${extension}`;
+      const target = path.join(folder, name);
+      if (await exists(target)) {
+        // The same file attached twice is one copy; a different file with the same name gets its own.
+        if (await sameBytes(target, attachment.bytes)) return path.join('.near-ai', 'attachments', name);
+        continue;
+      }
+      await writeFile(target, attachment.bytes);
+      return path.join('.near-ai', 'attachments', name);
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+async function exists(target: string): Promise<boolean> {
+  try { await stat(target); return true; } catch { return false; }
+}
+
+async function sameBytes(target: string, bytes: Buffer): Promise<boolean> {
+  try {
+    const there = await readFile(target);
+    return there.length === bytes.length && there.equals(bytes);
+  } catch { return false; }
 }
 
 /** `security`: where hidden content was removed or a likely injection was found, for Agent Activity. */
