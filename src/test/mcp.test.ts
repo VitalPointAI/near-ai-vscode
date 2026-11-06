@@ -47,7 +47,11 @@ test('a real stdio MCP server connects, lists its tools, and runs only with the 
     assert.equal(tools.find((tool) => tool.name === 'mcp__distributor__place_order')!.capability, 'network');
     const status = (await registry.status())[0];
     assert.deepEqual([status.state, status.enabledHere, status.hasSecrets.env, status.serverInfo], ['connected', true, ['STOCK'], 'test-distributor 1.0.0']);
-    assert.ok(!JSON.stringify(global.values.get('nearAi.mcp.servers')).includes('17'), 'secret values are not in ordinary storage');
+    // 0.4.17: the secret is asserted as the stored value, not as a bare "17" anywhere in the settings. The old check matched any "17" in the blob,
+    // including the fixture's own path, which made it fail in a folder named release-0.4.17 (a false failure, not a leak).
+    const serialised = JSON.stringify(global.values.get('nearAi.mcp.servers') ?? {});
+    assert.equal(serialised.includes('"STOCK":"17"'), false, 'the secret value is not in ordinary storage');
+    assert.equal(/\bSTOCK\b[^,}]*\b17\b/.test(serialised), false, 'and neither is the name beside its value');
     assert.match([...secrets.values.values()][0], /"STOCK":"17"/);
   } finally {
     await registry.dispose();

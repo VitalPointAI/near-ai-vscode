@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.17
 
 - **Auto approve stops asking about research work.** Web search and web fetch
   now run by themselves in Auto mode, so a research run is not a stream of
