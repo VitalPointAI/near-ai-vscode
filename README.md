@@ -80,7 +80,16 @@ as a row in the chat.
   A command card also offers **Always allow "git push" in this workspace**,
   which adds a narrow rule to `nearAi.agent.allowCommands` and applies at once.
   Rules never cover `--force`, a typed URL, `rm`, `curl`, or an interpreter
-  such as `node` or `bash`, and `npm run build` allows only that script.
+  such as `node` or `bash`, and `npm run build` allows only that script. When
+  a rule can never cover a command (it names a web address, chains another
+  command, or uses an absolute path), the card offers no **Always allow** for
+  it, so the button always does something when you see it.
+- **A card says what the risk is.** Above the buttons, the card names the kind
+  of risk in one plain sentence (it reaches outside this project, it can
+  destroy work, it can send data off this machine, it reads keys, it installs
+  software, or NEAR AI was not sure), then the rule's own reason, with
+  **Show what will run** to expand the whole reason and the exact command or
+  code.
 - **Auto approve that stays out of your way.** In Auto mode, fixed rules clear
   everyday work on their own: reading and searching, builds and tests, git
   status, diff, commit, pull, fetch, switch, stash, merge, revert and
@@ -89,9 +98,14 @@ as a row in the chat.
   or substitute, and the project's own `node_modules/.bin` tools. Each part of
   a chained command such as `cd app && npm test` is checked on its own.
   Commands the rules can't decide go to a private safety model (with a second
-  private model as fallback); risky or uncertain ones ask, and the card says
-  why. After the run reads web pages or MCP results, the safety model is
-  stricter and commands that can reach the network always ask.
+  private model as fallback), which is told when the run has read web pages or
+  MCP results and is stricter then; risky or uncertain ones ask, and the card
+  says why. Web search and web fetch run by themselves, so research is not a
+  stream of questions. A command that runs or reads outside this project is
+  held unless you turn on **Auto allow outside the workspace**; nothing that a
+  safety model says is fine can wave it through. Two switches let a project
+  decide a whole kind of risk once: **Auto allow outside the workspace** and
+  **Auto allow installs**. Destruction, publishing and reading keys always ask.
 - **Undo a whole run.** Every file the agent changes is snapshotted first, so
   one **Revert** puts them all back.
 - **A visible plan.** Multi-step work keeps a task list above the input box.
