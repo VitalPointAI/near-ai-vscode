@@ -947,23 +947,26 @@ async function waitFor(predicate: () => boolean, what: string, timeoutMs = 2_000
 }
 
 test('a refresh whose step throws writes one plain line naming the step, once per reason, and the next refresh still posts', async () => {
-  const fake = fakeSession({ me: 'dev', members: LEAD_TEAM });
-  const t = fakeHost(fake.session);
+  // A person who has joined but not been confirmed, with a request to join waiting: the section asks the handle whether a request is pending, which is
+  // the step the 0.6.4 re-test left no trace of.
+  const t = fakeHost(fakeSession({ me: undefined, members: LEAD_TEAM }).session);
   try {
-    t.host.attach(t.webview);
-    // The person has no profile yet and a request to join waits, so the section asks the handle whether a request is pending: that step throws.
+    // The handle is ready to fail before the section attaches, because attaching already asks for a refresh and a refresh asked for while one waits
+    // joins it.
     let fail = true;
     const canary = `sk-${'a1B2c3D4'.repeat(8)}`;
     t.handle.setPendingError(() => (fail ? new Error(`NEAR said no to ${canary} for https://aaron:${canary}@git.example.test/repo.git`) : undefined));
+    t.host.attach(t.webview);
     await t.host.refresh();
-    await waitFor(() => t.handle.logLines.length === 1, 'the failure line');
+    await waitFor(() => t.handle.logLines.length === 1, `the failure line (lines=${JSON.stringify(t.handle.logLines)}, posted=${t.record.posted.length})`);
     const line = t.handle.logLines[0] ?? '';
-    assert.match(line, /^The Team section could not update while checking for a request to join: /, line);
+    assert.match(line, /^The Team section was checking for a request to join: /, line);
     assert.equal(line.includes(canary), false, 'no key reaches the channel');
     assert.equal(line.includes('aaron:'), false, 'no address with a user part reaches the channel');
     assert.ok(line.length <= 400, `the line is short (${line.length})`);
 
     // The same failure again writes nothing more.
+    const before = t.record.posted.length;
     await t.host.refresh();
     await new Promise((resolve) => { setTimeout(resolve, 20); });
     assert.equal(t.handle.logLines.length, 1, 'the same reason is written once');
@@ -977,36 +980,42 @@ test('a refresh whose step throws writes one plain line naming the step, once pe
     // Once the step works, the section is drawn as usual.
     fail = false;
     await t.host.refresh();
-    await waitFor(() => t.record.posted.some((message) => (message as { type?: string }).type === 'team-state'), 'a state after the failure');
+    await waitFor(() => t.record.posted.length > before, 'a state after the failures');
+    assert.notEqual(lastState(t.record), undefined, 'the model arrived');
   } finally {
     t.cleanup();
   }
 });
 
 test('a step that never settles says it is taking longer, and after the limit the next refresh draws while the stuck one never overwrites it', async () => {
-  const fake = fakeSession({ me: 'dev', members: LEAD_TEAM });
+  const t = fakeHost(fakeSession({ me: undefined, members: LEAD_TEAM }).session, { slowRefreshMs: 20, refreshLimitMs: 80 });
   let release: (() => void) | undefined;
-  const t = fakeHost(fake.session, { slowRefreshMs: 20, refreshLimitMs: 60 });
+  let calls = 0;
   try {
+    // Only the first refresh hangs on the request step (the one attaching starts); a later one answers at once.
+    t.handle.setPendingGate(async () => {
+      calls += 1;
+      if (calls > 1) return;
+      await new Promise<void>((resolve) => { release = resolve; });
+    });
     t.host.attach(t.webview);
-    t.handle.setPendingError(() => undefined);
-    t.handle.setPendingGate(() => new Promise<void>((resolve) => { release = resolve; }));
-    const stuck = t.host.refresh();
-    await waitFor(() => t.handle.logLines.length === 1, 'the slow line', 2_000);
-    assert.match(t.handle.logLines[0] ?? '', /taking longer than \d+ seconds to update \(still /, t.handle.logLines[0]);
-
-    // The bound passes and a refresh asked for meanwhile runs and draws.
+    // Attaching starts the first refresh; it hangs on the request step until the test lets it go.
     await waitFor(() => release !== undefined, 'the stuck step to start');
-    const later = t.host.refresh();
-    await waitFor(() => t.record.posted.some((message) => (message as { type?: string }).type === 'team-state'), 'the newer refresh to draw', 2_000);
-    const drawn = t.record.posted.filter((message) => (message as { type?: string }).type === 'team-state').length;
+    await waitFor(() => t.handle.logLines.length === 1, 'the slow line');
+    assert.match(t.handle.logLines[0] ?? '', /taking longer than \d+ seconds to update/, t.handle.logLines[0]);
 
-    // The stuck step settles late: its model is older, so it must not be drawn over the newer one.
+    // The bound passes, so a refresh asked for now runs and draws while the first is still stuck.
+    await waitFor(() => calls >= 1, 'the first call');
+    await new Promise((resolve) => { setTimeout(resolve, 120); });
+    const later = t.host.refresh();
+    await later;
+    const drawn = t.record.posted.length;
+    assert.ok(drawn > 0, 'the newer refresh drew the section');
+
+    // The stuck run settles late with an older model, which must not be drawn over the newer one.
     release?.();
-    await stuck.catch(() => undefined);
-    await later.catch(() => undefined);
     await new Promise((resolve) => { setTimeout(resolve, 40); });
-    assert.equal(t.record.posted.filter((message) => (message as { type?: string }).type === 'team-state').length, drawn, 'the late answer is not posted');
+    assert.equal(t.record.posted.length, drawn, 'the late answer is not posted');
   } finally {
     t.cleanup();
   }

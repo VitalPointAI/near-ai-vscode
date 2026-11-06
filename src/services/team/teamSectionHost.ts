@@ -24,6 +24,10 @@ export interface TeamSectionHostDeps {
   checkShared?: (input: { projectRoot: string; teamFile: TeamFile; branch: string }) => Promise<SharedView>;
   /** Monotonic milliseconds for the shared check throttle; the default is performance.now. */
   now?: () => number;
+  /** 61-33: how long a step may take before one line says it is taking longer (default 5 s). Tests make it small. */
+  slowRefreshMs?: number;
+  /** 61-33: how long one refresh may hold the chain before the next one runs without it (default 15 s). Never blocks a later refresh. */
+  refreshLimitMs?: number;
   /** The e2e probe; the default is on only when NEAR_AI_E2E is exactly '1'. */
   testSeams?: boolean;
 }
@@ -40,6 +44,24 @@ export type TeamSectionMessage = { type: 'team-action'; action: TeamActionId } |
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 // The online check (a network call) runs at most once a minute, on a monotonic clock, unless an action that changes what is online just finished.
 const SHARED_RECHECK_MS = 60_000;
+// 61-33: a step that is slow is worth one line, and a refresh that drags on must never hold the next one behind it (the 0.6.4 re-test could not
+// tell a step that failed from one that never finished, because every failure was dropped and the chain waited forever).
+const SLOW_REFRESH_MS = 5_000;
+const REFRESH_LIMIT_MS = 15_000;
+// The step names a channel line carries, written only through note() below: the details view may say "Team Mode", a screen a person reads may not.
+const STEPS = {
+  starting: 'starting Team Mode',
+  reading: 'reading the team',
+  request: 'checking for a request to join',
+  shared: 'checking what is shared online',
+  posting: 'sending the section to the sidebar'
+} as const;
+type Step = keyof typeof STEPS;
+const STEP_STARTING: Step = 'starting';
+const STEP_READING: Step = 'reading';
+const STEP_REQUEST: Step = 'request';
+const STEP_SHARED: Step = 'shared';
+const STEP_POSTING: Step = 'posting';
 const RECHECK_AFTER: ReadonlySet<TeamActionId> = new Set<TeamActionId>(['share', 'invite', 'link', 'join']);
 
 // The action ids the page may post. A Record keyed by TeamActionId, so the compiler fails when the model's list and this one differ; the model module
@@ -138,6 +160,24 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
   // Refreshes run one after another; a refresh asked for while one waits to start joins it (and a recheck asked by either is kept).
   let chain: Promise<void> = Promise.resolve();
   let queued: { run: RefreshRun; done: Promise<void> } | undefined;
+  // 61-33: every run has a sequence number, and only a run newer than the last drawn model may post, so a step that settles late cannot draw an
+  // older model over a newer one. The lines are written once per reason, so a refresh on every session change cannot flood the channel.
+  let runSeq = 0;
+  let drawnSeq = 0;
+  const writtenReasons = new Set<string>();
+
+  /** One line for the details view: the step it was on, and a reason with no secret and no address with credentials in it. */
+  function note(reason: string): void {
+    const flat = reason.replace(/\s+/g, ' ').trim();
+    if (flat === '' || writtenReasons.has(flat)) return;
+    writtenReasons.add(flat);
+    try { deps.team.log(flat); } catch { /* a channel that could not be created must never fail a refresh */ }
+  }
+
+  /** One line for the details view, naming the step a refresh was on. */
+  function stepNote(step: Step, rest: string): void {
+    note(`The Team section was ${STEPS[step]}: ${rest}`);
+  }
 
   function follow(session: TeamSession | undefined): void {
     if (session === followed) return;
@@ -166,7 +206,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
   const profileSubscription = deps.team.onProfileChanged(() => { void profileChanged(); });
 
   // What is known of this person and this team, from the running session. Names pass through displayText; counts come from the log.
-  async function teamInput(session: TeamSession, projectRoot: string, run: RefreshRun): Promise<NonNullable<TeamSectionInput['team']>> {
+  async function teamInput(session: TeamSession, projectRoot: string, run: RefreshRun, step: (name: Step) => void): Promise<NonNullable<TeamSectionInput['team']>> {
     const [{ displayText }, { decideTeamAction }, { invitationStatus, memberAttention }] = await Promise.all([
       import('./teamStatusBar'), import('../../domain/team/permissions'), import('../../domain/team/invite')
     ]);
@@ -198,6 +238,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
       ...(awaitingKey ? { awaitingKey: true } : {})
     };
     if (canManage) {
+      step(STEP_SHARED);
       const view = await sharedFor(session, projectRoot, run);
       if (view !== undefined) team.shared = view;
     }
@@ -233,7 +274,7 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
     return view;
   }
 
-  async function input(run: RefreshRun): Promise<TeamSectionInput | undefined> {
+  async function input(run: RefreshRun, step: (name: Step) => void): Promise<TeamSectionInput | undefined> {
     const root = deps.firstFolder();
     if (root === undefined) return undefined;
     let session = deps.team.session();
@@ -249,16 +290,24 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
       session = deps.team.session();
     }
     follow(session);
-    if (session === undefined) return await withRequest(await teamFileOnly(root));
+    if (session === undefined) return await withRequest(await teamFileOnly(root), step);
     const board = deps.boardSummary?.();
-    return await withRequest({ folderOpen: true, team: await teamInput(session, root, run), ...(board === undefined ? {} : { board }) });
+    return await withRequest({ folderOpen: true, team: await teamInput(session, root, run, step), ...(board === undefined ? {} : { board }) }, step);
   }
 
   // A person not on the project's team may have asked to join it (61-29): only then is the handle asked, which reads VS Code's secure storage.
-  async function withRequest(built: TeamSectionInput): Promise<TeamSectionInput> {
+  async function withRequest(built: TeamSectionInput, step: (name: Step) => void): Promise<TeamSectionInput> {
     const team = built.team;
     if (team === undefined || team.removed || team.myRole !== undefined || team.pendingRole !== undefined) return built;
-    const pending = await Promise.resolve(deps.team.joinRequestPending()).catch(() => false);
+    step(STEP_REQUEST);
+    // A storage read that fails still means "no request waiting" for the section, but it used to vanish without a trace, and this is the step the
+    // 0.6.4 re-test could not account for: one line says so, once per reason, and the section is still drawn (61-33).
+    let pending = false;
+    try {
+      pending = await Promise.resolve(deps.team.joinRequestPending());
+    } catch (error) {
+      stepNote(STEP_REQUEST, await reasonOf(error));
+    }
     return pending ? { ...built, joinRequestPending: true } : built;
   }
 
@@ -273,14 +322,41 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
     };
   }
 
-  async function run(options: RefreshRun): Promise<void> {
+  async function run(options: RefreshRun, seq: number): Promise<void> {
     const target = webview;
     if (disposed || target === undefined) return;
-    const built = await input(options);
-    const { teamSectionModel } = await import('../../domain/team/teamSection');
-    const model = built === undefined ? undefined : teamSectionModel(built);
-    if (disposed || webview !== target) return;
-    await target.postMessage({ type: 'team-state', model: model ?? null });
+    // Each step names itself before it is awaited, so a line written later says where the refresh was rather than only that it failed.
+    const slowMs = deps.slowRefreshMs ?? SLOW_REFRESH_MS;
+    let step: Step = STEP_STARTING;
+    const slow = setTimeout(() => stepNote(step, `it is taking longer than ${Math.round(slowMs / 1000)} seconds to update.`), slowMs);
+    try {
+      step = STEP_READING;
+      const built = await input(options, (next) => { step = next; });
+      step = STEP_POSTING;
+      const { teamSectionModel } = await import('../../domain/team/teamSection');
+      const model = built === undefined ? undefined : teamSectionModel(built);
+      if (disposed || webview !== target) return;
+      if (seq <= drawnSeq) return;
+      drawnSeq = seq;
+      await target.postMessage({ type: 'team-state', model: model ?? null });
+    } catch (error) {
+      stepNote(step, await reasonOf(error));
+    } finally {
+      clearTimeout(slow);
+    }
+  }
+
+  /**
+   * A failure's own words for the details view, with no key and no address carrying one: the team redaction removes credentials from a URL and
+   * every secret the team detects (an API key, a sign-in token, a private key), then safeReason flattens it to one bounded line (T-61-130).
+   */
+  async function reasonOf(error: unknown): Promise<string> {
+    const message = error instanceof Error ? error.message : String(error);
+    const [{ safeReason }, { SECRET_PATTERNS }] = await Promise.all([import('./teamStatusBar'), import('../../domain/team/secrets')]);
+    let scrubbed = message;
+    for (const pattern of SECRET_PATTERNS) scrubbed = scrubbed.replace(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`), '[removed]');
+    const flat = safeReason(scrubbed);
+    return flat === '' ? 'it stopped without saying why' : flat;
   }
 
   function refresh(options: { recheckShared?: boolean } = {}): Promise<void> {
@@ -289,11 +365,18 @@ export function createTeamSectionHost(deps: TeamSectionHostDeps): TeamSectionHos
       queued.run.recheck ||= recheck;
       return queued.done;
     }
+    runSeq += 1;
+    const seq = runSeq;
     const entry: { run: RefreshRun; done: Promise<void> } = { run: { recheck }, done: Promise.resolve() };
-    // A refresh that fails (a module that cannot load, a record that cannot be read) leaves the last model shown; the next trigger tries again.
+    // A refresh that fails (a module that cannot load, a record that cannot be read) writes its line and leaves the last model shown; the next
+    // trigger tries again. A refresh that drags on stops holding the chain after refreshLimitMs, so a later refresh runs and draws without it; the
+    // slow one still finishes and cleans up, and its own model is not drawn because a newer run already was (61-33).
     entry.done = chain.then(() => {
       if (queued === entry) queued = undefined;
-      return run(entry.run);
+      const limitMs = deps.refreshLimitMs ?? REFRESH_LIMIT_MS;
+      let limit: ReturnType<typeof setTimeout> | undefined;
+      const bounded = new Promise<void>((resolve) => { limit = setTimeout(resolve, limitMs); });
+      return Promise.race([run(entry.run, seq), bounded]).finally(() => { if (limit !== undefined) clearTimeout(limit); });
     }).catch(() => undefined);
     queued = entry;
     chain = entry.done;

@@ -21,6 +21,10 @@ const OUTPUT_ONLY: ReadonlyArray<{ file: string; text: string; why: string }> = 
   {
     file: 'src/services/team/teamSession.ts', text: 'The device key for this team could not be read, so this computer runs read-only:  ',
     why: 'kept in identityProblem and written only with session.line(); the person sees READ_ONLY_TEXT'
+  },
+  {
+    file: 'src/services/team/teamSectionHost.ts', text: 'starting Team Mode',
+    why: 'a step name in STEPS, written only with deps.team.log() through stepNote() into the NEAR AI Team channel (61-33)'
   }
 ];
 
