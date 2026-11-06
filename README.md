@@ -455,6 +455,13 @@ installing it changes on your machine.
 A long scan can run in the panel or in the chat. A deep run goes to the chat by
 default, so closing the panel does not end it and you can steer it by typing.
 
+A scan runs on an abliterated model, one whose safety tuning was removed, so
+the payloads a scan sends are not refused by the model's own guardrails. When
+your organization offers one, the panel uses it and shows it in the Model list.
+When it offers several, the panel asks which one this scan runs on, once per
+engagement. When it offers none, the panel keeps your chat model and says so,
+because a safety-tuned model may refuse a scan's payloads.
+
 ### Respects your projects
 
 The extension only acts in projects you set up with it. Opening a folder,
