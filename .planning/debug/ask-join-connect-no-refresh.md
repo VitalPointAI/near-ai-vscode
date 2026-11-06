@@ -66,6 +66,15 @@ started: 0.6.4 preview
 - S2 (page): the team-state reached the code-server page while its browser window was in the background (the owner switched Brave windows to accept as alice) and was not drawn. Weaker: the notification of the same moment did arrive.
 - S3 (environment): the shared globalStorage of this one-server test (all three people on one mirror and one mirror lock) delayed the restarted session's first sync. Weak: the next poll (15 s focused) would have corrected the screen within the minute the owner waited.
 
+- timestamp: 2026-11-06T03:45:00Z
+  checked: the stricter VS Code check (61-33 Task 2): the team-ask window's Connect check after the automatic join, with no nudge and no click, bounded at 30 s (commit 8792786)
+  found: it passed in 251 ms. The session's own state change reaches the page and the Connect group is redrawn in a real VS Code window.
+  implication: the defect is not in the layer a VS Code window has. It is in what code-server adds: a browser frame, a hidden or backgrounded tab, or one server's shared global storage (S3).
+- timestamp: 2026-11-06T03:50:00Z
+  checked: src/test/e2e/codeServerTeam.ts (commit 8792786): the real packaged extension in code-server, in a real browser, with a listener on the sidebar frame recording every team-state it receives; variants A, B and C
+  found: the harness is written and compiles. The runs of variants A, B and C were not completed in this session (each is a heavy run of code-server plus a browser and needs the owner's approval, which was not given while the session was unattended).
+  implication: the code-server reproduction is the next step; the harness prints each variant's received team-states and the NEAR AI Team channel lines, which are the trace Task 1 added.
+
 ## Resolution
 
 root_cause: ""
