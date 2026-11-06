@@ -3,7 +3,9 @@
 // the worlds here go through the real materialiser, and the layout reads only the state and the board model built from it.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildBoardModel } from '../domain/team/board';
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
+import { buildBoardModel, planMove } from '../domain/team/board';
 import { reduce } from '../domain/team/materialize';
 import type { BoardModel } from '../domain/team/board';
 import { buildTimeline } from '../domain/team/timeline';
@@ -344,4 +346,55 @@ test('size: a 5000-card chain with 50 loops completes without a stack overflow, 
   assert.equal(timeline.dots.filter((dot) => dot.inCycle).length, 50 * 11);
   assert.equal(timeline.milestones[0]?.cycle, true);
   assert.deepEqual(stepsOf(timeline, chain), chain.map((_, index) => index), 'a chain with loops still takes one step per card in number order');
+});
+
+// ---- A reopened card on the timeline (62-28, Task 3) -----------------------------------------------------------------------------------------
+// Owner decision 2026-11-05: every reopen lands in Backlog and is held there, and Move to... on a dot makes the same move. Timeline dots stay
+// non-draggable, so Move to... is how a card moves on the timeline.
+
+test('a reopened finished plan is a dot in Backlog with the reopen menu entry gone and Release offered, and its dot never drags', async () => {
+  const world = await boardWorld();
+  // A finished plan that is ready to start once it is open again: files, an estimate and a finished dependency.
+  world.accept(world.lead, 'item.imported', importedBody({ id: 'milestone:v2', kind: 'milestone', title: 'Version 2', active: true }));
+  world.accept(world.lead, 'item.imported', importedBody({ id: 'phase:2', kind: 'phase', title: 'Second work', parentId: 'milestone:v2' }));
+  world.accept(world.lead, 'item.imported', importedBody({ id: 'plan:2-01', kind: 'plan', title: 'First', parentId: 'phase:2', scope: ['src/a/**'], estimate: { tokens: 1000 } }));
+  world.accept(world.lead, 'item.imported', importedBody({ id: 'plan:2-02', kind: 'plan', title: 'Second', parentId: 'phase:2', scope: ['src/b/**'], estimate: { tokens: 1000 }, dependsOn: ['plan:2-01'] }));
+  world.accept(world.lead, 'item.updated', { id: 'plan:2-01', changes: { state: 'done' } });
+  world.accept(world.lead, 'item.updated', { id: 'plan:2-02', changes: { state: 'done' } });
+  const lead = world.lead.memberId;
+
+  const before = timelineOf(world.state, lead);
+  const doneDot = dotOf(before, 'plan:2-02');
+  const doneCard = modelFor(world.state, lead).cards.find((card) => card.id === 'plan:2-02');
+  assert.equal(doneCard?.column, 'done');
+  assert.deepEqual(doneCard?.moves.map((move) => [move.key, move.column]), [['reopen', 'backlog']], 'before the reopen the menu offers Backlog (reopen) and nothing else');
+
+  // The same pair the board writes, planned by the real model.
+  const planned = planMove(world.state, lead, 'plan:2-02', 'reopen');
+  assert.ok(planned.ok, planned.ok ? '' : planned.reason);
+  if (!planned.ok) return;
+  assert.equal(planned.intents.length, 2, 'a reopen is the reopen and its hold');
+  for (const intent of planned.intents) world.accept(world.lead, intent.type, intent.body as never);
+
+  const after = timelineOf(world.state, lead);
+  const card = modelFor(world.state, lead).cards.find((entry) => entry.id === 'plan:2-02');
+  assert.equal(card?.column, 'backlog', 'the dot is drawn in Backlog');
+  assert.equal(card?.held, true, 'and it is held there');
+  assert.equal(dotOf(after, 'plan:2-02').step, doneDot.step, 'its place on the timeline does not move');
+  const keys = card?.moves.map((move) => move.key) ?? [];
+  assert.equal(keys.includes('reopen'), false, 'the reopen is gone from the menu');
+  assert.equal(keys.includes('release'), true, 'and Release is offered');
+  assert.deepEqual(card?.moves.find((move) => move.key === 'release')?.column, 'ready', 'Release names Ready');
+
+  // Release, and the ready-shaped plan moves on to Ready.
+  const release = planMove(world.state, lead, 'plan:2-02', 'release');
+  assert.ok(release.ok, release.ok ? '' : release.reason);
+  if (!release.ok) return;
+  world.accept(world.lead, release.intent.type, release.intent.body as never);
+  assert.equal(modelFor(world.state, lead).cards.find((entry) => entry.id === 'plan:2-02')?.column, 'ready');
+
+  // A dot is never a drag source: the page's dot markup carries no draggable attribute, and timeline.js never sets one (owner decision 2026-11-05).
+  const page = readFileSync(path.resolve(__dirname, '..', '..', 'media', 'board', 'timeline.js'), 'utf8');
+  assert.equal(/setAttribute\(\s*['"]draggable/.test(page), false, 'timeline.js sets no draggable attribute');
+  assert.equal(/\bdraggable\s*=/.test(page), false, 'and no draggable property');
 });
