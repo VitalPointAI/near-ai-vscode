@@ -915,8 +915,12 @@ function teamAskTests(): Array<[string, () => Promise<void>]> {
       assert.equal(member.status === 'invited', false);
       assert.equal(kit.prompts().shown.filter((record) => record.text.startsWith('You are on E2E team now.')).length, 1, 'joined once, with no second completion');
     }],
-    ['the Connect screen then says this team has no organization, so this person needs their own key or a saved profile', async () => {
-      const connect = await kit.connectScreen('the own-key sentence', (part) => /has no organization linked/.test(part.status), STEP_MS, nudge);
+    ['the Connect screen then says this team has no organization, so this person needs their own key or a saved profile, with no nudge', async () => {
+      // G-61-11 (61-33): the screen must follow the automatic join by itself, as carol's did not in the owner's 0.6.4 re-test. No nudge, no click:
+      // the session's own state change has to reach the page. Thirty seconds is the plan's bound, and the time is printed so a slow path shows.
+      const startedAt = Date.now();
+      const connect = await kit.connectScreen('the own-key sentence', (part) => /has no organization linked/.test(part.status), 30_000);
+      console.log(`(the Connect screen followed the automatic join in ${Date.now() - startedAt} ms, with no nudge)`);
       assert.equal(connect.status, 'E2E team has no organization linked, so each person uses their own key. Set up a new profile with your key or use a saved profile.');
       assert.deepEqual(connect.actions, [], 'the Connect screen\'s own profile buttons are the way in');
       const facts = await kit.facts('no Team section yet', (seen) => seen.hidden === true);
