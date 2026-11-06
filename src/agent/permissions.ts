@@ -35,6 +35,8 @@ const PLAIN_COMMAND = /^[A-Za-z0-9 _.\/:=@+,%-]+$/;
 /** git options that write files, read outside the repository, run programs, or destroy refs. */
 const RISKY_GIT_ARG = /^(?:--output(?:=|$)|-o$|--no-index$|--ext-diff$|--textconv$|--exec|--upload-pack|--receive-pack|-c$|-C$|--git-dir|--work-tree|-[a-zA-Z]*[DdMmfc][a-zA-Z]*$|--delete$|--force$|--move$|--copy$|--set-upstream|--unset-upstream|--edit-description$)/;
 const SAFE_GIT_BRANCH_ARGS = new Set(['-a', '-r', '-v', '-vv', '--list', '--show-current', '--all', '--remotes']);
+/** The classifier's own words for a command that runs or reads outside the workspace (0.4.17: a fact the safety model cannot overturn). */
+const LEAVES_WORKSPACE = /outside the workspace|leaves the workspace|another user's home directory/;
 
 /** Whether a command matches an allow-list entry and is simple enough to run without asking. */
 export function isAutoAllowed(command: string, allowCommands: string[]): boolean {
@@ -107,6 +109,9 @@ export function intrusiveGrantDecision(grants: RunGrants, step: IntrusiveStep | 
 export function decidePermission(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: CommandContext, intrusive?: IntrusiveStep): PermissionDecision {
   if (policy.emergencyStop) return { decision: 'deny', reason: 'Emergency stop is on.' };
   if (capability === 'read' || capability === 'plan') return { decision: 'allow' };
+  // Owner decision 2026-11-05 (0.4.17): in auto, a web search or fetch runs by itself. Research is what the run is for, so searching is not the
+  // risk; what can carry data out is judged by the tool's own checks (WebFetch's exfiltration check after outside content) and by the shell rules.
+  if (capability === 'network' && policy.mode === 'auto') return { decision: 'allow' };
   if (capability === 'workspaceWrite') {
     if (grants.edits || policy.mode !== 'approve-risky') return { decision: 'allow' };
     return { decision: 'ask' };
@@ -149,8 +154,12 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
   // Say why the safety model did not let it run: skipped (network command in a tainted run, no
   // private model), unable to answer (busy, unreachable, timed out), or answered no.
   const unplaced = `the rules couldn't place this command (${classified.reason})`;
-  // After outside content, anything that can reach the network asks: that content may have asked for it.
-  if (grants.tainted && NETWORK_COMMAND.test(command ?? '')) return { decision: 'ask', reason: `This run read outside content (a web page, search result, attachment, or MCP result), and this command can reach the network, so it asks; ${unplaced}.` };
+  // Owner decision 2026-11-05 (0.4.17): the blanket "after outside content, any network command asks" is gone. Research runs shell commands
+  // that reach the network on purpose, so the risk is judged per command (the shell rules, and the safety model below), not per run.
+  //
+  // A command that leaves the workspace is a structural fact, not a judgement call: the safety model is not asked about it, because a command
+  // that runs in another folder can do anything there and a model cannot check that from the command text alone.
+  if (LEAVES_WORKSPACE.test(classified.reason)) return { decision: 'ask', reason: `Auto approve held this: ${classified.reason}. Nothing outside this project is touched without your say.` };
   if (!auto.safety) return { decision: 'ask', reason: `No private (TEE) safety model is available to check it, and ${unplaced}.` };
   const verdict = await auto.safety.check((command ?? '').trim(), { root: auto.root, cwd: auto.cwd ?? auto.root, outsideContent: grants.tainted }, auto.signal);
   if (verdict.allow) return { decision: 'allow' };

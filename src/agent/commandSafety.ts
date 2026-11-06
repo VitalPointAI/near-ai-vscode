@@ -940,6 +940,8 @@ function classifyText(command: string, context: CommandContext, depth: number): 
       const target = segment.words[1];
       if (!target) { findings.push(unknown('cd with no directory goes to the home directory, outside the workspace')); state.cwd = context.home ?? '/'; continue; }
       if (target.expansion || target.glob || target.text === '-' || segment.words.length > 2) { findings.push(unknown('cd to a directory decided at run time')); continue; }
+      // Owner decision 2026-11-05 (0.4.17): a cd inside the workspace is part of ordinary work, so it is safe and does not make the whole
+      // command unknown; a cd that leaves the workspace still asks.
       const facts = pathFacts(target.text, state.cwd, context);
       if (!facts.inside) findings.push(unknown(`cd ${target.text} leaves the workspace`));
       state.cwd = facts.absolute;
