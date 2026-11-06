@@ -61,6 +61,31 @@ able to send a message ... similar to Codex where the user can click Steer and h
   only the model's context is reset, how much context is "time to clear" (a percentage of the model's window, or a token count), and whether Steer is a
   button or a modifier on send.
 
+### Agents reachable from Microsoft Teams, and a relay so end users need no VS Code
+
+Owner, 2026-11-06: "is there a way that we could integrate this extension with Microsoft Teams, so that if I invited an agentic team like ResearchX to
+be a member in a group chat, people in the chat could interact with it, each conversation within its own thread ... ResearchX would then privately
+message the requestor to continue ... Doable without ResearchX being a member inside the organization - would always be an external user."
+
+The extension cannot do this alone: it runs inside VS Code and has no inbound endpoint, so Teams needs a hosted service in front of the team.
+
+- **A relay service is the real product.** An HTTP API over an agentic team (start a run, continue it, ask its status, stream updates), with the
+  security and limits in one place. Teams is then one adapter over it, and a web page, Slack, or a plain API can use the same team. This is the piece
+  that gives end users the team without installing VS Code or the extension.
+- **The Teams bot is a thin adapter.** Registered with the Bot Framework for group chats, it receives an @mention, starts a run, and replies in the
+  same thread when the work is done. On the first mention it opens the bot's 1:1 conversation with the requestor and continues the work there, so each
+  person gets a private thread. Sessions are keyed on tenant, conversation, thread and requestor, so two people asking the same team get isolated runs.
+- **The team is an external app, not a member of the organization.** It needs no NEAR AI organization membership; the relay holds the model key,
+  scoped per tenant and team.
+- **Security, which is the real work.** Verify every Bot Framework activity (issuer, audience, expiry, OpenID key set), never trust a raw POST; carry
+  the requestor's validated Teams identity into the run so approvals and spend are attributed to a person; allowlist tenant ids so an outside install
+  cannot spend the budget; give every thread its own workspace, spend cap and runtime; treat every chat message as untrusted content under the rules
+  the extension already applies; and never put a NEAR AI key anywhere a person can read it.
+- **Recommended order:** the relay first, then the Teams adapter, then (optionally) an MCP server so other assistants can call the same team.
+
+Open questions for the owner when this starts: whether the relay is hosted by the owner or per customer, which Teams identity is authoritative when a
+guest account is involved, whether a group chat may see the whole run or only its result, and how a thread survives the bot being restarted.
+
 ### Decision agents on teams
 
 The team builder gains a decision agent configuration, so a decision agent can be put on a team and use a model configured for deciding. Sage 2
