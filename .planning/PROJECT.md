@@ -51,6 +51,23 @@ on that decision when it has been delegated the authority to act. Open questions
 without a person (and what always waits for one), how its decisions are recorded so the rest of the team can see them, how it is distinguished from an
 orchestrator in the roster and the board, and what it does when the information it has conflicts (for example two people's reports disagree).
 
+### Named team agents with personalities, and who is acting in the chat
+
+It is not clear today when a member agent of a team is the one acting in the chat, or which team it belongs to. Three things, together:
+
+- **Every action in the chat names the agent** that performed it and the team it belongs to, so a person can always tell who did what without
+  reading the details view.
+- **Agents can be named in the team builder,** and a name is shown wherever that agent acts, so the team has people rather than roles.
+- **Agents can be given a personality in the team builder,** and new agents come with a random default name and a personality typical of the role.
+- **A personality never makes an agent worse at its work.** The example the owner gave: a technical role is often written as a poor communicator, but
+  communication with the person is the job, so the personality is a skilled engineer who also explains things clearly. Every generated personality must
+  keep the role's competence and its communication explicit, and the tests should pin that. A personality changes voice and manner, never capability,
+  permissions or the quality of the work.
+
+Open questions for the owner when this starts: whether a personality is text appended to the agent's instructions or a structured set of traits, how a
+person changes a name or personality after the team is made, whether personalities are shared with the team (so everyone sees the same person) or local
+to one computer, and how a personality is kept from growing the prompt until runs get expensive.
+
 ### Verifiable agent guardrails
 
 Every agent the extension runs works under guardrails a person can see, and those guardrails are verifiable rather than trusted.
