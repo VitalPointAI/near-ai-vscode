@@ -22,6 +22,7 @@
   const steerButton = $('steer');
   const model = $('model');
   const policy = $('policy');
+  const advanceButton = $('advance');
   const profile = $('profile');
   const status = $('status');
   // Below the status line: set a usage reporting token, or that NEAR's total is in use.
@@ -844,6 +845,23 @@
   // nearAi.actionPolicy; it then sends the effective state back, which is what this shows.
   const policyMenu = $('policy-menu');
   let policyState;
+
+  // 0.4.18: whether a workflow carries on by itself, shown beside the approval picker so it can be changed during a run (owner, 2026-11-06). It is the
+  // project's Open-GSD setting, changed through the same picker, so the two cannot disagree.
+  advanceButton.addEventListener('click', () => {
+    // The switch is the approval mode: Auto carries on, the asking default stops at each step. Clicking toggles between them.
+    const wanted = advanceButton.getAttribute('aria-pressed') === 'true' ? 'approve-risky' : 'auto';
+    postFor({ type: 'set-action-policy', mode: wanted });
+  });
+  function renderAdvance(m) {
+    const state = m.autoAdvance || {};
+    advanceButton.hidden = !state.text;
+    advanceButton.textContent = state.on ? 'Carrying on' : 'Stops each step';
+    advanceButton.setAttribute('aria-pressed', state.on ? 'true' : 'false');
+    advanceButton.title = state.text || '';
+    advanceButton.setAttribute('aria-label', state.text || 'Whether a workflow carries on by itself');
+  }
+
   function renderPolicy(state) {
     policyState = state;
     closePolicyMenu(policyMenu.contains(document.activeElement));
@@ -1081,7 +1099,7 @@
         model.title = (modelInfo.get(model.value) || {}).label || '';
         break;
       }
-      case 'action-policy': renderPolicy(m); break;
+      case 'action-policy': renderPolicy(m); renderAdvance(m); break;
       case 'models-error': model.replaceChildren(el('option', '', 'Models unavailable')); model.title = m.text || ''; break;
       case 'auth-required':
         if (current) { removeTurn(current.node); current = undefined; }

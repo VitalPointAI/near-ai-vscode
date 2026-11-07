@@ -523,6 +523,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     }
     this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title, input: call.function.arguments });
     const command = tool.capability === 'shell' ? String((input as { command?: unknown }).command ?? '') : undefined;
+    if (command !== undefined) this.noteScratchWrites(command);
     let sensitive: string | undefined;
     let risky: string | undefined;
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
@@ -613,14 +614,32 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     // The forms a workflow uses: the preamble block (`_GSD_SHIM_NAME=`), a bare `gsd_run`/`gsd-tools` command, and `$GSD_TOOLS` (what gsd_run itself
     // runs). A path that merely contains "gsd-tools.cjs" is NOT one of them: a look-alike runtime elsewhere must still ask, and it would otherwise be
     // handed a trusted decision for the managed runtime.
-    const mentionsGsd = /(?:^|[\s;&|(])gsd[_-](?:run|tools)\b|\$GSD_TOOLS\b|_GSD_SHIM_NAME=/.test(command);
+    // 0.4.18 review: only a command that STARTS an Open-GSD call (or begins with the preamble) gets the decision, so `echo gsd_run` and a string inside
+    // `bash -c` do not carry a trusted-runtime verdict they do not deserve.
+    const mentionsGsd = /^\s*(?:_GSD_SHIM_NAME=|gsd[_-](?:run|tools)\b|node\s+["']?\$?GSD_TOOLS\b)/.test(command);
     const gsd = runtime?.preambles.length && mentionsGsd
       ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
     return {
-      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, ...gsd, safety: this.options.safety, signal: context.signal,
+      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: [...this.writtenScratch], ...gsd, safety: this.options.safety, signal: context.signal,
       ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {})
     };
+  }
+
+  /** Absolute paths of scratch files this run wrote (0.4.18): the only scratch scripts it may run without asking. */
+  private readonly writtenScratch = new Set<string>();
+
+  /**
+   * Records the scratch files a command writes into a temporary folder, so a later call that runs one is known to be running the run's own code and not
+   * something a page it read left there. Only a redirect or a copy into an absolute temporary path counts; a path in the workspace is not scratch.
+   */
+  private noteScratchWrites(command: string): void {
+    const roots = ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [path.resolve(process.env.TMPDIR)] : [])].map((root) => path.resolve(root));
+    const inScratch = (file: string): boolean => roots.some((root) => file === root || file.startsWith(`${root}${path.sep}`));
+    const note = (text: string): void => { const file = path.resolve(text); if (path.isAbsolute(text) && !text.split(/[/\\]/).includes('..') && inScratch(file)) this.writtenScratch.add(file); };
+    // `> /tmp/x`, `>> /tmp/x`, and `cp|mv a /tmp/x` (the destination is the last word).
+    for (const match of command.matchAll(/>>?\s*([^\s;&|]+)/g)) if (match[1]) note(match[1]);
+    for (const match of command.matchAll(/\b(?:cp|mv|install|tee)\b[^;&|]*\s([^\s;&|]+)\s*$/g)) if (match[1]) note(match[1]);
   }
 
   private finish(callId: string, ok: boolean, output: string): string {

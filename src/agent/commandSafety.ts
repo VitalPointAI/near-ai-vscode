@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import * as path from 'node:path';
 import { isSensitivePath } from './tools';
 
@@ -29,6 +30,11 @@ export interface CommandContext {
   trustedToolRoots?: string[];
   /** Open-GSD preambles shipped in the managed runtime (exact text); see src/gsd/preamble.ts. */
   gsdPreambles?: string[];
+  /**
+   * 0.4.18: absolute paths of scratch files THIS RUN wrote (its own writes into a temporary folder). Only these may be run by an interpreter without
+   * asking; a file that merely sits in a temporary folder may have been put there by a web page the run read, so it is not code the run may execute.
+   */
+  writtenScratch?: string[];
   /** Whether `gsd_run` as such a preamble defines it would run the managed runtime's gsd-tools, checked for this shell. */
   gsdRun?: { trusted: boolean; reason?: string };
   /** Set while classifying what follows a trusted preamble: `gsd_run` is the managed gsd-tools. */
@@ -326,8 +332,12 @@ function pathFacts(text: string, cwd: string, context: CommandContext): PathFact
   const inside = isInside(context.root, absolute);
   const sensitive = isSensitivePath(text) || isSensitivePath(absolute) || KB_OR_SECRET.test(text) || KB_OR_SECRET.test(absolute.split(path.sep).join('/'));
   const trusted = trustedRoots(context).some((trustedRoot) => isInside(trustedRoot, absolute));
-  const scratch = scratchFacts(text, absolute, sensitive);
-  return { absolute, inside, sensitive, protectedWrite: inside && PROTECTED_WRITE.test(relative), device: DEVICES.has(absolute), trusted, scratch };
+  // 0.4.18 review: a symlink in a temporary folder can point anywhere, so `/tmp/x/id_rsa` (or `/tmp/x` -> `~/.ssh`) would have looked like scratch
+  // and made a credential read safe. The real path decides: a link that lands outside the temporary folders, or on a credential path, is not scratch.
+  const real = realPathOrSelf(absolute);
+  const realSensitive = real !== absolute && (isSensitivePath(real) || KB_OR_SECRET.test(real.split(path.sep).join('/')));
+  const scratch = scratchFacts(text, absolute, sensitive, context) && scratchFacts(real, real, sensitive || realSensitive, context);
+  return { absolute, inside, sensitive: sensitive || realSensitive, protectedWrite: inside && PROTECTED_WRITE.test(relative), device: DEVICES.has(absolute), trusted, scratch };
 }
 
 
@@ -340,13 +350,33 @@ function pathFacts(text: string, cwd: string, context: CommandContext): PathFact
  * no `..` in it (so it cannot climb to a parent), and is not a credential or knowledge-base path. `/tmp`, `/var/tmp` and the per-user temp folder
  * count; `/dev/shm`, the home folder and anything else on the machine do not.
  */
-function scratchFacts(text: string, absolute: string, sensitive: boolean): boolean {
+/** The path a file really is, following symlinks, or the path itself when it does not exist (a write target). */
+function realPathOrSelf(target: string): string {
+  try { return realpathSync(target); } catch { return target; }
+}
+
+function scratchRoots(context: CommandContext): string[] {
+  const home = context.home ? path.resolve(context.home) : undefined;
+  const root = path.resolve(context.root);
+  const candidates = ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])].map((entry) => path.resolve(entry));
+  // 0.4.18 review: TMPDIR comes from the extension's own environment, so a TMPDIR of the home folder or of `/` would make the whole home or the whole
+  // filesystem "scratch". A root is accepted only when it is a real temporary folder: not `/`, not the home folder, not the workspace, and not an
+  // ancestor of either.
+  return candidates.filter((candidate) => {
+    if (candidate === path.parse(candidate).root) return false;
+    for (const mustNotContain of [home, root]) {
+      if (mustNotContain !== undefined && isInside(candidate, mustNotContain)) return false;
+    }
+    return true;
+  });
+}
+
+function scratchFacts(text: string, absolute: string, sensitive: boolean, context: CommandContext): boolean {
   if (sensitive) return false;
   // A relative name is scratch only when it resolves inside a temporary folder, which is the `cd /tmp && python3 verify.py` case: the text is not
   // absolute, but where it lands is. A `..` anywhere in the command's own text is refused, so a relative name cannot climb out.
   if (text.split(/[\\/]/).includes('..')) return false;
-  const roots = [path.resolve('/tmp'), path.resolve('/var/tmp'), ...(process.env.TMPDIR ? [path.resolve(process.env.TMPDIR)] : [])];
-  return roots.some((root) => absolute === root || isInside(root, absolute));
+  return scratchRoots(context).some((root) => absolute === root || isInside(root, absolute));
 }
 
 /** The trusted tool roots, absolute and normalised; relative or empty entries are ignored. */
@@ -857,7 +887,10 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
       // 0.4.18: a look-alike gsd-tools is not scratch. Running one from a temporary folder must still ask, so the scratch acceptance cannot be used
       // to reach a copy of Open-GSD's tool that NEAR AI did not install.
       const looksLikeGsdTools = /(?:^|\/)gsd-tools(?:\.cjs)?$/.test(firstArg.text);
-      if (scriptFacts.scratch && !looksLikeGsdTools) {
+      // 0.4.18 review: a temporary folder is writable by anything, so a page the run read could drop a script there and have it run. Only a script the
+      // run itself wrote is code the run may execute without asking; any other scratch script asks.
+      const wrote = (context.writtenScratch ?? []).some((file) => path.resolve(file) === path.resolve(scriptFacts.absolute));
+      if (scriptFacts.scratch && wrote && !looksLikeGsdTools) {
         const reads = checkReads(args.slice(args.indexOf(firstArg) + 1), state, context, `${name} on a scratch script`);
         return reads.verdict === 'safe' ? safe(`${name} runs a helper script in a temporary folder`) : reads;
       }

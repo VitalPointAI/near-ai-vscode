@@ -234,18 +234,22 @@ test('classifier: nothing else about Open-GSD is trusted', () => {
 // ---- 0.4.18: a temporary folder is accepted scratch work (owner, 2026-11-06) ----------------------------------------------------------
 // "accept it if gsd does keep using /tmp while also ensuring it's safe". Open-GSD's own workflows write helper scripts to /tmp and run them there, so
 // those steps are safe; everything that makes /tmp dangerous (climbing out, credentials, mutation verbs, the network) still asks.
-test('a temporary folder is scratch work: cd, reading, writing and running a helper script there are safe', () => {
+test('a temporary folder is scratch work for cd, reading and writing; running a script there needs the run to have written it', () => {
   const ctx = context;
   const safe = [
-    'cd /tmp && python3 verify.py a b',
-    'python3 /tmp/verify.py a b',
     'cd /tmp && cat verify.py',
     'cat /tmp/verify.py',
     'cat /var/tmp/page.html',
-    'echo hello > /tmp/out.txt',
-    'python3 /tmp/fetch.py /tmp/data.json'
+    'echo hello > /tmp/out.txt'
   ];
   for (const command of safe) assert.equal(classifyCommand(command, ctx).verdict, 'safe', `${command}: ${JSON.stringify(classifyCommand(command, ctx))}`);
+  // 0.4.18 review: a temporary folder is writable by anything, so a script there may have come from a page the run read. Only a script this run wrote
+  // may run without asking; the same command asks otherwise.
+  const wrote = { ...context, writtenScratch: ['/tmp/fetch.py'] };
+  // Absolute, because a relative name resolves against the workspace root here and lands in the project, not in the temporary folder.
+  assert.equal(classifyCommand('python3 /tmp/fetch.py /tmp/data.json', wrote).verdict, 'safe', 'the run wrote this script');
+  assert.equal(classifyCommand('python3 /tmp/evil.py a', wrote).verdict, 'unknown', 'a script the run did not write asks');
+  assert.equal(classifyCommand('cd /tmp && python3 verify.py a b', wrote).verdict, 'unknown', 'and so does one it did not write, from inside the folder');
 });
 
 test('the safety boundary around scratch work holds: climbing out, credentials, deletion and the network all still ask', () => {

@@ -115,7 +115,11 @@ test('Full auto needs a modal confirmation, and declining it writes nothing', as
 test('the emergency stop shows in the state without changing the stored mode', () => {
   const configuration = new FakeConfiguration();
   configuration.values = { globalValue: 'auto' };
-  assert.deepEqual({ ...policyStateMessage(configuration, true), options: [] }, { type: 'action-policy', mode: 'auto', stopped: true, scope: 'global', options: [] });
+  // 0.4.18: the message also says whether a workflow carries on by itself, which follows the mode.
+  const state = policyStateMessage(configuration, true);
+  assert.deepEqual({ ...state, options: [], autoAdvance: undefined }, { type: 'action-policy', mode: 'auto', stopped: true, scope: 'global', options: [], autoAdvance: undefined });
+  assert.equal(state.autoAdvance.on, true, 'Auto carries on');
+  assert.match(state.autoAdvance.text, /starts the next one without asking/);
   configuration.values = { workspaceValue: 'nonsense' };
   assert.equal(policyStateMessage(configuration, false).mode, 'approve-risky', 'an invalid value reads as the default');
 });

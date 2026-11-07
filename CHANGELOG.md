@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **A workflow carries on by itself in Auto.** A research or software project used to stop at every
+  boundary between analysing, planning and building, because the project's Open-GSD settings told it
+  to. In Auto the workflow now starts the next step on its own, and a switch beside the approval
+  picker lets you change that during a run.
+- **Approval cards are clearer, and "always allow" really learns.** The card offers **Allow this
+  time** and **Allow every time**; the second writes the rule and says whether it was saved, so the
+  same command is not asked about again. What a card would save is shown, and a command that no rule
+  can cover never offers it.
+- **A temporary folder is accepted for helper work.** A command that works in `/tmp` (where
+  Open-GSD's own steps put a helper script and run it) no longer asks. It stays safe: only a script
+  this run wrote may run, a symlink out of `/tmp` is refused, and `rm`, the network, keys and any
+  other folder still ask.
+- **Scratch work stays inside the project.** Each project keeps its scratch files in
+  `.near-ai/scratch/`, gitignored and emptied after a run, so drafts are never committed and the
+  project does not grow.
+- **Research accumulates instead of repeating.** The team writes its own findings files and reads
+  what Open-GSD already researched before adding to it, so the same question is not researched twice.
+
 - **Steer interrupts the agent now.** A message sent while the agent is working
   used to only queue for its next step. **Steer** (a button beside Send, or
   Ctrl+Enter) interrupts the reply in flight and becomes the agent's newest

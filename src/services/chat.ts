@@ -40,6 +40,7 @@ import { hostAttribution } from '../domain/activity';
 import { ContextGraphMemory } from './contextGraphMemory';
 import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 import { rememberedRuleNotice } from '../domain/allowRuleNotice';
+import { syncAutoAdvance } from './autoAdvanceConfig';
 import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
@@ -339,7 +340,10 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'set-action-policy') {
       try {
         const result = await applyPolicyChoice(message.mode, policyConfiguration(), vscode.ConfigurationTarget, async (text) => await vscode.window.showWarningMessage(text, { modal: true }, FULL_AUTO_CONFIRM) === FULL_AUTO_CONFIRM);
-        panel.webview.postMessage({ type: 'notice', text: result.text });
+        // 0.4.18: the approval mode is also what decides whether a workflow carries on by itself, so the project's Open-GSD flags follow it. Without
+        // this a run in Auto still stopped at every boundary, because Open-GSD was told to stop.
+        const advanced = await syncAutoAdvance(message.mode, workspaceRoot());
+        panel.webview.postMessage({ type: 'notice', text: `${result.text}${advanced === undefined ? '' : ` ${advanced}`}` });
       } catch (error) {
         panel.webview.postMessage({ type: 'notice', text: `The approval policy could not be saved: ${providerErrorMessage(error)}` });
       }
@@ -890,7 +894,10 @@ async function rememberAllowRule(rule: string, tab: { post(message: unknown): vo
   const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
   const where = target === vscode.ConfigurationTarget.Workspace ? 'workspace' : 'VS Code profile';
   if (!current.includes(rule)) {
-    await configuration.update('agent.allowCommands', [...current, rule], target);
+    // 0.4.18 review: a rejected write must be reported, not thrown into the run. The notice below then says it could not be saved.
+    try {
+      await configuration.update('agent.allowCommands', [...current, rule], target);
+    } catch { /* reported below, from the setting read back */ }
   }
   // Owner decision 2026-11-06: "if they select Allow Every Time, it actually learns to allow it every time". The entry is read back after writing, so
   // the message says what is true rather than what was attempted; a save that did not stick says so, with the one action that fixes it.

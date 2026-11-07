@@ -121,6 +121,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
       <button id="profile" class="chip" type="button" title="Choose the NEAR AI profile for this project">Set up</button>
       <select id="model" aria-label="Model"><option value="">Loading models…</option></select>
       <button id="policy" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="policy-menu" title="How much the agent may do without asking">Approval…</button>
+      <button id="advance" type="button" aria-pressed="false" hidden title="Whether a workflow carries on to its next step by itself">Carrying on</button>
       <span class="spacer"></span>
       <button id="attach" class="icon-button" type="button" aria-label="Attach files" title="Attach images, audio, or text files"></button>
       <button id="stop" class="icon-button" type="button" aria-label="Stop" title="Stop the run (Esc in an empty message box)" hidden></button>

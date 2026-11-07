@@ -208,12 +208,6 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
   const allowList = withAllowList(auto, [...rules.allowCommands, ...grants.allowRules]);
   const classified = classifyCommand(command ?? '', allowList);
   if (classified.verdict !== 'unknown') return decided;
-  if (!auto.safety) {
-    // Owner decision 2026-11-06: with no private safety model, say plainly how to stop these questions, and name what the rules could not place. The
-    // rules already had their chance above (a command they call safe never reaches here), so nothing is allowed by guesswork: the card names the model
-    // to set, which is the one action that ends this class of question for good.
-    return { decision: 'ask', reason: `No private (TEE) safety model is available to check it, and the rules couldn't place this command (${classified.reason}). Set nearAi.agent.safetyModel to a private chat model, such as a TEE chat model that is not the abliterated one, to stop these questions.` };
-  }
   // Say why the safety model did not let it run: skipped (network command in a tainted run, no
   // private model), unable to answer (busy, unreachable, timed out), or answered no.
   const unplaced = `the rules couldn't place this command (${classified.reason})`;
@@ -251,6 +245,11 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
     return { decision: 'ask', reason: `Auto approve held this: ${classified.reason}. Nothing runs outside this project without your say.` };
   }
   if (INSTALLS.test(classified.reason) && riskAllowed('installs', switches)) return { decision: 'allow' };
+  if (!auto.safety) {
+    // 0.4.18 review: this stays after the switches and the structural guards, so a project's own allow switches still decide without a safety
+    // model. The message names the model to set, which is the one action that ends this class of question for good.
+    return { decision: 'ask', reason: `No private (TEE) safety model is available to check it, and ${unplaced}. Set nearAi.agent.safetyModel to a private chat model, such as a TEE chat model that is not the abliterated one, to stop these questions.` };
+  }
   const verdict = await auto.safety.check((command ?? '').trim(), { root: auto.root, cwd: auto.cwd ?? auto.root, outsideContent: grants.tainted }, auto.signal);
   if (verdict.allow) return { decision: 'allow' };
   // The safety model said no: its own reason is the card's, and a kind the project has not allowed says so too.
