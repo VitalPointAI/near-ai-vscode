@@ -19,11 +19,11 @@ export function autoAdvanceFlags(mode: string, current?: Partial<AutoAdvanceFlag
   const flags: Partial<AutoAdvanceFlags> = {};
   // Only writes what differs, so the file is not rewritten on every switch flip.
   //
-  // 0.4.18 review: `_auto_chain_active` is the chain flag the extension owns, and `auto_advance` is the person's own Open-GSD setting. Turning Auto
-  // off must not write `auto_advance: false` over a value somebody chose by hand, so the second is only touched when the caller says the extension owns
-  // it (the switch beside the picker, which is explicit) or when it is turning it on.
+  // 0.4.18: both flags follow the mode together, because Open-GSD carries on only when BOTH are true: clearing one and leaving the other would make the
+  // switch do nothing (the review caught exactly that). `ownsAutoAdvance` exists for a caller that wants to leave the person's `auto_advance` alone,
+  // but the profile sync always owns both, since that is what makes the mode mean what it says.
   if (wanted !== (existing._auto_chain_active === true)) flags._auto_chain_active = wanted;
-  if (wanted || options.ownsAutoAdvance === true) {
+  if (wanted || options.ownsAutoAdvance !== false) {
     if (wanted !== (existing.auto_advance === true)) flags.auto_advance = wanted;
   }
   return flags;

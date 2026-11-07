@@ -18,8 +18,10 @@ test('the flags Open-GSD reads are turned on for Auto and off otherwise, and onl
   assert.deepEqual(autoAdvanceFlags('auto', { _auto_chain_active: true, auto_advance: true }), {});
   // Turning Auto off clears the chain flag, and leaves the person's own `auto_advance` alone unless the caller says the extension owns it (0.4.18
   // review: writing `auto_advance: false` over a value somebody chose by hand is wrong).
-  assert.deepEqual(autoAdvanceFlags('approve-risky', { _auto_chain_active: true, auto_advance: true }), { _auto_chain_active: false });
-  assert.deepEqual(autoAdvanceFlags('approve-risky', { _auto_chain_active: true, auto_advance: true }, { ownsAutoAdvance: true }), { _auto_chain_active: false, auto_advance: false });
+  // Both are cleared together, because Open-GSD carries on only when both are true: clearing one alone would leave the switch doing nothing.
+  assert.deepEqual(autoAdvanceFlags('approve-risky', { _auto_chain_active: true, auto_advance: true }), { _auto_chain_active: false, auto_advance: false });
+  // A caller that must leave the person's own setting alone can say so.
+  assert.deepEqual(autoAdvanceFlags('approve-risky', { _auto_chain_active: true, auto_advance: true }, { ownsAutoAdvance: false }), { _auto_chain_active: false });
   // A mode that already stops writes nothing.
   assert.deepEqual(autoAdvanceFlags('approve-risky', { _auto_chain_active: false, auto_advance: false }), {});
   // The two flags are judged separately, so a half-set project is repaired rather than skipped.
@@ -56,9 +58,9 @@ test('the project flags are written for Auto and cleared for an asking mode, kee
   const off = await syncAutoAdvance('approve-risky', root);
   assert.equal(off, AUTO_ADVANCE_TEXT.off);
   const afterManual = JSON.parse(await readFile(planningConfigFile(root), 'utf8'));
-  assert.equal(afterManual.workflow._auto_chain_active, false, 'the chain flag the extension owns is cleared');
-  // The person's own auto_advance is left as it is, unless the caller says the extension owns it.
-  assert.equal(afterManual.workflow.auto_advance, true, 'auto_advance is not overwritten when Auto is turned off');
+  // Both are cleared, so Open-GSD really stops at its boundary when a person turns the switch off.
+  assert.equal(afterManual.workflow._auto_chain_active, false);
+  assert.equal(afterManual.workflow.auto_advance, false);
 
   // A project without Open-GSD, and a file that cannot be parsed, are both said plainly and never throw.
   assert.equal(await syncAutoAdvance('auto', await mkdtemp(path.join(tmpdir(), 'near-ai-advance-none-'))), undefined);
@@ -77,4 +79,23 @@ test('the chat shows the carrying-on switch beside the approval picker, and clic
   assert.match(page, /advanceButton\.textContent = state\.on \? 'Carrying on' : 'Stops each step'/);
   assert.match(page, /postFor\(\{ type: 'set-action-policy', mode: /, 'the click goes through the same picker message');
   assert.match(page, /case 'action-policy': renderPolicy\(m\); renderAdvance\(m\);/);
+});
+
+test('the carrying-on switch works both ways, and neither way changes the mode more than it says', () => {
+  const { readFileSync } = require('node:fs') as typeof import('node:fs');
+  const path = require('node:path') as typeof import('node:path');
+  const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  // The blocker the review found: while the switch was on, the off branch posted 'auto' again, so it could never be turned off.
+  assert.match(page, /postFor\(\{ type: 'set-action-policy', mode: on \? advanceMode : 'auto' \}\)/, 'off returns to the remembered mode, on goes to Auto');
+  assert.match(page, /if \(m\.mode && m\.mode !== 'auto'\) advanceMode = m\.mode;/, 'only a stopping mode is remembered as the place to return to');
+});
+
+test('the project scratch folder counts as scratch, so a run can run the helper it just wrote there', async () => {
+  const { classifyCommand } = await import('../agent/commandSafety');
+  const root = '/work/app';
+  const ctx = { root, cwd: root, home: '/home/dev', writtenScratch: [`${root}/.near-ai/scratch/verify.py`] };
+  // The run is told to keep helpers here, so following that instruction must not ask.
+  assert.equal(classifyCommand('python3 .near-ai/scratch/verify.py', ctx).verdict, 'safe');
+  // A script there the run did not write still asks, like anywhere else.
+  assert.equal(classifyCommand('python3 .near-ai/scratch/other.py', ctx).verdict, 'unknown');
 });

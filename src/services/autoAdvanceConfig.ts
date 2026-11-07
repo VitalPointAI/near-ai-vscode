@@ -2,8 +2,10 @@
 // from the project's .planning/config.json and stops at every boundary when both are false. The approval mode decides them, so a run in Auto carries on
 // by itself and a run in an asking mode stops.
 //
-// Careful with the file: it belongs to the person's project, may have comments, and holds settings the extension must not disturb. Only the two keys are
-// changed, everything else is preserved as text, and a file that cannot be parsed is left exactly as it was, with a plain sentence saying so.
+// Careful with the file: it belongs to the person's project and holds settings the extension must not disturb. It is read as JSON, the two keys are
+// changed, and it is written back with two-space indentation, so a key the person added survives but the file's original formatting (and any comment,
+// which JSON does not allow) does not. A file that cannot be parsed, or is not a JSON object, is left exactly as it was, with a plain sentence saying
+// so.
 import { readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { AUTO_ADVANCE_TEXT, autoAdvanceFlags } from '../domain/autoAdvance';
@@ -24,7 +26,12 @@ export async function syncAutoAdvance(mode: string, root: string | undefined): P
   if (raw === undefined) return undefined;
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(raw) as Record<string, unknown>;
+    const value = JSON.parse(raw) as unknown;
+    // A `null`, an array or a scalar is not a config object: leave it alone rather than replacing it with one.
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return 'The project\'s .planning/config.json is not a settings object, so each step still stops at its boundary.';
+    }
+    parsed = value as Record<string, unknown>;
   } catch {
     return 'The project\'s .planning/config.json could not be read, so each step still stops at its boundary.';
   }

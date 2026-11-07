@@ -356,19 +356,23 @@ function realPathOrSelf(target: string): string {
 }
 
 function scratchRoots(context: CommandContext): string[] {
+  // 0.4.18 review: the run is told to keep its helpers in the project's own scratch folder (.near-ai/scratch/), so that folder must count as scratch
+  // too. It is inside the workspace, so it is already allowed for reads and writes; this makes a SCRIPT there runnable once the run itself wrote it.
+  const projectScratch = path.join(path.resolve(context.root), '.near-ai', 'scratch');
   const home = context.home ? path.resolve(context.home) : undefined;
   const root = path.resolve(context.root);
   const candidates = ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])].map((entry) => path.resolve(entry));
   // 0.4.18 review: TMPDIR comes from the extension's own environment, so a TMPDIR of the home folder or of `/` would make the whole home or the whole
   // filesystem "scratch". A root is accepted only when it is a real temporary folder: not `/`, not the home folder, not the workspace, and not an
   // ancestor of either.
-  return candidates.filter((candidate) => {
+  const real = candidates.filter((candidate) => {
     if (candidate === path.parse(candidate).root) return false;
     for (const mustNotContain of [home, root]) {
       if (mustNotContain !== undefined && isInside(candidate, mustNotContain)) return false;
     }
     return true;
   });
+  return [...real, projectScratch];
 }
 
 function scratchFacts(text: string, absolute: string, sensitive: boolean, context: CommandContext): boolean {

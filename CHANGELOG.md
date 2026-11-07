@@ -15,8 +15,9 @@
   this run wrote may run, a symlink out of `/tmp` is refused, and `rm`, the network, keys and any
   other folder still ask.
 - **Scratch work stays inside the project.** Each project keeps its scratch files in
-  `.near-ai/scratch/`, gitignored and emptied after a run, so drafts are never committed and the
-  project does not grow.
+  `.near-ai/scratch/` and attached files in `.near-ai/attachments/`. Both are added to the
+  project's `.gitignore` the first time a set-up project opens, so drafts and copied attachments are
+  never committed, and the scratch folder is emptied after each run so the project does not grow.
 - **Research accumulates instead of repeating.** The team writes its own findings files and reads
   what Open-GSD already researched before adding to it, so the same question is not researched twice.
 

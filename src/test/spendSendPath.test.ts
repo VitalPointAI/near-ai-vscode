@@ -243,13 +243,19 @@ function assertReconciled(outcome: Outcome): void {
 }
 
 test('S1. a GSD plan step in auto mode (2 foreground + 1 background sub-agent, safety checks): every request is in the ledger, at NEAR\'s cost', async () => {
-  const outcome = await scenario('S1', { main: PLAN_MAIN }, async (sidebar) => { await sidebar.send({ type: 'open-command', command: 'plan-phase', model: MAIN }); });
+  // The sidebar is captured here so the approvals it recorded can be checked (0.4.18 review).
+  let view: Awaited<ReturnType<typeof openSidebar>> | undefined;
+  const outcome = await scenario('S1', { main: PLAN_MAIN }, async (sidebar) => { view = sidebar; await sidebar.send({ type: 'open-command', command: 'plan-phase', model: MAIN }); });
   assertReconciled(outcome);
   const kinds = new Set(outcome.account.ledger.list().map((entry) => entry.kind));
   // 0.4.18: the run's main and sub-agent requests are recorded, and any safety check it made is part of the same run (the count itself is not pinned:
   // a managed GSD step is placed by the rules and may reach the model, which is fine, it just must not ask afterwards).
   for (const kind of ['main', 'sub-agent'] as const) assert.ok(kinds.has(kind), `S1 records ${kind} requests`);
-  assert.equal(outcome.account.ledger.list().filter((entry) => entry.kind === 'safety').every((entry) => entry.runId !== undefined), true, 'every safety check belongs to the run');
+  // 0.4.18 review: this used to be a vacuous `[].every(...)`. What matters is that the managed GSD step did not ASK the person: the scenario records
+  // every approval request, and an auto run that is placed by the rules asks for nothing.
+  const asked = (view?.posted ?? []).filter((message) => message.type === 'approval-request');
+  assert.deepEqual(asked.map((message) => message.title), [], 'an auto GSD step asks the person for nothing');
+  assert.equal(outcome.account.ledger.list().filter((entry) => entry.kind === 'safety').every((entry) => entry.runId !== undefined), true, 'every safety check it did make belongs to the run');
   const runIds = new Set(outcome.account.ledger.list().map((entry) => entry.runId));
   assert.equal(runIds.size, 1, 'the sub-agents (background one included) and safety checks belong to the run');
   // The reply footer: the run's ledger total, then NEAR's figure for all of it.
