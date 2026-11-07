@@ -688,6 +688,8 @@
     "watch": "tsc -p tsconfig.json --watch",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run compile && node --test dist/test/*.test.js scripts/test/*.test.mjs",
+    "report:spend": "node scripts/spend-report.mjs",
+    "experiment": "node scripts/ab-task.mjs",
     "package": "npm run compile && npm run sbom && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
     "generate:icon": "node scripts/generate-near-ai-icon.mjs",
     "install:global": "node scripts/install-global-extension.mjs",
