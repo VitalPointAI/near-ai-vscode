@@ -180,3 +180,40 @@ test('a saved conversation resumes with its full context', async () => {
   assert.ok(seen[0].some((message) => message.role === 'tool' && message.content.includes('hello')), 'the earlier tool result is back in context');
   assert.deepEqual(visibleTurns(seen[0]).map((turn) => turn.text), ['What does note.md say?', 'The note says hello.', 'and now?']);
 });
+
+// ---- Check now (0.4.19 review) ----------------------------------------------------------------------------------------------------------
+// The button interrupts a wait at once, but only a turn that is actually in flight may be cut: an interrupt queued behind a pause would be swallowed
+// and then fire on a later, unrelated turn.
+test('Check now interrupts a working agent and only queues for a paused one', async () => {
+  const { gsd, posted, conversation } = await project();
+  const client = scriptedClient({
+    parent: [{ calls: [call('a1', 'Agent', { subagent_type: 'gsd-planner', prompt: 'long job' })] }, { text: 'finished' }],
+    child: [{ calls: [call('r1', 'Read', { file_path: 'missing.txt' })], delayMs: 200 }, { text: 'report' }]
+  });
+  const running = conversation.send(request(client, gsd));
+  let agentId: string | undefined;
+  for (let attempt = 0; attempt < 200 && !agentId; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    agentId = (posted.filter((message) => message.type === 'agents').at(-1)?.agents as Array<{ id: string }> | undefined)?.[0]?.id;
+  }
+  assert.ok(agentId, 'the sub-agent started');
+  // Working: the check lands as an interruption, which ends the wait at once.
+  posted.length = 0;
+  assert.equal(conversation.controlAgent(agentId, 'nudge'), true);
+  assert.deepEqual(posted.filter((message) => message.type === 'steer-state').map((message) => message.state), ['queued', 'interrupting']);
+  // Paused: the check is queued and delivered, but cuts no turn.
+  conversation.controlAgent(agentId, 'pause');
+  posted.length = 0;
+  assert.equal(conversation.controlAgent(agentId, 'nudge'), true);
+  assert.deepEqual(posted.filter((message) => message.type === 'steer-state').map((message) => message.state), ['queued'], 'a paused agent is not interrupted');
+  conversation.controlAgent(agentId, 'stop');
+  await running.catch(() => undefined);
+  conversation.dispose();
+});
+
+test('Check now for an agent that has gone is refused, so the button cannot claim the check ran', async () => {
+  const { gsd, posted, conversation } = await project();
+  await conversation.send(request(scriptedClient({ parent: [{ text: 'done' }] }), gsd));
+  assert.equal(conversation.controlAgent('gsd-planner-gone', 'nudge'), false);
+  assert.deepEqual(posted.filter((message) => message.type === 'steer-state'), [], 'nothing was queued for an agent that is not there');
+});

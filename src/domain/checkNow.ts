@@ -22,8 +22,9 @@ export function isCheckNow(text: string): boolean {
 }
 
 /**
- * How a run is told to wait for something outside it (CI, a review, a deployment): in short polls, never one long sleep, so a person can interrupt it and
- * a verdict that lands early is picked up at once.
+ * How a run is told to wait for something outside it (CI, a review, a deployment): by asking GitHub again rather than by sleeping. Open-GSD's own guidance
+ * says "Never wait with sleep", so this says the same thing and gives the reason: a poll loop the person can interrupt, and a verdict that lands early is
+ * picked up at once.
  */
 export const WAITING_INSTRUCTIONS = `# Waiting for something outside the run
-When you must wait for CI, a review verdict, a deployment or another person, never sleep for minutes in one command. Poll in short steps (no more than about 20 seconds each), check the real state from GitHub with \`gh\` each time, and stop the moment the answer is there. Slow enough to be cheap, short enough to interrupt: a person watching can press **Check now** (which interrupts the wait) or **Steer**, and either arrives at your next step rather than after a long sleep. Write any temporary poll output in \`${SCRATCH_DIR}/\`.`;
+When you must wait for CI, a review verdict, a deployment or another person, never wait with \`sleep\` for minutes. Ask GitHub for the real state with \`gh\` again and again, and stop the moment the answer is there. A person watching can press **Check now** (which interrupts the wait) or **Steer**, and either arrives at your next check rather than after a long sleep. Write any temporary poll output in \`${SCRATCH_DIR}/\`.`;

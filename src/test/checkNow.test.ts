@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
+import * as vm from 'node:vm';
 import { CHECK_NOW_MARKER, WAITING_INSTRUCTIONS, checkNowMessage, isCheckNow } from '../domain/checkNow';
 
 test('the Check now message is marked, and says exactly what to do', () => {
@@ -18,19 +19,126 @@ test('the Check now message is marked, and says exactly what to do', () => {
   assert.equal(isCheckNow('carry on with the plan'), false);
 });
 
-test('a run is told to wait in short polls, so a Check now lands quickly and an early verdict is seen at once', () => {
-  assert.match(WAITING_INSTRUCTIONS, /never sleep for minutes in one command/);
-  assert.match(WAITING_INSTRUCTIONS, /Poll in short steps/);
-  assert.match(WAITING_INSTRUCTIONS, /no more than about 20 seconds/);
+test('a run is told to wait by checking again, so a Check now lands quickly and an early verdict is seen at once', () => {
+  // 0.4.18 review: Open-GSD's own guidance says "Never wait with sleep", so this note says the same thing rather than prescribing a sleep loop.
+  assert.match(WAITING_INSTRUCTIONS, /never wait with `sleep`/);
   assert.match(WAITING_INSTRUCTIONS, /Check now/);
   assert.match(WAITING_INSTRUCTIONS, /Steer/);
   assert.match(WAITING_INSTRUCTIONS, /\.near-ai\/scratch\//);
 });
 
-test('the chat shows a Check now button on a running agent, and it sends the marked message', () => {
-  const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
-  // 0.4.18 review: assert the real click, not just that the words appear somewhere. The control is on the running row and posts the nudge action.
-  assert.match(page, /textButton\('Check now', \(\) => post\(\{ type: 'agent-control', agentId: agent\.id, action: 'nudge' \}\)\)/, 'the button posts the nudge action');
+// A DOM just large enough to start the real chat page, so the button is judged by what it does rather than by the words in its source. The page needs
+// only a handful of node methods and the five helper kits panelView loads before it; anything it reaches for that is missing fails the test loudly.
+function chatPage(): { nodes: Map<string, StubNode>; send: (data: unknown) => void; posts: unknown[]; sent: () => unknown[] } {
+  const nodes = new Map<string, StubNode>();
+  const posts: unknown[] = [];
+  const listeners: Array<(event: { data: unknown }) => void> = [];
+  const document = new StubDocument(nodes);
+  const window = new StubNode('window');
+  const context: Record<string, unknown> = {
+    document, window, console, setTimeout, clearTimeout, setInterval, clearInterval, Date, Math, JSON, Intl, structuredClone,
+    requestAnimationFrame: (run: () => void) => setTimeout(run, 0),
+    getComputedStyle: () => ({ getPropertyValue: () => '' }),
+    ResizeObserver: class { public observe(): void {} public unobserve(): void {} public disconnect(): void {} },
+    acquireVsCodeApi: () => ({ postMessage: (message: unknown) => { posts.push(message); }, getState: () => undefined, setState: () => undefined })
+  };
+  // The kits panelView loads before chat.js, stubbed to their published shapes.
+  Object.assign(window, {
+    nearMarkdown: { render: (text: string) => text },
+    nearTables: { capture: () => ({ wraps: [], scroll: [], focused: -1, inner: -1 }), restore: () => [], syncTabStop: () => undefined, focusLeft: () => undefined, watchSizes: () => ({ observe: () => undefined, release: () => undefined, reset: () => undefined }) },
+    nearPending: { createPendingQueue: () => ({ add: () => undefined, close: () => undefined, remove: () => undefined }) },
+    nearComposer: { insertCommand: (value: string) => ({ text: value, caret: 0 }) },
+    nearSetup: { renderSetupNudge: () => undefined, welcomeState: () => 'ready', applyWelcomeState: () => undefined }
+  });
+  window.addEventListener = ((type: string, listener: (event: { data: unknown }) => void) => { if (type === 'message') listeners.push(listener); }) as never;
+  context.globalThis = context;
+  vm.createContext(context);
+  const source = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  new vm.Script(source, { filename: 'chat.js' }).runInContext(context);
+  // Messages are made inside the page's own context, so they are compared as plain data rather than by prototype.
+  const sent = () => posts.map((message) => JSON.parse(JSON.stringify(message)) as unknown);
+  return { nodes, send: (data) => { for (const listener of listeners) listener({ data }); }, posts, sent };
+}
+
+class StubNode {
+  public readonly children: StubNode[] = [];
+  public readonly attributes = new Map<string, string>();
+  public readonly dataset: Record<string, string> = {};
+  public readonly style: Record<string, string> = {};
+  public readonly classList = { add: () => undefined, remove: () => undefined, toggle: () => undefined, contains: () => false };
+  public readonly listeners: Record<string, Array<(event: { preventDefault(): void; target: unknown }) => void>> = {};
+  public id = '';
+  public textContent = '';
+  public value = '';
+  public hidden = false;
+  public type = '';
+  public title = '';
+  public disabled = false;
+  public checked = false;
+  public constructor(public readonly tagName: string) {}
+  public append(...nodes: StubNode[]): void { this.children.push(...nodes); }
+  public prepend(...nodes: StubNode[]): void { this.children.unshift(...nodes); }
+  public insertBefore(node: StubNode): void { this.children.push(node); }
+  public replaceChildren(...nodes: StubNode[]): void { this.children.splice(0, this.children.length, ...nodes); }
+  public addEventListener(type: string, listener: (event: { preventDefault(): void; target: unknown }) => void): void { (this.listeners[type] ??= []).push(listener); }
+  public removeEventListener(): void {}
+  public remove(): void {}
+  public setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
+  public getAttribute(name: string): string | undefined { return this.attributes.get(name); }
+  public querySelector(): undefined { return undefined; }
+  public querySelectorAll(): StubNode[] { return []; }
+  public contains(): boolean { return false; }
+  public closest(): undefined { return undefined; }
+  public focus(): void {}
+  public blur(): void {}
+  public scrollIntoView(): void {}
+  public setSelectionRange(): void {}
+  public getBoundingClientRect(): { width: number; height: number; top: number; left: number; bottom: number; right: number } { return { width: 100, height: 20, top: 0, left: 0, bottom: 20, right: 100 }; }
+  public click(): void { for (const listener of this.listeners.click ?? []) listener({ preventDefault: () => undefined, target: this }); }
+  /** Every node below this one that matches. A page may append a bare string as a separator, which is not a node. */
+  public all(predicate: (node: StubNode) => boolean): StubNode[] {
+    return this.children.filter((child) => child instanceof StubNode).flatMap((child) => [...(predicate(child) ? [child] : []), ...child.all(predicate)]);
+  }
+}
+
+class StubDocument {
+  public readonly body = new StubNode('body');
+  public readonly documentElement = new StubNode('html');
+  public activeElement: StubNode | undefined;
+  public constructor(private readonly nodes: Map<string, StubNode>) {}
+  public createElement(tag: string): StubNode { return new StubNode(tag); }
+  public createElementNS(_namespace: string, tag: string): StubNode { return new StubNode(tag); }
+  public createTextNode(text: string): StubNode { const node = new StubNode('#text'); node.textContent = text; return node; }
+  public getElementById(id: string): StubNode { if (!this.nodes.has(id)) { const node = new StubNode('div'); node.id = id; this.nodes.set(id, node); } return this.nodes.get(id) as StubNode; }
+  public querySelector(): undefined { return undefined; }
+  public querySelectorAll(): StubNode[] { return []; }
+  public addEventListener(): void {}
+  public removeEventListener(): void {}
+  public hasFocus(): boolean { return true; }
+  public execCommand(): boolean { return true; }
+}
+
+test('the chat draws a real Check now button on a running agent, which posts that agent\'s own nudge', () => {
+  const page = chatPage();
+  // The row the host sends for a running sub-agent, exactly as agentSession posts it.
+  page.send({ type: 'agents', count: 1, agents: [{ id: 'gsd-planner-abc123', label: 'gsd-planner', description: 'Draft a plan', model: 'z-ai/glm-5.3', paused: false, background: false, activity: 'Thinking', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 2, turns: 1 }] });
+  const panel = page.nodes.get('agents') as StubNode;
+  assert.equal(panel.hidden, false, 'the agents strip is shown');
+  const buttons = panel.all((node) => node.tagName === 'button').filter((node) => /^(Check now|Pause|Resume|Stop)$/.test(node.textContent));
+  assert.deepEqual(buttons.map((node) => node.textContent), ['Pause', 'Check now', 'Stop'], 'the control sits on the running row');
+  const nudge = buttons[1] as StubNode;
+  // A hidden control, or one that names another agent, passes a source regex and fails here.
+  assert.equal(nudge.hidden, false);
+  page.posts.length = 0;
+  nudge.click();
+  assert.deepEqual(page.sent(), [{ type: 'agent-control', agentId: 'gsd-planner-abc123', action: 'nudge' }], 'the click carries this agent\'s id');
+  // A paused agent offers Resume and Check now, never Pause: the nudge is still offered, because the wait can outlive the pause.
+  page.send({ type: 'agents', count: 1, agents: [{ id: 'gsd-worker-def456', label: 'gsd-worker', paused: true, background: false, activity: 'Paused', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 }] });
+  const paused = panel.all((node) => node.tagName === 'button').filter((node) => /^(Check now|Pause|Resume|Stop)$/.test(node.textContent));
+  assert.deepEqual(paused.map((node) => node.textContent), ['Resume', 'Check now', 'Stop']);
+  page.posts.length = 0;
+  (paused[1] as StubNode).click();
+  assert.deepEqual(page.sent(), [{ type: 'agent-control', agentId: 'gsd-worker-def456', action: 'nudge' }], 'the second agent gets its own id, not the first one\'s');
 });
 
 test('the nudge action goes through the sidebar parser and reaches the agent as an interruption', async () => {

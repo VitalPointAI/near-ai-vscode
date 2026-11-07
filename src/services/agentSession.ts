@@ -28,7 +28,7 @@ import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { SCRATCH_INSTRUCTIONS } from '../domain/scratch';
-import { WAITING_INSTRUCTIONS, checkNowMessage } from '../domain/checkNow';
+import { WAITING_INSTRUCTIONS, checkNowMessage, isCheckNow } from '../domain/checkNow';
 import { cleanScratch } from './scratch';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
@@ -159,6 +159,9 @@ export interface SteerMessage { id: string; text: string }
 
 /** How a message sent during a run reaches the agent: marked, so it knows it is new direction. */
 export function steeringContent(text: string): string {
+  // 0.4.19: a "Check now" message is not new direction, it is a request to look at the real state again, so it is wrapped as that. Left as ordinary
+  // direction it reads like a plan change, and the agent may answer it instead of polling, which is the wait this button exists to end.
+  if (isCheckNow(text)) return `<check-now>\n${text}\n</check-now>\nThis is not a change of plan. Stop waiting and look at the real state now, then carry on from what you find.`;
   return `<user-message-during-run>\n${text}\n</user-message-during-run>\nThe user sent this while you were working. It is new direction: it takes precedence over your current plan, so adjust what you are doing (or stop and answer) and say briefly how you changed course.`;
 }
 
@@ -424,10 +427,11 @@ export class AgentConversation {
     const agent = this.agents.get(agentId);
     if (!agent) return false;
     if (action === 'nudge') {
-      // 0.4.19: "Check now". The agent is told, as an interruption, to look at the real state again instead of waiting out its poll. A run that is not
-      // waiting simply carries on with this as its newest direction.
+      // 0.4.19: "Check now". The agent is told to look at the real state again instead of waiting out its poll. Only a working agent is interrupted: a
+      // paused one is not thinking about anything, and an interrupt there would be swallowed by the pause and then fire on a later, unrelated turn.
       const id = `steer-${randomBytes(6).toString('hex')}`;
-      this.steer(id, checkNowMessage(), { interrupt: true });
+      const working = !agent.paused && !agent.abort.signal.aborted;
+      this.steer(id, checkNowMessage(), { interrupt: working });
       return true;
     }
     if (action === 'stop') agent.abort.abort();
