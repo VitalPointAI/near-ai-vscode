@@ -610,8 +610,10 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     // A workflow runs both forms, the whole preamble block and a bare `gsd_run query …`, and the second used to arrive with no gsdRun decision, so
     // every one of those steps was "unknown" and asked (owner, 2026-11-06: GSD stopped between phases and every planning edit asked).
     const runtime = context.gsdRuntime;
-    // The forms a workflow uses: the preamble block, a bare `gsd_run`/`gsd-tools` call, and `node "$GSD_TOOLS" …` (what gsd_run itself runs).
-    const mentionsGsd = /(?:^|[\s;&|(])gsd[_-](?:run|tools)\b|gsd-core\/bin\/gsd-tools\.cjs|GSD_TOOLS|_GSD_SHIM_NAME=/.test(command);
+    // The forms a workflow uses: the preamble block (`_GSD_SHIM_NAME=`), a bare `gsd_run`/`gsd-tools` command, and `$GSD_TOOLS` (what gsd_run itself
+    // runs). A path that merely contains "gsd-tools.cjs" is NOT one of them: a look-alike runtime elsewhere must still ask, and it would otherwise be
+    // handed a trusted decision for the managed runtime.
+    const mentionsGsd = /(?:^|[\s;&|(])gsd[_-](?:run|tools)\b|\$GSD_TOOLS\b|_GSD_SHIM_NAME=/.test(command);
     const gsd = runtime?.preambles.length && mentionsGsd
       ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
