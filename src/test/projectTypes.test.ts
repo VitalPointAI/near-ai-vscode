@@ -114,3 +114,38 @@ test('the software team has a devops member who sets up the protected workflow a
   // Every other agent follows the same flow.
   assert.match(software.guidance, /\*\*Workflow:\*\*[^\n]*pull requests[^\n]*protected[^\n]*approval/);
 });
+
+// ---- 0.4.18: a research project's team augments Open-GSD's research instead of replacing it (owner, 2026-11-06) -------------------------
+// The owner saw research reports take a very long time and suspected the same research was done more than once. It is: /gsd-new-project runs four
+// project researchers and /gsd-plan-phase runs one per phase, and the team's own investigator then wrote into the same folder with no named file.
+test('the research team writes its own files, so it can never overwrite what Open-GSD owns', () => {
+  const members = projectType('research')!.members;
+  const investigator = members.find((member) => member.name === 'investigator')!;
+  const analyst = members.find((member) => member.name === 'analyst')!;
+  assert.match(investigator.instructions, /\.planning\/research\/TEAM-FINDINGS\.md/, 'its own file, not the folder');
+  assert.match(analyst.instructions, /\.planning\/research\/TEAM-ANALYSIS\.md/);
+  // The files Open-GSD writes are named as never-write, so a member cannot replace one by accident.
+  for (const owned of ['STACK.md', 'FEATURES.md', 'ARCHITECTURE.md', 'PITFALLS.md', 'SUMMARY.md']) {
+    assert.ok(investigator.instructions.includes(owned), `investigator: ${owned} is named as Open-GSD's`);
+  }
+  assert.match(investigator.instructions, /never write to a file Open-GSD owns/);
+  assert.match(analyst.instructions, /never overwrite a file Open-GSD owns/);
+});
+
+test('the research team reads what is already researched and adds only what is missing', () => {
+  const investigator = projectType('research')!.members.find((member) => member.name === 'investigator')!;
+  // It reads first, does not repeat what is covered, and says what it added.
+  assert.match(investigator.instructions, /Read \.planning\/research\/ before you search/);
+  assert.match(investigator.instructions, /Do not repeat what those files already establish/);
+  assert.match(investigator.instructions, /Add only what is missing, newer, or contradicted/);
+  assert.match(investigator.instructions, /say in one line what was already covered and what you are adding/);
+});
+
+test('the research project guidance says research comes first and accumulates, and that GSD extends it', () => {
+  const guidance = projectType('research')!.guidance;
+  assert.match(guidance, /Research comes first/);
+  assert.match(guidance, /one accumulating body of work/);
+  assert.match(guidance, /TEAM-FINDINGS\.md/);
+  assert.match(guidance, /extended, never replaced/);
+  assert.match(guidance, /never research the same question twice without saying why/i);
+});
