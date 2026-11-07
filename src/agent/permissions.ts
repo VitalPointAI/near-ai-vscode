@@ -198,16 +198,22 @@ export function decidePermission(capability: ActionCapability, command: string |
 }
 
 /**
- * decidePermission, plus the `auto` mode's model check: a shell command the rules call `unknown`
- * goes to the private safety model, unless the run has read outside content (which could have
- * steered both the agent and the check) or no private model is available; then it asks. Every
- * other mode decides exactly as decidePermission does.
+ * decidePermission, plus the `auto` mode's model check: a shell command the rules call `unknown` goes to the private safety model. With no private
+ * model available the rules decide instead (a whole command they could place is allowed), which keeps a run moving when the model is missing or was
+ * never set to a private one. Every other mode decides exactly as decidePermission does.
  */
 export async function decidePermissionAsync(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: AutoApprovalContext, intrusive?: IntrusiveStep): Promise<PermissionDecision> {
   const decided = decidePermission(capability, command, policy, rules, grants, auto, intrusive);
   if (policy.mode !== 'auto' || capability !== 'shell' || decided.decision !== 'ask' || !auto) return decided;
-  const classified = classifyCommand(command ?? '', withAllowList(auto, [...rules.allowCommands, ...grants.allowRules]));
+  const allowList = withAllowList(auto, [...rules.allowCommands, ...grants.allowRules]);
+  const classified = classifyCommand(command ?? '', allowList);
   if (classified.verdict !== 'unknown') return decided;
+  if (!auto.safety) {
+    // Owner decision 2026-11-06: with no private safety model, say plainly how to stop these questions, and name what the rules could not place. The
+    // rules already had their chance above (a command they call safe never reaches here), so nothing is allowed by guesswork: the card names the model
+    // to set, which is the one action that ends this class of question for good.
+    return { decision: 'ask', reason: `No private (TEE) safety model is available to check it, and the rules couldn't place this command (${classified.reason}). Set nearAi.agent.safetyModel to a private chat model, such as a TEE chat model that is not the abliterated one, to stop these questions.` };
+  }
   // Say why the safety model did not let it run: skipped (network command in a tainted run, no
   // private model), unable to answer (busy, unreachable, timed out), or answered no.
   const unplaced = `the rules couldn't place this command (${classified.reason})`;
@@ -245,7 +251,6 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
     return { decision: 'ask', reason: `Auto approve held this: ${classified.reason}. Nothing runs outside this project without your say.` };
   }
   if (INSTALLS.test(classified.reason) && riskAllowed('installs', switches)) return { decision: 'allow' };
-  if (!auto.safety) return { decision: 'ask', reason: `No private (TEE) safety model is available to check it, and ${unplaced}.` };
   const verdict = await auto.safety.check((command ?? '').trim(), { root: auto.root, cwd: auto.cwd ?? auto.root, outsideContent: grants.tainted }, auto.signal);
   if (verdict.allow) return { decision: 'allow' };
   // The safety model said no: its own reason is the card's, and a kind the project has not allowed says so too.

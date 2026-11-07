@@ -536,3 +536,33 @@ test('auto: the installs switch covers an install and nothing else, and the ship
   const buildOn = (await decidePermissionAsync('shell', 'npm run build', auto, DEFAULT_RULES, new RunGrants(), on)).decision;
   assert.equal(buildOn, buildOff, 'the installs switch does not decide an npm script');
 });
+
+// ---- 0.4.18: an Open-GSD step no longer asks (owner, 2026-11-06: GSD stopped between phases) ----------------------------------------
+test('auto: a bare gsd_run call gets the Open-GSD decision too, not only a command that starts with the preamble', async () => {
+  const { PREAMBLE_START } = await import('../gsd/preamble');
+  const home = '/storage/gsd/1.20.1';
+  const preamble = `${PREAMBLE_START} ...the block...`;
+  const runtime = { home, preambles: [preamble] };
+  const seen: Array<{ trimmed: boolean; commands: string[] }> = [];
+  const run = new AgentRun({
+    client: { async *streamCompletion() { yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage: { verificationStatus: 'unknown' as const } } as never; } },
+    model: 'm', tools: [], context: { root: where.root, checkpoints: new RunCheckpoints('gsd-auto'), readFiles: new Set() } as never,
+    policy: { mode: 'auto', emergencyStop: false }, rules: DEFAULT_RULES,
+    // The safety model is deliberately absent: the rules and the GSD trust have to carry these commands.
+    requestApproval: async (request) => { seen.push({ trimmed: false, commands: [request.title] }); return { decision: 'allow' }; },
+    emit: () => undefined
+  });
+  // The check under test is the one autoContext makes: is a GSD decision attached for each form of the call?
+  const autoContext = (run as unknown as { autoContext(context: unknown, command: string): Promise<Record<string, unknown>> }).autoContext.bind(run);
+  // The runtime rides on the shell context, which is where autoContext reads it from.
+  const context = { root: where.root, shell: { workingDirectory: where.root, environment: { CLAUDE_CONFIG_DIR: home } }, gsdRuntime: runtime };
+  for (const command of [preamble, 'gsd_run query init.plan-phase 01', 'node $GSD_TOOLS query state']) {
+    const built = await autoContext(context, command);
+    assert.ok(built.gsdPreambles !== undefined, `${command.slice(0, 40)}: the preamble list is attached`);
+    assert.ok(built.gsdRun !== undefined, `${command.slice(0, 40)}: the trusted-runtime decision is made`);
+  }
+  // A command that has nothing to do with Open-GSD is not given the decision, so the check costs nothing there.
+  const plain = await autoContext(context, 'npm test');
+  assert.equal(plain.gsdPreambles, undefined);
+  assert.deepEqual(seen, []);
+});
