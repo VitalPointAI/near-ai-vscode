@@ -5,7 +5,7 @@
 export const AGENT_DEFAULTS = {
   tiers: { deep: 'moonshotai/kimi-k3', standard: 'z-ai/glm-5.3', fast: 'Qwen/Qwen3.6-35B-A3B-FP8' },
   maxTurns: 60,
-  maxParallelAgents: 4,
+  maxParallelAgents: 8,
   maxRunCostUsd: 5,
   maxRunTokens: 4_000_000,
   maxOutputTokens: 32_000,
