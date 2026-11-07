@@ -86,7 +86,11 @@ class StubNode {
   public setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
   public getAttribute(name: string): string | undefined { return this.attributes.get(name); }
   public querySelector(): undefined { return undefined; }
-  public querySelectorAll(): StubNode[] { return []; }
+  /** Every descendant of a role, which is how a picker lists its own options. */
+  public querySelectorAll(selector: string): StubNode[] {
+    const role = /\[role="([\w-]+)"\]/.exec(selector)?.[1];
+    return role === undefined ? [] : this.all((node) => node.getAttribute('role') === role);
+  }
   public contains(): boolean { return false; }
   public closest(): undefined { return undefined; }
   public focus(): void {}
@@ -111,7 +115,11 @@ class StubDocument {
   public createTextNode(text: string): StubNode { const node = new StubNode('#text'); node.textContent = text; return node; }
   public getElementById(id: string): StubNode { if (!this.nodes.has(id)) { const node = new StubNode('div'); node.id = id; this.nodes.set(id, node); } return this.nodes.get(id) as StubNode; }
   public querySelector(): undefined { return undefined; }
-  public querySelectorAll(): StubNode[] { return []; }
+  /** Every element of a role anywhere in the body, which is how the pickers find their options. */
+  public querySelectorAll(selector: string): StubNode[] {
+    const role = /\[role="([\w-]+)"\]/.exec(selector)?.[1];
+    return role === undefined ? [] : this.body.all((node) => node.getAttribute('role') === role);
+  }
   public addEventListener(): void {}
   public removeEventListener(): void {}
   public hasFocus(): boolean { return true; }
@@ -152,4 +160,40 @@ test('the nudge action goes through the sidebar parser and reaches the agent as 
     assert.equal(parsed?.action, action);
   }
   assert.equal(parseChatWebviewMessage({ type: 'agent-control', agentId: 'agent-1-abc123', action: 'restart' }), undefined, 'an unknown action is refused');
+});
+
+// The between-steps picker, on the same page stand-in (owner, 2026-11-06: "clicking it doesn't let me toggle or choose to go back to asking me between
+// phases"). The old test was a regex over the source, so an empty option list, which is exactly the reported bug, still passed.
+test('the between-steps picker renders from the host message and offers every way back to asking', () => {
+  const page = chatPage();
+  const options = [
+    { mode: 'approve-risky', label: 'Approve risky actions', summary: 'Asks before anything risky', description: '', risky: false },
+    { mode: 'mostly-autonomous', label: 'Mostly autonomous', summary: 'Asks about outside folders', description: '', risky: false },
+    { mode: 'fully-autonomous', label: 'Fully autonomous', summary: 'Runs everything', description: '', risky: true }
+  ];
+  page.send({ type: 'action-policy', mode: 'fully-autonomous', stopped: false, scope: 'workspace', options, autoAdvance: { on: true, text: 'Each step starts the next one by itself.' } });
+  const button = page.nodes.get('advance') as StubNode;
+  const menu = page.nodes.get('advance-menu') as StubNode;
+  assert.equal(button.hidden, false, 'the picker is shown');
+  assert.equal(button.textContent, 'Carrying on', 'the label says what is happening now');
+  const rendered = menu.all((node) => node.tagName === 'div' && node.id.startsWith('advance-option-')).map((node) => [node.id, node.dataset.mode]);
+  assert.deepEqual(rendered, [
+    ['advance-option-auto', 'auto'],
+    ['advance-option-approve-risky', 'approve-risky'],
+    ['advance-option-mostly-autonomous', 'mostly-autonomous'],
+    ['advance-option-fully-autonomous', 'fully-autonomous']
+  ], 'carrying on, then a real choice for every asking mode: a person picks rather than toggles');
+  assert.equal(menu.all((node) => node.getAttribute('role') === 'option').find((node) => node.getAttribute('aria-selected') === 'true')?.dataset.mode, 'auto', 'the current choice is marked');
+  // Choosing a way back to asking posts the same message the approval picker posts, which the host then saves.
+  page.posts.length = 0;
+  (menu.all((node) => node.id === 'advance-option-approve-risky')[0] as StubNode).click();
+  assert.deepEqual(page.sent(), [{ type: 'set-action-policy', mode: 'approve-risky' }]);
+  assert.equal(menu.hidden, true, 'the menu closes after a choice');
+  // Stopping between steps with no mode set marks the mode that is in force, so the check never sits on "carrying on" by mistake.
+  page.send({ type: 'action-policy', mode: 'mostly-autonomous', stopped: true, scope: 'workspace', options, autoAdvance: { on: false, text: 'Stops at every step.' } });
+  assert.equal(button.textContent, 'Stops each step');
+  assert.equal(menu.all((node) => node.getAttribute('aria-selected') === 'true')[0]?.dataset.mode, 'mostly-autonomous');
+  // No options at all still leaves the way to keep carrying on, so the picker is never an empty menu.
+  page.send({ type: 'action-policy', mode: 'auto', stopped: false, scope: 'workspace', options: [], autoAdvance: { on: true, text: '' } });
+  assert.deepEqual(menu.all((node) => node.getAttribute('role') === 'option').map((node) => node.dataset.mode), ['auto']);
 });
