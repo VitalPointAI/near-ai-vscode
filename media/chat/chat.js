@@ -672,6 +672,8 @@
         agent.paused
           ? textButton('Resume', () => post({ type: 'agent-control', agentId: agent.id, action: 'resume' }))
           : textButton('Pause', () => post({ type: 'agent-control', agentId: agent.id, action: 'pause' })),
+        // 0.4.19: a run waiting on CI or a review can be told to look again now, instead of the person waiting out a poll they can already see is stale.
+        textButton('Check now', () => post({ type: 'agent-control', agentId: agent.id, action: 'nudge' })),
         textButton('Stop', () => post({ type: 'agent-control', agentId: agent.id, action: 'stop' }))
       );
       item.append(body, controls);
