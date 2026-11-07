@@ -427,11 +427,13 @@ export class AgentConversation {
     const agent = this.agents.get(agentId);
     if (!agent) return false;
     if (action === 'nudge') {
-      // 0.4.19: "Check now". The agent is told to look at the real state again instead of waiting out its poll. Only a working agent is interrupted: a
-      // paused one is not thinking about anything, and an interrupt there would be swallowed by the pause and then fire on a later, unrelated turn.
+      // 0.4.19: "Check now". The queue a run takes belongs to the whole conversation and only the main run consumes it, so the message goes to the main
+      // run rather than to the row that was clicked: that is where the wait is, and sending it "to" a sub-agent would have delivered it to the parent
+      // anyway, without saying so (0.4.18 review). The message names the agent when a sub-agent's row was clicked, so the parent knows what is being asked.
+      // Only a paused agent is not interrupted: a paused run is not in a turn, so the interrupt would be swallowed by the pause and fire later.
       const id = `steer-${randomBytes(6).toString('hex')}`;
       const working = !agent.paused && !agent.abort.signal.aborted;
-      this.steer(id, checkNowMessage(), { interrupt: working });
+      this.steer(id, checkNowMessage(agent.label), { interrupt: working });
       return true;
     }
     if (action === 'stop') agent.abort.abort();

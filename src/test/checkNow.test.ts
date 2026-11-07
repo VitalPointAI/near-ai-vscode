@@ -17,6 +17,11 @@ test('the Check now message is marked, and says exactly what to do', () => {
   assert.equal(/[\u2013\u2014]/.test(message), false);
   assert.equal(isCheckNow(message), true);
   assert.equal(isCheckNow('carry on with the plan'), false);
+  // A sub-agent's row names that agent, because the main run is the one that receives the message.
+  const named = checkNowMessage('gsd-planner');
+  assert.match(named, /pressed it on gsd-planner's row/);
+  assert.equal(isCheckNow(named), true, 'the marker still comes first, so it is still read as a check');
+  assert.doesNotMatch(named, /[\u2013\u2014]/);
 });
 
 test('a run is told to wait by checking again, so a Check now lands quickly and an early verdict is seen at once', () => {

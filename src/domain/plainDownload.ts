@@ -13,7 +13,7 @@ import { URL } from 'node:url';
 
 /** Flags that take no value, and send nothing: silence, errors, redirects, timing, compression, address family, TLS verification, output naming. */
 const VALUELESS = new Set([
-  '-s', '-S', '-sS', '-Ss', '-L', '-i', '-I', '-f', '-k', '-g', '-v', '-4', '-6', '-q', '-C', '-#',
+  '-s', '-S', '-sS', '-Ss', '-L', '-i', '-I', '-f', '-k', '-g', '-v', '-4', '-6', '-q', '-#',
   '--silent', '--show-error', '--location', '--include', '--head', '--fail', '--insecure', '--compressed', '--globoff', '--verbose',
   '--ipv4', '--ipv6', '--http1.1', '--http2', '--no-progress-meter', '--remote-name', '--remote-header-name', '--progress-bar',
   // wget's own harmless ones
@@ -22,7 +22,7 @@ const VALUELESS = new Set([
 
 /** Flags whose value is the next word, all known to carry nothing of the run's: method is GET, headers are absent, the body is `-`. */
 const TAKES_VALUE = new Set([
-  '-o', '--output', '-w', '--write-out', '-A', '--user-agent', '-m', '--max-time', '--connect-timeout', '--retry', '--retry-delay',
+  '-o', '--output', '-w', '--write-out', '-A', '--user-agent', '-m', '--max-time', '--connect-timeout', '--retry', '--retry-delay', '-C', '--continue-at',
   '--retry-max-time', '--limit-rate', '--max-filesize', '--referer', '-e', '--resolve', '--cacert', '--capath', '--tlsv1.2', '--tlsv1.3',
   '--max-redirs', '-r', '--range', '--dns-servers', '--interface', '--local-port', '--timeout', '--tries', '--waitretry', '-P', '--directory-prefix',
   '--output-document', '--user-agent-http'
@@ -31,6 +31,12 @@ const TAKES_VALUE = new Set([
 /** Regex forms of the same: `--flag=value` and `-oVALUE`. */
 const VALUELESS_PREFIX = [...VALUELESS];
 const TAKES_VALUE_PREFIX = [...TAKES_VALUE];
+
+/**
+ * Flags that write the reply into the working directory under a name the server chooses (`-O`, `--remote-name`) or into the name the URL ends with. The
+ * caller judges that folder like any other write target.
+ */
+const REMOTE_NAME = new Set(['-O', '--remote-name', '--remote-header-name']);
 
 /** The flags whose value is where the reply is written; the caller judges that path like any other write. */
 const WRITE_TARGET = new Set(['-o', '--output', '--output-document', '-P', '--directory-prefix']);
@@ -78,7 +84,6 @@ export function plainDownload(words: readonly string[]): PlainDownloadResult {
   const urls: string[] = [];
   let output: string | undefined;
   const note = (flag: string, value: string) => {
-    if (flag === '-O' || flag === '--remote-name' || flag === '--remote-header-name') return;
     const target = unquote(value);
     if (WRITE_TARGET.has(flag) && target !== '-') output = target;
   };
@@ -87,6 +92,9 @@ export function plainDownload(words: readonly string[]): PlainDownloadResult {
     if (!isLiteral(word)) return { plain: false, reason: `${word} is expanded by the shell, which can carry a secret into the request` };
     if (isUrl(word)) { urls.push(unquote(word)); continue; }
     if (word.startsWith('-')) {
+      // 0.4.18 review: `-O`/`--remote-name` (and wget with no -O) write into the working directory under a name the server chooses, so they are a write
+      // to wherever the command runs. Reporting that as `.` makes the caller judge the folder like any other write target.
+      if (REMOTE_NAME.has(word)) { output = '.'; continue; }
       // A value attached with `=` or straight after a short flag.
       const equals = /^(--?[A-Za-z0-9][\w-]*)=(.*)$/.exec(word);
       if (equals) {

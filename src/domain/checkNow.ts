@@ -10,10 +10,11 @@ export const CHECK_NOW_MARKER = 'CHECK-NOW';
 
 /**
  * The message a "Check now" button sends. It is a Steer, so it interrupts the wait, and it is worded so the agent knows exactly what is wanted: look at
- * GitHub again now and carry on from what it finds.
+ * GitHub again now and carry on from what it finds. A sub-agent's row names that agent, because the main run is the one that receives it.
  */
-export function checkNowMessage(): string {
-  return `[${CHECK_NOW_MARKER}] Check the real state now instead of waiting: read the pull request's checks and review verdict from GitHub again, and carry on from what they say. Do not sleep or wait again for this same verdict; if it is not there yet, poll again in short steps.`;
+export function checkNowMessage(agentLabel?: string): string {
+  const whose = agentLabel ? ` (the person pressed it on ${agentLabel}'s row)` : '';
+  return `[${CHECK_NOW_MARKER}] Check the real state now instead of waiting${whose}: read the pull request's checks and review verdict from GitHub again, and carry on from what they say. Do not sleep or wait again for this same verdict; if it is not there yet, poll again in short steps.`;
 }
 
 /** Whether a message is a "Check now" one. */

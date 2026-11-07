@@ -73,3 +73,12 @@ test('the rule reports where the reply is written, so the caller can judge that 
   assert.equal(plainDownload(['-o', '-', 'https://example.test/x']).output, undefined);
   assert.equal(plainDownload(['https://example.test/x']).output, undefined);
 });
+
+test('a flag whose value the shell would read is not valueless, and -O is a write into the working folder', () => {
+  // -C takes an offset in curl, so its value is the next word and must be checked as one.
+  assert.equal(plainDownload(['-C', '100', 'https://example.test/f']).plain, true);
+  assert.equal(plainDownload(['-C', '100']).plain, false, 'no URL is still no URL');
+  // -O (and wget with no -o) writes under a server-chosen name in the working folder, so the reply is a write there and must be judged as one.
+  assert.equal(plainDownload(['-O', 'https://example.test/f']).output, '.');
+  assert.equal(plainDownload(['--remote-name', 'https://example.test/f']).output, '.');
+});
