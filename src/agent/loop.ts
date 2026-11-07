@@ -620,7 +620,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     // `bash -c` do not carry a trusted-runtime verdict they do not deserve.
     const mentionsGsd = /^\s*(?:_GSD_SHIM_NAME=|gsd[_-](?:run|tools)\b|node\s+["']?\$?GSD_TOOLS\b)/.test(command);
     const gsd = runtime?.preambles.length && mentionsGsd
-      ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
+      ? { gsdPreambles: runtime.preambles, gsdHome: runtime.home, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
     return {
       root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: [...this.writtenScratch], ...gsd, safety: this.options.safety, signal: context.signal,

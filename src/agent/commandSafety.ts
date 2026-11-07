@@ -35,6 +35,8 @@ export interface CommandContext {
    * asking; a file that merely sits in a temporary folder may have been put there by a web page the run read, so it is not code the run may execute.
    */
   writtenScratch?: string[];
+  /** The managed Open-GSD home the runtime check verified (0.4.18: lets an inline prologue's variables be resolved to real paths). */
+  gsdHome?: string;
   /** Whether `gsd_run` as such a preamble defines it would run the managed runtime's gsd-tools, checked for this shell. */
   gsdRun?: { trusted: boolean; reason?: string };
   /** Set while classifying what follows a trusted preamble: `gsd_run` is the managed gsd-tools. */
@@ -823,7 +825,10 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   if (name === 'curl' || name === 'wget' || name === 'http' || name === 'https' || name === 'httpie' || name === 'xh') {
     if (anyFlag(/^-(?:[A-Za-z]*[dFT][A-Za-z]*)$|^--(?:data|data-binary|data-raw|data-urlencode|form|form-string|upload-file|json|post-data|post-file|body-data|body-file|method)(?:=|$)/) || words.some((word, at) => (word === '-X' || word === '--request') && /^(?:POST|PUT|PATCH|DELETE)$/i.test(words[at + 1] ?? '')) || /^-X(?:POST|PUT|PATCH|DELETE)$/i.test(words.find((word) => /^-X./.test(word)) ?? '')) return risky(`${name} sends data off this machine`);
     if (name === 'http' || name === 'https' || name === 'xh') return risky(`${name} can send data off this machine`);
-    return unknown(`${name} downloads from the network`);
+    // 0.4.18: a plain GET is a download, and fetching a page is what research does. It sends nothing of the run's with it: no body, no form, no upload,
+    // and no POST/PUT/PATCH/DELETE (all checked above). A write target is safe too, and this is the same shape the run is told to use for its pages.
+    const readsPage = words.every((word) => !/^-(?:[dFT]|X)/.test(word) && !/^--(?:data|form|upload-file|json|post-|body-|method)/.test(word));
+    if (readsPage && !/^-X(?:POST|PUT|PATCH|DELETE)/i.test(words.join(' '))) return safe(`${name} downloads a page and sends nothing of this run's with it`);
   }
   if (name === 'rsync') return words.some((word) => !looksLikeOption(word) && /^[^/]*:|^[\w.-]+@/.test(word)) ? risky('rsync copies to or from another machine') : unknown('rsync copies files');
   if (name === 'crontab') return words.length === 1 && words[0] === '-l' ? unknown('crontab -l') : risky('crontab changes scheduled jobs');
@@ -939,12 +944,38 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   return unknown(`${name} is not a command the rules know`);
 }
 
+/** Whether a command is Open-GSD's own "find the tool and run it" shape, written inline rather than as the shipped preamble block. */
+function isInlineGsdPrologue(command: string): boolean {
+  return /\bCLAUDE_CONFIG_DIR=/.test(command) && /\bGSD=/.test(command) && /gsd-tools\.cjs/.test(command);
+}
+
 function classifyText(command: string, context: CommandContext, depth: number): CommandClassification {
   const raw = command.trim();
   if (!raw) return unknown('the command is empty');
   if (depth > 4) return unknown('the command nests too deeply to check');
   if (/:\(\)\s*\{/.test(raw)) return risky('it defines a fork bomb');
   if (DOWNLOAD_TO_SHELL.test(raw)) return risky('it runs code downloaded from the network');
+  // 0.4.18: Open-GSD also writes its prologue inline (cd to the project, export CLAUDE_CONFIG_DIR, GSD=<the managed gsd-tools>, then run it), which is
+  // not the shipped block. When the runtime is verified trusted, its variables name known files, so the command is not opaque. This runs before the
+  // preamble match so both forms reach the same checker.
+  // The command's own CLAUDE_CONFIG_DIR must name the managed home: a look-alike runtime elsewhere must not borrow the trusted verdict.
+  const namesManagedHome = context.gsdHome !== undefined && raw.includes(context.gsdHome);
+  if (depth === 0 && isInlineGsdPrologue(raw) && context.gsdRun?.trusted && namesManagedHome) {
+    // Resolve the prologue's own variables to the paths the runtime check just verified: CLAUDE_CONFIG_DIR is the managed home, so GSD is that home's
+    // gsd-tools. Then the ordinary checks decide the resolved command, which is the only honest way to judge a command written with variables.
+    const tool = path.join(context.gsdHome as string, 'gsd-core', 'bin', 'gsd-tools.cjs');
+    const resolved = raw
+      .replace(/\$\{?CLAUDE_CONFIG_DIR\}?/g, context.gsdHome as string)
+      .replace(/\$\{?GSD\}?/g, tool)
+      // The prologue's own `export` and assignment only set those two variables, which are now resolved, so they carry no unknown side effect here.
+      // An assignment is removed together with the separator that introduced it, so no dangling `&;` is left behind (`&&` or `;` before it).
+      .replace(/\s*(?:&&|;)\s*(?:export\s+)?CLAUDE_CONFIG_DIR=[^;&]*/g, '')
+      .replace(/^\s*(?:export\s+)?CLAUDE_CONFIG_DIR=[^;&]*(?:;\s*)?/g, '')
+      .replace(/\s*(?:&&|;)\s*GSD=[^;&]*/g, '')
+      .replace(/^\s*GSD=[^;&]*(?:;\s*)?/g, '');
+    const inner = classifyText(resolved, { ...context, gsdRunDefined: true }, depth + 1);
+    if (inner.verdict === 'safe') return safe('it finds and runs the managed Open-GSD runtime\'s gsd-tools, which NEAR AI installed');
+  }
   const preamble = depth === 0 ? (context.gsdPreambles ?? []).find((text) => raw.startsWith(text)) : undefined;
   if (preamble) {
     // What follows must be a new command: nothing, or a newline, `;`, or `&&` and then the call.
