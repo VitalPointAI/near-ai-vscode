@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { redactSecrets } from './domain/redaction';
 import { homeFolder, startTeamsMove } from './domain/teamStorage';
 import { migrateTeams } from './services/teamStorage';
+import { cleanScratch, ensureScratch } from './services/scratch';
 import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
@@ -48,6 +49,11 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   // the ones saved under the extension's storage must finish before anything reads the library, or a person who opens Team Studio at once sees an
   // empty list; every reader calls whenTeamsMoved() first, and a move that fails never throws.
   startTeamsMove(migrateTeams({ home: homeFolder(), globalStorage: context.globalStorageUri.fsPath }).catch(() => ({ moved: 0, skipped: 0 })));
+  // Scratch work stays inside the project and leaves nothing behind (0.4.18): the folder and its .gitignore lines, and anything a killed run left.
+  // It runs for every project the person opens, never fails a start, and only ever touches .near-ai and .gitignore.
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    void ensureScratch(folder.uri.fsPath).then(() => cleanScratch(folder.uri.fsPath)).catch(() => undefined);
+  }
   // The computer-wide list of saved profiles (metadata only), so a profile set up in one project can be used in another (G-61-9).
   initProfileIndex(context.globalState);
   initEmergencyStop(context);
