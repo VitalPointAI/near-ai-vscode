@@ -149,3 +149,14 @@ test('the research project guidance says research comes first and accumulates, a
   assert.match(guidance, /extended, never replaced/);
   assert.match(guidance, /never research the same question twice without saying why/i);
 });
+
+test('the research guidance says a cost estimate is computed from the configured prices, never quoted from a file', () => {
+  // Owner, 2026-11-06: the deep/balanced/quick estimates shown at research setup were ridiculous, because the team file carried fixed dollars
+  // ($15-40, $90-250) that had nothing to do with the models in use. Every research project now inherits this rule.
+  const guidance = projectType('research')!.guidance;
+  assert.match(guidance, /Cost estimates are computed, never quoted/);
+  assert.match(guidance, /prices of the models actually configured/);
+  assert.match(guidance, /present a range with the assumptions printed/);
+  assert.match(guidance, /Never give a dollar figure that is not derived from the configured prices/);
+  assert.match(guidance, /Token counts are estimates/);
+});

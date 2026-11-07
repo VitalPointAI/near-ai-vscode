@@ -61,6 +61,7 @@ export const PROJECT_TYPES: ProjectType[] = [
 - **Verify:** every quoted passage passes CheckCitations; every source has a NATO Admiralty reliability grade (A completely reliable … E unreliable, F cannot be judged) and every claim a credibility grade (1 confirmed by other sources … 5 improbable, 6 cannot be judged), each with a reason. Claims resting on one source are labelled.
 - **Audit:** an editor checks that each sentence is supported by its citation and that confidence is stated, and that disagreements between sources are reported, not smoothed over.
 - **Release:** the report lists its sources with grades and dates, and separates findings from judgement.
+- **Cost estimates are computed, never quoted.** Before offering a research person a choice of effort (quick, balanced, deep), estimate what each will cost from this run's own shape and the prices of the models actually configured: estimate the input and output tokens for that depth (inputs dominate, because subagents re-read the corpus), multiply by each model's price per million, and present a range with the assumptions printed. Never give a dollar figure that is not derived from the configured prices, and recompute if a model or the scope changes. Token counts are estimates, so say so.
 - **Tone and format:** write in a clear, neutral, analytical register unless the project's style notes say otherwise.`
   },
   {
