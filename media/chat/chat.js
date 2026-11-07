@@ -906,7 +906,7 @@
   advanceButton.addEventListener('keydown', (event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); openAdvanceMenu(); } });
   advanceMenu.addEventListener('keydown', (event) => {
     const items = advanceItems();
-    const at = items.indexOf(document.activeElement as Element);
+    const at = items.indexOf(document.activeElement);
     if (event.key === 'Escape') { event.preventDefault(); closeAdvanceMenu(true); return; }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -920,7 +920,7 @@
     }
   });
   document.addEventListener('click', (event) => {
-    if (!advanceMenu.hidden && !advanceMenu.contains(event.target as Node) && !advanceButton.contains(event.target as Node)) closeAdvanceMenu(false);
+    if (!advanceMenu.hidden && !advanceMenu.contains(event.target) && !advanceButton.contains(event.target)) closeAdvanceMenu(false);
   });
   function renderPolicy(state) {
     policyState = state;
