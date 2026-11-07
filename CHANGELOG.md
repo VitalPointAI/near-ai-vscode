@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.18
 
 - **A workflow carries on by itself in Auto.** A research or software project used to stop at every
   boundary between analysing, planning and building, because the project's Open-GSD settings told it
