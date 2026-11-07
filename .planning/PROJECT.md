@@ -169,6 +169,38 @@ user wants to attach an agent team to carry it out." Today a newcomer has no way
 - Open questions for the owner when this starts: whether the template list is fixed or read from the team library, whether the team step can offer a
   team the person has already saved, and how the flow behaves when Open-GSD is not installed yet.
 
+### An isolated sandbox VM for cyber testing (owner, 2026-11-06)
+
+Owner: "ability to spin up a completely isolated VM to run tests and disassemble code, test exploits, etc... that is 100% completely separated from
+the user's machine. There must be absolutely no way for an agent or agent team doing cyber testing in this isolated sandbox VM or suitable constraining
+mechanism from breaking out of their sandbox. They can do what they like inside the VM across the whole range of defensive and offensive security
+testing, but only inside that isolated enclave."
+
+Today the cyber harness runs in a container or a temporary folder on the person's own machine. A container shares the host kernel, so a kernel bug, a
+misconfigured mount or a privileged flag is an escape; the temporary-folder tier is not isolation at all. A real enclave means a VM with a hypervisor
+boundary, and the work is in proving the boundary rather than assuming it.
+
+- **A VM per engagement, not a shared one**, destroyed when the engagement ends and never reused across targets.
+- **Hardware virtualisation with the smallest surface that still works:** a microVM (Firecracker, Cloud Hypervisor or QEMU microvm) with a minimal
+  kernel, one virtio NIC on a host-only bridge, no shared folders, no clipboard, no 9p/virtiofs mount of the person's home, and no host devices
+  except what is named explicitly.
+- **Network is deny-by-default.** The VM reaches the engagement's target scope and nothing else: an egress allowlist by address and port, DNS through
+  the host's resolver only for names in scope, and no route to the host's own services or the local network beyond the scope. Anything else is dropped
+  and logged.
+- **No way back to the host:** no host mounts, no host ports forwarded into the VM except a control channel the host dials outward, no shared memory, and
+  the agent's tools reach the VM only through that channel. The extension never executes VM output on the host.
+- **Constraints inside the VM are the point:** snapshots before an exploit, a time and CPU budget, a disk quota, and a reset to the snapshot between
+  attempts, so an agent may do anything inside and can always be rolled back.
+- **Prove it, do not claim it.** A breakout test suite that tries the known escapes and must fail: mount the host, reach the host's localhost, read a
+  host path through a shared folder, use a privileged container escape inside the VM, and exfiltrate to an address outside scope. Each escape attempt is
+  a test with an expected refusal, and the gate runs them before a release.
+- **What the person sees:** the panel says which isolation tier a run has (VM, container, temporary folder), and a scan cannot claim VM isolation unless
+  the breakout suite passed on that machine.
+
+Open questions for the owner when this starts: which hypervisor (KVM is available on Linux; macOS and Windows need a different answer), whether the VM
+image ships with the extension or is fetched once, how much of a scan's speed the VM costs, and what the fallback is on a machine without hardware
+virtualisation (my recommendation: refuse to claim isolation and say so plainly, rather than silently running in a container).
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
