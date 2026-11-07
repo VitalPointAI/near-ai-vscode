@@ -13,13 +13,19 @@ export interface AutoAdvanceFlags { auto_advance: boolean; _auto_chain_active: b
  * Open-GSD's own default of stopping at a boundary, which is what a person choosing "ask me about changes" expects. `auto_advance` is the project's
  * own setting and is left alone unless Auto is on, so a person who turned it on by hand does not lose it.
  */
-export function autoAdvanceFlags(mode: string, current?: Partial<AutoAdvanceFlags>): Partial<AutoAdvanceFlags> {
+export function autoAdvanceFlags(mode: string, current?: Partial<AutoAdvanceFlags>, options: { ownsAutoAdvance?: boolean } = {}): Partial<AutoAdvanceFlags> {
   const wanted = mode === 'auto' || mode === 'fully-autonomous';
   const existing = current ?? {};
   const flags: Partial<AutoAdvanceFlags> = {};
   // Only writes what differs, so the file is not rewritten on every switch flip.
+  //
+  // 0.4.18 review: `_auto_chain_active` is the chain flag the extension owns, and `auto_advance` is the person's own Open-GSD setting. Turning Auto
+  // off must not write `auto_advance: false` over a value somebody chose by hand, so the second is only touched when the caller says the extension owns
+  // it (the switch beside the picker, which is explicit) or when it is turning it on.
   if (wanted !== (existing._auto_chain_active === true)) flags._auto_chain_active = wanted;
-  if (wanted !== (existing.auto_advance === true)) flags.auto_advance = wanted;
+  if (wanted || options.ownsAutoAdvance === true) {
+    if (wanted !== (existing.auto_advance === true)) flags.auto_advance = wanted;
+  }
   return flags;
 }
 

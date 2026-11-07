@@ -56,7 +56,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     const root = folder.uri.fsPath;
     void isNearAiProject(root)
-      .then((nearAi) => (nearAi ? ensureScratch(root).then(() => cleanScratch(root)) : undefined))
+      .then((nearAi) => (nearAi ? ensureScratch(root).then(() => cleanScratch(root, { staleOnlyMs: 6 * 60 * 60 * 1000 })) : undefined))
       .catch(() => undefined);
   }
   // The computer-wide list of saved profiles (metadata only), so a profile set up in one project can be used in another (G-61-9).

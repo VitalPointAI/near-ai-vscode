@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
@@ -523,7 +523,6 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     }
     this.options.emit({ type: 'tool-start', callId: call.id, tool: tool.name, title, input: call.function.arguments });
     const command = tool.capability === 'shell' ? String((input as { command?: unknown }).command ?? '') : undefined;
-    if (command !== undefined) this.noteScratchWrites(command);
     let sensitive: string | undefined;
     let risky: string | undefined;
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
@@ -588,9 +587,12 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         try { await this.options.rememberAllowRule?.(allowRule); } catch { /* still allowed for this run; the setting could not be saved */ }
       }
     }
+    const ranAt = Date.now();
     try {
       const output = await tool.run(input, context);
       if (tool.untrusted) this.grants.tainted = true;
+      // A scratch file this command wrote is recorded now that it succeeded, and only if the file is really there (0.4.18 review).
+      if (command !== undefined) await this.noteScratchWrites(command, ranAt);
       return this.finish(call.id, true, output + await this.testWriteNote(tool, input));
     } catch (error) {
       if (signal.aborted) return this.finish(call.id, false, 'Cancelled.');
@@ -633,13 +635,28 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
    * Records the scratch files a command writes into a temporary folder, so a later call that runs one is known to be running the run's own code and not
    * something a page it read left there. Only a redirect or a copy into an absolute temporary path counts; a path in the workspace is not scratch.
    */
-  private noteScratchWrites(command: string): void {
+  /**
+   * Records the scratch files a command rewrote, after it succeeded. Two things make this trustworthy (0.4.18 review):
+   *   - it runs AFTER the command, so a write that was refused or failed does not count;
+   *   - the file must exist and be newer than the moment the command started, so a destination that received the run's bytes counts while a path that
+   *     merely appeared in the text (`cp something /tmp/already-there.py`) does not. A scratch path can only ever be a script the run itself put there.
+   */
+  private async noteScratchWrites(command: string, startedAt: number): Promise<void> {
     const roots = ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [path.resolve(process.env.TMPDIR)] : [])].map((root) => path.resolve(root));
     const inScratch = (file: string): boolean => roots.some((root) => file === root || file.startsWith(`${root}${path.sep}`));
-    const note = (text: string): void => { const file = path.resolve(text); if (path.isAbsolute(text) && !text.split(/[/\\]/).includes('..') && inScratch(file)) this.writtenScratch.add(file); };
-    // `> /tmp/x`, `>> /tmp/x`, and `cp|mv a /tmp/x` (the destination is the last word).
+    const candidates = new Set<string>();
+    const note = (text: string): void => { const file = path.resolve(text); if (path.isAbsolute(text) && !text.split(/[/\\]/).includes('..') && inScratch(file)) candidates.add(file); };
+    // `> /tmp/x`, `>> /tmp/x`, and `cp|mv|install|tee` (the destination is the last word on the line).
     for (const match of command.matchAll(/>>?\s*([^\s;&|]+)/g)) if (match[1]) note(match[1]);
     for (const match of command.matchAll(/\b(?:cp|mv|install|tee)\b[^;&|]*\s([^\s;&|]+)\s*$/g)) if (match[1]) note(match[1]);
+    for (const file of candidates) {
+      try {
+        const info = await stat(file);
+        if (info.isFile() && info.mtimeMs >= startedAt - 1000) this.writtenScratch.add(file);
+      } catch {
+        // Not there, so nothing was written where the text suggested.
+      }
+    }
   }
 
   private finish(callId: string, ok: boolean, output: string): string {

@@ -848,13 +848,17 @@
 
   // 0.4.18: whether a workflow carries on by itself, shown beside the approval picker so it can be changed during a run (owner, 2026-11-06). It is the
   // project's Open-GSD setting, changed through the same picker, so the two cannot disagree.
+  let advanceMode = 'approve-risky';
   advanceButton.addEventListener('click', () => {
-    // The switch is the approval mode: Auto carries on, the asking default stops at each step. Clicking toggles between them.
-    const wanted = advanceButton.getAttribute('aria-pressed') === 'true' ? 'approve-risky' : 'auto';
-    postFor({ type: 'set-action-policy', mode: wanted });
+    // 0.4.18 review: turning the switch ON never downgrades anything. It goes to Auto only from a mode that asks more often, and turning it OFF
+    // returns to the mode the run was in before, so a fully autonomous run is not silently reduced to "ask me about changes".
+    const on = advanceButton.getAttribute('aria-pressed') === 'true';
+    if (on) { postFor({ type: 'set-action-policy', mode: advanceMode === 'auto' ? 'approve-risky' : 'auto' }); return; }
+    postFor({ type: 'set-action-policy', mode: 'auto' });
   });
   function renderAdvance(m) {
     const state = m.autoAdvance || {};
+    if (m.mode && m.mode !== 'auto') advanceMode = m.mode;
     advanceButton.hidden = !state.text;
     advanceButton.textContent = state.on ? 'Carrying on' : 'Stops each step';
     advanceButton.setAttribute('aria-pressed', state.on ? 'true' : 'false');

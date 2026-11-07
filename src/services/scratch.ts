@@ -30,9 +30,12 @@ export async function ensureScratch(root: string): Promise<string[]> {
 /**
  * Empties the scratch folder, keeping the folder itself so the next run has one. Returns how many files and folders were removed. Never throws.
  */
-export async function cleanScratch(root: string): Promise<number> {
+export async function cleanScratch(root: string, options: { staleOnlyMs?: number } = {}): Promise<number> {
   const folder = scratchFolder(root);
   if (!(await exists(folder))) return 0;
+  // 0.4.18 review: the startup clean must not delete what a run in another window is using, so it removes only files older than `staleOnlyMs` (the
+  // run that made them is gone). The clean at the end of a run removes everything, because no other run of that window is using the folder.
+  const cutoff = options.staleOnlyMs === undefined ? undefined : Date.now() - options.staleOnlyMs;
   let entries: string[];
   try {
     entries = await readdir(folder);
@@ -42,6 +45,10 @@ export async function cleanScratch(root: string): Promise<number> {
   let removed = 0;
   for (const entry of entries) {
     try {
+      if (cutoff !== undefined) {
+        const info = await stat(path.join(folder, entry)).catch(() => undefined);
+        if (info !== undefined && info.mtimeMs > cutoff) continue;
+      }
       await rm(path.join(folder, entry), { recursive: true, force: true });
       removed += 1;
     } catch {

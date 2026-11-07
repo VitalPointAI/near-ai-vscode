@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
@@ -578,4 +578,46 @@ test('"Allow every time" reports what was really saved: learned when the entry s
   assert.match(rememberedRuleNotice('docker version', true, 'VS Code profile'), /in this VS Code profile/);
   // It names where the entry lives, so a person can find and remove it.
   assert.match(rememberedRuleNotice('docker version', true, 'workspace'), /Allow Commands/);
+});
+
+test('only a scratch script the run really wrote may run: the loop records the write itself, after it succeeded', async () => {
+  // The 0.4.18 review found the scratch tests passed a fabricated list, so the loop's own recording was never exercised and a `cp` onto a pre-existing
+  // script would have counted as "written by the run". This drives the real loop.
+  // The workspace must not be under a temporary folder, or /tmp stops counting as scratch (the reviewer's rule): use a folder beside it.
+  const root = await mkdtemp(path.join(homedir(), '.near-ai-scratch-run-'));
+  const scratch = path.join(process.env.TMPDIR ?? '/tmp', `near-ai-scratch-${process.pid}-${Date.now()}`);
+  await mkdir(scratch, { recursive: true });
+  const mine = path.join(scratch, 'verify.py');
+  const theirs = path.join(scratch, 'injected.py');
+  // A script that already exists, as a page the agent read could have left it: it is OLDER than the run.
+  await writeFile(theirs, 'print("injected")\n');
+  const old = new Date(Date.now() - 60 * 60 * 1000);
+  await utimes(theirs, old, old);
+
+  const shell = new ShellSession(root);
+  const approvals: ApprovalRequest[] = [];
+  const model = scriptedModel([
+    { calls: [call('s1', 'Bash', { command: `printf 'print(1)\\n' > ${mine}` })] },
+    { calls: [call('s2', 'Bash', { command: `python3 ${mine}` })] },
+    { calls: [call('s3', 'Bash', { command: `python3 ${theirs}` })] },
+    { text: 'Done.' }
+  ]);
+  const run = new AgentRun({
+    client: model, model: 'z-ai/glm-5.3', tools: CORE_TOOLS,
+    context: { root, checkpoints: new RunCheckpoints('scratch-run'), shell, readFiles: new Set() },
+    policy: auto, rules: DEFAULT_RULES, safety: fakeSafety(false).check,
+    requestApproval: async (request) => { approvals.push(request); return { decision: 'deny' }; },
+    emit: () => undefined
+  });
+  try {
+    assert.equal((await run.run([{ role: 'user', content: 'check' }], new AbortController().signal)).outcome, 'completed');
+    // The script the run wrote runs; the one already there is held, and its card shows why.
+    assert.equal(approvals.length, 1, `exactly one of the two asked: ${JSON.stringify(approvals.map((a) => a.title))}`);
+    assert.match(approvals[0]?.title ?? '', /injected\.py/, 'the pre-existing script is the one that asked');
+    // Held by the safety model (which here is not sure) or by the rules; either way it is not run.
+    assert.match(approvals[0]?.reason ?? '', /runs code the rules cannot check|outside the workspace|not sure/);
+  } finally {
+    shell.dispose();
+    await rm(scratch, { recursive: true, force: true });
+  }
 });

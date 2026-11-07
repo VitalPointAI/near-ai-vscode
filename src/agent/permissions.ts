@@ -199,8 +199,8 @@ export function decidePermission(capability: ActionCapability, command: string |
 
 /**
  * decidePermission, plus the `auto` mode's model check: a shell command the rules call `unknown` goes to the private safety model. With no private
- * model available the rules decide instead (a whole command they could place is allowed), which keeps a run moving when the model is missing or was
- * never set to a private one. Every other mode decides exactly as decidePermission does.
+ * model available the command asks, with a reason that names the setting to fix; the project's own allow switches and the structural guards still decide
+ * first, so a missing model never overrides them. Every other mode decides exactly as decidePermission does.
  */
 export async function decidePermissionAsync(capability: ActionCapability, command: string | undefined, policy: ActionPolicy, rules: PermissionRules, grants: RunGrants, auto?: AutoApprovalContext, intrusive?: IntrusiveStep): Promise<PermissionDecision> {
   const decided = decidePermission(capability, command, policy, rules, grants, auto, intrusive);
