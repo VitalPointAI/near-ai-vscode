@@ -85,6 +85,8 @@ interface ChatTab {
   stops: number;
   /** How each settled prompt ended, for the record left in its place when the conversation is shown again. */
   outcomes: Map<string, PromptOutcome>;
+  /** Prompts whose wait ran long enough to park the run. They are still waiting, so they are not outcomes: the card stays until it is answered. */
+  paused: Map<string, { minutes?: number; text: string }>;
   /** What was typed for each queued steer, so a re-shown conversation shows its queued messages. */
   steerTexts: Map<string, string>;
   /** Sends a message of this conversation: logged, and posted to the view when it is on screen. */
@@ -144,13 +146,15 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   };
 
   const newTab = (id = newConversationId()): ChatTab => {
-    const tab: ChatTab = { id, log: new ConversationLog(), title: '', turns: 0, outcome: 'idle', unread: false, closing: false, stops: 0, outcomes: new Map(), steerTexts: new Map(), post: () => undefined };
+    const tab: ChatTab = { id, log: new ConversationLog(), title: '', turns: 0, outcome: 'idle', unread: false, closing: false, stops: 0, outcomes: new Map(), paused: new Map(), steerTexts: new Map(), post: () => undefined };
     tab.post = (message) => {
       tab.outcome = outcomeOf(message) ?? tab.outcome;
       if (message.type === 'run-stopped') tab.continuable = message.continuable === true;
       // A new turn (Continue, or anything the user sent) settles the offer: shown again, it has no button.
       else if (message.type === 'assistant-start' && tab.continuable) { tab.continuable = false; tab.log.update('run-stopped', { continuable: false }); }
-      if (message.type === 'approval-expired' && typeof message.callId === 'string') tab.outcomes.set(message.callId, { outcome: 'expired', ...(typeof message.minutes === 'number' ? { detail: message.minutes } : {}) });
+      // 0.4.19: an expired wait no longer settles anything. The run parked on the step and the card stays, so the outcome is recorded only when the person
+      // answers (or the run is stopped), and a reloaded view shows the same waiting card rather than a decline that never happened.
+      if (message.type === 'approval-paused' && typeof message.callId === 'string') tab.paused.set(message.callId, { ...(typeof message.minutes === 'number' ? { minutes: message.minutes } : {}), text: String(message.text ?? '') });
       if (message.type === 'prompt-closed' && typeof message.id === 'string') tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' ? 'cancelled' : 'closed' });
       const steerId = message.type === 'steer-state' ? String(message.id) : undefined;
       tab.log.add(steerId && message.state === 'queued' && tab.steerTexts.has(steerId) ? { ...message, text: tab.steerTexts.get(steerId) } : message);

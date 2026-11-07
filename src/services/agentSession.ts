@@ -948,22 +948,27 @@ export class AgentConversation {
     if (agentId) this.activity?.approvalAsked(agentId);
     return new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      let expired = false;
       const settle = (reply: ApprovalReply, cancelled = false) => {
         if (timer) clearTimeout(timer);
         this.closePrompt(request.callId, cancelled);
-        if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : expired ? 'expired' : reply.decision === 'deny' ? 'declined' : 'allowed');
+        if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : reply.decision === 'deny' ? 'declined' : 'allowed');
         resolve(reply);
       };
       this.approvals.set(request.callId, settle);
       signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) settle({ decision: 'deny' }, true); }, { once: true });
       if (this.approvalTimeoutMs > 0) {
         timer = setTimeout(() => {
-          if (!this.approvals.delete(request.callId)) return;
+          // 0.4.19 (owner, 2026-11-07: "stop the idling"): the wait no longer ends by declining an action nobody saw. Measured on the owner's own runs,
+          // 35 waits hit this timeout exactly and 49 more ran long, which is up to 752 minutes of a run parked on a question. Declining made the run work
+          // around a decision the person never got to make, and the work was usually redone. Now the run simply stops counting down and stays on this
+          // step: nothing runs, nothing is lost, and answering whenever the person is back carries on from exactly here.
+          if (!this.approvals.has(request.callId)) return;
           const minutes = Math.round(this.approvalTimeoutMs / 60_000);
-          expired = true;
-          this.post({ type: 'approval-expired', callId: request.callId, minutes, text: `No one approved "${request.title}" within ${minutes} minute${minutes === 1 ? '' : 's'}, so it was declined and the agent continued without it.` });
-          settle({ decision: 'deny', feedback: `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'} (the user may be away). Continue without this action if you can, and report what still needs their approval.` });
+          this.post({
+            type: 'approval-paused', callId: request.callId, minutes,
+            text: `No one answered "${request.title}" within ${minutes} minute${minutes === 1 ? '' : 's'}, so the run is paused on this step. It has not run. Approve or decline it and the run carries on from here.`
+          });
+          if (agentId) this.activity?.approvalExpired(agentId);
         }, this.approvalTimeoutMs);
       }
       // 0.4.17: the card also carries the plain risk headline and the whole reason, and the exact command or code, so it can say why in one

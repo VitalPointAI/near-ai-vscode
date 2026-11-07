@@ -1203,6 +1203,19 @@
         if (closePending(m.callId, 'expired', m.minutes)) announce(m.text || 'An approval request expired.');
         else notice(m.text || 'An approval request expired.', []);
         break;
+      // 0.4.19: the wait reached its timeout and the run parked on this step. The card stays, because the answer is still owed and the run carries on
+      // from here when it comes.
+      case 'approval-paused': {
+        const entry = pendingCards.get(m.callId);
+        const text = m.text || 'The run is paused on this step until you answer.';
+        // The card stays and keeps its buttons: the answer is still owed, and the run carries on from this step when it comes.
+        if (entry && !entry.card.querySelector('.pending-paused')) {
+          const paused = el('p', 'pending-paused', text);
+          entry.card.append(paused);
+        } else if (!entry) notice(text, []);
+        announce(text);
+        break;
+      }
       case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' ? 'cancelled' : 'closed'); break;
       case 'todos': renderTodos(m.todos || []); break;
       case 'run-changes': onRunChanges(m); break;

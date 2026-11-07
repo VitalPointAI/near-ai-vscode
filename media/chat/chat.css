@@ -264,6 +264,9 @@ details.agent-tool .state { color: var(--vscode-errorForeground); }
 .question details.approval-more { margin: 0 0 8px; }
 .question details.approval-more summary { cursor: pointer; color: var(--vscode-textLink-foreground); font-size: 12px; }
 .question details.approval-more pre { margin: 6px 0 0; max-height: min(260px, 30vh); overflow: auto; }
+/* A run that reached its approval timeout and parked: the card keeps its buttons, and this line says why the run is not moving. */
+.pending-paused { margin: 4px 0 0; font-size: 12px; color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); overflow-wrap: anywhere; }
+
 .pending-line { font-size: 12px; color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; overflow-wrap: anywhere; }
 .pending-line::before { content: '⏸'; }
 .pending-line.resolved { color: var(--vscode-descriptionForeground); }

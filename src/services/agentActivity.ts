@@ -303,6 +303,14 @@ export class ActivityFeed {
     this.withAgent(agentId, (_base, stat) => { stat.approvals.asked += 1; this.enter(stat, 'waiting-you'); this.changed([]); });
   }
 
+  /**
+   * The wait reached its timeout and the run parked on the step. The person has not answered yet, so the agent is still waiting on them: the wait time keeps
+   * counting, which is what makes "Waiting for you" in the Activity view tell the truth.
+   */
+  public approvalExpired(agentId: string): void {
+    this.withAgent(agentId, (_base, stat) => { stat.approvals.expired += 1; this.changed([]); });
+  }
+
   /** `cancelled`: the run stopped while it waited, which is neither an answer nor an expiry. */
   public approvalSettled(agentId: string, outcome: 'allowed' | 'declined' | 'expired' | 'cancelled'): void {
     this.withAgent(agentId, (_base, stat) => {
