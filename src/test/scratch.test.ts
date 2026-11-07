@@ -67,3 +67,15 @@ test('cleaning empties the scratch folder but keeps the folder, and never touche
   // Cleaning a project with no scratch folder is not an error.
   assert.equal(await cleanScratch(await mkdtemp(path.join(tmpdir(), 'near-ai-scratch-none-'))), 0);
 });
+
+test('a folder the person has not set up is left untouched, so opening a project writes nothing into it', async () => {
+  // The plain e2e checks: merely opening a folder must not add a file. The activation setup therefore waits for .planning/.near-ai, which exists only
+  // once the person acts in the project.
+  const { isNearAiProject } = await import('../gsd/runtime');
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-scratch-plain-'));
+  assert.equal(await isNearAiProject(root), false, 'a bare folder is not set up');
+  await mkdir(path.join(root, '.planning', '.near-ai'), { recursive: true });
+  assert.equal(await isNearAiProject(root), true, 'and a set-up project is');
+  // Nothing was created by the check itself.
+  assert.equal(existsSync(path.join(root, '.gitignore')), false, 'the check alone writes nothing');
+});
