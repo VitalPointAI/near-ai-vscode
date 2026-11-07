@@ -360,9 +360,25 @@
     node.hidden = false;
   }
 
+  // Models worth testing again: a saved result that is stale or missing a task, and models that were added to the catalog since the last run. Shown above
+  // the board so a release of a new model is not something the user has to notice by scrolling (owner, 2026-11-07).
+  function renderRetest() {
+    const root = $('retest');
+    root.replaceChildren();
+    const worth = state.retest || { models: [], newModels: [] };
+    const lines = [];
+    if (worth.newModels.length) lines.push(el('p', '', 'Added since you last tested: ' + worth.newModels.join(', ') + '. Select them below to see how they do.'));
+    for (const entry of worth.models) lines.push(el('p', '', entry.model + ': ' + entry.why.join('; ')));
+    root.hidden = !lines.length;
+    if (lines.length) {
+      root.append(el('strong', '', 'Worth testing again'), ...lines);
+    }
+  }
+
   function renderAll() {
     $('problem').hidden = true;
     renderBoard();
+    renderRetest();
     renderSetup();
     renderHistory();
     renderReport();

@@ -141,7 +141,7 @@ class Node {
 
 async function runCompare() {
   const body = new Node('body');
-  for (const id of ['board', 'setup', 'history', 'results-section', 'results', 'results-actions', 'progress', 'notice', 'problem', 'refresh']) { const node = new Node('div'); node.id = id; body.append(node); }
+  for (const id of ['board', 'retest', 'setup', 'history', 'results-section', 'results', 'results-actions', 'progress', 'notice', 'problem', 'refresh']) { const node = new Node('div'); node.id = id; body.append(node); }
   const listeners: Array<(event: { data: unknown }) => void> = [];
   const document = { getElementById: (id: string) => body.all().find((node) => node.id === id) ?? null, createElement: (tag: string) => new Node(tag), createTextNode: (text: string) => { const node = new Node('#text'); node.textContent = text; return node; } };
   function Option(text: string, value: string) { const node = new Node('option'); node.textContent = text; node.value = value; return node; }

@@ -12,7 +12,7 @@ import { spendAccountOf } from './agentSession';
 import type { AuthService } from './auth';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
-import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
+import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
 import { privacyWarning, roleOptions, roleUpdate, type RoleOption } from './modelRoles';
 import type { ModelInfo, UsageMetadata } from './nearAiClient';
 import { activeProvider, clientFor, type ActiveProvider } from './providerCache';
@@ -55,11 +55,13 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
   const teeOnly = settings.privacyMode === 'tee-only';
   const catalog = catalogEntries(models, roles, teeOnly);
   const [tasks, runs] = await Promise.all([benchmarkTasks(), storeFor(context).list()]);
+  const leaderboard = leaderboardRows(runs, tasks, models, roles, Date.now());
   return {
     active, models, tasks, runs, roles,
     state: {
-      leaderboard: leaderboardRows(runs, tasks, models, roles, Date.now()), catalog, selected: defaultSelection(roles, catalog), roles,
-      taskSets: taskSetsView(tasks), history: historyEntries(runs), ...(running ? { running: { runId: running.runId } } : {}), teeOnly, ...(problem ? { problem } : {})
+      leaderboard, catalog, selected: defaultSelection(roles, catalog), roles,
+      taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models),
+      ...(running ? { running: { runId: running.runId } } : {}), teeOnly, ...(problem ? { problem } : {})
     }
   };
 }

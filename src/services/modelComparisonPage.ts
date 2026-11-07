@@ -1,4 +1,4 @@
-import { buildLeaderboard, catalogVersion, privacyOf, RUN_ID, summarizeRun, type CostEstimate, type ComparisonPlan, type LeaderboardEntry, type ModelSummary, type RunMode, type SavedRun } from '../benchmark/results';
+import { buildLeaderboard, needsRetest, catalogVersion, privacyOf, RUN_ID, summarizeRun, type CostEstimate, type ComparisonPlan, type LeaderboardEntry, type ModelSummary, type RunMode, type SavedRun } from '../benchmark/results';
 import { TASK_SETS, tasksFor, type BenchmarkTask, type TaskSetId } from '../benchmark/tasks';
 import { isChatModel } from './chatBridge';
 import { heldRoles, type RoleOption } from './modelRoles';
@@ -24,6 +24,8 @@ export interface PageState {
   roles: RoleOption[];
   taskSets: Array<{ id: TaskSetId; label: string; description: string; tasks: Array<{ id: string; label: string; kind: string }> }>;
   history: HistoryEntry[];
+  /** What is worth testing again: models whose result is stale or missing a task, and new models with no result at all. */
+  retest: { models: Array<{ model: string; why: string[] }>; newModels: string[] };
   running?: { runId: string };
   teeOnly: boolean;
   problem?: string;
@@ -65,6 +67,12 @@ export function historyEntries(runs: SavedRun[]): HistoryEntry[] {
       ...(costs.length ? { costUsd: costs.reduce((sum, value) => sum + value, 0) } : {})
     };
   });
+}
+
+/** The page's "worth testing again" view, built from the same leaderboard the table shows. */
+export function retestView(rows: LeaderboardRow[], catalog: ModelInfo[]): PageState['retest'] {
+  const { retest, newModels } = needsRetest(rows, catalog);
+  return { models: retest, newModels };
 }
 
 export function leaderboardRows(runs: SavedRun[], tasks: BenchmarkTask[], catalog: ModelInfo[], roles: RoleOption[], now: number): LeaderboardRow[] {
@@ -158,7 +166,7 @@ export function comparisonPageHtml(options: { cspSource: string; nonce: string; 
 <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 <main>
 <section aria-labelledby="board-title"><div class="section-head"><h2 id="board-title">Leaderboard</h2></div>
-<p class="hint">Every model tested on this computer, ranked on its latest result for each task. Scores are out of 10.</p><div id="board"><p class="hint">Loading…</p></div></section>
+<p class="hint">Every model tested on this computer, ranked on its latest result for each task. Scores are out of 10.</p><div id="retest" hidden></div><div id="board"><p class="hint">Loading…</p></div></section>
 <section aria-labelledby="run-title"><h2 id="run-title">Run a comparison</h2><div id="setup"></div><div id="progress" hidden></div></section>
 <section aria-labelledby="results-title" id="results-section" hidden><div class="section-head"><h2 id="results-title">Results</h2><div class="actions" id="results-actions"></div></div><div id="results"></div></section>
 <section aria-labelledby="history-title"><h2 id="history-title">Past comparisons</h2><div id="history"></div></section>

@@ -324,6 +324,27 @@ export function buildLeaderboard(runs: SavedRun[], current: BenchmarkTask[], cat
   return rankSummaries(entries);
 }
 
+/**
+ * The models worth testing again on the current tasks (owner, 2026-11-07: "enable the user to re-run them periodically as new models are released").
+ * Three reasons to re-run one: its saved result is on an older version of a task, it was tested more than `staleAfterDays` ago, or it has no result for a
+ * task in the set. `newModels` are catalog models with no result at all, which is what a release of a new model looks like here.
+ */
+export function needsRetest(leaderboard: LeaderboardEntry[], catalog: ModelInfo[], staleAfterDays = STALE_AFTER_DAYS): { retest: Array<{ model: string; why: string[] }>; newModels: string[] } {
+  const tested = new Set(leaderboard.map((entry) => entry.model));
+  const retest = leaderboard
+    .filter((entry) => entry.inCatalog && (entry.stale.length > 0 || entry.missingTasks.length > 0))
+    .map((entry) => ({ model: entry.model, why: [...entry.stale, ...(entry.missingTasks.length ? [`No result for: ${entry.missingTasks.join(', ')}`] : [])] }));
+  const newModels = catalog.filter((entry) => !tested.has(entry.id) && isDelegable(entry)).map((entry) => entry.id);
+  return { retest, newModels };
+}
+
+/** Whether a model can do the benchmark's work at all: text in, text out. */
+function isDelegable(model: ModelInfo): boolean {
+  const output = model.outputModalities ?? model.architectureOutputModalities;
+  const input = model.inputModalities ?? model.architectureInputModalities;
+  return (!output || output.includes('text')) && (!input || input.includes('text'));
+}
+
 /** A row copied from a saved result into a new comparison, marked as reused. */
 export function reusedRows(result: LatestResult): ResultRow[] {
   return result.rows.map((row) => ({ ...row, reusedFrom: result.runId }));

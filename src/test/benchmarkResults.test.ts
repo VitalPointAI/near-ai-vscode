@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildLeaderboard, catalogVersion, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ResultRow, type SavedRun } from '../benchmark/results';
+import { buildLeaderboard, catalogVersion, needsRetest, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ResultRow, type SavedRun } from '../benchmark/results';
 import { ComparisonStore } from '../benchmark/store';
 import type { BenchmarkTask, TaskKind } from '../benchmark/tasks';
 import type { ModelInfo } from '../services/nearAiClient';
@@ -192,4 +192,27 @@ test('the store saves each comparison as its own file, lists them newest first, 
   assert.equal(await store.newId(first.id), `${first.id}-2`);
   assert.equal(await store.newId('2026-10-04T00-00-00-000Z'), '2026-10-04T00-00-00-000Z');
   assert.throws(() => store.fileFor('../../etc/passwd'), /Not a saved comparison/);
+});
+
+// What is worth testing again (owner, 2026-11-07: "enable the user to re-run them periodically as new models are release").
+test('the retest plan names models with a stale result or a missing task, and models added since the last run', () => {
+  const now = Date.parse('2026-11-07T00:00:00.000Z');
+  // tee/a was tested on every task, recently. local/c was tested on everything but two days ago is fine; nopricing/d was tested on an OLD task version.
+  const complete = saved('2026-11-05T00-00-00-000Z', '2026-11-05T00:00:00.000Z', [
+    ...TASKS.map((entry) => row('tee/a', entry.id, 8, { at: '2026-11-05T01:00:00.000Z' })),
+    ...TASKS.map((entry) => row('local/c', entry.id, 7, { at: '2026-11-05T01:00:00.000Z' })),
+    ...TASKS.map((entry) => row('nopricing/d', entry.id, 5, { at: '2026-09-01T01:00:00.000Z', taskVersion: 'old-version' }))
+  ]);
+  const board = buildLeaderboard([complete], TASKS, [...catalog, { id: 'brand/new', privacyBoundary: 'tee' }], now);
+  const { retest, newModels } = needsRetest(board, [...catalog, { id: 'brand/new', privacyBoundary: 'tee' }]);
+  const retestIds = retest.map((entry) => entry.model);
+  assert.ok(retestIds.includes('nopricing/d'), 'an old task version and an old date both make it stale');
+  assert.match(retest.find((entry) => entry.model === 'nopricing/d')!.why.join(' '), /older version/);
+  assert.equal(retestIds.includes('tee/a'), false, 'a current result needs no retest');
+  // A model in the catalog with no result at all is new, and is offered separately because it has nothing to compare yet. fwd/b is one of those here:
+  // it is in the catalog and this run never tested it.
+  assert.deepEqual(newModels, ['fwd/b', 'brand/new']);
+  // A model that is only an embedding model cannot do the benchmark, so it is not offered.
+  const withEmbedding = needsRetest(board, [...catalog, { id: 'brand/new', privacyBoundary: 'tee' }, { id: 'embed/x', privacyBoundary: 'tee', outputModalities: ['image'] }]);
+  assert.equal(withEmbedding.newModels.includes('embed/x'), false);
 });
