@@ -29,9 +29,8 @@ test('a run is told to wait in short polls, so a Check now lands quickly and an 
 
 test('the chat shows a Check now button on a running agent, and it sends the marked message', () => {
   const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
-  // A control on the running row, beside Stop, so it is where a person is already looking.
-  assert.match(page, /Check now/);
-  assert.match(page, /nudge|check-now/, 'the click goes through its own action');
+  // 0.4.18 review: assert the real click, not just that the words appear somewhere. The control is on the running row and posts the nudge action.
+  assert.match(page, /textButton\('Check now', \(\) => post\(\{ type: 'agent-control', agentId: agent\.id, action: 'nudge' \}\)\)/, 'the button posts the nudge action');
 });
 
 test('the nudge action goes through the sidebar parser and reaches the agent as an interruption', async () => {

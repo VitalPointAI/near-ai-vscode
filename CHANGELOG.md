@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Check now, when a run is waiting on CI or a review.** A running agent row has a **Check now** button
+  beside Pause and Stop: it interrupts the wait and tells the agent to read the real state from GitHub
+  again. Runs also wait in short polls now, so a verdict that lands early is picked up with no click.
+- **The between-steps choice is a picker**, beside the approval picker and styled the same way: carry on
+  by itself, or stop between steps in any of the asking modes.
+- **Fetching a page no longer asks.** A plain `curl` or `wget` download is safe, because it sends
+  nothing of the run's with it; anything that uploads or carries data still asks.
+- **Open-GSD's own "find the tool and run it" prologue** no longer asks, once the managed runtime has
+  been verified, and a look-alike copy of it still does.
+
 ## 0.4.18
 
 - **A workflow carries on by itself in Auto.** A research or software project used to stop at every

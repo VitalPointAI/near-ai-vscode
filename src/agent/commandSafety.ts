@@ -827,7 +827,10 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     if (name === 'http' || name === 'https' || name === 'xh') return risky(`${name} can send data off this machine`);
     // 0.4.18: a plain GET is a download, and fetching a page is what research does. It sends nothing of the run's with it: no body, no form, no upload,
     // and no POST/PUT/PATCH/DELETE (all checked above). A write target is safe too, and this is the same shape the run is told to use for its pages.
-    const readsPage = words.every((word) => !/^-(?:[dFT]|X)/.test(word) && !/^--(?:data|form|upload-file|json|post-|body-|method)/.test(word));
+    // 0.4.18 review: the denylist has to cover every way curl sends a body or a file, including --url-query (which appends a file's contents to the URL
+    // and so is exfiltration), --json, --form-string and -G/--get with data. Anything not positively known to be a bare request asks.
+    const SENDS_SOMETHING = /^-(?:[dFTGg]|X)|^--(?:data|form|form-string|upload-file|json|post-data|post-file|body-data|body-file|method|url-query|request)/;
+    const readsPage = words.every((word) => !SENDS_SOMETHING.test(word)) && !/\s-X\s*(?:POST|PUT|PATCH|DELETE)/i.test(words.join(' '));
     if (readsPage && !/^-X(?:POST|PUT|PATCH|DELETE)/i.test(words.join(' '))) return safe(`${name} downloads a page and sends nothing of this run's with it`);
   }
   if (name === 'rsync') return words.some((word) => !looksLikeOption(word) && /^[^/]*:|^[\w.-]+@/.test(word)) ? risky('rsync copies to or from another machine') : unknown('rsync copies files');
@@ -959,8 +962,20 @@ function classifyText(command: string, context: CommandContext, depth: number): 
   // not the shipped block. When the runtime is verified trusted, its variables name known files, so the command is not opaque. This runs before the
   // preamble match so both forms reach the same checker.
   // The command's own CLAUDE_CONFIG_DIR must name the managed home: a look-alike runtime elsewhere must not borrow the trusted verdict.
+  //
+  // 0.4.18 review: the prologue is only acceptable in ONE shape. Every assignment must give the value the managed runtime has, and there may be exactly
+  // two of them (CLAUDE_CONFIG_DIR then GSD), so a later reassignment cannot be deleted along with the substitution and quietly trusted. A command that
+  // sets either variable to anything else, or sets them again, is judged without this allowance.
   const namesManagedHome = context.gsdHome !== undefined && raw.includes(context.gsdHome);
-  if (depth === 0 && isInlineGsdPrologue(raw) && context.gsdRun?.trusted && namesManagedHome) {
+  const assignments = [...raw.matchAll(/(?:^|&&|;)\s*(?:export\s+)?(CLAUDE_CONFIG_DIR|GSD)=("[^"]*"|'[^']*'|[^;&\s]*)/g)].map((match) => ({ name: match[1], value: (match[2] ?? '').replace(/^["']|["']$/g, '') }));
+  const toolPath = context.gsdHome === undefined ? undefined : path.join(context.gsdHome, 'gsd-core', 'bin', 'gsd-tools.cjs');
+  const onlyTheManagedValues = assignments.length === 2
+    && assignments[0]?.name === 'CLAUDE_CONFIG_DIR' && assignments[0].value === context.gsdHome
+    && assignments[1]?.name === 'GSD' && assignments[1].value === '$CLAUDE_CONFIG_DIR/gsd-core/bin/gsd-tools.cjs';
+  const prologueNames = new Set(assignments.map((entry) => entry.name));
+  const noReassignment = (prologueNames.size === assignments.length) && (raw.match(/\bGSD=/g) ?? []).length === 1 && (raw.match(/\bCLAUDE_CONFIG_DIR=/g) ?? []).length === 1;
+  const prologueShape = isInlineGsdPrologue(raw) && namesManagedHome && onlyTheManagedValues && noReassignment && toolPath !== undefined;
+  if (depth === 0 && prologueShape && context.gsdRun?.trusted) {
     // Resolve the prologue's own variables to the paths the runtime check just verified: CLAUDE_CONFIG_DIR is the managed home, so GSD is that home's
     // gsd-tools. Then the ordinary checks decide the resolved command, which is the only honest way to judge a command written with variables.
     const tool = path.join(context.gsdHome as string, 'gsd-core', 'bin', 'gsd-tools.cjs');
