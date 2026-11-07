@@ -1,4 +1,5 @@
 import type { ActionPolicyMode } from '../domain/policy';
+import { AUTO_ADVANCE_TEXT, carriesOn } from '../domain/autoAdvance';
 
 /**
  * The chat's approval-policy picker. Only the user's own choice in the chat composer reaches
@@ -48,6 +49,8 @@ export interface PolicyStateMessage {
   stopped: boolean;
   scope: PolicyScope;
   options: Array<{ mode: ActionPolicyMode; label: string; summary: string; description: string; risky: boolean }>;
+  /** 0.4.18: whether an Open-GSD workflow carries on to its next step by itself, shown beside the approval picker so it can be changed mid-run. */
+  autoAdvance: { on: boolean; text: string };
 }
 
 export function effectivePolicyScope(inspection: PolicyInspection | undefined): PolicyScope {
@@ -59,12 +62,14 @@ export function effectivePolicyScope(inspection: PolicyInspection | undefined): 
 
 export function policyStateMessage(configuration: PolicyConfiguration, stopped: boolean): PolicyStateMessage {
   const value = configuration.get<unknown>('actionPolicy', 'approve-risky');
+  const mode = isPolicyMode(value) ? value : 'approve-risky';
   return {
     type: 'action-policy',
-    mode: isPolicyMode(value) ? value : 'approve-risky',
+    mode,
     stopped,
     scope: effectivePolicyScope(configuration.inspect('actionPolicy')),
-    options: POLICY_OPTIONS.map((option) => ({ ...option }))
+    options: POLICY_OPTIONS.map((option) => ({ ...option })),
+    autoAdvance: { on: carriesOn(mode), text: carriesOn(mode) ? AUTO_ADVANCE_TEXT.on : AUTO_ADVANCE_TEXT.off }
   };
 }
 

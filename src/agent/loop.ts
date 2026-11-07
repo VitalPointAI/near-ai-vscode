@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
@@ -587,9 +587,12 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         try { await this.options.rememberAllowRule?.(allowRule); } catch { /* still allowed for this run; the setting could not be saved */ }
       }
     }
+    const ranAt = Date.now();
     try {
       const output = await tool.run(input, context);
       if (tool.untrusted) this.grants.tainted = true;
+      // A scratch file this command wrote is recorded now that it succeeded, and only if the file is really there (0.4.18 review).
+      if (command !== undefined) await this.noteScratchWrites(command, ranAt);
       return this.finish(call.id, true, output + await this.testWriteNote(tool, input));
     } catch (error) {
       if (signal.aborted) return this.finish(call.id, false, 'Cancelled.');
@@ -606,15 +609,54 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       if (manifest.scripts && typeof manifest.scripts === 'object' && !Array.isArray(manifest.scripts)) packageScripts = Object.fromEntries(Object.entries(manifest.scripts as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
     } catch { /* no package.json, or not JSON: scripts are not checked */ }
     const cwd = context.shell?.workingDirectory ?? root;
-    // An Open-GSD preamble: check, for this shell, that its gsd_run would be the managed gsd-tools.
+    // Open-GSD: the runtime check is made whenever the command could be an Open-GSD call at all, not only when it starts with the preamble.
+    // A workflow runs both forms, the whole preamble block and a bare `gsd_run query …`, and the second used to arrive with no gsdRun decision, so
+    // every one of those steps was "unknown" and asked (owner, 2026-11-06: GSD stopped between phases and every planning edit asked).
     const runtime = context.gsdRuntime;
-    const gsd = runtime?.preambles.length && command.trimStart().startsWith(PREAMBLE_START)
+    // The forms a workflow uses: the preamble block (`_GSD_SHIM_NAME=`), a bare `gsd_run`/`gsd-tools` command, and `$GSD_TOOLS` (what gsd_run itself
+    // runs). A path that merely contains "gsd-tools.cjs" is NOT one of them: a look-alike runtime elsewhere must still ask, and it would otherwise be
+    // handed a trusted decision for the managed runtime.
+    // 0.4.18 review: only a command that STARTS an Open-GSD call (or begins with the preamble) gets the decision, so `echo gsd_run` and a string inside
+    // `bash -c` do not carry a trusted-runtime verdict they do not deserve.
+    const mentionsGsd = /^\s*(?:_GSD_SHIM_NAME=|gsd[_-](?:run|tools)\b|node\s+["']?\$?GSD_TOOLS\b)/.test(command);
+    const gsd = runtime?.preambles.length && mentionsGsd
       ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
     return {
-      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, ...gsd, safety: this.options.safety, signal: context.signal,
+      root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: [...this.writtenScratch], ...gsd, safety: this.options.safety, signal: context.signal,
       ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {})
     };
+  }
+
+  /** Absolute paths of scratch files this run wrote (0.4.18): the only scratch scripts it may run without asking. */
+  private readonly writtenScratch = new Set<string>();
+
+  /**
+   * Records the scratch files a command writes into a temporary folder, so a later call that runs one is known to be running the run's own code and not
+   * something a page it read left there. Only a redirect or a copy into an absolute temporary path counts; a path in the workspace is not scratch.
+   */
+  /**
+   * Records the scratch files a command rewrote, after it succeeded. Two things make this trustworthy (0.4.18 review):
+   *   - it runs AFTER the command, so a write that was refused or failed does not count;
+   *   - the file must exist and be newer than the moment the command started, so a destination that received the run's bytes counts while a path that
+   *     merely appeared in the text (`cp something /tmp/already-there.py`) does not. A scratch path can only ever be a script the run itself put there.
+   */
+  private async noteScratchWrites(command: string, startedAt: number): Promise<void> {
+    const roots = ['/tmp', '/var/tmp', ...(process.env.TMPDIR ? [path.resolve(process.env.TMPDIR)] : [])].map((root) => path.resolve(root));
+    const inScratch = (file: string): boolean => roots.some((root) => file === root || file.startsWith(`${root}${path.sep}`));
+    const candidates = new Set<string>();
+    const note = (text: string): void => { const file = path.resolve(text); if (path.isAbsolute(text) && !text.split(/[/\\]/).includes('..') && inScratch(file)) candidates.add(file); };
+    // `> /tmp/x`, `>> /tmp/x`, and `cp|mv|install|tee` (the destination is the last word on the line).
+    for (const match of command.matchAll(/>>?\s*([^\s;&|]+)/g)) if (match[1]) note(match[1]);
+    for (const match of command.matchAll(/\b(?:cp|mv|install|tee)\b[^;&|]*\s([^\s;&|]+)\s*$/g)) if (match[1]) note(match[1]);
+    for (const file of candidates) {
+      try {
+        const info = await stat(file);
+        if (info.isFile() && info.mtimeMs >= startedAt - 1000) this.writtenScratch.add(file);
+      } catch {
+        // Not there, so nothing was written where the text suggested.
+      }
+    }
   }
 
   private finish(callId: string, ok: boolean, output: string): string {

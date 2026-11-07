@@ -27,6 +27,8 @@ import type { ActivityFeed, AgentBoundary } from './agentActivity';
 import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
+import { SCRATCH_INSTRUCTIONS } from '../domain/scratch';
+import { cleanScratch } from './scratch';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
@@ -338,6 +340,8 @@ export class AgentConversation {
         throw error;
       }
       this.activity?.agentEnded(mainId, result.outcome);
+      // The run's scratch folder is emptied when it ends (0.4.18), so a long session does not grow one. It never fails a run.
+      await cleanScratch(this.root).catch(() => 0);
       ended = result.outcome;
       await this.persistAgent(request, mainId, result.outcome);
       this.messages = result.messages;
@@ -526,7 +530,9 @@ export class AgentConversation {
   public dispose(): void { this.reset(); }
 
   private systemPrompt(request: AgentTurnRequest, root = this.root): string {
-    const base = `${agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}`;
+    // Every run is told where scratch work goes (0.4.18): inside the project, ignored by git, and emptied when the run ends. It goes before the
+    // Open-GSD note so a workflow's own instructions read as the more specific direction.
+    const base = `${agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}`;
     if (!request.gsd) return base;
     return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). When the agent does an item on your task list, pass that item's exact content as the Agent call's task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
   }

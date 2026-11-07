@@ -22,6 +22,7 @@
   const steerButton = $('steer');
   const model = $('model');
   const policy = $('policy');
+  const advanceButton = $('advance');
   const profile = $('profile');
   const status = $('status');
   // Below the status line: set a usage reporting token, or that NEAR's total is in use.
@@ -574,11 +575,15 @@
       postFor({ type: 'approval-reply', callId: m.callId, decision, ...(decision === 'deny' && feedback.value.trim() ? { feedback: feedback.value.trim() } : {}) });
       closePending(m.callId, decision);
     };
-    const runLabel = m.tool === 'Bash' ? 'Allow this command for this run' : 'Allow edits for this run';
-    const allow = textButton('Allow', () => answer('allow'), true);
-    choices.append(allow, textButton(runLabel, () => answer('allow-run')));
-    // Adds the command's leading words to this workspace's allow list (nearAi.agent.allowCommands).
-    if (m.allowRule) choices.append(textButton('Always allow "' + m.allowRule + '" in this workspace', () => answer('allow-always')));
+    // Owner decision 2026-11-06: two named choices, because "Allow" and "for this run" did the same thing whenever a run makes a command once.
+    // "Allow this time" is one call. "Allow every time" is permanent: it writes the entry to this workspace's allow list and says what it saved.
+    // "For this run" appears only where it is genuinely different, which is when the command repeats but no permanent entry can be made (an address on
+    // the command line, or something held for review).
+    const allow = textButton('Allow this time', () => answer('allow'), true);
+    choices.append(allow);
+    if (m.allowRule) choices.append(textButton('Allow every time', () => answer('allow-always')));
+    const runnable = m.allowRule === undefined && m.tool === 'Bash';
+    if (runnable) choices.append(textButton('Allow this command for this run', () => answer('allow-run')));
     choices.append(textButton('Deny', () => answer('deny')));
     // Enter in the feedback box declines with those instructions.
     feedback.addEventListener('keydown', (event) => { if (event.key === 'Enter' && feedback.value.trim()) { event.preventDefault(); answer('deny'); } });
@@ -840,6 +845,28 @@
   // nearAi.actionPolicy; it then sends the effective state back, which is what this shows.
   const policyMenu = $('policy-menu');
   let policyState;
+
+  // 0.4.18: whether a workflow carries on by itself, shown beside the approval picker so it can be changed during a run (owner, 2026-11-06). It is the
+  // project's Open-GSD setting, changed through the same picker, so the two cannot disagree.
+  // The mode the run was in before the switch was turned on, so turning it off returns there ('auto' while it is on).
+  let advanceMode = 'approve-risky';
+  advanceButton.addEventListener('click', () => {
+    // 0.4.18 review: the switch must work in both directions, and neither direction may silently change the mode otherwise. Turning it OFF returns to the
+    // mode the run was in before it was turned on, so a fully autonomous run is not reduced to "ask me about changes"; turning it ON goes to Auto.
+    const on = advanceButton.getAttribute('aria-pressed') === 'true';
+    postFor({ type: 'set-action-policy', mode: on ? advanceMode : 'auto' });
+  });
+  function renderAdvance(m) {
+    const state = m.autoAdvance || {};
+    // Only a mode that stops at each step is remembered as the place to return to; while the switch is on, the current mode is Auto itself.
+    if (m.mode && m.mode !== 'auto') advanceMode = m.mode;
+    advanceButton.hidden = !state.text;
+    advanceButton.textContent = state.on ? 'Carrying on' : 'Stops each step';
+    advanceButton.setAttribute('aria-pressed', state.on ? 'true' : 'false');
+    advanceButton.title = state.text || '';
+    advanceButton.setAttribute('aria-label', state.text || 'Whether a workflow carries on by itself');
+  }
+
   function renderPolicy(state) {
     policyState = state;
     closePolicyMenu(policyMenu.contains(document.activeElement));
@@ -1077,7 +1104,7 @@
         model.title = (modelInfo.get(model.value) || {}).label || '';
         break;
       }
-      case 'action-policy': renderPolicy(m); break;
+      case 'action-policy': renderPolicy(m); renderAdvance(m); break;
       case 'models-error': model.replaceChildren(el('option', '', 'Models unavailable')); model.title = m.text || ''; break;
       case 'auth-required':
         if (current) { removeTurn(current.node); current = undefined; }

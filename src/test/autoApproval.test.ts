@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { RunCheckpoints } from '../agent/checkpoints';
@@ -535,4 +535,89 @@ test('auto: the installs switch covers an install and nothing else, and the ship
   const buildOff = (await decidePermissionAsync('shell', 'npm run build', auto, DEFAULT_RULES, new RunGrants(), off)).decision;
   const buildOn = (await decidePermissionAsync('shell', 'npm run build', auto, DEFAULT_RULES, new RunGrants(), on)).decision;
   assert.equal(buildOn, buildOff, 'the installs switch does not decide an npm script');
+});
+
+// ---- 0.4.18: an Open-GSD step no longer asks (owner, 2026-11-06: GSD stopped between phases) ----------------------------------------
+test('auto: a bare gsd_run call gets the Open-GSD decision too, not only a command that starts with the preamble', async () => {
+  const { PREAMBLE_START } = await import('../gsd/preamble');
+  const home = '/storage/gsd/1.20.1';
+  const preamble = `${PREAMBLE_START} ...the block...`;
+  const runtime = { home, preambles: [preamble] };
+  const seen: Array<{ trimmed: boolean; commands: string[] }> = [];
+  const run = new AgentRun({
+    client: { async *streamCompletion() { yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage: { verificationStatus: 'unknown' as const } } as never; } },
+    model: 'm', tools: [], context: { root: where.root, checkpoints: new RunCheckpoints('gsd-auto'), readFiles: new Set() } as never,
+    policy: { mode: 'auto', emergencyStop: false }, rules: DEFAULT_RULES,
+    // The safety model is deliberately absent: the rules and the GSD trust have to carry these commands.
+    requestApproval: async (request) => { seen.push({ trimmed: false, commands: [request.title] }); return { decision: 'allow' }; },
+    emit: () => undefined
+  });
+  // The check under test is the one autoContext makes: is a GSD decision attached for each form of the call?
+  const autoContext = (run as unknown as { autoContext(context: unknown, command: string): Promise<Record<string, unknown>> }).autoContext.bind(run);
+  // The runtime rides on the shell context, which is where autoContext reads it from.
+  const context = { root: where.root, shell: { workingDirectory: where.root, environment: { CLAUDE_CONFIG_DIR: home } }, gsdRuntime: runtime };
+  for (const command of [preamble, 'gsd_run query init.plan-phase 01', 'node $GSD_TOOLS query state']) {
+    const built = await autoContext(context, command);
+    assert.ok(built.gsdPreambles !== undefined, `${command.slice(0, 40)}: the preamble list is attached`);
+    assert.ok(built.gsdRun !== undefined, `${command.slice(0, 40)}: the trusted-runtime decision is made`);
+  }
+  // A command that has nothing to do with Open-GSD is not given the decision, so the check costs nothing there.
+  const plain = await autoContext(context, 'npm test');
+  assert.equal(plain.gsdPreambles, undefined);
+  assert.deepEqual(seen, []);
+});
+
+test('"Allow every time" reports what was really saved: learned when the entry sticks, and a plain failure when it does not', async () => {
+  // The owner's requirement is that the permanent choice "actually learns to allow it every time". The message is the evidence a person sees, so it
+  // must be read back from the settings rather than assumed from the write.
+  const { rememberedRuleNotice } = await import('../domain/allowRuleNotice');
+  assert.match(rememberedRuleNotice('docker version', true, 'workspace'), /^Learned: "docker version" now runs without asking in this workspace/);
+  assert.match(rememberedRuleNotice('docker version', true, 'workspace'), /not asked about again/);
+  assert.match(rememberedRuleNotice('docker version', false, 'workspace'), /could not be saved to this workspace/);
+  assert.match(rememberedRuleNotice('docker version', false, 'workspace'), /allowed for this run only/);
+  assert.match(rememberedRuleNotice('docker version', true, 'VS Code profile'), /in this VS Code profile/);
+  // It names where the entry lives, so a person can find and remove it.
+  assert.match(rememberedRuleNotice('docker version', true, 'workspace'), /Allow Commands/);
+});
+
+test('only a scratch script the run really wrote may run: the loop records the write itself, after it succeeded', async () => {
+  // The 0.4.18 review found the scratch tests passed a fabricated list, so the loop's own recording was never exercised and a `cp` onto a pre-existing
+  // script would have counted as "written by the run". This drives the real loop.
+  // The workspace must not be under a temporary folder, or /tmp stops counting as scratch (the reviewer's rule): use a folder beside it.
+  const root = await mkdtemp(path.join(homedir(), '.near-ai-scratch-run-'));
+  const scratch = path.join(process.env.TMPDIR ?? '/tmp', `near-ai-scratch-${process.pid}-${Date.now()}`);
+  await mkdir(scratch, { recursive: true });
+  const mine = path.join(scratch, 'verify.py');
+  const theirs = path.join(scratch, 'injected.py');
+  // A script that already exists, as a page the agent read could have left it: it is OLDER than the run.
+  await writeFile(theirs, 'print("injected")\n');
+  const old = new Date(Date.now() - 60 * 60 * 1000);
+  await utimes(theirs, old, old);
+
+  const shell = new ShellSession(root);
+  const approvals: ApprovalRequest[] = [];
+  const model = scriptedModel([
+    { calls: [call('s1', 'Bash', { command: `printf 'print(1)\\n' > ${mine}` })] },
+    { calls: [call('s2', 'Bash', { command: `python3 ${mine}` })] },
+    { calls: [call('s3', 'Bash', { command: `python3 ${theirs}` })] },
+    { text: 'Done.' }
+  ]);
+  const run = new AgentRun({
+    client: model, model: 'z-ai/glm-5.3', tools: CORE_TOOLS,
+    context: { root, checkpoints: new RunCheckpoints('scratch-run'), shell, readFiles: new Set() },
+    policy: auto, rules: DEFAULT_RULES, safety: fakeSafety(false).check,
+    requestApproval: async (request) => { approvals.push(request); return { decision: 'deny' }; },
+    emit: () => undefined
+  });
+  try {
+    assert.equal((await run.run([{ role: 'user', content: 'check' }], new AbortController().signal)).outcome, 'completed');
+    // The script the run wrote runs; the one already there is held, and its card shows why.
+    assert.equal(approvals.length, 1, `exactly one of the two asked: ${JSON.stringify(approvals.map((a) => a.title))}`);
+    assert.match(approvals[0]?.title ?? '', /injected\.py/, 'the pre-existing script is the one that asked');
+    // Held by the safety model (which here is not sure) or by the rules; either way it is not run.
+    assert.match(approvals[0]?.reason ?? '', /runs code the rules cannot check|outside the workspace|not sure/);
+  } finally {
+    shell.dispose();
+    await rm(scratch, { recursive: true, force: true });
+  }
 });

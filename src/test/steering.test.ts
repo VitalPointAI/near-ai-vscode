@@ -489,3 +489,17 @@ test('sidebar: a Steer through the real message path is taken as an interruption
     globalThis.fetch = originalFetch;
   }
 });
+
+// ---- 0.4.18: two named choices on an approval card (owner, 2026-11-06) ---------------------------------------------------------------
+// "Allow and Allow this command for this run seem to do the same thing. I'd rather see Allow this time, Allow Every Time (and if they select Allow
+// Every Time, it actually learns to allow it every time)."
+test('the approval card offers Allow this time and Allow every time, and "for this run" only where it differs', () => {
+  const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  const card = page.slice(page.indexOf('function onApproval('), page.indexOf('function onQuestions('));
+  assert.match(card, /textButton\('Allow this time'/, 'the per-call choice says it is per call');
+  assert.match(card, /textButton\('Allow every time', \(\) => answer\('allow-always'\)/, 'the permanent choice is named, and permanent');
+  assert.doesNotMatch(card, /textButton\('Allow', /, 'the bare Allow that meant the same thing is gone');
+  // "For this run" is offered only when no permanent entry can be made, so the two never read as duplicates.
+  assert.match(card, /if \(m\.allowRule\) choices\.append\(textButton\('Allow every time'/, 'every time appears only when there is an entry to save');
+  assert.match(card, /m\.allowRule === undefined/, 'for this run appears only when there is none');
+});
