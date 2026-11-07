@@ -68,7 +68,8 @@ function unquote(word: string): string {
 export function isPublicHost(url: string): boolean {
   let parsed: URL;
   try { parsed = new URL(unquote(url)); } catch { return false; }
-  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  // 0.4.18 review: `localhost.` is the same host to DNS as `localhost`, so the final dot is stripped before matching.
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (!host) return false;
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.home.arpa')) return false;
   const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
@@ -107,9 +108,11 @@ function isUrl(word: string): boolean {
 export function plainDownload(words: readonly string[]): PlainDownloadResult {
   const urls: string[] = [];
   let output: string | undefined;
+  // 0.4.18 review: two write flags must not let the later one hide the earlier, so the first named target is kept. A remote name (`-O`) fills the folder
+  // only when no named target was given.
   const note = (flag: string, value: string) => {
     const target = unquote(value);
-    if (WRITE_TARGET.has(flag) && target !== '-') output = target;
+    if (WRITE_TARGET.has(flag) && target !== '-' && output === undefined) output = target;
   };
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index] as string;
@@ -118,7 +121,7 @@ export function plainDownload(words: readonly string[]): PlainDownloadResult {
     if (word.startsWith('-')) {
       // 0.4.18 review: `-O`/`--remote-name` (and wget with no -O) write into the working directory under a name the server chooses, so they are a write
       // to wherever the command runs. Reporting that as `.` makes the caller judge the folder like any other write target.
-      if (REMOTE_NAME.has(word)) { output = '.'; continue; }
+      if (REMOTE_NAME.has(word)) { output ??= '.'; continue; }
       // A value attached with `=` or straight after a short flag.
       const equals = /^(--?[A-Za-z0-9][\w-]*)=(.*)$/.exec(word);
       if (equals) {
@@ -135,6 +138,9 @@ export function plainDownload(words: readonly string[]): PlainDownloadResult {
         // Its value is the next word, which must not be another flag.
         const value = words[index + 1];
         if (value === undefined || (value.startsWith('-') && value !== '-')) return { plain: false, reason: `${word} has no value` };
+        // 0.4.18 review: a value written as its own word is sent too (`-A "$TOKEN"`, `-e "$SECRET"`), so it must pass the same literal check as every
+        // other word.
+        if (!isLiteral(value)) return { plain: false, reason: `${value} is expanded by the shell, which can carry a secret into the request` };
         index += 1;
         if (isUrl(value)) urls.push(unquote(value)); else note(word, value);
         continue;
