@@ -11,11 +11,12 @@ import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 
 // Team commands (which open Team Studio), the team-file save hook, and the memory flow.
 
-export function registerWorkspaceCommands(context: vscode.ExtensionContext, openStudio: (options: { wizard?: 'project' }) => void): void {
+export function registerWorkspaceCommands(context: vscode.ExtensionContext, openStudio: (options: { wizard?: 'project' }) => void | Promise<void>): void {
   const library = new TeamLibrary(teamLibraryDir(homeFolder()));
   context.subscriptions.push(
     // Teams are built and managed in Team Studio; the Markdown files stay editable as before.
-    vscode.commands.registerCommand('nearAi.manageTeams', () => openStudio({})),
+    // Awaited, not fired and forgotten, so whoever runs the command (a person is not waiting, but a test is) sees the panel open.
+    vscode.commands.registerCommand('nearAi.manageTeams', async () => { await openStudio({}); }),
     vscode.commands.registerCommand('nearAi.setupProjectTeam', () => {
       if (!vscode.workspace.workspaceFolders?.length) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
       openStudio({ wizard: 'project' });

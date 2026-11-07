@@ -477,7 +477,8 @@ export class AgentConversation {
       return { role: 'user', content };
     }),
     subscribe: (listener) => { this.steerListeners.add(listener); return () => { this.steerListeners.delete(listener); }; },
-    interruptRequested: () => this.interrupting
+    interruptRequested: () => this.interrupting,
+    consumeInterrupt: () => { this.interrupting = false; }
   };
 
   /** Checks NEAR's signature and TDX attestation for a run's final answer. */

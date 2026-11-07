@@ -109,6 +109,8 @@ export interface RunInput {
   subscribe(listener: (notice: { interrupt: boolean }) => void): () => void;
   /** Whether the newest queued message asked to interrupt, since the last take. */
   interruptRequested?(): boolean;
+  /** Clears the interrupt request once it has been honoured, so it cuts a reply once and not every later one. */
+  consumeInterrupt?(): void;
 }
 
 export interface AgentRunOptions {
@@ -345,6 +347,8 @@ export class AgentRun {
         const urgent = notice.interrupt || input.interruptRequested?.() === true;
         if (!urgent && (received || !(this.options.client.cooldownRemainingMs?.(this.options.model) ?? 0))) return;
         cutForInput = true;
+        // An interrupt is honoured once, so a later ordinary message queued before the cut does not cut the reply as well (0.4.18 review).
+        if (urgent) input.consumeInterrupt?.();
         attemptAbort.abort();
       });
       try {

@@ -38,7 +38,7 @@ import { ConversationLog, ConversationOutcome, ConversationStatus, ConversationS
 import { ReputationStore } from './reputation';
 import { hostAttribution } from '../domain/activity';
 import { ContextGraphMemory } from './contextGraphMemory';
-import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
+import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
@@ -492,6 +492,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     let redTeamStep: { addendum: string; agents: GsdAgent[] } | undefined;
     try {
       if (message.type === 'open-command' && message.command.startsWith('team:')) {
+        await whenTeamsMoved();
         team = await new TeamLibrary(teamLibraryDir(homeFolder())).find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
         if (!team) { tab.post({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with NEAR AI: Team Studio.` }); return; }
         if (!message.args?.trim()) { tab.post({ type: 'assistant-error', text: `Tell the team what to do: /team:${team.slug} <task>` }); return; }
@@ -507,6 +508,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         skill = { name: found.name, args: message.args ?? '' };
         // Projects set up with a red-team stage add it to GSD workflows that end in verification.
         if (/^gsd-(?:execute-phase|verify-work|autonomous)$/.test(found.name) && await redTeamEnabled(root)) {
+          await whenTeamsMoved();
           const project = await new TeamLibrary(teamLibraryDir(homeFolder())).find('project', root).catch(() => undefined);
           const redTeam = project ? teamAgents(project).filter((agent) => agent.name === 'red-team') : [];
           redTeamStep = { addendum: RED_TEAM_WORKFLOW_STEP, agents: redTeam };

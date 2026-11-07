@@ -44,3 +44,28 @@ export function teamLibraryDir(home: string, env: NodeJS.ProcessEnv = process.en
 export function homeFolder(env: NodeJS.ProcessEnv = process.env): string {
   return env.HOME ?? env.USERPROFILE ?? os.homedir();
 }
+
+/**
+ * The one-time move of teams from the old extension storage, started once and shared by every reader (0.4.18 review: a fire-and-forget move let a
+ * reader run before the copy finished and show an empty list). `startTeamsMove` sets it at activation; readers call `whenTeamsMoved` first.
+ */
+let moving: Promise<{ moved: number; skipped: number }> | undefined;
+
+export function startTeamsMove(move: Promise<{ moved: number; skipped: number }>): void {
+  moving = move;
+}
+
+/** Resolves when the one-time move has finished (or at once when there is none). Never rejects. */
+export async function whenTeamsMoved(): Promise<void> {
+  await moving?.catch(() => undefined);
+}
+
+/** For tests and for a caller that wants the same promise: undefined when no move was started. */
+export function teamsMoveInFlight(): Promise<{ moved: number; skipped: number }> | undefined {
+  return moving;
+}
+
+/** Forget the move (tests only), so a suite that starts several times does not wait on an earlier one. */
+export function forgetTeamsMove(): void {
+  moving = undefined;
+}

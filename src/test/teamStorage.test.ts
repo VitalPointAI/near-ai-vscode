@@ -87,3 +87,26 @@ test('reading a team the extension wrote never asks for approval, and any other 
   const write = classifyCommand(`echo x > ${path.join(teams, 'teams', 'researchx.md')}`, trusted);
   assert.notEqual(write.verdict, 'safe', JSON.stringify(write));
 });
+
+test('a reader that opens while the move is still copying waits for it, and one with nothing to move does not wait at all', async () => {
+  const { forgetTeamsMove, startTeamsMove, teamsMoveInFlight, whenTeamsMoved } = await import('../domain/teamStorage');
+  forgetTeamsMove();
+  // Nothing pending: the wait resolves at once, which is what keeps the studio opening in the same tick as before.
+  assert.equal(teamsMoveInFlight(), undefined);
+  let done = false;
+  await whenTeamsMoved();
+  assert.equal(done, false);
+
+  // A real move in flight: the reader waits until it finishes (0.4.18 review: a fire-and-forget move let a reader see an empty list).
+  let finish: (value: { moved: number; skipped: number }) => void = () => undefined;
+  const pending = new Promise<{ moved: number; skipped: number }>((resolve) => { finish = resolve; });
+  startTeamsMove(pending);
+  assert.notEqual(teamsMoveInFlight(), undefined);
+  const waited = whenTeamsMoved().then(() => { done = true; });
+  await new Promise((resolve) => { setTimeout(resolve, 10); });
+  assert.equal(done, false, 'the reader is still waiting');
+  finish({ moved: 2, skipped: 0 });
+  await waited;
+  assert.equal(done, true, 'and proceeds once the copy is done');
+  forgetTeamsMove();
+});

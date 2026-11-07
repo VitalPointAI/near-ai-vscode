@@ -37,6 +37,10 @@ test('the bridge parses steer strictly', () => {
   const id = 'steer-0123456789ab';
   assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: '  use port 8080 ' }), { type: 'steer', id, text: 'use port 8080' });
   assert.ok(parseChatWebviewMessage({ type: 'steer', id, text: 'x'.repeat(MAX_MESSAGE_CHARS) }));
+  // 0.4.18 review: a Steer carries `interrupt`, and the parser must accept it; before this the button sent a message the host threw away.
+  assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: 'stop that', interrupt: true }), { type: 'steer', id, text: 'stop that', interrupt: true });
+  assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: 'stop that' }), { type: 'steer', id, text: 'stop that' }, 'a queue is unchanged');
+  assert.equal(parseChatWebviewMessage({ type: 'steer', id, text: 'stop that', interrupt: 'yes' }), undefined, 'interrupt is a boolean');
   for (const bad of [
     { type: 'steer', id, text: 'x'.repeat(MAX_MESSAGE_CHARS + 1) },
     { type: 'steer', id, text: '   ' },
@@ -459,4 +463,29 @@ test('a message sent without Steer still waits for the reply to finish, as befor
   assert.equal(result.outcome, 'completed');
   assert.equal(streamedToEnd, true, 'a queued message does not cut the reply');
   assert.equal(seen.length, 2, 'and the agent picks it up before its next request');
+});
+
+test('sidebar: a Steer through the real message path is taken as an interruption, not a queue', async () => {
+  // The 0.4.18 review found the button did nothing because the parser dropped `interrupt`, and the loop-level tests could not see it. This goes
+  // through the sidebar's own parser, the host's steer handler and the conversation's flag, so a regression at any of those fails here.
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear((messages) => near.requests.length === 1 ? editCall : { content: `Saw: ${lastUser(messages)}` });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    // A Steer, exactly as the page posts it.
+    await sidebar.send({ type: 'steer', id: 'steer-cccccccccccc', text: 'Stop: use 9090 instead', interrupt: true });
+    // The host says at once that it was taken as an interruption.
+    // It is queued first and then says it is interrupting, which is the order the conversation produces.
+    assert.deepEqual(steerStates(sidebar.posted, 'steer-cccccccccccc'), ['queued', 'interrupting'], JSON.stringify(steerStates(sidebar.posted, 'steer-cccccccccccc')));
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    const users = (near.requests[1] ?? []).filter((message) => message.role === 'user').map((message) => String(message.content));
+    assert.ok(users.some((text) => text.includes('Stop: use 9090 instead')), 'the steer reached the model');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

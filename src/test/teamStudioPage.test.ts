@@ -930,6 +930,9 @@ test('host path: Manage Teams opens one Team Studio tab; Set Up Project Team sta
   const originalLoad = nodeModule._load;
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try {
+    // 0.4.18: the studio remembers its open panel in module state, and a test earlier in this file leaves one "open" (the stub never fires
+    // onDidDispose), so this test starts from a fresh module or it would only reveal the previous panel.
+
     const { openTeamStudio } = require('../services/teamStudioPanel') as typeof import('../services/teamStudioPanel');
     const { registerWorkspaceCommands } = require('../services/workspaceCommands') as typeof import('../services/workspaceCommands');
     const { initEmergencyStop } = require('../services/emergencyStop') as typeof import('../services/emergencyStop');

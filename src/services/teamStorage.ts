@@ -3,7 +3,7 @@
 //   - copy, never move: the old files stay, so going back to an older version of the extension still finds them;
 //   - never overwrite: a file already in the new folder may be the newer one, so an existing name is skipped and counted;
 //   - never fail a start: a folder that cannot be read or written leaves the person with whatever is already in place.
-import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rename, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { legacyTeamsDirectory, sameFolder, teamsDirectory } from '../domain/teamStorage';
 
@@ -50,7 +50,11 @@ export async function migrateTeams(options: { home: string; globalStorage: strin
     if (await exists(to)) { skipped += 1; continue; }
     try {
       await mkdir(path.dirname(to), { recursive: true });
-      await copyFile(from, to);
+      // Copy to a temporary name and rename it into place (0.4.18 review): a copy that fails half way (a full disk, a permission) must not leave a
+      // truncated team that every later run then treats as already present.
+      const temporary = `${to}.copying`;
+      await copyFile(from, temporary);
+      await rename(temporary, to);
       moved += 1;
     } catch {
       // One file that cannot be copied (a permission, a full disk) must not stop the rest or fail the start.

@@ -318,7 +318,9 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     return { type: 'questions-reply', id: message.id, answers: message.answers as string[], ...scoped };
   }
   if (message.type === 'steer') {
-    if (Object.keys(message).some((key) => key !== 'type' && key !== 'id' && key !== 'text' && key !== 'conversationId')) return undefined;
+    // 0.4.18 review: `interrupt` is part of a Steer, so it must be allowed here; without it a Steer was rejected and the button did nothing.
+    if (Object.keys(message).some((key) => key !== 'type' && key !== 'id' && key !== 'text' && key !== 'conversationId' && key !== 'interrupt')) return undefined;
+    if (message.interrupt !== undefined && typeof message.interrupt !== 'boolean') return undefined;
     if (typeof message.id !== 'string' || !/^steer-[a-f0-9]{12}$/.test(message.id)) return undefined;
     if (typeof message.text !== 'string' || !message.text.trim() || message.text.length > MAX_MESSAGE_CHARS) return undefined;
     return { type: 'steer', id: message.id, text: message.text.trim(), ...scoped, ...(message.interrupt === true ? { interrupt: true } : {}) };
