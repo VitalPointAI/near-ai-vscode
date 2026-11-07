@@ -606,9 +606,15 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       if (manifest.scripts && typeof manifest.scripts === 'object' && !Array.isArray(manifest.scripts)) packageScripts = Object.fromEntries(Object.entries(manifest.scripts as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
     } catch { /* no package.json, or not JSON: scripts are not checked */ }
     const cwd = context.shell?.workingDirectory ?? root;
-    // An Open-GSD preamble: check, for this shell, that its gsd_run would be the managed gsd-tools.
+    // Open-GSD: the runtime check is made whenever the command could be an Open-GSD call at all, not only when it starts with the preamble.
+    // A workflow runs both forms, the whole preamble block and a bare `gsd_run query …`, and the second used to arrive with no gsdRun decision, so
+    // every one of those steps was "unknown" and asked (owner, 2026-11-06: GSD stopped between phases and every planning edit asked).
     const runtime = context.gsdRuntime;
-    const gsd = runtime?.preambles.length && command.trimStart().startsWith(PREAMBLE_START)
+    // The forms a workflow uses: the preamble block (`_GSD_SHIM_NAME=`), a bare `gsd_run`/`gsd-tools` command, and `$GSD_TOOLS` (what gsd_run itself
+    // runs). A path that merely contains "gsd-tools.cjs" is NOT one of them: a look-alike runtime elsewhere must still ask, and it would otherwise be
+    // handed a trusted decision for the managed runtime.
+    const mentionsGsd = /(?:^|[\s;&|(])gsd[_-](?:run|tools)\b|\$GSD_TOOLS\b|_GSD_SHIM_NAME=/.test(command);
+    const gsd = runtime?.preambles.length && mentionsGsd
       ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
     return {

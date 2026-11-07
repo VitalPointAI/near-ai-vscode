@@ -246,7 +246,10 @@ test('S1. a GSD plan step in auto mode (2 foreground + 1 background sub-agent, s
   const outcome = await scenario('S1', { main: PLAN_MAIN }, async (sidebar) => { await sidebar.send({ type: 'open-command', command: 'plan-phase', model: MAIN }); });
   assertReconciled(outcome);
   const kinds = new Set(outcome.account.ledger.list().map((entry) => entry.kind));
-  for (const kind of ['main', 'sub-agent', 'safety'] as const) assert.ok(kinds.has(kind), `S1 records ${kind} requests`);
+  // 0.4.18: a managed Open-GSD step no longer reaches the safety model at all (it was being sent for every gsd_run and then asking), so the run records
+  // main and sub-agent requests; a safety request is only expected if something in the run was genuinely unplaceable.
+  for (const kind of ['main', 'sub-agent'] as const) assert.ok(kinds.has(kind), `S1 records ${kind} requests`);
+  assert.equal(outcome.account.ledger.list().every((entry) => entry.kind !== 'safety'), true, 'S1 asked the safety model about nothing the rules could place');
   const runIds = new Set(outcome.account.ledger.list().map((entry) => entry.runId));
   assert.equal(runIds.size, 1, 'the sub-agents (background one included) and safety checks belong to the run');
   // The reply footer: the run's ledger total, then NEAR's figure for all of it.

@@ -574,11 +574,15 @@
       postFor({ type: 'approval-reply', callId: m.callId, decision, ...(decision === 'deny' && feedback.value.trim() ? { feedback: feedback.value.trim() } : {}) });
       closePending(m.callId, decision);
     };
-    const runLabel = m.tool === 'Bash' ? 'Allow this command for this run' : 'Allow edits for this run';
-    const allow = textButton('Allow', () => answer('allow'), true);
-    choices.append(allow, textButton(runLabel, () => answer('allow-run')));
-    // Adds the command's leading words to this workspace's allow list (nearAi.agent.allowCommands).
-    if (m.allowRule) choices.append(textButton('Always allow "' + m.allowRule + '" in this workspace', () => answer('allow-always')));
+    // Owner decision 2026-11-06: two named choices, because "Allow" and "for this run" did the same thing whenever a run makes a command once.
+    // "Allow this time" is one call. "Allow every time" is permanent: it writes the entry to this workspace's allow list and says what it saved.
+    // "For this run" appears only where it is genuinely different, which is when the command repeats but no permanent entry can be made (an address on
+    // the command line, or something held for review).
+    const allow = textButton('Allow this time', () => answer('allow'), true);
+    choices.append(allow);
+    if (m.allowRule) choices.append(textButton('Allow every time', () => answer('allow-always')));
+    const runnable = m.allowRule === undefined && m.tool === 'Bash';
+    if (runnable) choices.append(textButton('Allow this command for this run', () => answer('allow-run')));
     choices.append(textButton('Deny', () => answer('deny')));
     // Enter in the feedback box declines with those instructions.
     feedback.addEventListener('keydown', (event) => { if (event.key === 'Enter' && feedback.value.trim()) { event.preventDefault(); answer('deny'); } });

@@ -39,6 +39,7 @@ import { ReputationStore } from './reputation';
 import { hostAttribution } from '../domain/activity';
 import { ContextGraphMemory } from './contextGraphMemory';
 import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
+import { rememberedRuleNotice } from '../domain/allowRuleNotice';
 import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
@@ -886,8 +887,15 @@ async function readGsdStatusLine(live?: { agents: number; spend?: string }): Pro
 async function rememberAllowRule(rule: string, tab: { post(message: unknown): void }): Promise<void> {
   const configuration = vscode.workspace.getConfiguration('nearAi');
   const current = readAgentRules().allowCommands;
-  if (current.includes(rule)) return;
   const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-  await configuration.update('agent.allowCommands', [...current, rule], target);
-  tab.post({ type: 'notice', text: `"${rule}" now runs without asking in this ${target === vscode.ConfigurationTarget.Workspace ? 'workspace' : 'VS Code profile'}. Remove it under Settings → NEAR AI › Agent: Allow Commands.` });
+  const where = target === vscode.ConfigurationTarget.Workspace ? 'workspace' : 'VS Code profile';
+  if (!current.includes(rule)) {
+    await configuration.update('agent.allowCommands', [...current, rule], target);
+  }
+  // Owner decision 2026-11-06: "if they select Allow Every Time, it actually learns to allow it every time". The entry is read back after writing, so
+  // the message says what is true rather than what was attempted; a save that did not stick says so, with the one action that fixes it.
+  const saved = readAgentRules().allowCommands.includes(rule);
+  tab.post({ type: 'notice', text: rememberedRuleNotice(rule, saved, where) });
 }
+
+
