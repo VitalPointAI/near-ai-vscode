@@ -506,6 +506,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const context: ToolContext = {
       ...this.options.context, signal, onTodos: (todos) => this.options.emit({ type: 'todos', todos }),
       tainted: () => this.grants.tainted,
+      // 0.4.18 review: the pages this run already has, so re-reading one with a plain download is not held after the run reads outside content.
+      noteFetched: (url) => { for (const known of this.options.context.pages?.keys() ?? []) this.grants.fetched.add(known); this.grants.fetched.add(url); },
       onSecurity: (event) => this.options.emit({ type: 'security', tool: call.function.name, ...event })
     };
     let input: unknown;

@@ -430,10 +430,12 @@ export class AgentConversation {
       // 0.4.19: "Check now". The queue a run takes belongs to the whole conversation and only the main run consumes it, so the message goes to the main
       // run rather than to the row that was clicked: that is where the wait is, and sending it "to" a sub-agent would have delivered it to the parent
       // anyway, without saying so (0.4.18 review). The message names the agent when a sub-agent's row was clicked, so the parent knows what is being asked.
-      // Only a paused agent is not interrupted: a paused run is not in a turn, so the interrupt would be swallowed by the pause and fire later.
       const id = `steer-${randomBytes(6).toString('hex')}`;
       const working = !agent.paused && !agent.abort.signal.aborted;
-      this.steer(id, checkNowMessage(agent.label), { interrupt: working });
+      // 0.4.18 review: a paused agent is not waiting on anything, so a check queued for it would arrive on a later, unrelated turn, which is worse than
+      // doing nothing. It is refused, and the page says so, rather than reported as sent.
+      if (!working) return false;
+      this.steer(id, checkNowMessage(agent.label), { interrupt: true });
       return true;
     }
     if (action === 'stop') agent.abort.abort();

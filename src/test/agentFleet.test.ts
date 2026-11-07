@@ -201,11 +201,11 @@ test('Check now interrupts a working agent and only queues for a paused one', as
   posted.length = 0;
   assert.equal(conversation.controlAgent(agentId, 'nudge'), true);
   assert.deepEqual(posted.filter((message) => message.type === 'steer-state').map((message) => message.state), ['queued', 'interrupting']);
-  // Paused: the check is queued and delivered, but cuts no turn.
+  // Paused: the check is refused, because it would arrive on a later, unrelated turn, which is worse than doing nothing.
   conversation.controlAgent(agentId, 'pause');
   posted.length = 0;
-  assert.equal(conversation.controlAgent(agentId, 'nudge'), true);
-  assert.deepEqual(posted.filter((message) => message.type === 'steer-state').map((message) => message.state), ['queued'], 'a paused agent is not interrupted');
+  assert.equal(conversation.controlAgent(agentId, 'nudge'), false, 'a paused agent takes no check');
+  assert.deepEqual(posted.filter((message) => message.type === 'steer-state'), [], 'nothing was queued behind the pause');
   conversation.controlAgent(agentId, 'stop');
   await running.catch(() => undefined);
   conversation.dispose();

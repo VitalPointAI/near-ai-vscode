@@ -28,9 +28,6 @@ const TAKES_VALUE = new Set([
   '--output-document', '--user-agent-http'
 ]);
 
-/** Regex forms of the same: `--flag=value` and `-oVALUE`. */
-const VALUELESS_PREFIX = [...VALUELESS];
-const TAKES_VALUE_PREFIX = [...TAKES_VALUE];
 
 /**
  * Flags that write the reply into the working directory under a name the server chooses (`-O`, `--remote-name`) or into the name the URL ends with. The
@@ -65,6 +62,33 @@ function unquote(word: string): string {
     return trimmed.slice(1, -1);
   }
   return trimmed;
+}
+
+/** Whether a URL names a host on the public internet, so a download cannot reach the machine or its private network. */
+export function isPublicHost(url: string): boolean {
+  let parsed: URL;
+  try { parsed = new URL(unquote(url)); } catch { return false; }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return false;
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.home.arpa')) return false;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+    if (a === 0 || a === 10 || a === 127) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false;
+    if (a >= 224) return false;
+    return true;
+  }
+  if (host.includes(':')) {
+    // IPv6: loopback, unspecified, unique-local (fc00::/7) and link-local (fe80::/10).
+    if (host === '::1' || host === '::') return false;
+    if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)) return false;
+    return true;
+  }
+  return true;
 }
 
 function isUrl(word: string): boolean {
@@ -123,7 +147,9 @@ export function plainDownload(words: readonly string[]): PlainDownloadResult {
     return { plain: false, reason: `"${word}" is not a URL` };
   }
   if (urls.length !== 1) return { plain: false, reason: urls.length === 0 ? 'no URL' : 'more than one URL' };
-  void VALUELESS_PREFIX; void TAKES_VALUE_PREFIX;
+  // 0.4.18 review: an internal address is not an ordinary page fetch. Loopback, a private range, link-local (cloud metadata at 169.254.169.254) and a
+  // `.local` name can reach the machine and the network it sits in, so they ask, as they did before this rule existed.
+  if (!isPublicHost(unquote(urls[0] as string))) return { plain: false, reason: `${urls[0]} is on the local machine or a private network` };
   const target = output !== undefined && output !== '/dev/null' && output !== '/dev/stdout' ? output : undefined;
   return { plain: true, url: urls[0] as string, ...(target !== undefined ? { output: target } : {}) };
 }

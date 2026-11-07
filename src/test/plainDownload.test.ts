@@ -82,3 +82,13 @@ test('a flag whose value the shell would read is not valueless, and -O is a writ
   assert.equal(plainDownload(['-O', 'https://example.test/f']).output, '.');
   assert.equal(plainDownload(['--remote-name', 'https://example.test/f']).output, '.');
 });
+
+test('an address on the machine or a private network is not a plain download', () => {
+  // Before this rule existed these asked, and they must still ask: metadata endpoints and anything on the local network are not ordinary page fetches.
+  for (const url of ['http://169.254.169.254/latest/meta-data/', 'http://localhost:8080/x', 'http://127.0.0.1/x', 'http://10.0.0.5/x', 'http://192.168.1.1/x', 'http://172.16.0.1/x', 'http://100.64.0.1/x', 'http://[::1]/x', 'http://printer.local/x', 'http://svc.internal/x']) {
+    assert.equal(plainDownload([url]).plain, false, `${url} must ask`);
+  }
+  for (const url of ['https://example.test/page', 'https://8.8.8.8/x', 'https://api.github.com/repos/x/y']) {
+    assert.equal(plainDownload([url]).plain, true, `${url} is a public page`);
+  }
+});

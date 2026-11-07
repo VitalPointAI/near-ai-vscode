@@ -864,7 +864,9 @@
     advanceButton.title = advanceState.text || 'Whether a workflow carries on to its next step by itself';
     // The menu: carry on, then every mode that asks. The approval picker's own labels and summaries are reused, so the two read the same.
     const asking = (m.options || []).filter((option) => option.mode !== CARRY_ON);
-    const chosen = advanceState.on ? CARRY_ON : m.mode;
+    // 0.4.18 review: when the run stops between steps while the mode IS "auto", "carry on" must not also look selected, or the menu contradicts the
+    // button that says "Stops each step". Only a run that really carries on marks the carry-on row.
+    const chosen = advanceState.on ? CARRY_ON : (m.mode === CARRY_ON ? '' : m.mode);
     advanceMenu.replaceChildren(
       optionRow(CARRY_ON, 'Carry on by itself', 'Each step starts the next one without asking', chosen === CARRY_ON, false),
       ...asking.map((option) => optionRow(option.mode, 'Stop between steps: ' + option.label, option.summary || option.description, chosen === option.mode, option.risky === true))

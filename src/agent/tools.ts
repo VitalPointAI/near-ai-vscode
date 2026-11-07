@@ -28,6 +28,8 @@ export interface ToolContext {
   gsdRuntime?: { home: string; preambles: string[] };
   /** Whether this run has read outside content (web pages, search results, attachments, MCP results). */
   tainted?(): boolean;
+  /** Called with each URL this run fetches, so the auto mode knows a plain download of it sends nothing new. */
+  noteFetched?(url: string): void;
   /** Text of pages fetched in this run, by URL, for CheckCitations. */
   pages?: Map<string, string>;
   /** When set, writes outside this workspace-relative folder ask first (research agents write only .planning/). */
