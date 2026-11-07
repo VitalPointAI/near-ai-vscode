@@ -156,6 +156,18 @@
 
     const models = el('fieldset', 'models');
     models.append(el('legend', '', 'Models to test (2 to 6)'));
+    // The same two presets the command line has (npm run compare:models -- --new / --retest), so a released model does not need a terminal.
+    const worth = state.retest || { models: [], newModels: [] };
+    const presets = el('div', 'presets');
+    if (worth.newModels.length) {
+      presets.append(button('New models (' + worth.newModels.length + ')', () => selectModels([...selection.models, ...worth.newModels])),
+        el('span', 'hint', 'Added to the catalog since you last tested them.'));
+    }
+    if (worth.models.length) {
+      presets.append(button('Worth testing again (' + worth.models.length + ')', () => selectModels([...selection.models, ...worth.models.map((entry) => entry.model)])),
+        el('span', 'hint', 'A saved result that is out of date or missing a task.'));
+    }
+    if (worth.newModels.length || worth.models.length) models.append(presets);
     const filter = el('input'); filter.type = 'search'; filter.placeholder = 'Filter models'; filter.setAttribute('aria-label', 'Filter models');
     const list = el('ul', 'checks');
     for (const entry of state.catalog) {
@@ -372,7 +384,22 @@
     root.hidden = !lines.length;
     if (lines.length) {
       root.append(el('strong', '', 'Worth testing again'), ...lines);
+      // The banner selects, so acting on it is one click rather than hunting for models in the list below.
+      const actions = el('div', 'retest-actions');
+      const all = [...worth.models.map((entry) => entry.model), ...worth.newModels];
+      if (all.length) actions.append(button('Select every model worth testing again', () => selectModels(all)));
+      if (worth.newModels.length) actions.append(button('Select the new models', () => selectModels(worth.newModels)));
+      root.append(actions);
     }
+  }
+
+  // Ticks the given models in the list below and refreshes the estimate, so the person sees the cost before starting. A model the catalog does not
+  // offer (or that TEE-only mode blocks) is skipped rather than silently ticking nothing.
+  function selectModels(models) {
+    selection.touched = true;
+    selection.models = new Set(models.filter((model) => state.catalog.some((entry) => entry.id === model && !entry.blocked)));
+    renderSetup();
+    requestEstimate();
   }
 
   function renderAll() {

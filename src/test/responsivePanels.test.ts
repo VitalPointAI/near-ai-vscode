@@ -131,7 +131,11 @@ class Node {
   replaceChildren(...nodes: Node[]) { this.children = []; this.text = ''; this.append(...nodes); }
   setAttribute(name: string, value: string) { this.attributes.set(name, value); }
   getAttribute(name: string) { return this.attributes.get(name); }
-  addEventListener() { /* not needed */ }
+  private listeners = new Map<string, Array<(event: unknown) => void>>();
+  addEventListener(type: string, listener: (event: unknown) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
+  /** A real click, so a control's effect is tested instead of the words around it. */
+  click() { for (const listener of this.listeners.get('click') ?? []) listener({ preventDefault: () => undefined, target: this }); }
+  fire(type: string, event: unknown = {}) { for (const listener of this.listeners.get(type) ?? []) listener(event); }
   all(): Node[] { return this.children.flatMap((child) => [child, ...child.all()]); }
   querySelectorAll(selector: string): Node[] {
     const [outer, inner] = selector.split(' ');
@@ -190,4 +194,33 @@ test('the MCP approval explanation is tied to its menu, and Tools badges wrap in
 
 test('chat reply tables keep their natural width instead of filling the reply', () => {
   assert.match(css('chat/chat.css'), /\.turn \.table-wrap > table \{ width: auto; \}/);
+});
+
+// The two presets that make "re-run as new models are released" one click (owner, 2026-11-07). The banner names what is worth testing; these buttons
+// tick it in the list, and the estimate runs on exactly what was ticked.
+test('Compare Models selects the new and stale models with one click, and only ones it can actually run', async () => {
+  const page = await runCompare();
+  const entry = (id: string, blocked?: string) => ({ id, privacy: 'tee', privacyText: 'TEE', holds: [], inputPerMillion: 1, outputPerMillion: 2, ...(blocked ? { blocked } : {}) });
+  page.dispatch({
+    type: 'state',
+    state: {
+      leaderboard: [], catalog: [entry('tee/fresh'), entry('tee/stale'), entry('tee/new'), entry('tee/new-blocked', 'TEE-only mode is on')], roles: [], taskSets: [], history: [], selected: [],
+      retest: { models: [{ model: 'tee/stale', why: ['Last tested 40 days ago'] }], newModels: ['tee/new', 'tee/new-blocked'] }
+    }
+  });
+  const buttons = () => page.body.all().filter((node) => node.tagName === 'button').map((node) => node.textContent);
+  // 2 new models are named, one of which this key cannot run, so its count is still 2: the banner tells the truth about the catalog, the selection skips it.
+  assert.ok(buttons().some((text) => text.includes('New models (2)')), `the new-models preset is offered: ${JSON.stringify(buttons())}`);
+  assert.ok(buttons().some((text) => text.includes('Worth testing again (1)')));
+
+  const newPreset = page.body.all().find((node) => node.tagName === 'button' && node.textContent.includes('New models'))!;
+  newPreset.click();
+  // The page sets the type as a property, so the stub sees it there.
+  const boxes = () => page.body.all().filter((node) => node.tagName === 'input' && node.type === 'checkbox');
+  const ticked = () => boxes().filter((node) => node.checked).map((node) => node.value).sort();
+  assert.deepEqual(ticked(), ['tee/new'], 'a model this key cannot run is not selected');
+
+  const stalePreset = page.body.all().find((node) => node.tagName === 'button' && node.textContent.includes('Worth testing again'))!;
+  stalePreset.click();
+  assert.deepEqual(ticked(), ['tee/new', 'tee/stale'], 'the stale model is added to what was already chosen');
 });

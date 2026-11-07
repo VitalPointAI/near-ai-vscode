@@ -8,6 +8,10 @@ code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; word-br
 .top { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 14px 0 10px; background: var(--vscode-editor-background); border-bottom: 1px solid var(--border); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+/* The presets that select stale or new models, and the action row under the banner. */
+.presets, .retest-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 8px; }
+.presets .hint, .retest-actions .hint { margin: 0; }
+
 /* Models worth testing again, and models added since the last run: a quiet card above the board. */
 #retest { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700); border-radius: 4px; background: var(--vscode-inputValidation-warningBackground, var(--vscode-editorWidget-background)); overflow-wrap: anywhere; }
 #retest p { margin: 4px 0 0; font-size: 0.92em; }
