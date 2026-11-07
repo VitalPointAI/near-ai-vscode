@@ -124,6 +124,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
       <span class="spacer"></span>
       <button id="attach" class="icon-button" type="button" aria-label="Attach files" title="Attach images, audio, or text files"></button>
       <button id="stop" class="icon-button" type="button" aria-label="Stop" title="Stop the run (Esc in an empty message box)" hidden></button>
+      <button id="steer" class="text-button" type="button" aria-label="Steer: interrupt the agent now with this message" title="Steer: interrupt the agent now with this message (Ctrl+Enter)" hidden>Steer</button>
       <button id="send" class="icon-button" type="button" aria-label="Send"></button>
     </div>
   </div>

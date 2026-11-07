@@ -26,6 +26,7 @@ import { gsdTools, Question } from '../gsd/tools';
 import type { ActivityFeed, AgentBoundary } from './agentActivity';
 import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
+import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
@@ -193,7 +194,7 @@ export class AgentConversation {
   private readonly tasks = new TaskBoard();
   /** Messages the user sent while a run was going, oldest first, until a model request takes them. */
   private steering: SteerMessage[] = [];
-  private readonly steerListeners = new Set<() => void>();
+  private readonly steerListeners = new Set<(notice: { interrupt: boolean }) => void>();
   private slotWaiters: Array<() => void> = [];
   private slotsInUse = 0;
   private contextWarned = false;
@@ -281,7 +282,9 @@ export class AgentConversation {
     // Attached files are outside content, so the run starts out treated as having read some.
     if (request.attachments?.text) grants.tainted = true;
     for (const event of request.attachments?.security ?? []) this.activity?.security(mainId, event);
-    const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [], trustedToolRoots: request.gsd ? [request.gsd.home] : [], ...(request.gsd ? { gsdRuntime: { home: request.gsd.home, preambles: await trustedPreambles(request.gsd.home) } } : {}) };
+    const context: Omit<ToolContext, 'signal' | 'onTodos'> = { root: this.root, checkpoints, shell, readFiles: new Set(), pages: new Map(), ripgrepPath: this.ripgrepPath, readOnlyRoots: request.gsd ? [request.gsd.home] : [], // A person's own teams (0.4.18) are the extension's files as much as the managed Open-GSD runtime: reading them must never ask. Their folder
+    // lives outside the workspace by design, so it is a trusted root for reads, and it is never written to by an agent.
+    trustedToolRoots: [...(request.gsd ? [request.gsd.home] : []), teamLibraryDir(homeFolder())], ...(request.gsd ? { gsdRuntime: { home: request.gsd.home, preambles: await trustedPreambles(request.gsd.home) } } : {}) };
     const tools = this.toolsFor(request, context, grants, extraUsage, record, abort.signal, runId);
     // One safety check per run, shared with sub-agents, so each command is asked about once.
     const safety = request.policy.mode === 'auto' && request.safetyModel ? new SafetyModelCheck({ client: request.client, model: request.safetyModel, fallbackModel: request.safetyFallbackModel, task: request.text, onUsage: (usage) => extraUsage.push(usage) }) : undefined;
@@ -440,18 +443,30 @@ export class AgentConversation {
    * Queues a message the user sent while a run is going (or about to start). The run appends it to
    * its transcript before its next model request; a retry wait ends early for it.
    */
-  public steer(id: string, text: string): void {
+  public steer(id: string, text: string, options: { interrupt?: boolean } = {}): void {
     this.steering.push({ id, text });
     this.post({ type: 'steer-state', id, state: 'queued' });
-    for (const listener of [...this.steerListeners]) listener();
+    // 0.4.18: a message the person asked to interrupt with cuts the turn in flight; one that did not waits for the next safe point as before.
+    const interrupt = options.interrupt === true;
+    if (interrupt) {
+      this.interrupting = true;
+      // Said at once, so a person who pressed Steer sees that it was taken as an interruption rather than a queue.
+      this.post({ type: 'steer-state', id, state: 'interrupting' });
+    }
+    for (const listener of [...this.steerListeners]) listener({ interrupt });
   }
 
   /** Queued messages no run took (it ended first), oldest first; the caller sends them as a new turn. */
   public takeUndelivered(): SteerMessage[] {
     const left = this.steering;
     this.steering = [];
+    // The queue is emptied, so any interrupt it carried has been honoured.
+    this.interrupting = false;
     return left;
   }
+
+  /** Whether a queued message asked to interrupt; cleared when a run takes the queue. */
+  private interrupting = false;
 
   private readonly steeringInput: RunInput = {
     pending: () => this.steering.length > 0,
@@ -461,7 +476,9 @@ export class AgentConversation {
       this.post({ type: 'steer-state', id: item.id, state: 'delivered' });
       return { role: 'user', content };
     }),
-    subscribe: (listener) => { this.steerListeners.add(listener); return () => { this.steerListeners.delete(listener); }; }
+    subscribe: (listener) => { this.steerListeners.add(listener); return () => { this.steerListeners.delete(listener); }; },
+    interruptRequested: () => this.interrupting,
+    consumeInterrupt: () => { this.interrupting = false; }
   };
 
   /** Checks NEAR's signature and TDX attestation for a run's final answer. */
@@ -703,7 +720,7 @@ export class AgentConversation {
     this.post({ type: 'notice', text: `Waiting for ${this.background.size} background agent${this.background.size === 1 ? '' : 's'} to finish…` });
     // A message from the user wakes the agent too.
     let unsubscribe: (() => void) | undefined;
-    await Promise.race([...this.background, new Promise<void>((resolve) => { signal.addEventListener('abort', () => resolve(), { once: true }); unsubscribe = this.steeringInput.subscribe(resolve); })]);
+    await Promise.race([...this.background, new Promise<void>((resolve) => { signal.addEventListener('abort', () => resolve(), { once: true }); unsubscribe = this.steeringInput.subscribe(() => resolve()); })]);
     unsubscribe?.();
     return signal.aborted ? undefined : [...this.drainNotifications(), ...this.steeringInput.take()];
   }

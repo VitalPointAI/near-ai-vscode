@@ -20,7 +20,7 @@ import { withSpendTag } from './spendLedger';
 import { ProfileStore } from './profileStore';
 import { readAgentLimits, readAgentModels, readAgentRules, readModelTiers, readRiskSwitches, readRoleModels, readSafetyModel, readSettings, shouldAutoInstallGsd, readRunBudget } from './settings';
 import { sharedTranscriptKey, TranscriptStore } from './transcripts';
-import { prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
+import { copyAttachmentIntoProject, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { TeamDefinition, TeamLibrary, teamAgents } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
 import { modelOptions, modelPrivacyLabel, modelsAsPrivateAs, privateSafetyModel, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
@@ -38,6 +38,7 @@ import { ConversationLog, ConversationOutcome, ConversationStatus, ConversationS
 import { ReputationStore } from './reputation';
 import { hostAttribution } from '../domain/activity';
 import { ContextGraphMemory } from './contextGraphMemory';
+import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
@@ -491,7 +492,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     let redTeamStep: { addendum: string; agents: GsdAgent[] } | undefined;
     try {
       if (message.type === 'open-command' && message.command.startsWith('team:')) {
-        team = await new TeamLibrary(context.globalStorageUri.fsPath).find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
+        await whenTeamsMoved();
+        team = await new TeamLibrary(teamLibraryDir(homeFolder())).find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
         if (!team) { tab.post({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with NEAR AI: Team Studio.` }); return; }
         if (!message.args?.trim()) { tab.post({ type: 'assistant-error', text: `Tell the team what to do: /team:${team.slug} <task>` }); return; }
         gsd = await gsdHost.context();
@@ -506,7 +508,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         skill = { name: found.name, args: message.args ?? '' };
         // Projects set up with a red-team stage add it to GSD workflows that end in verification.
         if (/^gsd-(?:execute-phase|verify-work|autonomous)$/.test(found.name) && await redTeamEnabled(root)) {
-          const project = await new TeamLibrary(context.globalStorageUri.fsPath).find('project', root).catch(() => undefined);
+          await whenTeamsMoved();
+          const project = await new TeamLibrary(teamLibraryDir(homeFolder())).find('project', root).catch(() => undefined);
           const redTeam = project ? teamAgents(project).filter((agent) => agent.name === 'red-team') : [];
           redTeamStep = { addendum: RED_TEAM_WORKFLOW_STEP, agents: redTeam };
         }
@@ -570,6 +573,16 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
           tab.post({ type: 'assistant-error', text: providerErrorMessage(error) });
           return;
         }
+        // 0.4.18: every attachment is copied into the project, so the agent can open it with its own file tools instead of hunting for it on disk.
+        const copies: string[] = [];
+        for (const item of staged) {
+          const saved = await copyAttachmentIntoProject(item, root).catch(() => undefined);
+          if (saved !== undefined) copies.push(saved);
+        }
+        if (copies.length > 0) {
+          // A plain sentence, not fenced: this is the agent's own note about where the files are, not outside content.
+          attachments.text = `${attachments.text}\n\nThe attached file${copies.length === 1 ? ' is' : 's are'} saved in this project and can be opened with your own file tools:\n${copies.map((file) => `- ${file}`).join('\n')}`;
+        }
         for (const item of staged) state.attachments.delete(item.id);
         panel.webview.postMessage({ type: 'attachments-cleared' });
       }
@@ -615,7 +628,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (reason) { tab.post({ type: 'steer-state', id: message.id, state: 'blocked', reason, text: message.text }); return; }
     tab.steerTexts.set(message.id, message.text);
-    ensureAgent(tab, root).steer(message.id, message.text);
+    ensureAgent(tab, root).steer(message.id, message.text, { interrupt: message.interrupt === true });
   };
   const receive = async (value: unknown): Promise<void> => {
     await ready;

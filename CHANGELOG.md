@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **Steer interrupts the agent now.** A message sent while the agent is working
+  used to only queue for its next step. **Steer** (a button beside Send, or
+  Ctrl+Enter) interrupts the reply in flight and becomes the agent's newest
+  direction; Enter still queues, and the message says which it did.
+- **Reading your own team never asks for approval.** Teams are NEAR AI's own
+  files, so reading one no longer appears as "outside this project", while any
+  other file outside still does.
+- **An attached file is saved into the project.** A file you attach from
+  anywhere on the machine is copied into `.near-ai/attachments/` in your
+  project and the message names it, so the agent opens it with its own file
+  tools instead of looking for it on disk.
+- **Your agent teams survive an uninstall.** Teams made in Team Studio now live
+  in `.near-ai-teams` in your home folder instead of inside the extension, so
+  uninstalling the extension, reinstalling it, or installing it in another
+  VS Code keeps them. Teams saved by an earlier version are copied across the
+  first time this version starts, and the old copies stay where they were.
+
 ## 0.4.17
 
 - **Auto approve stops asking about research work.** Web search and web fetch

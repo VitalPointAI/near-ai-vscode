@@ -13,6 +13,7 @@ import { readAgentModels, readAgentRules, readModelTiers, readRoleModels, readSa
 import { buildToolsDirectory, DirectoryInput, parseToolsPageMessage, ToolsDirectory, toolsPageHtml } from './toolsDirectory';
 import { webSearchProvider } from './webSearchSetup';
 import { currentReportingTokenHint, onReportingTokenChange } from './spendTracking';
+import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 
 // The NEAR AI Tools tab: the directory of what the agents can use. It reads; the only things it
 // changes are through existing actions (switching an MCP server on for this project, which the
@@ -108,7 +109,7 @@ export async function gatherDirectoryInput(context: vscode.ExtensionContext, aut
   const [gsd, version, teams, webSearch, servers, catalog, reportingToken] = await Promise.all([
     host.context().catch(() => undefined),
     host.runtime.installedVersion().catch(() => null),
-    new TeamLibrary(context.globalStorageUri.fsPath).list(root).catch(() => []),
+    new TeamLibrary(teamLibraryDir(homeFolder())).list(root).catch(() => []),
     webSearchProvider(context.secrets).then((provider) => Boolean(provider), () => false),
     mcp.status().catch(() => []),
     // The catalog list (cached per profile); no completion is requested.

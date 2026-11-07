@@ -22,13 +22,13 @@ const usage = { verificationStatus: 'unknown' as const, latencyMs: 1 };
 /** A RunInput backed by an array, as AgentConversation provides one. */
 function queue() {
   const items: string[] = [];
-  const listeners = new Set<() => void>();
+  const listeners = new Set<(notice: { interrupt: boolean }) => void>();
   const input: RunInput = {
     pending: () => items.length > 0,
     take: () => items.splice(0).map((text) => ({ role: 'user' as const, content: text })),
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }
   };
-  return { input, push: (text: string) => { items.push(text); for (const listener of [...listeners]) listener(); } };
+  return { input, push: (text: string, options: { interrupt?: boolean } = {}) => { items.push(text); for (const listener of [...listeners]) listener({ interrupt: options.interrupt === true }); } };
 }
 
 const userTexts = (messages: AgentMessage[]) => messages.filter((message) => message.role === 'user').map((message) => String(message.content));
@@ -37,6 +37,10 @@ test('the bridge parses steer strictly', () => {
   const id = 'steer-0123456789ab';
   assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: '  use port 8080 ' }), { type: 'steer', id, text: 'use port 8080' });
   assert.ok(parseChatWebviewMessage({ type: 'steer', id, text: 'x'.repeat(MAX_MESSAGE_CHARS) }));
+  // 0.4.18 review: a Steer carries `interrupt`, and the parser must accept it; before this the button sent a message the host threw away.
+  assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: 'stop that', interrupt: true }), { type: 'steer', id, text: 'stop that', interrupt: true });
+  assert.deepEqual(parseChatWebviewMessage({ type: 'steer', id, text: 'stop that' }), { type: 'steer', id, text: 'stop that' }, 'a queue is unchanged');
+  assert.equal(parseChatWebviewMessage({ type: 'steer', id, text: 'stop that', interrupt: 'yes' }), undefined, 'interrupt is a boolean');
   for (const bad of [
     { type: 'steer', id, text: 'x'.repeat(MAX_MESSAGE_CHARS + 1) },
     { type: 'steer', id, text: '   ' },
@@ -352,7 +356,8 @@ test('sidebar: sending while idle is unchanged', async () => {
 
 test('the composer keeps Send during a run, with a separate Stop button and Esc to stop', () => {
   const view = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'panelView.ts'), 'utf8');
-  assert.match(view, /<button id="stop" class="icon-button" type="button" aria-label="Stop" title="Stop the run \(Esc in an empty message box\)" hidden><\/button>\s*<button id="send"/);
+  // 0.4.18: a Steer button sits between Stop and Send, hidden until a run is going, so the interrupt is a control a person can find.
+  assert.match(view, /<button id="stop" class="icon-button" type="button" aria-label="Stop" title="Stop the run \(Esc in an empty message box\)" hidden><\/button>\s*<button id="steer"[^>]*hidden>Steer<\/button>\s*<button id="send"/);
   const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
   assert.doesNotMatch(script, /if \(busy\) \{ post\(\{ type: 'stop' \}\)/, 'Enter no longer stops the run');
   assert.match(script, /function updateSendState\(\) \{ send\.disabled = !input\.value\.trim\(\); \}/, 'Send depends only on there being text');
@@ -361,4 +366,126 @@ test('the composer keeps Send during a run, with a separate Stop button and Esc 
   assert.match(script, /Finish or stop the current run first/);
   const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.css'), 'utf8');
   assert.match(css, /\.composer \.bar \.icon-button \{ flex: none; \}/, 'both buttons keep their size at narrow widths');
+});
+
+// ---- 0.4.18: Steer interrupts the reply in flight (owner, 2026-11-06: "a message sent is still only queued") ---------------------------
+// The old cut only fired before anything had streamed and only while the model was cooling down from a rate limit, so in normal use a message could
+// only ever queue. A Steer is an explicit request, so it cuts whatever has already streamed.
+
+function interruptingQueue() {
+  const items: string[] = [];
+  const listeners = new Set<(notice: { interrupt: boolean }) => void>();
+  let interrupts = 0;
+  const input: RunInput = {
+    pending: () => items.length > 0,
+    take: () => { interrupts = 0; return items.splice(0).map((text) => ({ role: 'user' as const, content: text })); },
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    interruptRequested: () => interrupts > 0
+  };
+  return {
+    input,
+    push: (text: string, options: { interrupt?: boolean } = {}) => {
+      items.push(text);
+      if (options.interrupt) interrupts += 1;
+      for (const listener of [...listeners]) listener({ interrupt: options.interrupt === true });
+    }
+  };
+}
+
+test('a Steer pressed while the reply is streaming cuts it at once, and the message becomes the next request', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-steer-cut-'));
+  const { input, push } = interruptingQueue();
+  const seen: AgentMessage[][] = [];
+  let streamed = 0;
+  const client = {
+    // A normal model with no cooldown: `cooldownRemainingMs` returns 0, so the old "only before anything streamed, only while cooling down" cut
+    // could never fire here. Only the explicit Steer can end this reply early.
+    cooldownRemainingMs: () => 0,
+    async *streamCompletion(_model: string, messages: AgentMessage[], _tools: unknown, signal?: AbortSignal): AsyncGenerator<CompletionEvent> {
+      seen.push(messages.map((message) => ({ ...message })));
+      if (seen.length === 1) {
+        yield { type: 'text', text: 'Writing a long answer' };
+        streamed += 1;
+        // Text has arrived, which is the case the old rule refused to cut. The Steer comes now.
+        push('Stop: use the other file', { interrupt: true });
+        // This reply would stream for ten seconds if nothing aborted it, far longer than the test's patience.
+        for (let index = 0; index < 10_000 && !signal?.aborted; index += 1) {
+          await new Promise((resolve) => { setTimeout(resolve, 1); });
+          yield { type: 'text', text: '.' };
+          streamed += 1;
+        }
+        yield { type: 'done', message: { role: 'assistant', content: 'A long answer.' }, finishReason: 'stop', usage };
+        return;
+      }
+      yield { type: 'done', message: { role: 'assistant', content: 'Used the other file.' }, finishReason: 'stop', usage };
+    }
+  };
+  const run = new AgentRun({
+    client, model: 'm', tools: [], context: { root, checkpoints: new RunCheckpoints('steer-cut'), readFiles: new Set() } as never,
+    policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input,
+    requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined
+  });
+  const startedAt = Date.now();
+  const result = await run.run([{ role: 'user', content: 'start' }], new AbortController().signal);
+  const took = Date.now() - startedAt;
+  assert.equal(result.outcome, 'completed', 'an interrupted turn is not a failure');
+  assert.equal(seen.length, 2, 'the interrupted reply was followed by a second request');
+  assert.ok(took < 2_000, `the reply was cut at once (took ${took} ms; uncut it would run for ten seconds)`);
+  assert.ok(streamed < 1_000, `the stream stopped early (${streamed} pieces)`);
+  assert.ok(seen[1]?.some((message) => message.role === 'user' && message.content === 'Stop: use the other file'), 'the Steer is the newest direction');
+});
+
+test('a message sent without Steer still waits for the reply to finish, as before', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-steer-wait-'));
+  const { input, push } = interruptingQueue();
+  const seen: AgentMessage[][] = [];
+  let streamedToEnd = false;
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[], _tools: unknown, signal?: AbortSignal): AsyncGenerator<CompletionEvent> {
+      seen.push(messages.map((message) => ({ ...message })));
+      if (seen.length === 1) {
+        yield { type: 'text', text: 'Answering' };
+        push('One more thing');
+        for (let index = 0; index < 5; index += 1) { await new Promise((resolve) => { setTimeout(resolve, 1); }); yield { type: 'text', text: '.' }; }
+        streamedToEnd = signal?.aborted !== true;
+        yield { type: 'done', message: { role: 'assistant', content: 'Answering.' }, finishReason: 'stop', usage };
+        return;
+      }
+      yield { type: 'done', message: { role: 'assistant', content: 'Noted.' }, finishReason: 'stop', usage };
+    }
+  };
+  const run = new AgentRun({
+    client, model: 'm', tools: [], context: { root, checkpoints: new RunCheckpoints('steer-wait'), readFiles: new Set() } as never,
+    policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, input,
+    requestApproval: async () => ({ decision: 'allow' }), emit: () => undefined
+  });
+  const result = await run.run([{ role: 'user', content: 'start' }], new AbortController().signal);
+  assert.equal(result.outcome, 'completed');
+  assert.equal(streamedToEnd, true, 'a queued message does not cut the reply');
+  assert.equal(seen.length, 2, 'and the agent picks it up before its next request');
+});
+
+test('sidebar: a Steer through the real message path is taken as an interruption, not a queue', async () => {
+  // The 0.4.18 review found the button did nothing because the parser dropped `interrupt`, and the loop-level tests could not see it. This goes
+  // through the sidebar's own parser, the host's steer handler and the conversation's flag, so a regression at any of those fails here.
+  const { root, auth } = await projectWithProfile();
+  const near = fakeNear((messages) => near.requests.length === 1 ? editCall : { content: `Saw: ${lastUser(messages)}` });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = near.fetch;
+  try {
+    const sidebar = await openSidebar(root, auth);
+    const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
+    const approval = await until(() => sidebar.posted.find((message) => message.type === 'approval-request'));
+    // A Steer, exactly as the page posts it.
+    await sidebar.send({ type: 'steer', id: 'steer-cccccccccccc', text: 'Stop: use 9090 instead', interrupt: true });
+    // The host says at once that it was taken as an interruption.
+    // It is queued first and then says it is interrupting, which is the order the conversation produces.
+    assert.deepEqual(steerStates(sidebar.posted, 'steer-cccccccccccc'), ['queued', 'interrupting'], JSON.stringify(steerStates(sidebar.posted, 'steer-cccccccccccc')));
+    await sidebar.send({ type: 'approval-reply', callId: approval.callId, decision: 'allow' });
+    await running;
+    const users = (near.requests[1] ?? []).filter((message) => message.role === 'user').map((message) => String(message.content));
+    assert.ok(users.some((text) => text.includes('Stop: use 9090 instead')), 'the steer reached the model');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

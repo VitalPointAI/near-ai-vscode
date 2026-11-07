@@ -9,6 +9,7 @@ import { AuthService } from './auth';
 import { attachTeamStudio, StudioTarget, teamStudioHtml } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { onDidChangeEmergencyStop } from './emergencyStop';
+import { homeFolder, teamLibraryDir, teamsMoveInFlight, whenTeamsMoved } from '../domain/teamStorage';
 
 // The NEAR AI Team Studio tab. One tab at a time; opening it again shows it (and, for the project
 // team setup, starts the guided builder).
@@ -18,14 +19,20 @@ const DRAFT_KEY = 'nearAi.teamStudio.draft';
 const KEPT_KEY = 'nearAi.teamStudio.kept';
 let current: { panel: vscode.WebviewPanel; startWizard(target: StudioTarget): Promise<void> } | undefined;
 
-export function openTeamStudio(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill, options: { wizard?: StudioTarget } = {}): void {
+/**
+ * Opens Team Studio, after the one-time move of older teams has finished (0.4.18 review), so the studio never opens on a half-copied library. It
+ * returns a promise so a caller (and a test) can await the panel; VS Code ignores a command handler's promise.
+ */
+export async function openTeamStudio(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill, options: { wizard?: StudioTarget } = {}): Promise<void> {
+  // Only an actual move is waited for: with nothing to move this opens in the same tick, as it always did.
+  if (teamsMoveInFlight() !== undefined) await whenTeamsMoved();
   if (current) {
     current.panel.reveal();
     if (options.wizard) void current.startWizard(options.wizard);
     return;
   }
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const library = new TeamLibrary(context.globalStorageUri.fsPath);
+  const library = new TeamLibrary(teamLibraryDir(homeFolder()));
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'teams');
   const shared = sharedMedia(context.extensionUri);
   const panel = vscode.window.createWebviewPanel('nearAiTeamStudio', 'NEAR AI Team Studio', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media, shared] });

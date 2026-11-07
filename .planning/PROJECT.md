@@ -54,9 +54,25 @@ able to send a message ... similar to Codex where the user can click Steer and h
   is reset, so nothing is lost. It happens only in Auto (or the mode the owner names), and a person can still ask to be stopped at boundaries.
 - **Steer interrupts now.** A message the person sends mid-run can either queue (today's behaviour, taken at the next safe point, never cutting off a
   streaming reply or a running tool) or **Steer**, which injects it at once: the current turn is cut, the message is taken as the newest direction,
-  and the tool in flight is cancelled cleanly and said so. The existing `RunInput` seam (`pending`/`take`/`subscribe` in `src/agent/loop.ts`)
-  already carries queued messages; Steer needs a second channel that aborts the in-flight request and a card/button in the chat composer
-  (`media/chat/chat.js`), matching how the composer already posts `send`.
+  and the tool in flight is cancelled cleanly and said so.
+
+  **Confirmed cause (owner report, 2026-11-06: "a message sent is still only queued").** The queue-and-cut machinery is built: the composer already
+  posts `steer` when the chat is busy (`media/chat/chat.js:771`), the host forwards it to the running agent (`src/services/chat.ts:601`), and the
+  loop subscribes and can abort the in-flight request (`src/agent/loop.ts:337`). But the subscription is gated:
+
+  ```ts
+  // src/agent/loop.ts:337
+  const unsubscribe = input?.subscribe(() => {
+    if (received || !(this.options.client.cooldownRemainingMs?.(this.options.model) ?? 0)) return;
+    cutForInput = true;
+    attemptAbort.abort();
+  });
+  ```
+
+  It cuts only when **nothing has streamed yet** (`!received`) **and** the model is in a rate-limit cooldown. In normal use neither holds, so a steer
+  can only ever queue. The fix is to make interruption an explicit request from the person, not a side effect of those two conditions: a `steer` with
+  `interrupt: true` (a Steer button, or Ctrl+Enter on the composer) aborts the in-flight attempt whatever `received` says, the loop then takes the
+  queued messages as the newest direction, and the chat says the reply was interrupted and the tool in flight was stopped.
 - Open questions for the owner when this starts: whether a cleared boundary keeps the visible transcript (so the person still reads the history) while
   only the model's context is reset, how much context is "time to clear" (a percentage of the model's window, or a token count), and whether Steer is a
   button or a modifier on send.
@@ -136,6 +152,22 @@ Builds on what exists: signed events and device identities (`src/team/`, Phase 6
 approval and policy layer (`src/agent/permissions.ts`, `src/domain/policy.ts`) and the activity view. Open questions: which NEAR account model, how a
 DID is anchored in the confidential-intents format, what happens when the chain is unreachable, and how a run works with no chain at all.
 
+
+### A new project asks what kind it is, then offers a team for it (0.4.19)
+
+Owner, 2026-11-06: "when someone opens the extension and clicks the button to start a new project, it initiates /gsd-new-project which is ok, but the next
+question should be what kind of project it is with option to choose from one of our templates - research, software dev, etc... and then whether or not the
+user wants to attach an agent team to carry it out." Today a newcomer has no way to know that teams designed for exactly their kind of work already exist.
+
+- **The second step of Start a New Project asks what kind of project it is**, offering the shipped templates (research, software development, and the
+  others the library already has), each with a one-line description of what it produces.
+- **The third step offers the team that fits that kind**, showing each candidate's members and what it is good at, with "no team for now" as a real
+  choice, so a person can start solo and add a team later.
+- **The choice is written where the project keeps it**: the project's kind in its planning state, and a chosen team as the project's own
+  `.planning/.near-ai/team.md` (the mechanism that already exists), so the first message can use it without being told again.
+- **A newcomer learns the teams exist** without opening Team Studio first. The wording stays plain and says what the team will do for them.
+- Open questions for the owner when this starts: whether the template list is fixed or read from the team library, whether the team step can offer a
+  team the person has already saved, and how the flow behaves when Open-GSD is not installed yet.
 
 ## Evolution
 

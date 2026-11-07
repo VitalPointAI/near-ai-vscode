@@ -20,3 +20,6 @@ eval-*.json
 # Agent worktrees and local Claude Code settings
 .claude/worktrees/
 .claude/settings.local.json
+
+# 0.4.18: files attached to a message and copied into the project for the agent to read.
+.near-ai/attachments/

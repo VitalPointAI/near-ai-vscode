@@ -418,7 +418,8 @@ function checkReads(args: Word[], state: SegmentState, context: CommandContext, 
     if (allowTrusted && facts.trusted && !facts.inside) { readsTrusted = true; continue; }
     if (!facts.inside && !facts.device) return unknown(`${label} names ${value}, which is outside the workspace`);
   }
-  return safe(readsTrusted ? `${label} only reads inside the workspace and the Open-GSD runtime NEAR AI installed` : `${label} only reads inside the workspace`);
+  // 0.4.18: the trusted roots are the managed Open-GSD runtime and the person's own team library, both of which NEAR AI installed or wrote.
+  return safe(readsTrusted ? `${label} only reads inside the workspace and the files NEAR AI installed for this project and its teams` : `${label} only reads inside the workspace`);
 }
 
 /** gsd-tools verbs that act outside the workspace or contact the network. */

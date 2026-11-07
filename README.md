@@ -410,7 +410,11 @@ until it runs out aren't shown.
   sub-agents, each limited to its own tools. Saving a team file records a
   version. Teams can be duplicated, archived, restored, imported, and deleted.
   **Set Up Project Team** asks a few questions and drafts a team for the
-  project in `.planning/.near-ai/team.md` for you to review. In Team Studio,
+  project in `.planning/.near-ai/team.md` for you to review. Your teams are
+  kept in `.near-ai-teams` in your home folder, not inside the extension, so
+  uninstalling the extension or installing it in another VS Code keeps them;
+  teams saved before this move are copied across the first time the new
+  version starts, and the old copies are left in place. In Team Studio,
   leaving the builder or the editor with unsaved changes asks first (Discard
   changes, or Save draft / Save); closing the tab keeps the unsaved team as a
   draft and says so the next time the studio opens.

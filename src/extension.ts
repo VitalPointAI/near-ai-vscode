@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { redactSecrets } from './domain/redaction';
+import { homeFolder, startTeamsMove } from './domain/teamStorage';
+import { migrateTeams } from './services/teamStorage';
 import { saveHandoff } from './services/handoff';
 import { AuthService } from './services/auth';
 import { ProfileStore } from './services/profileStore';
@@ -42,6 +44,10 @@ export interface NearAiTestApi { auth: AuthService; sidebar: NearAiPanelViewProv
 
 export function activate(context: vscode.ExtensionContext): NearAiTestApi | undefined {
   const auth = new AuthService(context.secrets);
+  // Teams a person made in Team Studio now live in their home folder, so an uninstall or another VS Code keeps them (0.4.18). The one-time move of
+  // the ones saved under the extension's storage must finish before anything reads the library, or a person who opens Team Studio at once sees an
+  // empty list; every reader calls whenTeamsMoved() first, and a move that fails never throws.
+  startTeamsMove(migrateTeams({ home: homeFolder(), globalStorage: context.globalStorageUri.fsPath }).catch(() => ({ moved: 0, skipped: 0 })));
   // The computer-wide list of saved profiles (metadata only), so a profile set up in one project can be used in another (G-61-9).
   initProfileIndex(context.globalState);
   initEmergencyStop(context);
