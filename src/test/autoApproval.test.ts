@@ -566,3 +566,16 @@ test('auto: a bare gsd_run call gets the Open-GSD decision too, not only a comma
   assert.equal(plain.gsdPreambles, undefined);
   assert.deepEqual(seen, []);
 });
+
+test('"Allow every time" reports what was really saved: learned when the entry sticks, and a plain failure when it does not', async () => {
+  // The owner's requirement is that the permanent choice "actually learns to allow it every time". The message is the evidence a person sees, so it
+  // must be read back from the settings rather than assumed from the write.
+  const { rememberedRuleNotice } = await import('../domain/allowRuleNotice');
+  assert.match(rememberedRuleNotice('docker version', true, 'workspace'), /^Learned: "docker version" now runs without asking in this workspace/);
+  assert.match(rememberedRuleNotice('docker version', true, 'workspace'), /not asked about again/);
+  assert.match(rememberedRuleNotice('docker version', false, 'workspace'), /could not be saved to this workspace/);
+  assert.match(rememberedRuleNotice('docker version', false, 'workspace'), /allowed for this run only/);
+  assert.match(rememberedRuleNotice('docker version', true, 'VS Code profile'), /in this VS Code profile/);
+  // It names where the entry lives, so a person can find and remove it.
+  assert.match(rememberedRuleNotice('docker version', true, 'workspace'), /Allow Commands/);
+});
