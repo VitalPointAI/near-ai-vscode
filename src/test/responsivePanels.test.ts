@@ -279,7 +279,8 @@ test('Compare Models shows the recommended setup, marks an abliterated model, an
   assert.match(text, /gsd-planner/, 'a role is named, not just a tier');
   assert.match(text, /already set/, 'a tier that needs no change says so');
   assert.match(text, /abliterated/, 'a model that does not refuse is marked');
-  // One button applies everything that differs: three changes here.
-  const apply = area.all().find((node) => node.tagName === 'button' && /Apply all 3 changes/.test(node.textContent));
+  // One button applies everything that differs. Three recommendations change here, but the cyber row is skipped by the host (a scan picks its own model), so
+  // the count must say 2, not 3 (0.4.19 review).
+  const apply = area.all().find((node) => node.tagName === 'button' && /Apply all 2 changes/.test(node.textContent));
   assert.ok(apply, `the apply button counts the changes: ${JSON.stringify(area.all().filter((n) => n.tagName === 'button').map((n) => n.textContent))}`);
 });

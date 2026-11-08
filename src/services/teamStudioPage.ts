@@ -301,7 +301,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       const draft = parseDraft(message.draft);
       return draft ? { type: 'review', seq: message.seq as number, draft, ...(message.id !== undefined ? { id: message.id as string } : {}) } : undefined;
     }
-    case 'optimise-all': return isPlain(message) ? { type: 'optimise-all' } : undefined;
+    case 'optimise-all': return isPlain(message) && exactKeys(message, ['type']) ? { type: 'optimise-all' } : undefined;
     case 'draft-team': {
       if (!text(message.idea, 2000) || !message.idea.trim()) return undefined;
       if (message.outputFormat !== undefined && !text(message.outputFormat, 300)) return undefined;

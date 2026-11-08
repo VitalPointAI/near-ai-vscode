@@ -459,7 +459,9 @@
     const root = $('recommended');
     root.replaceChildren();
     const recommended = state.recommended || { tiers: [], roles: [] };
-    const changes = [...recommended.tiers, ...recommended.roles].filter((entry) => entry.changes);
+    // The count is what APPLY will really write. The cyber row is skipped by the host (a scan picks its own model when it starts), so counting it here made
+    // the button promise one change more than it made (0.4.19 review).
+    const changes = [...recommended.tiers, ...recommended.roles].filter((entry) => entry.changes && !(entry.tier === 'cyber'));
     if (!recommended.tiers.length && !recommended.roles.length) { root.hidden = true; return; }
     root.hidden = false;
     const LABELS = { deep: 'Deep tier', standard: 'Standard tier', fast: 'Fast tier', cyber: 'Cybersecurity scans' };

@@ -501,7 +501,9 @@ export function recommendRoles(leaderboard: LeaderboardEntry[], roles: Array<{ i
     }).filter((candidate) => !kind || candidate.measured || usable.every((other) => !other.byKind[kind!]));
     if (!scored.length) continue;
     const best = Math.max(...scored.map((candidate) => candidate.score));
-    const tied = scored.filter((candidate) => candidate.score >= best - 0.05);
+    // 0.4.19 review: a 0.05 tolerance then speed let a marginally less accurate model win, contradicting "a model must be as accurate as the best for that
+    // kind". Time now breaks a TIE on the score, not a near-miss.
+    const tied = scored.filter((candidate) => candidate.score === best);
     const pick = [...tied].sort((a, b) => (a.entry.medianSeconds ?? Number.POSITIVE_INFINITY) - (b.entry.medianSeconds ?? Number.POSITIVE_INFINITY) || (a.entry.costPerRunUsd ?? 0) - (b.entry.costPerRunUsd ?? 0))[0] as { entry: LeaderboardEntry; score: number };
     recommendations.push({
       role, setting: 'agent.roleModels', model: pick.entry.model,

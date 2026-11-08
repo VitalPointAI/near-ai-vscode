@@ -133,8 +133,20 @@
   }
   const memberLabel = (member, index) => (member.name || 'member ' + (index + 1)) + (member.role ? ' (' + member.role + ')' : '');
 
+  // The saved team's shape and knowledge, held here because a new team must clear them (see startWizard). Declared before anything that assigns them.
+  let currentGraph = null;
+  let currentKnowledge = null;
+  let selectedNode = null;
+  let openCard = null;
+
   function startWizard(target, resume, fromProposal) {
     hideBanner();
+    // A new team has no shape or knowledge yet, so the previous team's are cleared here. Without this, "New team" showed the last team's hierarchy and
+    // graph in its tabs (0.4.19 review).
+    currentGraph = null;
+    currentKnowledge = null;
+    selectedNode = null;
+    openCard = null;
     work = resume
       ? { mode: 'wizard', target: resume.target, step: resume.step, maxStep: resume.step, draft: clone(resume.draft), startingPoint: resume.startingPoint || 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null }
       : { mode: 'wizard', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: fromProposal ? clone(fromProposal.draft || fallbackDraft(fromProposal.proposal || fromProposal)) : { name: target === 'project' ? 'Project team' : '', description: '', members: [] }, startingPoint: 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null };
@@ -877,8 +889,6 @@
   // ---------- the knowledge graph as a network ----------
   // Owner, 2026-11-08: "visualize its context graph in an interactive network graph where one can select nodes and see suitable animations depicting all
   // its relationships, additional detail cards, admiralty of sources". The layout is computed by the host, so the same graph always draws the same way.
-  let currentKnowledge = null;
-  let selectedNode = null;
 
   function renderNetwork(root) {
     root.replaceChildren();
@@ -1031,8 +1041,6 @@
   // Owner, 2026-11-08: "teams represented graphically with ability to click on a member and get a member card detailing their capabilities and
   // expectations. Should show hierarchy if one exists." Drawn as nested boxes rather than an abstract diagram: the nesting IS the hierarchy, and every
   // member is a real button, so it works with Tab and Enter as well as with a click.
-  let currentGraph = null;
-  let openCard = null;
 
   function renderGraph(root) {
     root.replaceChildren();
@@ -1203,7 +1211,9 @@
             box.append(el('strong', '', 'The comparisons suggest a different model'));
             const list = el('ul', 'issues');
             for (const entry of changes) list.append(el('li', '', `${entry.member}: ${entry.model}${entry.current ? ' (now ' + entry.current + ')' : ''}${entry.why ? ' — ' + entry.why : ''}`));
-            box.append(list, button('Review in Compare Models', () => vscode.postMessage({ type: 'optimise-all' }), { link: true }));
+            // 0.4.19 review: this was labelled "Review in Compare Models" but posted `optimise-all`, which RUNS role tests for every team and rewrites their
+            // files. It now says what it does, and the suggestion itself is only advice until the person clicks it.
+            box.append(list, button('Test these teams and set the models', () => vscode.postMessage({ type: 'optimise-all' }), { link: true, label: 'Run the role tests for every team and set each member model from the result' }));
           }
         }
         if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
