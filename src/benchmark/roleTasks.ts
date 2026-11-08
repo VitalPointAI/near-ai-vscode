@@ -41,11 +41,18 @@ import { totalAfterTax } from './shop.js';
 test('adds tax', () => {
   assert.equal(totalAfterTax([{ price: 10, quantity: 2 }], 0.1, 1000), 22);
 });
-test('applies the discount at the threshold', () => {
-  assert.equal(totalAfterTax([{ price: 100, quantity: 1 }], 0, 100), 90);
+test('applies the discount ABOVE the threshold', () => {
+  // 0.4.19 review: this said "at the threshold" and used a subtotal of exactly 100, while BRIEF.md requires the discount only when the subtotal is MORE
+  // than the threshold. The implementer task asks for the tests to pass AND the brief to be met, which was impossible, so every implementer result (and the
+  // model chosen from it) was measured on a contradictory task. A subtotal of 120 is unambiguously above.
+  assert.equal(totalAfterTax([{ price: 120, quantity: 1 }], 0, 100), 108);
 });
 test('discounts BEFORE tax', () => {
-  assert.equal(totalAfterTax([{ price: 100, quantity: 1 }], 0.1, 100), 99);
+  assert.equal(totalAfterTax([{ price: 120, quantity: 1 }], 0.1, 100), 118.8);
+});
+test('does NOT discount at exactly the threshold', () => {
+  // The boundary the brief is about, so a fix that keeps the >= comparison fails here.
+  assert.equal(totalAfterTax([{ price: 100, quantity: 1 }], 0, 100), 100);
 });
 `;
 const SHOP_BRIEF = `# The order total

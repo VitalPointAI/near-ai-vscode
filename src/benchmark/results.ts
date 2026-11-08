@@ -434,13 +434,15 @@ export function recommendTiers(leaderboard: LeaderboardEntry[], current: { fast?
       changes: current.cyber !== cyberPick.model, abliterated: true,
       note: 'These tasks do not test refusal, so the cyber model is the best scoring abliterated model rather than a general winner.'
     });
-  } else if (current.cyber) {
+  } else if (true) {
     // 0.4.19 review: with no abliterated model tested, the one in use is kept, and it may be safety-tuned. That is said plainly rather than presented as a
     // guarantee: the cyber model is only known to be abliterated when an abliterated model has actually been measured.
-    const keepsAbliterated = isAbliteratedModel(current.cyber);
+    // 0.4.19 review: with no cyber current passed in, this row disappeared, so the changelog's "it keeps what it uses and says so" was not true in the panel.
+    // The row now always appears: with no abliterated model tested it states plainly that the scan keeps whatever it picks at start, and that it may refuse.
+    const keepsAbliterated = current.cyber !== undefined && isAbliteratedModel(current.cyber);
     recommendations.push({
-      tier: 'cyber', model: current.cyber, current: current.cyber,
-      why: keepsAbliterated ? 'no abliterated model has been tested here, so it keeps the one it uses now, which does not refuse' : 'no abliterated model has been tested here, so it keeps the one it uses now, which may refuse attack payloads',
+      tier: 'cyber', model: current.cyber ?? 'what each scan picks when it starts', ...(current.cyber ? { current: current.cyber } : {}),
+      why: keepsAbliterated ? 'no abliterated model has been tested here, so it keeps the one it uses now, which does not refuse' : 'no abliterated model has been tested here, so each scan keeps whatever it picks at start, which may refuse attack payloads',
       score: 0, changes: false, abliterated: keepsAbliterated,
       note: keepsAbliterated ? 'Test another abliterated model to compare it.' : 'Test an abliterated model and this stops being a guess. Until then the current model can refuse attack payloads, which fails the work rather than answering it wrongly.'
     });

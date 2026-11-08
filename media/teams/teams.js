@@ -1213,7 +1213,7 @@
             for (const entry of changes) list.append(el('li', '', `${entry.member}: ${entry.model}${entry.current ? ' (now ' + entry.current + ')' : ''}${entry.why ? ' — ' + entry.why : ''}`));
             // 0.4.19 review: this was labelled "Review in Compare Models" but posted `optimise-all`, which RUNS role tests for every team and rewrites their
             // files. It now says what it does, and the suggestion itself is only advice until the person clicks it.
-            box.append(list, button('Test these teams and set the models', () => vscode.postMessage({ type: 'optimise-all' }), { link: true, label: 'Run the role tests for every team and set each member model from the result' }));
+            box.append(list, button('Test every team and set the models', () => vscode.postMessage({ type: 'optimise-all' }), { link: true, label: 'Run the role tests for EVERY team, not only this one, and set each member model from the result' }));
           }
         }
         if (message.text) { showBanner(message.text, 'info'); announce(message.text); }

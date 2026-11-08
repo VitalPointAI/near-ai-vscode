@@ -132,7 +132,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       const outcomes = await runRoleSuite(plan, { clientFor: (model) => clientFor(active, model).client, rules: readAgentRules(), signal: options.signal ?? new AbortController().signal });
       const picks = bestOf(outcomes);
       if (!picks.length) return { applied: 0, text: options.signal?.aborted ? `${teamName}: cancelled, so its models were left alone.` : 'Every role test failed, so the team is unchanged. Run Compare Models to see why.' };
-      // The team is the newest file for this name in the library; its models are set by rewriting that member's model line.
+      // Which picks really matched a member, collected where the write happens, so the notice below cannot claim a write that did not happen.
+      const wroteNames: typeof picks = [];
       // The team's own file, found the way the library finds teams, so a name with spaces or capitals still lands on the right file.
       {
         // The role tests take minutes, so the file may have been edited in the meantime: the version read BEFORE the tests is compared with the one on disk
@@ -144,11 +145,11 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
         // The file vanished between the tests and the write: say so rather than reporting models that were never written (0.4.19 review).
         if (before === undefined) return { applied: 0, text: `${teamName} was deleted while its roles were being tested, so its models were not set.` };
         const text = before;
+        const draft = draftFromMarkdown(text, file);
         {
-          const draft = draftFromMarkdown(text, file);
           for (const pick of picks) {
             const member = draft.members.find((entry) => entry.name === pick.member);
-            if (member) member.model = pick.model;
+            if (member) { member.model = pick.model; wroteNames.push(pick); }
           }
           await writeFile(file, teamMarkdown(draft, text), 'utf8');
           await library.snapshot(file);
@@ -159,7 +160,13 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
           }
         }
       }
-      return { applied: picks.length, text: `Set ${picks.length} member model${picks.length === 1 ? '' : 's'} from the role tests: ${picks.map((pick) => `${pick.member} to ${pick.model}`).join(', ')}.` };
+      // 0.4.19 review: `picks.length` was reported even when a pick's member was not in the draft, so the notice claimed writes that never happened.
+      const written = wroteNames;
+      const missing = picks.filter((pick) => !written.includes(pick));
+      return {
+        applied: written.length,
+        text: `Set ${written.length} member model${written.length === 1 ? '' : 's'} from the role tests: ${written.map((pick) => `${pick.member} to ${pick.model}`).join(', ')}.${missing.length ? ` ${missing.map((pick) => pick.member).join(', ')} changed name while being tested, so their models were left alone.` : ''}`
+      };
     },
     // The models a role test would try, so testing every team shows the whole cost once before it starts.
     optimiseCandidates: async () => (await optimisationSetup(auth, context))?.candidates ?? [],

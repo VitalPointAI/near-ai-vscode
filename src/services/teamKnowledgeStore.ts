@@ -79,8 +79,11 @@ export async function addKnowledge(dir: string, team: string, addition: Knowledg
       await saveKnowledge(dir, merged);
       return problem ? { ...merged, problem } : merged;
     }
-    // Eight other-window writes in a row is not a lost update; it is a busy graph, and the caller still gets what it merged.
-    return last ?? mergeKnowledge((await loadKnowledge(dir, team)).knowledge, addition);
+    // 0.4.19 review: this returned a merged graph that was never written, so Learn reported success for an addition that was lost. After the retries a last
+    // write is attempted without the compare, so the caller's addition IS in the file even if another window is still busy.
+    const final = last ?? mergeKnowledge((await loadKnowledge(dir, team)).knowledge, addition);
+    await saveKnowledge(dir, final);
+    return final;
   });
 }
 
