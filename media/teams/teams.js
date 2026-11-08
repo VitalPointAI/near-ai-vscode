@@ -133,11 +133,11 @@
   }
   const memberLabel = (member, index) => (member.name || 'member ' + (index + 1)) + (member.role ? ' (' + member.role + ')' : '');
 
-  function startWizard(target, resume) {
+  function startWizard(target, resume, fromProposal) {
     hideBanner();
     work = resume
       ? { mode: 'wizard', target: resume.target, step: resume.step, maxStep: resume.step, draft: clone(resume.draft), startingPoint: resume.startingPoint || 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null }
-      : { mode: 'wizard', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: { name: target === 'project' ? 'Project team' : '', description: '', members: [] }, startingPoint: 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null };
+      : { mode: 'wizard', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: fromProposal ? proposedDraft(fromProposal) : { name: target === 'project' ? 'Project team' : '', description: '', members: [] }, startingPoint: 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null };
     work.clean = JSON.stringify(work.draft);
     render();
     requestReview();
@@ -186,6 +186,96 @@
   function focusMain() { const main = $('main'); if (main && main.focus) main.focus(); }
 
   // ---------- library ----------
+  // ---------- the AI start ----------
+  // Owner, 2026-11-08: "start with the chat asking what type of task or output the user wants the team to be able to provide", then draft the team with a
+  // name, members, roles, suggested models, what each produces, and the final outputs and formats. The proposal is shown first and becomes a team only
+  // when the person accepts it, so one answer is never saved on trust.
+  let proposal = null;
+  let drafting = false;
+  // What the person typed is kept while they look at the proposal, so "Start over" does not make them write it again.
+  let lastIdea = '';
+  let lastFormat = '';
+  let lastDepth = 'thorough';
+
+  /** The proposal as a draft the existing editor, checks and save already understand. The outputs and what each member produces go in its instructions. */
+  function proposedDraft(from) {
+    return {
+      name: from.name || 'New team',
+      description: `${from.mission || ''} ${from.description || ''}`.trim().slice(0, 400),
+      members: (from.members || []).map((member) => ({
+        name: member.name, role: member.role || '', model: member.model || 'standard', tools: null,
+        instructions: `${member.instructions || ''}${member.produces ? '\n\nProduces: ' + member.produces : ''}`.trim()
+      }))
+    };
+  }
+
+  function askSection() {
+    const box = el('section', 'ask');
+    if (drafting) { box.append(el('p', 'hint', 'Drafting the team from what you wrote...')); return box; }
+    box.append(el('h2', '', 'What should this team be able to produce?'));
+    box.append(el('p', 'hint', 'Describe it in your own words. The team is drafted from this: its name, its members and their roles, what each one hands back, and the outputs you get.'));
+    const idea = el('textarea', 'ask-idea', '');
+    idea.id = 'ask-idea'; idea.rows = 3;
+    idea.value = lastIdea;
+    idea.setAttribute('aria-label', 'What should this team be able to produce');
+    idea.setAttribute('placeholder', 'e.g. A team that researches a market and writes a short brief with a citation for every claim');
+    idea.addEventListener('input', () => { lastIdea = idea.value; });
+    box.append(idea);
+    const details = el('div', 'ask-details');
+    const format = input(lastFormat, (value) => { lastFormat = value; }, { id: 'ask-format', placeholder: 'Output format, e.g. Markdown brief with citations', maxlength: '300', autocomplete: 'off' });
+    format.setAttribute('aria-label', 'The output format you want');
+    const depth = el('select'); depth.setAttribute('aria-label', 'How deep the work should go');
+    depth.append(new Option('Thorough: sources checked', 'thorough', false, lastDepth !== 'quick'), new Option('Quick: a first useful answer', 'quick', false, lastDepth === 'quick'));
+    depth.addEventListener('change', () => { lastDepth = depth.value; });
+    details.append(field('Output format (optional)', format), field('Depth', depth));
+    box.append(details);
+    const actions = el('div', 'ask-actions');
+    actions.append(button('Draft the team', () => {
+      if (!idea.value.trim()) { announce('Say what the team should produce first.'); idea.focus(); return; }
+      drafting = true; render();
+      vscode.postMessage({ type: 'draft-team', idea: idea.value, ...(lastFormat.trim() ? { outputFormat: lastFormat } : {}), depth: lastDepth });
+    }, { primary: true, id: 'draft-team' }), el('span', 'hint', 'One model call. You see the proposal before anything is saved.'));
+    box.append(actions);
+    return box;
+  }
+
+  function proposalSection() {
+    const box = el('section', 'proposal');
+    box.append(el('h2', '', proposal.proposal.name || 'Proposed team'));
+    box.append(el('p', 'mission', proposal.proposal.mission));
+    box.append(el('p', '', proposal.proposal.description));
+    const members = el('table', 'proposal-members');
+    const head = el('thead'); const headRow = el('tr');
+    for (const label of ['Member', 'Role', 'Model', 'Produces']) headRow.append(el('th', '', label));
+    head.append(headRow); members.append(head);
+    const body = el('tbody');
+    for (const member of proposal.proposal.members) {
+      const row = el('tr');
+      row.append(el('td', '', member.name), el('td', '', member.role), el('td', '', member.model), el('td', '', member.produces));
+      body.append(row);
+    }
+    members.append(body);
+    box.append(members);
+    if (proposal.proposal.outputs.length) {
+      box.append(el('h3', '', 'You get'));
+      const list = el('ul', 'proposal-outputs');
+      for (const output of proposal.proposal.outputs) list.append(el('li', '', output.name + ': ' + output.format + ' (from ' + output.from + ')'));
+      box.append(list);
+    }
+    if (proposal.problems && proposal.problems.length) {
+      const notes = el('ul', 'issues');
+      for (const problem of proposal.problems) notes.append(issueLine({ message: problem }, 'warning'));
+      box.append(el('p', 'hint', 'The draft was repaired in these places:'), notes);
+    }
+    const actions = el('div', 'ask-actions');
+    actions.append(
+      button('Use this team', () => { startWizard('user', null, proposal.proposal); proposal = null; }, { primary: true }),
+      button('Start over', () => { proposal = null; drafting = false; render(); }, { link: true })
+    );
+    box.append(actions);
+    return box;
+  }
+
   function renderLibrary(root) {
     const bar = el('div', 'toolbar');
     const heading = el('h2', '', 'Teams'); heading.id = 'library-title';
@@ -202,6 +292,8 @@
       resume.append(button('Resume', () => startWizard(savedDraft.target, savedDraft), { primary: true }), button('Discard draft', () => { vscode.postMessage({ type: 'discard-draft' }); savedDraft = null; render(); }, { link: true }));
       root.append(resume);
     }
+    root.append(askSection());
+    if (proposal) root.append(proposalSection());
 
     if (!lib.teams.length) {
       const empty = el('div', 'empty');
@@ -1091,6 +1183,14 @@
         savedDraft = null;
         render();
         requestReview();
+        focusMain();
+        break;
+      case 'team-proposal':
+        drafting = false;
+        proposal = { proposal: message.proposal, problems: message.problems || [] };
+        if (!work) render();
+        else { work = null; render(); }
+        announce('The team has been drafted. Review it, then use it or start over.');
         focusMain();
         break;
       case 'review':

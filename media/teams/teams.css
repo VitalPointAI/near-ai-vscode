@@ -1,3 +1,15 @@
+/* The AI start: one box for what the team should produce, then the proposal it drafted. */
+.ask, .proposal { margin: 10px 0; padding: 10px 14px; border: 1px solid var(--vscode-editorWidget-border, #444); border-radius: 6px; background: var(--vscode-editorWidget-background); overflow-wrap: anywhere; }
+.ask h2, .proposal h2 { margin: 0 0 4px; font-size: 1.05em; }
+.ask-idea { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 6px; font: inherit; resize: vertical; color: inherit; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, #444); border-radius: 4px; }
+.ask-details { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.ask-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 8px; }
+.proposal .mission { font-weight: 600; margin: 2px 0 6px; }
+.proposal-members { width: 100%; border-collapse: collapse; margin: 6px 0; }
+.proposal-members th, .proposal-members td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--vscode-editorWidget-border, #444); vertical-align: top; }
+.proposal-members th { font-size: 0.9em; color: var(--muted); }
+.proposal-outputs { margin: 2px 0 0; padding-left: 18px; }
+
 /* The team as a picture: nested boxes, so the nesting is the hierarchy, with a card beside it. */
 .graph { margin: 8px 0; }
 .graph-tree, .graph-children { list-style: none; margin: 4px 0; padding: 0; }

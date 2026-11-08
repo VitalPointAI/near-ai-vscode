@@ -658,7 +658,7 @@ async function runPage() {
   const doc = new FakeDoc();
   const posts: Array<Record<string, any>> = [];
   const listeners: Array<(event: { data: unknown }) => void> = [];
-  const sandbox = vm.createContext({ document: doc, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))) }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math });
+  const sandbox = vm.createContext({ document: doc, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))) }), setTimeout, clearTimeout, JSON, Map, Set, Date, String, Boolean, Object, isNaN, Math, Option: function Option(text: string, value: string) { const node = doc.createElement('option'); node.textContent = text; node.value = value; return node; } });
   vm.runInContext(await readFile(SCRIPT, 'utf8'), sandbox, { timeout: 1000 });
   const byLabel = (label: string) => doc.body.all().find((node) => node.tagName === 'button' && (node.getAttribute('aria-label') === label || (!node.getAttribute('aria-label') && node.textContent === label)));
   return { doc, posts, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };

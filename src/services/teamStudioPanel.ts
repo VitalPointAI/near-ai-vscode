@@ -11,6 +11,7 @@ import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { ComparisonStore } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { leaderboardRows, suggestForTeam } from './modelComparisonPage';
+import { builderPrompt, parseProposal, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
 import { activeProvider, clientFor } from './providerCache';
 import { readAgentRules, readModelTiers } from './settings';
 import { bestOf, planRoleSuite, runRoleSuite } from '../benchmark/roleSuite';
@@ -58,6 +59,19 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
     // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.
+    // The AI start (owner, 2026-11-08): one call drafts the team from the person's own words, and the result is a proposal they accept or edit.
+    draftTeam: async (brief) => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+      const active = await activeProvider(root, auth).catch(() => undefined);
+      if (!active) throw new Error('Set up a NEAR AI profile for this project first.');
+      const tiers = readModelTiers();
+      const client = clientFor(active, tiers.deep || active.models[0]?.id).client;
+      const reply = await client.completeOnce(tiers.deep || active.models[0]?.id, [
+        { role: 'system', content: TEAM_BUILDER_PROMPT },
+        { role: 'user', content: builderPrompt(brief) }
+      ], { maxTokens: 2000 });
+      return parseProposal(reply.text, brief);
+    },
     // The final step of adding a team: measure each member's role on a few candidate models, then write the winner into the team file. The person is
     // asked first, because this spends real time and tokens, and skipping it leaves exactly the team they wrote.
     optimiseTeam: async (members, teamName) => {

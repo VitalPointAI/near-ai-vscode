@@ -6,6 +6,7 @@ import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue
 import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
+import { proposalText, type TeamProposal } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
 import { gradingCoverage } from '../domain/teamKnowledge';
 import { loadKnowledge } from './teamKnowledgeStore';
@@ -246,6 +247,7 @@ export type StudioMessage =
   | { type: 'save'; draft: TeamDraft; id: string; base: string }
   | { type: 'create'; draft: TeamDraft; target: StudioTarget; projectType?: { id: string; goal: string } }
   | { type: 'save-draft'; draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string }
+  | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough' }
   | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
   | { type: 'open-setting'; key: string };
 
@@ -295,6 +297,12 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       if (!exactKeys(message, ['type', 'seq', 'draft'], ['id']) || !Number.isSafeInteger(message.seq) || (message.id !== undefined && !id())) return undefined;
       const draft = parseDraft(message.draft);
       return draft ? { type: 'review', seq: message.seq as number, draft, ...(message.id !== undefined ? { id: message.id as string } : {}) } : undefined;
+    }
+    case 'draft-team': {
+      if (!text(message.idea, 2000) || !message.idea.trim()) return undefined;
+      if (message.outputFormat !== undefined && !text(message.outputFormat, 300)) return undefined;
+      if (message.depth !== undefined && message.depth !== 'quick' && message.depth !== 'thorough') return undefined;
+      return { type: 'draft-team', idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth === 'quick' || message.depth === 'thorough' ? { depth: message.depth } : {}) };
     }
     case 'save': {
       if (!exactKeys(message, ['type', 'draft', 'id', 'base']) || !id() || !String(message.id).match(/^(?:project|user:)/) || typeof message.base !== 'string' || !/^[0-9a-f]{64}$/.test(message.base)) return undefined;
@@ -368,6 +376,11 @@ export interface TeamStudioDeps {
    * What the model comparisons say each role should use, for a team that was just saved (owner, 2026-11-07: "as new teams are added, we should
    * automatically check and suggest model optimizations for the new members and roles that are created"). Undefined when no comparison has been run.
    */
+  /**
+   * Drafts a team from the person's own description (owner, 2026-11-08: start with a chat asking what the team should produce, then launch the research to
+   * propose mission, members, roles and outputs). One model call, returned as a proposal for the person to accept or edit.
+   */
+  draftTeam?(brief: { idea: string; outputFormat?: string; depth?: 'quick' | 'thorough' }): Promise<{ proposal: TeamProposal; problems: string[] }>;
   suggestModels?(members: Array<{ name: string; role?: string; model?: string }>): Promise<Array<{ member: string; model: string; current?: string; why: string; changes: boolean }>>;
   /**
    * The final step of adding a team (owner, 2026-11-08): run each member's role test with the candidate models and apply the winner, so a new team's
@@ -538,6 +551,17 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'refresh': await refresh(); return;
+      case 'draft-team': {
+        // One model call drafts the team from the person's own words (owner, 2026-11-08). The result goes back as a proposal the person reads first, and
+        // only becomes a team when they accept it, so nothing is saved on the strength of one answer.
+        if (!deps.draftTeam) { post({ type: 'error', text: 'No model is available to draft a team. Set up a NEAR AI profile, or fill the team in by hand.' }); return; }
+        post({ type: 'notice', text: 'Drafting the team...' });
+        try {
+          const drafted = await deps.draftTeam({ idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth ? { depth: message.depth } : {}) });
+          post({ type: 'team-proposal', proposal: drafted.proposal, text: proposalText(drafted.proposal), problems: drafted.problems });
+        } catch (error) { post({ type: 'error', text: `The team could not be drafted: ${(error as Error).message}` }); }
+        return;
+      }
       case 'review': {
         if (!input || !context) await load();
         const original = message.id && open?.id === message.id ? open.text : undefined;
