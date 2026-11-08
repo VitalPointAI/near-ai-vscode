@@ -352,6 +352,11 @@ export interface TeamStudioDeps {
    * automatically check and suggest model optimizations for the new members and roles that are created"). Undefined when no comparison has been run.
    */
   suggestModels?(members: Array<{ name: string; role?: string; model?: string }>): Promise<Array<{ member: string; model: string; current?: string; why: string; changes: boolean }>>;
+  /**
+   * The final step of adding a team (owner, 2026-11-08): run each member's role test with the candidate models and apply the winner, so a new team's
+   * models come from evidence rather than a default. Returns what each member ended up with, or undefined when the person skipped it.
+   */
+  optimiseTeam?(members: Array<{ name: string; role?: string; model?: string }>, teamName: string): Promise<{ applied: number; text: string } | undefined>;
   drafts: { get(): unknown; set(value: SavedWizard | undefined): Promise<void> };
   /** A modal question; resolves to the action chosen, or undefined when dismissed. */
   choose?(message: string, ...actions: string[]): Promise<string | undefined>;
@@ -573,7 +578,16 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         await refreshLibrary();
         await sendTeam(id, file, message.target === 'project' ? `Saved the project team. Run it with /team:project <task>.${message.projectType ? ' AGENTS.md now has this project type\'s guidance.' : ''}` : `Saved "${message.draft.name.trim()}". Run it with /team:${path.basename(file, '.md')} <task>.`);
         // A team that was just saved is checked against the model results, so a new member does not silently keep a default model the tests disagree with.
-        await suggestModelsFor(draftFromMarkdown(await readFile(file, 'utf8'), file), id);
+        const saved = draftFromMarkdown(await readFile(file, 'utf8'), file);
+        await suggestModelsFor(saved, id);
+        // The final step: test each member's role and set its model from what the test found. The person is asked first, because this spends real time and
+        // tokens, and skipping it leaves exactly the team they just wrote.
+        if (deps.optimiseTeam && saved.members.length) {
+          try {
+            const result = await deps.optimiseTeam(saved.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })), saved.name);
+            if (result) { post({ type: 'notice', text: result.text }); await sendTeam(id, file); }
+          } catch (error) { post({ type: 'error', text: `The role tests could not run: ${(error as Error).message}` }); }
+        }
         return;
       }
       case 'save-draft': {

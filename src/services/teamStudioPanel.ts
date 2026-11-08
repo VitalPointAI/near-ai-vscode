@@ -4,14 +4,18 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { applyProjectType } from '../agent/projectTypes';
-import { TeamLibrary } from '../agent/teams';
+import { slugify, TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
 import { attachTeamStudio, StudioTarget, teamStudioHtml } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { ComparisonStore } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { leaderboardRows, suggestForTeam } from './modelComparisonPage';
-import { activeProvider } from './providerCache';
+import { activeProvider, clientFor } from './providerCache';
+import { readAgentRules, readModelTiers } from './settings';
+import { bestOf, planRoleSuite, runRoleSuite } from '../benchmark/roleSuite';
+import { draftFromMarkdown, teamMarkdown } from '../agent/teamMarkdown';
+import { readFile, writeFile } from 'node:fs/promises';
 import { onDidChangeEmergencyStop } from './emergencyStop';
 import { homeFolder, teamLibraryDir, teamsMoveInFlight, whenTeamsMoved } from '../domain/teamStorage';
 
@@ -54,6 +58,47 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
     // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.
+    // The final step of adding a team: measure each member's role on a few candidate models, then write the winner into the team file. The person is
+    // asked first, because this spends real time and tokens, and skipping it leaves exactly the team they wrote.
+    optimiseTeam: async (members, teamName) => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+      const active = await activeProvider(root, auth).catch(() => undefined);
+      if (!active) return undefined;
+      // The candidates: the three tiers (the models in use now) and the two best any comparison has measured, capped so this stays minutes not hours.
+      const tiers = readModelTiers();
+      const tasks = await loadBenchmarkTasks();
+      const runs = await new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals')).list();
+      const board = leaderboardRows(runs, tasks, active.models, [], Date.now());
+      const candidates = [...new Set([tiers.fast, tiers.standard, tiers.deep, ...board.slice(0, 2).map((entry) => entry.model)])].filter((model): model is string => Boolean(model && active.models.some((entry) => entry.id === model))).slice(0, 3);
+      if (!candidates.length) return undefined;
+      const plan = planRoleSuite(members, candidates);
+      const answer = await vscode.window.showWarningMessage(
+        `Test the roles in "${teamName}" and set each member's model?`,
+        { modal: true, detail: `${plan.estimatedRuns} short runs (${plan.members} member${plan.members === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}), a few minutes. Tested: ${candidates.join(', ')}. Skipping leaves the team exactly as you wrote it.` },
+        'Run the tests', 'Skip'
+      );
+      if (answer !== 'Run the tests') return undefined;
+      const outcomes = await runRoleSuite(plan, { clientFor: (model) => clientFor(active, model).client, rules: readAgentRules(), signal: new AbortController().signal });
+      const picks = bestOf(outcomes);
+      if (!picks.length) return { applied: 0, text: 'Every role test failed, so the team is unchanged. Run Compare Models to see why.' };
+      // The team is the newest file for this name in the library; its models are set by rewriting that member's model line.
+      // The team's own file, found the way the library finds teams, so a name with spaces or capitals still lands on the right file.
+      const entries = await library.list();
+      const file = entries.find((entry) => entry.team?.name === teamName || path.basename(entry.file, '.md') === slugify(teamName))?.file;
+      if (file) {
+        const text = await readFile(file, 'utf8').catch(() => undefined);
+        if (text !== undefined) {
+          const draft = draftFromMarkdown(text, file);
+          for (const pick of picks) {
+            const member = draft.members.find((entry) => entry.name === pick.member);
+            if (member) member.model = pick.model;
+          }
+          await writeFile(file, teamMarkdown(draft, text), 'utf8');
+          await library.snapshot(file);
+        }
+      }
+      return { applied: picks.length, text: `Set ${picks.length} member model${picks.length === 1 ? '' : 's'} from the role tests: ${picks.map((pick) => `${pick.member} to ${pick.model}`).join(', ')}.` };
+    },
     suggestModels: async (members) => {
       const tasks = await loadBenchmarkTasks();
       const runs = await new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals')).list();
