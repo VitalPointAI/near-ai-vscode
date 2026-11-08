@@ -13,9 +13,10 @@
     error: 'M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm2.8 8.7l-1.1 1.1L8 9.1l-1.7 1.7-1.1-1.1L6.9 8 5.2 6.3l1.1-1.1L8 6.9l1.7-1.7 1.1 1.1L9.1 8z'
   };
   const STEPS = ['Purpose', 'Members', 'Models', 'Tools & permissions', 'Instructions & review'];
-  const TABS = ['Purpose', 'Members', 'Models', 'Tools', 'Instructions', 'Team shape', 'Markdown & checks', 'History'];
+  const TABS = ['Purpose', 'Members', 'Models', 'Tools', 'Instructions', 'Team shape', 'Knowledge', 'Markdown & checks', 'History'];
   // Named indexes, because a tab inserted in the middle silently moved every number after it (adding "Team shape" turned History from 6 into 7).
   const TAB_SHAPE = TABS.indexOf('Team shape');
+  const TAB_KNOWLEDGE = TABS.indexOf('Knowledge');
   const TAB_CHECKS = TABS.indexOf('Markdown & checks');
   const TAB_HISTORY = TABS.indexOf('History');
   const CAPABILITY_ORDER = ['read', 'plan', 'edit', 'shell', 'network', 'generate', 'git', 'publish'];
@@ -755,9 +756,9 @@
     });
     root.append(tabs);
     const panel = el('section', 'panel'); panel.id = 'tabpanel'; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', 'tab-' + work.tab);
-    [sectionPurpose, sectionMembers, sectionModels, sectionTools, sectionInstructions, sectionShape, (node) => sectionChecks(node, true), sectionHistory][work.tab](panel);
+    [sectionPurpose, sectionMembers, sectionModels, sectionTools, sectionInstructions, sectionShape, sectionKnowledge, (node) => sectionChecks(node, true), sectionHistory][work.tab](panel);
     // The mini checks sit under every tab except the checks tab itself and the shape, which is a picture rather than a form.
-    if (work.tab !== TAB_CHECKS && work.tab !== TAB_SHAPE) { const mini = el('div', 'mini-checks'); panel.append(mini); sectionChecks(mini, false); }
+    if (work.tab !== TAB_CHECKS && work.tab !== TAB_SHAPE && work.tab !== TAB_KNOWLEDGE) { const mini = el('div', 'mini-checks'); panel.append(mini); sectionChecks(mini, false); }
     root.append(panel);
     updateDirty();
   }
@@ -775,6 +776,143 @@
     if (saveButton && work && work.mode === 'editor') saveButton.disabled = !isDirty() || Boolean(work.review && work.review.errors.length);
     const revert = $('revert');
     if (revert) revert.disabled = !isDirty();
+  }
+
+  // ---------- the knowledge graph as a network ----------
+  // Owner, 2026-11-08: "visualize its context graph in an interactive network graph where one can select nodes and see suitable animations depicting all
+  // its relationships, additional detail cards, admiralty of sources". The layout is computed by the host, so the same graph always draws the same way.
+  let currentKnowledge = null;
+  let selectedNode = null;
+
+  function renderNetwork(root) {
+    root.replaceChildren();
+    const knowledge = currentKnowledge;
+    if (!knowledge || !knowledge.nodes || !knowledge.nodes.length) { root.hidden = true; return; }
+    root.hidden = false;
+    const head = el('div', 'network-head');
+    head.append(el('strong', '', 'What this team knows'), el('span', 'hint', ` ${knowledge.nodes.length} actors, ${knowledge.edges.length} relations, ${knowledge.coverage.gradedNodes} graded actors and ${knowledge.coverage.gradedEdges} graded relations.`));
+    root.append(head);
+    if (knowledge.problem) root.append(el('p', 'hint', knowledge.problem));
+    const svgNs = 'http://www.w3.org/2000/svg';
+    const make = (name, attrs) => { const node = document.createElementNS(svgNs, name); for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, String(value)); return node; };
+    const chart = make('svg', { viewBox: `0 0 ${knowledge.width} ${knowledge.height}`, width: '100%', height: knowledge.height, role: 'img', 'aria-label': 'Network of the actors this team knows and how they relate' });
+    const positions = new Map(knowledge.nodes.map((node) => [node.id, node]));
+    const touched = selectedNode ? highlightSet(knowledge, selectedNode) : null;
+    const order = selectedNode ? highlightOrderOf(knowledge, selectedNode) : [];
+    const delayFor = new Map(order.map((entry) => [entry.edgeId, entry.delayMs]));
+    // Relations first, so the nodes sit on top of their lines.
+    for (const edge of knowledge.edges) {
+      const from = positions.get(edge.from);
+      const to = positions.get(edge.to);
+      if (!from || !to) continue;
+      const dim = touched && !touched.edges.has(edge.id);
+      const line = make('line', { x1: from.x, y1: from.y, x2: to.x, y2: to.y, class: 'net-edge' + (dim ? ' dim' : '') + (edge.neutral ? ' unmeasured' : edge.positive ? ' positive' : ' negative'), 'stroke-width': edge.width });
+      if (selectedNode && touched && touched.edges.has(edge.id)) {
+        // The relations of the selected actor are drawn on in sequence, strongest first, so the eye follows strength.
+        line.setAttribute('class', 'net-edge highlighted' + (edge.positive ? ' positive' : ' negative'));
+        line.style.animationDelay = (delayFor.get(edge.id) || 0) + 'ms';
+      }
+      line.setAttribute('aria-hidden', 'true');
+      chart.append(line);
+      if (selectedNode && touched && touched.edges.has(edge.id)) {
+        const label = make('text', { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 - 4, class: 'net-edge-label', 'text-anchor': 'middle' });
+        label.textContent = edge.kind + (edge.tension === null ? '' : ' ' + edge.tension.toFixed(1));
+        chart.append(label);
+      }
+    }
+    for (const node of knowledge.nodes) {
+      const dim = touched && !touched.nodes.has(node.id);
+      const circle = make('circle', { cx: node.x, cy: node.y, r: node.radius, class: 'net-node' + (dim ? ' dim' : '') + (node.id === selectedNode ? ' selected' : ''), tabindex: '0', role: 'button', 'aria-label': node.label + ', ' + node.degree + ' relations: open its card' });
+      circle.addEventListener('click', () => { selectedNode = selectedNode === node.id ? null : node.id; renderNetwork(root); });
+      chart.append(circle);
+      const label = make('text', { x: node.x, y: node.y + node.radius + 12, class: 'net-label' + (dim ? ' dim' : ''), 'text-anchor': 'middle' });
+      label.textContent = node.label;
+      chart.append(label);
+    }
+    root.append(chart);
+    const card = el('section', 'net-card');
+    card.id = 'net-card';
+    card.setAttribute('aria-live', 'polite');
+    root.append(card);
+    renderNodeCard();
+  }
+
+  function highlightSet(knowledge, id) {
+    const nodes = new Set([id]);
+    const edges = new Set();
+    for (const edge of knowledge.edges) {
+      if (edge.from === id) { nodes.add(edge.to); edges.add(edge.id); }
+      else if (edge.to === id) { nodes.add(edge.from); edges.add(edge.id); }
+    }
+    return { nodes, edges };
+  }
+
+  function highlightOrderOf(knowledge, id) {
+    return knowledge.edges.filter((edge) => edge.from === id || edge.to === id)
+      .map((edge) => ({ edgeId: edge.id, tension: Math.abs(edge.tension === null ? 0 : edge.tension) }))
+      .sort((a, b) => b.tension - a.tension || a.edgeId.localeCompare(b.edgeId))
+      .map((entry, index) => ({ edgeId: entry.edgeId, delayMs: index * 60 }));
+  }
+
+  /** Admiralty as a person reads it: the source's reliability and the information's credibility, spelled out. */
+  function admiralty(grading) {
+    const reliability = { A: 'completely reliable', B: 'usually reliable', C: 'fairly reliable', D: 'not usually reliable', E: 'unreliable', F: 'cannot be judged' }[grading.reliability] || 'unknown source';
+    const credibility = { 1: 'confirmed', 2: 'probably true', 3: 'possibly true', 4: 'doubtful', 5: 'improbable', 6: 'cannot be judged' }[grading.credibility] || 'unknown credibility';
+    return grading.reliability + grading.credibility + ' (' + reliability + ', ' + credibility + ')';
+  }
+
+  // The card for the selected actor: what it does, what is known with where it came from and how reliable that is, and every relation.
+  function renderNodeCard() {
+    const card = $('net-card');
+    if (!card) return;
+    card.replaceChildren();
+    const knowledge = currentKnowledge;
+    if (!knowledge || !selectedNode || !knowledge.groups || !knowledge.groups[selectedNode]) { card.hidden = true; return; }
+    card.hidden = false;
+    const node = knowledge.nodes.find((entry) => entry.id === selectedNode);
+    const detail = knowledge.groups[selectedNode];
+    card.append(el('h3', '', node.label));
+    card.append(el('p', 'meta', `${node.kind}, seen ${detail.mentions} time${detail.mentions === 1 ? '' : 's'}, from ${detail.origin}${detail.grading ? `; evidence ${admiralty(detail.grading)}` : '; evidence not graded'}`));
+    if (detail.functions.length) {
+      const list = el('ul', 'net-functions');
+      for (const fn of detail.functions) list.append(el('li', '', fn));
+      card.append(el('h4', '', 'What it does'), list);
+    }
+    if (detail.facts.length) {
+      card.append(el('h4', '', 'What is known'));
+      const list = el('ul', 'net-facts');
+      for (const fact of detail.facts) {
+        const item = el('li');
+        item.append(document.createTextNode(fact.text + ' '));
+        if (fact.source) item.append(el('code', 'net-source', fact.source));
+        if (fact.grading) item.append(el('span', 'net-grade', ' ' + admiralty(fact.grading)));
+        list.append(item);
+      }
+      card.append(list);
+    }
+    if (detail.relations.length) {
+      card.append(el('h4', '', 'Relations'));
+      const list = el('ul', 'net-relations');
+      for (const relation of detail.relations) {
+        const other = knowledge.nodes.find((entry) => entry.id === relation.other);
+        const item = el('li');
+        const strength = relation.tension === null ? 'not measured' : (relation.tension > 0 ? '+' : '') + relation.tension.toFixed(1);
+        item.append(el('span', 'net-relation', (relation.direction === 'out' ? '\u2192 ' : '\u2190 ') + (other ? other.label : '?') + ' (' + relation.kind + ', tension ' + strength + ')' + (relation.basis ? ': ' + relation.basis : '')));
+        if (relation.grading) item.append(el('span', 'net-grade', ' ' + admiralty(relation.grading)));
+        list.append(item);
+      }
+      card.append(list);
+    }
+    card.append(button('Close', () => { selectedNode = null; renderNetwork($('knowledge')); }, { link: true }));
+  }
+
+  function sectionKnowledge(root) {
+    root.append(el('p', 'hint', 'What this team has learned, shared by all its members and kept between runs. Select an actor to see what is known about it, where that came from, and how strongly it relates to the rest.'));
+    const network = el('div', 'network');
+    network.id = 'knowledge';
+    root.append(network);
+    renderNetwork(network);
+    if (!currentKnowledge || !currentKnowledge.nodes.length) root.append(el('p', 'hint', 'Nothing learned yet. A team adds to this graph as it researches and as people tell it things.'));
   }
 
   function save() {
@@ -934,6 +1072,8 @@
       case 'team':
         openEditor(message, true);
         currentGraph = message.graph || null;
+        currentKnowledge = message.knowledge || null;
+        selectedNode = null;
         if (keptEdit && keptEdit.id === message.id) {
           // Reopening a team whose changes were kept: they come back as unsaved changes.
           work.draft = clone(keptEdit.draft);

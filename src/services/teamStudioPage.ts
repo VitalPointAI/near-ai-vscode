@@ -6,6 +6,21 @@ import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue
 import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
+import { layoutNetwork } from '../domain/networkLayout';
+import { gradingCoverage } from '../domain/teamKnowledge';
+import { loadKnowledge } from './teamKnowledgeStore';
+
+/** The facts, relations and grading of each node, so the page can show a card without being sent the whole graph twice. */
+function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: string; source?: string }>; functions: string[]; grading?: unknown; origin: string; mentions: number }>; edges: Array<{ from: string; to: string; kind: string; tension: number | null; basis?: string; grading?: unknown }> }): Record<string, unknown> {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  return Object.fromEntries(graph.nodes.map((node) => [node.id, {
+    functions: node.functions, facts: node.facts, grading: node.grading ?? null, origin: node.origin, mentions: node.mentions,
+    relations: graph.edges.filter((edge) => edge.from === node.id || edge.to === node.id).map((edge) => ({
+      kind: edge.kind, tension: edge.tension, basis: edge.basis ?? null, grading: edge.grading ?? null,
+      direction: edge.from === node.id ? 'out' : 'in', other: byId.get(edge.from === node.id ? edge.to : edge.from)?.facts !== undefined ? (edge.from === node.id ? edge.to : edge.from) : (edge.from === node.id ? edge.to : edge.from)
+    }))
+  }]));
+}
 import { isAbliteratedModel } from '../domain/cyberModel';
 import { buildToolsDirectory, firstSentence, PRIVACY_TEXT, privacyOf, resolveAgentModel, type DirectoryInput, type DirectoryModel, type ToolStatus, type ToolsDirectory } from './toolsDirectory';
 
@@ -429,7 +444,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const draft = draftFromMarkdown(textNow, file);
     open = { id, file, text: textNow, base: hash(textNow) };
     const entry = teamFor(id);
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, versions: await versionsOf(file), graph: graphOf(textNow, file), ...(notice ? { notice } : {}) });
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
   };
 
   /**
@@ -451,6 +466,19 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    * The team as a shape for the page to draw (owner, 2026-11-08). Built from the text that was just read, and never allowed to break the studio: a file
    * that does not parse as a team gets no shape, and the page falls back to the draft it already shows.
    */
+  /**
+   * The team's knowledge graph for the network view (owner, 2026-11-08), laid out here so the page only has to draw. A team that has not learned
+   * anything yet sends an empty graph, and the page says so rather than drawing an empty frame.
+   */
+  const knowledgeOf = async (file: string) => {
+    try {
+      const slug = slugify(path.basename(file, '.md'));
+      const { knowledge, problem } = await loadKnowledge(deps.library.directory, slug);
+      const layout = layoutNetwork(knowledge);
+      return { nodes: layout.nodes, edges: layout.edges, width: layout.width, height: layout.height, coverage: gradingCoverage(knowledge), groups: nodeDetails(knowledge), ...(problem ? { problem } : {}) };
+    } catch { return undefined; }
+  };
+
   const graphOf = (textNow: string, file: string) => {
     try {
       const team = parseTeam(textNow, file);
@@ -757,10 +785,10 @@ function displayPath(file: string, root: string | undefined): string {
 export type { TeamDefinition };
 
 /** The page's HTML: one nonce script and two stylesheets (the shared base, then its own); everything else is rendered by the script with textContent. */
-export function teamStudioHtml(options: { cspSource: string; nonce: string; script: string; style: string; base: string; probe?: string }): string {
+export function teamStudioHtml(options: { cspSource: string; nonce: string; script: string; style: string; network: string; base: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">
-<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><title>NEAR AI Team Studio</title></head><body>
+<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><link rel="stylesheet" href="${options.network}"><title>NEAR AI Team Studio</title></head><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="title"><h1 id="title">Team Studio</h1><p id="subtitle" class="hint">Build and manage agent teams. Each team is a Markdown file; the studio reads and writes it for you.</p></div><nav id="crumbs" aria-label="Breadcrumb"></nav></header>
 <div id="announce" class="visually-hidden" aria-live="polite" role="status"></div>

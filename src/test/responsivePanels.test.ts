@@ -72,7 +72,7 @@ test('pages link the shared stylesheet before their own, and load the layout pro
   for (const html of [
     toolsPageHtml({ cspSource: 'vscode-resource:', nonce: 'n', script: 'tools.js', style: 'tools.css', base: 'base.css' }),
     comparisonPageHtml({ cspSource: 'vscode-resource:', nonce: 'n', script: 'compare.js', style: 'compare.css', base: 'base.css' }),
-    teamStudioHtml({ cspSource: 'vscode-resource:', nonce: 'n', script: 'teams.js', style: 'teams.css', base: 'base.css' })
+    teamStudioHtml({ cspSource: 'vscode-resource:', nonce: 'n', script: 'teams.js', style: 'teams.css', network: 'network.css', base: 'base.css' })
   ]) {
     assert.match(html, /<link rel="stylesheet" href="base\.css"><link rel="stylesheet" href="(tools|compare|teams)\.css">/);
     assert.doesNotMatch(html, /layout-probe/);
