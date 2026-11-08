@@ -2,6 +2,12 @@ export type ActionCapability =
   | 'read'
   | 'plan'
   | 'workspaceWrite'
+  /**
+   * A write to shared state OUTSIDE the workspace that outlives the run: a team's knowledge graph, which every member and every later run reads. It always
+   * asks a person, in every mode, because a `workspaceWrite` grant covers it otherwise and an agent reading a hostile page could then commit that page as
+   * durable team memory with no prompt (0.4.19 review).
+   */
+  | 'sharedWrite'
   | 'shell'
   | 'network'
   | 'gitMutation'

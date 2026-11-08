@@ -96,7 +96,8 @@ test('reading the graph is free and writing it asks, because what it writes outl
   // 0.4.19 review: Learn writes the team's own file outside the workspace, so it must not be treated as a non-mutating tool.
   const kit = tools();
   assert.equal(kit.lookup.capability, 'read');
-  assert.equal(kit.learn.capability, 'workspaceWrite');
+  // `sharedWrite`, not `workspaceWrite`: it writes outside the workspace, so an edit grant must not cover it, and the permission layer always asks.
+  assert.equal(kit.learn.capability, 'sharedWrite');
 });
 
 test('a damaged graph is reported on the merge that overwrites it, rather than replaced in silence', async () => {

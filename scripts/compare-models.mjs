@@ -11,6 +11,7 @@
 //   node scripts/compare-models.mjs --new --task research-brief              # every catalog model not yet measured on that task
 //
 // Needs NEAR_AI_API_KEY, or a --key-file with one line in it. Nothing is written except the benchmark's own result store.
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
@@ -82,6 +83,12 @@ function defaultStoreDir() {
   ];
   // `undefined` when none exists, so the caller can refuse to run rather than write where the tab never looks (0.4.19 review).
   return candidates.find((dir) => existsSync(dir));
+}
+
+/** The catalogue as a version string: a hash of ids and prices, so a changed catalogue of the same size is not mistaken for the same one. */
+function catalogVersionOf(catalog) {
+  const material = catalog.map((entry) => `${entry.id}:${entry.inputPricePerMillion ?? ''}:${entry.outputPricePerMillion ?? ''}`).sort().join('|');
+  return createHash('sha256').update(material).digest('hex').slice(0, 16);
 }
 
 /** Reads one settings.json, allowing the comments VS Code permits. */
@@ -166,7 +173,7 @@ async function main() {
     // 0.4.19 review: a single-task run was saved as a full-set run, so Past comparisons said the team had been tested on everything. `short` is the
     // store's value for a subset; the task ids are saved on the run anyway, so the record says exactly which tasks were run.
     taskSet: options.set ?? 'short', mode: options.mode, runsPerTask: options.runs,
-    models: models.map((model) => { const info = catalog.find((entry) => entry.id === model); return { id: model, privacy: privacyOf(info), ...(info?.forwardedTo ? { forwardedTo: info.forwardedTo } : {}), catalogVersion: String(catalog.length) }; }),
+    models: models.map((model) => { const info = catalog.find((entry) => entry.id === model); return { id: model, privacy: privacyOf(info), ...(info?.forwardedTo ? { forwardedTo: info.forwardedTo } : {}), catalogVersion: catalogVersionOf(catalog) }; }),
     tasks: chosen.map((task) => ({ id: task.id, kind: task.kind, version: task.version })),
     rows
   };

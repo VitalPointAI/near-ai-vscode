@@ -5,7 +5,8 @@
 - **A run does not lose its place when nobody answers.** An approval that used to be declined after 15
   minutes, so the agent worked around a decision you never made and the work was redone, now parks the run
   on that step. Nothing runs, nothing is lost, the card keeps its buttons, and answering whenever you are
-  back carries on from exactly there. Measured on real runs, up to 752 minutes of a single run went into
+  back carries on from exactly there, up to a day: after that the action is declined and the run released, so an
+  abandoned conversation cannot hold a run and its sub-agents open for ever. Measured on real runs, up to 752 minutes of a single run went into
   waits like this.
 - **A team's own knowledge graph, and a network view of it.** Each team keeps what it learns: actors,
   what each does, and how they relate, with the signed strength of each relation and an Admiralty grade

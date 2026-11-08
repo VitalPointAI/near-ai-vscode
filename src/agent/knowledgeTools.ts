@@ -27,10 +27,11 @@ function gradingOf(raw: unknown, where: string): Grading | undefined {
  */
 function looksLikeAddress(source: string): boolean {
   const text = source.trim();
-  if (/^https?:\/\//i.test(text)) return true;
-  // A host-looking first token with a dot and no space: `evil.test/about`, `www.example.org`, `192.0.2.1/x`.
-  const host = text.split(/[/?#\s]/)[0] ?? '';
-  return /^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?$/i.test(host);
+  // 0.4.19 review: this only looked at the FIRST token, so `see evil.test/about` or `from www.example.org` kept an A1. Any address anywhere in the source
+  // counts, wherever it sits in the sentence.
+  if (/https?:\/\//i.test(text)) return true;
+  // A host-looking word with a dot somewhere: `evil.test/about`, `www.example.org`, `192.0.2.1`, and the same after "see" or "from".
+  return /(?:^|[\s([<,;:])[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i.test(`${text} `);
 }
 
 /**
@@ -122,8 +123,10 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
       required: ['nodes'],
       additionalProperties: false
     },
-    // Learn WRITES: it changes the team's shared graph, which outlives the run, so it is a workspace write and asks where writes ask (0.4.19 review).
-    capability: 'workspaceWrite',
+    // Learn writes SHARED state that outlives the run and lives outside the workspace (the team library under the home folder), so it is `sharedWrite`, which
+    // always asks. `workspaceWrite` was wrong: where edits are auto-approved, a model reading a hostile page could commit that page as durable team memory
+    // with no prompt at all (0.4.19 review).
+    capability: 'sharedWrite',
     parse: (raw) => {
       if (!Array.isArray(raw.nodes) || !raw.nodes.length) throw new ToolError('Give at least one actor in "nodes".');
       const nodes = raw.nodes.slice(0, 40).map((entry, index) => {

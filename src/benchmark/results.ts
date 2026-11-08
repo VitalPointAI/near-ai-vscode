@@ -434,7 +434,7 @@ export function recommendTiers(leaderboard: LeaderboardEntry[], current: { fast?
       changes: current.cyber !== cyberPick.model, abliterated: true,
       note: 'These tasks do not test refusal, so the cyber model is the best scoring abliterated model rather than a general winner.'
     });
-  } else if (true) {
+  } else {
     // 0.4.19 review: with no abliterated model tested, the one in use is kept, and it may be safety-tuned. That is said plainly rather than presented as a
     // guarantee: the cyber model is only known to be abliterated when an abliterated model has actually been measured.
     // 0.4.19 review: with no cyber current passed in, this row disappeared, so the changelog's "it keeps what it uses and says so" was not true in the panel.
