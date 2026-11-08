@@ -622,6 +622,7 @@ class FakeNode {
   attributes = new Map<string, string>();
   dataset: Record<string, string> = {};
   listeners = new Map<string, Array<(event: unknown) => void>>();
+  get classList(): { contains(name: string): boolean } { return { contains: (name: string) => this.className.split(/\s+/).includes(name) }; }
   hidden = false; id = ''; className = ''; type = ''; value = ''; title = ''; checked = false; disabled = false; open = false; selected = false; name = '';
   private text = '';
   constructor(public tagName: string, private readonly doc: FakeDoc) {}
@@ -636,6 +637,12 @@ class FakeNode {
   click() { if (!this.disabled) this.fire('click'); }
   focus() { this.doc.activeElement = this; }
   all(): FakeNode[] { return this.children.flatMap((child) => [child, ...child.all()]); }
+  /** Only the class selector the page uses, so a control found by class is found here too. */
+  querySelector(selector: string): FakeNode | null {
+    const cls = /^\.([\w-]+)$/.exec(selector)?.[1] ?? /^([\w-]+)\[/.exec(selector)?.[1];
+    if (!cls) return null;
+    return this.all().find((node) => (node.className.split(/\s+/).includes(cls) || node.tagName === cls) && node.getAttribute('aria-expanded') === 'true') ?? this.all().find((node) => node.className.split(/\s+/).includes(cls) || node.tagName === cls) ?? null;
+  }
 }
 class FakeDoc {
   body = new FakeNode('body', this);
@@ -751,7 +758,7 @@ test('page: the editor tracks unsaved changes, saves with its base, and handles 
   const base = 'b'.repeat(64);
   page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base, versions: [{ ref: '2026-10-29T10-00-00-000Z.md', label: '2026-10-29 10:00:00 UTC' }] });
   assert.match(page.text(), /Web team.*My teams\/web\.md.*Saved/);
-  assert.match(page.text(), /Purpose.*Members.*Models.*Tools.*Instructions.*Markdown & checks.*History/);
+  assert.match(page.text(), /Purpose.*Members.*Models.*Tools.*Instructions.*Team shape.*Markdown & checks.*History/);
   assert.equal(page.doc.getElementById('save')!.disabled, true, 'nothing to save yet');
   const name = page.doc.getElementById('f-name')!;
   name.value = 'Site team'; name.fire('input');
@@ -1040,4 +1047,51 @@ test('host path: the questions are VS Code modals, and closing the tab with an u
     nodeModule._load = originalLoad;
     globalThis.fetch = originalFetch;
   }
+});
+
+// The Team shape tab (owner, 2026-11-08): the saved team drawn as nested boxes with a card per member. Driven by clicking the real buttons.
+test('page: the Team shape tab draws the hierarchy and opens a member card when a member is clicked', async () => {
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
+  const card = (name: string, extra: Record<string, unknown> = {}) => ({
+    name, role: `${name}-role`, model: 'z-ai/glm-5.3-flash', tools: ['Read', 'Bash'],
+    capabilities: ['Read files', 'Run commands'], purpose: `${name} does the work.`, expectations: ['Report what changed.'], leads: [], abliterated: false, ...extra
+  });
+  page.dispatch({
+    type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'd'.repeat(64), versions: [],
+    graph: {
+      team: { name: 'Web team', description: 'Builds pages', members: 3 },
+      roots: [
+        { name: 'lead', role: 'lead-role', children: [{ name: 'scout', role: 'scout-role', children: [], card: card('scout', { reportsTo: 'lead' }) }], card: card('lead', { leads: ['scout'] }) },
+        { name: 'writer', role: 'writer-role', children: [], card: card('writer', { model: 'Qwen/Qwen3.8-27B-abliterated', abliterated: true }) }
+      ],
+      orphaned: [{ name: 'lost', reportsTo: 'nobody' }]
+    }
+  });
+  // Open the tab by its real button.
+  const tab = page.doc.body.all().find((node) => node.tagName === 'button' && /Team shape/.test(node.textContent));
+  assert.ok(tab, 'the tab is offered');
+  tab.click();
+  const graphTab = page.doc.getElementById('graph');
+  assert.ok(graphTab, 'the shape is drawn');
+  assert.match(graphTab.textContent, /lead/);
+  assert.match(graphTab.textContent, /scout/);
+  // The hierarchy is real nesting: the child sits inside the parent's list, not beside it.
+  const nested = graphTab.all().find((node) => node.classList.contains('graph-children'));
+  assert.ok(nested, 'a child is in a nested list, which is what shows the hierarchy');
+  assert.match(nested.textContent, /scout/);
+  assert.match(graphTab.textContent, /reports to nobody|Report to someone who is not on the team/i, 'a member that cannot be placed is named');
+  // A card opens on the member that was clicked, and says what it can do and what to expect.
+  const memberButton = page.doc.body.all().find((node) => node.tagName === 'button' && node.classList.contains('graph-member') && /scout/.test(node.textContent));
+  assert.ok(memberButton);
+  memberButton.click();
+  const panel = page.doc.getElementById('member-card');
+  assert.ok(panel);
+  assert.equal(panel.hidden, false);
+  assert.match(panel.textContent, /scout/);
+  assert.match(panel.textContent, /What it can do/);
+  assert.match(panel.textContent, /Run commands/);
+  assert.match(panel.textContent, /What to expect from it/);
+  assert.match(panel.textContent, /Report what changed/);
+  assert.match(panel.textContent, /Reports to: lead/);
 });

@@ -1,3 +1,19 @@
+/* The team as a picture: nested boxes, so the nesting is the hierarchy, with a card beside it. */
+.graph { margin: 8px 0; }
+.graph-tree, .graph-children { list-style: none; margin: 4px 0; padding: 0; }
+.graph-children { margin-left: 18px; padding-left: 12px; border-left: 2px solid var(--vscode-editorWidget-border, #444); }
+.graph-node { margin: 4px 0; }
+.graph-member { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 4px 10px; border: 1px solid var(--vscode-editorWidget-border, #444); border-radius: 6px; background: var(--vscode-editorWidget-background); color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.graph-member:hover { border-color: var(--vscode-focusBorder, #007fd4); }
+.graph-member[aria-expanded="true"] { border-color: var(--vscode-focusBorder, #007fd4); background: var(--vscode-list-activeSelectionBackground, var(--vscode-editorWidget-background)); }
+.graph-role { color: var(--muted); font-size: 0.9em; }
+.graph-model { font-size: 0.85em; color: var(--muted); }
+.member-card { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--vscode-focusBorder, #007fd4); border-radius: 4px; background: var(--vscode-editorWidget-background); overflow-wrap: anywhere; }
+.member-card h3 { margin: 0 0 6px; font-size: 1em; }
+.member-card h4 { margin: 8px 0 2px; font-size: 0.92em; }
+.member-card p { margin: 2px 0; }
+.graph-capabilities { margin: 2px 0 0; padding-left: 18px; }
+
 /* The footer's count of problems now names them, so it needs to wrap instead of sitting on one line. */
 #error-count { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; max-width: 46ch; overflow-wrap: anywhere; }
 #error-count .error-count-text { color: var(--vscode-errorForeground, #f14c4c); }

@@ -5,6 +5,8 @@ import { PROJECT_TYPES, projectTypeTeam, type ProjectType } from '../agent/proje
 import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue, type DraftMember, type TeamDraft } from '../agent/teamMarkdown';
 import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
+import { buildTeamGraph } from '../agent/teamGraph';
+import { isAbliteratedModel } from '../domain/cyberModel';
 import { buildToolsDirectory, firstSentence, PRIVACY_TEXT, privacyOf, resolveAgentModel, type DirectoryInput, type DirectoryModel, type ToolStatus, type ToolsDirectory } from './toolsDirectory';
 
 // NEAR AI Team Studio: a guided, visual way to build and manage agent teams. The team Markdown
@@ -427,7 +429,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const draft = draftFromMarkdown(textNow, file);
     open = { id, file, text: textNow, base: hash(textNow) };
     const entry = teamFor(id);
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, versions: await versionsOf(file), ...(notice ? { notice } : {}) });
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, versions: await versionsOf(file), graph: graphOf(textNow, file), ...(notice ? { notice } : {}) });
   };
 
   /**
@@ -443,6 +445,18 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     if (!changes.length) return;
     const lines = changes.map((entry) => `${entry.member}: ${entry.model} (${entry.why}${entry.current ? `, now ${entry.current}` : ''})`);
     post({ type: 'model-suggestion', id, changes, text: `The comparisons suggest a different model for ${changes.length} member${changes.length === 1 ? '' : 's'}: ${lines.join('; ')}.` });
+  };
+
+  /**
+   * The team as a shape for the page to draw (owner, 2026-11-08). Built from the text that was just read, and never allowed to break the studio: a file
+   * that does not parse as a team gets no shape, and the page falls back to the draft it already shows.
+   */
+  const graphOf = (textNow: string, file: string) => {
+    try {
+      const team = parseTeam(textNow, file);
+      const graph = buildTeamGraph(team, isAbliteratedModel);
+      return { team: graph.team, roots: graph.roots, orphaned: graph.orphaned };
+    } catch { return undefined; }
   };
 
   const onWatch = async (file: string) => {

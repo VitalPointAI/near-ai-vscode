@@ -13,7 +13,11 @@
     error: 'M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm2.8 8.7l-1.1 1.1L8 9.1l-1.7 1.7-1.1-1.1L6.9 8 5.2 6.3l1.1-1.1L8 6.9l1.7-1.7 1.1 1.1L9.1 8z'
   };
   const STEPS = ['Purpose', 'Members', 'Models', 'Tools & permissions', 'Instructions & review'];
-  const TABS = ['Purpose', 'Members', 'Models', 'Tools', 'Instructions', 'Markdown & checks', 'History'];
+  const TABS = ['Purpose', 'Members', 'Models', 'Tools', 'Instructions', 'Team shape', 'Markdown & checks', 'History'];
+  // Named indexes, because a tab inserted in the middle silently moved every number after it (adding "Team shape" turned History from 6 into 7).
+  const TAB_SHAPE = TABS.indexOf('Team shape');
+  const TAB_CHECKS = TABS.indexOf('Markdown & checks');
+  const TAB_HISTORY = TABS.indexOf('History');
   const CAPABILITY_ORDER = ['read', 'plan', 'edit', 'shell', 'network', 'generate', 'git', 'publish'];
   const CAPABILITY_LABEL = { read: 'Read', plan: 'Plan and coordinate', edit: 'Edit files', shell: 'Run commands', network: 'Network', generate: 'Generate media', git: 'Git', publish: 'Publish' };
   const STATUS_CLASS = { runs: 'ok', asks: 'ask', 'auto-checked': 'checked', off: 'off', stopped: 'stopped' };
@@ -274,6 +278,20 @@
   }
 
   // ---------- sections shared by the wizard and the editor ----------
+  // The team as a picture: who answers to whom, and a card for each member. It reads the saved team, not the unsaved draft, and says so, so a card
+  // never claims to describe a change that has not been saved.
+  function sectionShape(root) {
+    root.append(el('p', 'hint', 'The saved team, as it is written. Click a member for its card: what it is for, what it can do, and what to expect from it.'));
+    const lax = el('div', 'graph'); lax.id = 'graph';
+    const card = el('section', 'member-card');
+    card.id = 'member-card'; openCard = null;
+    card.setAttribute('aria-live', 'polite');
+    root.append(lax, card);
+    renderGraph(lax);
+    renderCard();
+    if (!currentGraph) root.append(el('p', 'hint', 'This team has no saved shape yet. Save it, then come back.'), el('p', 'hint', 'A card shows what a member is for, what it can do from its tools, and what it reports back.'));
+  }
+
   function sectionPurpose(root) {
     const draft = work.draft;
     root.append(field('Team name', input(draft.name, (value) => { draft.name = value.replace(/[\r\n]+/g, ' '); renderHeaderName(); changed(false); }, { id: 'f-name', maxlength: '80', autocomplete: 'off' }), work.mode === 'editor' ? 'Renaming keeps the file and its /team: command.' : 'Shown in the library and when the team runs.'));
@@ -737,15 +755,16 @@
     });
     root.append(tabs);
     const panel = el('section', 'panel'); panel.id = 'tabpanel'; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', 'tab-' + work.tab);
-    [sectionPurpose, sectionMembers, sectionModels, sectionTools, sectionInstructions, (node) => sectionChecks(node, true), sectionHistory][work.tab](panel);
-    if (work.tab !== 5) { const mini = el('div', 'mini-checks'); panel.append(mini); sectionChecks(mini, false); }
+    [sectionPurpose, sectionMembers, sectionModels, sectionTools, sectionInstructions, sectionShape, (node) => sectionChecks(node, true), sectionHistory][work.tab](panel);
+    // The mini checks sit under every tab except the checks tab itself and the shape, which is a picture rather than a form.
+    if (work.tab !== TAB_CHECKS && work.tab !== TAB_SHAPE) { const mini = el('div', 'mini-checks'); panel.append(mini); sectionChecks(mini, false); }
     root.append(panel);
     updateDirty();
   }
 
   function selectTab(index) {
     work.tab = index;
-    if (index === 6) vscode.postMessage({ type: 'versions', id: work.id });
+    if (index === TAB_HISTORY) vscode.postMessage({ type: 'versions', id: work.id });
     render();
   }
 
@@ -773,6 +792,85 @@
   // ---------- render ----------
   let pendingFocus = null;
   function focusLater(id) { pendingFocus = id; }
+
+  // ---------- the team as a shape ----------
+  // Owner, 2026-11-08: "teams represented graphically with ability to click on a member and get a member card detailing their capabilities and
+  // expectations. Should show hierarchy if one exists." Drawn as nested boxes rather than an abstract diagram: the nesting IS the hierarchy, and every
+  // member is a real button, so it works with Tab and Enter as well as with a click.
+  let currentGraph = null;
+  let openCard = null;
+
+  function renderGraph(root) {
+    root.replaceChildren();
+    const graph = currentGraph;
+    if (!graph || !graph.roots || !graph.roots.length) { root.hidden = true; return; }
+    root.hidden = false;
+    root.append(el('strong', '', 'The team, and who answers to whom'));
+    const tree = el('ul', 'graph-tree');
+    const node = (member) => {
+      const item = el('li', 'graph-node');
+      const button = el('button', 'graph-member');
+      button.type = 'button';
+      button.setAttribute('aria-expanded', String(openCard === member.name));
+      button.setAttribute('aria-label', `${member.name}${member.role ? ', ' + member.role : ''}${member.children && member.children.length ? ', leads ' + member.children.length : ''}: open its card`);
+      button.append(el('strong', '', member.name));
+      if (member.role && member.role !== member.name) button.append(el('span', 'graph-role', member.role));
+      if (member.card && member.card.model) button.append(el('code', 'graph-model', member.card.model.split('/').pop()));
+      if (member.card && member.card.abliterated) button.append(badge('abliterated'));
+      button.addEventListener('click', () => { openCard = openCard === member.name ? null : member.name; renderGraph(root); renderCard(); const again = root.querySelector('.graph-member[aria-expanded="true"]'); if (again) again.focus(); });
+      item.append(button);
+      if (member.children && member.children.length) {
+        const children = el('ul', 'graph-children');
+        for (const child of member.children) children.append(node(child));
+        item.append(children);
+      }
+      return item;
+    };
+    for (const member of graph.roots) tree.append(node(member));
+    root.append(tree);
+    if (graph.orphaned && graph.orphaned.length) {
+      root.append(el('p', 'hint', 'Report to someone who is not on the team, so they are drawn at the top: ' + graph.orphaned.map((entry) => entry.name + (entry.reportsTo ? ' (reports to ' + entry.reportsTo + ')' : '')).join(', ') + '.'));
+    }
+  }
+
+  function renderCard() {
+    const card = $('member-card');
+    if (!card) return;
+    card.replaceChildren();
+    const graph = currentGraph;
+    const member = graph && openCard ? findMember(graph.roots, openCard) : null;
+    if (!member) { card.hidden = true; return; }
+    card.hidden = false;
+    const title = el('h3', '', member.name);
+    if (member.role && member.role !== member.name) title.append(el('span', 'hint', ' · ' + member.role));
+    card.append(title);
+    const info = member.card || {};
+    if (info.model) card.append(el('p', 'meta', 'Model: ' + info.model + (info.abliterated ? ' (does not refuse)' : '')));
+    if (info.reportsTo) card.append(el('p', 'meta', 'Reports to: ' + info.reportsTo));
+    if (info.leads && info.leads.length) card.append(el('p', 'meta', 'Leads: ' + info.leads.join(', ')));
+    if (info.purpose) { card.append(el('h4', '', 'What it is for'), el('p', '', info.purpose)); }
+    if (info.capabilities && info.capabilities.length) {
+      const list = el('ul', 'graph-capabilities');
+      for (const capability of info.capabilities) list.append(el('li', '', capability));
+      card.append(el('h4', '', 'What it can do'), list);
+    }
+    if (info.tools && info.tools.length) card.append(el('p', 'hint', 'Tools: ' + info.tools.join(', ')));
+    if (info.expectations && info.expectations.length) {
+      card.append(el('h4', '', 'What to expect from it'));
+      for (const part of info.expectations) card.append(el('p', '', part));
+    }
+    const close = button('Close', () => { openCard = null; renderGraph($('graph')); renderCard(); }, { link: true });
+    card.append(close);
+  }
+
+  function findMember(nodes, name) {
+    for (const node of nodes || []) {
+      if (node.name === name) return node;
+      const found = findMember(node.children, name);
+      if (found) return found;
+    }
+    return null;
+  }
 
   function render() {
     const active = document.activeElement && document.activeElement.id;
@@ -835,6 +933,7 @@
         break;
       case 'team':
         openEditor(message, true);
+        currentGraph = message.graph || null;
         if (keptEdit && keptEdit.id === message.id) {
           // Reopening a team whose changes were kept: they come back as unsaved changes.
           work.draft = clone(keptEdit.draft);
