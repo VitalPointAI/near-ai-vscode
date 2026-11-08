@@ -100,7 +100,8 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
       required: ['nodes'],
       additionalProperties: false
     },
-    capability: 'plan',
+    // Learn WRITES: it changes the team's shared graph, which outlives the run, so it is a workspace write and asks where writes ask (0.4.19 review).
+    capability: 'workspaceWrite',
     parse: (raw) => {
       if (!Array.isArray(raw.nodes) || !raw.nodes.length) throw new ToolError('Give at least one actor in "nodes".');
       const nodes = raw.nodes.slice(0, 40).map((entry, index) => {

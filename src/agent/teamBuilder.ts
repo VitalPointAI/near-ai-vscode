@@ -83,12 +83,14 @@ export function parseProposal(text: string, brief: TeamBrief): { proposal: TeamP
     if (!entry || typeof entry !== 'object') continue;
     const member = entry as Record<string, unknown>;
     const role = text_(member.role, 'specialist', 60).replace(/[\r\n,]+/g, ' ');
-    // A name that cannot be used is replaced, not dropped: the member is more valuable than its name.
+    // A name that cannot be used is replaced, not dropped: the member is more valuable than its name. The replacement is UNIQUE, because a fallback that
+    // collides with a member already named `member-2` produces a team the studio's own checks then reject (0.4.19 review).
     let memberName = text_(member.name, '', 40).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
     if (!SLUG.test(memberName) || seen.has(memberName)) {
-      const base = SLUG.test(memberName) ? `${memberName}-${index + 1}` : `member-${index + 1}`;
-      memberName = base.slice(0, 40);
-      if (seen.has(memberName)) memberName = `member-${index + 1}`;
+      const stem = SLUG.test(memberName) ? memberName.replace(/-\d+$/, '') : 'member';
+      let candidate = `${stem}-${index + 1}`.slice(0, 40);
+      for (let n = index + 2; seen.has(candidate); n += 1) candidate = `${stem}-${n}`.slice(0, 40);
+      memberName = candidate;
       problems.push(`Member ${index + 1} needed a usable name; it is now "${memberName}".`);
     }
     seen.add(memberName);

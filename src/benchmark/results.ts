@@ -327,10 +327,13 @@ export function buildLeaderboard(runs: SavedRun[], current: BenchmarkTask[], cat
 
 /**
  * The models worth testing again on the current tasks (owner, 2026-11-07: "enable the user to re-run them periodically as new models are released").
- * Three reasons to re-run one: its saved result is on an older version of a task, it was tested more than `staleAfterDays` ago, or it has no result for a
- * task in the set. `newModels` are catalog models with no result at all, which is what a release of a new model looks like here.
+ * Three reasons to re-run one: its saved result is on an older version of a task, it was tested longer ago than the staleness window, or it has no result for
+ * a task in the set. `newModels` are catalog models with no result at all, which is what a release of a new model looks like here.
+ *
+ * The window is decided by `buildLeaderboard`, which already applied it when it built these entries: a caller that wants a different window passes it
+ * THERE. An earlier version accepted `staleAfterDays` here and ignored it, silently discarding the caller's choice (0.4.19 review).
  */
-export function needsRetest(leaderboard: LeaderboardEntry[], catalog: ModelInfo[], staleAfterDays = STALE_AFTER_DAYS): { retest: Array<{ model: string; why: string[] }>; newModels: string[] } {
+export function needsRetest(leaderboard: LeaderboardEntry[], catalog: ModelInfo[]): { retest: Array<{ model: string; why: string[] }>; newModels: string[] } {
   const tested = new Set(leaderboard.map((entry) => entry.model));
   const retest = leaderboard
     .filter((entry) => entry.inCatalog && (entry.stale.length > 0 || entry.missingTasks.length > 0))

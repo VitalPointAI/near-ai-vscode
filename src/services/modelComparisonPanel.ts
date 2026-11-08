@@ -288,7 +288,11 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
   const undoEntries: Array<{ setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }> = [];
   const roleModels = readRoleModels();
   for (const choice of choices) {
-    const roleId = 'tier' in choice ? (choice.tier === 'cyber' ? 'main' : `tier:${choice.tier}`) : `role:${choice.role}`;
+    // 0.4.19 review: the cyber recommendation is NOT the chat model. Mapping it to `main` rewrote the ordinary chat model with an abliterated one
+    // chosen only because it will not refuse attack payloads. The cyber engagement picks its model when it starts (src/domain/cyberModel.ts), so the bulk
+    // apply leaves it alone and says so.
+    if ('tier' in choice && choice.tier === 'cyber') { skipped.push(`the cyber model (${choice.model}), which a scan picks when it starts`); continue; }
+    const roleId = 'tier' in choice ? `tier:${choice.tier}` : `role:${choice.role}`;
     const option = gathered.roles.find((role) => role.id === roleId);
     const entry = gathered.state.catalog.find((candidate) => candidate.id === choice.model);
     if (!option || !entry || entry.blocked) { skipped.push(`${'tier' in choice ? choice.tier : choice.role} (${choice.model})`); continue; }

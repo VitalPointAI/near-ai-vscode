@@ -80,9 +80,21 @@ export async function runRoleSuite(plan: RolePlan, options: RoleSuiteOptions): P
         await mkdir(path.dirname(path.join(root, name)), { recursive: true });
         await writeFile(path.join(root, name), content);
       }
-      const result = await runAgentInFolder(options.clientFor(run.model), run.model, root, run.task.prompt, {
-        maxTurns: run.task.maxTurns, signal: options.signal, rules: options.rules
-      });
+      // Each task declares a wall-clock limit, so one slow model cannot hold a whole team's tests open (0.4.19 review: it was set and never passed).
+      const abort = new AbortController();
+      const forward = () => abort.abort();
+      if (options.signal.aborted) abort.abort();
+      else options.signal.addEventListener('abort', forward, { once: true });
+      const limit = setTimeout(() => abort.abort(), run.task.timeoutMs);
+      let result: Awaited<ReturnType<typeof runAgentInFolder>>;
+      try {
+        result = await runAgentInFolder(options.clientFor(run.model), run.model, root, run.task.prompt, {
+          maxTurns: run.task.maxTurns, signal: abort.signal, rules: options.rules
+        });
+      } finally {
+        clearTimeout(limit);
+        options.signal.removeEventListener('abort', forward);
+      }
       const graded = gradeRoleAnswer(run.role, root, run.task.files, run.task.kind, run.task.role);
       score = graded.score;
       outOf = graded.outOf;

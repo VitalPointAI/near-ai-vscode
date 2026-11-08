@@ -36,14 +36,22 @@ function parseArgs(argv) {
   return options;
 }
 
-/** Runs one command with the task on stdin, and returns its answer, wall time and whether it succeeded. */
+/**
+ * Runs one command with the task on stdin, and returns its answer, wall time and whether it succeeded.
+ *
+ * The command runs in its OWN process group, and a timeout kills the whole group (0.4.19 review). Killing only `bash` left the command it started, and
+ * anything that command started, running after the experiment had moved on, so a timed-out run could still be spending tokens in the background.
+ */
 export function runOnce(command, task, { timeoutMs = 30 * 60_000, cwd = process.cwd() } = {}) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn('bash', ['-lc', command], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('bash', ['-lc', command], { cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     let stdout = '';
     let stderr = '';
-    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    const killGroup = () => {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+    };
+    const timer = setTimeout(killGroup, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.on('error', (error) => { clearTimeout(timer); resolve({ ok: false, answer: '', stderr: String(error), ms: Date.now() - started }); });
