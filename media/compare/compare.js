@@ -402,9 +402,38 @@
     requestEstimate();
   }
 
+  // The setup these results point to, per tier and per role, with one button that applies every change it lists. Shown above the board because it is the
+  // conclusion of the numbers below it, and because a recommendation nobody can apply in one click is just advice (owner, 2026-11-07).
+  function renderRecommended() {
+    const root = $('recommended');
+    root.replaceChildren();
+    const recommended = state.recommended || { tiers: [], roles: [] };
+    const changes = [...recommended.tiers, ...recommended.roles].filter((entry) => entry.changes);
+    if (!recommended.tiers.length && !recommended.roles.length) { root.hidden = true; return; }
+    root.hidden = false;
+    const LABELS = { deep: 'Deep tier', standard: 'Standard tier', fast: 'Fast tier', cyber: 'Cybersecurity scans' };
+    const label = (entry) => ('tier' in entry ? LABELS[entry.tier] || entry.tier : entry.role);
+    const list = el('ul', 'recommendation');
+    for (const entry of [...recommended.tiers, ...recommended.roles]) {
+      const item = el('li', entry.changes ? '' : 'same');
+      const name = el('strong', '', label(entry) + ': ');
+      const body = entry.model + ' — ' + entry.why + (entry.changes ? '' : ' (already set)');
+      item.append(name, el('span', '', body));
+      if ('abliterated' in entry && entry.abliterated) item.append(badge('abliterated', 'held'));
+      if ('note' in entry && entry.note) item.append(el('p', 'hint', entry.note));
+      list.append(item);
+    }
+    root.append(el('strong', '', 'The setup these results point to'), list);
+    const actions = el('div', 'retest-actions');
+    if (changes.length) actions.append(button('Apply all ' + changes.length + ' change' + (changes.length === 1 ? '' : 's'), () => vscode.postMessage({ type: 'apply-recommended' })));
+    else actions.append(el('span', 'hint', 'Every tier and role already uses the recommended model.'));
+    root.append(actions);
+  }
+
   function renderAll() {
     $('problem').hidden = true;
     renderBoard();
+    renderRecommended();
     renderRetest();
     renderSetup();
     renderHistory();

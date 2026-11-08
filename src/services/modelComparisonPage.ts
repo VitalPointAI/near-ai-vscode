@@ -1,5 +1,5 @@
-import { buildLeaderboard, needsRetest, catalogVersion, privacyOf, RUN_ID, summarizeRun, type CostEstimate, type ComparisonPlan, type LeaderboardEntry, type ModelSummary, type RunMode, type SavedRun } from '../benchmark/results';
-import { TASK_SETS, tasksFor, type BenchmarkTask, type TaskSetId } from '../benchmark/tasks';
+import { buildLeaderboard, needsRetest, recommendRoles, recommendTiers, catalogVersion, privacyOf, RUN_ID, summarizeRun, type CostEstimate, type ComparisonPlan, type LeaderboardEntry, type ModelSummary, type RoleRecommendation, type RunMode, type SavedRun, type TierRecommendation } from '../benchmark/results';
+import { TASK_SETS, tasksFor, type BenchmarkTask, type TaskSetId, type TaskKind } from '../benchmark/tasks';
 import { isChatModel } from './chatBridge';
 import { heldRoles, type RoleOption } from './modelRoles';
 import type { ModelInfo } from './nearAiClient';
@@ -26,6 +26,11 @@ export interface PageState {
   history: HistoryEntry[];
   /** What is worth testing again: models whose result is stale or missing a task, and new models with no result at all. */
   retest: { models: Array<{ model: string; why: string[] }>; newModels: string[] };
+  /**
+   * The setup the results point to, for one button to apply: each tier and each agent role with the model that is best at its own kind of work, and the
+   * cyber model kept abliterated. Only what differs from the current setup is written.
+   */
+  recommended: { tiers: TierRecommendation[]; roles: RoleRecommendation[] };
   running?: { runId: string };
   teeOnly: boolean;
   problem?: string;
@@ -66,6 +71,34 @@ export function historyEntries(runs: SavedRun[]): HistoryEntry[] {
       models: saved.models.map((model) => model.id), ran: fresh.length, reused: saved.rows.length - fresh.length,
       ...(costs.length ? { costUsd: costs.reduce((sum, value) => sum + value, 0) } : {})
     };
+  });
+}
+
+/** What the button would write, from the same leaderboard the table shows. Roles are matched to the kind of work they do, not to one overall winner. */
+export function recommendationView(rows: LeaderboardRow[], roles: RoleOption[]): PageState['recommended'] {
+  const current = Object.fromEntries(roles.filter((role) => role.group === 'Tiers').map((role) => [role.id.slice(5), role.current])) as { fast?: string; standard?: string; deep?: string };
+  const roleOptions = roles.filter((role) => role.group === 'Agent roles');
+  // The cyber engagement's own model is whatever the chat currently uses, which the page knows as the main model.
+  const cyber = roles.find((role) => role.id === 'main')?.current;
+  return {
+    tiers: recommendTiers(rows, { ...current, ...(cyber ? { cyber } : {}) }),
+    roles: recommendRoles(rows, roleOptions.map((role) => ({ id: role.id, ...(role.current ? { current: role.current } : {}) })))
+  };
+}
+
+/**
+ * The suggestion for a team's own members (owner, 2026-11-07: "as new teams are added, we should automatically check and suggest model optimizations
+ * for the new members and roles that are created"). A team member does not go through nearAi.agent.roleModels: it follows its agent definition's tier
+ * unless the member's own line names a model, so the suggestion is made per member and applied by writing that member's model line.
+ */
+export interface TeamSuggestion { member: string; role?: string; model: string; current?: string; kind?: TaskKind; score: number; why: string; changes: boolean }
+
+export function suggestForTeam(rows: LeaderboardRow[], members: Array<{ name: string; role?: string; model?: string }>): TeamSuggestion[] {
+  const recommendations = recommendRoles(rows, members.map((member) => ({ id: `role:${member.role ?? member.name}`, ...(member.model ? { current: member.model } : {}) })));
+  return members.flatMap((member) => {
+    const found = recommendations.find((entry) => entry.role === (member.role ?? member.name));
+    if (!found) return [];
+    return [{ member: member.name, ...(member.role ? { role: member.role } : {}), model: found.model, ...(member.model ? { current: member.model } : {}), ...(found.kind ? { kind: found.kind } : {}), score: found.score, why: found.why, changes: member.model !== found.model }];
   });
 }
 
@@ -111,6 +144,8 @@ export type ComparisonPageMessage =
   | { type: 'open-run'; id: string }
   | { type: 'export'; id: string }
   | { type: 'apply-role'; model: string; role: string }
+  /** Applies the recommended setup in one go: every tier and role whose best model differs from the one it uses. */
+  | { type: 'apply-recommended' }
   | { type: 'undo-role'; token: string };
 
 const MODEL_ID = /^[\w.:@+/-]{1,200}$/;
@@ -138,6 +173,7 @@ export function parseComparisonMessage(value: unknown): ComparisonPageMessage | 
       return picked ? { type: message.type, ...picked } : undefined;
     }
     case 'open-run': case 'export': return only('id') && typeof message.id === 'string' && RUN_ID.test(message.id) ? { type: message.type, id: message.id } : undefined;
+    case 'apply-recommended': return only() ? { type: 'apply-recommended' } : undefined;
     case 'apply-role': return only('model', 'role') && typeof message.model === 'string' && MODEL_ID.test(message.model) && typeof message.role === 'string' && ROLE_ID.test(message.role) ? { type: 'apply-role', model: message.model, role: message.role } : undefined;
     case 'undo-role': return only('token') && typeof message.token === 'string' && /^[a-f0-9]{16}$/.test(message.token) ? { type: 'undo-role', token: message.token } : undefined;
     default: return undefined;
@@ -166,7 +202,7 @@ export function comparisonPageHtml(options: { cspSource: string; nonce: string; 
 <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 <main>
 <section aria-labelledby="board-title"><div class="section-head"><h2 id="board-title">Leaderboard</h2></div>
-<p class="hint">Every model tested on this computer, ranked on its latest result for each task. Scores are out of 10.</p><div id="retest" hidden></div><div id="board"><p class="hint">Loading…</p></div></section>
+<p class="hint">Every model tested on this computer, ranked on its latest result for each task. Scores are out of 10.</p><div id="recommended" hidden></div><div id="retest" hidden></div><div id="board"><p class="hint">Loading…</p></div></section>
 <section aria-labelledby="run-title"><h2 id="run-title">Run a comparison</h2><div id="setup"></div><div id="progress" hidden></div></section>
 <section aria-labelledby="results-title" id="results-section" hidden><div class="section-head"><h2 id="results-title">Results</h2><div class="actions" id="results-actions"></div></div><div id="results"></div></section>
 <section aria-labelledby="history-title"><h2 id="history-title">Past comparisons</h2><div id="history"></div></section>

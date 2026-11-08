@@ -12,7 +12,7 @@ import { spendAccountOf } from './agentSession';
 import type { AuthService } from './auth';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
-import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
+import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
 import { privacyWarning, roleOptions, roleUpdate, type RoleOption } from './modelRoles';
 import type { ModelInfo, UsageMetadata } from './nearAiClient';
 import { activeProvider, clientFor, type ActiveProvider } from './providerCache';
@@ -60,7 +60,7 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
     active, models, tasks, runs, roles,
     state: {
       leaderboard, catalog, selected: defaultSelection(roles, catalog), roles,
-      taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models),
+      taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models), recommended: recommendationView(leaderboard, roles),
       ...(running ? { running: { runId: running.runId } } : {}), teeOnly, ...(problem ? { problem } : {})
     }
   };
@@ -114,6 +114,7 @@ export function openModelComparison(context: vscode.ExtensionContext, auth: Auth
           }
           case 'export': await exportRun(context, message.id); break;
           case 'apply-role': await applyRole(context, auth, message.model, message.role); break;
+          case 'apply-recommended': await applyRecommended(context, auth); break;
           case 'undo-role': await undoRole(message.token); break;
         }
       } catch (error) {
@@ -264,6 +265,45 @@ async function applyRole(context: vscode.ExtensionContext, auth: AuthService, mo
   undo.set(token, { setting: update.setting, previous, target, label: option.label });
   const warning = privacyWarning(entry.privacy, option);
   post({ type: 'role-applied', token, text: `${option.label} now uses ${model}${inWorkspace ? ' in this workspace' : ''}.`, ...(warning ? { warning } : {}) });
+}
+
+/**
+ * Applies the recommended setup in one action (owner, 2026-11-07: "implementable by the user confirming with a button which changes all the models
+ * appropriately"). Every tier and every agent role whose best model differs is written, one setting each, to the same target a single role would use; the
+ * rest are left exactly as they are, so this never rewrites a setting that already holds the recommended model. One undo token restores all of them.
+ * A model the catalog does not offer, or that TEE-only mode blocks, is skipped and named rather than silently dropped.
+ */
+async function applyRecommended(context: vscode.ExtensionContext, auth: AuthService): Promise<void> {
+  const gathered = await gather(context, auth);
+  const { recommended } = gathered.state;
+  const choices = [...recommended.tiers, ...recommended.roles].filter((entry) => entry.changes);
+  if (!choices.length) { post({ type: 'notice', text: 'Every tier and agent role already uses the model these results recommend.' }); return; }
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const applied: string[] = [];
+  const skipped: string[] = [];
+  const undoEntries: Array<{ setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }> = [];
+  const roleModels = readRoleModels();
+  for (const choice of choices) {
+    const roleId = 'tier' in choice ? (choice.tier === 'cyber' ? 'main' : `tier:${choice.tier}`) : `role:${choice.role}`;
+    const option = gathered.roles.find((role) => role.id === roleId);
+    const entry = gathered.state.catalog.find((candidate) => candidate.id === choice.model);
+    if (!option || !entry || entry.blocked) { skipped.push(`${'tier' in choice ? choice.tier : choice.role} (${choice.model})`); continue; }
+    const inspected = configuration.inspect(option.setting);
+    const inWorkspace = inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined;
+    const target = inWorkspace ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    const previous = inWorkspace ? inspected?.workspaceValue : inspected?.globalValue;
+    const update = roleUpdate(option, choice.model, roleModels);
+    await configuration.update(update.setting, update.value, target);
+    if (update.setting === 'agent.roleModels') Object.assign(roleModels, update.value as Record<string, string>);
+    undoEntries.push({ setting: update.setting, previous, target, label: option.label });
+    applied.push(`${option.label} to ${choice.model}`);
+  }
+  const token = randomBytes(8).toString('hex');
+  if (undoEntries.length) undo.set(token, undoEntries.length === 1 ? undoEntries[0] as never : { entries: undoEntries } as never);
+  const text = applied.length
+    ? `Applied ${applied.length} change${applied.length === 1 ? '' : 's'}: ${applied.join('; ')}.${skipped.length ? ` Skipped ${skipped.join(', ')}, which the catalog no longer offers or TEE-only mode blocks.` : ''}`
+    : `Nothing was applied. Skipped ${skipped.join(', ')}.`;
+  post({ type: applied.length ? 'role-applied' : 'notice', token, text });
 }
 
 async function undoRole(token: string): Promise<void> {
