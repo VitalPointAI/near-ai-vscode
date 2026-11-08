@@ -95,7 +95,7 @@ export async function runRoleSuite(plan: RolePlan, options: RoleSuiteOptions): P
         clearTimeout(limit);
         options.signal.removeEventListener('abort', forward);
       }
-      const graded = gradeRoleAnswer(run.role, root, run.task.files, run.task.kind, run.task.role);
+      const graded = gradeRoleAnswer(run.role, root, run.task.files, run.task.kind, run.task.borrowedFrom ?? run.task.role);
       score = graded.score;
       outOf = graded.outOf;
       misses = graded.misses;

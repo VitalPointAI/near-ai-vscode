@@ -52,7 +52,27 @@ function chatPage(): { nodes: Map<string, StubNode>; send: (data: unknown) => vo
   Object.assign(window, {
     nearMarkdown: { render: (text: string) => text },
     nearTables: { capture: () => ({ wraps: [], scroll: [], focused: -1, inner: -1 }), restore: () => [], syncTabStop: () => undefined, focusLeft: () => undefined, watchSizes: () => ({ observe: () => undefined, release: () => undefined, reset: () => undefined }) },
-    nearPending: { createPendingQueue: () => ({ add: () => undefined, close: () => undefined, remove: () => undefined }) },
+    // A real queue: the page tracks which prompts are pinned, and a stub that answered nothing would hide a card that never appeared.
+    nearPending: {
+      createPendingQueue: () => {
+        const items: Array<{ id: string }> = [];
+        return {
+          add: (item: { id: string }) => { if (items.some((known) => known.id === item.id)) return false; items.push(item); return true; },
+          has: (id: string) => items.some((known) => known.id === id),
+          resolve: (id: string) => { const at = items.findIndex((known) => known.id === id); return at < 0 ? undefined : items.splice(at, 1)[0]; },
+          size: () => items.length,
+          current: () => items[0],
+          position: () => (items.length ? 1 : 0),
+          select: () => true,
+          step: () => items[0],
+          list: () => [...items],
+          clear: () => items.splice(0, items.length)
+        };
+      },
+      headerText: () => 'Waiting for you',
+      waitingText: (item: { title: string }) => 'Waiting: ' + item.title,
+      outcomeText: (item: { title: string }, outcome: string) => outcome + ': ' + item.title
+    },
     nearComposer: { insertCommand: (value: string) => ({ text: value, caret: 0 }) },
     nearSetup: { renderSetupNudge: () => undefined, welcomeState: () => 'ready', applyWelcomeState: () => undefined }
   });
@@ -71,7 +91,15 @@ class StubNode {
   public readonly attributes = new Map<string, string>();
   public readonly dataset: Record<string, string> = {};
   public readonly style: Record<string, string> = {};
-  public readonly classList = { add: () => undefined, remove: () => undefined, toggle: () => undefined, contains: () => false };
+  // A real class list over `className`, because the page checks membership (`querySelector('.pending-paused')`) and a stub that always said "no" would
+  // hide exactly the defect a test like this exists to catch.
+  public className = '';
+  public readonly classList = {
+    add: (name: string) => { if (!this.className.split(/\s+/).includes(name)) this.className = `${this.className} ${name}`.trim(); },
+    remove: (name: string) => { this.className = this.className.split(/\s+/).filter((part) => part && part !== name).join(' '); },
+    toggle: (name: string) => { this.classList.contains(name) ? this.classList.remove(name) : this.classList.add(name); },
+    contains: (name: string) => this.className.split(/\s+/).includes(name)
+  };
   public readonly listeners: Record<string, Array<(event: { key?: string; preventDefault(): void; target: unknown }) => void>> = {};
   public id = '';
   public textContent = '';
@@ -82,7 +110,8 @@ class StubNode {
   public disabled = false;
   public checked = false;
   public constructor(public readonly tagName: string) {}
-  public append(...nodes: StubNode[]): void { this.children.push(...nodes); }
+  public append(...nodes: Array<StubNode | string>): void { for (const node of nodes) this.children.push(node as StubNode); }
+  public appendChild(node: StubNode): StubNode { this.children.push(node); return node; }
   public prepend(...nodes: StubNode[]): void { this.children.unshift(...nodes); }
   public insertBefore(node: StubNode): void { this.children.push(node); }
   public replaceChildren(...nodes: StubNode[]): void { this.children.splice(0, this.children.length, ...nodes); }
@@ -92,7 +121,12 @@ class StubNode {
   public setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
   public getAttribute(name: string): string | undefined { return this.attributes.get(name); }
   public removeAttribute(name: string): void { this.attributes.delete(name); }
-  public querySelector(): undefined { return undefined; }
+  /** A descendant by class, which is how the page checks whether a note is already on a card. */
+  public querySelector(selector: string): StubNode | undefined {
+    const cls = /^\.([\w-]+)$/.exec(selector)?.[1];
+    if (cls === undefined) return undefined;
+    return this.all((node) => node.className.split(/\s+/).includes(cls))[0];
+  }
   /** Every descendant of a role, which is how a picker lists its own options. */
   public querySelectorAll(selector: string): StubNode[] {
     const role = /\[role="([\w-]+)"\]/.exec(selector)?.[1];
@@ -248,4 +282,27 @@ test('the between-steps picker names the active option and closes on Escape from
   button.press('Escape');
   assert.equal(menu.hidden, true);
   assert.deepEqual(page.sent(), [], 'Escape never chooses an option');
+});
+
+test('a run that parks on a timeout keeps its approval card and says it is paused', () => {
+  // The review's finding: the branch was never exercised, so a wrong card shape would have shipped silently.
+  const page = chatPage();
+  page.send({ type: 'approval-request', callId: 'p1', tool: 'Bash', title: 'Run npm test', preview: { kind: 'note', text: 'npm test' } });
+  const card = page.nodes.get('pending') as StubNode;
+  assert.ok(card, 'the approval card is pinned');
+  page.posts.length = 0;
+  page.send({ type: 'approval-paused', callId: 'p1', minutes: 15, text: 'No one answered within 15 minutes, so the run is paused on this step. It has not run.' });
+  // The card is still there, with the note on it, so the answer is still owed.
+  const note = card.all((node) => node.className.split(/\s+/).includes('pending-paused'));
+  assert.equal(note.length, 1, 'the card carries the paused note');
+  assert.match(note[0]?.textContent ?? '', /paused on this step/);
+  // A second paused message for the same prompt does not stack notes.
+  page.send({ type: 'approval-paused', callId: 'p1', minutes: 15, text: 'Still paused.' });
+  assert.equal(card.all((node) => node.className.split(/\s+/).includes('pending-paused')).length, 1, 'no duplicate note');
+  // And a pause for a card that is not pinned is announced rather than dropped.
+  // A pause for a card that is not pinned becomes a notice in the transcript, which is how the page tells the person.
+  page.send({ type: 'approval-paused', callId: 'gone', minutes: 5, text: 'The run is paused and its card is gone.' });
+  const transcript = page.nodes.get('transcript') as StubNode;
+  const said = transcript.children.filter((node) => node instanceof StubNode).flatMap((node) => [node, ...node.all(() => true)]).map((node) => node.textContent).join(' ');
+  assert.match(said, /card is gone/, `an unknown card still reaches the person, saw: ${said.slice(0, 200)}`);
 });

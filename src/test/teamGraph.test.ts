@@ -77,3 +77,26 @@ test('reports-to survives a save and read of the team file, and a file without i
   const old = renderTeam('T', 'D', [{ name: 'solo', role: 'solo', instructions: 'Alone.' }]);
   assert.equal(parseTeam(old, '/teams/t.md').members[0]?.reportsTo, undefined);
 });
+
+// The hierarchy must survive the studio, not just parseTeam (0.4.19 review: every studio save deleted it, because TeamDraft had no such field).
+test('a studio save keeps reports-to, on an edited member and on an unedited one', async () => {
+  const { draftFromMarkdown, teamMarkdown } = await import('../agent/teamMarkdown');
+  const { parseDraft } = await import('../services/teamStudioPage');
+  const text = renderTeam('T', 'D', [
+    { name: 'lead', role: 'lead', instructions: 'Lead.' },
+    { name: 'scout', role: 'scout', instructions: 'Scout.', reportsTo: 'lead' }
+  ]);
+  const draft = draftFromMarkdown(text, '/teams/t.md');
+  assert.equal(draft.members[1]?.reportsTo, 'lead', 'the draft carries the hierarchy');
+  draft.members[1]!.model = 'fast';
+  const saved = teamMarkdown(draft, text);
+  assert.deepEqual(saved.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('reports-to:')), ['reports-to: lead'], 'the save writes it back');
+  // The page's own parser must accept the field, or a draft carrying it is refused outright.
+  const parsed = parseDraft({ ...draft, members: draft.members.map((member) => ({ ...member, model: member.model ?? '' })) });
+  assert.ok(parsed, 'a draft with reportsTo parses');
+  assert.equal(parsed.members[1]?.reportsTo, 'lead');
+  // And a draft without it still parses, so existing teams are unaffected.
+  const plain = parseDraft({ name: 'T', description: 'D', members: [{ name: 'a', role: 'r', model: '', tools: null, instructions: 'Does a.' }] });
+  assert.ok(plain);
+  assert.equal(plain.members[0]?.reportsTo, undefined);
+});

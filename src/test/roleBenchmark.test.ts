@@ -121,3 +121,16 @@ test('every grader is mechanical: the same folder scores the same twice', async 
     assert.equal(first.score + first.misses.length, first.outOf, `${role}: every check is either a pass or a miss`);
   }
 });
+
+test('a role that borrows another task is graded on the output that task asks for, not its own kind', async () => {
+  // The review's finding: a new coding role ran the implementer task but was graded on review.md, so it scored 0 and never got a model.
+  const { fallbackRoleTask } = await import('../benchmark/roleTasks');
+  const { roleOutputs } = await import('../benchmark/roleGraders');
+  const borrowed = fallbackRoleTask('compliance-auditor');
+  assert.equal(borrowed.written, false);
+  assert.equal(borrowed.task.role, 'implementer', 'the task keeps its own role');
+  assert.equal(borrowed.task.borrowedFrom, 'implementer', 'and says whose task it is');
+  // The output the grader will look for is the one the TASK asks for.
+  const outputs = roleOutputs('compliance-auditor', borrowed.task.kind, borrowed.task.borrowedFrom ?? borrowed.task.role);
+  assert.deepEqual(outputs, ['shop.js'], 'the implementer task asks for a change to shop.js');
+});

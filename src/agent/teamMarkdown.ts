@@ -6,16 +6,19 @@ import { DEFAULT_TOOLS, parseTeam, renderTeam, slugify } from './teams';
 // comments, the text before the first member, and every member section the draft left as it was
 // are kept byte for byte. A new team is exactly what renderTeam writes.
 
-/** A member as the studio edits it. `tools: null` means no `tools:` line (the default set). */
-export interface DraftMember { name: string; role: string; model: string; tools: string[] | null; instructions: string }
+/**
+ * A member as the studio edits it. `tools: null` means no `tools:` line (the default set). `reportsTo` carries the team's hierarchy: without it in this
+ * type the studio rewrote every save from a draft that had no such field and silently deleted the hierarchy (0.4.19 review).
+ */
+export interface DraftMember { name: string; role: string; model: string; tools: string[] | null; instructions: string; reportsTo?: string }
 export interface TeamDraft { name: string; description: string; members: DraftMember[] }
 
-interface Section { raw: string; name: string; role?: string; model?: string; tools?: string[]; instructions: string }
+interface Section { raw: string; name: string; role?: string; model?: string; tools?: string[]; reportsTo?: string; instructions: string }
 interface TeamParts { frontmatter?: { open: string; inner: string; close: string }; preamble: string; sections: Section[] }
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const SECTION_START = /^##\s+/gm;
-const FIELD = /^(role|model|tools):\s*(.*)$/i;
+const FIELD = /^(role|model|tools|reports-to):\s*(.*)$/i;
 
 /** Splits a team file the same way parseTeam reads it, keeping each part's exact text. */
 function splitTeam(text: string): TeamParts {
@@ -43,6 +46,7 @@ function splitTeam(text: string): TeamParts {
     return {
       raw, name: slugify(heading.trim()),
       ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}),
+      ...(fields['reports-to'] ? { reportsTo: slugify(fields['reports-to']) } : {}),
       ...(fields.tools !== undefined && fields.tools ? { tools: fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean) } : {}),
       instructions: rest.slice(line).join('\n').trim()
     };
@@ -58,7 +62,7 @@ export function draftFromMarkdown(text: string, file: string): TeamDraft {
     name: team.name, description: team.description,
     members: team.members.map((member) => {
       const section = sections.find((candidate) => candidate.name === member.name);
-      return { name: member.name, role: member.role ?? '', model: member.model ?? '', tools: section?.tools ? [...section.tools] : null, instructions: member.instructions };
+      return { name: member.name, role: member.role ?? '', model: member.model ?? '', tools: section?.tools ? [...section.tools] : null, instructions: member.instructions, ...(section?.reportsTo ? { reportsTo: section.reportsTo } : {}) };
     })
   };
 }
@@ -66,7 +70,7 @@ export function draftFromMarkdown(text: string, file: string): TeamDraft {
 function renderMembers(draft: TeamDraft) {
   return draft.members.map((member) => ({
     name: member.name, ...(member.role.trim() ? { role: member.role.trim() } : {}), ...(member.model.trim() ? { model: member.model.trim() } : {}),
-    ...(member.tools ? { tools: member.tools } : {}), instructions: member.instructions.trim()
+    ...(member.tools ? { tools: member.tools } : {}), ...(member.reportsTo?.trim() ? { reportsTo: member.reportsTo.trim() } : {}), instructions: member.instructions.trim()
   }));
 }
 
@@ -74,6 +78,8 @@ function renderSection(member: ReturnType<typeof renderMembers>[number]): string
   const lines = [`## ${member.name}`];
   if (member.role) lines.push(`role: ${member.role}`);
   if (member.model) lines.push(`model: ${member.model}`);
+  // The hierarchy is written back, so a save keeps it (0.4.19 review: it was read but never written, so every save deleted it).
+  if (member.reportsTo) lines.push(`reports-to: ${member.reportsTo}`);
   if (member.tools?.length) lines.push(`tools: ${member.tools.join(', ')}`);
   lines.push('', member.instructions, '', '');
   return lines.join('\n');

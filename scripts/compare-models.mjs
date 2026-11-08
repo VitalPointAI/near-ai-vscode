@@ -80,7 +80,8 @@ function defaultStoreDir() {
     path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'vitalpoint.near-ai-vscode', 'evals'),
     path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'vitalpoint.near-ai-vscode', 'evals')
   ];
-  return candidates.find((dir) => existsSync(dir)) ?? candidates[0];
+  // `undefined` when none exists, so the caller can refuse to run rather than write where the tab never looks (0.4.19 review).
+  return candidates.find((dir) => existsSync(dir));
 }
 
 /** The model a tier uses now, from the workspace settings the extension reads, falling back to its defaults. */

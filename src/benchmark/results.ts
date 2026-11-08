@@ -429,7 +429,7 @@ export function recommendTiers(leaderboard: LeaderboardEntry[], current: { fast?
   if (cyberPick) {
     recommendations.push({
       tier: 'cyber', model: cyberPick.model, ...(current.cyber ? { current: current.cyber } : {}),
-      why: `it does not refuse the work, and scores ${cyberPick.score.toFixed(1)}/10 with the best speed among the abliterated models tested`,
+      why: `it does not refuse the work, and has the best score among the abliterated models tested (${cyberPick.score.toFixed(1)}/10)`,
       score: cyberPick.score, ...(cyberPick.medianSeconds !== undefined ? { seconds: cyberPick.medianSeconds } : {}), ...(cyberPick.costPerRunUsd !== undefined ? { costUsd: cyberPick.costPerRunUsd } : {}),
       changes: current.cyber !== cyberPick.model, abliterated: true,
       note: 'These tasks do not test refusal, so the cyber model is the best scoring abliterated model rather than a general winner.'

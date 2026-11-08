@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -6,13 +6,13 @@ import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProb
 import { applyProjectType } from '../agent/projectTypes';
 import { slugify, TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
-import { attachTeamStudio, StudioTarget, teamStudioHtml } from './teamStudioPage';
+import { attachTeamStudio, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
 import { ComparisonStore } from '../benchmark/store';
 import { loadBenchmarkTasks } from '../benchmark/tasks';
 import { leaderboardRows, suggestForTeam } from './modelComparisonPage';
 import { builderPrompt, parseProposal, TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
-import { activeProvider, clientFor } from './providerCache';
+import { activeProvider, clientFor, type ActiveProvider } from './providerCache';
 import { readAgentRules, readModelTiers } from './settings';
 import { bestOf, planRoleSuite, runRoleSuite } from '../benchmark/roleSuite';
 import { draftFromMarkdown, teamMarkdown } from '../agent/teamMarkdown';
@@ -27,6 +27,23 @@ const DRAFT_KEY = 'nearAi.teamStudio.draft';
 /** Unsaved work kept when the tab was closed (VS Code cannot ask before a webview panel closes). */
 const KEPT_KEY = 'nearAi.teamStudio.kept';
 let current: { panel: vscode.WebviewPanel; startWizard(target: StudioTarget): Promise<void> } | undefined;
+
+/**
+ * The provider and the candidate models a role test would use: the three tiers (the models in use now) and the two best any comparison has measured,
+ * capped so this stays minutes not hours. Shared by the run and by the cost shown before it, so the count the person is asked about is the count that
+ * runs.
+ */
+async function optimisationSetup(auth: AuthService, context: vscode.ExtensionContext): Promise<{ active: ActiveProvider; candidates: string[] } | undefined> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+  const active = await activeProvider(root, auth).catch(() => undefined);
+  if (!active) return undefined;
+  const tiers = readModelTiers();
+  const tasks = await loadBenchmarkTasks();
+  const runs = await new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals')).list();
+  const board = leaderboardRows(runs, tasks, active.models, [], Date.now());
+  const candidates = [...new Set([tiers.fast, tiers.standard, tiers.deep, ...board.slice(0, 2).map((entry) => entry.model)])].filter((model): model is string => Boolean(model && active.models.some((entry) => entry.id === model))).slice(0, 3);
+  return candidates.length ? { active, candidates } : undefined;
+}
 
 /**
  * Opens Team Studio, after the one-time move of older teams has finished (0.4.18 review), so the studio never opens on a half-copied library. It
@@ -74,17 +91,10 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     },
     // The final step of adding a team: measure each member's role on a few candidate models, then write the winner into the team file. The person is
     // asked first, because this spends real time and tokens, and skipping it leaves exactly the team they wrote.
-    optimiseTeam: async (members, teamName) => {
-      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-      const active = await activeProvider(root, auth).catch(() => undefined);
-      if (!active) return undefined;
-      // The candidates: the three tiers (the models in use now) and the two best any comparison has measured, capped so this stays minutes not hours.
-      const tiers = readModelTiers();
-      const tasks = await loadBenchmarkTasks();
-      const runs = await new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals')).list();
-      const board = leaderboardRows(runs, tasks, active.models, [], Date.now());
-      const candidates = [...new Set([tiers.fast, tiers.standard, tiers.deep, ...board.slice(0, 2).map((entry) => entry.model)])].filter((model): model is string => Boolean(model && active.models.some((entry) => entry.id === model))).slice(0, 3);
-      if (!candidates.length) return undefined;
+    optimiseTeam: async (members, teamName, options = {}) => {
+      const setup = await optimisationSetup(auth, context);
+      if (!setup) return undefined;
+      const { active, candidates } = setup;
       const plan = planRoleSuite(members, candidates);
       // The team's own file, found the way the library finds teams, so a name with spaces or capitals still lands on the right file. It is resolved ONCE,
       // before the tests, and the same path is used afterwards (0.4.19 review: resolving it twice, and once when the team could not be found, made the
@@ -93,15 +103,18 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       const file = teamEntry?.file;
       const beforeTests = file ? await readFile(file, 'utf8').catch(() => undefined) : undefined;
       if (!file || beforeTests === undefined) return { applied: 0, text: `${teamName} could not be found on disk, so its models were left alone.` };
-      const answer = await vscode.window.showWarningMessage(
-        `Test the roles in "${teamName}" and set each member's model?`,
-        { modal: true, detail: `${plan.estimatedRuns} short runs (${plan.members} member${plan.members === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}), a few minutes. Tested: ${candidates.join(', ')}. Skipping leaves the team exactly as you wrote it.` },
-        'Run the tests', 'Skip'
-      );
-      if (answer !== 'Run the tests') return undefined;
-      const outcomes = await runRoleSuite(plan, { clientFor: (model) => clientFor(active, model).client, rules: readAgentRules(), signal: new AbortController().signal });
+      // The caller has already asked about the whole run when confirm is false, so no modal is shown for one team.
+      if (options.confirm !== false) {
+        const answer = await vscode.window.showWarningMessage(
+          `Test the roles in "${teamName}" and set each member's model?`,
+          { modal: true, detail: `${plan.estimatedRuns} short runs (${plan.members} member${plan.members === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}), a few minutes. Tested: ${candidates.join(', ')}. Skipping leaves the team exactly as you wrote it.` },
+          'Run the tests', 'Skip'
+        );
+        if (answer !== 'Run the tests') return undefined;
+      }
+      const outcomes = await runRoleSuite(plan, { clientFor: (model) => clientFor(active, model).client, rules: readAgentRules(), signal: options.signal ?? new AbortController().signal });
       const picks = bestOf(outcomes);
-      if (!picks.length) return { applied: 0, text: 'Every role test failed, so the team is unchanged. Run Compare Models to see why.' };
+      if (!picks.length) return { applied: 0, text: options.signal?.aborted ? `${teamName}: cancelled, so its models were left alone.` : 'Every role test failed, so the team is unchanged. Run Compare Models to see why.' };
       // The team is the newest file for this name in the library; its models are set by rewriting that member's model line.
       // The team's own file, found the way the library finds teams, so a name with spaces or capitals still lands on the right file.
       {
@@ -111,8 +124,10 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
         if (before !== undefined && before !== beforeTests) {
           return { applied: 0, text: `${teamName} changed while its roles were being tested, so its models were left alone. Save the team again to apply them: ${picks.map((pick) => `${pick.member} to ${pick.model}`).join(', ')}.` };
         }
+        // The file vanished between the tests and the write: say so rather than reporting models that were never written (0.4.19 review).
+        if (before === undefined) return { applied: 0, text: `${teamName} was deleted while its roles were being tested, so its models were not set.` };
         const text = before;
-        if (text !== undefined) {
+        {
           const draft = draftFromMarkdown(text, file);
           for (const pick of picks) {
             const member = draft.members.find((entry) => entry.name === pick.member);
@@ -120,10 +135,19 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
           }
           await writeFile(file, teamMarkdown(draft, text), 'utf8');
           await library.snapshot(file);
+          // The studio's open editor holds the hash from before the write, so it is told the file changed rather than left to conflict on its next save.
+          if (current) {
+            const changed = await readFile(file, 'utf8');
+            void current.panel.webview.postMessage({ type: 'external-change', id: teamEntry?.project ? 'project' : `user:${slugify(path.basename(file, '.md'))}`, reason: 'edited', draft: draftFromMarkdown(changed, file), base: createHash('sha256').update(changed).digest('hex'), versions: (await library.versions(file)).map((version) => ({ ref: path.basename(version), label: versionLabel(path.basename(version)) })) });
+          }
         }
       }
       return { applied: picks.length, text: `Set ${picks.length} member model${picks.length === 1 ? '' : 's'} from the role tests: ${picks.map((pick) => `${pick.member} to ${pick.model}`).join(', ')}.` };
     },
+    // The models a role test would try, so testing every team shows the whole cost once before it starts.
+    optimiseCandidates: async () => (await optimisationSetup(auth, context))?.candidates ?? [],
+    // Emergency stop cancels a run in progress, the same way Compare Models does.
+    onStop: (listener) => onDidChangeEmergencyStop((engaged) => { if (engaged) listener(); }),
     suggestModels: async (members) => {
       const tasks = await loadBenchmarkTasks();
       const runs = await new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals')).list();

@@ -11,6 +11,8 @@
 import type { TaskKind } from './tasks';
 
 export interface RoleTask {
+  /** Set when this task was borrowed for another role: the role whose task it really is, so the grader knows which output the task asks for. */
+  borrowedFrom?: string;
   /** The role id the studio uses: planner, implementer, reviewer, tester, security, researcher, analyst, writer, editor, red-team. */
   role: string;
   label: string;
@@ -178,7 +180,9 @@ export function fallbackRoleTask(role: string): { task: RoleTask; written: boole
   const kind = kindForRoleName(role);
   // The first written task of that kind is the one a new role of this kind is measured on. Every kind has at least one.
   const sameKind = ROLE_TASKS.find((task) => task.kind === kind) ?? (ROLE_TASKS[0] as RoleTask);
-  return { task: { ...sameKind, role, label: `${sameKind.label} (a ${kind} task, used because ${role} has no task of its own)` }, written: false };
+  // `borrowedFrom` says whose task this is, and `role` is NOT overwritten: overwriting it made the grader look for the wrong file, so a new coding role ran
+  // the implementer task (a change to shop.js) but was graded on review.md, scored 0, and never got a model (0.4.19 review).
+  return { task: { ...sameKind, borrowedFrom: sameKind.role, label: `${sameKind.label} (a ${kind} task, used because ${role} has no task of its own)` }, written: false };
 }
 
 export const roleTaskFor = (role: string): RoleTask | undefined => ROLE_TASKS.find((task) => task.role === role);

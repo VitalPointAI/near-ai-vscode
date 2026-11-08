@@ -262,9 +262,11 @@ export function parseDraft(value: unknown): TeamDraft | undefined {
   if (!isPlain(value) || !exactKeys(value, ['name', 'description', 'members']) || !text(value.name, 120) || !text(value.description, 600) || !Array.isArray(value.members) || value.members.length > 12) return undefined;
   const members: DraftMember[] = [];
   for (const member of value.members) {
-    if (!isPlain(member) || !exactKeys(member, ['name', 'role', 'model', 'tools', 'instructions']) || !text(member.name, 60) || !text(member.role, 120) || !text(member.model, 160) || !text(member.instructions, 12_000)) return undefined;
+    // `reportsTo` is optional and must be allowed here, or a draft that carries the team's hierarchy is refused outright (0.4.19 review).
+    if (!isPlain(member) || !exactKeys(member, ['name', 'role', 'model', 'tools', 'instructions'], ['reportsTo']) || !text(member.name, 60) || !text(member.role, 120) || !text(member.model, 160) || !text(member.instructions, 12_000)) return undefined;
+    if (member.reportsTo !== undefined && !text(member.reportsTo, 60)) return undefined;
     if (member.tools !== null && (!Array.isArray(member.tools) || member.tools.length > 80 || !member.tools.every((tool) => typeof tool === 'string' && TOOL_NAME.test(tool)))) return undefined;
-    members.push({ name: member.name, role: member.role, model: member.model, tools: member.tools === null ? null : [...new Set(member.tools as string[])], instructions: member.instructions });
+    members.push({ name: member.name, role: member.role, model: member.model, tools: member.tools === null ? null : [...new Set(member.tools as string[])], instructions: member.instructions, ...(member.reportsTo ? { reportsTo: member.reportsTo as string } : {}) });
   }
   return { name: value.name, description: value.description, members };
 }
@@ -386,9 +388,14 @@ export interface TeamStudioDeps {
   suggestModels?(members: Array<{ name: string; role?: string; model?: string }>): Promise<Array<{ member: string; model: string; current?: string; why: string; changes: boolean }>>;
   /**
    * The final step of adding a team (owner, 2026-11-08): run each member's role test with the candidate models and apply the winner, so a new team's
-   * models come from evidence rather than a default. Returns what each member ended up with, or undefined when the person skipped it.
+   * models come from evidence rather than a default. Returns what each member ended up with, or undefined when the person skipped it. `confirm: false`
+   * means the caller has already asked, so no modal is shown; `signal` cancels the tests part-way.
    */
-  optimiseTeam?(members: Array<{ name: string; role?: string; model?: string }>, teamName: string): Promise<{ applied: number; text: string } | undefined>;
+  optimiseTeam?(members: Array<{ name: string; role?: string; model?: string }>, teamName: string, options?: { signal?: AbortSignal; confirm?: boolean }): Promise<{ applied: number; text: string } | undefined>;
+  /** The models a role test would try, so testing every team can show the whole cost once before it starts. */
+  optimiseCandidates?(): Promise<string[]>;
+  /** The person asked everything to stop (Emergency stop), so long-running work can be cancelled. */
+  onStop?(listener: () => void): { dispose(): void };
   drafts: { get(): unknown; set(value: SavedWizard | undefined): Promise<void> };
   /** A modal question; resolves to the action chosen, or undefined when dismissed. */
   choose?(message: string, ...actions: string[]): Promise<string | undefined>;
@@ -555,17 +562,35 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'refresh': await refresh(); return;
       case 'optimise-all': {
         // On demand, for every team at once (owner, 2026-11-08: "we can do a model optimization recommendation for all teams whenever the user wants").
+        // The whole cost is worked out and asked about ONCE, before any run, and the notice after each team shows the work moving rather than a long silence.
         if (!deps.optimiseTeam) { post({ type: 'error', text: 'No model is available to test the teams. Set up a NEAR AI profile first.' }); return; }
         const all = await deps.library.list(deps.root);
         const teams = all.flatMap((entry) => entry.team ? [{ name: entry.team.name, members: entry.team.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })) }] : []);
         if (!teams.length) { post({ type: 'notice', text: 'There are no teams to test yet.' }); return; }
+        const candidates = await deps.optimiseCandidates?.().catch(() => undefined) ?? [];
+        // Each member is tested on each candidate model, which is what the role suite plans, so the total is members x models summed over the teams.
+        const runs = candidates.length ? teams.reduce((total, team) => total + team.members.length * candidates.length, 0) : 0;
+        const question = `Test the roles in ${teams.length === 1 ? `"${teams[0].name}"` : `all ${teams.length} teams`} and set each member's model? ${runs ? `${runs} short runs (${teams.map((team) => `${team.name}: ${team.members.length} member${team.members.length === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}`).join(', ')}), a few minutes. ` : 'A few minutes. '}Tested: ${candidates.length ? candidates.join(', ') : 'the models this machine is set up with'}. Cancelling part-way keeps the teams already tested.`;
+        if (await choose(question, 'Run the tests', 'Skip') !== 'Run the tests') return;
+        // One controller for the whole run, so the person can cancel part-way and the teams that finished keep their results.
+        const controller = new AbortController();
+        const stop = deps.onStop?.(() => controller.abort());
         const results: string[] = [];
-        for (const team of teams) {
-          try {
-            const result = await deps.optimiseTeam(team.members, team.name);
-            results.push(result ? result.text : team.name + ': skipped.');
-          } catch (error) { results.push(team.name + ': ' + (error as Error).message); }
-        }
+        let done = 0;
+        try {
+          for (const team of teams) {
+            if (controller.signal.aborted) break;
+            let outcome: string;
+            try {
+              const result = await deps.optimiseTeam(team.members, team.name, { signal: controller.signal, confirm: false });
+              outcome = result ? result.text : team.name + ': skipped.';
+            } catch (error) { outcome = team.name + ': ' + (error as Error).message; }
+            results.push(outcome);
+            done += 1;
+            post({ type: 'notice', text: `${done} of ${teams.length} teams tested. ${outcome}` });
+          }
+        } finally { stop?.dispose(); }
+        if (controller.signal.aborted && done < teams.length) results.push(`Cancelled after ${done} of ${teams.length} teams; the ones already tested kept their models.`);
         post({ type: 'notice', text: results.join(' ') });
         await sendTeam('library', open?.file ?? '', '');
         return;
@@ -638,6 +663,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'discard-kept': await deps.kept?.set(undefined); return;
       case 'create': {
         if (!input || !context) await load();
+        // Whether this save ADDED a team, which decides whether the role tests run afterwards.
+        let created = false;
         const review = reviewDraft(message.draft, undefined, input!, context!);
         if (review.errors.length) { post({ type: 'save-failed', errors: review.errors }); return; }
         let file: string;
@@ -658,6 +685,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         } else {
           file = await deps.library.create(message.draft.name.trim(), review.markdown);
           id = `user:${slugify(path.basename(file, '.md'))}`;
+          created = true;
         }
         await deps.drafts.set(undefined);
         await refreshLibrary();
@@ -665,9 +693,10 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         // A team that was just saved is checked against the model results, so a new member does not silently keep a default model the tests disagree with.
         const saved = draftFromMarkdown(await readFile(file, 'utf8'), file);
         await suggestModelsFor(saved, id);
-        // The final step: test each member's role and set its model from what the test found. The person is asked first, because this spends real time and
-        // tokens, and skipping it leaves exactly the team they just wrote.
-        if (deps.optimiseTeam && saved.members.length) {
+        // The final step of ADDING a team: test each member's role and set its model from what the test found. Only on create, because this spends minutes
+        // and tokens: firing it on every edit-and-save would charge the person again for a team that was already measured (0.4.19 review). An existing team
+        // is optimised on demand with "Optimise all teams".
+        if (created && deps.optimiseTeam && saved.members.length) {
           try {
             const result = await deps.optimiseTeam(saved.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })), saved.name);
             if (result) { post({ type: 'notice', text: result.text }); await sendTeam(id, file); }

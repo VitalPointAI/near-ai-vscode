@@ -118,7 +118,7 @@ export function parseJudgement(text, pair) {
 
 /** Sends one judge prompt through the model the caller names, using the NEAR AI chat endpoint and key the environment already has. */
 export async function judge(prompt, { model, fetchFn = fetch, baseUrl = process.env.NEAR_AI_BASE_URL ?? 'https://cloud-api.near.ai/v1', apiKey = process.env.NEAR_AI_API_KEY } = {}) {
-  if (!apiKey) throw new Error('NEAR_AI_API_KEY is not set, so the judge cannot run. Export it, or pass --judge-model with a key in the environment.');
+  if (!apiKey) throw new Error('NEAR_AI_API_KEY is not set, so the judge cannot run. Export it, or pass --judge <model> with a key in the environment.');
   const response = await fetchFn(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
