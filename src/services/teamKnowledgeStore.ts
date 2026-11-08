@@ -53,18 +53,34 @@ async function serialised<T>(file: string, run: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Adds what an agent learned. Read, merge, write under a per-team lock, so a parallel member never loses another's addition.
+ * Adds what an agent learned.
  *
- * A damaged file is REPORTED once, on the graph the merge returns, rather than being overwritten in silence (0.4.19 review): the merge starts from an empty
- * graph and writes over the broken file, so without this the corruption was lost while the comment claimed it was surfaced.
+ * Two locks, because they stop two different losses (0.4.19 review):
+ *   - `serialised` orders the writes inside ONE extension host, so parallel team members never interleave a read and a write.
+ *   - the compare-and-retry below covers OTHER processes: the team library is in globalStorage, so a second VS Code window has its own host and its own Map,
+ *     and the two would otherwise read the same file, merge separately, and the second write would drop the first addition. Each attempt re-reads and checks
+ *     that the file is still exactly what was read; if another window wrote in between, it merges again over the newer file.
+ *
+ * A damaged file is REPORTED once, on the graph the merge returns, rather than being overwritten in silence: the merge starts from an empty graph and writes
+ * over the broken file, so without this the corruption was lost while the comment claimed it was surfaced.
  */
 export async function addKnowledge(dir: string, team: string, addition: KnowledgeAddition): Promise<TeamKnowledge> {
   const file = knowledgeFile(dir, team);
   return serialised(file, async () => {
-    const { knowledge, problem } = await loadKnowledge(dir, team);
-    const merged = mergeKnowledge(knowledge, addition);
-    await saveKnowledge(dir, merged);
-    return problem ? { ...merged, problem } : merged;
+    let last: TeamKnowledge | undefined;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const before = await readFile(file, 'utf8').catch(() => undefined);
+      const { knowledge, problem } = await loadKnowledge(dir, team);
+      const merged = mergeKnowledge(knowledge, addition);
+      // Write only if the file is still what was read. A rename is atomic, so a reader never sees half a file; this compares CONTENT, which is what another
+      // window would have changed.
+      const now = await readFile(file, 'utf8').catch(() => undefined);
+      if (now !== before) { last = merged; continue; }
+      await saveKnowledge(dir, merged);
+      return problem ? { ...merged, problem } : merged;
+    }
+    // Eight other-window writes in a row is not a lost update; it is a busy graph, and the caller still gets what it merged.
+    return last ?? mergeKnowledge((await loadKnowledge(dir, team)).knowledge, addition);
   });
 }
 

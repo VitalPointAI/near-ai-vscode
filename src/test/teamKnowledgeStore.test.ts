@@ -61,3 +61,20 @@ test('the graph file is named from the team, safe for a file system, and written
   assert.match(written, /"version": 1/);
   assert.match(knowledgeFile(dir, 'My Team/One'), /my-team-one\.json$/);
 });
+
+test('a write from another window is merged, not overwritten', async () => {
+  // The review's finding: the in-process lock cannot see a second VS Code window, which has its own extension host and its own Map. Simulated here by writing
+  // the file from "outside" between this process's read and its write, which is exactly what the other window does.
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-cross-'));
+  await addKnowledge(dir, 'scouts', addition('alpha'));
+  const file = knowledgeFile(dir, 'scouts');
+  const before = JSON.parse(await readFile(file, 'utf8'));
+  // Another window adds "bravo" and writes the whole file.
+  const other = { ...before, nodes: [...before.nodes, { id: 'x', label: 'bravo', kind: 'actor', functions: [], facts: [], origin: 'research', firstSeen: at, lastSeen: at, mentions: 1 }] };
+  await writeFile(file, JSON.stringify(other), 'utf8');
+  // This window now adds "charlie"; its read already happened, so without the retry it would write a graph holding only alpha and charlie.
+  await addKnowledge(dir, 'scouts', addition('charlie'));
+  const { knowledge } = await loadKnowledge(dir, 'scouts');
+  const labels = knowledge.nodes.map((node) => node.label).sort();
+  assert.deepEqual(labels, ['alpha', 'bravo', 'charlie'], `the other window's addition survives: ${JSON.stringify(labels)}`);
+});
