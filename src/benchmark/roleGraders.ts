@@ -19,7 +19,7 @@ const items = (text: string): number => (text.match(/^\s*(?:\d+[.)]|[-*])\s+\S/g
 
 export interface RoleGrade { score: number; outOf: number; misses: string[] }
 
-export function gradeRoleAnswer(role: string, root: string, files: Record<string, string>, kind?: string): RoleGrade {
+export function gradeRoleAnswer(role: string, root: string, files: Record<string, string>, kind?: string, taskRole?: string): RoleGrade {
   const checks: Array<[string, boolean]> = [];
   const add = (name: string, pass: boolean) => checks.push([name, pass]);
   switch (role) {
@@ -128,7 +128,7 @@ export function gradeRoleAnswer(role: string, root: string, files: Record<string
     default: {
       // A role with no grader of its own is graded on the output of the task it was given: did it produce the file, and does the file say something.
       // A new role therefore scores on the same scale as every other role, and the comparison can still rank it (owner, 2026-11-08).
-      const outputs = roleOutputs(role, kind);
+      const outputs = roleOutputs(role, kind, taskRole);
       const produced = outputs.map((file) => read(root, file)).join('\n');
       add('wrote its output', produced.trim().length > 40);
       add('its output is not a placeholder', !/^(?:todo|tbd|n\/a|none)\s*$/im.test(produced));
@@ -147,12 +147,15 @@ const OUTPUTS: Record<string, string[]> = {
 };
 
 /**
- * The files a run of a role's task should leave behind. A role with no entry of its own takes its kind's task, so it takes that task's outputs too,
- * which is what lets a role added later be graded without anyone editing this file.
+ * The files a run of a role's task should leave behind. 0.4.19 review: a role added later is given its KIND's task (a coding-kind role gets the implementer
+ * task, which asks for a fix in shop.js), so the output must come from the task that was actually run, not from the kind's name. The task's own role decides
+ * where the task has one, and the given role decides when it does not.
  */
-export function roleOutputs(role: string, kind?: string): string[] {
+export function roleOutputs(role: string, kind?: string, taskRole?: string): string[] {
   const own = OUTPUTS[role];
   if (own) return own;
+  const fromTask = taskRole ? OUTPUTS[taskRole] : undefined;
+  if (fromTask) return fromTask;
   const byKind: Record<string, string[]> = { planning: ['plan.md'], research: ['brief.md'], coding: ['review.md'], execution: ['plan.md'] };
   return byKind[kind ?? kindForRoleName(role)] ?? ['plan.md'];
 }

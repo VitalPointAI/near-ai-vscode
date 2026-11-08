@@ -34,7 +34,11 @@ let post: (message: Record<string, unknown>) => void = () => undefined;
 /** A comparison keeps running when the tab is closed; reopening the tab shows it. */
 let running: { runId: string; abort: AbortController; saved: SavedRun; done: number; total: number; current?: { model: string; task: string; run: number } } | undefined;
 let tasksLoaded: Promise<BenchmarkTask[]> | undefined;
-const undo = new Map<string, { setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }>();
+/**
+ * One undo record per applied setting. "Apply all" changes several, so the map holds a LIST: a single role writes a list of one, and undo restores every
+ * entry in reverse order (0.4.19 review: the multi-entry shape was stored under a single-entry type, so Apply all could not be undone at all).
+ */
+const undo = new Map<string, Array<{ setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }>>();
 
 const storeFor = (context: vscode.ExtensionContext) => new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals'));
 const benchmarkTasks = () => (tasksLoaded ??= loadBenchmarkTasks().catch((error: unknown) => { tasksLoaded = undefined; throw error; }));
@@ -262,7 +266,7 @@ async function applyRole(context: vscode.ExtensionContext, auth: AuthService, mo
   const update = roleUpdate(option, model, readRoleModels());
   await configuration.update(update.setting, update.value, target);
   const token = randomBytes(8).toString('hex');
-  undo.set(token, { setting: update.setting, previous, target, label: option.label });
+  undo.set(token, [{ setting: update.setting, previous, target, label: option.label }]);
   const warning = privacyWarning(entry.privacy, option);
   post({ type: 'role-applied', token, text: `${option.label} now uses ${model}${inWorkspace ? ' in this workspace' : ''}.`, ...(warning ? { warning } : {}) });
 }
@@ -299,7 +303,7 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
     applied.push(`${option.label} to ${choice.model}`);
   }
   const token = randomBytes(8).toString('hex');
-  if (undoEntries.length) undo.set(token, undoEntries.length === 1 ? undoEntries[0] as never : { entries: undoEntries } as never);
+  if (undoEntries.length) undo.set(token, undoEntries);
   const text = applied.length
     ? `Applied ${applied.length} change${applied.length === 1 ? '' : 's'}: ${applied.join('; ')}.${skipped.length ? ` Skipped ${skipped.join(', ')}, which the catalog no longer offers or TEE-only mode blocks.` : ''}`
     : `Nothing was applied. Skipped ${skipped.join(', ')}.`;
@@ -308,8 +312,9 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
 
 async function undoRole(token: string): Promise<void> {
   const change = undo.get(token);
-  if (!change) return;
+  if (!change || !change.length) return;
   undo.delete(token);
-  await vscode.workspace.getConfiguration('nearAi').update(change.setting, change.previous, change.target);
-  post({ type: 'notice', text: `Undone: ${change.label} is back to what it was.` });
+  // In reverse, so two changes to the same setting unwind in the order they were made.
+  for (const entry of [...change].reverse()) await vscode.workspace.getConfiguration('nearAi').update(entry.setting, entry.previous, entry.target);
+  post({ type: 'notice', text: change.length === 1 ? `Undone: ${change[0]?.label} is back to what it was.` : `Undone: ${change.length} settings are back to what they were.` });
 }

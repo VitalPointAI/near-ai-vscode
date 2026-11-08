@@ -20,7 +20,11 @@ const VALUELESS = new Set([
   '-nv', '-nc', '-N', '--no-verbose', '--no-clobber', '--timestamping', '--spider', '--no-check-certificate', '--https-only'
 ]);
 
-/** Flags whose value is the next word, all known to carry nothing of the run's: method is GET, headers are absent, the body is `-`. */
+/**
+ * Flags whose value is the next word, all known to carry nothing of the run's: the method is GET and the body is `-`. `-A`/`-e` DO send a header (user
+ * agent, referer), which is safe only because every word must be literal (see isLiteral), so a value cannot be an expansion that carries a secret. A value
+ * the agent writes out in full is visible in the command the person approves anyway.
+ */
 const TAKES_VALUE = new Set([
   '-o', '--output', '-w', '--write-out', '-A', '--user-agent', '-m', '--max-time', '--connect-timeout', '--retry', '--retry-delay', '-C', '--continue-at',
   '--retry-max-time', '--limit-rate', '--max-filesize', '--referer', '-e', '--resolve', '--cacert', '--capath', '--tlsv1.2', '--tlsv1.3',
@@ -64,6 +68,19 @@ function unquote(word: string): string {
   return trimmed;
 }
 
+/** Whether a dotted quad is a public address. Kept separate from the host checks so a host that CONTAINS an address cannot recurse. */
+export function isPublicAddress(address: string): boolean {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(address);
+  if (!match) return false;
+  const [a, b] = [Number(match[1]), Number(match[2])];
+  if (a === 0 || a === 10 || a === 127) return false;
+  if (a === 169 && b === 254) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false;
+  return a < 224;
+}
+
 /** Whether a URL names a host on the public internet, so a download cannot reach the machine or its private network. */
 export function isPublicHost(url: string): boolean {
   let parsed: URL;
@@ -72,17 +89,19 @@ export function isPublicHost(url: string): boolean {
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (!host) return false;
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.home.arpa')) return false;
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (ipv4) {
-    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
-    if (a === 0 || a === 10 || a === 127) return false;
-    if (a === 169 && b === 254) return false;
-    if (a === 172 && b >= 16 && b <= 31) return false;
-    if (a === 192 && b === 168) return false;
-    if (a === 100 && b >= 64 && b <= 127) return false;
-    if (a >= 224) return false;
-    return true;
+  // 0.4.19 review: a NAME can carry a private address, and `169.254.169.254.nip.io` resolves straight to it. So any dotted address written anywhere in
+  // the name is judged as an address, and a name that is nothing but a decimal number (`2130706433` is 127.0.0.1) is judged as the address it encodes.
+  for (const address of host.match(/(?:\d{1,3}\.){3}\d{1,3}/g) ?? []) {
+    if (!isPublicAddress(address)) return false;
   }
+  if (/^\d{1,10}$/.test(host)) {
+    const value = Number(host);
+    if (value > 0 && value <= 4294967295) {
+      const octets = [Math.floor(value / 16777216) % 256, Math.floor(value / 65536) % 256, Math.floor(value / 256) % 256, value % 256];
+      if (!isPublicAddress(octets.join('.'))) return false;
+    }
+  }
+  if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(host)) return isPublicAddress(host);
   if (host.includes(':')) {
     // 0.4.19 review: an IPv4-mapped address reaches the same machine, so its last 32 bits are judged as IPv4 rather than passed as "some IPv6".
     // Node normalises the dotted form to hex, so both `::ffff:127.0.0.1` and `::ffff:7f00:1` have to be read.

@@ -83,7 +83,7 @@ export async function runRoleSuite(plan: RolePlan, options: RoleSuiteOptions): P
       const result = await runAgentInFolder(options.clientFor(run.model), run.model, root, run.task.prompt, {
         maxTurns: run.task.maxTurns, signal: options.signal, rules: options.rules
       });
-      const graded = gradeRoleAnswer(run.role, root, run.task.files, run.task.kind);
+      const graded = gradeRoleAnswer(run.role, root, run.task.files, run.task.kind, run.task.role);
       score = graded.score;
       outOf = graded.outOf;
       misses = graded.misses;

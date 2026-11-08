@@ -430,10 +430,14 @@ export function recommendTiers(leaderboard: LeaderboardEntry[], current: { fast?
       note: 'These tasks do not test refusal, so the cyber model is the best scoring abliterated model rather than a general winner.'
     });
   } else if (current.cyber) {
+    // 0.4.19 review: with no abliterated model tested, the one in use is kept, and it may be safety-tuned. That is said plainly rather than presented as a
+    // guarantee: the cyber model is only known to be abliterated when an abliterated model has actually been measured.
+    const keepsAbliterated = isAbliteratedModel(current.cyber);
     recommendations.push({
-      tier: 'cyber', model: current.cyber, current: current.cyber, why: 'no abliterated model has been tested here, so the scan keeps the one it uses now',
-      score: 0, changes: false, abliterated: isAbliteratedModel(current.cyber),
-      note: 'Test an abliterated model to compare it; a safety-tuned model will refuse attack payloads.'
+      tier: 'cyber', model: current.cyber, current: current.cyber,
+      why: keepsAbliterated ? 'no abliterated model has been tested here, so it keeps the one it uses now, which does not refuse' : 'no abliterated model has been tested here, so it keeps the one it uses now, which may refuse attack payloads',
+      score: 0, changes: false, abliterated: keepsAbliterated,
+      note: keepsAbliterated ? 'Test another abliterated model to compare it.' : 'Test an abliterated model and this stops being a guess. Until then the current model can refuse attack payloads, which fails the work rather than answering it wrongly.'
     });
   }
   return recommendations;

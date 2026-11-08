@@ -31,12 +31,36 @@ export async function saveKnowledge(dir: string, knowledge: TeamKnowledge): Prom
   await rename(temporary, file);
 }
 
-/** Adds what an agent learned. Read, merge, write: the merge is idempotent, so a retried add does not duplicate anything. */
+/**
+ * One write at a time per team file. Every member of a team shares the graph and up to 8 run at once, so two Learn calls could read the same file, merge
+ * separately, and the second write would silently lose the first addition (0.4.19 review). The queue is per file and lives in this process, which is where
+ * every write comes from: one extension host.
+ */
+const writing = new Map<string, Promise<unknown>>();
+
+async function serialised<T>(file: string, run: () => Promise<T>): Promise<T> {
+  const previous = writing.get(file) ?? Promise.resolve();
+  // The next write waits for this one even if it failed, so one failure cannot block the graph for the rest of the session.
+  const next = previous.then(run, run);
+  const tracked = next.catch(() => undefined);
+  writing.set(file, tracked);
+  try {
+    return await next;
+  } finally {
+    // Only the last write clears the entry, so a queued write is never forgotten.
+    if (writing.get(file) === tracked) writing.delete(file);
+  }
+}
+
+/** Adds what an agent learned. Read, merge, write under a per-team lock, so a parallel member never loses another's addition. */
 export async function addKnowledge(dir: string, team: string, addition: KnowledgeAddition): Promise<TeamKnowledge> {
-  const { knowledge } = await loadKnowledge(dir, team);
-  const merged = mergeKnowledge(knowledge, addition);
-  await saveKnowledge(dir, merged);
-  return merged;
+  const file = knowledgeFile(dir, team);
+  return serialised(file, async () => {
+    const { knowledge } = await loadKnowledge(dir, team);
+    const merged = mergeKnowledge(knowledge, addition);
+    await saveKnowledge(dir, merged);
+    return merged;
+  });
 }
 
 export const knowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()}.json`);
