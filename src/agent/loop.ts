@@ -506,8 +506,6 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const context: ToolContext = {
       ...this.options.context, signal, onTodos: (todos) => this.options.emit({ type: 'todos', todos }),
       tainted: () => this.grants.tainted,
-      // 0.4.18 review: the pages this run already has, so re-reading one with a plain download is not held after the run reads outside content.
-      noteFetched: (url) => { for (const known of this.options.context.pages?.keys() ?? []) this.grants.fetched.add(known); this.grants.fetched.add(url); },
       onSecurity: (event) => this.options.emit({ type: 'security', tool: call.function.name, ...event })
     };
     let input: unknown;
@@ -620,13 +618,9 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     // handed a trusted decision for the managed runtime.
     // 0.4.18 review: only a command that STARTS an Open-GSD call (or begins with the preamble) gets the decision, so `echo gsd_run` and a string inside
     // `bash -c` do not carry a trusted-runtime verdict they do not deserve.
-    // 0.4.18 review: the inline prologue begins with a `cd`, so the match cannot be anchored to the start. A command is an Open-GSD one when it starts
-    // with the preamble, a gsd_run/gsd-tools call, or a `cd` into the project followed by the CLAUDE_CONFIG_DIR/GSD assignments; `echo gsd_run` and a
-    // string inside `bash -c` still do not match.
-    const mentionsGsd = /^\s*(?:_GSD_SHIM_NAME=|gsd[_-](?:run|tools)\b|node\s+["']?\$?GSD_TOOLS\b)/.test(command)
-      || /^\s*cd\s+\S+\s*&&\s*(?:export\s+)?CLAUDE_CONFIG_DIR=/.test(command);
+    const mentionsGsd = /^\s*(?:_GSD_SHIM_NAME=|gsd[_-](?:run|tools)\b|node\s+["']?\$?GSD_TOOLS\b)/.test(command);
     const gsd = runtime?.preambles.length && mentionsGsd
-      ? { gsdPreambles: runtime.preambles, gsdHome: runtime.home, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
+      ? { gsdPreambles: runtime.preambles, gsdRun: await resolveGsdRun(cwd, runtime.home, context.shell?.environment ?? process.env) }
       : {};
     return {
       root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: [...this.writtenScratch], ...gsd, safety: this.options.safety, signal: context.signal,

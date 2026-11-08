@@ -38,11 +38,6 @@
   request in flight, so four parts in parallel now finish in about the time of one.
 - **The between-steps choice is a picker**, beside the approval picker and styled the same way: carry on
   by itself, or stop between steps in any of the asking modes.
-- **Fetching a page no longer asks.** A plain `curl` or `wget` download is safe, because every flag is
-  one known to send nothing, every word is literal, and the host is public; anything that uploads, carries
-  data, reaches the local network, or writes outside the project still asks.
-- **Open-GSD's own "find the tool and run it" prologue** no longer asks, once the managed runtime has
-  been verified, and a look-alike copy of it still does.
 - **"1 to fix" now says what needs fixing**, and takes you to the step that holds it.
 
 ## 0.4.18
