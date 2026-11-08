@@ -247,6 +247,7 @@ export type StudioMessage =
   | { type: 'save'; draft: TeamDraft; id: string; base: string }
   | { type: 'create'; draft: TeamDraft; target: StudioTarget; projectType?: { id: string; goal: string } }
   | { type: 'save-draft'; draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string }
+  | { type: 'optimise-all' }
   | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough' }
   | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
   | { type: 'open-setting'; key: string };
@@ -298,6 +299,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       const draft = parseDraft(message.draft);
       return draft ? { type: 'review', seq: message.seq as number, draft, ...(message.id !== undefined ? { id: message.id as string } : {}) } : undefined;
     }
+    case 'optimise-all': return isPlain(message) ? { type: 'optimise-all' } : undefined;
     case 'draft-team': {
       if (!text(message.idea, 2000) || !message.idea.trim()) return undefined;
       if (message.outputFormat !== undefined && !text(message.outputFormat, 300)) return undefined;
@@ -551,6 +553,23 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'refresh': await refresh(); return;
+      case 'optimise-all': {
+        // On demand, for every team at once (owner, 2026-11-08: "we can do a model optimization recommendation for all teams whenever the user wants").
+        if (!deps.optimiseTeam) { post({ type: 'error', text: 'No model is available to test the teams. Set up a NEAR AI profile first.' }); return; }
+        const all = await deps.library.list(deps.root);
+        const teams = all.flatMap((entry) => entry.team ? [{ name: entry.team.name, members: entry.team.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })) }] : []);
+        if (!teams.length) { post({ type: 'notice', text: 'There are no teams to test yet.' }); return; }
+        const results: string[] = [];
+        for (const team of teams) {
+          try {
+            const result = await deps.optimiseTeam(team.members, team.name);
+            results.push(result ? result.text : team.name + ': skipped.');
+          } catch (error) { results.push(team.name + ': ' + (error as Error).message); }
+        }
+        post({ type: 'notice', text: results.join(' ') });
+        await sendTeam('library', open?.file ?? '', '');
+        return;
+      }
       case 'draft-team': {
         // One model call drafts the team from the person's own words (owner, 2026-11-08). The result goes back as a proposal the person reads first, and
         // only becomes a team when they accept it, so nothing is saved on the strength of one answer.

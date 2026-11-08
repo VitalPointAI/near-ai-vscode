@@ -281,6 +281,8 @@
     const heading = el('h2', '', 'Teams'); heading.id = 'library-title';
     const actions = el('div', 'actions');
     actions.append(button('New team', () => startWizard('user'), { primary: true, icon: 'plus' }));
+    // On demand, for every team at once: test each and set its member models from what the tests found.
+    actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. This takes a few minutes.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found' }));
     if (ctx && ctx.hasProject) actions.append(button(lib.teams.some((team) => team.kind === 'project') ? 'Rebuild project team' : 'Set up project team', () => startWizard('project')));
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' })), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true }));
     bar.append(heading, actions);
