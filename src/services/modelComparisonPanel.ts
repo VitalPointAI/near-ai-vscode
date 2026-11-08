@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
-import { estimateComparisonCost, latestResults, planComparison, reusedRows, runIdFor, savedModel, type SavedRun } from '../benchmark/results';
+import { estimateComparisonCost, latestResults, performanceTrend, planComparison, reusedRows, runIdFor, savedModel, type SavedRun } from '../benchmark/results';
 import { runComparison } from '../benchmark/runner';
 import { ComparisonStore } from '../benchmark/store';
 import { loadBenchmarkTasks, tasksFor, type BenchmarkTask } from '../benchmark/tasks';
@@ -60,7 +60,7 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
     active, models, tasks, runs, roles,
     state: {
       leaderboard, catalog, selected: defaultSelection(roles, catalog), roles,
-      taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models), recommended: recommendationView(leaderboard, roles),
+      taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models), recommended: recommendationView(leaderboard, roles), trend: performanceTrend(runs),
       ...(running ? { running: { runId: running.runId } } : {}), teeOnly, ...(problem ? { problem } : {})
     }
   };

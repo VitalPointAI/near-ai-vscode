@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildLeaderboard, catalogVersion, needsRetest, recommendRoles, recommendTiers, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ModelSummary, type ResultRow, type SavedRun } from '../benchmark/results';
+import { buildLeaderboard, catalogVersion, needsRetest, performanceTrend, recommendRoles, recommendTiers, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ModelSummary, type ResultRow, type SavedRun } from '../benchmark/results';
 import { ComparisonStore } from '../benchmark/store';
 import type { BenchmarkTask, TaskKind } from '../benchmark/tasks';
 import type { ModelInfo } from '../services/nearAiClient';
@@ -286,4 +286,19 @@ test('each role is given the model that is best at its own kind of work, not the
   assert.ok(byRole['gsd-executor']);
   assert.equal(byRole['gsd-executor'].model, 'vendor/planner-king');
   for (const entry of roles) assert.equal(entry.setting, 'agent.roleModels');
+});
+
+// Performance over time (owner, 2026-11-07): score as a percentage against the date, with coding, research, planning and execution kept apart.
+test('the trend is one point per day of fresh results, per task type, and a reused copy never looks like progress', () => {
+  const day = (date: string, rows: ResultRow[]): SavedRun => ({ format: 'near-ai-model-comparison', version: 1, id: date, startedAt: `${date}T00:00:00.000Z`, status: 'completed', taskSet: 'full', mode: 'rerun', runsPerTask: 1, models: [{ id: 'tee/a', privacy: 'tee', catalogVersion: 'x' }], tasks: TASKS.map((task) => ({ id: task.id, kind: task.kind, version: task.version })), rows });
+  const first = day('2026-11-01', [row('tee/a', 'implement', 5, { at: '2026-11-01T10:00:00.000Z' }), row('tee/a', 'phase-plan', 5, { at: '2026-11-01T11:00:00.000Z' })]);
+  const second = day('2026-11-05', [row('tee/a', 'implement', 9, { at: '2026-11-05T10:00:00.000Z' }), row('tee/a', 'phase-plan', 7, { at: '2026-11-05T11:00:00.000Z' })]);
+  // A third day whose results were all copied from the second: it is not a new measurement.
+  const copied = day('2026-11-06', [{ ...row('tee/a', 'implement', 1, { at: '2026-11-06T10:00:00.000Z' }), reusedFrom: second.id }]);
+  const trend = performanceTrend([first, second, copied]);
+  assert.deepEqual(trend.overall.map((point) => [point.date, point.percent]), [['2026-11-01', 50], ['2026-11-05', 80]], 'the copied day adds no point');
+  const byKind = Object.fromEntries(trend.byKind.map((entry) => [entry.kind, entry.points.map((point) => point.percent)]));
+  assert.deepEqual(byKind.coding, [50, 90], 'coding improved');
+  assert.deepEqual(byKind.planning, [50, 70], 'planning improved, by less');
+  assert.equal(byKind.research, undefined, 'a kind with no results has no line rather than a flat zero');
 });

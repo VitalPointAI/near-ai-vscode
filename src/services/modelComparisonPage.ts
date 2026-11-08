@@ -1,4 +1,4 @@
-import { buildLeaderboard, needsRetest, recommendRoles, recommendTiers, catalogVersion, privacyOf, RUN_ID, summarizeRun, type CostEstimate, type ComparisonPlan, type LeaderboardEntry, type ModelSummary, type RoleRecommendation, type RunMode, type SavedRun, type TierRecommendation } from '../benchmark/results';
+import { buildLeaderboard, needsRetest, performanceTrend, recommendRoles, recommendTiers, catalogVersion, privacyOf, RUN_ID, summarizeRun, type CostEstimate, type ComparisonPlan, type LeaderboardEntry, type ModelSummary, type RoleRecommendation, type RunMode, type TrendPoint, type SavedRun, type TierRecommendation } from '../benchmark/results';
 import { TASK_SETS, tasksFor, type BenchmarkTask, type TaskSetId, type TaskKind } from '../benchmark/tasks';
 import { isChatModel } from './chatBridge';
 import { heldRoles, type RoleOption } from './modelRoles';
@@ -26,6 +26,8 @@ export interface PageState {
   history: HistoryEntry[];
   /** What is worth testing again: models whose result is stale or missing a task, and new models with no result at all. */
   retest: { models: Array<{ model: string; why: string[] }>; newModels: string[] };
+  /** Score as a percentage over time, for every task and split by type, so a change shows as better or worse. */
+  trend: { overall: TrendPoint[]; byKind: Array<{ kind: TaskKind; points: TrendPoint[] }> };
   /**
    * The setup the results point to, for one button to apply: each tier and each agent role with the model that is best at its own kind of work, and the
    * cyber model kept abliterated. Only what differs from the current setup is written.
@@ -202,7 +204,7 @@ export function comparisonPageHtml(options: { cspSource: string; nonce: string; 
 <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 <main>
 <section aria-labelledby="board-title"><div class="section-head"><h2 id="board-title">Leaderboard</h2></div>
-<p class="hint">Every model tested on this computer, ranked on its latest result for each task. Scores are out of 10.</p><div id="recommended" hidden></div><div id="retest" hidden></div><div id="board"><p class="hint">Loading…</p></div></section>
+<p class="hint">Every model tested on this computer, ranked on its latest result for each task. Scores are out of 10.</p><div id="trend" hidden></div><div id="recommended" hidden></div><div id="retest" hidden></div><div id="board"><p class="hint">Loading…</p></div></section>
 <section aria-labelledby="run-title"><h2 id="run-title">Run a comparison</h2><div id="setup"></div><div id="progress" hidden></div></section>
 <section aria-labelledby="results-title" id="results-section" hidden><div class="section-head"><h2 id="results-title">Results</h2><div class="actions" id="results-actions"></div></div><div id="results"></div></section>
 <section aria-labelledby="history-title"><h2 id="history-title">Past comparisons</h2><div id="history"></div></section>

@@ -145,9 +145,9 @@ class Node {
 
 async function runCompare() {
   const body = new Node('body');
-  for (const id of ['board', 'recommended', 'retest', 'setup', 'history', 'results-section', 'results', 'results-actions', 'progress', 'notice', 'problem', 'refresh']) { const node = new Node('div'); node.id = id; body.append(node); }
+  for (const id of ['board', 'trend', 'recommended', 'retest', 'setup', 'history', 'results-section', 'results', 'results-actions', 'progress', 'notice', 'problem', 'refresh']) { const node = new Node('div'); node.id = id; body.append(node); }
   const listeners: Array<(event: { data: unknown }) => void> = [];
-  const document = { getElementById: (id: string) => body.all().find((node) => node.id === id) ?? null, createElement: (tag: string) => new Node(tag), createTextNode: (text: string) => { const node = new Node('#text'); node.textContent = text; return node; } };
+  const document = { getElementById: (id: string) => body.all().find((node) => node.id === id) ?? null, createElement: (tag: string) => new Node(tag), createElementNS: (_namespace: string, tag: string) => new Node(tag), createTextNode: (text: string) => { const node = new Node('#text'); node.textContent = text; return node; } };
   function Option(text: string, value: string) { const node = new Node('option'); node.textContent = text; node.value = value; return node; }
   const context = vm.createContext({ document, Option, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: () => undefined }), setTimeout: () => 0, clearTimeout: () => undefined, Date, Math, JSON, Set, Object, String, Number, Boolean });
   vm.runInContext(await readFile(path.join(MEDIA, 'compare', 'compare.js'), 'utf8'), context, { timeout: 1000 });
@@ -223,4 +223,31 @@ test('Compare Models selects the new and stale models with one click, and only o
   const stalePreset = page.body.all().find((node) => node.tagName === 'button' && node.textContent.includes('Worth testing again'))!;
   stalePreset.click();
   assert.deepEqual(ticked(), ['tee/new', 'tee/stale'], 'the stale model is added to what was already chosen');
+});
+
+// The performance trend (owner, 2026-11-07): score percent over time, a line per task type, drawn on when it appears, and readable with motion off.
+test('the trend chart draws a line per task type and animates it in, with less-motion respected', async () => {
+  const page = await runCompare();
+  const points = (percents: number[]) => percents.map((percent, index) => ({ date: `2026-11-0${index + 1}`, percent, runs: 2 }));
+  page.dispatch({
+    type: 'state',
+    state: {
+      leaderboard: [], catalog: [], roles: [], taskSets: [], history: [], selected: [],
+      trend: { overall: points([50, 62, 80]), byKind: [{ kind: 'coding', points: points([40, 55, 90]) }, { kind: 'research', points: points([60, 60, 61]) }] },
+      retest: { models: [], newModels: [] }, recommended: { tiers: [], roles: [] }
+    }
+  });
+  const root = page.body.all().find((node) => node.id === 'trend')!;
+  assert.equal(root.hidden, false);
+  const paths = root.all().filter((node) => node.tagName === 'path');
+  assert.equal(paths.length, 3, 'one line for every task and one per task type that has results');
+  assert.ok(paths.every((path) => /^M[\d.]+ [\d.]+( L[\d.]+ [\d.]+)+$/.test(path.getAttribute('d') ?? '')), 'each line is a real path through its points');
+  // A key names every line, so a coloured line is never unnamed.
+  const key = root.all().filter((node) => node.classList.contains('trend-key')).map((node) => node.textContent).join(' ');
+  assert.match(key, /All tasks: 80%/);
+  assert.match(key, /coding: 90%/);
+  assert.doesNotMatch(key, /planning/, 'a type with no results is not in the key');
+  const css = readFileSync(path.join(MEDIA, 'compare', 'compare.css'), 'utf8');
+  assert.match(css, /#trend \.trend-line \{[^}]*animation: trend-draw/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*#trend \.trend-line \{ animation: none/);
 });

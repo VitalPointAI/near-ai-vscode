@@ -402,6 +402,57 @@
     requestEstimate();
   }
 
+  // Performance over time: a line per series, score percent up the side, date along the bottom. Drawn as SVG so it keeps its shape at any width, and
+  // drawn from the data rather than fetched from anywhere. A task type with no results has no line, so an untested kind cannot look like a flat zero.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const svg = (name, attrs) => { const node = document.createElementNS(SVG_NS, name); for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, String(value)); return node; };
+  function renderTrend() {
+    const root = $('trend');
+    root.replaceChildren();
+    const trend = state.trend || { overall: [], byKind: [] };
+    if (trend.overall.length < 2) {
+      root.hidden = true;
+      // One point is not a trend, but it is worth saying what it was, so the first comparison does not look like nothing happened.
+      if (trend.overall.length === 1) { root.hidden = false; root.append(el('strong', '', 'Performance over time'), el('p', 'hint', 'One day of results so far: ' + trend.overall[0].percent + '% on ' + trend.overall[0].date + '. Run another comparison to see the line.')); }
+      return;
+    }
+    root.hidden = false;
+    root.append(el('strong', '', 'Performance over time'));
+    const W = 640, H = 200, PAD = { left: 34, right: 12, top: 10, bottom: 24 };
+    const dates = [...new Set(trend.overall.map((point) => point.date))].sort();
+    const x = (date) => PAD.left + (dates.length === 1 ? 0 : (dates.indexOf(date) / (dates.length - 1)) * (W - PAD.left - PAD.right));
+    const y = (percent) => PAD.top + (1 - percent / 100) * (H - PAD.top - PAD.bottom);
+    const chart = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H, role: 'img', 'aria-label': 'Score percentage over time, for every task and by task type' });
+    // Grid at 0, 50 and 100 percent, with their labels.
+    for (const percent of [0, 50, 100]) {
+      chart.append(svg('line', { x1: PAD.left, x2: W - PAD.right, y1: y(percent), y2: y(percent), class: 'grid' }));
+      const label = svg('text', { x: 4, y: y(percent) + 4, class: 'axis' }); label.textContent = percent + '%'; chart.append(label);
+    }
+    for (const date of dates) {
+      const label = svg('text', { x: x(date), y: H - 6, class: 'axis', 'text-anchor': 'middle' }); label.textContent = date.slice(5); chart.append(label);
+    }
+    const series = [{ name: 'All tasks', points: trend.overall, cls: 'all' }, ...trend.byKind.map((entry) => ({ name: entry.kind, points: entry.points, cls: entry.kind }))];
+    for (const line of series) {
+      const path = line.points.map((point, index) => (index ? 'L' : 'M') + x(point.date).toFixed(1) + ' ' + y(point.percent).toFixed(1)).join(' ');
+      chart.append(svg('path', { d: path, class: 'trend-line ' + line.cls }));
+      for (const point of line.points) chart.append(svg('circle', { cx: x(point.date), cy: y(point.percent), r: line.cls === 'all' ? 3 : 2, class: 'trend-dot ' + line.cls }));
+    }
+    root.append(chart);
+    // A key, because a line nobody can name is decoration. The overall line is thicker and first.
+    const key = el('ul', 'trend-key');
+    for (const line of series) {
+      const last = line.points[line.points.length - 1];
+      const item = el('li');
+      item.append(el('span', 'swatch ' + line.cls, ''), el('span', '', line.name + (last ? ': ' + last.percent + '%' : '')));
+      key.append(item);
+    }
+    root.append(key);
+    const first = trend.overall[0], last = trend.overall[trend.overall.length - 1];
+    const change = last.percent - first.percent;
+    root.append(el('p', 'hint', 'Every task went from ' + first.percent + '% on ' + first.date + ' to ' + last.percent + '% on ' + last.date + ' (' +
+      (change > 0 ? '+' : '') + change + ' points over ' + trend.overall.length + ' days of testing).'));
+  }
+
   // The setup these results point to, per tier and per role, with one button that applies every change it lists. Shown above the board because it is the
   // conclusion of the numbers below it, and because a recommendation nobody can apply in one click is just advice (owner, 2026-11-07).
   function renderRecommended() {
@@ -433,6 +484,7 @@
   function renderAll() {
     $('problem').hidden = true;
     renderBoard();
+    renderTrend();
     renderRecommended();
     renderRetest();
     renderSetup();

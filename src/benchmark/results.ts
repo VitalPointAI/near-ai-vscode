@@ -511,6 +511,48 @@ export function recommendRoles(leaderboard: LeaderboardEntry[], roles: Array<{ i
   return recommendations;
 }
 
+/**
+ * Model performance over time (owner, 2026-11-07: "keeping track of and visualizing model performance over time ... a line graph with percentage
+ * score on y axis and time on x axis", and "categorize the results by type of task"). One point per day on which comparisons ran, using only that day's
+ * fresh results, so a reused copy from an older comparison never looks like progress. `overall` is every task; `byKind` keeps coding, research,
+ * planning and execution apart, because a change can help one and hurt another. Percent is score out of the maximum, which is how the page shows it.
+ */
+export interface TrendPoint { date: string; percent: number; runs: number }
+export interface TrendSeries { name: string; kind?: TaskKind; points: TrendPoint[] }
+
+const TREND_KINDS: TaskKind[] = ['coding', 'research', 'planning', 'execution'];
+
+export function performanceTrend(runs: SavedRun[]): { overall: TrendPoint[]; byKind: Array<{ kind: TaskKind; points: TrendPoint[] }> } {
+  // Day by day, fresh rows only, and one average per model per day so a model tested five times does not outweigh one tested once.
+  const byDate = new Map<string, ResultRow[]>();
+  for (const saved of runs) {
+    for (const row of saved.rows) {
+      if (row.reusedFrom) continue;
+      const date = row.at.slice(0, 10);
+      byDate.set(date, [...(byDate.get(date) ?? []), row]);
+    }
+  }
+  const pointFor = (rows: ResultRow[]): TrendPoint | undefined => {
+    const scored = rows.filter((row) => row.outOf > 0);
+    if (!scored.length) return undefined;
+    const total = scored.reduce((sum, row) => sum + row.score / row.outOf, 0);
+    return { date: '', percent: Math.round((100 * total) / scored.length), runs: scored.length };
+  };
+  const dates = [...byDate.keys()].sort();
+  const overall: TrendPoint[] = [];
+  const byKind = new Map<TaskKind, TrendPoint[]>(TREND_KINDS.map((kind) => [kind, []]));
+  for (const date of dates) {
+    const rows = byDate.get(date) ?? [];
+    const all = pointFor(rows);
+    if (all) overall.push({ ...all, date });
+    for (const kind of TREND_KINDS) {
+      const point = pointFor(rows.filter((row) => row.kind === kind));
+      if (point) byKind.get(kind)?.push({ ...point, date });
+    }
+  }
+  return { overall, byKind: TREND_KINDS.map((kind) => ({ kind, points: byKind.get(kind) ?? [] })).filter((entry) => entry.points.length > 0) };
+}
+
 /** A row copied from a saved result into a new comparison, marked as reused. */
 export function reusedRows(result: LatestResult): ResultRow[] {
   return result.rows.map((row) => ({ ...row, reusedFrom: result.runId }));
