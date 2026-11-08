@@ -132,7 +132,8 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     },
     title: (input) => `Learn ${input.nodes.length} actor${input.nodes.length === 1 ? '' : 's'}${input.edges.length ? `, ${input.edges.length} relation${input.edges.length === 1 ? '' : 's'}` : ''}`,
     async preview(input) {
-      return { kind: 'note', text: `Add to the team's knowledge graph: ${input.nodes.map((node) => node.label).join(', ')}${input.edges.length ? `; relations: ${input.edges.map((edge) => `${edge.from} ${edge.kind} ${edge.to}`).join(', ')}` : ''}.` };
+      // "Approve for this run" is the answer to "one card per fact": a workspace write approved for the run covers every later one (src/agent/loop.ts).
+      return { kind: 'note', text: `Add to the team's knowledge graph: ${input.nodes.map((node) => node.label).join(', ')}${input.edges.length ? `; relations: ${input.edges.map((edge) => `${edge.from} ${edge.kind} ${edge.to}`).join(', ')}` : ''}.\nIt is written to the team's own file, outside this project. "Approve for this run" also allows its later additions, so a team working in parallel does not stop at every fact.` };
     },
     async run(input) {
       const graph = await knowledge.add(input);

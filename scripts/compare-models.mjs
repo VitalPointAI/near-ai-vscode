@@ -11,8 +11,8 @@
 //   node scripts/compare-models.mjs --new --task research-brief              # every catalog model not yet measured on that task
 //
 // Needs NEAR_AI_API_KEY, or a --key-file with one line in it. Nothing is written except the benchmark's own result store.
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { runComparison } from '../dist/benchmark/runner.js';
 import { planComparison } from '../dist/benchmark/results.js';
@@ -67,6 +67,22 @@ function parse(argv) {
   return options;
 }
 
+/**
+ * The folder Compare Models reads on this machine: the extension's globalStorage `evals`. The first one that exists wins, so a machine with VS Code and
+ * Insiders both reports the one that is really in use. `undefined` when none exists, and the caller says how to set it.
+ */
+function defaultStoreDir() {
+  const home = homedir();
+  const candidates = [
+    path.join(home, '.config', 'Code', 'User', 'globalStorage', 'vitalpoint.near-ai-vscode', 'evals'),
+    path.join(home, '.config', 'Code - Insiders', 'User', 'globalStorage', 'vitalpoint.near-ai-vscode', 'evals'),
+    path.join(home, '.local', 'share', 'code-server', 'User', 'globalStorage', 'vitalpoint.near-ai-vscode', 'evals'),
+    path.join(home, 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'vitalpoint.near-ai-vscode', 'evals'),
+    path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'vitalpoint.near-ai-vscode', 'evals')
+  ];
+  return candidates.find((dir) => existsSync(dir)) ?? candidates[0];
+}
+
 /** The model a tier uses now, from the workspace settings the extension reads, falling back to its defaults. */
 function tierModel(tier) {
   const settingsPath = path.join(process.cwd(), '.vscode', 'settings.json');
@@ -91,9 +107,15 @@ async function main() {
   const chosen = options.set ? tasksFor(options.set, all) : all.filter((task) => task.id === options.task);
   if (!chosen.length) throw new Error(`no task "${options.task}". Tasks: ${all.map((task) => task.id).join(', ')}`);
 
-  // The extension's own comparison store, so a run from here appears in Compare Models and its results can be put into a role there. The store lives in
-  // globalStorage for the marketplace build; NEAR_AI_BENCHMARK_DIR overrides it, which is what an experiment uses to keep runs apart.
-  const storeDir = process.env.NEAR_AI_BENCHMARK_DIR ?? path.join(process.cwd(), '.near-ai', 'benchmark');
+  // The extension's own comparison store, so a run from here appears in Compare Models and its results can be put into a role there.
+  // 0.4.19 review: the default was `<cwd>/.near-ai/benchmark`, which the tab never reads, so results vanished from the UI while the docs claimed they were
+  // shared. The default is now the folder the tab reads; NEAR_AI_BENCHMARK_DIR still overrides it for an experiment that wants runs kept apart.
+  const storeDir = process.env.NEAR_AI_BENCHMARK_DIR ?? defaultStoreDir();
+  if (!storeDir) {
+    process.stderr.write(`No Compare Models store found on this machine. Set NEAR_AI_BENCHMARK_DIR to the extension's globalStorage "evals" folder, for example:\n  NEAR_AI_BENCHMARK_DIR="$HOME/.config/Code/User/globalStorage/vitalpoint.near-ai-vscode/evals"\n`);
+    process.exitCode = 1;
+    return;
+  }
   const store = new ComparisonStore(storeDir);
   const saved = await store.list();
   const latest = latestResults(saved);

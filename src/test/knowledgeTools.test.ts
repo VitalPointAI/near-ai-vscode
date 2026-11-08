@@ -91,3 +91,25 @@ test('a second Learn of the same actor adds to it rather than replacing it, so t
   assert.equal(node.facts.length, 2);
   assert.equal(node.mentions, 2);
 });
+
+test('reading the graph is free and writing it asks, because what it writes outlives the run', () => {
+  // 0.4.19 review: Learn writes the team's own file outside the workspace, so it must not be treated as a non-mutating tool.
+  const kit = tools();
+  assert.equal(kit.lookup.capability, 'read');
+  assert.equal(kit.learn.capability, 'workspaceWrite');
+});
+
+test('a damaged graph is reported on the merge that overwrites it, rather than replaced in silence', async () => {
+  const { mkdtemp, readFile, writeFile, mkdir } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const path = (await import('node:path')).default;
+  const { addKnowledge, knowledgeFile } = await import('../services/teamKnowledgeStore');
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-damaged-'));
+  await mkdir(path.dirname(knowledgeFile(dir, 'scouts')), { recursive: true });
+  await writeFile(knowledgeFile(dir, 'scouts'), '{ not json', 'utf8');
+  const merged = await addKnowledge(dir, 'scouts', { origin: 'research', at: '2026-11-08T10:00:00.000Z', nodes: [{ label: 'alpha' }], edges: [] });
+  assert.match(String(merged.problem ?? ''), /could not be read/, 'the corruption is surfaced on the graph that replaces it');
+  assert.deepEqual(merged.nodes.map((node) => node.label), ['alpha']);
+  // And the file is now valid.
+  assert.match(await readFile(knowledgeFile(dir, 'scouts'), 'utf8'), /"version": 1/);
+});

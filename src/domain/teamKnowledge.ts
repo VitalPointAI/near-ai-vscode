@@ -67,6 +67,11 @@ export interface TeamKnowledge {
   nodes: KnowledgeNode[];
   edges: KnowledgeEdge[];
   updatedAt: string;
+  /**
+   * Why the file this came from could not be read, when it could not. A damaged graph is rebuilt from empty and the problem travels with it, so the person is
+   * told instead of the corruption disappearing (0.4.19 review). Never written to disk.
+   */
+  problem?: string;
 }
 
 /** What an agent proposes to add: the raw shape, before it is merged, which is what makes adding idempotent. */

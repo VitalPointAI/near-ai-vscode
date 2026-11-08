@@ -1164,10 +1164,12 @@
         startWizard(message.target);
         break;
       case 'team':
-        openEditor(message, true);
+        // The shape and knowledge tabs read these, so they are set BEFORE the editor renders: assigned after, the first paint of either tab could show
+        // the previous team's graph (0.4.19 review).
         currentGraph = message.graph || null;
         currentKnowledge = message.knowledge || null;
         selectedNode = null;
+        openEditor(message, true);
         if (keptEdit && keptEdit.id === message.id) {
           // Reopening a team whose changes were kept: they come back as unsaved changes.
           work.draft = clone(keptEdit.draft);
@@ -1187,6 +1189,24 @@
         requestReview();
         focusMain();
         break;
+      // A saved team's members checked against the comparisons (owner, 2026-11-08). The host used to post this with no handler here, so the suggestion was
+      // dropped silently; it now shows above the team with the members it would change and a way to act on it.
+      case 'model-suggestion': {
+        const changes = Array.isArray(message.changes) ? message.changes : [];
+        const box = $('suggestion');
+        if (box) {
+          box.replaceChildren();
+          box.hidden = !changes.length;
+          if (changes.length) {
+            box.append(el('strong', '', 'The comparisons suggest a different model'));
+            const list = el('ul', 'issues');
+            for (const entry of changes) list.append(el('li', '', `${entry.member}: ${entry.model}${entry.current ? ' (now ' + entry.current + ')' : ''}${entry.why ? ' — ' + entry.why : ''}`));
+            box.append(list, button('Review in Compare Models', () => vscode.postMessage({ type: 'optimise-all' }), { link: true }));
+          }
+        }
+        if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
+        break;
+      }
       case 'team-proposal':
         drafting = false;
         proposal = { proposal: message.proposal, problems: message.problems || [] };

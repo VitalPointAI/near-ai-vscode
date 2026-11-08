@@ -836,6 +836,7 @@ export function teamStudioHtml(options: { cspSource: string; nonce: string; scri
 <header class="top"><div class="title"><h1 id="title">Team Studio</h1><p id="subtitle" class="hint">Build and manage agent teams. Each team is a Markdown file; the studio reads and writes it for you.</p></div><nav id="crumbs" aria-label="Breadcrumb"></nav></header>
 <div id="announce" class="visually-hidden" aria-live="polite" role="status"></div>
 <div id="banner" class="banner" hidden role="alert"></div>
+<div id="suggestion" class="suggestion" hidden></div>
 <main id="main" tabindex="-1"><p class="hint">Loading…</p></main>
 ${options.probe ? `<script nonce="${options.nonce}" src="${options.probe}"></script>` : ''}<script nonce="${options.nonce}" src="${options.script}"></script></body></html>`;
 }

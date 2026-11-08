@@ -251,3 +251,35 @@ test('the trend chart draws a line per task type and animates it in, with less-m
   assert.match(css, /#trend \.trend-line \{[^}]*animation: trend-draw/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*#trend \.trend-line \{ animation: none/);
 });
+
+// The recommendation card (owner, 2026-11-08). It was never rendered by a test, so a missing helper here would only have shown up in a live window.
+test('Compare Models shows the recommended setup, marks an abliterated model, and offers one button to apply it', async () => {
+  const page = await runCompare();
+  page.dispatch({
+    type: 'state',
+    state: {
+      leaderboard: [], catalog: [], roles: [], taskSets: [], history: [], selected: [], retest: { models: [], newModels: [] }, trend: { overall: [], byKind: [] },
+      recommended: {
+        tiers: [
+          { tier: 'deep', model: 'vendor/best', current: 'vendor/old', why: 'the most accurate on these tasks (9.0/10)', score: 9, changes: true, abliterated: false },
+          { tier: 'fast', model: 'vendor/quick', current: 'vendor/quick', why: 'within 0.5 of the best', score: 8.6, changes: false, abliterated: false },
+          { tier: 'cyber', model: 'vendor/model-abliterated', why: 'does not refuse the work', score: 8.1, changes: true, abliterated: true, note: 'These tasks do not test refusal.' }
+        ],
+        roles: [{ role: 'gsd-planner', setting: 'agent.roleModels', model: 'vendor/planner', current: 'vendor/old', kind: 'planning', score: 9.2, changes: true, abliterated: false, why: 'best at planning work (9.2/10)' }]
+      }
+    }
+  });
+  const root = page.body.all().find((node) => node.id === 'trend' || node.id === 'recommended');
+  assert.ok(root, 'the recommendation area is in the page');
+  const area = page.body.all().find((node) => node.id === 'recommended')!;
+  assert.equal(area.hidden, false, 'it is shown when there are recommendations');
+  const text = area.textContent;
+  assert.match(text, /vendor\/best/, 'the chosen model is named');
+  assert.match(text, /9\.2\/10/, 'the reason quotes its score');
+  assert.match(text, /gsd-planner/, 'a role is named, not just a tier');
+  assert.match(text, /already set/, 'a tier that needs no change says so');
+  assert.match(text, /abliterated/, 'a model that does not refuse is marked');
+  // One button applies everything that differs: three changes here.
+  const apply = area.all().find((node) => node.tagName === 'button' && /Apply all 3 changes/.test(node.textContent));
+  assert.ok(apply, `the apply button counts the changes: ${JSON.stringify(area.all().filter((n) => n.tagName === 'button').map((n) => n.textContent))}`);
+});

@@ -52,14 +52,19 @@ async function serialised<T>(file: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Adds what an agent learned. Read, merge, write under a per-team lock, so a parallel member never loses another's addition. */
+/**
+ * Adds what an agent learned. Read, merge, write under a per-team lock, so a parallel member never loses another's addition.
+ *
+ * A damaged file is REPORTED once, on the graph the merge returns, rather than being overwritten in silence (0.4.19 review): the merge starts from an empty
+ * graph and writes over the broken file, so without this the corruption was lost while the comment claimed it was surfaced.
+ */
 export async function addKnowledge(dir: string, team: string, addition: KnowledgeAddition): Promise<TeamKnowledge> {
   const file = knowledgeFile(dir, team);
   return serialised(file, async () => {
-    const { knowledge } = await loadKnowledge(dir, team);
+    const { knowledge, problem } = await loadKnowledge(dir, team);
     const merged = mergeKnowledge(knowledge, addition);
     await saveKnowledge(dir, merged);
-    return merged;
+    return problem ? { ...merged, problem } : merged;
   });
 }
 

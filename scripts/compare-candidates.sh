@@ -14,11 +14,22 @@ cd "$(dirname "$0")/.."
 # cheap fast candidates, and two stronger models for the deep tier.
 MODELS='deepseek-ai/DeepSeek-V4.1-Flash-1017,deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated,Qwen/Qwen3.8-27B-abliterated,z-ai/glm-5.3-flash,Qwen/Qwen3.8-27B,moonshotai/kimi-k2.6'
 
-# Compare Models reads <globalStorage>/evals. Writing there means the tab shows these results, rather than a private folder the UI never looks at.
-case "$(uname -s)" in
-  Darwin) DEFAULT_EVALS="$HOME/Library/Application Support/Code/User/globalStorage/vitalpoint.near-ai-vscode/evals" ;;
-  *) DEFAULT_EVALS="$HOME/.config/Code/User/globalStorage/vitalpoint.near-ai-vscode/evals" ;;
-esac
+# The folder Compare Models reads, per platform and per VS Code flavour. The script checks each and uses the first that exists, so Insiders, code-server
+# and plain VS Code all work without the person naming a path; NEAR_AI_BENCHMARK_DIR overrides everything.
+candidates=(
+  "$HOME/.config/Code/User/globalStorage/vitalpoint.near-ai-vscode/evals"
+  "$HOME/.config/Code - Insiders/User/globalStorage/vitalpoint.near-ai-vscode/evals"
+  "$HOME/.local/share/code-server/User/globalStorage/vitalpoint.near-ai-vscode/evals"
+  "$HOME/Library/Application Support/Code/User/globalStorage/vitalpoint.near-ai-vscode/evals"
+  "$HOME/Library/Application Support/Code - Insiders/User/globalStorage/vitalpoint.near-ai-vscode/evals"
+  "${APPDATA:-$HOME/AppData/Roaming}/Code/User/globalStorage/vitalpoint.near-ai-vscode/evals"
+  "${APPDATA:-$HOME/AppData/Roaming}/Code - Insiders/User/globalStorage/vitalpoint.near-ai-vscode/evals"
+)
+DEFAULT_EVALS=""
+for candidate in "${candidates[@]}"; do
+  if [ -d "$candidate" ]; then DEFAULT_EVALS="$candidate"; break; fi
+done
+if [ -z "$DEFAULT_EVALS" ]; then DEFAULT_EVALS="${candidates[0]}"; fi
 export NEAR_AI_BENCHMARK_DIR="${NEAR_AI_BENCHMARK_DIR:-$DEFAULT_EVALS}"
 
 if [ -z "${NEAR_AI_API_KEY:-}" ]; then
