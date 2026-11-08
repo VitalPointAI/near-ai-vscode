@@ -1,0 +1,53 @@
+// Where a team's knowledge graph lives, and how the agent adds to it during a run (owner, 2026-11-08: "each team needs to learn over time and have its
+// own shared context graph of knowledge to draw from. Any research it does or any information it's given by those it interacts with should be added to
+// the graph").
+//
+// One file per team under the team library's own storage, beside the team files: <teams>/knowledge/<slug>.json. A team is its file, so its knowledge
+// travels with it and two teams never share a map. Writes are whole-file and atomic, and a damaged file is reported rather than thrown away silently.
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { emptyKnowledge, mergeKnowledge, type KnowledgeAddition, type TeamKnowledge } from '../domain/teamKnowledge';
+
+/** The graph for a team, or an empty one when it has not learned anything yet. A file that cannot be read is reported, not replaced. */
+export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
+  const file = knowledgeFile(dir, team);
+  let text: string;
+  try { text = await readFile(file, 'utf8'); } catch { return { knowledge: emptyKnowledge(team, new Date().toISOString()) }; }
+  try {
+    const parsed = JSON.parse(text) as TeamKnowledge;
+    if (parsed.version !== 1 || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error('unexpected shape');
+    return { knowledge: { ...parsed, team } };
+  } catch (error) {
+    // The graph is a cache of what the team learned, so a damaged one is worth reporting but must not stop the team working.
+    return { knowledge: emptyKnowledge(team, new Date().toISOString()), problem: `The knowledge graph for ${team} could not be read (${(error as Error).message}). It will be rebuilt as the team works.` };
+  }
+}
+
+export async function saveKnowledge(dir: string, knowledge: TeamKnowledge): Promise<void> {
+  const file = knowledgeFile(dir, knowledge.team);
+  await mkdir(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  await writeFile(temporary, JSON.stringify(knowledge, null, 2), 'utf8');
+  await rename(temporary, file);
+}
+
+/** Adds what an agent learned. Read, merge, write: the merge is idempotent, so a retried add does not duplicate anything. */
+export async function addKnowledge(dir: string, team: string, addition: KnowledgeAddition): Promise<TeamKnowledge> {
+  const { knowledge } = await loadKnowledge(dir, team);
+  const merged = mergeKnowledge(knowledge, addition);
+  await saveKnowledge(dir, merged);
+  return merged;
+}
+
+export const knowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()}.json`);
+
+/**
+ * What a run is told about the graph, and how to add to it. Short on purpose: it is a hint about a tool, not a second system prompt. The Admiralty
+ * grading is spelled out because agents will not guess it, and ungraded knowledge is worth less than graded knowledge.
+ */
+export const KNOWLEDGE_INSTRUCTIONS = `# This team's knowledge graph
+You share a knowledge graph with the rest of your team, and it is what the team knows about the world so far. Read it before researching: if it already answers the question, say so and cite the node instead of searching again. Add to it as you learn, with Remember-style facts, so the team is more useful next time.
+
+Add to it only what you verified. Grade each piece with the Admiralty scale: reliability A (completely reliable) to F (cannot be trusted) for the source, and credibility 1 (confirmed by other sources) to 6 (impossible) for the information. A document the team wrote, or a vendor's own marketing, is not an A.
+
+Extract actors (organisations, people, systems, documents, facts, places), what each does, and how they relate: the kind of relation, and its tension from -1 (hostile or contradictory) through 0 (neutral) to +1 (strongly supportive). State the basis for each relation. Leave the tension unset rather than guessing zero.`;

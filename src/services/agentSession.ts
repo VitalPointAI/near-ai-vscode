@@ -37,6 +37,9 @@ import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult }
 import { PreparedAttachments } from '../agent/attachments';
 import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
+import { knowledgeTools } from '../agent/knowledgeTools';
+import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
+import { slugify } from '../agent/teams';
 import type { MemoryScope } from '../domain/contextGraph';
 import type { AgentRole } from '../domain/agents';
 import type { ContextGraphMemory } from './contextGraphMemory';
@@ -598,7 +601,15 @@ export class AgentConversation {
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...memoryFor()];
+    // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
+    // same graph, which is what makes it shared: a fact one member verified is there for the next one.
+    const teamKnowledge = request.team
+      ? knowledgeTools({
+          read: async () => (await loadKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug))).knowledge,
+          add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug), addition)
+        })
+      : [];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
     if (!agents.length) return base;
     const gsd = request.gsd;
