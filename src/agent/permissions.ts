@@ -169,6 +169,8 @@ export function decidePermission(capability: ActionCapability, command: string |
   // tainted would ask for every search after the first one, which is exactly what this change exists to stop. Their own outbound checks cover the
   // risk: WebFetch refuses an exfiltration-shaped URL after outside content (src/agent/webTools.ts risky), and the pages go to the model fenced.
   if (capability === 'network' && policy.mode === 'auto' && auto?.autoSafeTool === true) return { decision: 'allow' };
+  // Always asks, in every mode: see ActionCapability.sharedWrite.
+  if (capability === 'sharedWrite') return { decision: 'ask' };
   if (capability === 'workspaceWrite') {
     if (grants.edits || policy.mode !== 'approve-risky') return { decision: 'allow' };
     return { decision: 'ask' };

@@ -1,0 +1,36 @@
+/* The knowledge graph as an interactive network: nodes, relations coloured by their tension, a highlighted neighbourhood drawn on in sequence, and the
+   detail card. Colours come from the theme so it works in light and dark, and motion is turned off for anyone who asked for less. */
+.network { margin: 8px 0; }
+.network-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 4px; }
+.network svg { display: block; max-width: 100%; }
+.net-node { fill: var(--vscode-charts-blue, #3794ff); cursor: pointer; transition: opacity 160ms ease-out, r 160ms ease-out; stroke: var(--vscode-editor-background, #1e1e1e); stroke-width: 1.5; }
+.net-node:hover { fill: var(--vscode-focusBorder, #007fd4); }
+.net-node.selected { fill: var(--vscode-charts-orange, #d18616); stroke: var(--vscode-focusBorder, #007fd4); stroke-width: 2.5; }
+.net-node.dim { opacity: 0.25; }
+.net-node:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 2px; }
+.net-label { fill: var(--vscode-foreground, #ccc); font-size: 10px; pointer-events: none; }
+.net-label.dim { opacity: 0.3; }
+.net-edge { stroke: var(--vscode-editorWidget-border, #666); opacity: 0.55; }
+.net-edge.positive { stroke: var(--vscode-charts-green, #89d185); }
+.net-edge.negative { stroke: var(--vscode-charts-red, #f14c4c); }
+.net-edge.unmeasured { stroke-dasharray: 4 4; opacity: 0.4; }
+.net-edge.dim { opacity: 0.1; }
+/* The relations of the selected actor are drawn on from the actor outwards, strongest first. */
+.net-edge.highlighted { opacity: 1; stroke-dasharray: var(--edge-length, 400); stroke-dashoffset: var(--edge-length, 400); animation: net-draw 420ms ease-out forwards; }
+.net-edge-label { fill: var(--vscode-foreground, #ccc); font-size: 9px; opacity: 0.9; animation: net-fade 300ms ease-out both; }
+@keyframes net-draw { to { stroke-dashoffset: 0; } }
+@keyframes net-fade { from { opacity: 0; } to { opacity: 0.9; } }
+@media (prefers-reduced-motion: reduce) {
+  .net-edge.highlighted { animation: none; stroke-dashoffset: 0; }
+  .net-edge-label { animation: none; }
+  .net-node { transition: none; }
+}
+.net-card { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--vscode-focusBorder, #007fd4); border-radius: 4px; background: var(--vscode-editorWidget-background); overflow-wrap: anywhere; }
+.net-card h3 { margin: 0 0 4px; font-size: 1em; }
+.net-card h4 { margin: 8px 0 2px; font-size: 0.92em; }
+.net-card p { margin: 2px 0; }
+.net-functions, .net-facts, .net-relations { margin: 2px 0 0; padding-left: 18px; }
+.net-facts li, .net-relations li { margin: 3px 0; }
+.net-source { font-size: 0.85em; color: var(--muted); }
+.net-grade { font-size: 0.85em; color: var(--vscode-charts-orange, #d18616); white-space: nowrap; }
+.net-relation { font-size: 0.92em; }

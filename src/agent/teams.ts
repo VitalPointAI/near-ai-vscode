@@ -9,7 +9,18 @@ import { recommendAgentTeam } from '../services/agentTeams';
 // `## member` section is a member with optional `role:`, `model:`, and `tools:` lines followed by
 // its instructions. Running a team gives a lead agent the members as sub-agents.
 
-export interface TeamMember { name: string; role?: string; model?: string; tools: string[]; instructions: string }
+export interface TeamMember {
+  name: string;
+  role?: string;
+  model?: string;
+  tools: string[];
+  instructions: string;
+  /**
+   * The member this one reports to (owner, 2026-11-08: "should show hierarchy if one exists"). Optional and absent in every existing team, so a team
+   * without it still runs and still draws, as a lead with its members. A member naming one that does not exist is drawn at the top, never dropped.
+   */
+  reportsTo?: string;
+}
 export interface TeamDefinition { slug: string; name: string; description: string; members: TeamMember[]; file: string }
 
 const MEMBER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -36,14 +47,15 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     const fields: Record<string, string> = {};
     let index = 0;
     while (index < rest.length) {
-      const field = /^(role|model|tools):\s*(.*)$/i.exec(rest[index].trim());
+      const field = /^(role|model|tools|reports-to):\s*(.*)$/i.exec(rest[index].trim());
       if (!field) { if (rest[index].trim()) break; index += 1; continue; }
       fields[field[1].toLowerCase()] = field[2].trim();
       index += 1;
     }
     const instructions = rest.slice(index).join('\n').trim();
     if (!instructions) throw new Error(`Member ${memberName} needs instructions under its heading.`);
-    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), tools: fields.tools ? fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean) : DEFAULT_TOOLS, instructions });
+    const reportsTo = fields['reports-to'] ? slugify(fields['reports-to']) : undefined;
+    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), ...(reportsTo ? { reportsTo } : {}), tools: fields.tools ? fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean) : DEFAULT_TOOLS, instructions });
   }
   if (!members.length) throw new Error('Add at least one member as a "## member-name" section.');
   if (members.length > 12) throw new Error('A team can have at most 12 members.');
@@ -51,11 +63,12 @@ export function parseTeam(text: string, file: string): TeamDefinition {
 }
 
 export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>): string {
-  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated). Then the member\'s instructions. Save to create a new version. -->', ''];
+  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member). Then the member\'s instructions. Save to create a new version. -->', ''];
   for (const member of members) {
     lines.push(`## ${member.name}`);
     if (member.role) lines.push(`role: ${member.role}`);
     if (member.model) lines.push(`model: ${member.model}`);
+    if (member.reportsTo) lines.push(`reports-to: ${member.reportsTo}`);
     if (member.tools?.length) lines.push(`tools: ${member.tools.join(', ')}`);
     lines.push('', member.instructions, '');
   }
@@ -83,7 +96,21 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
 }
 
 export function teamLeadPrompt(team: TeamDefinition, task: string): string {
-  return `You lead the "${team.name}" team${team.description ? ` (${team.description})` : ''}. Members, each available as an Agent subagent_type:\n${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role})` : ''}: ${member.instructions.split('\n')[0].slice(0, 160)}`).join('\n')}\n\nAccomplish the task below by delegating to members with the Agent tool (give each a complete, self-contained prompt; run independent members in parallel), checking their reports, and integrating the result. Do the coordination yourself; do not do members' work for them. Finish with a short summary of what each member did and the outcome.\n\nTask: ${task}`;
+  // Owner, 2026-11-08: "ensure all our teams and default instructions prompt the orchestrating agent or team lead to allow use of parallelism where
+  // appropriate". The old wording mentioned parallelism in a clause; this makes it a rule with the test for what may run together, and says to fan out in
+  // ONE turn, because starting members across several turns is the measured way teams end up sequential (30 of 37 runs had one request in flight).
+  return `You lead the "${team.name}" team${team.description ? ` (${team.description})` : ''}. Members, each available as an Agent subagent_type:
+${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role})` : ''}: ${member.instructions.split('\n')[0].slice(0, 160)}`).join('\n')}
+
+# How to lead
+- **Split the task into the parts the members can do, and start every part that does not depend on another in the SAME turn**, each with run_in_background. A part may start together with another when it can finish without the other's answer. Starting members one turn at a time, or waiting for one before starting the next, is the slowest way to run a team and is the mistake to avoid.
+- Then collect the reports, resolve what conflicts, and integrate. If a part's result changes what another part needs, run that second part afterwards and say why it had to wait.
+- Give every member a complete, self-contained prompt: it sees nothing of this conversation. Name the exact output you want back from it.
+- Do the coordination yourself; do not do the members' work for them.
+
+Finish with a short summary of what each member did, what ran at the same time, and the outcome.
+
+Task: ${task}`;
 }
 
 /** Recommends a project team from the onboarding answers and renders it as a team file. */

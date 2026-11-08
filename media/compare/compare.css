@@ -8,6 +8,53 @@ code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; word-br
 .top { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 14px 0 10px; background: var(--vscode-editor-background); border-bottom: 1px solid var(--border); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+/* Performance over time: the chart, its key, and a line drawn on when it appears. */
+#trend { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--vscode-charts-blue, var(--vscode-focusBorder)); border-radius: 4px; background: var(--vscode-editorWidget-background); overflow-wrap: anywhere; }
+#trend svg { display: block; margin: 6px 0; }
+#trend .grid { stroke: var(--vscode-editorWidget-border, #444); stroke-width: 1; opacity: 0.4; }
+#trend .axis { fill: var(--muted); font-size: 10px; }
+/* Each line is drawn on from left to right, so the eye follows the change rather than finding a finished shape. */
+#trend .trend-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: var(--length, 2000); stroke-dashoffset: var(--length, 2000); animation: trend-draw 900ms ease-out forwards; }
+#trend .trend-line.all { stroke: var(--vscode-charts-blue, #3794ff); stroke-width: 3; }
+#trend .trend-line.coding { stroke: var(--vscode-charts-green, #89d185); }
+#trend .trend-line.research { stroke: var(--vscode-charts-purple, #b180d7); }
+#trend .trend-line.planning { stroke: var(--vscode-charts-orange, #d18616); }
+#trend .trend-line.execution { stroke: var(--vscode-charts-red, #f14c4c); }
+#trend .trend-dot { animation: trend-pop 240ms ease-out forwards; transform-box: fill-box; transform-origin: center; }
+#trend .trend-dot.all { fill: var(--vscode-charts-blue, #3794ff); }
+#trend .trend-dot.coding { fill: var(--vscode-charts-green, #89d185); }
+#trend .trend-dot.research { fill: var(--vscode-charts-purple, #b180d7); }
+#trend .trend-dot.planning { fill: var(--vscode-charts-orange, #d18616); }
+#trend .trend-dot.execution { fill: var(--vscode-charts-red, #f14c4c); }
+@keyframes trend-draw { to { stroke-dashoffset: 0; } }
+@keyframes trend-pop { from { opacity: 0; } to { opacity: 1; } }
+/* Someone who asked for less motion gets the finished chart at once, not a slower one. */
+@media (prefers-reduced-motion: reduce) {
+  #trend .trend-line { animation: none; stroke-dashoffset: 0; }
+  #trend .trend-dot { animation: none; opacity: 1; }
+}
+#trend .trend-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; padding: 0; list-style: none; font-size: 0.9em; }
+#trend .trend-key li { display: flex; align-items: center; gap: 6px; }
+#trend .trend-key .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+#trend .trend-key .swatch.all { background: var(--vscode-charts-blue, #3794ff); }
+#trend .trend-key .swatch.coding { background: var(--vscode-charts-green, #89d185); }
+#trend .trend-key .swatch.research { background: var(--vscode-charts-purple, #b180d7); }
+#trend .trend-key .swatch.planning { background: var(--vscode-charts-orange, #d18616); }
+#trend .trend-key .swatch.execution { background: var(--vscode-charts-red, #f14c4c); }
+
+/* The setup the results point to: a card above the board, with its one button. */
+#recommended { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--vscode-focusBorder, #007fd4); border-radius: 4px; background: var(--vscode-editorWidget-background); overflow-wrap: anywhere; }
+#recommended .recommendation { margin: 6px 0; padding-left: 18px; }
+#recommended .recommendation li { margin: 4px 0; font-size: 0.94em; }
+#recommended .recommendation li.same { color: var(--muted); }
+
+/* The presets that select stale or new models, and the action row under the banner. */
+.presets, .retest-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 8px; }
+.presets .hint, .retest-actions .hint { margin: 0; }
+
+/* Models worth testing again, and models added since the last run: a quiet card above the board. */
+#retest { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700); border-radius: 4px; background: var(--vscode-inputValidation-warningBackground, var(--vscode-editorWidget-background)); overflow-wrap: anywhere; }
+#retest p { margin: 4px 0 0; font-size: 0.92em; }
 .hint { color: var(--muted); margin: 4px 0; font-size: 0.92em; }
 .error { color: var(--bad); margin: 8px 0; }
 .warning { color: var(--warn); margin: 4px 0; }

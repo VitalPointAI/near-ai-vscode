@@ -23,6 +23,7 @@
   const model = $('model');
   const policy = $('policy');
   const advanceButton = $('advance');
+  const advanceMenu = $('advance-menu');
   const profile = $('profile');
   const status = $('status');
   // Below the status line: set a usage reporting token, or that NEAR's total is in use.
@@ -672,6 +673,8 @@
         agent.paused
           ? textButton('Resume', () => post({ type: 'agent-control', agentId: agent.id, action: 'resume' }))
           : textButton('Pause', () => post({ type: 'agent-control', agentId: agent.id, action: 'pause' })),
+        // 0.4.19: a run waiting on CI or a review can be told to look again now, instead of the person waiting out a poll they can already see is stale.
+        textButton('Check now', () => post({ type: 'agent-control', agentId: agent.id, action: 'nudge' })),
         textButton('Stop', () => post({ type: 'agent-control', agentId: agent.id, action: 'stop' }))
       );
       item.append(body, controls);
@@ -848,25 +851,93 @@
 
   // 0.4.18: whether a workflow carries on by itself, shown beside the approval picker so it can be changed during a run (owner, 2026-11-06). It is the
   // project's Open-GSD setting, changed through the same picker, so the two cannot disagree.
-  // The mode the run was in before the switch was turned on, so turning it off returns there ('auto' while it is on).
-  let advanceMode = 'approve-risky';
-  advanceButton.addEventListener('click', () => {
-    // 0.4.18 review: the switch must work in both directions, and neither direction may silently change the mode otherwise. Turning it OFF returns to the
-    // mode the run was in before it was turned on, so a fully autonomous run is not reduced to "ask me about changes"; turning it ON goes to Auto.
-    const on = advanceButton.getAttribute('aria-pressed') === 'true';
-    postFor({ type: 'set-action-policy', mode: on ? advanceMode : 'auto' });
-  });
+  // 0.4.19: a picker, not a button, and styled like the approval picker beside it (owner, 2026-11-06). It offers "Carry on by itself" and each mode
+  // that stops between steps, so the person can choose rather than only toggle. The choices are the same approval modes, so the two pickers agree.
+  const CARRY_ON = 'auto';
+  let advanceState = { on: false, text: '' };
   function renderAdvance(m) {
-    const state = m.autoAdvance || {};
-    // Only a mode that stops at each step is remembered as the place to return to; while the switch is on, the current mode is Auto itself.
-    if (m.mode && m.mode !== 'auto') advanceMode = m.mode;
-    advanceButton.hidden = !state.text;
-    advanceButton.textContent = state.on ? 'Carrying on' : 'Stops each step';
-    advanceButton.setAttribute('aria-pressed', state.on ? 'true' : 'false');
-    advanceButton.title = state.text || '';
-    advanceButton.setAttribute('aria-label', state.text || 'Whether a workflow carries on by itself');
+    advanceState = m.autoAdvance || { on: false, text: '' };
+    advanceButton.hidden = !advanceState.text;
+    // The markup ships a chevron, and setting textContent would drop it, so the affordance went missing after the first state message.
+    advanceButton.textContent = (advanceState.on ? 'Carrying on' : 'Stops each step') + ' \u25be';
+    advanceButton.dataset.carrying = advanceState.on ? 'true' : 'false';
+    advanceButton.setAttribute('aria-label', advanceState.on ? 'Between steps: carrying on by itself' : 'Between steps: stops so you can choose');
+    advanceButton.title = advanceState.text || 'Whether a workflow carries on to its next step by itself';
+    // The menu: carry on, then every mode that asks. The approval picker's own labels and summaries are reused, so the two read the same.
+    const asking = (m.options || []).filter((option) => option.mode !== CARRY_ON);
+    // 0.4.18 review: when the run stops between steps while the mode IS "auto", "carry on" must not also look selected, or the menu contradicts the
+    // button that says "Stops each step". Only a run that really carries on marks the carry-on row.
+    const chosen = advanceState.on ? CARRY_ON : (m.mode === CARRY_ON ? '' : m.mode);
+    advanceMenu.replaceChildren(
+      optionRow(CARRY_ON, 'Carry on by itself', 'Each step starts the next one without asking', chosen === CARRY_ON, false),
+      ...asking.map((option) => optionRow(option.mode, 'Stop between steps: ' + option.label, option.summary || option.description, chosen === option.mode, option.risky === true))
+    );
   }
-
+  function optionRow(mode, label, summary, selected, risky) {
+    const item = el('div', 'policy-option');
+    item.id = 'advance-option-' + mode;
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', String(selected));
+    item.tabIndex = -1;
+    item.dataset.mode = mode;
+    item.dataset.risky = risky ? 'true' : 'false';
+    item.title = summary || '';
+    item.append(el('strong', '', label + (risky ? ' ⚠' : '')), el('span', '', summary || ''));
+    item.addEventListener('click', () => chooseAdvance(mode));
+    return item;
+  }
+  function advanceItems() { return [...advanceMenu.querySelectorAll('[role="option"]')]; }
+  // The listbox keeps DOM focus on the option (tabIndex -1), so a screen reader is told which one by aria-activedescendant rather than by focus.
+  function markAdvanceActive() {
+    const current = document.activeElement;
+    if (current && current.id && advanceMenu.contains(current)) advanceMenu.setAttribute('aria-activedescendant', current.id);
+    else advanceMenu.removeAttribute('aria-activedescendant');
+  }
+  function openAdvanceMenu() {
+    const items = advanceItems();
+    if (!items.length) return;
+    advanceMenu.hidden = false;
+    advanceButton.setAttribute('aria-expanded', 'true');
+    (items.find((item) => item.getAttribute('aria-selected') === 'true') || items[0]).focus();
+    markAdvanceActive();
+  }
+  function closeAdvanceMenu(returnFocus) {
+    if (advanceMenu.hidden) return;
+    advanceMenu.hidden = true;
+    advanceButton.setAttribute('aria-expanded', 'false');
+    advanceMenu.removeAttribute('aria-activedescendant');
+    if (returnFocus) advanceButton.focus();
+  }
+  function chooseAdvance(mode) {
+    closeAdvanceMenu(true);
+    if (!mode) return;
+    post({ type: 'set-action-policy', mode });
+  }
+  advanceButton.addEventListener('click', () => { if (advanceMenu.hidden) openAdvanceMenu(); else closeAdvanceMenu(true); });
+  advanceButton.addEventListener('keydown', (event) => {
+    // Escape closes an open menu from the button too, so the key works wherever the focus is.
+    if (event.key === 'Escape' && !advanceMenu.hidden) { event.preventDefault(); closeAdvanceMenu(true); return; }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); openAdvanceMenu(); }
+  });
+  advanceMenu.addEventListener('keydown', (event) => {
+    const items = advanceItems();
+    const at = items.indexOf(document.activeElement);
+    if (event.key === 'Escape') { event.preventDefault(); closeAdvanceMenu(true); return; }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      (items[(at + step + items.length) % items.length] ?? items[0])?.focus();
+      markAdvanceActive();
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      const item = items[at];
+      if (item) { event.preventDefault(); chooseAdvance(item.dataset.mode || ''); }
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (!advanceMenu.hidden && !advanceMenu.contains(event.target) && !advanceButton.contains(event.target)) closeAdvanceMenu(false);
+  });
   function renderPolicy(state) {
     policyState = state;
     closePolicyMenu(policyMenu.contains(document.activeElement));
@@ -1146,6 +1217,19 @@
         if (closePending(m.callId, 'expired', m.minutes)) announce(m.text || 'An approval request expired.');
         else notice(m.text || 'An approval request expired.', []);
         break;
+      // 0.4.19: the wait reached its timeout and the run parked on this step. The card stays, because the answer is still owed and the run carries on
+      // from here when it comes.
+      case 'approval-paused': {
+        const entry = pendingCards.get(m.callId);
+        const text = m.text || 'The run is paused on this step until you answer.';
+        // The card stays and keeps its buttons: the answer is still owed, and the run carries on from this step when it comes.
+        if (entry && !entry.card.querySelector('.pending-paused')) {
+          const paused = el('p', 'pending-paused', text);
+          entry.card.append(paused);
+        } else if (!entry) notice(text, []);
+        announce(text);
+        break;
+      }
       case 'prompt-closed': closePending(m.id, m.outcome === 'cancelled' ? 'cancelled' : 'closed'); break;
       case 'todos': renderTodos(m.todos || []); break;
       case 'run-changes': onRunChanges(m); break;

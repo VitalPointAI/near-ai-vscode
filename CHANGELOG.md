@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+- **A run does not lose its place when nobody answers.** An approval that used to be declined after 15
+  minutes, so the agent worked around a decision you never made and the work was redone, now parks the run
+  on that step. Nothing runs, nothing is lost, the card keeps its buttons, and answering whenever you are
+  back carries on from exactly there, up to a day: after that the action is declined and the run released, so an
+  abandoned conversation cannot hold a run and its sub-agents open for ever. Measured on real runs, up to 752 minutes of a single run went into
+  waits like this.
+- **A team's own knowledge graph, and a network view of it.** Each team keeps what it learns: actors,
+  what each does, and how they relate, with the signed strength of each relation and an Admiralty grade
+  (source reliability A to F, information credibility 1 to 6) on the evidence. Two tools feed it, shared
+  by every member and kept between runs. A new **Knowledge** tab draws it as an interactive network:
+  select an actor and its relations are drawn on in sequence, strongest first, with a card showing what
+  is known, where it came from, and how reliable that is.
+- **A team is drawn, not just listed.** A **Team shape** tab shows the team as nested boxes, so the
+  nesting is the hierarchy, and clicking a member opens its card: what it is for, what it can do from
+  its tools, its model, who it reports to and who it leads, and what to expect from it. An optional
+  `reports-to` line adds hierarchy to a team; existing team files need no change.
+- **A team can be started from one description.** Say what the team should produce, and the AI drafts
+  the team: a name, a mission, members with a name each and a role, a suggested model tier for each,
+  what each one hands back, and the outputs you get with their formats. You see the proposal before
+  anything is saved, and the Markdown editor is still there for anyone who wants the raw file.
+- **Models are chosen from tests, per role.** Each role has its own graded task, and the last step of
+  adding a team tests its roles and sets each member's model from the result, with the cost shown first
+  and a skip. A role added later automatically gets the task for its kind of work, so no role is chosen
+  by guesswork. **Optimise all teams** does the same for every team on demand.
+- **Compare Models can now answer "which model for which role".** Run the comparison from a terminal
+  with `npm run compare:models`, keep only what is stale or new with one click, and apply the setup the
+  results point to in one action: deep is the most accurate, fast the quickest model still within half a
+  point, standard the best value among those. For cyber work it advises a model chosen only from those that do not refuse
+the work, once one has been tested: a scan picks its own model when it starts, so that row is advice rather than a setting
+the button writes. A chart shows the score over time, by task type, so you can see whether it is improving.
+- **Check now, when a run is waiting on CI or a review.** A running agent row has a **Check now** button
+  beside Pause and Stop: it interrupts the wait and tells the agent to read the real state from GitHub
+  again. Runs also wait without sleeping, so a verdict that lands early is picked up with no click.
+- **A multi-part task is fanned out.** Agents are told to start one sub-agent per independent part in a
+  single turn, and up to 8 sub-agents may run at once. Measured on real runs, 30 of 37 had only one
+  request in flight, so four parts in parallel now finish in about the time of one.
+- **The between-steps choice is a picker**, beside the approval picker and styled the same way: carry on
+  by itself, or stop between steps in any of the asking modes.
+- **"1 to fix" now says what needs fixing**, and takes you to the step that holds it.
+
 ## 0.4.18
 
 - **A workflow carries on by itself in Auto.** A research or software project used to stop at every

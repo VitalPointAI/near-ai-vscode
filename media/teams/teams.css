@@ -1,3 +1,35 @@
+/* The AI start: one box for what the team should produce, then the proposal it drafted. */
+.ask, .proposal { margin: 10px 0; padding: 10px 14px; border: 1px solid var(--vscode-editorWidget-border, #444); border-radius: 6px; background: var(--vscode-editorWidget-background); overflow-wrap: anywhere; }
+.ask h2, .proposal h2 { margin: 0 0 4px; font-size: 1.05em; }
+.ask-idea { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 6px; font: inherit; resize: vertical; color: inherit; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, #444); border-radius: 4px; }
+.ask-details { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.ask-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 8px; }
+.proposal .mission { font-weight: 600; margin: 2px 0 6px; }
+.proposal-members { width: 100%; border-collapse: collapse; margin: 6px 0; }
+.proposal-members th, .proposal-members td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--vscode-editorWidget-border, #444); vertical-align: top; }
+.proposal-members th { font-size: 0.9em; color: var(--muted); }
+.proposal-outputs { margin: 2px 0 0; padding-left: 18px; }
+
+/* The team as a picture: nested boxes, so the nesting is the hierarchy, with a card beside it. */
+.graph { margin: 8px 0; }
+.graph-tree, .graph-children { list-style: none; margin: 4px 0; padding: 0; }
+.graph-children { margin-left: 18px; padding-left: 12px; border-left: 2px solid var(--vscode-editorWidget-border, #444); }
+.graph-node { margin: 4px 0; }
+.graph-member { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 4px 10px; border: 1px solid var(--vscode-editorWidget-border, #444); border-radius: 6px; background: var(--vscode-editorWidget-background); color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.graph-member:hover { border-color: var(--vscode-focusBorder, #007fd4); }
+.graph-member[aria-expanded="true"] { border-color: var(--vscode-focusBorder, #007fd4); background: var(--vscode-list-activeSelectionBackground, var(--vscode-editorWidget-background)); }
+.graph-role { color: var(--muted); font-size: 0.9em; }
+.graph-model { font-size: 0.85em; color: var(--muted); }
+.member-card { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--vscode-focusBorder, #007fd4); border-radius: 4px; background: var(--vscode-editorWidget-background); overflow-wrap: anywhere; }
+.member-card h3 { margin: 0 0 6px; font-size: 1em; }
+.member-card h4 { margin: 8px 0 2px; font-size: 0.92em; }
+.member-card p { margin: 2px 0; }
+.graph-capabilities { margin: 2px 0 0; padding-left: 18px; }
+
+/* The footer's count of problems now names them, so it needs to wrap instead of sitting on one line. */
+#error-count { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; max-width: 46ch; overflow-wrap: anywhere; }
+#error-count .error-count-text { color: var(--vscode-errorForeground, #f14c4c); }
+
 /* Shared basics (--border, --muted, box sizing, no sideways page scroll) come from media/shared/base.css. */
 :root {
   --surface: var(--vscode-editorWidget-background, var(--vscode-editor-background));
@@ -68,6 +100,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--vscode-button-
 .notice { display: flex; gap: 6px; align-items: flex-start; padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--warn); }
 .notice .icon { color: var(--warn); }
 .resume { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; margin: 0 0 14px; border: 1px dashed var(--accent); border-radius: var(--radius); }
+/* A saved team's model suggestion, above the team: the same block as the AI start, with a left accent because it is advice, not a prompt. */
+#suggestion { margin: 10px 0; padding: 10px 14px; border: 1px solid var(--vscode-editorWidget-border, #444); border-left: 3px solid var(--vscode-focusBorder, #007fd4); border-radius: 6px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); overflow-wrap: anywhere; }
 
 /* Library */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 14px; }

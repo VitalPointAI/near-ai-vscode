@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildLeaderboard, catalogVersion, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ResultRow, type SavedRun } from '../benchmark/results';
+import { buildLeaderboard, catalogVersion, needsRetest, performanceTrend, RUN_ID, recommendRoles, recommendTiers, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ModelSummary, type ResultRow, type SavedRun } from '../benchmark/results';
 import { ComparisonStore } from '../benchmark/store';
 import type { BenchmarkTask, TaskKind } from '../benchmark/tasks';
 import type { ModelInfo } from '../services/nearAiClient';
@@ -192,4 +192,150 @@ test('the store saves each comparison as its own file, lists them newest first, 
   assert.equal(await store.newId(first.id), `${first.id}-2`);
   assert.equal(await store.newId('2026-10-04T00-00-00-000Z'), '2026-10-04T00-00-00-000Z');
   assert.throws(() => store.fileFor('../../etc/passwd'), /Not a saved comparison/);
+});
+
+// What is worth testing again (owner, 2026-11-07: "enable the user to re-run them periodically as new models are release").
+test('the retest plan names models with a stale result or a missing task, and models added since the last run', () => {
+  const now = Date.parse('2026-11-07T00:00:00.000Z');
+  // tee/a was tested on every task, recently. local/c was tested on everything but two days ago is fine; nopricing/d was tested on an OLD task version.
+  const complete = saved('2026-11-05T00-00-00-000Z', '2026-11-05T00:00:00.000Z', [
+    ...TASKS.map((entry) => row('tee/a', entry.id, 8, { at: '2026-11-05T01:00:00.000Z' })),
+    ...TASKS.map((entry) => row('local/c', entry.id, 7, { at: '2026-11-05T01:00:00.000Z' })),
+    ...TASKS.map((entry) => row('nopricing/d', entry.id, 5, { at: '2026-09-01T01:00:00.000Z', taskVersion: 'old-version' }))
+  ]);
+  const board = buildLeaderboard([complete], TASKS, [...catalog, { id: 'brand/new', privacyBoundary: 'tee' }], now);
+  const { retest, newModels } = needsRetest(board, [...catalog, { id: 'brand/new', privacyBoundary: 'tee' }]);
+  const retestIds = retest.map((entry) => entry.model);
+  assert.ok(retestIds.includes('nopricing/d'), 'an old task version and an old date both make it stale');
+  assert.match(retest.find((entry) => entry.model === 'nopricing/d')!.why.join(' '), /older version/);
+  assert.equal(retestIds.includes('tee/a'), false, 'a current result needs no retest');
+  // A model in the catalog with no result at all is new, and is offered separately because it has nothing to compare yet. fwd/b is one of those here:
+  // it is in the catalog and this run never tested it.
+  assert.deepEqual(newModels, ['fwd/b', 'brand/new']);
+  // A model that is only an embedding model cannot do the benchmark, so it is not offered.
+  const withEmbedding = needsRetest(board, [...catalog, { id: 'brand/new', privacyBoundary: 'tee' }, { id: 'embed/x', privacyBoundary: 'tee', outputModalities: ['image'] }]);
+  assert.equal(withEmbedding.newModels.includes('embed/x'), false);
+});
+
+// The setup a comparison points to (owner, 2026-11-07): applied with one button, accuracy before speed, per role rather than one blanket winner, and
+// cyber work kept on an abliterated model because a refusal is not a wrong answer, it is no answer.
+function boardRow(model: string, extra: Partial<ModelSummary & { inCatalog: boolean }> = {}) {
+  return {
+    model, rank: 1, score: 8, byKind: {}, runs: 2, passes: 1, passRate: 0.5, medianSeconds: 60, costPerRunUsd: 0.02,
+    costEstimated: false, failures: 0, stalls: 0, tasks: [], inCatalog: true, stale: [], missingTasks: [], privacy: 'tee' as const, ...extra
+  };
+}
+
+test('the recommended tiers are chosen on accuracy first, then time, then cost, so a faster model never wins by being worse', () => {
+  const entries = [
+    boardRow('tee/best', { score: 9, medianSeconds: 120, costPerRunUsd: 0.05 }),
+    // Much quicker and much cheaper, but 0.8 behind: outside the half point that counts as "as good", so it never wins.
+    boardRow('tee/fast-but-worse', { score: 8.2, medianSeconds: 20, costPerRunUsd: 0.001 }),
+    boardRow('tee/near-fast', { score: 8.7, medianSeconds: 45, costPerRunUsd: 0.03 }),
+    boardRow('tee/gone', { score: 9.6, medianSeconds: 10, inCatalog: false })
+  ];
+  const recommendations = recommendTiers(entries, { deep: 'old/deep', fast: 'old/fast', standard: 'old/standard' });
+  const byTier = Object.fromEntries(recommendations.map((entry) => [entry.tier, entry]));
+  // Accuracy decides the deep tier, whatever it costs in time or money.
+  assert.equal(byTier.deep.model, 'tee/best');
+  // A model missing from the catalog is never recommended, however good it looks.
+  assert.equal(recommendations.some((entry) => entry.model === 'tee/gone'), false);
+  // The fast tier takes the quickest model that is still within half a point, which is not the quickest overall.
+  assert.equal(byTier.fast.model, 'tee/near-fast', 'the quickest model loses on accuracy, so it is not the fast tier');
+  // The standard tier takes the best value among the accurate ones.
+  assert.equal(byTier.standard.model, 'tee/near-fast');
+  // And the tier that had it already says so, so the button writes only what changed.
+  const settled = recommendTiers(entries, { deep: 'tee/best', fast: 'tee/near-fast', standard: 'tee/near-fast' });
+  assert.equal(settled.filter((entry) => entry.tier !== 'cyber').every((entry) => entry.changes === false), true);
+});
+
+test('a cyber recommendation is always an abliterated model, and says so when the results cannot judge refusal', () => {
+  const entries = [
+    boardRow('vendor/aligned-best', { score: 9.6, medianSeconds: 30 }),
+    boardRow('vendor/model-abliterated', { score: 8.1, medianSeconds: 90 }),
+    boardRow('vendor/other-abliterated', { score: 8.4, medianSeconds: 120 })
+  ];
+  const cyber = recommendTiers(entries, { deep: 'vendor/aligned-best', cyber: 'vendor/model-abliterated' }).find((entry) => entry.tier === 'cyber')!;
+  assert.equal(cyber.model, 'vendor/other-abliterated', 'among the abliterated models, the best score wins even though it is slower');
+  assert.equal(cyber.abliterated, true);
+  assert.match(cyber.note ?? '', /do not test refusal/);
+  // With no abliterated model tested, the scan keeps the one it uses and the note explains why.
+  const alignedOnly = recommendTiers([boardRow('vendor/aligned-best', { score: 9 })], { cyber: 'vendor/model-abliterated' }).find((entry) => entry.tier === 'cyber')!;
+  assert.equal(alignedOnly.model, 'vendor/model-abliterated');
+  assert.equal(alignedOnly.changes, false);
+});
+
+test('each role is given the model that is best at its own kind of work, not the overall winner', () => {
+  const entries = [
+    // Best overall at planning, weak at research.
+    boardRow('vendor/planner-king', { score: 8, byKind: { planning: { score: 9.5, tasks: 1, runs: 1 }, research: { score: 5, tasks: 1, runs: 1 } } }),
+    // The reverse: the best researcher, a poor planner.
+    boardRow('vendor/research-king', { score: 8, byKind: { planning: { score: 5, tasks: 1, runs: 1 }, research: { score: 9.4, tasks: 1, runs: 1 } } })
+  ];
+  const roles = recommendRoles(entries, [
+    { id: 'role:gsd-planner', current: 'vendor/research-king' },
+    { id: 'role:gsd-*-researcher', current: 'vendor/planner-king' },
+    { id: 'role:gsd-executor' }
+  ]);
+  const byRole = Object.fromEntries(roles.map((entry) => [entry.role, entry]));
+  assert.equal(byRole['gsd-planner'].model, 'vendor/planner-king', 'the planner gets the best planner');
+  assert.equal(byRole['gsd-planner'].changes, true);
+  assert.match(byRole['gsd-planner'].why, /planning/);
+  assert.equal(byRole['gsd-*-researcher'].model, 'vendor/research-king', 'the researcher gets the best researcher, the opposite model');
+  // A role whose kind has no results of its own is judged on the overall score rather than left empty.
+  assert.ok(byRole['gsd-executor']);
+  assert.equal(byRole['gsd-executor'].model, 'vendor/planner-king');
+  for (const entry of roles) assert.equal(entry.setting, 'agent.roleModels');
+});
+
+// Performance over time (owner, 2026-11-07): score as a percentage against the date, with coding, research, planning and execution kept apart.
+test('the trend is one point per day of fresh results, per task type, and a reused copy never looks like progress', () => {
+  const day = (date: string, rows: ResultRow[]): SavedRun => ({ format: 'near-ai-model-comparison', version: 1, id: date, startedAt: `${date}T00:00:00.000Z`, status: 'completed', taskSet: 'full', mode: 'rerun', runsPerTask: 1, models: [{ id: 'tee/a', privacy: 'tee', catalogVersion: 'x' }], tasks: TASKS.map((task) => ({ id: task.id, kind: task.kind, version: task.version })), rows });
+  const first = day('2026-11-01', [row('tee/a', 'implement', 5, { at: '2026-11-01T10:00:00.000Z' }), row('tee/a', 'phase-plan', 5, { at: '2026-11-01T11:00:00.000Z' })]);
+  const second = day('2026-11-05', [row('tee/a', 'implement', 9, { at: '2026-11-05T10:00:00.000Z' }), row('tee/a', 'phase-plan', 7, { at: '2026-11-05T11:00:00.000Z' })]);
+  // A third day whose results were all copied from the second: it is not a new measurement.
+  const copied = day('2026-11-06', [{ ...row('tee/a', 'implement', 1, { at: '2026-11-06T10:00:00.000Z' }), reusedFrom: second.id }]);
+  const trend = performanceTrend([first, second, copied]);
+  assert.deepEqual(trend.overall.map((point) => [point.date, point.percent]), [['2026-11-01', 50], ['2026-11-05', 80]], 'the copied day adds no point');
+  const byKind = Object.fromEntries(trend.byKind.map((entry) => [entry.kind, entry.points.map((point) => point.percent)]));
+  assert.deepEqual(byKind.coding, [50, 90], 'coding improved');
+  assert.deepEqual(byKind.planning, [50, 70], 'planning improved, by less');
+  assert.equal(byKind.research, undefined, 'a kind with no results has no line rather than a flat zero');
+});
+
+// A comparison run from the terminal must show up in Compare Models (owner, 2026-11-08: "make sure the results will be saved and accessible by the
+// UI"). The CLI builds a saved run itself, so this writes one exactly as it does and reads it back through the store and the parser the tab uses. A
+// hand-made run ID failed RUN_ID and every save was refused, which this now catches.
+test('a comparison saved the way the CLI saves it is readable by the tab', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-cli-save-'));
+  const store = new ComparisonStore(dir);
+  const at = new Date('2026-11-08T12:00:00.000Z');
+  const id = await store.newId(runIdFor(at));
+  assert.match(id, RUN_ID, 'the CLI uses the store\'s own ID format');
+  const savedRun: SavedRun = {
+    format: 'near-ai-model-comparison', version: 1, id, startedAt: at.toISOString(), status: 'completed', taskSet: 'full', mode: 'rerun', runsPerTask: 1,
+    models: [{ id: 'z-ai/glm-5.3-flash', privacy: 'tee', catalogVersion: '64' }],
+    tasks: [{ id: 'research-brief', kind: 'research', version: 'abc123' }],
+    rows: [row('z-ai/glm-5.3-flash', 'research-brief', 9, { kind: 'research', taskVersion: 'abc123' })]
+  };
+  await store.save(savedRun);
+  const listed = await store.list();
+  assert.equal(listed.length, 1, 'the store lists the run the CLI wrote');
+  assert.equal(listed[0]?.rows.length, 1, 'and its rows survive the round trip');
+  // The tab builds its table from exactly this list plus the catalog.
+  const board = buildLeaderboard(listed, [task('research-brief', 'research', 'abc123')], [], at.getTime());
+  assert.equal(board.length, 1);
+  assert.equal(board[0]?.model, 'z-ai/glm-5.3-flash');
+});
+
+test('the trend weights each model once per day, so five runs by one model do not outweigh one run by another', () => {
+  const at = '2026-11-08T10:00:00.000Z';
+  const day = (rows: ResultRow[]): SavedRun => ({ format: 'near-ai-model-comparison', version: 1, id: at, startedAt: at, status: 'completed', taskSet: 'full', mode: 'rerun', runsPerTask: 1, models: [], tasks: [], rows });
+  // Model A scores 10/10 five times; model B scores 0/10 once. Averaging every row gives 83%, averaging per model first gives 50%.
+  const rows: ResultRow[] = [
+    ...Array.from({ length: 5 }, () => row('tee/a', 'implement', 10, { at })),
+    row('tee/b', 'implement', 0, { at })
+  ];
+  const trend = performanceTrend([day(rows)]);
+  assert.equal(trend.overall[0]?.percent, 50, 'each model counts once, not once per run');
 });

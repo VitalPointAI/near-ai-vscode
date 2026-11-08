@@ -66,7 +66,7 @@ export interface DirectoryInput {
 }
 
 const CAPABILITY_LABEL: Record<ActionCapability, string> = {
-  read: 'read', plan: 'plan', workspaceWrite: 'edit', shell: 'shell', network: 'network', gitMutation: 'git', mediaGeneration: 'generate', mediaPublication: 'publish'
+  read: 'read', plan: 'plan', workspaceWrite: 'edit', sharedWrite: 'learn', shell: 'shell', network: 'network', gitMutation: 'git', mediaGeneration: 'generate', mediaPublication: 'publish'
 };
 
 /** Groups for the skills list, by the words a skill's name is made of (nothing per-command is hard-coded). */

@@ -72,7 +72,7 @@ test('pages link the shared stylesheet before their own, and load the layout pro
   for (const html of [
     toolsPageHtml({ cspSource: 'vscode-resource:', nonce: 'n', script: 'tools.js', style: 'tools.css', base: 'base.css' }),
     comparisonPageHtml({ cspSource: 'vscode-resource:', nonce: 'n', script: 'compare.js', style: 'compare.css', base: 'base.css' }),
-    teamStudioHtml({ cspSource: 'vscode-resource:', nonce: 'n', script: 'teams.js', style: 'teams.css', base: 'base.css' })
+    teamStudioHtml({ cspSource: 'vscode-resource:', nonce: 'n', script: 'teams.js', style: 'teams.css', network: 'network.css', base: 'base.css' })
   ]) {
     assert.match(html, /<link rel="stylesheet" href="base\.css"><link rel="stylesheet" href="(tools|compare|teams)\.css">/);
     assert.doesNotMatch(html, /layout-probe/);
@@ -131,7 +131,11 @@ class Node {
   replaceChildren(...nodes: Node[]) { this.children = []; this.text = ''; this.append(...nodes); }
   setAttribute(name: string, value: string) { this.attributes.set(name, value); }
   getAttribute(name: string) { return this.attributes.get(name); }
-  addEventListener() { /* not needed */ }
+  private listeners = new Map<string, Array<(event: unknown) => void>>();
+  addEventListener(type: string, listener: (event: unknown) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
+  /** A real click, so a control's effect is tested instead of the words around it. */
+  click() { for (const listener of this.listeners.get('click') ?? []) listener({ preventDefault: () => undefined, target: this }); }
+  fire(type: string, event: unknown = {}) { for (const listener of this.listeners.get(type) ?? []) listener(event); }
   all(): Node[] { return this.children.flatMap((child) => [child, ...child.all()]); }
   querySelectorAll(selector: string): Node[] {
     const [outer, inner] = selector.split(' ');
@@ -141,9 +145,9 @@ class Node {
 
 async function runCompare() {
   const body = new Node('body');
-  for (const id of ['board', 'setup', 'history', 'results-section', 'results', 'results-actions', 'progress', 'notice', 'problem', 'refresh']) { const node = new Node('div'); node.id = id; body.append(node); }
+  for (const id of ['board', 'trend', 'recommended', 'retest', 'setup', 'history', 'results-section', 'results', 'results-actions', 'progress', 'notice', 'problem', 'refresh']) { const node = new Node('div'); node.id = id; body.append(node); }
   const listeners: Array<(event: { data: unknown }) => void> = [];
-  const document = { getElementById: (id: string) => body.all().find((node) => node.id === id) ?? null, createElement: (tag: string) => new Node(tag), createTextNode: (text: string) => { const node = new Node('#text'); node.textContent = text; return node; } };
+  const document = { getElementById: (id: string) => body.all().find((node) => node.id === id) ?? null, createElement: (tag: string) => new Node(tag), createElementNS: (_namespace: string, tag: string) => new Node(tag), createTextNode: (text: string) => { const node = new Node('#text'); node.textContent = text; return node; } };
   function Option(text: string, value: string) { const node = new Node('option'); node.textContent = text; node.value = value; return node; }
   const context = vm.createContext({ document, Option, window: { addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => listeners.push(listener) }, acquireVsCodeApi: () => ({ postMessage: () => undefined }), setTimeout: () => 0, clearTimeout: () => undefined, Date, Math, JSON, Set, Object, String, Number, Boolean });
   vm.runInContext(await readFile(path.join(MEDIA, 'compare', 'compare.js'), 'utf8'), context, { timeout: 1000 });
@@ -190,4 +194,93 @@ test('the MCP approval explanation is tied to its menu, and Tools badges wrap in
 
 test('chat reply tables keep their natural width instead of filling the reply', () => {
   assert.match(css('chat/chat.css'), /\.turn \.table-wrap > table \{ width: auto; \}/);
+});
+
+// The two presets that make "re-run as new models are released" one click (owner, 2026-11-07). The banner names what is worth testing; these buttons
+// tick it in the list, and the estimate runs on exactly what was ticked.
+test('Compare Models selects the new and stale models with one click, and only ones it can actually run', async () => {
+  const page = await runCompare();
+  const entry = (id: string, blocked?: string) => ({ id, privacy: 'tee', privacyText: 'TEE', holds: [], inputPerMillion: 1, outputPerMillion: 2, ...(blocked ? { blocked } : {}) });
+  page.dispatch({
+    type: 'state',
+    state: {
+      leaderboard: [], catalog: [entry('tee/fresh'), entry('tee/stale'), entry('tee/new'), entry('tee/new-blocked', 'TEE-only mode is on')], roles: [], taskSets: [], history: [], selected: [],
+      retest: { models: [{ model: 'tee/stale', why: ['Last tested 40 days ago'] }], newModels: ['tee/new', 'tee/new-blocked'] }
+    }
+  });
+  const buttons = () => page.body.all().filter((node) => node.tagName === 'button').map((node) => node.textContent);
+  // 2 new models are named, one of which this key cannot run, so its count is still 2: the banner tells the truth about the catalog, the selection skips it.
+  assert.ok(buttons().some((text) => text.includes('New models (2)')), `the new-models preset is offered: ${JSON.stringify(buttons())}`);
+  assert.ok(buttons().some((text) => text.includes('Worth testing again (1)')));
+
+  const newPreset = page.body.all().find((node) => node.tagName === 'button' && node.textContent.includes('New models'))!;
+  newPreset.click();
+  // The page sets the type as a property, so the stub sees it there.
+  const boxes = () => page.body.all().filter((node) => node.tagName === 'input' && node.type === 'checkbox');
+  const ticked = () => boxes().filter((node) => node.checked).map((node) => node.value).sort();
+  assert.deepEqual(ticked(), ['tee/new'], 'a model this key cannot run is not selected');
+
+  const stalePreset = page.body.all().find((node) => node.tagName === 'button' && node.textContent.includes('Worth testing again'))!;
+  stalePreset.click();
+  assert.deepEqual(ticked(), ['tee/new', 'tee/stale'], 'the stale model is added to what was already chosen');
+});
+
+// The performance trend (owner, 2026-11-07): score percent over time, a line per task type, drawn on when it appears, and readable with motion off.
+test('the trend chart draws a line per task type and animates it in, with less-motion respected', async () => {
+  const page = await runCompare();
+  const points = (percents: number[]) => percents.map((percent, index) => ({ date: `2026-11-0${index + 1}`, percent, runs: 2 }));
+  page.dispatch({
+    type: 'state',
+    state: {
+      leaderboard: [], catalog: [], roles: [], taskSets: [], history: [], selected: [],
+      trend: { overall: points([50, 62, 80]), byKind: [{ kind: 'coding', points: points([40, 55, 90]) }, { kind: 'research', points: points([60, 60, 61]) }] },
+      retest: { models: [], newModels: [] }, recommended: { tiers: [], roles: [] }
+    }
+  });
+  const root = page.body.all().find((node) => node.id === 'trend')!;
+  assert.equal(root.hidden, false);
+  const paths = root.all().filter((node) => node.tagName === 'path');
+  assert.equal(paths.length, 3, 'one line for every task and one per task type that has results');
+  assert.ok(paths.every((path) => /^M[\d.]+ [\d.]+( L[\d.]+ [\d.]+)+$/.test(path.getAttribute('d') ?? '')), 'each line is a real path through its points');
+  // A key names every line, so a coloured line is never unnamed.
+  const key = root.all().filter((node) => node.classList.contains('trend-key')).map((node) => node.textContent).join(' ');
+  assert.match(key, /All tasks: 80%/);
+  assert.match(key, /coding: 90%/);
+  assert.doesNotMatch(key, /planning/, 'a type with no results is not in the key');
+  const css = readFileSync(path.join(MEDIA, 'compare', 'compare.css'), 'utf8');
+  assert.match(css, /#trend \.trend-line \{[^}]*animation: trend-draw/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*#trend \.trend-line \{ animation: none/);
+});
+
+// The recommendation card (owner, 2026-11-08). It was never rendered by a test, so a missing helper here would only have shown up in a live window.
+test('Compare Models shows the recommended setup, marks an abliterated model, and offers one button to apply it', async () => {
+  const page = await runCompare();
+  page.dispatch({
+    type: 'state',
+    state: {
+      leaderboard: [], catalog: [], roles: [], taskSets: [], history: [], selected: [], retest: { models: [], newModels: [] }, trend: { overall: [], byKind: [] },
+      recommended: {
+        tiers: [
+          { tier: 'deep', model: 'vendor/best', current: 'vendor/old', why: 'the most accurate on these tasks (9.0/10)', score: 9, changes: true, abliterated: false },
+          { tier: 'fast', model: 'vendor/quick', current: 'vendor/quick', why: 'within 0.5 of the best', score: 8.6, changes: false, abliterated: false },
+          { tier: 'cyber', model: 'vendor/model-abliterated', why: 'does not refuse the work', score: 8.1, changes: true, abliterated: true, note: 'These tasks do not test refusal.' }
+        ],
+        roles: [{ role: 'gsd-planner', setting: 'agent.roleModels', model: 'vendor/planner', current: 'vendor/old', kind: 'planning', score: 9.2, changes: true, abliterated: false, why: 'best at planning work (9.2/10)' }]
+      }
+    }
+  });
+  const root = page.body.all().find((node) => node.id === 'trend' || node.id === 'recommended');
+  assert.ok(root, 'the recommendation area is in the page');
+  const area = page.body.all().find((node) => node.id === 'recommended')!;
+  assert.equal(area.hidden, false, 'it is shown when there are recommendations');
+  const text = area.textContent;
+  assert.match(text, /vendor\/best/, 'the chosen model is named');
+  assert.match(text, /9\.2\/10/, 'the reason quotes its score');
+  assert.match(text, /gsd-planner/, 'a role is named, not just a tier');
+  assert.match(text, /already set/, 'a tier that needs no change says so');
+  assert.match(text, /abliterated/, 'a model that does not refuse is marked');
+  // One button applies everything that differs. Three recommendations change here, but the cyber row is skipped by the host (a scan picks its own model), so
+  // the count must say 2, not 3 (0.4.19 review).
+  const apply = area.all().find((node) => node.tagName === 'button' && /Apply all 2 changes/.test(node.textContent));
+  assert.ok(apply, `the apply button counts the changes: ${JSON.stringify(area.all().filter((n) => n.tagName === 'button').map((n) => n.textContent))}`);
 });

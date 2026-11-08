@@ -459,10 +459,10 @@
         },
         "nearAi.agent.maxParallelAgents": {
           "type": "number",
-          "default": 4,
+          "default": 8,
           "minimum": 1,
           "maximum": 16,
-          "description": "How many sub-agents may run at the same time."
+          "description": "How many sub-agents may run at the same time. A research team of nine workstreams finishes in about the time of one workstream when this is 8 or more; the earlier default of 4, with agents that worked one part at a time, left most runs with a single request in flight."
         },
         "nearAi.agent.maxTurns": {
           "type": "number",
@@ -688,6 +688,9 @@
     "watch": "tsc -p tsconfig.json --watch",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run compile && node --test dist/test/*.test.js scripts/test/*.test.mjs",
+    "report:spend": "node scripts/spend-report.mjs",
+    "experiment": "node scripts/ab-task.mjs",
+    "compare:models": "node scripts/compare-models.mjs",
     "package": "npm run compile && npm run sbom && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
     "generate:icon": "node scripts/generate-near-ai-icon.mjs",
     "install:global": "node scripts/install-global-extension.mjs",

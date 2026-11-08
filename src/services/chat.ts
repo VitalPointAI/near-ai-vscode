@@ -85,6 +85,8 @@ interface ChatTab {
   stops: number;
   /** How each settled prompt ended, for the record left in its place when the conversation is shown again. */
   outcomes: Map<string, PromptOutcome>;
+  /** Prompts whose wait ran long enough to park the run. They are still waiting, so they are not outcomes: the card stays until it is answered. */
+  paused: Map<string, { minutes?: number; text: string }>;
   /** What was typed for each queued steer, so a re-shown conversation shows its queued messages. */
   steerTexts: Map<string, string>;
   /** Sends a message of this conversation: logged, and posted to the view when it is on screen. */
@@ -144,14 +146,22 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   };
 
   const newTab = (id = newConversationId()): ChatTab => {
-    const tab: ChatTab = { id, log: new ConversationLog(), title: '', turns: 0, outcome: 'idle', unread: false, closing: false, stops: 0, outcomes: new Map(), steerTexts: new Map(), post: () => undefined };
+    const tab: ChatTab = { id, log: new ConversationLog(), title: '', turns: 0, outcome: 'idle', unread: false, closing: false, stops: 0, outcomes: new Map(), paused: new Map(), steerTexts: new Map(), post: () => undefined };
     tab.post = (message) => {
       tab.outcome = outcomeOf(message) ?? tab.outcome;
       if (message.type === 'run-stopped') tab.continuable = message.continuable === true;
       // A new turn (Continue, or anything the user sent) settles the offer: shown again, it has no button.
       else if (message.type === 'assistant-start' && tab.continuable) { tab.continuable = false; tab.log.update('run-stopped', { continuable: false }); }
-      if (message.type === 'approval-expired' && typeof message.callId === 'string') tab.outcomes.set(message.callId, { outcome: 'expired', ...(typeof message.minutes === 'number' ? { detail: message.minutes } : {}) });
-      if (message.type === 'prompt-closed' && typeof message.id === 'string') tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' ? 'cancelled' : 'closed' });
+      // 0.4.19: an expired wait no longer settles anything. The run parked on the step and the card stays, so the outcome is recorded only when the person
+      // answers (or the run is stopped), and a reloaded view shows the same waiting card rather than a decline that never happened.
+      if (message.type === 'approval-paused' && typeof message.callId === 'string') tab.paused.set(message.callId, { ...(typeof message.minutes === 'number' ? { minutes: message.minutes } : {}), text: String(message.text ?? '') });
+      // 0.4.19 review: the day-long release posts `approval-expired` and no `prompt-closed`, so the parked entry stayed forever and the prompt never got an
+      // outcome to replay. It is settled here as expired.
+      if (message.type === 'approval-expired' && typeof message.callId === 'string') {
+        tab.paused.delete(message.callId);
+        tab.outcomes.set(message.callId, { outcome: 'expired', ...(typeof message.minutes === 'number' ? { detail: message.minutes } : {}) });
+      }
+      if (message.type === 'prompt-closed' && typeof message.id === 'string') { tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' ? 'cancelled' : 'closed' }); tab.paused.delete(message.id); }
       const steerId = message.type === 'steer-state' ? String(message.id) : undefined;
       tab.log.add(steerId && message.state === 'queued' && tab.steerTexts.has(steerId) ? { ...message, text: tab.steerTexts.get(steerId) } : message);
       if (steerId && message.state !== 'queued') tab.steerTexts.delete(steerId);
@@ -179,7 +189,14 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     feed.focusConversation(tab.id);
     void panel.webview.postMessage({ type: 'conversation-show', id: tab.id, title: tab.title, ...(tab.model ? { model: tab.model } : {}) });
     const waiting = new Map((tab.agent?.waitingPrompts() ?? []).map((prompt) => [promptIdOf(prompt) ?? '', prompt] as const).filter(([id]) => id));
-    for (const message of tab.log.replay(waiting, tab.outcomes)) void panel.webview.postMessage(message);
+    for (const message of tab.log.replay(waiting, tab.outcomes)) {
+      void panel.webview.postMessage(message);
+      // A prompt whose wait parked the run says so again when the conversation is shown again, since the run is still on that step and the card is still
+      // waiting to be answered (owner, 2026-11-08). Without this, a reloaded view would look like an ordinary prompt.
+      if (message.type === 'approval-request' && typeof message.callId === 'string' && tab.paused.has(message.callId)) {
+        void panel.webview.postMessage({ type: 'approval-paused', callId: message.callId, ...tab.paused.get(message.callId), replay: true });
+      }
+    }
     void panel.webview.postMessage({ type: 'conversation-shown', id: tab.id, busy: isRunning(tab) });
     sendSummary(true);
   };

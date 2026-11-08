@@ -164,24 +164,32 @@ test('stopping a run cancels its waiting approval and tells the view to unpin it
   }
 });
 
-test('an expired approval says after how long, and is no longer waiting', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-pending-expire-'));
+test('a wait that runs long parks the run instead of declining the action, and a late answer carries on from that step', async () => {
+  // Owner, 2026-11-07: "stop the idling". On the owner's own runs, 35 waits hit the 15-minute timeout exactly and the work was then redone. So the
+  // timeout no longer declines anything: the run stops counting down and stays on this step, the card keeps its buttons, and answering whenever the
+  // person is back runs the tool and continues.
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-pending-park-'));
   const { conversation, posted, counts, send } = writingConversation(root);
   conversation.approvalTimeoutMs = 60_000;
   const timers = { set: globalThis.setTimeout };
-  // Fire the 1-minute timeout at once, so the test does not wait a minute.
   globalThis.setTimeout = ((handler: () => void, ms?: number) => timers.set(handler, ms === 60_000 ? 5 : ms)) as typeof setTimeout;
-  try {
-    await send();
-  } finally {
-    globalThis.setTimeout = timers.set;
-    conversation.dispose();
-  }
-  const expired = posted.find((message) => message.type === 'approval-expired');
-  assert.equal(expired?.minutes, 1);
-  assert.match(String(expired?.text), /within 1 minute, so it was declined/);
-  assert.deepEqual(counts, [1, 0]);
-  assert.equal(posted.some((message) => message.type === 'prompt-closed'), false, 'the expiry message already closes it');
+  // The run does not finish while it is parked, so it is started and left running; the answer comes next.
+  const running = send();
+  const parked = await until(() => posted.find((message) => message.type === 'approval-paused'));
+  globalThis.setTimeout = timers.set;
+  assert.ok(parked, 'the run says it parked');
+  assert.equal(parked.minutes, 1);
+  assert.match(String(parked.text), /paused on this step\. It has not run\./);
+  assert.equal(posted.some((message) => message.type === 'approval-expired'), false, 'nothing expired and nothing was declined');
+  assert.deepEqual(counts, [1], 'the prompt is still counted as waiting, so the badge stays lit');
+  assert.equal(conversation.waitingPrompts().length, 1, 'and it is still there to answer');
+  // The late answer runs the tool the timeout would have thrown away.
+  conversation.answerApproval(String(parked.callId), { decision: 'allow' });
+  await until(() => posted.find((message) => message.type === 'tool-end' && message.callId === 'w1'));
+  await running;
+  assert.ok(posted.some((message) => message.type === 'run-changes'), 'the run finished and the file it wrote is offered for review');
+  assert.deepEqual(conversation.waitingPrompts(), []);
+  conversation.dispose();
 });
 
 test('questions wait, replay, and are cancelled when the run is stopped', async () => {

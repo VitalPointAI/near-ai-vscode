@@ -5,6 +5,24 @@ import { PROJECT_TYPES, projectTypeTeam, type ProjectType } from '../agent/proje
 import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue, type DraftMember, type TeamDraft } from '../agent/teamMarkdown';
 import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
+import { buildTeamGraph } from '../agent/teamGraph';
+import { proposalDraft, proposalText, type TeamProposal } from '../agent/teamBuilder';
+import { layoutNetwork } from '../domain/networkLayout';
+import { gradingCoverage } from '../domain/teamKnowledge';
+import { loadKnowledge } from './teamKnowledgeStore';
+
+/** The facts, relations and grading of each node, so the page can show a card without being sent the whole graph twice. */
+function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: string; source?: string }>; functions: string[]; grading?: unknown; origin: string; mentions: number }>; edges: Array<{ from: string; to: string; kind: string; tension: number | null; basis?: string; grading?: unknown }> }): Record<string, unknown> {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  return Object.fromEntries(graph.nodes.map((node) => [node.id, {
+    functions: node.functions, facts: node.facts, grading: node.grading ?? null, origin: node.origin, mentions: node.mentions,
+    relations: graph.edges.filter((edge) => edge.from === node.id || edge.to === node.id).map((edge) => ({
+      kind: edge.kind, tension: edge.tension, basis: edge.basis ?? null, grading: edge.grading ?? null,
+      direction: edge.from === node.id ? 'out' : 'in', other: edge.from === node.id ? edge.to : edge.from
+    }))
+  }]));
+}
+import { isAbliteratedModel } from '../domain/cyberModel';
 import { buildToolsDirectory, firstSentence, PRIVACY_TEXT, privacyOf, resolveAgentModel, type DirectoryInput, type DirectoryModel, type ToolStatus, type ToolsDirectory } from './toolsDirectory';
 
 // NEAR AI Team Studio: a guided, visual way to build and manage agent teams. The team Markdown
@@ -58,6 +76,9 @@ const TEAM_ROLES: Array<Omit<StudioRole, 'source'>> = [
   { id: 'editor', label: 'Editor', model: 'standard', tools: [...READ, 'CheckCitations'], description: 'Edits for accuracy, clarity, and structure. Does not rewrite.', suggestion: 'Edit the draft for accuracy, clarity, tone, and structure. Confirm that citations support the sentences they are attached to. Report required changes; do not rewrite the document yourself.' },
   { id: 'red-team', label: 'Red team', model: 'deep', tools: [...READ, 'Bash', 'Write'], description: 'Attacks the work like an adversary before it is verified.', suggestion: 'Attack the work like an adversary before it is verified: find bugs, holes, unhandled edge cases, wrong assumptions, and weak tests. Prove what you can. Report the findings, numbered with severity and evidence. Do not fix anything yourself.' }
 ];
+
+/** The role ids the studio offers, in order, so a benchmark can require a task for each one. */
+export const TEAM_ROLE_IDS: string[] = TEAM_ROLES.map((role) => role.id);
 
 /** Starting points built from Open-GSD agent roles. Each member's role names the Open-GSD agent it is modelled on. */
 const GSD_TEMPLATES: Array<{ id: string; label: string; description: string; members: Array<{ name: string; role: string; model: string; tools: string[] | null; fallback: string }> }> = [
@@ -225,6 +246,8 @@ export type StudioMessage =
   | { type: 'save'; draft: TeamDraft; id: string; base: string }
   | { type: 'create'; draft: TeamDraft; target: StudioTarget; projectType?: { id: string; goal: string } }
   | { type: 'save-draft'; draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string }
+  | { type: 'optimise-all' }
+  | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough' }
   | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
   | { type: 'open-setting'; key: string };
 
@@ -238,9 +261,11 @@ export function parseDraft(value: unknown): TeamDraft | undefined {
   if (!isPlain(value) || !exactKeys(value, ['name', 'description', 'members']) || !text(value.name, 120) || !text(value.description, 600) || !Array.isArray(value.members) || value.members.length > 12) return undefined;
   const members: DraftMember[] = [];
   for (const member of value.members) {
-    if (!isPlain(member) || !exactKeys(member, ['name', 'role', 'model', 'tools', 'instructions']) || !text(member.name, 60) || !text(member.role, 120) || !text(member.model, 160) || !text(member.instructions, 12_000)) return undefined;
+    // `reportsTo` is optional and must be allowed here, or a draft that carries the team's hierarchy is refused outright (0.4.19 review).
+    if (!isPlain(member) || !exactKeys(member, ['name', 'role', 'model', 'tools', 'instructions'], ['reportsTo']) || !text(member.name, 60) || !text(member.role, 120) || !text(member.model, 160) || !text(member.instructions, 12_000)) return undefined;
+    if (member.reportsTo !== undefined && !text(member.reportsTo, 60)) return undefined;
     if (member.tools !== null && (!Array.isArray(member.tools) || member.tools.length > 80 || !member.tools.every((tool) => typeof tool === 'string' && TOOL_NAME.test(tool)))) return undefined;
-    members.push({ name: member.name, role: member.role, model: member.model, tools: member.tools === null ? null : [...new Set(member.tools as string[])], instructions: member.instructions });
+    members.push({ name: member.name, role: member.role, model: member.model, tools: member.tools === null ? null : [...new Set(member.tools as string[])], instructions: member.instructions, ...(member.reportsTo ? { reportsTo: member.reportsTo as string } : {}) });
   }
   return { name: value.name, description: value.description, members };
 }
@@ -274,6 +299,13 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       if (!exactKeys(message, ['type', 'seq', 'draft'], ['id']) || !Number.isSafeInteger(message.seq) || (message.id !== undefined && !id())) return undefined;
       const draft = parseDraft(message.draft);
       return draft ? { type: 'review', seq: message.seq as number, draft, ...(message.id !== undefined ? { id: message.id as string } : {}) } : undefined;
+    }
+    case 'optimise-all': return isPlain(message) && exactKeys(message, ['type']) ? { type: 'optimise-all' } : undefined;
+    case 'draft-team': {
+      if (!text(message.idea, 2000) || !message.idea.trim()) return undefined;
+      if (message.outputFormat !== undefined && !text(message.outputFormat, 300)) return undefined;
+      if (message.depth !== undefined && message.depth !== 'quick' && message.depth !== 'thorough') return undefined;
+      return { type: 'draft-team', idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth === 'quick' || message.depth === 'thorough' ? { depth: message.depth } : {}) };
     }
     case 'save': {
       if (!exactKeys(message, ['type', 'draft', 'id', 'base']) || !id() || !String(message.id).match(/^(?:project|user:)/) || typeof message.base !== 'string' || !/^[0-9a-f]{64}$/.test(message.base)) return undefined;
@@ -343,6 +375,26 @@ export interface TeamStudioDeps {
   pickExportTarget(defaultName: string): Promise<string | undefined>;
   pickImportSource(): Promise<string | undefined>;
   applyProjectType(root: string, type: ProjectType, goal: string): Promise<unknown>;
+  /**
+   * What the model comparisons say each role should use, for a team that was just saved (owner, 2026-11-07: "as new teams are added, we should
+   * automatically check and suggest model optimizations for the new members and roles that are created"). Undefined when no comparison has been run.
+   */
+  /**
+   * Drafts a team from the person's own description (owner, 2026-11-08: start with a chat asking what the team should produce, then launch the research to
+   * propose mission, members, roles and outputs). One model call, returned as a proposal for the person to accept or edit.
+   */
+  draftTeam?(brief: { idea: string; outputFormat?: string; depth?: 'quick' | 'thorough' }): Promise<{ proposal: TeamProposal; problems: string[] }>;
+  suggestModels?(members: Array<{ name: string; role?: string; model?: string }>): Promise<Array<{ member: string; model: string; current?: string; why: string; changes: boolean }>>;
+  /**
+   * The final step of adding a team (owner, 2026-11-08): run each member's role test with the candidate models and apply the winner, so a new team's
+   * models come from evidence rather than a default. Returns what each member ended up with, or undefined when the person skipped it. `confirm: false`
+   * means the caller has already asked, so no modal is shown; `signal` cancels the tests part-way.
+   */
+  optimiseTeam?(members: Array<{ name: string; role?: string; model?: string }>, teamName: string, options?: { signal?: AbortSignal; confirm?: boolean }): Promise<{ applied: number; text: string } | undefined>;
+  /** The models a role test would try, so testing every team can show the whole cost once before it starts. */
+  optimiseCandidates?(): Promise<string[]>;
+  /** The person asked everything to stop (Emergency stop), so long-running work can be cancelled. */
+  onStop?(listener: () => void): { dispose(): void };
   drafts: { get(): unknown; set(value: SavedWizard | undefined): Promise<void> };
   /** A modal question; resolves to the action chosen, or undefined when dismissed. */
   choose?(message: string, ...actions: string[]): Promise<string | undefined>;
@@ -413,7 +465,47 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     const draft = draftFromMarkdown(textNow, file);
     open = { id, file, text: textNow, base: hash(textNow) };
     const entry = teamFor(id);
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, versions: await versionsOf(file), ...(notice ? { notice } : {}) });
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, versions: await versionsOf(file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
+  };
+
+  /**
+   * Suggests a model for each member of a team that was just saved, from the comparisons that have been run. It never changes anything by itself: it
+   * names the members whose tested best model differs and offers to open Compare Models, which is where one click applies the setup. Silent when no
+   * comparison exists, because a suggestion without evidence is an opinion.
+   */
+  const suggestModelsFor = async (team: { members: Array<{ name: string; role?: string; model?: string }> }, id: string) => {
+    if (!deps.suggestModels) return;
+    let suggestions: Array<{ member: string; model: string; current?: string; why: string; changes: boolean }> = [];
+    try { suggestions = await deps.suggestModels(team.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) }))); } catch { return; }
+    const changes = suggestions.filter((entry) => entry.changes);
+    if (!changes.length) return;
+    const lines = changes.map((entry) => `${entry.member}: ${entry.model} (${entry.why}${entry.current ? `, now ${entry.current}` : ''})`);
+    post({ type: 'model-suggestion', id, changes, text: `The comparisons suggest a different model for ${changes.length} member${changes.length === 1 ? '' : 's'}: ${lines.join('; ')}.` });
+  };
+
+  /**
+   * The team as a shape for the page to draw (owner, 2026-11-08). Built from the text that was just read, and never allowed to break the studio: a file
+   * that does not parse as a team gets no shape, and the page falls back to the draft it already shows.
+   */
+  /**
+   * The team's knowledge graph for the network view (owner, 2026-11-08), laid out here so the page only has to draw. A team that has not learned
+   * anything yet sends an empty graph, and the page says so rather than drawing an empty frame.
+   */
+  const knowledgeOf = async (file: string) => {
+    try {
+      const slug = slugify(path.basename(file, '.md'));
+      const { knowledge, problem } = await loadKnowledge(deps.library.directory, slug);
+      const layout = layoutNetwork(knowledge);
+      return { nodes: layout.nodes, edges: layout.edges, width: layout.width, height: layout.height, coverage: gradingCoverage(knowledge), groups: nodeDetails(knowledge), ...(problem ? { problem } : {}) };
+    } catch { return undefined; }
+  };
+
+  const graphOf = (textNow: string, file: string) => {
+    try {
+      const team = parseTeam(textNow, file);
+      const graph = buildTeamGraph(team, isAbliteratedModel);
+      return { team: graph.team, roots: graph.roots, orphaned: graph.orphaned };
+    } catch { return undefined; }
   };
 
   const onWatch = async (file: string) => {
@@ -467,6 +559,58 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'refresh': await refresh(); return;
+      case 'optimise-all': {
+        // On demand, for every team at once (owner, 2026-11-08: "we can do a model optimization recommendation for all teams whenever the user wants").
+        // The whole cost is worked out and asked about ONCE, before any run, and the notice after each team shows the work moving rather than a long silence.
+        if (!deps.optimiseTeam) { post({ type: 'error', text: 'No model is available to test the teams. Set up a NEAR AI profile first.' }); return; }
+        const all = await deps.library.list(deps.root);
+        const teams = all.flatMap((entry) => entry.team ? [{ name: entry.team.name, members: entry.team.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })) }] : []);
+        if (!teams.length) { post({ type: 'notice', text: 'There are no teams to test yet.' }); return; }
+        const candidates = await deps.optimiseCandidates?.().catch(() => undefined) ?? [];
+        // Each member is tested on each candidate model, which is what the role suite plans, so the total is members x models summed over the teams.
+        const runs = candidates.length ? teams.reduce((total, team) => total + team.members.length * candidates.length, 0) : 0;
+        const label = teams.length === 1 ? `"${teams[0]!.name}"` : `all ${teams.length} teams`;
+        const breakdown = teams.map((team) => `${team.name}: ${team.members.length} member${team.members.length === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}`).join(', ');
+        // 0.4.19 review: "a few minutes" was wrong for six members and three models. The ceiling is stated, from the run count, so nobody starts this
+        // expecting minutes.
+        const ceiling = Math.max(1, Math.ceil((runs * 8) / 60));
+        const cost = runs ? `${runs} runs (${breakdown}), one at a time, up to ${ceiling} hour${ceiling === 1 ? '' : 's'} at the very worst and usually much less. ` : 'A few minutes. ';
+        const question = `Test the roles in ${label} and set each member's model? ${cost}Tested: ${candidates.length ? candidates.join(', ') : 'the models this machine is set up with'}. Costs tokens. Cancelling part-way keeps the teams already tested.`;
+        if (await choose(question, 'Run the tests', 'Skip') !== 'Run the tests') return;
+        // One controller for the whole run, so the person can cancel part-way and the teams that finished keep their results.
+        const controller = new AbortController();
+        const stop = deps.onStop?.(() => controller.abort());
+        const results: string[] = [];
+        let done = 0;
+        try {
+          for (const team of teams) {
+            if (controller.signal.aborted) break;
+            let outcome: string;
+            try {
+              const result = await deps.optimiseTeam(team.members, team.name, { signal: controller.signal, confirm: false });
+              outcome = result ? result.text : team.name + ': skipped.';
+            } catch (error) { outcome = team.name + ': ' + (error as Error).message; }
+            results.push(outcome);
+            done += 1;
+            post({ type: 'notice', text: `${done} of ${teams.length} teams tested. ${outcome}` });
+          }
+        } finally { stop?.dispose(); }
+        if (controller.signal.aborted && done < teams.length) results.push(`Cancelled after ${done} of ${teams.length} teams; the ones already tested kept their models.`);
+        post({ type: 'notice', text: results.join(' ') });
+        await sendTeam('library', open?.file ?? '', '');
+        return;
+      }
+      case 'draft-team': {
+        // One model call drafts the team from the person's own words (owner, 2026-11-08). The result goes back as a proposal the person reads first, and
+        // only becomes a team when they accept it, so nothing is saved on the strength of one answer.
+        if (!deps.draftTeam) { post({ type: 'error', text: 'No model is available to draft a team. Set up a NEAR AI profile, or fill the team in by hand.' }); return; }
+        post({ type: 'notice', text: 'Drafting the team...' });
+        try {
+          const drafted = await deps.draftTeam({ idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth ? { depth: message.depth } : {}) });
+          post({ type: 'team-proposal', proposal: drafted.proposal, draft: proposalDraft(drafted.proposal), text: proposalText(drafted.proposal), problems: drafted.problems });
+        } catch (error) { post({ type: 'error', text: `The team could not be drafted: ${(error as Error).message}` }); }
+        return;
+      }
       case 'review': {
         if (!input || !context) await load();
         const original = message.id && open?.id === message.id ? open.text : undefined;
@@ -524,6 +668,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'discard-kept': await deps.kept?.set(undefined); return;
       case 'create': {
         if (!input || !context) await load();
+        // Whether this save ADDED a team, which decides whether the role tests run afterwards.
+        let created = false;
         const review = reviewDraft(message.draft, undefined, input!, context!);
         if (review.errors.length) { post({ type: 'save-failed', errors: review.errors }); return; }
         let file: string;
@@ -544,10 +690,23 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         } else {
           file = await deps.library.create(message.draft.name.trim(), review.markdown);
           id = `user:${slugify(path.basename(file, '.md'))}`;
+          created = true;
         }
         await deps.drafts.set(undefined);
         await refreshLibrary();
         await sendTeam(id, file, message.target === 'project' ? `Saved the project team. Run it with /team:project <task>.${message.projectType ? ' AGENTS.md now has this project type\'s guidance.' : ''}` : `Saved "${message.draft.name.trim()}". Run it with /team:${path.basename(file, '.md')} <task>.`);
+        // A team that was just saved is checked against the model results, so a new member does not silently keep a default model the tests disagree with.
+        const saved = draftFromMarkdown(await readFile(file, 'utf8'), file);
+        await suggestModelsFor(saved, id);
+        // The final step of ADDING a team: test each member's role and set its model from what the test found. Only on create, because this spends minutes
+        // and tokens: firing it on every edit-and-save would charge the person again for a team that was already measured (0.4.19 review). An existing team
+        // is optimised on demand with "Optimise all teams".
+        if (created && deps.optimiseTeam && saved.members.length) {
+          try {
+            const result = await deps.optimiseTeam(saved.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })), saved.name);
+            if (result) { post({ type: 'notice', text: result.text }); await sendTeam(id, file); }
+          } catch (error) { post({ type: 'error', text: `The role tests could not run: ${(error as Error).message}` }); }
+        }
         return;
       }
       case 'save-draft': {
@@ -703,14 +862,15 @@ function displayPath(file: string, root: string | undefined): string {
 export type { TeamDefinition };
 
 /** The page's HTML: one nonce script and two stylesheets (the shared base, then its own); everything else is rendered by the script with textContent. */
-export function teamStudioHtml(options: { cspSource: string; nonce: string; script: string; style: string; base: string; probe?: string }): string {
+export function teamStudioHtml(options: { cspSource: string; nonce: string; script: string; style: string; network: string; base: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">
-<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><title>NEAR AI Team Studio</title></head><body>
+<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><link rel="stylesheet" href="${options.network}"><title>NEAR AI Team Studio</title></head><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="title"><h1 id="title">Team Studio</h1><p id="subtitle" class="hint">Build and manage agent teams. Each team is a Markdown file; the studio reads and writes it for you.</p></div><nav id="crumbs" aria-label="Breadcrumb"></nav></header>
 <div id="announce" class="visually-hidden" aria-live="polite" role="status"></div>
 <div id="banner" class="banner" hidden role="alert"></div>
+<div id="suggestion" class="suggestion" hidden></div>
 <main id="main" tabindex="-1"><p class="hint">Loading…</p></main>
 ${options.probe ? `<script nonce="${options.nonce}" src="${options.probe}"></script>` : ''}<script nonce="${options.nonce}" src="${options.script}"></script></body></html>`;
 }

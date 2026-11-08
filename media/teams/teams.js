@@ -13,7 +13,12 @@
     error: 'M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm2.8 8.7l-1.1 1.1L8 9.1l-1.7 1.7-1.1-1.1L6.9 8 5.2 6.3l1.1-1.1L8 6.9l1.7-1.7 1.1 1.1L9.1 8z'
   };
   const STEPS = ['Purpose', 'Members', 'Models', 'Tools & permissions', 'Instructions & review'];
-  const TABS = ['Purpose', 'Members', 'Models', 'Tools', 'Instructions', 'Markdown & checks', 'History'];
+  const TABS = ['Purpose', 'Members', 'Models', 'Tools', 'Instructions', 'Team shape', 'Knowledge', 'Markdown & checks', 'History'];
+  // Named indexes, because a tab inserted in the middle silently moved every number after it (adding "Team shape" turned History from 6 into 7).
+  const TAB_SHAPE = TABS.indexOf('Team shape');
+  const TAB_KNOWLEDGE = TABS.indexOf('Knowledge');
+  const TAB_CHECKS = TABS.indexOf('Markdown & checks');
+  const TAB_HISTORY = TABS.indexOf('History');
   const CAPABILITY_ORDER = ['read', 'plan', 'edit', 'shell', 'network', 'generate', 'git', 'publish'];
   const CAPABILITY_LABEL = { read: 'Read', plan: 'Plan and coordinate', edit: 'Edit files', shell: 'Run commands', network: 'Network', generate: 'Generate media', git: 'Git', publish: 'Publish' };
   const STATUS_CLASS = { runs: 'ok', asks: 'ask', 'auto-checked': 'checked', off: 'off', stopped: 'stopped' };
@@ -128,11 +133,23 @@
   }
   const memberLabel = (member, index) => (member.name || 'member ' + (index + 1)) + (member.role ? ' (' + member.role + ')' : '');
 
-  function startWizard(target, resume) {
+  // The saved team's shape and knowledge, held here because a new team must clear them (see startWizard). Declared before anything that assigns them.
+  let currentGraph = null;
+  let currentKnowledge = null;
+  let selectedNode = null;
+  let openCard = null;
+
+  function startWizard(target, resume, fromProposal) {
     hideBanner();
+    // A new team has no shape or knowledge yet, so the previous team's are cleared here. Without this, "New team" showed the last team's hierarchy and
+    // graph in its tabs (0.4.19 review).
+    currentGraph = null;
+    currentKnowledge = null;
+    selectedNode = null;
+    openCard = null;
     work = resume
       ? { mode: 'wizard', target: resume.target, step: resume.step, maxStep: resume.step, draft: clone(resume.draft), startingPoint: resume.startingPoint || 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null }
-      : { mode: 'wizard', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: { name: target === 'project' ? 'Project team' : '', description: '', members: [] }, startingPoint: 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null };
+      : { mode: 'wizard', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: fromProposal ? clone(fromProposal.draft || fallbackDraft(fromProposal.proposal || fromProposal)) : { name: target === 'project' ? 'Project team' : '', description: '', members: [] }, startingPoint: 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null };
     work.clean = JSON.stringify(work.draft);
     render();
     requestReview();
@@ -181,11 +198,104 @@
   function focusMain() { const main = $('main'); if (main && main.focus) main.focus(); }
 
   // ---------- library ----------
+  // ---------- the AI start ----------
+  // Owner, 2026-11-08: "start with the chat asking what type of task or output the user wants the team to be able to provide", then draft the team with a
+  // name, members, roles, suggested models, what each produces, and the final outputs and formats. The proposal is shown first and becomes a team only
+  // when the person accepts it, so one answer is never saved on trust.
+  let proposal = null;
+  let drafting = false;
+  // What the person typed is kept while they look at the proposal, so "Start over" does not make them write it again.
+  let lastIdea = '';
+  let lastFormat = '';
+  let lastDepth = 'thorough';
+
+  // The host computes the draft from the proposal (src/agent/teamBuilder.ts) and sends it with the proposal, so the two cannot drift. This is only a
+  // fallback for an older host that does not send it: the page must never throw, even then.
+  function fallbackDraft(from) {
+    return {
+      name: from.name || 'New team',
+      description: `${from.mission || ''} ${from.description || ''}`.trim().slice(0, 400),
+      members: (from.members || []).map((member, index) => ({
+        name: member.name || 'member-' + (index + 1), role: member.role || '', model: member.model || 'standard', tools: null,
+        instructions: member.instructions || ''
+      }))
+    };
+  }
+
+  function askSection() {
+    const box = el('section', 'ask');
+    if (drafting) { box.append(el('p', 'hint', 'Drafting the team from what you wrote...')); return box; }
+    box.append(el('h2', '', 'What should this team be able to produce?'));
+    box.append(el('p', 'hint', 'Describe it in your own words. The team is drafted from this: its name, its members and their roles, what each one hands back, and the outputs you get.'));
+    const idea = el('textarea', 'ask-idea', '');
+    idea.id = 'ask-idea'; idea.rows = 3;
+    idea.value = lastIdea;
+    idea.setAttribute('aria-label', 'What should this team be able to produce');
+    idea.setAttribute('placeholder', 'e.g. A team that researches a market and writes a short brief with a citation for every claim');
+    idea.addEventListener('input', () => { lastIdea = idea.value; });
+    box.append(idea);
+    const details = el('div', 'ask-details');
+    const format = input(lastFormat, (value) => { lastFormat = value; }, { id: 'ask-format', placeholder: 'Output format, e.g. Markdown brief with citations', maxlength: '300', autocomplete: 'off' });
+    format.setAttribute('aria-label', 'The output format you want');
+    const depth = el('select'); depth.setAttribute('aria-label', 'How deep the work should go');
+    depth.append(new Option('Thorough: sources checked', 'thorough', false, lastDepth !== 'quick'), new Option('Quick: a first useful answer', 'quick', false, lastDepth === 'quick'));
+    depth.addEventListener('change', () => { lastDepth = depth.value; });
+    details.append(field('Output format (optional)', format), field('Depth', depth));
+    box.append(details);
+    const actions = el('div', 'ask-actions');
+    actions.append(button('Draft the team', () => {
+      if (!idea.value.trim()) { announce('Say what the team should produce first.'); idea.focus(); return; }
+      drafting = true; render();
+      vscode.postMessage({ type: 'draft-team', idea: idea.value, ...(lastFormat.trim() ? { outputFormat: lastFormat } : {}), depth: lastDepth });
+    }, { primary: true, id: 'draft-team' }), el('span', 'hint', 'One model call. You see the proposal before anything is saved.'));
+    box.append(actions);
+    return box;
+  }
+
+  function proposalSection() {
+    const box = el('section', 'proposal');
+    box.append(el('h2', '', proposal.proposal.name || 'Proposed team'));
+    box.append(el('p', 'mission', proposal.proposal.mission));
+    box.append(el('p', '', proposal.proposal.description));
+    const members = el('table', 'proposal-members');
+    const head = el('thead'); const headRow = el('tr');
+    for (const label of ['Member', 'Role', 'Model', 'Produces']) headRow.append(el('th', '', label));
+    head.append(headRow); members.append(head);
+    const body = el('tbody');
+    for (const member of proposal.proposal.members) {
+      const row = el('tr');
+      row.append(el('td', '', member.name), el('td', '', member.role), el('td', '', member.model), el('td', '', member.produces));
+      body.append(row);
+    }
+    members.append(body);
+    box.append(members);
+    if (proposal.proposal.outputs.length) {
+      box.append(el('h3', '', 'You get'));
+      const list = el('ul', 'proposal-outputs');
+      for (const output of proposal.proposal.outputs) list.append(el('li', '', output.name + ': ' + output.format + ' (from ' + output.from + ')'));
+      box.append(list);
+    }
+    if (proposal.problems && proposal.problems.length) {
+      const notes = el('ul', 'issues');
+      for (const problem of proposal.problems) notes.append(issueLine({ message: problem }, 'warning'));
+      box.append(el('p', 'hint', 'The draft was repaired in these places:'), notes);
+    }
+    const actions = el('div', 'ask-actions');
+    actions.append(
+      button('Use this team', () => { const from = proposal; proposal = null; startWizard('user', null, from); }, { primary: true }),
+      button('Start over', () => { proposal = null; drafting = false; render(); }, { link: true })
+    );
+    box.append(actions);
+    return box;
+  }
+
   function renderLibrary(root) {
     const bar = el('div', 'toolbar');
     const heading = el('h2', '', 'Teams'); heading.id = 'library-title';
     const actions = el('div', 'actions');
     actions.append(button('New team', () => startWizard('user'), { primary: true, icon: 'plus' }));
+    // On demand, for every team at once: test each and set its member models from what the tests found.
+    actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. This takes a few minutes.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found' }));
     if (ctx && ctx.hasProject) actions.append(button(lib.teams.some((team) => team.kind === 'project') ? 'Rebuild project team' : 'Set up project team', () => startWizard('project')));
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' })), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true }));
     bar.append(heading, actions);
@@ -197,6 +307,8 @@
       resume.append(button('Resume', () => startWizard(savedDraft.target, savedDraft), { primary: true }), button('Discard draft', () => { vscode.postMessage({ type: 'discard-draft' }); savedDraft = null; render(); }, { link: true }));
       root.append(resume);
     }
+    root.append(askSection());
+    if (proposal) root.append(proposalSection());
 
     if (!lib.teams.length) {
       const empty = el('div', 'empty');
@@ -274,6 +386,20 @@
   }
 
   // ---------- sections shared by the wizard and the editor ----------
+  // The team as a picture: who answers to whom, and a card for each member. It reads the saved team, not the unsaved draft, and says so, so a card
+  // never claims to describe a change that has not been saved.
+  function sectionShape(root) {
+    root.append(el('p', 'hint', 'The saved team, as it is written. Click a member for its card: what it is for, what it can do, and what to expect from it.'));
+    const lax = el('div', 'graph'); lax.id = 'graph';
+    const card = el('section', 'member-card');
+    card.id = 'member-card'; openCard = null;
+    card.setAttribute('aria-live', 'polite');
+    root.append(lax, card);
+    renderGraph(lax);
+    renderCard();
+    if (!currentGraph) root.append(el('p', 'hint', 'This team has no saved shape yet. Save it, then come back.'), el('p', 'hint', 'A card shows what a member is for, what it can do from its tools, and what it reports back.'));
+  }
+
   function sectionPurpose(root) {
     const draft = work.draft;
     root.append(field('Team name', input(draft.name, (value) => { draft.name = value.replace(/[\r\n]+/g, ' '); renderHeaderName(); changed(false); }, { id: 'f-name', maxlength: '80', autocomplete: 'off' }), work.mode === 'editor' ? 'Renaming keeps the file and its /team: command.' : 'Shown in the library and when the team runs.'));
@@ -593,6 +719,20 @@
   const slots = [];
   function reviewSlot(parent, kind, index, fields) { const node = el('div', 'slot'); node.setAttribute('aria-live', 'polite'); parent.append(node); slots.push({ node, kind, index, fields: fields || [] }); return node; }
 
+  /**
+   * The wizard step a problem lives on, so the count can take the person to it. A problem with a member belongs to the step that owns that field; one
+   * about the team itself belongs to Purpose.
+   */
+  function stepFor(issue) {
+    if (!issue) return undefined;
+    if (issue.member === undefined || issue.member === null) return (issue.field === 'name' || issue.field === 'description') ? 0 : 1;
+    if (issue.field === 'name' || issue.field === 'role') return 1;
+    if (issue.field === 'model') return 2;
+    if (issue.field === 'tools') return 3;
+    if (issue.field === 'instructions') return 4;
+    return 1;
+  }
+
   function issueLine(issue, level) {
     const line = el('li', level);
     line.append(icon(level === 'error' ? 'error' : 'warn'), document.createTextNode(' ' + issue.message));
@@ -638,8 +778,22 @@
     if (preview) preview.textContent = review ? review.markdown : '';
     const saveButton = $('save');
     if (saveButton) saveButton.disabled = Boolean(review && review.errors.length) || (work && work.mode === 'editor' && !isDirty());
+    // 0.4.19 (owner, 2026-11-08): "there's no indication of what that thing is that needs fixing". The footer used to say only "1 to fix", and the
+    // problem usually lives on a step the person is not looking at. It now names each problem and goes to the step that holds it.
     const errorCount = $('error-count');
-    if (errorCount) errorCount.textContent = review && review.errors.length ? review.errors.length + ' to fix' : '';
+    if (errorCount) {
+      errorCount.replaceChildren();
+      if (review && review.errors.length) {
+        const go = button(review.errors.length + ' to fix', () => { const step = stepFor(review.errors[0]); if (step !== undefined) goStep(step); }, { link: true, label: 'Go to the first problem that is stopping this team from being saved' });
+        errorCount.append(go);
+        // Show the first two and count the REST from what was actually shown: the old loop broke after one and then subtracted two, so it said "and 1 more"
+        // while two were hidden (0.4.19 review).
+        const shown = review.errors.slice(0, 2);
+        for (const issue of shown) errorCount.append(el('span', 'error-count-text', ' ' + issue.message));
+        const hidden = review.errors.length - shown.length;
+        if (hidden > 0) errorCount.append(el('span', 'hint', ` and ${hidden} more`));
+      }
+    }
   }
 
   // ---------- the wizard ----------
@@ -710,15 +864,16 @@
     });
     root.append(tabs);
     const panel = el('section', 'panel'); panel.id = 'tabpanel'; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', 'tab-' + work.tab);
-    [sectionPurpose, sectionMembers, sectionModels, sectionTools, sectionInstructions, (node) => sectionChecks(node, true), sectionHistory][work.tab](panel);
-    if (work.tab !== 5) { const mini = el('div', 'mini-checks'); panel.append(mini); sectionChecks(mini, false); }
+    [sectionPurpose, sectionMembers, sectionModels, sectionTools, sectionInstructions, sectionShape, sectionKnowledge, (node) => sectionChecks(node, true), sectionHistory][work.tab](panel);
+    // The mini checks sit under every tab except the checks tab itself and the shape, which is a picture rather than a form.
+    if (work.tab !== TAB_CHECKS && work.tab !== TAB_SHAPE && work.tab !== TAB_KNOWLEDGE) { const mini = el('div', 'mini-checks'); panel.append(mini); sectionChecks(mini, false); }
     root.append(panel);
     updateDirty();
   }
 
   function selectTab(index) {
     work.tab = index;
-    if (index === 6) vscode.postMessage({ type: 'versions', id: work.id });
+    if (index === TAB_HISTORY) vscode.postMessage({ type: 'versions', id: work.id });
     render();
   }
 
@@ -729,6 +884,141 @@
     if (saveButton && work && work.mode === 'editor') saveButton.disabled = !isDirty() || Boolean(work.review && work.review.errors.length);
     const revert = $('revert');
     if (revert) revert.disabled = !isDirty();
+  }
+
+  // ---------- the knowledge graph as a network ----------
+  // Owner, 2026-11-08: "visualize its context graph in an interactive network graph where one can select nodes and see suitable animations depicting all
+  // its relationships, additional detail cards, admiralty of sources". The layout is computed by the host, so the same graph always draws the same way.
+
+  function renderNetwork(root) {
+    root.replaceChildren();
+    const knowledge = currentKnowledge;
+    if (!knowledge || !knowledge.nodes || !knowledge.nodes.length) { root.hidden = true; return; }
+    root.hidden = false;
+    const head = el('div', 'network-head');
+    head.append(el('strong', '', 'What this team knows'), el('span', 'hint', ` ${knowledge.nodes.length} actors, ${knowledge.edges.length} relations, ${knowledge.coverage.gradedNodes} graded actors and ${knowledge.coverage.gradedEdges} graded relations.`));
+    root.append(head);
+    if (knowledge.problem) root.append(el('p', 'hint', knowledge.problem));
+    const svgNs = 'http://www.w3.org/2000/svg';
+    const make = (name, attrs) => { const node = document.createElementNS(svgNs, name); for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, String(value)); return node; };
+    const chart = make('svg', { viewBox: `0 0 ${knowledge.width} ${knowledge.height}`, width: '100%', height: knowledge.height, role: 'img', 'aria-label': 'Network of the actors this team knows and how they relate' });
+    const positions = new Map(knowledge.nodes.map((node) => [node.id, node]));
+    const touched = selectedNode ? highlightSet(knowledge, selectedNode) : null;
+    const order = selectedNode ? highlightOrderOf(knowledge, selectedNode) : [];
+    const delayFor = new Map(order.map((entry) => [entry.edgeId, entry.delayMs]));
+    // Relations first, so the nodes sit on top of their lines.
+    for (const edge of knowledge.edges) {
+      const from = positions.get(edge.from);
+      const to = positions.get(edge.to);
+      if (!from || !to) continue;
+      const dim = touched && !touched.edges.has(edge.id);
+      const line = make('line', { x1: from.x, y1: from.y, x2: to.x, y2: to.y, class: 'net-edge' + (dim ? ' dim' : '') + (edge.neutral ? ' unmeasured' : edge.positive ? ' positive' : ' negative'), 'stroke-width': edge.width });
+      if (selectedNode && touched && touched.edges.has(edge.id)) {
+        // The relations of the selected actor are drawn on in sequence, strongest first, so the eye follows strength.
+        line.setAttribute('class', 'net-edge highlighted' + (edge.positive ? ' positive' : ' negative'));
+        line.style.animationDelay = (delayFor.get(edge.id) || 0) + 'ms';
+      }
+      line.setAttribute('aria-hidden', 'true');
+      chart.append(line);
+      if (selectedNode && touched && touched.edges.has(edge.id)) {
+        const label = make('text', { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 - 4, class: 'net-edge-label', 'text-anchor': 'middle' });
+        label.textContent = edge.kind + (edge.tension === null ? '' : ' ' + edge.tension.toFixed(1));
+        chart.append(label);
+      }
+    }
+    for (const node of knowledge.nodes) {
+      const dim = touched && !touched.nodes.has(node.id);
+      const circle = make('circle', { cx: node.x, cy: node.y, r: node.radius, class: 'net-node' + (dim ? ' dim' : '') + (node.id === selectedNode ? ' selected' : ''), tabindex: '0', role: 'button', 'aria-label': node.label + ', ' + node.degree + ' relations: open its card' });
+      circle.addEventListener('click', () => { selectedNode = selectedNode === node.id ? null : node.id; renderNetwork(root); });
+      chart.append(circle);
+      const label = make('text', { x: node.x, y: node.y + node.radius + 12, class: 'net-label' + (dim ? ' dim' : ''), 'text-anchor': 'middle' });
+      label.textContent = node.label;
+      chart.append(label);
+    }
+    root.append(chart);
+    const card = el('section', 'net-card');
+    card.id = 'net-card';
+    card.setAttribute('aria-live', 'polite');
+    root.append(card);
+    renderNodeCard();
+  }
+
+  function highlightSet(knowledge, id) {
+    const nodes = new Set([id]);
+    const edges = new Set();
+    for (const edge of knowledge.edges) {
+      if (edge.from === id) { nodes.add(edge.to); edges.add(edge.id); }
+      else if (edge.to === id) { nodes.add(edge.from); edges.add(edge.id); }
+    }
+    return { nodes, edges };
+  }
+
+  function highlightOrderOf(knowledge, id) {
+    return knowledge.edges.filter((edge) => edge.from === id || edge.to === id)
+      .map((edge) => ({ edgeId: edge.id, tension: Math.abs(edge.tension === null ? 0 : edge.tension) }))
+      .sort((a, b) => b.tension - a.tension || a.edgeId.localeCompare(b.edgeId))
+      .map((entry, index) => ({ edgeId: entry.edgeId, delayMs: index * 60 }));
+  }
+
+  /** Admiralty as a person reads it: the source's reliability and the information's credibility, spelled out. */
+  function admiralty(grading) {
+    const reliability = { A: 'completely reliable', B: 'usually reliable', C: 'fairly reliable', D: 'not usually reliable', E: 'unreliable', F: 'cannot be judged' }[grading.reliability] || 'unknown source';
+    const credibility = { 1: 'confirmed', 2: 'probably true', 3: 'possibly true', 4: 'doubtful', 5: 'improbable', 6: 'cannot be judged' }[grading.credibility] || 'unknown credibility';
+    return grading.reliability + grading.credibility + ' (' + reliability + ', ' + credibility + ')';
+  }
+
+  // The card for the selected actor: what it does, what is known with where it came from and how reliable that is, and every relation.
+  function renderNodeCard() {
+    const card = $('net-card');
+    if (!card) return;
+    card.replaceChildren();
+    const knowledge = currentKnowledge;
+    if (!knowledge || !selectedNode || !knowledge.groups || !knowledge.groups[selectedNode]) { card.hidden = true; return; }
+    card.hidden = false;
+    const node = knowledge.nodes.find((entry) => entry.id === selectedNode);
+    const detail = knowledge.groups[selectedNode];
+    card.append(el('h3', '', node.label));
+    card.append(el('p', 'meta', `${node.kind}, seen ${detail.mentions} time${detail.mentions === 1 ? '' : 's'}, from ${detail.origin}${detail.grading ? `; evidence ${admiralty(detail.grading)}` : '; evidence not graded'}`));
+    if (detail.functions.length) {
+      const list = el('ul', 'net-functions');
+      for (const fn of detail.functions) list.append(el('li', '', fn));
+      card.append(el('h4', '', 'What it does'), list);
+    }
+    if (detail.facts.length) {
+      card.append(el('h4', '', 'What is known'));
+      const list = el('ul', 'net-facts');
+      for (const fact of detail.facts) {
+        const item = el('li');
+        item.append(document.createTextNode(fact.text + ' '));
+        if (fact.source) item.append(el('code', 'net-source', fact.source));
+        if (fact.grading) item.append(el('span', 'net-grade', ' ' + admiralty(fact.grading)));
+        list.append(item);
+      }
+      card.append(list);
+    }
+    if (detail.relations.length) {
+      card.append(el('h4', '', 'Relations'));
+      const list = el('ul', 'net-relations');
+      for (const relation of detail.relations) {
+        const other = knowledge.nodes.find((entry) => entry.id === relation.other);
+        const item = el('li');
+        const strength = relation.tension === null ? 'not measured' : (relation.tension > 0 ? '+' : '') + relation.tension.toFixed(1);
+        item.append(el('span', 'net-relation', (relation.direction === 'out' ? '\u2192 ' : '\u2190 ') + (other ? other.label : '?') + ' (' + relation.kind + ', tension ' + strength + ')' + (relation.basis ? ': ' + relation.basis : '')));
+        if (relation.grading) item.append(el('span', 'net-grade', ' ' + admiralty(relation.grading)));
+        list.append(item);
+      }
+      card.append(list);
+    }
+    card.append(button('Close', () => { selectedNode = null; renderNetwork($('knowledge')); }, { link: true }));
+  }
+
+  function sectionKnowledge(root) {
+    root.append(el('p', 'hint', 'What this team has learned, shared by all its members and kept between runs. Select an actor to see what is known about it, where that came from, and how strongly it relates to the rest.'));
+    const network = el('div', 'network');
+    network.id = 'knowledge';
+    root.append(network);
+    renderNetwork(network);
+    if (!currentKnowledge || !currentKnowledge.nodes.length) root.append(el('p', 'hint', 'Nothing learned yet. A team adds to this graph as it researches and as people tell it things.'));
   }
 
   function save() {
@@ -746,6 +1036,83 @@
   // ---------- render ----------
   let pendingFocus = null;
   function focusLater(id) { pendingFocus = id; }
+
+  // ---------- the team as a shape ----------
+  // Owner, 2026-11-08: "teams represented graphically with ability to click on a member and get a member card detailing their capabilities and
+  // expectations. Should show hierarchy if one exists." Drawn as nested boxes rather than an abstract diagram: the nesting IS the hierarchy, and every
+  // member is a real button, so it works with Tab and Enter as well as with a click.
+
+  function renderGraph(root) {
+    root.replaceChildren();
+    const graph = currentGraph;
+    if (!graph || !graph.roots || !graph.roots.length) { root.hidden = true; return; }
+    root.hidden = false;
+    root.append(el('strong', '', 'The team, and who answers to whom'));
+    const tree = el('ul', 'graph-tree');
+    const node = (member) => {
+      const item = el('li', 'graph-node');
+      const button = el('button', 'graph-member');
+      button.type = 'button';
+      button.setAttribute('aria-expanded', String(openCard === member.name));
+      button.setAttribute('aria-label', `${member.name}${member.role ? ', ' + member.role : ''}${member.children && member.children.length ? ', leads ' + member.children.length : ''}: open its card`);
+      button.append(el('strong', '', member.name));
+      if (member.role && member.role !== member.name) button.append(el('span', 'graph-role', member.role));
+      if (member.card && member.card.model) button.append(el('code', 'graph-model', member.card.model.split('/').pop()));
+      if (member.card && member.card.abliterated) button.append(badge('abliterated'));
+      button.addEventListener('click', () => { openCard = openCard === member.name ? null : member.name; renderGraph(root); renderCard(); const again = root.querySelector('.graph-member[aria-expanded="true"]'); if (again) again.focus(); });
+      item.append(button);
+      if (member.children && member.children.length) {
+        const children = el('ul', 'graph-children');
+        for (const child of member.children) children.append(node(child));
+        item.append(children);
+      }
+      return item;
+    };
+    for (const member of graph.roots) tree.append(node(member));
+    root.append(tree);
+    if (graph.orphaned && graph.orphaned.length) {
+      root.append(el('p', 'hint', 'Report to someone who is not on the team, so they are drawn at the top: ' + graph.orphaned.map((entry) => entry.name + (entry.reportsTo ? ' (reports to ' + entry.reportsTo + ')' : '')).join(', ') + '.'));
+    }
+  }
+
+  function renderCard() {
+    const card = $('member-card');
+    if (!card) return;
+    card.replaceChildren();
+    const graph = currentGraph;
+    const member = graph && openCard ? findMember(graph.roots, openCard) : null;
+    if (!member) { card.hidden = true; return; }
+    card.hidden = false;
+    const title = el('h3', '', member.name);
+    if (member.role && member.role !== member.name) title.append(el('span', 'hint', ' · ' + member.role));
+    card.append(title);
+    const info = member.card || {};
+    if (info.model) card.append(el('p', 'meta', 'Model: ' + info.model + (info.abliterated ? ' (does not refuse)' : '')));
+    if (info.reportsTo) card.append(el('p', 'meta', 'Reports to: ' + info.reportsTo));
+    if (info.leads && info.leads.length) card.append(el('p', 'meta', 'Leads: ' + info.leads.join(', ')));
+    if (info.purpose) { card.append(el('h4', '', 'What it is for'), el('p', '', info.purpose)); }
+    if (info.capabilities && info.capabilities.length) {
+      const list = el('ul', 'graph-capabilities');
+      for (const capability of info.capabilities) list.append(el('li', '', capability));
+      card.append(el('h4', '', 'What it can do'), list);
+    }
+    if (info.tools && info.tools.length) card.append(el('p', 'hint', 'Tools: ' + info.tools.join(', ')));
+    if (info.expectations && info.expectations.length) {
+      card.append(el('h4', '', 'What to expect from it'));
+      for (const part of info.expectations) card.append(el('p', '', part));
+    }
+    const close = button('Close', () => { openCard = null; renderGraph($('graph')); renderCard(); }, { link: true });
+    card.append(close);
+  }
+
+  function findMember(nodes, name) {
+    for (const node of nodes || []) {
+      if (node.name === name) return node;
+      const found = findMember(node.children, name);
+      if (found) return found;
+    }
+    return null;
+  }
 
   function render() {
     const active = document.activeElement && document.activeElement.id;
@@ -807,6 +1174,11 @@
         startWizard(message.target);
         break;
       case 'team':
+        // The shape and knowledge tabs read these, so they are set BEFORE the editor renders: assigned after, the first paint of either tab could show
+        // the previous team's graph (0.4.19 review).
+        currentGraph = message.graph || null;
+        currentKnowledge = message.knowledge || null;
+        selectedNode = null;
         openEditor(message, true);
         if (keptEdit && keptEdit.id === message.id) {
           // Reopening a team whose changes were kept: they come back as unsaved changes.
@@ -825,6 +1197,34 @@
         savedDraft = null;
         render();
         requestReview();
+        focusMain();
+        break;
+      // A saved team's members checked against the comparisons (owner, 2026-11-08). The host used to post this with no handler here, so the suggestion was
+      // dropped silently; it now shows above the team with the members it would change and a way to act on it.
+      case 'model-suggestion': {
+        const changes = Array.isArray(message.changes) ? message.changes : [];
+        const box = $('suggestion');
+        if (box) {
+          box.replaceChildren();
+          box.hidden = !changes.length;
+          if (changes.length) {
+            box.append(el('strong', '', 'The comparisons suggest a different model'));
+            const list = el('ul', 'issues');
+            for (const entry of changes) list.append(el('li', '', `${entry.member}: ${entry.model}${entry.current ? ' (now ' + entry.current + ')' : ''}${entry.why ? ' — ' + entry.why : ''}`));
+            // 0.4.19 review: this was labelled "Review in Compare Models" but posted `optimise-all`, which RUNS role tests for every team and rewrites their
+            // files. It now says what it does, and the suggestion itself is only advice until the person clicks it.
+            box.append(list, button('Test every team and set the models', () => vscode.postMessage({ type: 'optimise-all' }), { link: true, label: 'Run the role tests for EVERY team, not only this one, and set each member model from the result' }));
+          }
+        }
+        if (message.text) { showBanner(message.text, 'info'); announce(message.text); }
+        break;
+      }
+      case 'team-proposal':
+        drafting = false;
+        proposal = { proposal: message.proposal, draft: message.draft || null, problems: message.problems || [] };
+        if (!work) render();
+        else { work = null; render(); }
+        announce('The team has been drafted. Review it, then use it or start over.');
         focusMain();
         break;
       case 'review':
@@ -880,6 +1280,9 @@
         break;
       case 'error':
         showBanner(message.text, 'error');
+        // A failed draft leaves the ask box replaced by "Drafting the team..." with no way back, because only team-proposal cleared this: clear it and
+        // draw the box again so the person can retry or change what they wrote.
+        if (drafting) { drafting = false; if (!work) render(); }
         break;
     }
   });

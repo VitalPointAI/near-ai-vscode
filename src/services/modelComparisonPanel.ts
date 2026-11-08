@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
-import { estimateComparisonCost, latestResults, planComparison, reusedRows, runIdFor, savedModel, type SavedRun } from '../benchmark/results';
+import { estimateComparisonCost, latestResults, performanceTrend, planComparison, reusedRows, runIdFor, savedModel, type SavedRun } from '../benchmark/results';
 import { runComparison } from '../benchmark/runner';
 import { ComparisonStore } from '../benchmark/store';
 import { loadBenchmarkTasks, tasksFor, type BenchmarkTask } from '../benchmark/tasks';
@@ -12,7 +12,7 @@ import { spendAccountOf } from './agentSession';
 import type { AuthService } from './auth';
 import { providerErrorMessage } from './chatBridge';
 import { isEmergencyStopped, onDidChangeEmergencyStop } from './emergencyStop';
-import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
+import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, historyEntries, leaderboardRows, recommendationView, retestView, parseComparisonMessage, reportView, selectionProblem, taskSetsView, type PageState, type Selection } from './modelComparisonPage';
 import { privacyWarning, roleOptions, roleUpdate, type RoleOption } from './modelRoles';
 import type { ModelInfo, UsageMetadata } from './nearAiClient';
 import { activeProvider, clientFor, type ActiveProvider } from './providerCache';
@@ -34,7 +34,11 @@ let post: (message: Record<string, unknown>) => void = () => undefined;
 /** A comparison keeps running when the tab is closed; reopening the tab shows it. */
 let running: { runId: string; abort: AbortController; saved: SavedRun; done: number; total: number; current?: { model: string; task: string; run: number } } | undefined;
 let tasksLoaded: Promise<BenchmarkTask[]> | undefined;
-const undo = new Map<string, { setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }>();
+/**
+ * One undo record per applied setting. "Apply all" changes several, so the map holds a LIST: a single role writes a list of one, and undo restores every
+ * entry in reverse order (0.4.19 review: the multi-entry shape was stored under a single-entry type, so Apply all could not be undone at all).
+ */
+const undo = new Map<string, Array<{ setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }>>();
 
 const storeFor = (context: vscode.ExtensionContext) => new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals'));
 const benchmarkTasks = () => (tasksLoaded ??= loadBenchmarkTasks().catch((error: unknown) => { tasksLoaded = undefined; throw error; }));
@@ -55,11 +59,13 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
   const teeOnly = settings.privacyMode === 'tee-only';
   const catalog = catalogEntries(models, roles, teeOnly);
   const [tasks, runs] = await Promise.all([benchmarkTasks(), storeFor(context).list()]);
+  const leaderboard = leaderboardRows(runs, tasks, models, roles, Date.now());
   return {
     active, models, tasks, runs, roles,
     state: {
-      leaderboard: leaderboardRows(runs, tasks, models, roles, Date.now()), catalog, selected: defaultSelection(roles, catalog), roles,
-      taskSets: taskSetsView(tasks), history: historyEntries(runs), ...(running ? { running: { runId: running.runId } } : {}), teeOnly, ...(problem ? { problem } : {})
+      leaderboard, catalog, selected: defaultSelection(roles, catalog), roles,
+      taskSets: taskSetsView(tasks), history: historyEntries(runs), retest: retestView(leaderboard, models), recommended: recommendationView(leaderboard, roles), trend: performanceTrend(runs),
+      ...(running ? { running: { runId: running.runId } } : {}), teeOnly, ...(problem ? { problem } : {})
     }
   };
 }
@@ -112,6 +118,7 @@ export function openModelComparison(context: vscode.ExtensionContext, auth: Auth
           }
           case 'export': await exportRun(context, message.id); break;
           case 'apply-role': await applyRole(context, auth, message.model, message.role); break;
+          case 'apply-recommended': await applyRecommended(context, auth); break;
           case 'undo-role': await undoRole(message.token); break;
         }
       } catch (error) {
@@ -259,15 +266,69 @@ async function applyRole(context: vscode.ExtensionContext, auth: AuthService, mo
   const update = roleUpdate(option, model, readRoleModels());
   await configuration.update(update.setting, update.value, target);
   const token = randomBytes(8).toString('hex');
-  undo.set(token, { setting: update.setting, previous, target, label: option.label });
+  undo.set(token, [{ setting: update.setting, previous, target, label: option.label }]);
   const warning = privacyWarning(entry.privacy, option);
   post({ type: 'role-applied', token, text: `${option.label} now uses ${model}${inWorkspace ? ' in this workspace' : ''}.`, ...(warning ? { warning } : {}) });
 }
 
+/**
+ * Applies the recommended setup in one action (owner, 2026-11-07: "implementable by the user confirming with a button which changes all the models
+ * appropriately"). Every tier and every agent role whose best model differs is written, one setting each, to the same target a single role would use; the
+ * rest are left exactly as they are, so this never rewrites a setting that already holds the recommended model. One undo token restores all of them.
+ * A model the catalog does not offer, or that TEE-only mode blocks, is skipped and named rather than silently dropped.
+ */
+async function applyRecommended(context: vscode.ExtensionContext, auth: AuthService): Promise<void> {
+  const gathered = await gather(context, auth);
+  const { recommended } = gathered.state;
+  const choices = [...recommended.tiers, ...recommended.roles].filter((entry) => entry.changes);
+  if (!choices.length) { post({ type: 'notice', text: 'Every tier and agent role already uses the model these results recommend.' }); return; }
+  const configuration = vscode.workspace.getConfiguration('nearAi');
+  const applied: string[] = [];
+  const skipped: string[] = [];
+  const undoEntries: Array<{ setting: string; previous: unknown; target: vscode.ConfigurationTarget; label: string }> = [];
+  const roleModels = readRoleModels();
+  for (const choice of choices) {
+    // 0.4.19 review: the cyber recommendation is NOT the chat model. Mapping it to `main` rewrote the ordinary chat model with an abliterated one
+    // chosen only because it will not refuse attack payloads. The cyber engagement picks its model when it starts (src/domain/cyberModel.ts), so the bulk
+    // apply leaves it alone and says so.
+    if ('tier' in choice && choice.tier === 'cyber') { skipped.push(`the cyber model (${choice.model}), which a scan picks when it starts`); continue; }
+    const roleId = 'tier' in choice ? `tier:${choice.tier}` : `role:${choice.role}`;
+    const option = gathered.roles.find((role) => role.id === roleId);
+    const entry = gathered.state.catalog.find((candidate) => candidate.id === choice.model);
+    if (!option || !entry || entry.blocked) { skipped.push(`${'tier' in choice ? choice.tier : choice.role} (${choice.model})`); continue; }
+    const inspected = configuration.inspect(option.setting);
+    const inWorkspace = inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined;
+    const target = inWorkspace ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    const previous = inWorkspace ? inspected?.workspaceValue : inspected?.globalValue;
+    const update = roleUpdate(option, choice.model, roleModels);
+    // The undo entry is recorded BEFORE the write, so a write that throws half way leaves every change that did happen undoable (0.4.19 review: entries were
+    // collected after the loop, so a failure left changes applied with no way back).
+    const undoEntry = { setting: update.setting, previous, target, label: option.label };
+    undoEntries.push(undoEntry);
+    try {
+      await configuration.update(update.setting, update.value, target);
+      if (update.setting === 'agent.roleModels') Object.assign(roleModels, update.value as Record<string, string>);
+      applied.push(`${option.label} to ${choice.model}`);
+    } catch (error) {
+      // This one did not happen after all, so it is not undone; the ones already written still are.
+      undoEntries.splice(undoEntries.indexOf(undoEntry), 1);
+      applied.push(`${option.label} could not be set: ${(error as Error).message}`);
+      break;
+    }
+  }
+  const token = randomBytes(8).toString('hex');
+  if (undoEntries.length) undo.set(token, undoEntries);
+  const text = applied.length
+    ? `Applied ${applied.length} change${applied.length === 1 ? '' : 's'}: ${applied.join('; ')}.${skipped.length ? ` Skipped ${skipped.join(', ')}, which the catalog no longer offers or TEE-only mode blocks.` : ''}`
+    : `Nothing was applied. Skipped ${skipped.join(', ')}.`;
+  post({ type: applied.length ? 'role-applied' : 'notice', token, text });
+}
+
 async function undoRole(token: string): Promise<void> {
   const change = undo.get(token);
-  if (!change) return;
+  if (!change || !change.length) return;
   undo.delete(token);
-  await vscode.workspace.getConfiguration('nearAi').update(change.setting, change.previous, change.target);
-  post({ type: 'notice', text: `Undone: ${change.label} is back to what it was.` });
+  // In reverse, so two changes to the same setting unwind in the order they were made.
+  for (const entry of [...change].reverse()) await vscode.workspace.getConfiguration('nearAi').update(entry.setting, entry.previous, entry.target);
+  post({ type: 'notice', text: change.length === 1 ? `Undone: ${change[0]?.label} is back to what it was.` : `Undone: ${change.length} settings are back to what they were.` });
 }

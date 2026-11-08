@@ -185,32 +185,49 @@ test('a run stops at its cost budget, counting its sub-agents, and keeps its wor
   assert.ok(posted.some((message) => message.type === 'assistant-cancelled'));
 });
 
-test('an approval nobody answers is declined after the timeout, and the run carries on', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-approval-timeout-'));
+/** Waits for the first POSTED message the caller can find, polling, so a parked run can be answered. */
+async function until<T>(read: () => T | undefined): Promise<T> {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const value = read();
+    if (value !== undefined) return value;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('the expected message never arrived');
+}
+
+test('an approval nobody answers parks the run, and answering later runs the action', async () => {
+  // 0.4.19 (owner, 2026-11-07): the timeout no longer declines an action nobody saw. The run parks on the step, the prompt stays waiting, and a late
+  // answer runs the tool and carries on, so the work the timeout used to throw away is kept.
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-approval-park-'));
   let turn = 0;
-  let toolResult = '';
   const near = {
-    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+    async *streamCompletion(): AsyncGenerator<CompletionEvent> {
       const usage = { verificationStatus: 'unknown' as const, latencyMs: 1 };
       turn += 1;
       if (turn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('w1', 'Write', { file_path: 'notes.md', content: 'x' })] }, finishReason: 'tool_calls', usage }; return; }
-      toolResult = String(messages.at(-1)?.content);
-      yield { type: 'done', message: { role: 'assistant', content: 'Could not write notes.md: it needs your approval.' }, finishReason: 'stop', usage };
+      yield { type: 'done', message: { role: 'assistant', content: 'Wrote notes.md.' }, finishReason: 'stop', usage };
     },
     async actualCostsUsd() { return undefined; }
   };
   const posted: Array<Record<string, unknown>> = [];
   const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
   conversation.approvalTimeoutMs = 50;
+  const running = conversation.send({ text: 'write notes', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
   try {
-    await conversation.send({ text: 'write notes', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
+    const parked = await until(() => posted.find((message) => message.type === 'approval-paused'));
+    assert.match(String(parked.text), /paused on this step\. It has not run\./);
+    assert.equal(posted.some((message) => message.type === 'approval-expired'), false, 'nothing was declined');
+    assert.equal(conversation.waitingPrompts().length, 1, 'the prompt is still waiting to be answered');
+    conversation.answerApproval(String(parked.callId), { decision: 'allow' });
+    await running;
   } finally {
     conversation.dispose();
   }
-  assert.ok(posted.some((message) => message.type === 'approval-request'));
-  assert.match(String(posted.find((message) => message.type === 'approval-expired')?.text), /No one approved "Write notes\.md" within 0 minutes, so it was declined/);
-  assert.match(toolResult, /declined[\s\S]*Nobody answered within 0 minutes/);
-  assert.ok(posted.some((message) => message.type === 'assistant-done'), 'the run finished instead of waiting');
+  assert.ok(posted.some((message) => message.type === 'tool-end' && message.callId === 'w1'), 'the late answer ran the write');
+  // The run ended with a finished answer rather than a stop or a cancel, which is what "carried on" means here.
+  assert.ok(posted.some((message) => message.type === 'assistant-done'), 'the run finished after the answer');
+  assert.equal(posted.some((message) => message.type === 'run-stopped'), false, 'it was not stopped or cut short');
+  assert.equal(turn, 2, 'the model was asked once for the tool call and once for the answer');
 });
 
 test('each reply is capped, a cut-off reply asks for a shorter continuation and its tool call is not run, and repeated cut-offs stop the agent', async () => {

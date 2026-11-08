@@ -28,6 +28,7 @@ import type { ActivityStore } from './activityStore';
 import { saveHandoff } from './handoff';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { SCRATCH_INSTRUCTIONS } from '../domain/scratch';
+import { WAITING_INSTRUCTIONS, checkNowMessage, isCheckNow } from '../domain/checkNow';
 import { cleanScratch } from './scratch';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
@@ -36,6 +37,9 @@ import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult }
 import { PreparedAttachments } from '../agent/attachments';
 import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
+import { knowledgeTools } from '../agent/knowledgeTools';
+import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
+import { slugify } from '../agent/teams';
 import type { MemoryScope } from '../domain/contextGraph';
 import type { AgentRole } from '../domain/agents';
 import type { ContextGraphMemory } from './contextGraphMemory';
@@ -158,6 +162,9 @@ export interface SteerMessage { id: string; text: string }
 
 /** How a message sent during a run reaches the agent: marked, so it knows it is new direction. */
 export function steeringContent(text: string): string {
+  // 0.4.19: a "Check now" message is not new direction, it is a request to look at the real state again, so it is wrapped as that. Left as ordinary
+  // direction it reads like a plan change, and the agent may answer it instead of polling, which is the wait this button exists to end.
+  if (isCheckNow(text)) return `<check-now>\n${text}\n</check-now>\nThis is not a change of plan. Stop waiting and look at the real state now, then carry on from what you find.`;
   return `<user-message-during-run>\n${text}\n</user-message-during-run>\nThe user sent this while you were working. It is new direction: it takes precedence over your current plan, so adjust what you are doing (or stop and answer) and say briefly how you changed course.`;
 }
 
@@ -419,9 +426,24 @@ export class AgentConversation {
   }
 
   /** Pause (before its next model turn), resume, or stop one sub-agent. */
-  public controlAgent(agentId: string, action: 'pause' | 'resume' | 'stop'): boolean {
+  public controlAgent(agentId: string, action: 'pause' | 'resume' | 'stop' | 'nudge'): boolean {
     const agent = this.agents.get(agentId);
     if (!agent) return false;
+    if (action === 'nudge') {
+      // 0.4.19: "Check now". The queue a run takes belongs to the whole conversation and only the main run consumes it, so the message goes to the main
+      // run rather than to the row that was clicked: that is where the wait is, and sending it "to" a sub-agent would have delivered it to the parent
+      // anyway, without saying so (0.4.18 review). The message names the agent when a sub-agent's row was clicked, so the parent knows what is being asked.
+      const id = `steer-${randomBytes(6).toString('hex')}`;
+      const working = !agent.paused && !agent.abort.signal.aborted;
+      // 0.4.18 review: a paused agent is not waiting on anything, so a check queued for it would arrive on a later, unrelated turn, which is worse than
+      // doing nothing. 0.4.19 review: the page must say so, or the click looks broken, so a notice explains why.
+      if (!working) {
+        this.post({ type: 'notice', text: `${agent.label} is paused, so there is nothing to check. Resume it first, or stop it.` });
+        return false;
+      }
+      this.steer(id, checkNowMessage(agent.label), { interrupt: true });
+      return true;
+    }
     if (action === 'stop') agent.abort.abort();
     else if (action === 'pause') agent.paused = true;
     else { agent.paused = false; agent.resume?.(); agent.resume = undefined; }
@@ -532,7 +554,7 @@ export class AgentConversation {
   private systemPrompt(request: AgentTurnRequest, root = this.root): string {
     // Every run is told where scratch work goes (0.4.18): inside the project, ignored by git, and emptied when the run ends. It goes before the
     // Open-GSD note so a workflow's own instructions read as the more specific direction.
-    const base = `${agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}`;
+    const base = `${agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}\n\n${WAITING_INSTRUCTIONS}${request.team ? `\n\n${KNOWLEDGE_INSTRUCTIONS}` : ''}`;
     if (!request.gsd) return base;
     return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). When the agent does an item on your task list, pass that item's exact content as the Agent call's task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
   }
@@ -582,7 +604,15 @@ export class AgentConversation {
   private toolsFor(request: AgentTurnRequest, context: Omit<ToolContext, 'signal' | 'onTodos'>, grants: RunGrants, extraUsage: UsageMetadata[], record: Record_, runSignal: AbortSignal, runId: string): AgentTool<any>[] {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...memoryFor()];
+    // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
+    // same graph, which is what makes it shared: a fact one member verified is there for the next one.
+    const teamKnowledge = request.team
+      ? knowledgeTools({
+          read: async () => (await loadKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug))).knowledge,
+          add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug), addition)
+        })
+      : [];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
     if (!agents.length) return base;
     const gsd = request.gsd;
@@ -932,22 +962,41 @@ export class AgentConversation {
     if (agentId) this.activity?.approvalAsked(agentId);
     return new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      let expired = false;
+      let parkLimit: ReturnType<typeof setTimeout> | undefined;
+      // A day past the first timeout, which is long enough that nobody is surprised and short enough that an abandoned run does not live for ever.
+      const parkLimitMs = 24 * 60 * 60_000;
       const settle = (reply: ApprovalReply, cancelled = false) => {
         if (timer) clearTimeout(timer);
+        if (parkLimit) clearTimeout(parkLimit);
         this.closePrompt(request.callId, cancelled);
-        if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : expired ? 'expired' : reply.decision === 'deny' ? 'declined' : 'allowed');
+        if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : reply.decision === 'deny' ? 'declined' : 'allowed');
         resolve(reply);
       };
       this.approvals.set(request.callId, settle);
       signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) settle({ decision: 'deny' }, true); }, { once: true });
       if (this.approvalTimeoutMs > 0) {
         timer = setTimeout(() => {
-          if (!this.approvals.delete(request.callId)) return;
+          // 0.4.19 (owner, 2026-11-07: "stop the idling"): the wait no longer ends by declining an action nobody saw. Measured on the owner's own runs,
+          // 35 waits hit this timeout exactly and 49 more ran long, which is up to 752 minutes of a run parked on a question. Declining made the run work
+          // around a decision the person never got to make, and the work was usually redone. Now the run simply stops counting down and stays on this
+          // step: nothing runs, nothing is lost, and answering whenever the person is back carries on from exactly here.
+          if (!this.approvals.has(request.callId)) return;
           const minutes = Math.round(this.approvalTimeoutMs / 60_000);
-          expired = true;
-          this.post({ type: 'approval-expired', callId: request.callId, minutes, text: `No one approved "${request.title}" within ${minutes} minute${minutes === 1 ? '' : 's'}, so it was declined and the agent continued without it.` });
-          settle({ decision: 'deny', feedback: `Nobody answered within ${minutes} minute${minutes === 1 ? '' : 's'} (the user may be away). Continue without this action if you can, and report what still needs their approval.` });
+          this.post({
+            type: 'approval-paused', callId: request.callId, minutes,
+            text: `No one answered "${request.title}" within ${minutes} minute${minutes === 1 ? '' : 's'}, so the run is paused on this step. It has not run. Approve or decline it and the run carries on from here.`
+          });
+          if (agentId) this.activity?.approvalExpired(agentId);
+          // 0.4.19 review: a parked run had no end at all, so an abandoned conversation kept the run and its sub-agents alive for ever. After a generous
+          // final wait (a whole working day past the first timeout) the prompt is declined, and the message says it was the long limit, not the person.
+          parkLimit = setTimeout(() => {
+            if (!this.approvals.delete(request.callId)) return;
+            this.post({
+              type: 'approval-expired', callId: request.callId, minutes: Math.round(parkLimitMs / 60_000),
+              text: `"${request.title}" waited a whole day without an answer, so it was declined and the run was released.`
+            });
+            settle({ decision: 'deny', feedback: 'Nobody answered for a day, so this action was declined and the run released. Ask again if it is still wanted.' });
+          }, parkLimitMs);
         }, this.approvalTimeoutMs);
       }
       // 0.4.17: the card also carries the plain risk headline and the whole reason, and the exact command or code, so it can say why in one

@@ -69,25 +69,25 @@ test('the project flags are written for Auto and cleared for an asking mode, kee
   assert.equal(await readFile(planningConfigFile(root), 'utf8'), '{ not json', 'a broken file is left exactly as it was');
 });
 
-test('the chat shows the carrying-on switch beside the approval picker, and clicking it flips the mode', () => {
+test('the between-steps choice is a picker styled like the approval picker, and offers every way back to asking', () => {
+  // Owner, 2026-11-06: "I don't like how Carrying On is shown as a button with white background - and clicking it doesn't let me toggle or choose to go
+  // back to asking me between phases. It should blend in and be styled like the auto approval picker."
   const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const path = require('node:path') as typeof import('node:path');
   const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
   const markup = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'panelView.ts'), 'utf8');
-  // One button, right after the approval picker, hidden until the host says what it means.
-  assert.match(markup, /id="policy"[^>]*>Approval…<\/button>\s*<button id="advance"/s);
-  assert.match(page, /advanceButton\.textContent = state\.on \? 'Carrying on' : 'Stops each step'/);
-  assert.match(page, /postFor\(\{ type: 'set-action-policy', mode: /, 'the click goes through the same picker message');
-  assert.match(page, /case 'action-policy': renderPolicy\(m\); renderAdvance\(m\);/);
-});
-
-test('the carrying-on switch works both ways, and neither way changes the mode more than it says', () => {
-  const { readFileSync } = require('node:fs') as typeof import('node:fs');
-  const path = require('node:path') as typeof import('node:path');
-  const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
-  // The blocker the review found: while the switch was on, the off branch posted 'auto' again, so it could never be turned off.
-  assert.match(page, /postFor\(\{ type: 'set-action-policy', mode: on \? advanceMode : 'auto' \}\)/, 'off returns to the remembered mode, on goes to Auto');
-  assert.match(page, /if \(m\.mode && m\.mode !== 'auto'\) advanceMode = m\.mode;/, 'only a stopping mode is remembered as the place to return to');
+  const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.css'), 'utf8');
+  // A picker beside the approval picker, with its own listbox, like the one it sits next to.
+  assert.match(markup, /id="advance"[^>]*aria-haspopup="listbox"[^>]*aria-controls="advance-menu"/);
+  assert.match(markup, /id="advance-menu" role="listbox"/);
+  // It shares the picker styling rather than sitting there as a bare button.
+  assert.match(css, /#model, #policy, #advance \{/);
+  assert.match(css, /#advance \{ max-width: 34%; flex: 0 3 auto; text-align: left; \}/);
+  // It offers carrying on AND a way back to asking each step, so a person chooses rather than toggles.
+  assert.match(page, /optionRow\(CARRY_ON, 'Carry on by itself'/);
+  assert.match(page, /'Stop between steps: ' \+ option.label/);
+  // Choosing posts the same message the approval picker posts, so the two cannot disagree.
+  assert.match(page, /post\(\{ type: 'set-action-policy', mode \}\)/);
 });
 
 test('the project scratch folder counts as scratch, so a run can run the helper it just wrote there', async () => {

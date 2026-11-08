@@ -25,7 +25,7 @@ export type ChatWebviewMessage =
   | { type: 'chat-ready' }
   | { type: 'open-command'; command: string; args?: string; model?: string; conversationId?: string }
   | { type: 'questions-reply'; id: string; answers: string[]; conversationId?: string }
-  | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' }
+  | { type: 'agent-control'; agentId: string; action: 'pause' | 'resume' | 'stop' | 'nudge' }
   /** Opens a saved conversation as a tab, or shows it if it is already open. */
   | { type: 'resume-conversation'; id: string }
   /** Resume or dismiss a conversation's run the extension host never finished. */
@@ -308,7 +308,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (message.agentId === undefined) return { type: 'open-activity' };
     return typeof message.agentId === 'string' && /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i.test(message.agentId) ? { type: 'open-activity', agentId: message.agentId } : undefined;
   }
-  if (message.type === 'agent-control' && typeof message.agentId === 'string' && /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i.test(message.agentId) && (message.action === 'pause' || message.action === 'resume' || message.action === 'stop') && Object.keys(message).length === 3) {
+  if (message.type === 'agent-control' && typeof message.agentId === 'string' && /^[a-z0-9][a-z0-9:_-]{0,90}-[a-f0-9]{6}$/i.test(message.agentId) && (message.action === 'pause' || message.action === 'resume' || message.action === 'stop' || message.action === 'nudge') && Object.keys(message).length === 3) {
     return { type: 'agent-control', agentId: message.agentId, action: message.action };
   }
   if (message.type === 'resume-conversation' && typeof message.id === 'string' && /^conv-[a-z0-9-]{6,60}$/.test(message.id) && Object.keys(message).length === 2) return { type: 'resume-conversation', id: message.id };

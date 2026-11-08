@@ -6,7 +6,11 @@ import test from 'node:test';
 import { unifiedDiff } from '../agent/diff';
 import { matchesGlob } from '../agent/glob';
 import { ShellSession } from '../agent/shell';
+import { agentSystemPrompt } from '../agent/systemPrompt';
+import { teamLeadPrompt } from '../agent/teams';
+import { TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
 import { resolveInWorkspace } from '../agent/workspace';
+import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 
 test('workspace paths resolve inside the root and refuse escapes, including through symlinks', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-ws-'));
@@ -191,4 +195,49 @@ test('a failing test the agent runs reports failure even when the extension itse
   } finally {
     shell.dispose();
   }
+});
+
+// The fan-out rule (owner, 2026-11-07: "Hope everything is not currently happening sequentially - that would be a real waste of time"). Measured on the
+// owner's own runs, 30 of 37 ran with only one request in flight, so the rule has to be an explicit procedure an agent cannot skim past.
+test('the system prompt tells an agent to fan a multi-part task out in ONE turn, with background agents', () => {
+  const prompt = agentSystemPrompt({ root: '/work/app', platform: 'linux x64', date: '2026-11-07', isGitRepo: true, model: 'm' });
+  assert.match(prompt, /Fan out every multi-part task/);
+  assert.match(prompt, /one sub-agent per part in a single turn/);
+  assert.match(prompt, /run_in_background: true/);
+  assert.match(prompt, /do not spawn them across several turns/i);
+  // The two properties that keep parallelism honest: a part must stand alone, and its report must merge.
+  assert.match(prompt, /a part must be able to finish without another part's answer/);
+  // It keeps the original instruction to batch independent calls, which the rule builds on.
+  assert.match(prompt, /request them all in the same turn/);
+  // Plain user-facing text: no em or en dashes.
+  assert.doesNotMatch(prompt, /[\u2013\u2014]/);
+});
+
+test('the parallel-agent limit defaults to 8, which a research team needs and the old 4 did not reach', () => {
+  assert.equal(AGENT_DEFAULTS.maxParallelAgents, 8);
+  // The old default with agents that worked one part at a time was the measured bottleneck: 30 of 37 runs had one request in flight.
+  assert.ok(AGENT_DEFAULTS.maxParallelAgents >= 8);
+});
+
+test('every path that briefs a lead tells it to run independent members at the same time', () => {
+  // Owner, 2026-11-08: all teams and default instructions must prompt parallelism. Three paths brief an agent: the system prompt, a team lead's prompt,
+  // and the AI that drafts a new team.
+  const system = agentSystemPrompt({ root: '/work/app', platform: 'linux x64', date: '2026-11-08', isGitRepo: true, model: 'm' });
+  assert.match(system, /Fan out every multi-part task/);
+  assert.match(system, /one sub-agent per part in a single turn/);
+
+  const lead = teamLeadPrompt({ slug: 't', name: 'Scouts', description: 'd', file: '/t.md', members: [
+    { name: 'a', tools: [], instructions: 'A does a.' },
+    { name: 'b', tools: [], instructions: 'B does b.' }
+  ] }, 'find out');
+  assert.match(lead, /start every part that does not depend on another in the SAME turn/, 'the lead is told to fan out in one turn');
+  assert.match(lead, /run_in_background/);
+  assert.match(lead, /Starting members one turn at a time[\s\S]*slowest way/, 'and told what the mistake looks like');
+  assert.match(lead, /what ran at the same time/, 'and reports what ran together');
+  // Both members are listed with what they do, so the lead can decide what can run together.
+  assert.match(lead, /- a: A does a\./);
+  assert.match(lead, /- b: B does b\./);
+
+  assert.match(TEAM_BUILDER_PROMPT, /work INDEPENDENTLY of the others/, 'a drafted team is designed to run concurrently');
+  assert.doesNotMatch(lead, /[\u2013\u2014]/, 'plain text, no em or en dashes');
 });
