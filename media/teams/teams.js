@@ -593,6 +593,20 @@
   const slots = [];
   function reviewSlot(parent, kind, index, fields) { const node = el('div', 'slot'); node.setAttribute('aria-live', 'polite'); parent.append(node); slots.push({ node, kind, index, fields: fields || [] }); return node; }
 
+  /**
+   * The wizard step a problem lives on, so the count can take the person to it. A problem with a member belongs to the step that owns that field; one
+   * about the team itself belongs to Purpose.
+   */
+  function stepFor(issue) {
+    if (!issue) return undefined;
+    if (issue.member === undefined || issue.member === null) return (issue.field === 'name' || issue.field === 'description') ? 0 : 1;
+    if (issue.field === 'name' || issue.field === 'role') return 1;
+    if (issue.field === 'model') return 2;
+    if (issue.field === 'tools') return 3;
+    if (issue.field === 'instructions') return 4;
+    return 1;
+  }
+
   function issueLine(issue, level) {
     const line = el('li', level);
     line.append(icon(level === 'error' ? 'error' : 'warn'), document.createTextNode(' ' + issue.message));
@@ -638,8 +652,21 @@
     if (preview) preview.textContent = review ? review.markdown : '';
     const saveButton = $('save');
     if (saveButton) saveButton.disabled = Boolean(review && review.errors.length) || (work && work.mode === 'editor' && !isDirty());
+    // 0.4.19 (owner, 2026-11-08): "there's no indication of what that thing is that needs fixing". The footer used to say only "1 to fix", and the
+    // problem usually lives on a step the person is not looking at. It now names each problem and goes to the step that holds it.
     const errorCount = $('error-count');
-    if (errorCount) errorCount.textContent = review && review.errors.length ? review.errors.length + ' to fix' : '';
+    if (errorCount) {
+      errorCount.replaceChildren();
+      if (review && review.errors.length) {
+        const go = button(review.errors.length + ' to fix', () => { const step = stepFor(review.errors[0]); if (step !== undefined) goStep(step); }, { link: true, label: 'Go to the first problem that is stopping this team from being saved' });
+        errorCount.append(go);
+        for (const issue of review.errors.slice(0, 2)) {
+          errorCount.append(el('span', 'error-count-text', ' ' + issue.message));
+          if (review.errors.length > 1) break;
+        }
+        if (review.errors.length > 2) errorCount.append(el('span', 'hint', ' and ' + (review.errors.length - 2) + ' more'));
+      }
+    }
   }
 
   // ---------- the wizard ----------

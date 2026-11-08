@@ -1,3 +1,7 @@
+/* The footer's count of problems now names them, so it needs to wrap instead of sitting on one line. */
+#error-count { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; max-width: 46ch; overflow-wrap: anywhere; }
+#error-count .error-count-text { color: var(--vscode-errorForeground, #f14c4c); }
+
 /* Shared basics (--border, --muted, box sizing, no sideways page scroll) come from media/shared/base.css. */
 :root {
   --surface: var(--vscode-editorWidget-background, var(--vscode-editor-background));

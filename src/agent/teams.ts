@@ -9,7 +9,18 @@ import { recommendAgentTeam } from '../services/agentTeams';
 // `## member` section is a member with optional `role:`, `model:`, and `tools:` lines followed by
 // its instructions. Running a team gives a lead agent the members as sub-agents.
 
-export interface TeamMember { name: string; role?: string; model?: string; tools: string[]; instructions: string }
+export interface TeamMember {
+  name: string;
+  role?: string;
+  model?: string;
+  tools: string[];
+  instructions: string;
+  /**
+   * The member this one reports to (owner, 2026-11-08: "should show hierarchy if one exists"). Optional and absent in every existing team, so a team
+   * without it still runs and still draws, as a lead with its members. A member naming one that does not exist is drawn at the top, never dropped.
+   */
+  reportsTo?: string;
+}
 export interface TeamDefinition { slug: string; name: string; description: string; members: TeamMember[]; file: string }
 
 const MEMBER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -36,14 +47,15 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     const fields: Record<string, string> = {};
     let index = 0;
     while (index < rest.length) {
-      const field = /^(role|model|tools):\s*(.*)$/i.exec(rest[index].trim());
+      const field = /^(role|model|tools|reports-to):\s*(.*)$/i.exec(rest[index].trim());
       if (!field) { if (rest[index].trim()) break; index += 1; continue; }
       fields[field[1].toLowerCase()] = field[2].trim();
       index += 1;
     }
     const instructions = rest.slice(index).join('\n').trim();
     if (!instructions) throw new Error(`Member ${memberName} needs instructions under its heading.`);
-    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), tools: fields.tools ? fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean) : DEFAULT_TOOLS, instructions });
+    const reportsTo = fields['reports-to'] ? slugify(fields['reports-to']) : undefined;
+    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), ...(reportsTo ? { reportsTo } : {}), tools: fields.tools ? fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean) : DEFAULT_TOOLS, instructions });
   }
   if (!members.length) throw new Error('Add at least one member as a "## member-name" section.');
   if (members.length > 12) throw new Error('A team can have at most 12 members.');
@@ -51,11 +63,12 @@ export function parseTeam(text: string, file: string): TeamDefinition {
 }
 
 export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>): string {
-  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated). Then the member\'s instructions. Save to create a new version. -->', ''];
+  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member). Then the member\'s instructions. Save to create a new version. -->', ''];
   for (const member of members) {
     lines.push(`## ${member.name}`);
     if (member.role) lines.push(`role: ${member.role}`);
     if (member.model) lines.push(`model: ${member.model}`);
+    if (member.reportsTo) lines.push(`reports-to: ${member.reportsTo}`);
     if (member.tools?.length) lines.push(`tools: ${member.tools.join(', ')}`);
     lines.push('', member.instructions, '');
   }
