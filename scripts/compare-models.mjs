@@ -17,7 +17,7 @@ import path from 'node:path';
 import { runComparison } from '../dist/benchmark/runner.js';
 import { planComparison } from '../dist/benchmark/results.js';
 import { ComparisonStore } from '../dist/benchmark/store.js';
-import { buildLeaderboard, latestResults, needsRetest, RUN_FORMAT, privacyOf } from '../dist/benchmark/results.js';
+import { buildLeaderboard, latestResults, needsRetest, RUN_FORMAT, privacyOf, runIdFor } from '../dist/benchmark/results.js';
 import { loadBenchmarkTasks, tasksFor } from '../dist/benchmark/tasks.js';
 import { DEFAULT_RULES } from '../dist/agent/permissions.js';
 import { NearAiClient } from '../dist/services/nearAiClient.js';
@@ -122,7 +122,8 @@ async function main() {
   }
   const rows = [];
   const started = Date.now();
-  const id = await store.newId(`${new Date(started).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')}-cli`);
+  // The store's own ID format, so the tab can read it: a hand-made ID fails RUN_ID and every save would be refused.
+  const id = await store.newId(runIdFor(new Date(started)));
   const savedRun = {
     format: RUN_FORMAT, version: 1, id, startedAt: new Date(started).toISOString(), status: 'running',
     taskSet: options.set ?? 'full', mode: options.mode, runsPerTask: options.runs,

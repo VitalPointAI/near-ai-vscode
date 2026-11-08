@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildLeaderboard, catalogVersion, needsRetest, performanceTrend, recommendRoles, recommendTiers, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ModelSummary, type ResultRow, type SavedRun } from '../benchmark/results';
+import { buildLeaderboard, catalogVersion, needsRetest, performanceTrend, RUN_ID, recommendRoles, recommendTiers, estimateComparisonCost, latestResults, median, parseSavedRun, planComparison, rankSummaries, reusedRows, runIdFor, serializeRun, summarizeModel, summarizeRun, type ModelSummary, type ResultRow, type SavedRun } from '../benchmark/results';
 import { ComparisonStore } from '../benchmark/store';
 import type { BenchmarkTask, TaskKind } from '../benchmark/tasks';
 import type { ModelInfo } from '../services/nearAiClient';
@@ -301,4 +301,29 @@ test('the trend is one point per day of fresh results, per task type, and a reus
   assert.deepEqual(byKind.coding, [50, 90], 'coding improved');
   assert.deepEqual(byKind.planning, [50, 70], 'planning improved, by less');
   assert.equal(byKind.research, undefined, 'a kind with no results has no line rather than a flat zero');
+});
+
+// A comparison run from the terminal must show up in Compare Models (owner, 2026-11-08: "make sure the results will be saved and accessible by the
+// UI"). The CLI builds a saved run itself, so this writes one exactly as it does and reads it back through the store and the parser the tab uses. A
+// hand-made run ID failed RUN_ID and every save was refused, which this now catches.
+test('a comparison saved the way the CLI saves it is readable by the tab', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-cli-save-'));
+  const store = new ComparisonStore(dir);
+  const at = new Date('2026-11-08T12:00:00.000Z');
+  const id = await store.newId(runIdFor(at));
+  assert.match(id, RUN_ID, 'the CLI uses the store\'s own ID format');
+  const savedRun: SavedRun = {
+    format: 'near-ai-model-comparison', version: 1, id, startedAt: at.toISOString(), status: 'completed', taskSet: 'full', mode: 'rerun', runsPerTask: 1,
+    models: [{ id: 'z-ai/glm-5.3-flash', privacy: 'tee', catalogVersion: '64' }],
+    tasks: [{ id: 'research-brief', kind: 'research', version: 'abc123' }],
+    rows: [row('z-ai/glm-5.3-flash', 'research-brief', 9, { kind: 'research', taskVersion: 'abc123' })]
+  };
+  await store.save(savedRun);
+  const listed = await store.list();
+  assert.equal(listed.length, 1, 'the store lists the run the CLI wrote');
+  assert.equal(listed[0]?.rows.length, 1, 'and its rows survive the round trip');
+  // The tab builds its table from exactly this list plus the catalog.
+  const board = buildLeaderboard(listed, [task('research-brief', 'research', 'abc123')], [], at.getTime());
+  assert.equal(board.length, 1);
+  assert.equal(board[0]?.model, 'z-ai/glm-5.3-flash');
 });
