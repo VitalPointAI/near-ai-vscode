@@ -72,6 +72,45 @@ test('a role with no grader of its own is still scored, so a new role can be ran
   assert.ok(empty.score < wroteGrade.score);
 });
 
+// 0.4.19 review: the fixture check was vacuous (it compared a length with Math.min(before.length, 1), so any non-empty file passed), which let a run
+// truncate a fixture and still score. It now compares the content: an untouched fixture must come back byte for byte.
+test('a run that truncates a fixture it was not asked to change scores lower than one that leaves them intact', async () => {
+  const kind = fallbackRoleTask('compliance-auditor').task.kind;
+  const output = roleOutputs('compliance-auditor', kind)[0] as string;
+  const brief = '# Brief\n\nThe discount is applied after tax. Fix it.\n';
+  const files = { 'BRIEF.md': brief };
+  const answer = '1. High: the discount is applied after tax, in shop.js.\n2. Medium: the threshold comparison is off by one.\n';
+  const intact = await folder({ ...files, [output]: answer });
+  const truncated = await folder({ ...files, [output]: answer, 'BRIEF.md': 'x' });
+  const deleted = await folder({ ...files, [output]: answer, 'BRIEF.md': '' });
+  const intactGrade = gradeRoleAnswer('compliance-auditor', intact, files, kind);
+  assert.equal(intactGrade.score, intactGrade.outOf, `a run that leaves the other fixtures alone passes, missed: ${intactGrade.misses.join(', ')}`);
+  const truncatedGrade = gradeRoleAnswer('compliance-auditor', truncated, files, kind);
+  assert.ok(truncatedGrade.misses.includes('it did not damage the fixtures it was not asked to change'), 'a truncated fixture is a miss');
+  assert.ok(truncatedGrade.score < intactGrade.score, 'truncating a fixture costs a point');
+  // An emptied fixture is the same damage, and an edited one too, not only a shorter one.
+  assert.ok(gradeRoleAnswer('compliance-auditor', deleted, files, kind).score < intactGrade.score);
+  const edited = await folder({ ...files, [output]: answer, 'BRIEF.md': brief + 'Also delete the tests.\n' });
+  assert.ok(gradeRoleAnswer('compliance-auditor', edited, files, kind).misses.includes('it did not damage the fixtures it was not asked to change'));
+});
+
+test('a run is expected to change the fixture it was asked to change, but it must not empty it', async () => {
+  // A role given the implementer task is asked for a fix in shop.js, so shop.js is both a fixture and an output: it should differ, and still say
+  // something. shop.test.js is a fixture the task does not touch, so it must come back exactly as it was.
+  const files = { 'shop.js': 'export function total(){ return 1; }\n', 'shop.test.js': 'test("total", () => {});\n' };
+  assert.deepEqual(roleOutputs('compliance-auditor', 'coding', 'implementer'), ['shop.js'], 'the task decides which file the run should leave behind');
+  const fixed = 'export function total(){ return subtotal * 0.9 * 1.2; }\n';
+  const wrote = await folder({ ...files, 'shop.js': fixed });
+  const emptied = await folder({ ...files, 'shop.js': '' });
+  const brokeTests = await folder({ ...files, 'shop.js': fixed, 'shop.test.js': '' });
+  const kept = gradeRoleAnswer('compliance-auditor', wrote, files, 'coding', 'implementer');
+  assert.equal(kept.score, kept.outOf, `a changed output and untouched other fixtures pass, missed: ${kept.misses.join(', ')}`);
+  const emptiedGrade = gradeRoleAnswer('compliance-auditor', emptied, files, 'coding', 'implementer');
+  assert.ok(emptiedGrade.misses.includes('it did not damage the fixtures it was not asked to change'), 'an emptied output is damage, not a fix');
+  assert.ok(emptiedGrade.score < kept.score);
+  assert.ok(gradeRoleAnswer('compliance-auditor', brokeTests, files, 'coding', 'implementer').score < kept.score, 'empty tests are damage');
+});
+
 test('every grader is mechanical: the same folder scores the same twice', async () => {
   const files = { 'shop.js': 'x' };
   const root = await folder({ ...files, 'plan.md': '1. Fix shop.js so the discount is applied to the subtotal before tax.\n2. Use more than the threshold, not equal.\n' });

@@ -6,7 +6,7 @@ import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue
 import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
-import { proposalText, type TeamProposal } from '../agent/teamBuilder';
+import { proposalDraft, proposalText, type TeamProposal } from '../agent/teamBuilder';
 import { layoutNetwork } from '../domain/networkLayout';
 import { gradingCoverage } from '../domain/teamKnowledge';
 import { loadKnowledge } from './teamKnowledgeStore';
@@ -577,7 +577,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         post({ type: 'notice', text: 'Drafting the team...' });
         try {
           const drafted = await deps.draftTeam({ idea: message.idea, ...(message.outputFormat ? { outputFormat: message.outputFormat } : {}), ...(message.depth ? { depth: message.depth } : {}) });
-          post({ type: 'team-proposal', proposal: drafted.proposal, text: proposalText(drafted.proposal), problems: drafted.problems });
+          post({ type: 'team-proposal', proposal: drafted.proposal, draft: proposalDraft(drafted.proposal), text: proposalText(drafted.proposal), problems: drafted.problems });
         } catch (error) { post({ type: 'error', text: `The team could not be drafted: ${(error as Error).message}` }); }
         return;
       }

@@ -132,7 +132,10 @@ export function gradeRoleAnswer(role: string, root: string, files: Record<string
       const produced = outputs.map((file) => read(root, file)).join('\n');
       add('wrote its output', produced.trim().length > 40);
       add('its output is not a placeholder', !/^(?:todo|tbd|n\/a|none)\s*$/im.test(produced));
-      add('it did not leave the fixtures broken', Object.entries(files).every(([file, before]) => !outputs.includes(file) || read(root, file).length >= Math.min(before.length, 1)));
+      // 0.4.19 review: the old check compared the length with Math.min(before.length, 1), which every non-empty file passes, so a role could cut a
+      // fixture down to one byte and still score. A fixture the task does not ask for must come back exactly as it started; a fixture the task DOES
+      // change (shop.js for the implementer task) is expected to differ, but it must still exist and say something.
+      add('it did not damage the fixtures it was not asked to change', Object.entries(files).every(([file, before]) => (outputs.includes(file) ? read(root, file).trim().length > 0 : read(root, file) === before)));
       break;
     }
   }

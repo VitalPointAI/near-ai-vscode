@@ -42,6 +42,7 @@ Rules:
 - Choose the roles the work actually needs, between 3 and 6 members. Do not pad the team, and do not leave out a step the output needs.
 - For each member's model, write one of: "deep" for the hardest reasoning, "standard" for most work, "fast" for quick, well-defined tasks. These are tiers; the studio replaces them with a measured model when it can.
 - "produces" must be concrete: what the next member or the person receives.
+- Every member must be able to work INDEPENDENTLY of the others wherever the work allows it: the lead starts all the parts that do not depend on each other at the same time. Design the team so that most members can run concurrently, and where a member must wait for another, say so in its instructions.
 - "outputs" is what the PERSON gets at the end, with its format. Be specific: "Markdown brief with a citation per claim", not "a report".
 - Write in plain English. No em dashes and no en dashes. British or American spelling is fine, but be consistent.`;
 

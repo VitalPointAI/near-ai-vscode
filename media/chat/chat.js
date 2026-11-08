@@ -887,17 +887,25 @@
     return item;
   }
   function advanceItems() { return [...advanceMenu.querySelectorAll('[role="option"]')]; }
+  // The listbox keeps DOM focus on the option (tabIndex -1), so a screen reader is told which one by aria-activedescendant rather than by focus.
+  function markAdvanceActive() {
+    const current = document.activeElement;
+    if (current && current.id && advanceMenu.contains(current)) advanceMenu.setAttribute('aria-activedescendant', current.id);
+    else advanceMenu.removeAttribute('aria-activedescendant');
+  }
   function openAdvanceMenu() {
     const items = advanceItems();
     if (!items.length) return;
     advanceMenu.hidden = false;
     advanceButton.setAttribute('aria-expanded', 'true');
     (items.find((item) => item.getAttribute('aria-selected') === 'true') || items[0]).focus();
+    markAdvanceActive();
   }
   function closeAdvanceMenu(returnFocus) {
     if (advanceMenu.hidden) return;
     advanceMenu.hidden = true;
     advanceButton.setAttribute('aria-expanded', 'false');
+    advanceMenu.removeAttribute('aria-activedescendant');
     if (returnFocus) advanceButton.focus();
   }
   function chooseAdvance(mode) {
@@ -906,7 +914,11 @@
     post({ type: 'set-action-policy', mode });
   }
   advanceButton.addEventListener('click', () => { if (advanceMenu.hidden) openAdvanceMenu(); else closeAdvanceMenu(true); });
-  advanceButton.addEventListener('keydown', (event) => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); openAdvanceMenu(); } });
+  advanceButton.addEventListener('keydown', (event) => {
+    // Escape closes an open menu from the button too, so the key works wherever the focus is.
+    if (event.key === 'Escape' && !advanceMenu.hidden) { event.preventDefault(); closeAdvanceMenu(true); return; }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); openAdvanceMenu(); }
+  });
   advanceMenu.addEventListener('keydown', (event) => {
     const items = advanceItems();
     const at = items.indexOf(document.activeElement);
@@ -915,6 +927,7 @@
       event.preventDefault();
       const step = event.key === 'ArrowDown' ? 1 : -1;
       (items[(at + step + items.length) % items.length] ?? items[0])?.focus();
+      markAdvanceActive();
       return;
     }
     if (event.key === 'Enter' || event.key === ' ') {

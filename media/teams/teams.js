@@ -137,7 +137,7 @@
     hideBanner();
     work = resume
       ? { mode: 'wizard', target: resume.target, step: resume.step, maxStep: resume.step, draft: clone(resume.draft), startingPoint: resume.startingPoint || 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null }
-      : { mode: 'wizard', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: fromProposal ? proposedDraft(fromProposal) : { name: target === 'project' ? 'Project team' : '', description: '', members: [] }, startingPoint: 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null };
+      : { mode: 'wizard', target: target === 'project' && ctx && ctx.hasProject ? 'project' : 'user', step: 0, maxStep: 0, draft: fromProposal ? clone(fromProposal.draft || fallbackDraft(fromProposal.proposal || fromProposal)) : { name: target === 'project' ? 'Project team' : '', description: '', members: [] }, startingPoint: 'recommend', options: { locality: 'cloud', workShape: 'feature', riskLevel: 'medium' }, review: null };
     work.clean = JSON.stringify(work.draft);
     render();
     requestReview();
@@ -197,14 +197,15 @@
   let lastFormat = '';
   let lastDepth = 'thorough';
 
-  /** The proposal as a draft the existing editor, checks and save already understand. The outputs and what each member produces go in its instructions. */
-  function proposedDraft(from) {
+  // The host computes the draft from the proposal (src/agent/teamBuilder.ts) and sends it with the proposal, so the two cannot drift. This is only a
+  // fallback for an older host that does not send it: the page must never throw, even then.
+  function fallbackDraft(from) {
     return {
       name: from.name || 'New team',
       description: `${from.mission || ''} ${from.description || ''}`.trim().slice(0, 400),
-      members: (from.members || []).map((member) => ({
-        name: member.name, role: member.role || '', model: member.model || 'standard', tools: null,
-        instructions: `${member.instructions || ''}${member.produces ? '\n\nProduces: ' + member.produces : ''}`.trim()
+      members: (from.members || []).map((member, index) => ({
+        name: member.name || 'member-' + (index + 1), role: member.role || '', model: member.model || 'standard', tools: null,
+        instructions: member.instructions || ''
       }))
     };
   }
@@ -269,7 +270,7 @@
     }
     const actions = el('div', 'ask-actions');
     actions.append(
-      button('Use this team', () => { startWizard('user', null, proposal.proposal); proposal = null; }, { primary: true }),
+      button('Use this team', () => { const from = proposal; proposal = null; startWizard('user', null, from); }, { primary: true }),
       button('Start over', () => { proposal = null; drafting = false; render(); }, { link: true })
     );
     box.append(actions);
@@ -1209,7 +1210,7 @@
       }
       case 'team-proposal':
         drafting = false;
-        proposal = { proposal: message.proposal, problems: message.problems || [] };
+        proposal = { proposal: message.proposal, draft: message.draft || null, problems: message.problems || [] };
         if (!work) render();
         else { work = null; render(); }
         announce('The team has been drafted. Review it, then use it or start over.');
@@ -1268,6 +1269,9 @@
         break;
       case 'error':
         showBanner(message.text, 'error');
+        // A failed draft leaves the ask box replaced by "Drafting the team..." with no way back, because only team-proposal cleared this: clear it and
+        // draw the box again so the person can retry or change what they wrote.
+        if (drafting) { drafting = false; if (!work) render(); }
         break;
     }
   });

@@ -35,6 +35,7 @@ test('a run is told to wait by checking again, so a Check now lands quickly and 
 // A DOM just large enough to start the real chat page, so the button is judged by what it does rather than by the words in its source. The page needs
 // only a handful of node methods and the five helper kits panelView loads before it; anything it reaches for that is missing fails the test loudly.
 function chatPage(): { nodes: Map<string, StubNode>; send: (data: unknown) => void; posts: unknown[]; sent: () => unknown[] } {
+  focused = undefined;
   const nodes = new Map<string, StubNode>();
   const posts: unknown[] = [];
   const listeners: Array<(event: { data: unknown }) => void> = [];
@@ -71,7 +72,7 @@ class StubNode {
   public readonly dataset: Record<string, string> = {};
   public readonly style: Record<string, string> = {};
   public readonly classList = { add: () => undefined, remove: () => undefined, toggle: () => undefined, contains: () => false };
-  public readonly listeners: Record<string, Array<(event: { preventDefault(): void; target: unknown }) => void>> = {};
+  public readonly listeners: Record<string, Array<(event: { key?: string; preventDefault(): void; target: unknown }) => void>> = {};
   public id = '';
   public textContent = '';
   public value = '';
@@ -85,35 +86,41 @@ class StubNode {
   public prepend(...nodes: StubNode[]): void { this.children.unshift(...nodes); }
   public insertBefore(node: StubNode): void { this.children.push(node); }
   public replaceChildren(...nodes: StubNode[]): void { this.children.splice(0, this.children.length, ...nodes); }
-  public addEventListener(type: string, listener: (event: { preventDefault(): void; target: unknown }) => void): void { (this.listeners[type] ??= []).push(listener); }
+  public addEventListener(type: string, listener: (event: { key?: string; preventDefault(): void; target: unknown }) => void): void { (this.listeners[type] ??= []).push(listener); }
   public removeEventListener(): void {}
   public remove(): void {}
   public setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
   public getAttribute(name: string): string | undefined { return this.attributes.get(name); }
+  public removeAttribute(name: string): void { this.attributes.delete(name); }
   public querySelector(): undefined { return undefined; }
   /** Every descendant of a role, which is how a picker lists its own options. */
   public querySelectorAll(selector: string): StubNode[] {
     const role = /\[role="([\w-]+)"\]/.exec(selector)?.[1];
     return role === undefined ? [] : this.all((node) => node.getAttribute('role') === role);
   }
-  public contains(): boolean { return false; }
+  public contains(node: StubNode): boolean { return this.all((child) => child === node).length > 0; }
   public closest(): undefined { return undefined; }
-  public focus(): void {}
-  public blur(): void {}
+  public focus(): void { focused = this; }
+  public blur(): void { if (focused === this) focused = undefined; }
   public scrollIntoView(): void {}
   public setSelectionRange(): void {}
   public getBoundingClientRect(): { width: number; height: number; top: number; left: number; bottom: number; right: number } { return { width: 100, height: 20, top: 0, left: 0, bottom: 20, right: 100 }; }
   public click(): void { for (const listener of this.listeners.click ?? []) listener({ preventDefault: () => undefined, target: this }); }
+  /** A key press, as the page's own listeners see it. */
+  public press(key: string): void { for (const listener of this.listeners.keydown ?? []) listener({ key, preventDefault: () => undefined, target: this }); }
   /** Every node below this one that matches. A page may append a bare string as a separator, which is not a node. */
   public all(predicate: (node: StubNode) => boolean): StubNode[] {
     return this.children.filter((child) => child instanceof StubNode).flatMap((child) => [...(predicate(child) ? [child] : []), ...child.all(predicate)]);
   }
 }
 
+// Focus is global to a page, so the focused node is held here and the document reports it.
+let focused: StubNode | undefined;
+
 class StubDocument {
   public readonly body = new StubNode('body');
   public readonly documentElement = new StubNode('html');
-  public activeElement: StubNode | undefined;
+  public get activeElement(): StubNode | undefined { return focused; }
   public constructor(private readonly nodes: Map<string, StubNode>) {}
   public createElement(tag: string): StubNode { return new StubNode(tag); }
   public createElementNS(_namespace: string, tag: string): StubNode { return new StubNode(tag); }
@@ -202,4 +209,43 @@ test('the between-steps picker renders from the host message and offers every wa
   // No options at all still leaves the way to keep carrying on, so the picker is never an empty menu.
   page.send({ type: 'action-policy', mode: 'auto', stopped: false, scope: 'workspace', options: [], autoAdvance: { on: true, text: '' } });
   assert.deepEqual(menu.all((node) => node.getAttribute('role') === 'option').map((node) => node.dataset.mode), ['auto']);
+});
+
+// 0.4.19 review: the picker's options sit at tabIndex -1, so nothing told a screen reader which one the arrows were on, and Escape pressed while the
+// focus was still on the button did nothing. Both are driven on the real page rather than matched in the source.
+test('the between-steps picker names the active option and closes on Escape from its button', () => {
+  const page = chatPage();
+  const options = [
+    { mode: 'approve-risky', label: 'Approve risky actions', summary: 'Asks before anything risky', description: '', risky: false },
+    { mode: 'mostly-autonomous', label: 'Mostly autonomous', summary: 'Asks about outside folders', description: '', risky: false }
+  ];
+  page.send({ type: 'action-policy', mode: 'approve-risky', stopped: false, scope: 'workspace', options, autoAdvance: { on: false, text: 'Stops at every step.' } });
+  const button = page.nodes.get('advance') as StubNode;
+  const menu = page.nodes.get('advance-menu') as StubNode;
+  // The markup ships the menu hidden; a stub node starts visible, so this is the page as loaded.
+  menu.hidden = true;
+  assert.equal(menu.getAttribute('aria-activedescendant'), undefined, 'a closed menu names no option');
+  // The button opens the menu, focuses the current choice, and names it to assistive tech.
+  button.click();
+  assert.equal(menu.hidden, false, 'the button opens the menu');
+  assert.equal(menu.getAttribute('aria-activedescendant'), 'advance-option-approve-risky', 'the selected option is the active descendant');
+  // ArrowDown moves the active option, and the name moves with it.
+  menu.press('ArrowDown');
+  assert.equal(menu.getAttribute('aria-activedescendant'), 'advance-option-mostly-autonomous');
+  // Escape on the listbox closes it, as before.
+  menu.press('Escape');
+  assert.equal(menu.hidden, true, 'Escape in the menu closes it');
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.equal(menu.getAttribute('aria-activedescendant'), undefined, 'a closed menu names no option');
+  // Escape while the focus is on the BUTTON also closes the menu, which is where a person's focus starts.
+  button.click();
+  assert.equal(menu.hidden, false);
+  button.press('Escape');
+  assert.equal(menu.hidden, true, 'Escape on the button closes the open menu');
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  // Escape with the menu already closed stays harmless, and posts nothing.
+  page.posts.length = 0;
+  button.press('Escape');
+  assert.equal(menu.hidden, true);
+  assert.deepEqual(page.sent(), [], 'Escape never chooses an option');
 });

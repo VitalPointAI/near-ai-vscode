@@ -100,6 +100,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--vscode-button-
 .notice { display: flex; gap: 6px; align-items: flex-start; padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--warn); }
 .notice .icon { color: var(--warn); }
 .resume { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; margin: 0 0 14px; border: 1px dashed var(--accent); border-radius: var(--radius); }
+/* A saved team's model suggestion, above the team: the same block as the AI start, with a left accent because it is advice, not a prompt. */
+#suggestion { margin: 10px 0; padding: 10px 14px; border: 1px solid var(--vscode-editorWidget-border, #444); border-left: 3px solid var(--vscode-focusBorder, #007fd4); border-radius: 6px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); overflow-wrap: anywhere; }
 
 /* Library */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 14px; }

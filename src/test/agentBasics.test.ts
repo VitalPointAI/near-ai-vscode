@@ -7,6 +7,8 @@ import { unifiedDiff } from '../agent/diff';
 import { matchesGlob } from '../agent/glob';
 import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt } from '../agent/systemPrompt';
+import { teamLeadPrompt } from '../agent/teams';
+import { TEAM_BUILDER_PROMPT } from '../agent/teamBuilder';
 import { resolveInWorkspace } from '../agent/workspace';
 import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 
@@ -215,4 +217,27 @@ test('the parallel-agent limit defaults to 8, which a research team needs and th
   assert.equal(AGENT_DEFAULTS.maxParallelAgents, 8);
   // The old default with agents that worked one part at a time was the measured bottleneck: 30 of 37 runs had one request in flight.
   assert.ok(AGENT_DEFAULTS.maxParallelAgents >= 8);
+});
+
+test('every path that briefs a lead tells it to run independent members at the same time', () => {
+  // Owner, 2026-11-08: all teams and default instructions must prompt parallelism. Three paths brief an agent: the system prompt, a team lead's prompt,
+  // and the AI that drafts a new team.
+  const system = agentSystemPrompt({ root: '/work/app', platform: 'linux x64', date: '2026-11-08', isGitRepo: true, model: 'm' });
+  assert.match(system, /Fan out every multi-part task/);
+  assert.match(system, /one sub-agent per part in a single turn/);
+
+  const lead = teamLeadPrompt({ slug: 't', name: 'Scouts', description: 'd', file: '/t.md', members: [
+    { name: 'a', tools: [], instructions: 'A does a.' },
+    { name: 'b', tools: [], instructions: 'B does b.' }
+  ] }, 'find out');
+  assert.match(lead, /start every part that does not depend on another in the SAME turn/, 'the lead is told to fan out in one turn');
+  assert.match(lead, /run_in_background/);
+  assert.match(lead, /Starting members one turn at a time[\s\S]*slowest way/, 'and told what the mistake looks like');
+  assert.match(lead, /what ran at the same time/, 'and reports what ran together');
+  // Both members are listed with what they do, so the lead can decide what can run together.
+  assert.match(lead, /- a: A does a\./);
+  assert.match(lead, /- b: B does b\./);
+
+  assert.match(TEAM_BUILDER_PROMPT, /work INDEPENDENTLY of the others/, 'a drafted team is designed to run concurrently');
+  assert.doesNotMatch(lead, /[\u2013\u2014]/, 'plain text, no em or en dashes');
 });

@@ -96,7 +96,21 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
 }
 
 export function teamLeadPrompt(team: TeamDefinition, task: string): string {
-  return `You lead the "${team.name}" team${team.description ? ` (${team.description})` : ''}. Members, each available as an Agent subagent_type:\n${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role})` : ''}: ${member.instructions.split('\n')[0].slice(0, 160)}`).join('\n')}\n\nAccomplish the task below by delegating to members with the Agent tool (give each a complete, self-contained prompt; run independent members in parallel), checking their reports, and integrating the result. Do the coordination yourself; do not do members' work for them. Finish with a short summary of what each member did and the outcome.\n\nTask: ${task}`;
+  // Owner, 2026-11-08: "ensure all our teams and default instructions prompt the orchestrating agent or team lead to allow use of parallelism where
+  // appropriate". The old wording mentioned parallelism in a clause; this makes it a rule with the test for what may run together, and says to fan out in
+  // ONE turn, because starting members across several turns is the measured way teams end up sequential (30 of 37 runs had one request in flight).
+  return `You lead the "${team.name}" team${team.description ? ` (${team.description})` : ''}. Members, each available as an Agent subagent_type:
+${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role})` : ''}: ${member.instructions.split('\n')[0].slice(0, 160)}`).join('\n')}
+
+# How to lead
+- **Split the task into the parts the members can do, and start every part that does not depend on another in the SAME turn**, each with run_in_background. A part may start together with another when it can finish without the other's answer. Starting members one turn at a time, or waiting for one before starting the next, is the slowest way to run a team and is the mistake to avoid.
+- Then collect the reports, resolve what conflicts, and integrate. If a part's result changes what another part needs, run that second part afterwards and say why it had to wait.
+- Give every member a complete, self-contained prompt: it sees nothing of this conversation. Name the exact output you want back from it.
+- Do the coordination yourself; do not do the members' work for them.
+
+Finish with a short summary of what each member did, what ran at the same time, and the outcome.
+
+Task: ${task}`;
 }
 
 /** Recommends a project team from the onboarding answers and renders it as a team file. */
