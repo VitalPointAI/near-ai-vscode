@@ -155,6 +155,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       // 0.4.19: an expired wait no longer settles anything. The run parked on the step and the card stays, so the outcome is recorded only when the person
       // answers (or the run is stopped), and a reloaded view shows the same waiting card rather than a decline that never happened.
       if (message.type === 'approval-paused' && typeof message.callId === 'string') tab.paused.set(message.callId, { ...(typeof message.minutes === 'number' ? { minutes: message.minutes } : {}), text: String(message.text ?? '') });
+      // 0.4.19 review: the day-long release posts `approval-expired` and no `prompt-closed`, so the parked entry stayed forever and the prompt never got an
+      // outcome to replay. It is settled here as expired.
+      if (message.type === 'approval-expired' && typeof message.callId === 'string') {
+        tab.paused.delete(message.callId);
+        tab.outcomes.set(message.callId, { outcome: 'expired', ...(typeof message.minutes === 'number' ? { detail: message.minutes } : {}) });
+      }
       if (message.type === 'prompt-closed' && typeof message.id === 'string') { tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' ? 'cancelled' : 'closed' }); tab.paused.delete(message.id); }
       const steerId = message.type === 'steer-state' ? String(message.id) : undefined;
       tab.log.add(steerId && message.state === 'queued' && tab.steerTexts.has(steerId) ? { ...message, text: tab.steerTexts.get(steerId) } : message);

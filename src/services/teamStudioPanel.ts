@@ -33,6 +33,18 @@ let current: { panel: vscode.WebviewPanel; startWizard(target: StudioTarget): Pr
  * capped so this stays minutes not hours. Shared by the run and by the cost shown before it, so the count the person is asked about is the count that
  * runs.
  */
+/**
+ * The longest a plan could take, from the runs' own time limits. It is a CEILING, not an estimate: every run is capped by its task's timeout and they run
+ * one after another, so the sum is the worst case a person is agreeing to (0.4.19 review: the confirmation said "a few minutes").
+ */
+function worstCase(runs: Array<{ task: { timeoutMs: number } }>): string {
+  const totalMinutes = Math.round(runs.reduce((total, run) => total + run.task.timeoutMs, 0) / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes} minutes`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours} hour${hours === 1 ? '' : 's'}${minutes ? ` ${minutes} minutes` : ''}`;
+}
+
 async function optimisationSetup(auth: AuthService, context: vscode.ExtensionContext): Promise<{ active: ActiveProvider; candidates: string[] } | undefined> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
   const active = await activeProvider(root, auth).catch(() => undefined);
@@ -110,7 +122,9 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       if (options.confirm !== false) {
         const answer = await vscode.window.showWarningMessage(
           `Test the roles in "${teamName}" and set each member's model?`,
-          { modal: true, detail: `${plan.estimatedRuns} short runs (${plan.members} member${plan.members === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}), a few minutes. Tested: ${candidates.join(', ')}. Skipping leaves the team exactly as you wrote it.` },
+          // 0.4.19 review: "a few minutes" was wrong. Each run is capped by its task's timeout and they run one at a time, so a six-member team can take
+          // over two hours. The worst case is stated, from the tasks' own limits, so nobody starts this expecting minutes.
+          { modal: true, detail: `${plan.estimatedRuns} runs (${plan.members} member${plan.members === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}), one at a time, up to ${worstCase(plan.runs)} if every run uses its whole time limit and much less when they finish early. Tested: ${candidates.join(', ')}. Costs tokens. Skipping leaves the team exactly as you wrote it.` },
           'Run the tests', 'Skip'
         );
         if (answer !== 'Run the tests') return undefined;

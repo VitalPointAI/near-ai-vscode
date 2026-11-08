@@ -45,13 +45,13 @@ test('a role added later still gets a task and a score, from the kind of work it
 test('a good reviewer scores full marks and a careless one does not, on the same grader', async () => {
   const files = { 'shop.js': 'export function totalAfterTax(){}\n' };
   const good = await folder({ ...files, 'review.md': '1. High: the discount is applied AFTER tax, because `taxed` is discounted on line 5 of shop.js.\n2. Medium: the `>= threshold` comparison gives the discount at exactly the threshold; the brief says more than.\n' });
-  const careless = await folder({ ...files, 'review.md': 'Looks fine.\n' });
+  const careless = await folder({ ...files, 'review.md': 'Looks fine. shop.js is mentioned but nothing in it is cited.\n' });
   const goodGrade = gradeRoleAnswer('reviewer', good, files);
   const carelessGrade = gradeRoleAnswer('reviewer', careless, files);
   assert.equal(goodGrade.score, goodGrade.outOf, `a good review should score full marks, missed: ${goodGrade.misses.join(', ')}`);
   assert.ok(carelessGrade.score < goodGrade.score, 'a review that finds nothing scores lower');
   assert.ok(carelessGrade.misses.includes('found the discount order'));
-  assert.ok(carelessGrade.misses.includes('cites the file'));
+  assert.ok(carelessGrade.misses.includes('cites the file and a place in it'), 'a review that names no place in the file does not pass the citation check');
 });
 
 test('a role with no grader of its own is still scored, so a new role can be ranked', async () => {
@@ -137,4 +137,25 @@ test('a role that borrows another task is graded on the output that task asks fo
   // The output the grader will look for is the one the TASK asks for.
   const outputs = roleOutputs('compliance-auditor', borrowed.task.kind, borrowed.task.borrowedFrom ?? borrowed.task.role);
   assert.deepEqual(outputs, ['shop.js'], 'the implementer task asks for a change to shop.js');
+});
+
+test('a role that name-drops without doing the work fails the checks it used to pass', async () => {
+  // The review's finding: several checks were keyword matches, so a model that mentioned the right words scored full marks and was then written into the
+  // team as that role's chosen model. Each of these is a name-drop with no evidence.
+  const reviewerFiles = { 'shop.js': 'export function total(){}\n' };
+  const nameDrop = await folder({ ...reviewerFiles, 'review.md': '1. High: shop.js has a discount problem and a threshold problem.\n' });
+  const grade = gradeRoleAnswer('reviewer', nameDrop, reviewerFiles);
+  assert.ok(grade.misses.includes('cites the file and a place in it'), 'naming shop.js is not citing a place in it');
+
+  const securityFiles = { 'server.js': 'x\n' };
+  const vague = await folder({ ...securityFiles, 'findings.md': '1. Critical issue. 2. High issue.\n' });
+  const securityGrade = gradeRoleAnswer('security', vague, securityFiles);
+  assert.ok(securityGrade.misses.includes('grades the injection finding'), 'a severity not attached to the finding does not count');
+
+  const redFiles = { 'duration.js': 'x\n' };
+  const quoted = await folder({ ...redFiles, 'attacks.md': '1. It can crash on bad input, for example "foo".\n2. It can return undefined.\n' });
+  assert.equal(gradeRoleAnswer('red-team', quoted, redFiles).misses.includes('shows a triggering input'), false, 'a real input to this function does pass');
+
+  const noInput = await folder({ ...redFiles, 'attacks.md': '1. It can crash.\n2. It can return undefined.\n' });
+  assert.ok(gradeRoleAnswer('red-team', noInput, redFiles).misses.includes('shows a triggering input'), 'no input at all fails');
 });

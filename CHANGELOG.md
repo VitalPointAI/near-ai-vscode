@@ -28,8 +28,9 @@
 - **Compare Models can now answer "which model for which role".** Run the comparison from a terminal
   with `npm run compare:models`, keep only what is stale or new with one click, and apply the setup the
   results point to in one action: deep is the most accurate, fast the quickest model still within half a
-  point, standard the best value among those, and **the cyber model is always chosen from the models that do
-  not refuse the work** once one has been tested; until then it keeps the model it uses now and says so. A chart shows the score over time, by task type, so you can see whether it is improving.
+  point, standard the best value among those. For cyber work it advises a model chosen only from those that do not refuse
+the work, once one has been tested: a scan picks its own model when it starts, so that row is advice rather than a setting
+the button writes. A chart shows the score over time, by task type, so you can see whether it is improving.
 - **Check now, when a run is waiting on CI or a review.** A running agent row has a **Check now** button
   beside Pause and Stop: it interrupts the wait and tells the agent to read the real state from GitHub
   again. Runs also wait without sleeping, so a verdict that lands early is picked up with no click.

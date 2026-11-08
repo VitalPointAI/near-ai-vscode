@@ -163,7 +163,9 @@ async function main() {
   const id = await store.newId(runIdFor(new Date(started)));
   const savedRun = {
     format: RUN_FORMAT, version: 1, id, startedAt: new Date(started).toISOString(), status: 'running',
-    taskSet: options.set ?? 'full', mode: options.mode, runsPerTask: options.runs,
+    // 0.4.19 review: a single-task run was saved as a full-set run, so Past comparisons said the team had been tested on everything. `short` is the
+    // store's value for a subset; the task ids are saved on the run anyway, so the record says exactly which tasks were run.
+    taskSet: options.set ?? 'short', mode: options.mode, runsPerTask: options.runs,
     models: models.map((model) => { const info = catalog.find((entry) => entry.id === model); return { id: model, privacy: privacyOf(info), ...(info?.forwardedTo ? { forwardedTo: info.forwardedTo } : {}), catalogVersion: String(catalog.length) }; }),
     tasks: chosen.map((task) => ({ id: task.id, kind: task.kind, version: task.version })),
     rows

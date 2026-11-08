@@ -17,7 +17,7 @@ function tools(start = emptyKnowledge('scouts', '2026-11-08T10:00:00.000Z')) {
 
 const honest = {
   nodes: [
-    { label: 'Halden Ports', kind: 'organisation', functions: ['issues certifications'], facts: [{ text: 'Certifies marine equipment.', source: 'https://register.example/a' }, { text: 'Certifies marine equipment.' }], grading: { reliability: 'A', credibility: 1 } },
+    { label: 'Halden Ports', kind: 'organisation', functions: ['issues certifications'], facts: [{ text: 'Certifies marine equipment.', source: 'Certification register, 2026-10-02' }, { text: 'Certifies marine equipment.' }], grading: { reliability: 'A', credibility: 1 } },
     { label: 'Ministry of Trade', kind: 'organisation' }
   ],
   edges: [{ from: 'Ministry of Trade', to: 'Halden Ports', kind: 'regulates', tension: -0.7, basis: 'fined twice', grading: { reliability: 'B', credibility: 2 } }]
@@ -69,7 +69,7 @@ test('an empty graph says so, and a full lookup names the actor, its grade, its 
   assert.match(text, /Halden Ports \(organisation\)/);
   assert.match(text, /A1/);
   assert.match(text, /Certifies marine equipment/);
-  assert.match(text, /https:\/\/register\.example\/a/);
+  assert.match(text, /Certification register, 2026-10-02/);
   assert.match(text, /<- regulates Ministry of Trade \(tension -0\.7, fined twice\)/, 'the incoming relation is shown with its direction and strength');
   // The list form names the strongest relation, so an agent sees what matters without asking for each actor.
   const list = await kit.lookup.run({} as never, {} as never);
@@ -112,4 +112,23 @@ test('a damaged graph is reported on the merge that overwrites it, rather than r
   assert.deepEqual(merged.nodes.map((node) => node.label), ['alpha']);
   // And the file is now valid.
   assert.match(await readFile(knowledgeFile(dir, 'scouts'), 'utf8'), /"version": 1/);
+});
+
+test('a fact taken from a web page cannot claim the top grade, so a hostile page does not become trusted memory', () => {
+  // The review's finding: an agent could grade a page it just read as A1 and make it durable team knowledge.
+  const kit = tools();
+  const input = kit.learn.parse({
+    nodes: [{
+      label: 'Evil Corp', grading: { reliability: 'A', credibility: 1 },
+      facts: [{ text: 'It certifies everything.', source: 'https://evil.test/about' }]
+    }]
+  } as never);
+  // Capped at C3: the agent cannot vouch for a page it read.
+  assert.deepEqual(input.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
+  // A source that is not a web page keeps the grade the agent gave it, which is what a cited document is for.
+  const cited = kit.learn.parse({ nodes: [{ label: 'Registry', grading: { reliability: 'A', credibility: 1 }, facts: [{ text: 'Certified.', source: 'Certification register, 2026-10-02' }] }] } as never);
+  assert.deepEqual(cited.nodes[0]?.grading, { reliability: 'A', credibility: 1 });
+  // No source at all is the agent's own working memory, so its grade stands.
+  const unwritten = kit.learn.parse({ nodes: [{ label: 'Note', grading: { reliability: 'B', credibility: 2 } }] } as never);
+  assert.deepEqual(unwritten.nodes[0]?.grading, { reliability: 'B', credibility: 2 });
 });

@@ -569,7 +569,13 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const candidates = await deps.optimiseCandidates?.().catch(() => undefined) ?? [];
         // Each member is tested on each candidate model, which is what the role suite plans, so the total is members x models summed over the teams.
         const runs = candidates.length ? teams.reduce((total, team) => total + team.members.length * candidates.length, 0) : 0;
-        const question = `Test the roles in ${teams.length === 1 ? `"${teams[0].name}"` : `all ${teams.length} teams`} and set each member's model? ${runs ? `${runs} short runs (${teams.map((team) => `${team.name}: ${team.members.length} member${team.members.length === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}`).join(', ')}), a few minutes. ` : 'A few minutes. '}Tested: ${candidates.length ? candidates.join(', ') : 'the models this machine is set up with'}. Cancelling part-way keeps the teams already tested.`;
+        const label = teams.length === 1 ? `"${teams[0]!.name}"` : `all ${teams.length} teams`;
+        const breakdown = teams.map((team) => `${team.name}: ${team.members.length} member${team.members.length === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}`).join(', ');
+        // 0.4.19 review: "a few minutes" was wrong for six members and three models. The ceiling is stated, from the run count, so nobody starts this
+        // expecting minutes.
+        const ceiling = Math.max(1, Math.ceil((runs * 8) / 60));
+        const cost = runs ? `${runs} runs (${breakdown}), one at a time, up to ${ceiling} hour${ceiling === 1 ? '' : 's'} at the very worst and usually much less. ` : 'A few minutes. ';
+        const question = `Test the roles in ${label} and set each member's model? ${cost}Tested: ${candidates.length ? candidates.join(', ') : 'the models this machine is set up with'}. Costs tokens. Cancelling part-way keeps the teams already tested.`;
         if (await choose(question, 'Run the tests', 'Skip') !== 'Run the tests') return;
         // One controller for the whole run, so the person can cancel part-way and the teams that finished keep their results.
         const controller = new AbortController();

@@ -54,7 +54,8 @@ export function gradeRoleAnswer(role: string, root: string, files: Record<string
       add('wrote review.md', review.trim().length > 40);
       add('found the discount order', mentions(review, /discount[^\n]*(before|then|after)[^\n]*tax|tax[^\n]*after[^\n]*discount/i));
       add('found the threshold boundary', mentions(review, /threshold/i) && mentions(review, /(more than|greater than|equal|>|>=)/i));
-      add('cites the file', mentions(review, /shop\.js/));
+      // 0.4.19 review: naming shop.js is not a citation. It must point at a place in it, so a model that name-drops without reading scores nothing here.
+      add('cites the file and a place in it', /shop\.js[^\n]{0,40}(?::\s*\d+|line\s*\d+|\d+\s*-\s*\d+)/i.test(review) || /line\s*\d+[^\n]{0,40}shop\.js/i.test(review));
       add('does not edit the code', !changed(root, files, 'shop.js'));
       add('lists findings as items', items(review) >= 1);
       break;
@@ -73,7 +74,8 @@ export function gradeRoleAnswer(role: string, root: string, files: Record<string
       add('wrote findings.md', findings.trim().length > 40);
       add('found the command injection', mentions(findings, /(injection|execSync|untrusted|arbitrary command)/i));
       add('found the hardcoded secret', mentions(findings, /(sk-live|hard[- ]?coded|hardcoded|secret|api key)/i));
-      add('names a severity', mentions(findings, /(critical|high|medium|low)/i));
+      // The severity must be on the finding it belongs to, within a short distance of the injection phrase.
+      add('grades the injection finding', /(?:critical|high|medium|low)[^\n]{0,80}(?:injection|execSync|untrusted)/i.test(findings) || /(?:injection|execSync|untrusted)[^\n]{0,80}(?:critical|high|medium|low)/i.test(findings));
       add('says how to fix it', mentions(findings, /(fix|use|replace|sanitize|escap|allow[- ]?list)/i));
       add('does not edit the code', !changed(root, files, 'server.js'));
       break;
@@ -126,7 +128,9 @@ export function gradeRoleAnswer(role: string, root: string, files: Record<string
       add('wrote attacks.md', attacks.trim().length > 40);
       add('finds the missing match', mentions(attacks, /(no match|null|undefined|null match|invalid input)/i));
       add('finds the unvalidated unit', mentions(attacks, /(unit|suffix|letter|format)/i));
-      add('shows a triggering input', /["'`]/.test(attacks) && /(\d+[a-z]|abc|"(?:30x|xyz)")/i.test(attacks));
+      // 0.4.19 review: any quoted word passed. The input has to be one that reaches this function's shape (a number and a unit, or something that is not
+      // one), and the finding has to say what it does.
+      add('shows a triggering input', /["'`]\s*(?:\d+\s*[a-z]{1,3}|[a-z]{2,6}|\d+\s*[xX][a-z]*|\s*)\s*["'`]/.test(attacks) && /(parseDuration|duration\.js|input|query)/i.test(attacks));
       add('says why it matters', mentions(attacks, /(crash|error|throw|500|denial|NaN)/i));
       add('lists attacks as items', items(attacks) >= 2);
       add('does not edit the function', !changed(root, files, 'duration.js'));

@@ -116,7 +116,17 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
           if (typeof fact.text !== 'string' || !fact.text.trim()) return [];
           return [{ text: fact.text.slice(0, 400), ...(typeof fact.source === 'string' && fact.source.trim() ? { source: fact.source.slice(0, 300) } : {}) }];
         }).slice(0, 12) : [];
-        const grading = gradingOf(node.grading, `nodes[${index}]`);
+        let grading = gradingOf(node.grading, `nodes[${index}]`);
+        // 0.4.19 review: a hostile page an agent read could be given an A1 grade by that agent and become durable team memory. A fact with an external
+        // SOURCE but no grade is therefore ungraded on purpose, and one claiming the top grade for a web source is capped at C3: the agent cannot vouch for
+        // a page it just read, and the card shows what it claimed rather than silently trusting it.
+        const fromWeb = facts.some((fact) => fact.source !== undefined && /^https?:\/\//i.test(fact.source));
+        if (fromWeb) {
+          if (!grading) grading = undefined;
+          // Cleared to C3: C is "fairly reliable" and 3 is "possibly true", which is what an agent's own reading of a page is worth. Both are floored,
+          // because a page just read cannot be confirmed by other sources either.
+          else if (grading.reliability === 'A' || grading.reliability === 'B') grading = { reliability: 'C', credibility: 3 };
+        }
         return { label: node.label.trim().slice(0, 120), kind, functions, facts, ...(grading ? { grading } : {}) };
       });
       const edges = Array.isArray(raw.edges) ? raw.edges.slice(0, 60).flatMap((entry, index) => {
@@ -132,8 +142,9 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     },
     title: (input) => `Learn ${input.nodes.length} actor${input.nodes.length === 1 ? '' : 's'}${input.edges.length ? `, ${input.edges.length} relation${input.edges.length === 1 ? '' : 's'}` : ''}`,
     async preview(input) {
-      // "Approve for this run" is the answer to "one card per fact": a workspace write approved for the run covers every later one (src/agent/loop.ts).
-      return { kind: 'note', text: `Add to the team's knowledge graph: ${input.nodes.map((node) => node.label).join(', ')}${input.edges.length ? `; relations: ${input.edges.map((edge) => `${edge.from} ${edge.kind} ${edge.to}`).join(', ')}` : ''}.\nIt is written to the team's own file, outside this project. "Approve for this run" also allows its later additions, so a team working in parallel does not stop at every fact.` };
+      // 0.4.19 review: the preview promised that approving once covered every later addition, which is true of "Approve for this run" but was stated as if
+      // the graph became approved wholesale. It now says what approving does, and warns that what is added is durable and model-authored.
+      return { kind: 'note', text: `Add to the team's knowledge graph: ${input.nodes.map((node) => node.label).join(', ')}${input.edges.length ? `; relations: ${input.edges.map((edge) => `${edge.from} ${edge.kind} ${edge.to}`).join(', ')}` : ''}.\nIt is written to the team's own file, outside this project, and later runs treat it as what the team knows. "Approve for this run" also allows this run's later additions, so a team working in parallel does not stop at every fact. Check the sources: what is added here outlives the run.` };
     },
     async run(input) {
       const graph = await knowledge.add(input);
