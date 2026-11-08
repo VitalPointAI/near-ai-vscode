@@ -306,12 +306,20 @@ export class ActivityFeed {
   /**
    * The wait reached its timeout and the run parked on the step. The person has not answered yet, so the agent is still waiting on them: the wait time keeps
    * counting, which is what makes "Waiting for you" in the Activity view tell the truth.
+   *
+   * 0.4.19 review: this used to increment `expired`, and then the person's later answer ran `approvalSettled` and counted the SAME prompt again, so one
+   * prompt showed up twice in the approval stats. The expiry count belongs to the settle, which happens exactly once per prompt; this only re-states that
+   * the agent is still waiting.
    */
   public approvalExpired(agentId: string): void {
-    this.withAgent(agentId, (_base, stat) => { stat.approvals.expired += 1; this.changed([]); });
+    this.withAgent(agentId, (_base, stat) => { if (stat.phase !== 'waiting-you') this.enter(stat, 'waiting-you'); this.changed([]); });
   }
 
-  /** `cancelled`: the run stopped while it waited, which is neither an answer nor an expiry. */
+  /**
+   * `cancelled`: the run stopped while it waited, which is neither an answer nor an expiry. `expired` stays accepted for a caller that settles a prompt AS
+   * an expiry: since a parked run now waits for its answer, nothing passes it today, and the count lives here so a prompt is never counted twice (0.4.19
+   * review).
+   */
   public approvalSettled(agentId: string, outcome: 'allowed' | 'declined' | 'expired' | 'cancelled'): void {
     this.withAgent(agentId, (_base, stat) => {
       if (outcome === 'declined') stat.approvals.declined += 1;

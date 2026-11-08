@@ -327,3 +327,15 @@ test('a comparison saved the way the CLI saves it is readable by the tab', async
   assert.equal(board.length, 1);
   assert.equal(board[0]?.model, 'z-ai/glm-5.3-flash');
 });
+
+test('the trend weights each model once per day, so five runs by one model do not outweigh one run by another', () => {
+  const at = '2026-11-08T10:00:00.000Z';
+  const day = (rows: ResultRow[]): SavedRun => ({ format: 'near-ai-model-comparison', version: 1, id: at, startedAt: at, status: 'completed', taskSet: 'full', mode: 'rerun', runsPerTask: 1, models: [], tasks: [], rows });
+  // Model A scores 10/10 five times; model B scores 0/10 once. Averaging every row gives 83%, averaging per model first gives 50%.
+  const rows: ResultRow[] = [
+    ...Array.from({ length: 5 }, () => row('tee/a', 'implement', 10, { at })),
+    row('tee/b', 'implement', 0, { at })
+  ];
+  const trend = performanceTrend([day(rows)]);
+  assert.equal(trend.overall[0]?.percent, 50, 'each model counts once, not once per run');
+});

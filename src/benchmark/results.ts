@@ -544,8 +544,13 @@ export function performanceTrend(runs: SavedRun[]): { overall: TrendPoint[]; byK
   const pointFor = (rows: ResultRow[]): TrendPoint | undefined => {
     const scored = rows.filter((row) => row.outOf > 0);
     if (!scored.length) return undefined;
-    const total = scored.reduce((sum, row) => sum + row.score / row.outOf, 0);
-    return { date: '', percent: Math.round((100 * total) / scored.length), runs: scored.length };
+    // One average per MODEL per day, then the day is the average of those, so a model tested five times does not outweigh one tested once (0.4.19 review:
+    // the comment promised this and the code averaged every row).
+    const byModel = new Map<string, number[]>();
+    for (const row of scored) byModel.set(row.model, [...(byModel.get(row.model) ?? []), row.score / row.outOf]);
+    const perModel = [...byModel.values()].map((values) => values.reduce((sum, value) => sum + value, 0) / values.length);
+    const percent = perModel.reduce((sum, value) => sum + value, 0) / perModel.length;
+    return { date: '', percent: Math.round(100 * percent), runs: scored.length };
   };
   const dates = [...byDate.keys()].sort();
   const overall: TrendPoint[] = [];

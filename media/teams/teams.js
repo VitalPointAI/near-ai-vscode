@@ -774,11 +774,12 @@
       if (review && review.errors.length) {
         const go = button(review.errors.length + ' to fix', () => { const step = stepFor(review.errors[0]); if (step !== undefined) goStep(step); }, { link: true, label: 'Go to the first problem that is stopping this team from being saved' });
         errorCount.append(go);
-        for (const issue of review.errors.slice(0, 2)) {
-          errorCount.append(el('span', 'error-count-text', ' ' + issue.message));
-          if (review.errors.length > 1) break;
-        }
-        if (review.errors.length > 2) errorCount.append(el('span', 'hint', ' and ' + (review.errors.length - 2) + ' more'));
+        // Show the first two and count the REST from what was actually shown: the old loop broke after one and then subtracted two, so it said "and 1 more"
+        // while two were hidden (0.4.19 review).
+        const shown = review.errors.slice(0, 2);
+        for (const issue of shown) errorCount.append(el('span', 'error-count-text', ' ' + issue.message));
+        const hidden = review.errors.length - shown.length;
+        if (hidden > 0) errorCount.append(el('span', 'hint', ` and ${hidden} more`));
       }
     }
   }

@@ -84,13 +84,26 @@ function defaultStoreDir() {
   return candidates.find((dir) => existsSync(dir));
 }
 
-/** The model a tier uses now, from the workspace settings the extension reads, falling back to its defaults. */
+/** Reads one settings.json, allowing the comments VS Code permits. */
+function readSettings(file) {
+  try { return JSON.parse(readFileSync(file, 'utf8').replace(/^\s*\/\/.*$/gm, '')); } catch { return {}; }
+}
+
+/**
+ * The model a tier uses now. 0.4.19 review: this read ONLY the workspace settings, so `--tier` on a machine whose tiers live in user settings compared
+ * something other than "the model that tier uses now". Workspace settings still win, as they do in VS Code, and the user settings are read after them.
+ */
 function tierModel(tier) {
-  const settingsPath = path.join(process.cwd(), '.vscode', 'settings.json');
-  let settings = {};
-  try { settings = JSON.parse(readFileSync(settingsPath, 'utf8').replace(/^\s*\/\/.*$/gm, '')); } catch { /* no workspace settings */ }
+  const home = homedir();
+  const userSettings = [
+    path.join(home, '.config', 'Code', 'User', 'settings.json'),
+    path.join(home, '.config', 'Code - Insiders', 'User', 'settings.json'),
+    path.join(home, '.local', 'share', 'code-server', 'User', 'settings.json'),
+    path.join(home, 'Library', 'Application Support', 'Code', 'User', 'settings.json'),
+    path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'settings.json')
+  ].map(readSettings);
   const key = `nearAi.agent.${tier}Model`;
-  const direct = settings[key];
+  const direct = readSettings(path.join(process.cwd(), '.vscode', 'settings.json'))[key] ?? userSettings.map((settings) => settings[key]).find((value) => typeof value === 'string' && value.trim());
   if (typeof direct === 'string' && direct.trim()) return direct.trim();
   const tiers = { deep: 'moonshotai/kimi-k3', standard: 'z-ai/glm-5.3', fast: 'Qwen/Qwen3.6-35B-A3B-FP8' };
   if (!(tier in tiers)) throw new Error(`--tier takes deep, standard or fast (got ${tier})`);
