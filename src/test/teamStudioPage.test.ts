@@ -1095,3 +1095,47 @@ test('page: the Team shape tab draws the hierarchy and opens a member card when 
   assert.match(panel.textContent, /Report what changed/);
   assert.match(panel.textContent, /Reports to: lead/);
 });
+
+// The role-test step was added with no test coverage of its own (0.4.19 review): the sequence of what the person is shown matters, because it spends real
+// minutes and tokens. These drive the REAL handler with a stubbed optimiser.
+test('optimise-all asks once for every team with the total, then reports each team as it finishes', async () => {
+  const h = await harness();
+  const calls: Array<{ team: string; members: number; confirm?: boolean }> = [];
+  (h.deps as unknown as Record<string, unknown>).optimiseCandidates = async () => ['fast', 'standard'];
+  (h.deps as unknown as Record<string, unknown>).optimiseTeam = async (members: Array<{ name: string }>, team: string, options?: { confirm?: boolean }) => {
+    calls.push({ team, members: members.length, ...(options?.confirm === undefined ? {} : { confirm: options.confirm }) });
+    return { applied: members.length, text: `${team}: set ${members.length} model(s).` };
+  };
+  // The up-front question is answered with "Run the tests"; the harness's choose() records what it was asked.
+  h.chooseAnswer.value = 'Run the tests';
+  // Two teams in the library.
+  await h.library.create('First', '---\nname: First\ndescription: One.\n---\n\n## a\nrole: planner\n\nDoes a.\n');
+  await h.library.create('Second', '---\nname: Second\ndescription: Two.\n---\n\n## b\nrole: writer\n\nDoes b.\n');
+  h.posted.length = 0;
+  await h.send({ type: 'optimise-all' });
+  await h.settle();
+
+  // One up-front question naming the total, not one per team.
+  assert.equal(h.asked.length, 1, `one modal for the whole run, saw ${h.asked.length}: ${JSON.stringify(h.asked.map((entry) => entry.message.slice(0, 60)))}`);
+  assert.match(h.asked[0]!.message, /4/, 'the total is the sum across teams: 2 teams x 1 member x 2 models');
+  // Each team was run without its own modal, since the caller already asked.
+  assert.deepEqual(calls.map((call) => call.team).sort(), ['First', 'Second']);
+  assert.ok(calls.every((call) => call.confirm === false), 'no second modal per team');
+  // Progress is reported per team, so the person sees movement rather than a long silence.
+  const notices = h.posted.filter((message) => message.type === 'notice').map((message) => String(message.text));
+  assert.ok(notices.some((text) => /First/.test(text)), `a notice names the team as it finishes: ${JSON.stringify(notices)}`);
+  assert.ok(notices.some((text) => /Second/.test(text)));
+  h.close();
+});
+
+test('optimise-all says so when there is nothing to test, and does not ask a pointless question', async () => {
+  const h = await harness();
+  (h.deps as unknown as Record<string, unknown>).optimiseTeam = async () => ({ applied: 0, text: 'unused' });
+  h.posted.length = 0;
+  await h.send({ type: 'optimise-all' });
+  await h.settle();
+  assert.equal(h.asked.length, 0, 'no modal when there are no teams');
+  const notices = h.posted.filter((message) => message.type === 'notice').map((message) => String(message.text));
+  assert.ok(notices.some((text) => /no teams to test/i.test(text)), `it says there is nothing to do: ${JSON.stringify(notices)}`);
+  h.close();
+});
