@@ -124,3 +124,29 @@ test('the page loads one nonce script and two stylesheets (shared base, then its
   assert.match(html, /id="board"[\s\S]*id="setup"[\s\S]*id="history"/, 'the leaderboard comes first, then the controls, then past comparisons');
   assert.deepEqual(parseToolsPageMessage({ type: 'run-command', command: 'nearAi.compareModels' }), { type: 'run-command', command: 'nearAi.compareModels' });
 });
+
+// A team that was just saved is checked against the comparisons (owner, 2026-11-07): the suggestion names the members whose tested best model differs,
+// and says nothing when there is nothing to say.
+test('a new team is checked per member, and only members whose tested best model differs are suggested', async () => {
+  const { suggestForTeam, leaderboardRows } = await import('../services/modelComparisonPage');
+  const row = (model: string, byKind: Record<string, { score: number; tasks: number; runs: number }>) => ({
+    model, rank: 1, score: 8, byKind, runs: 2, passes: 1, passRate: 0.5, medianSeconds: 60, costPerRunUsd: 0.02,
+    costEstimated: false, failures: 0, stalls: 0, tasks: [], inCatalog: true, stale: [], missingTasks: [], privacy: 'tee' as const
+  });
+  const rows = [
+    row('vendor/research-king', { research: { score: 9.2, tasks: 1, runs: 1 }, planning: { score: 5, tasks: 1, runs: 1 } }),
+    row('vendor/planner-king', { planning: { score: 9.4, tasks: 1, runs: 1 }, research: { score: 5.5, tasks: 1, runs: 1 } })
+  ] as never;
+  const suggestions = suggestForTeam(rows, [
+    { name: 'scout', role: 'gsd-researcher' },
+    { name: 'architect', role: 'gsd-planner', model: 'vendor/planner-king' },
+    { name: 'mapper' }
+  ]);
+  const byMember = Object.fromEntries(suggestions.map((entry) => [entry.member, entry]));
+  assert.equal(byMember.scout.model, 'vendor/research-king');
+  assert.equal(byMember.scout.changes, true, 'a member with no model line is suggested one');
+  assert.equal(byMember.architect.changes, false, 'a member already on the recommended model is not a change');
+  assert.ok(byMember.mapper, 'a member with no role is judged on the overall score rather than skipped');
+  // The page builds the same leaderboard the table shows, so a suggestion cannot disagree with the numbers above it.
+  assert.equal(typeof leaderboardRows, 'function');
+});

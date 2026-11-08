@@ -343,6 +343,11 @@ export interface TeamStudioDeps {
   pickExportTarget(defaultName: string): Promise<string | undefined>;
   pickImportSource(): Promise<string | undefined>;
   applyProjectType(root: string, type: ProjectType, goal: string): Promise<unknown>;
+  /**
+   * What the model comparisons say each role should use, for a team that was just saved (owner, 2026-11-07: "as new teams are added, we should
+   * automatically check and suggest model optimizations for the new members and roles that are created"). Undefined when no comparison has been run.
+   */
+  suggestModels?(members: Array<{ name: string; role?: string; model?: string }>): Promise<Array<{ member: string; model: string; current?: string; why: string; changes: boolean }>>;
   drafts: { get(): unknown; set(value: SavedWizard | undefined): Promise<void> };
   /** A modal question; resolves to the action chosen, or undefined when dismissed. */
   choose?(message: string, ...actions: string[]): Promise<string | undefined>;
@@ -414,6 +419,21 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     open = { id, file, text: textNow, base: hash(textNow) };
     const entry = teamFor(id);
     post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root), command: entry?.command ?? '', draft, base: open.base, versions: await versionsOf(file), ...(notice ? { notice } : {}) });
+  };
+
+  /**
+   * Suggests a model for each member of a team that was just saved, from the comparisons that have been run. It never changes anything by itself: it
+   * names the members whose tested best model differs and offers to open Compare Models, which is where one click applies the setup. Silent when no
+   * comparison exists, because a suggestion without evidence is an opinion.
+   */
+  const suggestModelsFor = async (team: { members: Array<{ name: string; role?: string; model?: string }> }, id: string) => {
+    if (!deps.suggestModels) return;
+    let suggestions: Array<{ member: string; model: string; current?: string; why: string; changes: boolean }> = [];
+    try { suggestions = await deps.suggestModels(team.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) }))); } catch { return; }
+    const changes = suggestions.filter((entry) => entry.changes);
+    if (!changes.length) return;
+    const lines = changes.map((entry) => `${entry.member}: ${entry.model} (${entry.why}${entry.current ? `, now ${entry.current}` : ''})`);
+    post({ type: 'model-suggestion', id, changes, text: `The comparisons suggest a different model for ${changes.length} member${changes.length === 1 ? '' : 's'}: ${lines.join('; ')}.` });
   };
 
   const onWatch = async (file: string) => {
@@ -548,6 +568,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         await deps.drafts.set(undefined);
         await refreshLibrary();
         await sendTeam(id, file, message.target === 'project' ? `Saved the project team. Run it with /team:project <task>.${message.projectType ? ' AGENTS.md now has this project type\'s guidance.' : ''}` : `Saved "${message.draft.name.trim()}". Run it with /team:${path.basename(file, '.md')} <task>.`);
+        // A team that was just saved is checked against the model results, so a new member does not silently keep a default model the tests disagree with.
+        await suggestModelsFor(draftFromMarkdown(await readFile(file, 'utf8'), file), id);
         return;
       }
       case 'save-draft': {

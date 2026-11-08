@@ -8,6 +8,10 @@ import { TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
 import { attachTeamStudio, StudioTarget, teamStudioHtml } from './teamStudioPage';
 import { ChatPrefill, gatherDirectoryInput } from './toolsPage';
+import { ComparisonStore } from '../benchmark/store';
+import { loadBenchmarkTasks } from '../benchmark/tasks';
+import { leaderboardRows, suggestForTeam } from './modelComparisonPage';
+import { activeProvider } from './providerCache';
 import { onDidChangeEmergencyStop } from './emergencyStop';
 import { homeFolder, teamLibraryDir, teamsMoveInFlight, whenTeamsMoved } from '../domain/teamStorage';
 
@@ -49,6 +53,16 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     openSetting: (key) => Promise.resolve(vscode.commands.executeCommand('workbench.action.openSettings', key)),
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
+    // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.
+    suggestModels: async (members) => {
+      const tasks = await loadBenchmarkTasks();
+      const runs = await new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals')).list();
+      if (!runs.length) return [];
+      // The catalogue is only needed for prices and privacy, and a failure there must not block the suggestion.
+      const active = await activeProvider(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '', auth).catch(() => undefined);
+      const rows = leaderboardRows(runs, tasks, active?.models ?? [], [], Date.now());
+      return suggestForTeam(rows, members);
+    },
     ask: (prompt, value) => Promise.resolve(vscode.window.showInputBox({ title: 'Team Studio', prompt, value, validateInput: (text) => text.trim() ? undefined : 'Enter a name.' })),
     pickExportTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(root ?? context.globalStorageUri.fsPath, name)), filters: { 'Team file': ['md'] }, title: 'Export team' }))?.fsPath,
     pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'Team file': ['md'] }, title: 'Import a NEAR AI team file', canSelectMany: false }))?.[0]?.fsPath,
