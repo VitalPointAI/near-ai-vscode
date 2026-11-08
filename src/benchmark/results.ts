@@ -382,11 +382,13 @@ export function recommendTiers(leaderboard: LeaderboardEntry[], current: { fast?
   // A real ordering: accuracy first, then time, then cost. A comparator that only ever returned "a is better or equal" makes sort's result depend on
   // the input order, which is how a slower, less accurate model once reached the top.
   const rankOf = (entry: LeaderboardEntry): [number, number, number] => [-(Math.round(entry.score * 100) / 100), entry.medianSeconds ?? Number.POSITIVE_INFINITY, entry.costPerRunUsd ?? Number.POSITIVE_INFINITY];
+  // A TOTAL order, so sort never depends on the input order: accuracy, then time, then cost, with no tolerance band inside the comparator (a band makes
+  // the comparison non-transitive, so a > b and b > c but c > a, and sort's answer changes with the array's order). The "within half a point counts as
+  // good enough" idea is applied AFTER sorting, when the near-best set is chosen.
   const best = (a: LeaderboardEntry, b: LeaderboardEntry): number => {
     const [scoreA, timeA, costA] = rankOf(a);
     const [scoreB, timeB, costB] = rankOf(b);
-    // Within 0.05 counts as the same accuracy, and then time decides.
-    if (Math.abs(scoreA - scoreB) > 0.05) return scoreA - scoreB;
+    if (scoreA !== scoreB) return scoreA - scoreB;
     if (timeA !== timeB) return timeA - timeB;
     return costA - costB;
   };

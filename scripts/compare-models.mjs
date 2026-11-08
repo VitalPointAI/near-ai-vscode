@@ -40,7 +40,8 @@ const USAGE = `usage: node scripts/compare-models.mjs [options]
 `;
 
 function parse(argv) {
-  const options = { runs: 1, task: 'research-brief', mode: 'run', baseUrl: DEFAULT_BASE_URL, temp: tmpdir() };
+  // The store's own mode value: 'rerun'. A hand-made 'run' would be saved in a shape the tab reads as neither reuse nor rerun (0.4.19 review).
+  const options = { runs: 1, task: 'research-brief', mode: 'rerun', baseUrl: DEFAULT_BASE_URL, temp: tmpdir() };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = () => {
@@ -132,7 +133,8 @@ async function main() {
     rows
   };
   const outcome = await runComparison({
-    runId: `cli-${Date.now()}`,
+    // The store id, so the spend ledger and the saved run agree on which comparison a request belonged to.
+    runId: id,
     plan, tasks: chosen, runsPerTask: options.runs,
     clientFor: () => client,
     rules: DEFAULT_RULES,
@@ -142,7 +144,11 @@ async function main() {
     onProgress: ({ done, total, model, task }) => { if (model) process.stderr.write(`  ${done + 1}/${total} ${model} on ${task}\n`); },
     onRow: async (row) => { rows.push(row); await store.save({ ...savedRun, rows: [...rows] }).catch((error) => process.stderr.write(`  could not save: ${error.message}\n`)); }
   });
-  await store.save({ ...savedRun, rows: [...rows], finishedAt: new Date().toISOString(), status: outcome.status, ...(outcome.stopReason ? { stopReason: outcome.stopReason } : {}) }).catch(() => undefined);
+  // A failed final save is reported, not swallowed: the comparison cost real time and money, and the person must know it is not in the tab.
+  let saveProblem = '';
+  try {
+    await store.save({ ...savedRun, rows: [...rows], finishedAt: new Date().toISOString(), status: outcome.status, ...(outcome.stopReason ? { stopReason: outcome.stopReason } : {}) });
+  } catch (error) { saveProblem = error.message; }
   // Ranked by score first, then by time: the point is fast AND right.
   const byModel = new Map();
   for (const row of rows) {
@@ -159,6 +165,7 @@ async function main() {
   }
   process.stdout.write(`\n${outcome.status} in ${Math.round((Date.now() - started) / 1000)}s. Results are saved, so Compare Models shows them and can put a model into a role.\n`);
   if (outcome.status !== 'completed' && outcome.stopReason) process.stdout.write(`Stopped: ${outcome.stopReason}\n`);
+  if (saveProblem) process.stdout.write(`The results could not be saved to ${storeDir}: ${saveProblem}. The table above is what was measured.\n`);
 }
 
 main().catch((error) => { process.stderr.write(`${error?.message ?? error}\n`); process.exitCode = 1; });

@@ -117,8 +117,7 @@ export function buildTeamGraph(team: TeamDefinition, isAbliterated: (model: stri
     }
     parent.children.push(node);
   }
-  // `leads` reads as "who this member leads", so it is filled from the children, not from the parent's name.
-  for (const node of nodes.values()) node.card.leads = node.children.map((child) => child.name);
+  // `leads` is filled ONCE, at the end, after any cycle promotion has moved a member, so a promoted node never reports stale children.
   // A cycle puts every member of the loop under a parent that is itself, so nothing reaches a root. Any member not reachable from a root is promoted, so
   // every member appears exactly once and the drawing terminates.
   const reachable = new Set<string>();

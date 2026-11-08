@@ -858,7 +858,8 @@
   function renderAdvance(m) {
     advanceState = m.autoAdvance || { on: false, text: '' };
     advanceButton.hidden = !advanceState.text;
-    advanceButton.textContent = (advanceState.on ? 'Carrying on' : 'Stops each step');
+    // The markup ships a chevron, and setting textContent would drop it, so the affordance went missing after the first state message.
+    advanceButton.textContent = (advanceState.on ? 'Carrying on' : 'Stops each step') + ' \u25be';
     advanceButton.dataset.carrying = advanceState.on ? 'true' : 'false';
     advanceButton.setAttribute('aria-label', advanceState.on ? 'Between steps: carrying on by itself' : 'Between steps: stops so you can choose');
     advanceButton.title = advanceState.text || 'Whether a workflow carries on to its next step by itself';

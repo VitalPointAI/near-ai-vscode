@@ -180,7 +180,8 @@ test('the between-steps picker renders from the host message and offers every wa
   const button = page.nodes.get('advance') as StubNode;
   const menu = page.nodes.get('advance-menu') as StubNode;
   assert.equal(button.hidden, false, 'the picker is shown');
-  assert.equal(button.textContent, 'Carrying on', 'the label says what is happening now');
+  // The chevron is the picker's affordance and is part of the label, as the markup ships it.
+  assert.equal(button.textContent, 'Carrying on \u25be', 'the label says what is happening now, and keeps its chevron');
   const rendered = menu.all((node) => node.tagName === 'div' && node.id.startsWith('advance-option-')).map((node) => [node.id, node.dataset.mode]);
   assert.deepEqual(rendered, [
     ['advance-option-auto', 'auto'],
@@ -196,7 +197,7 @@ test('the between-steps picker renders from the host message and offers every wa
   assert.equal(menu.hidden, true, 'the menu closes after a choice');
   // Stopping between steps with no mode set marks the mode that is in force, so the check never sits on "carrying on" by mistake.
   page.send({ type: 'action-policy', mode: 'mostly-autonomous', stopped: true, scope: 'workspace', options, autoAdvance: { on: false, text: 'Stops at every step.' } });
-  assert.equal(button.textContent, 'Stops each step');
+  assert.equal(button.textContent, 'Stops each step \u25be');
   assert.equal(menu.all((node) => node.getAttribute('aria-selected') === 'true')[0]?.dataset.mode, 'mostly-autonomous');
   // No options at all still leaves the way to keep carrying on, so the picker is never an empty menu.
   page.send({ type: 'action-policy', mode: 'auto', stopped: false, scope: 'workspace', options: [], autoAdvance: { on: true, text: '' } });
