@@ -17,10 +17,16 @@ const mentions = (text: string, pattern: RegExp): boolean => pattern.test(text);
 /** A numbered or bulleted finding, which is what "each problem as an item" means. */
 const items = (text: string): number => (text.match(/^\s*(?:\d+[.)]|[-*])\s+\S/gm) ?? []).length;
 
+/** The roles that have a grader of their own, which is what makes a borrowed task's own grader available. */
+const KNOWN_ROLES = new Set(['planner', 'implementer', 'reviewer', 'tester', 'security', 'researcher', 'analyst', 'writer', 'editor', 'red-team']);
+
 export interface RoleGrade { score: number; outOf: number; misses: string[] }
 
 export function gradeRoleAnswer(role: string, root: string, files: Record<string, string>, kind?: string, taskRole?: string): RoleGrade {
   const checks: Array<[string, boolean]> = [];
+  // A role measured on a BORROWED task is graded by that task's own grader, because the task asks for that role's work. Without this the generic checks
+  // passed on any non-empty file, so the model was chosen on speed alone, contradicting "speed never wins by being worse" (0.4.19 review).
+  if (taskRole && taskRole !== role && KNOWN_ROLES.has(taskRole)) role = taskRole;
   const add = (name: string, pass: boolean) => checks.push([name, pass]);
   switch (role) {
     case 'planner': {
@@ -37,7 +43,8 @@ export function gradeRoleAnswer(role: string, root: string, files: Record<string
       const source = read(root, 'shop.js');
       add('changed shop.js', source !== (files['shop.js'] ?? ''));
       add('discounts before tax', /(?:subtotal|discount)[\s\S]{0,80}(?:\*|-)0?\.?9|subtotal\s*\*\s*0\.9|discountAmount/i.test(source));
-      add('only at more than the threshold', />\s*discountThreshold|threshold\s*<|subtotal\s*>\s*discountThreshold/.test(source));
+      // A strict comparison against whatever the threshold is called, because the parameter name is the model's choice, not the task's.
+      add('only at more than the threshold', (/(?:subtotal|value|total)\s*>\s*\w*[Tt]hreshold/.test(source) || />\s*\w*[Tt]hreshold/.test(source)) && !/\w+\s*>=\s*\w*[Tt]hreshold/.test(source));
       add('keeps the tests untouched', !changed(root, files, 'shop.test.js'));
       add('keeps the brief untouched', !changed(root, files, 'BRIEF.md'));
       break;

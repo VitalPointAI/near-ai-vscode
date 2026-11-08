@@ -962,8 +962,12 @@ export class AgentConversation {
     if (agentId) this.activity?.approvalAsked(agentId);
     return new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let parkLimit: ReturnType<typeof setTimeout> | undefined;
+      // A day past the first timeout, which is long enough that nobody is surprised and short enough that an abandoned run does not live for ever.
+      const parkLimitMs = 24 * 60 * 60_000;
       const settle = (reply: ApprovalReply, cancelled = false) => {
         if (timer) clearTimeout(timer);
+        if (parkLimit) clearTimeout(parkLimit);
         this.closePrompt(request.callId, cancelled);
         if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : reply.decision === 'deny' ? 'declined' : 'allowed');
         resolve(reply);
@@ -983,6 +987,16 @@ export class AgentConversation {
             text: `No one answered "${request.title}" within ${minutes} minute${minutes === 1 ? '' : 's'}, so the run is paused on this step. It has not run. Approve or decline it and the run carries on from here.`
           });
           if (agentId) this.activity?.approvalExpired(agentId);
+          // 0.4.19 review: a parked run had no end at all, so an abandoned conversation kept the run and its sub-agents alive for ever. After a generous
+          // final wait (a whole working day past the first timeout) the prompt is declined, and the message says it was the long limit, not the person.
+          parkLimit = setTimeout(() => {
+            if (!this.approvals.delete(request.callId)) return;
+            this.post({
+              type: 'approval-expired', callId: request.callId, minutes: Math.round(parkLimitMs / 60_000),
+              text: `"${request.title}" waited a whole day without an answer, so it was declined and the run was released.`
+            });
+            settle({ decision: 'deny', feedback: 'Nobody answered for a day, so this action was declined and the run released. Ask again if it is still wanted.' });
+          }, parkLimitMs);
         }, this.approvalTimeoutMs);
       }
       // 0.4.17: the card also carries the plain risk headline and the whole reason, and the exact command or code, so it can say why in one

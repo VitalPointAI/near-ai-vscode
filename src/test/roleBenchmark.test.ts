@@ -97,16 +97,20 @@ test('a run that truncates a fixture it was not asked to change scores lower tha
 test('a run is expected to change the fixture it was asked to change, but it must not empty it', async () => {
   // A role given the implementer task is asked for a fix in shop.js, so shop.js is both a fixture and an output: it should differ, and still say
   // something. shop.test.js is a fixture the task does not touch, so it must come back exactly as it was.
-  const files = { 'shop.js': 'export function total(){ return 1; }\n', 'shop.test.js': 'test("total", () => {});\n' };
+  const files = { 'shop.js': 'export function total(){ return 1; }\n', 'shop.test.js': 'test("total", () => {});\n', 'BRIEF.md': 'brief\n' };
   assert.deepEqual(roleOutputs('compliance-auditor', 'coding', 'implementer'), ['shop.js'], 'the task decides which file the run should leave behind');
-  const fixed = 'export function total(){ return subtotal * 0.9 * 1.2; }\n';
+  // A genuine fix for the implementer task: the discount applies to the subtotal, only ABOVE the threshold, and the tests and brief are untouched.
+  const fixed = 'export function total(items, tax, threshold){ const subtotal = 1; const discounted = subtotal > threshold ? subtotal * 0.9 : subtotal; return discounted * (1 + tax); }\n';
   const wrote = await folder({ ...files, 'shop.js': fixed });
   const emptied = await folder({ ...files, 'shop.js': '' });
   const brokeTests = await folder({ ...files, 'shop.js': fixed, 'shop.test.js': '' });
   const kept = gradeRoleAnswer('compliance-auditor', wrote, files, 'coding', 'implementer');
   assert.equal(kept.score, kept.outOf, `a changed output and untouched other fixtures pass, missed: ${kept.misses.join(', ')}`);
   const emptiedGrade = gradeRoleAnswer('compliance-auditor', emptied, files, 'coding', 'implementer');
-  assert.ok(emptiedGrade.misses.includes('it did not damage the fixtures it was not asked to change'), 'an emptied output is damage, not a fix');
+  // An emptied output now runs the IMPLEMENTER's own grader (the borrowed task's), which is stronger than the generic "not empty" check: it fails the
+  // fix itself, so the score falls. That is the intended behaviour of grading a borrowed task by its own grader.
+  assert.ok(emptiedGrade.score < kept.score, 'an emptied output scores lower than a real fix');
+  assert.ok(emptiedGrade.misses.length > 0, 'and says which checks it failed');
   assert.ok(emptiedGrade.score < kept.score);
   assert.ok(gradeRoleAnswer('compliance-auditor', brokeTests, files, 'coding', 'implementer').score < kept.score, 'empty tests are damage');
 });

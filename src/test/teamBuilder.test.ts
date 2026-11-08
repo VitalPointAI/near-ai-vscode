@@ -90,3 +90,16 @@ test('the prompt tells the model to name every member, to choose real roles, and
   assert.doesNotMatch(TEAM_BUILDER_PROMPT, /[\u2013\u2014]/, 'no em or en dashes in what we send');
   assert.doesNotMatch(prompt, /[\u2013\u2014]/);
 });
+
+test('a 40-character name still gets unique suffixed names, so the fallback cannot loop forever', () => {
+  // The review's blocker: `(stem + suffix).slice(0, 40)` is the stem for every suffix, so the loop never terminated and hung the extension host.
+  const long = 'a'.repeat(40);
+  const { proposal } = parseProposal(JSON.stringify({ name: 'T', members: [{ name: long }, { name: long }, { name: long }] }), brief);
+  const names = proposal.members.map((member) => member.name);
+  assert.equal(names.length, 3, 'every member is kept');
+  assert.equal(new Set(names).size, 3, 'and each has its own name');
+  for (const name of names) assert.ok(name.length <= 40, `${name.length} characters is too long`);
+  // The suffix survives, which is what makes them unique.
+  assert.match(names[1] as string, /-2$/);
+  assert.match(names[2] as string, /-3$/);
+});

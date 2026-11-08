@@ -301,10 +301,20 @@ async function applyRecommended(context: vscode.ExtensionContext, auth: AuthServ
     const target = inWorkspace ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
     const previous = inWorkspace ? inspected?.workspaceValue : inspected?.globalValue;
     const update = roleUpdate(option, choice.model, roleModels);
-    await configuration.update(update.setting, update.value, target);
-    if (update.setting === 'agent.roleModels') Object.assign(roleModels, update.value as Record<string, string>);
-    undoEntries.push({ setting: update.setting, previous, target, label: option.label });
-    applied.push(`${option.label} to ${choice.model}`);
+    // The undo entry is recorded BEFORE the write, so a write that throws half way leaves every change that did happen undoable (0.4.19 review: entries were
+    // collected after the loop, so a failure left changes applied with no way back).
+    const undoEntry = { setting: update.setting, previous, target, label: option.label };
+    undoEntries.push(undoEntry);
+    try {
+      await configuration.update(update.setting, update.value, target);
+      if (update.setting === 'agent.roleModels') Object.assign(roleModels, update.value as Record<string, string>);
+      applied.push(`${option.label} to ${choice.model}`);
+    } catch (error) {
+      // This one did not happen after all, so it is not undone; the ones already written still are.
+      undoEntries.splice(undoEntries.indexOf(undoEntry), 1);
+      applied.push(`${option.label} could not be set: ${(error as Error).message}`);
+      break;
+    }
   }
   const token = randomBytes(8).toString('hex');
   if (undoEntries.length) undo.set(token, undoEntries);

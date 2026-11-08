@@ -80,10 +80,11 @@ export function historyEntries(runs: SavedRun[]): HistoryEntry[] {
 export function recommendationView(rows: LeaderboardRow[], roles: RoleOption[]): PageState['recommended'] {
   const current = Object.fromEntries(roles.filter((role) => role.group === 'Tiers').map((role) => [role.id.slice(5), role.current])) as { fast?: string; standard?: string; deep?: string };
   const roleOptions = roles.filter((role) => role.group === 'Agent roles');
-  // The cyber engagement's own model is whatever the chat currently uses, which the page knows as the main model.
-  const cyber = roles.find((role) => role.id === 'main')?.current;
+  // 0.4.19 review: the cyber "current" was read from the `main` role, which is the CHAT model, not the one a scan uses. A scan picks an abliterated model
+  // when it starts (src/domain/cyberModel.ts), so the page does not know it; passing none is honest, and the cyber row then shows no "already set" claim
+  // and no change that "Apply all" would skip.
   return {
-    tiers: recommendTiers(rows, { ...current, ...(cyber ? { cyber } : {}) }),
+    tiers: recommendTiers(rows, { ...current }),
     roles: recommendRoles(rows, roleOptions.map((role) => ({ id: role.id, ...(role.current ? { current: role.current } : {}) })))
   };
 }

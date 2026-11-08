@@ -41,7 +41,10 @@ async function optimisationSetup(auth: AuthService, context: vscode.ExtensionCon
   const tasks = await loadBenchmarkTasks();
   const runs = await new ComparisonStore(path.join(context.globalStorageUri.fsPath, 'evals')).list();
   const board = leaderboardRows(runs, tasks, active.models, [], Date.now());
-  const candidates = [...new Set([tiers.fast, tiers.standard, tiers.deep, ...board.slice(0, 2).map((entry) => entry.model)])].filter((model): model is string => Boolean(model && active.models.some((entry) => entry.id === model))).slice(0, 3);
+  // 0.4.19 review: the three tier models were listed FIRST and the list then sliced to three, so the two best measured models were never tested, while the
+  // comment claimed they were. The measured models now come first, and the tier models fill the remaining places.
+  const measured = [...new Set(board.map((entry) => entry.model))].filter((model) => active.models.some((entry) => entry.id === model));
+  const candidates = [...new Set([...measured, tiers.fast, tiers.standard, tiers.deep])].filter((model): model is string => Boolean(model)).slice(0, 3);
   return candidates.length ? { active, candidates } : undefined;
 }
 

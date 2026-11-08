@@ -89,8 +89,15 @@ export function parseProposal(text: string, brief: TeamBrief): { proposal: TeamP
     let memberName = text_(member.name, '', 40).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
     if (!SLUG.test(memberName) || seen.has(memberName)) {
       const stem = SLUG.test(memberName) ? memberName.replace(/-\d+$/, '') : 'member';
-      let candidate = `${stem}-${index + 1}`.slice(0, 40);
-      for (let n = index + 2; seen.has(candidate); n += 1) candidate = `${stem}-${n}`.slice(0, 40);
+      // The suffix is where the uniqueness lives, so the STEM is truncated to make room for it. `(stem + suffix).slice(0, 40)` produced the same 40
+      // characters for every suffix, so the loop below could never terminate and would hang the extension host (0.4.19 review).
+      const withSuffix = (n: number): string => {
+        const suffix = `-${n}`;
+        return `${stem.slice(0, Math.max(1, 40 - suffix.length))}${suffix}`;
+      };
+      let candidate = withSuffix(index + 1);
+      // Bounded as well as correct: a colliding team cannot spin forever even if the suffix space ran out.
+      for (let n = index + 2; seen.has(candidate) && n <= index + 400; n += 1) candidate = withSuffix(n);
       memberName = candidate;
       problems.push(`Member ${index + 1} needed a usable name; it is now "${memberName}".`);
     }

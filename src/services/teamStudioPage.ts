@@ -64,8 +64,6 @@ const WRITE = ['Write', 'Edit'];
 const DOCS = ['CreatePresentation', 'RenderSvg', 'VectorizeImage'];
 
 /** General team roles with suggested instructions; Open-GSD agent roles are added from the installed library. */
-/** The role ids the studio offers, in order, so a benchmark can require a task for each one. */
-export const TEAM_ROLE_IDS: string[] = [];
 const TEAM_ROLES: Array<Omit<StudioRole, 'source'>> = [
   { id: 'planner', label: 'Planner', model: 'standard', tools: READ, description: 'Breaks the work into small, verifiable steps. Does not change files.', suggestion: 'Read the relevant code and break the task into small, verifiable steps. Do not change files. Report the plan with the files each step touches.' },
   { id: 'implementer', label: 'Implementer', model: 'deep', tools: null, description: 'Makes the changes and runs the tests.', suggestion: 'Make the changes in the plan, matching the project\'s style. Run the relevant tests and fix what you broke. Report what changed and how you verified it.' },
@@ -79,7 +77,8 @@ const TEAM_ROLES: Array<Omit<StudioRole, 'source'>> = [
   { id: 'red-team', label: 'Red team', model: 'deep', tools: [...READ, 'Bash', 'Write'], description: 'Attacks the work like an adversary before it is verified.', suggestion: 'Attack the work like an adversary before it is verified: find bugs, holes, unhandled edge cases, wrong assumptions, and weak tests. Prove what you can. Report the findings, numbered with severity and evidence. Do not fix anything yourself.' }
 ];
 
-TEAM_ROLE_IDS.push(...TEAM_ROLES.map((role) => role.id));
+/** The role ids the studio offers, in order, so a benchmark can require a task for each one. */
+export const TEAM_ROLE_IDS: string[] = TEAM_ROLES.map((role) => role.id);
 
 /** Starting points built from Open-GSD agent roles. Each member's role names the Open-GSD agent it is modelled on. */
 const GSD_TEMPLATES: Array<{ id: string; label: string; description: string; members: Array<{ name: string; role: string; model: string; tools: string[] | null; fallback: string }> }> = [
