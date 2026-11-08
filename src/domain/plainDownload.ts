@@ -8,7 +8,7 @@
 //
 // So this does not enumerate. It accepts EXACTLY ONE canonical shape per program and asks about everything else:
 //
-//   curl  -sS  [-A <literal>]  [--max-time N]  [-w <status>]  -o <path>  [-w <status>]  <one https URL>
+//   curl  -sS  [--max-time N]  [-w <status>]  -o <path>  [-w <status>]  <one https URL>
 //   wget  -q   [--timeout N]                   -O <path>                <one https URL>
 //
 // That is the shape a research run actually uses. Anything else, however harmless it looks, asks, and a flag curl ships next year is caught because it is
@@ -18,7 +18,8 @@
 //   - one URL, http(s), a PUBLIC host (an address written in the name counts as that address);
 //   - every word literal, so no `$VAR`, `${…}`, backtick or `!` can put a secret in the request;
 //   - the reply is written to a path the caller then judges like any other write, and -w carries no %output{...} or @file;
-//   - no other flag, so no upload, no header, no --resolve, no --execute.
+//   - no other flag, so no upload, NO HEADER of any kind (a user agent included, because `-A "sk-…"` is a literal channel for data that would
+//     otherwise need a card), no --resolve, no --execute.
 //
 // Pure: no I/O. The caller supplies the path rule through `output`.
 import { URL } from 'node:url';
@@ -119,12 +120,6 @@ function canonicalCurl(words: readonly string[]): PlainDownloadResult {
   const rest = [...words];
   const quiet = rest.shift();
   if (quiet !== '-sS' && quiet !== '-s' && quiet !== '-Ss' && quiet !== '-S') return { plain: false, reason: 'a plain download starts with -sS' };
-  // The user agent is part of the shape a research run uses (`-A "curl/8"`); it sends a header, which is safe only because every word must be literal.
-  while (rest.length && (rest[0] === '-A' || rest[0] === '--user-agent')) {
-    const value = rest[1];
-    if (value === undefined || !isLiteral(value)) return { plain: false, reason: `${rest[0]} needs a literal value` };
-    rest.splice(0, 2);
-  }
   while (rest.length && (rest[0] === '--max-time' || rest[0] === '-m' || rest[0] === '--connect-timeout')) {
     if (!seconds(rest[1])) return { plain: false, reason: `${rest[0]} needs a number of seconds` };
     rest.splice(0, 2);

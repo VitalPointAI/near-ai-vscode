@@ -41,6 +41,17 @@ the button writes. A chart shows the score over time, by task type, so you can s
 - **The between-steps choice is a picker**, beside the approval picker and styled the same way: carry on
   by itself, or stop between steps in any of the asking modes.
 - **"1 to fix" now says what needs fixing**, and takes you to the step that holds it.
+- **A download runs without asking only in one exact shape.** `curl -sS [-w …] -o <path> <one https URL>` or `wget -q -O <path> <one https URL>`: one
+  public address, every word literal, no other flag and no header of any kind. Anything else asks, including a bare `curl <url>`, a user agent, a
+  `--resolve`, or an address on the local machine however it is written. Once a run has read outside content, even the exact shape asks.
+- **Reading from GitHub no longer asks.** `gh pr view`, `gh pr list`, `gh pr checks` and the other read-only subcommands run, so a run can poll for a
+  verdict; anything that writes to GitHub still asks.
+
+- **A download runs without asking only in one exact shape.** `curl -sS [-w …] -o <path> <one https URL>` or `wget -q -O <path> <one https URL>`: one
+  public address, every word literal, no other flag and no header of any kind. Anything else asks, including a bare `curl <url>`, a user agent, a
+  `--resolve`, or an address on the local machine however it is written. Once a run has read outside content, even the exact shape asks.
+- **Reading from GitHub no longer asks.** `gh pr view`, `gh pr list`, `gh pr checks` and the other read-only subcommands run, so a run can poll for a
+  verdict; anything that writes to GitHub still asks.
 
 ## 0.4.18
 

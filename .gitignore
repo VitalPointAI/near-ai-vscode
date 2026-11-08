@@ -23,3 +23,5 @@ eval-*.json
 
 # 0.4.18: files attached to a message and copied into the project for the agent to read.
 .near-ai/attachments/
+# A run's own scratch work (src/domain/scratch.ts): written and cleaned by the run, never committed.
+.near-ai/scratch/

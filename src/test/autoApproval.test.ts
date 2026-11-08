@@ -637,11 +637,11 @@ test('a download that sends nothing runs, and after outside content the same dow
     assert.equal(decided.decision, 'ask', `${mode}: a download after outside content asks`);
     assert.match(decided.decision === 'ask' ? decided.reason ?? '' : '', /sends a URL that content may have chosen/);
   }
-  // A URL the run already has the text of sends nothing new, so it runs again.
-  const known = new RunGrants();
-  known.tainted = true;
-  known.fetched.add('https://example.test/page');
-  assert.deepEqual(await decide(shape, { grants: known, safety: fakeSafety(true).check }), { decision: 'allow' }, 'a page it already has runs');
+  // EVERY plain download is held once tainted, including one the run fetched before: 0.4.19 removed the "already has this page" exception, because nothing
+  // populated it and an unreachable branch is worse than no branch.
+  const again = new RunGrants();
+  again.tainted = true;
+  assert.equal((await decide(shape, { grants: again, safety: fakeSafety(true).check })).decision, 'ask', 'a re-read asks too');
 });
 
 test('a download with a flag outside the canonical shape asks, so a page cannot steer one into a header or another host', async () => {
