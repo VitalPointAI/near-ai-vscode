@@ -18,7 +18,7 @@ function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: st
     functions: node.functions, facts: node.facts, grading: node.grading ?? null, origin: node.origin, mentions: node.mentions,
     relations: graph.edges.filter((edge) => edge.from === node.id || edge.to === node.id).map((edge) => ({
       kind: edge.kind, tension: edge.tension, basis: edge.basis ?? null, grading: edge.grading ?? null,
-      direction: edge.from === node.id ? 'out' : 'in', other: byId.get(edge.from === node.id ? edge.to : edge.from)?.facts !== undefined ? (edge.from === node.id ? edge.to : edge.from) : (edge.from === node.id ? edge.to : edge.from)
+      direction: edge.from === node.id ? 'out' : 'in', other: edge.from === node.id ? edge.to : edge.from
     }))
   }]));
 }

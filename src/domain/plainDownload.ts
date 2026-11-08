@@ -84,6 +84,16 @@ export function isPublicHost(url: string): boolean {
     return true;
   }
   if (host.includes(':')) {
+    // 0.4.19 review: an IPv4-mapped address reaches the same machine, so its last 32 bits are judged as IPv4 rather than passed as "some IPv6".
+    // Node normalises the dotted form to hex, so both `::ffff:127.0.0.1` and `::ffff:7f00:1` have to be read.
+    const mappedDotted = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(host);
+    if (mappedDotted) return isPublicHost(`http://${mappedDotted[1] as string}/`);
+    const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+    if (mappedHex) {
+      const high = parseInt(mappedHex[1] as string, 16);
+      const low = parseInt(mappedHex[2] as string, 16);
+      return isPublicHost(`http://${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}/`);
+    }
     // IPv6: loopback, unspecified, unique-local (fc00::/7) and link-local (fe80::/10).
     if (host === '::1' || host === '::') return false;
     if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)) return false;
@@ -112,6 +122,13 @@ export function plainDownload(words: readonly string[]): PlainDownloadResult {
   // only when no named target was given.
   const note = (flag: string, value: string) => {
     const target = unquote(value);
+    // 0.4.19 review: curl's -w takes %output{path}, which WRITES the reply wherever it says, so a write-out value naming an output or a file makes the
+    // reply a write to that path rather than harmless text.
+    if (flag === '-w' || flag === '--write-out') {
+      const written = /%output\{([^}]*)\}/.exec(target)?.[1] ?? (/@/.test(target) ? target.replace(/^@/, '') : undefined);
+      if (written !== undefined && output === undefined) output = written;
+      return;
+    }
     if (WRITE_TARGET.has(flag) && target !== '-' && output === undefined) output = target;
   };
   for (let index = 0; index < words.length; index += 1) {

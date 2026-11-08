@@ -86,6 +86,9 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       const candidates = [...new Set([tiers.fast, tiers.standard, tiers.deep, ...board.slice(0, 2).map((entry) => entry.model)])].filter((model): model is string => Boolean(model && active.models.some((entry) => entry.id === model))).slice(0, 3);
       if (!candidates.length) return undefined;
       const plan = planRoleSuite(members, candidates);
+      // The team file as it is BEFORE the tests, so a later edit is noticed rather than overwritten.
+      const teamEntry = (await library.list()).find((entry) => entry.team?.name === teamName || path.basename(entry.file, '.md') === slugify(teamName));
+      const beforeTests = teamEntry ? await readFile(teamEntry.file, 'utf8').catch(() => '') : '';
       const answer = await vscode.window.showWarningMessage(
         `Test the roles in "${teamName}" and set each member's model?`,
         { modal: true, detail: `${plan.estimatedRuns} short runs (${plan.members} member${plan.members === 1 ? '' : 's'} x ${candidates.length} model${candidates.length === 1 ? '' : 's'}), a few minutes. Tested: ${candidates.join(', ')}. Skipping leaves the team exactly as you wrote it.` },
@@ -100,7 +103,13 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       const entries = await library.list();
       const file = entries.find((entry) => entry.team?.name === teamName || path.basename(entry.file, '.md') === slugify(teamName))?.file;
       if (file) {
-        const text = await readFile(file, 'utf8').catch(() => undefined);
+        // 0.4.19 review: the role tests take minutes, so the file may have been edited in the meantime. The version read BEFORE the tests is compared with
+        // the one on disk now, and a change means the models are not written rather than the edit being lost.
+        const before = await readFile(file, 'utf8').catch(() => undefined);
+        if (before !== undefined && before !== beforeTests) {
+          return { applied: 0, text: `${teamName} changed while its roles were being tested, so its models were left alone. Save the team again to apply them: ${picks.map((pick) => `${pick.member} to ${pick.model}`).join(', ')}.` };
+        }
+        const text = before;
         if (text !== undefined) {
           const draft = draftFromMarkdown(text, file);
           for (const pick of picks) {

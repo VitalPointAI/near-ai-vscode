@@ -436,8 +436,11 @@ export class AgentConversation {
       const id = `steer-${randomBytes(6).toString('hex')}`;
       const working = !agent.paused && !agent.abort.signal.aborted;
       // 0.4.18 review: a paused agent is not waiting on anything, so a check queued for it would arrive on a later, unrelated turn, which is worse than
-      // doing nothing. It is refused, and the page says so, rather than reported as sent.
-      if (!working) return false;
+      // doing nothing. 0.4.19 review: the page must say so, or the click looks broken, so a notice explains why.
+      if (!working) {
+        this.post({ type: 'notice', text: `${agent.label} is paused, so there is nothing to check. Resume it first, or stop it.` });
+        return false;
+      }
       this.steer(id, checkNowMessage(agent.label), { interrupt: true });
       return true;
     }

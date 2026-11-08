@@ -155,7 +155,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       // 0.4.19: an expired wait no longer settles anything. The run parked on the step and the card stays, so the outcome is recorded only when the person
       // answers (or the run is stopped), and a reloaded view shows the same waiting card rather than a decline that never happened.
       if (message.type === 'approval-paused' && typeof message.callId === 'string') tab.paused.set(message.callId, { ...(typeof message.minutes === 'number' ? { minutes: message.minutes } : {}), text: String(message.text ?? '') });
-      if (message.type === 'prompt-closed' && typeof message.id === 'string') tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' ? 'cancelled' : 'closed' });
+      if (message.type === 'prompt-closed' && typeof message.id === 'string') { tab.outcomes.set(message.id, { outcome: message.outcome === 'cancelled' ? 'cancelled' : 'closed' }); tab.paused.delete(message.id); }
       const steerId = message.type === 'steer-state' ? String(message.id) : undefined;
       tab.log.add(steerId && message.state === 'queued' && tab.steerTexts.has(steerId) ? { ...message, text: tab.steerTexts.get(steerId) } : message);
       if (steerId && message.state !== 'queued') tab.steerTexts.delete(steerId);
@@ -183,7 +183,14 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     feed.focusConversation(tab.id);
     void panel.webview.postMessage({ type: 'conversation-show', id: tab.id, title: tab.title, ...(tab.model ? { model: tab.model } : {}) });
     const waiting = new Map((tab.agent?.waitingPrompts() ?? []).map((prompt) => [promptIdOf(prompt) ?? '', prompt] as const).filter(([id]) => id));
-    for (const message of tab.log.replay(waiting, tab.outcomes)) void panel.webview.postMessage(message);
+    for (const message of tab.log.replay(waiting, tab.outcomes)) {
+      void panel.webview.postMessage(message);
+      // A prompt whose wait parked the run says so again when the conversation is shown again, since the run is still on that step and the card is still
+      // waiting to be answered (owner, 2026-11-08). Without this, a reloaded view would look like an ordinary prompt.
+      if (message.type === 'approval-request' && typeof message.callId === 'string' && tab.paused.has(message.callId)) {
+        void panel.webview.postMessage({ type: 'approval-paused', callId: message.callId, ...tab.paused.get(message.callId), replay: true });
+      }
+    }
     void panel.webview.postMessage({ type: 'conversation-shown', id: tab.id, busy: isRunning(tab) });
     sendSummary(true);
   };
