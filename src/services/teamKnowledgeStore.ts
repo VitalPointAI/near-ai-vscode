@@ -54,6 +54,15 @@ const presented = (read: { knowledge?: TeamKnowledge; problem?: string }, team: 
  * plain lowercase slug (`My Team` was `my-team.json`) would lose its memory on upgrade, because the new path would simply not exist (0.4.19 review). The
  * legacy graph is read and written back under the new name, so the migration happens once and the old file is left as a backup.
  */
+/** The whole graph as one addition, so a raced migration can merge a legacy file into a graph another window has just created (see loadKnowledge). Provenance
+  * of a merged-in graph reads as `seed`, which is the honest mark for knowledge that arrived by migration rather than by a run. */
+const additionOf = (graph: TeamKnowledge): KnowledgeAddition => ({
+  origin: 'seed',
+  at: new Date().toISOString(),
+  nodes: graph.nodes.map((node) => ({ label: node.label, ...(node.kind !== 'actor' ? { kind: node.kind } : {}), functions: node.functions, facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.source ? { source: fact.source } : {}) })), ...(node.grading ? { grading: node.grading } : {}) })),
+  edges: graph.edges.map((edge) => ({ from: graph.nodes.find((node) => node.id === edge.from)?.label ?? edge.from, to: graph.nodes.find((node) => node.id === edge.to)?.label ?? edge.to, kind: edge.kind, ...(edge.tension !== null ? { tension: edge.tension } : {}), ...(edge.basis ? { basis: edge.basis } : {}), ...(edge.grading ? { grading: edge.grading } : {}) }))
+});
+
 export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
   const file = knowledgeFile(dir, team);
   const legacy = legacyKnowledgeFile(dir, team);
@@ -62,12 +71,28 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
   // gate is now whether the new file exists at all: migration happens once, when it does not.
   if (existsSync(file) || file === legacy) return current;
   const older = await readKnowledgeFile(legacy, team);
+  const legacyGraph = older.knowledge;
   // Identity check before adopting (0.4.19 review): the legacy file of a NON-plain name is also the LIVE file of a plain team (`acme co` once sanitised to
   // `acme-co.json`, which is team `acme-co`'s graph), and its parsed `team` names `acme-co`, not the team asking. Only a file that names THIS team migrates;
   // anything else stays exactly where it is, so one team never reads or copies another's graph.
-  if (older.knowledge?.team !== team) return current;
-  if (!older.knowledge.nodes.length) return current;
-  await saveKnowledge(dir, older.knowledge).catch(() => undefined);
+  if (legacyGraph?.team !== team || !legacyGraph.nodes.length) return current;
+  // Migration races like any other writer (0.4.19 review MAJOR): between the existsSync above and a save below, a concurrent addKnowledge — here or in
+  // another window — can create the new file, and a blind rename would clobber its addition. The compare-and-retry below is the same guard addKnowledge
+  // uses across windows, and it deliberately does NOT enter the per-file write queue: addKnowledge already holds that queue while it calls this function,
+  // so re-entering it here would deadlock. If the file appeared, the legacy graph MERGES into what is there instead of replacing it.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const before = await readFile(file, 'utf8').catch(() => undefined);
+    if (before === undefined) {
+      await saveKnowledge(dir, legacyGraph).catch(() => undefined);
+      return presented(older, team);
+    }
+    const newer = presented(await readKnowledgeFile(file, team), team);
+    const merged = mergeKnowledge(newer.knowledge, additionOf(legacyGraph));
+    const now = await readFile(file, 'utf8').catch(() => undefined);
+    if (now !== before) continue;
+    await saveKnowledge(dir, merged).catch(() => undefined);
+    break;
+  }
   return presented(older, team);
 }
 

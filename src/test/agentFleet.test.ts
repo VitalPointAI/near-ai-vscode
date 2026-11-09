@@ -51,6 +51,12 @@ test('a background agent returns at once, and the run waits for its report befor
   const { root, gsd, posted, conversation } = await project();
   const store = new ActivityStore(root);
   const session = await store.start({ project: 'demo', model: 'z-ai/glm-5.3' });
+  // The child's turn is gated on a latch the test holds, so BOTH interleavings are exercised deterministically: at the parent's second turn the child has
+  // not finished (the run holds, and the notice says why), and after the latch opens the child's report feeds the run. An unmanaged timer made this a race
+  // that flaked CI: on a loaded runner the child could finish while the parent streamed, the drain-first wait returned the report without waiting, and the
+  // notice — which states why the run is holding — was rightly absent.
+  const gate: { release?: () => void } = {};
+  const latch = new Promise<void>((resolve) => { gate.release = resolve; });
   const client = scriptedClient({
     parent: [
       { calls: [call('a1', 'Agent', { subagent_type: 'gsd-planner', description: 'Draft a plan', prompt: 'Plan it.', run_in_background: true })] },
@@ -59,6 +65,12 @@ test('a background agent returns at once, and the run waits for its report befor
     ],
     child: [{ text: 'plan ready', delayMs: 50 }]
   });
+  const streamed = client.streamCompletion.bind(client);
+  client.streamCompletion = async function* (model: string, messages: AgentMessage[]) {
+    if (messages.at(-1)?.role !== 'assistant') { yield * streamed(model, messages); return; }
+    await latch;
+    yield * streamed(model, messages);
+  };
   await conversation.send(request(client, gsd, { activity: { store, sessionId: session.sessionId } }));
   assert.deepEqual(client.log, ['parent:1', 'child:1', 'parent:2', 'parent:3'], 'the agent starts at once, in parallel with the parent, and the final parent turn comes after its report');
   const agentResult = posted.find((message) => message.type === 'tool-end' && message.callId === 'a1');
@@ -68,6 +80,7 @@ test('a background agent returns at once, and the run waits for its report befor
   assert.equal(fleet.agents.length, 1);
   assert.equal(fleet.agents[0].role, 'gsd-planner');
   assert.equal(fleet.agents[0].status, 'completed');
+  gate.release?.();
 });
 
 test('the parallel-agent limit runs extra agents one after another', async () => {
