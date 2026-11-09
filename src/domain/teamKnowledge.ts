@@ -351,7 +351,9 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       const contradicted = existing.facts.filter((old) => isContradicted(old.text, incomingFact.text));
       for (const contradicts of contradicted) {
         const outgoing = contradicts.grading;
-        const incoming = grading ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
+        // The claim's EFFECTIVE grade decides (twelfth 0.4.19 review, MINOR): a fact carrying its own stronger grade — a migrated legacy fact — must not be
+        // judged at the node's weaker one, or the gate retires knowledge it should not.
+        const incoming = factGrading(incomingFact) ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
         if (!outgoing || (incoming !== undefined && atLeastAsStrong(incoming, outgoing))) {
           const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
           retire(existing, contradicts, why, addition.at);

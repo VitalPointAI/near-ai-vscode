@@ -6,7 +6,7 @@ import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { addKnowledge, knowledgeFile, loadKnowledge, saveKnowledge } from '../services/teamKnowledgeStore';
+import { addKnowledge, ForeignGraphError, knowledgeFile, loadKnowledge, saveKnowledge } from '../services/teamKnowledgeStore';
 import { emptyKnowledge } from '../domain/teamKnowledge';
 
 const at = '2026-11-08T10:00:00.000Z';
@@ -100,9 +100,17 @@ test('the migration reads nobody\'s graph but the team it belongs to', async () 
   // collide with — and copied that team's graph across. `acme co` must not adopt `acme-co`'s knowledge.
   const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-leak-'));
   await addKnowledge(dir, 'acme-co', addition('Bravo')); // the plain team's live graph, sitting at the legacy name of `acme co`
-  const leaked = await loadKnowledge(dir, 'acme co');
-  assert.deepEqual(leaked.knowledge.nodes, [], 'another team\'s graph is not copied into this team');
+  // Reading it as legacy names acme-co, so the loader refuses — and never serves or copies the plain team's graph (twelfth 0.4.19 review: the refusal throws).
+  await assert.rejects(() => loadKnowledge(dir, 'acme co'), ForeignGraphError, 'another team\'s graph is not copied into this team');
   assert.match(knowledgeFile(dir, 'acme co'), /~/, 'the sanitised name lives under its own hashed file, not the plain team\'s');
+  // And addKnowledge refuses loudly rather than merging into nothing and saving over the plain team's file (twelfth 0.4.19 review, BLOCKER) — the load
+  // throws the same way, so the file is intact for its owner either way.
+  const plainTeamFile = knowledgeFile(dir, 'acme-co');
+  // Force `acme co` onto `acme-co`'s path only by reading the ownership state the loader sees: `acme co`'s own hashed file does not exist yet, so its load
+  // finds nothing foreign; the FOREIGN case is the plain-name path below.
+  const plainRead = await loadKnowledge(dir, 'acme-co');
+  assert.equal(plainRead.knowledge.nodes.length, 1, 'the plain team still reads its own graph');
+  assert.match(await readFile(plainTeamFile, 'utf8'), /Bravo/, 'the plain team\'s file is untouched after everything above');
   // A legacy file that DOES name this team still migrates.
   const legacy = path.join(dir, 'knowledge', 'my-team.json');
   await mkdir(path.dirname(legacy), { recursive: true });
@@ -192,4 +200,19 @@ test('a write from another window is merged, not overwritten', async () => {
   const { knowledge } = await loadKnowledge(dir, 'scouts');
   const labels = knowledge.nodes.map((node) => node.label).sort();
   assert.deepEqual(labels, ['alpha', 'bravo', 'charlie'], `the other window's addition survives: ${JSON.stringify(labels)}`);
+});
+
+test('addKnowledge refuses to write over a file that names another team, so the record survives for its owner', async () => {
+  // Twelfth 0.4.19 review, BLOCKER: the "belongs to another team" branch returned an empty graph and a problem, and the NEXT addKnowledge merged into that
+  // empty graph and SAVED — destroying the plain team's record before its own load could migrate it. The refusal is now enforced at the write, not just the
+  // read, and the plain team's file is byte-for-byte what it was.
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-foreign-'));
+  await addKnowledge(dir, 'acme-co', addition('Bravo'));
+  const plain = knowledgeFile(dir, 'acme-co');
+  const bytes = await readFile(plain, 'utf8');
+  // `acme co` cleaned to `acme-co`, whose LEGACY file is knowledge/acme-co.json — the very file the plain team lives on. Reading it as legacy names acme-co,
+  // so the loader throws, and a Learn into `acme co` throws the same gate before any write.
+  await assert.rejects(() => loadKnowledge(dir, 'acme co'), ForeignGraphError, 'the loader refuses a foreign legacy file');
+  await assert.rejects(() => addKnowledge(dir, 'acme co', addition('Alpha')), ForeignGraphError, 'a Learn into a foreign file throws instead of overwriting');
+  assert.equal(await readFile(plain, 'utf8'), bytes, 'the plain team\'s file is byte-for-byte unchanged');
 });

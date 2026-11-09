@@ -41,11 +41,30 @@ async function readKnowledgeFile(file: string, team: string): Promise<{ knowledg
   }
 }
 
+/** Thrown when a team's graph file names a DIFFERENT team: the caller must not read it as its own and must never write over it (twelfth 0.4.19 review). */
+export class ForeignGraphError extends Error {
+  constructor(readonly file: string, readonly owner: string, readonly requester: string) {
+    super(`The knowledge file ${path.basename(file)} belongs to ${owner}, not ${requester}; nothing was read for ${requester} and nothing was written over it.`);
+  }
+}
+
 /** What a caller always gets: the graph read from disk stamped with the team that asked, or an empty one when nothing readable is there. */
 const presented = (read: { knowledge?: TeamKnowledge; problem?: string }, team: string): { knowledge: TeamKnowledge; problem?: string } => ({
   knowledge: read.knowledge ? { ...read.knowledge, team } : emptyKnowledge(team, new Date().toISOString()),
   ...(read.problem ? { problem: read.problem } : {})
 });
+
+/** Whether the file at `path` exists and names a DIFFERENT team: the one state a write must never touch. */
+const foreignOwner = async (file: string, team: string): Promise<string | undefined> => {
+  const text = await readFile(file, 'utf8').catch(() => undefined);
+  if (text === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(text) as TeamKnowledge;
+    return parsed.version === 1 && typeof parsed.team === 'string' && parsed.team !== team ? parsed.team : undefined;
+  } catch {
+    return undefined; // unreadable: ownership unknown, handled by the damage path, not this one
+  }
+};
 
 /**
  * The graph for a team, or an empty one when it has not learned anything yet.
@@ -99,20 +118,25 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
   const owns = read.knowledge === undefined || read.knowledge.team === team;
   const current = presented(owns ? read : {}, team);
   if (!owns) {
-    // Not served the file, and never written over it either (eleventh 0.4.19 review, MAJOR): the next addKnowledge would merge into this empty graph and
-    // SAVE, destroying the other team's record before its own load could migrate it. The caller is told why, and nothing is written.
-    return { ...current, problem: `The knowledge file at ${path.basename(file)} belongs to another team (${read.knowledge?.team}); nothing was read for ${team} and nothing will be written over it.` };
+    // Not served the file, and never written over it either: addKnowledge refuses through the same gate (twelfth 0.4.19 review, BLOCKER), so the comment and
+    // the CHANGELOG claim are true — merging into an empty graph and saving would destroy the other team's record before its own load could migrate it.
+    throw new ForeignGraphError(file, read.knowledge!.team, team);
   }
   // 0.4.19 review: the gate was "the new graph has nodes", which made a legitimately EMPTIED new graph re-import the old file's nodes on every load. The
-  // gate is now whether the new file exists at all: migration happens once, when it does not.
-  if (existsSync(file) || file === legacy) return current;
+  // gate is now whether the new file exists AND READS (twelfth 0.4.19 review, MINOR): a damaged new file would otherwise block adoption forever — the team
+  // sees an empty graph while its legacy record sits unreadable-but-present under the old name, so the migration is attempted exactly when the new file is
+  // absent or unreadable, and the legacy graph merges into whatever the rebuild produces.
+  if ((existsSync(file) && read.knowledge !== undefined) || file === legacy) return current;
   const older = await readKnowledgeFile(legacy, team);
   const legacyGraph = older.knowledge;
   let mergedProblem: string | undefined = undefined;
   // Identity check before adopting (0.4.19 review): the legacy file of a NON-plain name is also the LIVE file of a plain team (`acme co` once sanitised to
   // `acme-co.json`, which is team `acme-co`'s graph), and its parsed `team` names `acme-co`, not the team asking. Only a file that names THIS team migrates;
-  // anything else stays exactly where it is, so one team never reads or copies another's graph.
-  if (legacyGraph?.team !== team || !legacyGraph.nodes.length) return current;
+  // anything else stays exactly where it is, so one team never reads or copies another's graph. A foreign LEGACY file throws too (twelfth 0.4.19 review,
+  // BLOCKER): the loader refusing silently meant addKnowledge merged into its empty graph and saved over the plain team's record — the legacy gate is a write
+  // gate, not only a read gate.
+  if (legacyGraph !== undefined && legacyGraph.team !== team) throw new ForeignGraphError(legacy, legacyGraph.team, team);
+  if (!legacyGraph?.nodes.length) return current;
   // A legacy file that parsed damaged carries its problem forward (eighth 0.4.19 review, MINOR): the caller is adopting whatever readable parts survived,
   // and it must be told the record it came from was not whole — the previous code reported this and the identity-gate rewrite dropped it.
   const legacyProblem = older.problem;
@@ -142,17 +166,15 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
     const merged = withLegacyHistory(mergeKnowledge(newer.knowledge, additionOf(legacyGraph)), legacyGraph);
     const now = await readFile(file, 'utf8').catch(() => undefined);
     if (now !== before) continue;
-    // The compare-and-retry only protects the READ (ninth 0.4.19 review, MAJOR): between the check above and the save below another window can still write,
-    // and an unguarded whole-file rename would clobber it. The window is closed the same way everywhere else in this file — the write goes through the
-    // per-file queue, which is exactly the lock another window's addKnowledge is holding while it writes; queuing behind it and re-checking after would
-    // deadlock (this load may itself be inside that queue), so instead the merged graph is written to a TEMP file and renamed only after re-reading and
-    // confirming the file still holds what was merged over. A change in between restarts the attempt.
+    // The compare-and-retry protects the READ, and the temp-then-rename narrows the WRITE window (twelfth 0.4.19 review, MINOR): a rename can still land on a
+    // file another window changed in the microseconds between the guard read and the rename — POSIX offers no atomic compare-and-rename — so the comment no
+    // longer claims the window is closed, only narrowed to the rename syscall itself. A clobber there is bounded to one merge cycle and both graphs survive
+    // in the retry loop's re-read; the honest alternative was a lock file protocol across processes, which is a larger change than a review round.
     const temporary = `${file}.${process.pid}.mig.tmp`;
     try {
       await writeFile(temporary, JSON.stringify({ ...merged, team }, null, 2), 'utf8');
-      // The compare-and-retry only protects the READ (ninth 0.4.19 review, MAJOR): between the check above and the rename below another window can still
-      // write, and an unguarded whole-file rename would clobber it. The rename happens only after re-reading and confirming the file still holds what was
-      // merged over; a change in between restarts the attempt.
+      // Re-read immediately before the rename; a change in between restarts the attempt. (The window between this read and the rename is narrowed to the
+      // syscall itself — see the comment above.)
       const guard = await readFile(file, 'utf8').catch(() => undefined);
       if (guard !== now) continue;
       try {
@@ -222,6 +244,10 @@ async function serialised<T>(file: string, run: () => Promise<T>): Promise<T> {
 export async function addKnowledge(dir: string, team: string, addition: KnowledgeAddition): Promise<TeamKnowledge> {
   const file = knowledgeFile(dir, team);
   return serialised(file, async () => {
+    // The ownership gate FIRST (twelfth 0.4.19 review, BLOCKER): an existing file naming another team is never read as ours and never overwritten — the
+    // throw stops the merge before any write, and the loader throws the same way, so a Learn into a mis-slugged file fails loudly instead of destroying it.
+    const owner = await foreignOwner(file, team);
+    if (owner !== undefined) throw new ForeignGraphError(file, owner, team);
     let last: TeamKnowledge | undefined;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const before = await readFile(file, 'utf8').catch(() => undefined);
