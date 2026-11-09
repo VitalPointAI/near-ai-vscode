@@ -89,9 +89,6 @@ test('a background agent returns at once, and the run waits for its report befor
   assert.deepEqual(client.log, ['parent:1', 'parent:2', 'child:1', 'parent:3'], 'the agent starts at once, in parallel with the parent, and the final parent turn comes after its report');
   const agentResult = posted.find((message) => message.type === 'tool-end' && message.callId === 'a1');
   assert.match(String(agentResult?.output), /Started gsd-planner in the background as gsd-planner-[a-f0-9]{6}/);
-  // The latched order is the proof: the child is SPAWNED during parent turn 1 and runs in parallel with turn 2 (it was latched, still unfinished), and its
-  // report lands before the parent's final turn — the run held for it.
-  assert.deepEqual(client.log, ['parent:1', 'parent:2', 'child:1', 'parent:3'], 'the agent starts at once, in parallel with the parent, and the final parent turn comes after its report');
   const fleet = (await new AnalyticsStore({ sessions: await store.list() }).query()).fleet;
   assert.equal(fleet.agents.length, 1);
   assert.equal(fleet.agents[0].role, 'gsd-planner');

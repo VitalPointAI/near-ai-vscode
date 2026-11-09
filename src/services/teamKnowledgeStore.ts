@@ -55,20 +55,25 @@ const presented = (read: { knowledge?: TeamKnowledge; problem?: string }, team: 
  * legacy graph is read and written back under the new name, so the migration happens once and the old file is left as a backup.
  */
 /** The whole graph as one addition, so a raced migration can merge a legacy file into a graph another window has just created (see loadKnowledge). Each fact
-  * keeps its own source and the node keeps its functions and grade. Provenance reads as `seed`, the honest mark for knowledge that arrived by migration rather
-  * than by a run. */
-const additionOf = (graph: TeamKnowledge): KnowledgeAddition => ({
-  origin: 'seed',
-  at: new Date().toISOString(),
-  nodes: graph.nodes.map((node) => ({
-    label: node.label,
-    ...(node.kind !== 'actor' ? { kind: node.kind } : {}),
-    functions: node.functions,
-    facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.source ? { source: fact.source } : {}) })),
-    ...(node.grading ? { grading: node.grading } : {})
-  })),
-  edges: graph.edges.map((edge) => ({ from: graph.nodes.find((node) => node.id === edge.from)?.label ?? edge.from, to: graph.nodes.find((node) => node.id === edge.to)?.label ?? edge.to, kind: edge.kind, ...(edge.tension !== null ? { tension: edge.tension } : {}), ...(edge.basis ? { basis: edge.basis } : {}), ...(edge.grading ? { grading: edge.grading } : {}) }))
-});
+  * keeps its own source and grade and the node keeps its functions and grade; per-fact timestamps and mention counts are rebuildable metadata that the merge
+  * re-dates on purpose, since the merge itself is the moment of arrival for a raced window's copy. Edge endpoints resolve through a label map built once
+  * rather than a find per edge (sixth 0.4.19 review, MINOR — quadratic on a large graph). Provenance reads as `seed`, the honest mark for knowledge that
+  * arrived by migration rather than by a run. */
+const additionOf = (graph: TeamKnowledge): KnowledgeAddition => {
+  const labelOf = new Map(graph.nodes.map((node) => [node.id, node.label]));
+  return {
+    origin: 'seed',
+    at: new Date().toISOString(),
+    nodes: graph.nodes.map((node) => ({
+      label: node.label,
+      ...(node.kind !== 'actor' ? { kind: node.kind } : {}),
+      functions: node.functions,
+      facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.source ? { source: fact.source } : {}) })),
+      ...(node.grading ? { grading: node.grading } : {})
+    })),
+    edges: graph.edges.map((edge) => ({ from: labelOf.get(edge.from) ?? edge.from, to: labelOf.get(edge.to) ?? edge.to, kind: edge.kind, ...(edge.tension !== null ? { tension: edge.tension } : {}), ...(edge.basis ? { basis: edge.basis } : {}), ...(edge.grading ? { grading: edge.grading } : {}) }))
+  };
+};
 
 /** A merge cannot carry the refutation HISTORY (an addition is claims, not a record), so the raced migration re-attaches each legacy node's history to the
   * merged node by label: what the team un-believed, and why, is exactly what a merge must not lose (fourth 0.4.19 review, MINOR). */
@@ -93,6 +98,7 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
   if (existsSync(file) || file === legacy) return current;
   const older = await readKnowledgeFile(legacy, team);
   const legacyGraph = older.knowledge;
+  let mergedProblem: string | undefined = undefined;
   // Identity check before adopting (0.4.19 review): the legacy file of a NON-plain name is also the LIVE file of a plain team (`acme co` once sanitised to
   // `acme-co.json`, which is team `acme-co`'s graph), and its parsed `team` names `acme-co`, not the team asking. Only a file that names THIS team migrates;
   // anything else stays exactly where it is, so one team never reads or copies another's graph.
@@ -105,24 +111,33 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
     const before = await readFile(file, 'utf8').catch(() => undefined);
     if (before === undefined) {
       // The read came back empty, so the file does not exist YET — but a concurrent window may create it between now and the write (fifth 0.4.19 review,
-      // MINOR). Exclusive-create closes that window: EEXIST means someone else won the race, and the retry loop takes the merge branch instead.
+      // MINOR). Exclusive-create closes that window: EEXIST means someone else won the race and the retry loop takes the merge branch. Every OTHER failure
+      // (EACCES, ENOSPC) is not a race, and retrying it would just fail again (sixth 0.4.19 review, MINOR), so it surfaces as the read's problem and the
+      // caller is told the legacy graph is NOT in place.
       try {
         await writeFile(file, JSON.stringify(legacyGraph, null, 2), { flag: 'wx' });
         return presented(older, team);
-      } catch {
-        continue;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
+        return { knowledge: legacyGraph, problem: `The knowledge graph for ${team} could not be moved to its new file name (${(error as Error).message}). The old file is untouched and will be tried again.` };
       }
     }
     const newer = presented(await readKnowledgeFile(file, team), team);
     const merged = withLegacyHistory(mergeKnowledge(newer.knowledge, additionOf(legacyGraph)), legacyGraph);
     const now = await readFile(file, 'utf8').catch(() => undefined);
     if (now !== before) continue;
-    await saveKnowledge(dir, merged).catch(() => undefined);
+    // A failed write is REPORTED, not swallowed (sixth 0.4.19 review, MINOR): returning the merged graph after a failed save would claim persistence the
+    // file does not hold. The problem rides the returned read, exactly as a damaged file's does.
+    await saveKnowledge(dir, merged).catch((error: Error) => {
+      mergedProblem = `The knowledge graph for ${team} could not be written (${error.message}). The addition may be lost when this window closes.`;
+    });
     // Return the MERGED graph (second 0.4.19 review, MAJOR): the caller asked for this team's knowledge now, and after the merge that is the concurrent
     // window's graph plus the legacy one — returning the pre-merge snapshot would hide nodes another window already learned.
-    return presented({ knowledge: merged }, team);
+    return { knowledge: merged, ...(mergedProblem ? { problem: mergedProblem } : {}) };
   }
-  return presented(older, team);
+  // The retry budget ran out without a confirmed write: re-read whatever IS on disk now (sixth 0.4.19 review, MINOR) rather than presenting a legacy snapshot
+  // that may hold less than another window has already learned.
+  return presented(await readKnowledgeFile(file, team), team);
 }
 
 export async function saveKnowledge(dir: string, knowledge: TeamKnowledge): Promise<void> {
