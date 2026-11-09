@@ -4,7 +4,7 @@
 //
 // One file per team under the team library's own storage, beside the team files: <teams>/knowledge/<slug>.json. A team is its file, so its knowledge
 // travels with it and two teams never share a map. Writes are whole-file and atomic, and a damaged file is reported rather than thrown away silently.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -129,14 +129,30 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
     const merged = withLegacyHistory(mergeKnowledge(newer.knowledge, additionOf(legacyGraph)), legacyGraph);
     const now = await readFile(file, 'utf8').catch(() => undefined);
     if (now !== before) continue;
-    // A failed write is REPORTED, not swallowed (sixth 0.4.19 review, MINOR): returning the merged graph after a failed save would claim persistence the
-    // file does not hold. The problem rides the returned read, exactly as a damaged file's does.
-    await saveKnowledge(dir, merged).catch((error: Error) => {
+    // The compare-and-retry only protects the READ (ninth 0.4.19 review, MAJOR): between the check above and the save below another window can still write,
+    // and an unguarded whole-file rename would clobber it. The window is closed the same way everywhere else in this file — the write goes through the
+    // per-file queue, which is exactly the lock another window's addKnowledge is holding while it writes; queuing behind it and re-checking after would
+    // deadlock (this load may itself be inside that queue), so instead the merged graph is written to a TEMP file and renamed only after re-reading and
+    // confirming the file still holds what was merged over. A change in between restarts the attempt.
+    const temporary = `${file}.${process.pid}.mig.tmp`;
+    let raced = false;
+    await writeFile(temporary, JSON.stringify({ ...merged, team }, null, 2), 'utf8').catch((error: Error) => {
       mergedProblem = `The knowledge graph for ${team} could not be written (${error.message}). The addition may be lost when this window closes.`;
+      raced = true;
     });
+    if (!raced) {
+      const guard = await readFile(file, 'utf8').catch(() => undefined);
+      if (guard !== now) { raced = true; await writeFile(temporary, '').catch(() => undefined); await rm(temporary, { force: true }); continue; }
+      await rename(temporary, file).catch((error: Error) => {
+        mergedProblem = `The knowledge graph for ${team} could not be written (${error.message}). The addition may be lost when this window closes.`;
+      });
+    } else {
+      await writeFile(temporary, '', { flag: 'wx' }).catch(() => undefined);
+    }
     // Return the MERGED graph (second 0.4.19 review, MAJOR): the caller asked for this team's knowledge now, and after the merge that is the concurrent
-    // window's graph plus the legacy one — returning the pre-merge snapshot would hide nodes another window already learned.
-    return { knowledge: merged, ...(mergedProblem || legacyProblem ? { problem: mergedProblem ?? legacyProblem } : {}) };
+    // window's graph plus the legacy one — returning the pre-merge snapshot would hide nodes another window already learned. The graph is stamped with the
+    // REQUESTING team (ninth 0.4.19 review, MINOR): a mismatched claim inside the merged file would fail the identity gate on every later load.
+    return { knowledge: { ...merged, team }, ...(mergedProblem || legacyProblem ? { problem: mergedProblem ?? legacyProblem } : {}) };
   }
   // The retry budget ran out without a confirmed write: re-read whatever IS on disk now (sixth 0.4.19 review, MINOR) rather than presenting a legacy snapshot
   // that may hold less than another window has already learned. The legacy file's damage report, if any, rides along.

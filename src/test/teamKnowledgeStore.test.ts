@@ -87,6 +87,12 @@ test('two team names that sanitised to the same file now get their own, so one t
   await addKnowledge(dir, 'acme-co', addition('Bravo'));
   assert.deepEqual((await loadKnowledge(dir, 'acme co')).knowledge.nodes.map((node) => node.label), ['Alpha']);
   assert.deepEqual((await loadKnowledge(dir, 'acme-co')).knowledge.nodes.map((node) => node.label), ['Bravo']);
+  // Case-only collisions too (ninth 0.4.19 review, MINOR): `ACME` and `acme` cleaned to the same lowercased slug before hashing, and the store-level gate —
+  // not just the file names — has to keep their graphs apart. This is the remaining collision path after migration.
+  await addKnowledge(dir, 'ACME', addition('Upper'));
+  await addKnowledge(dir, 'acme', addition('Lower'));
+  assert.deepEqual((await loadKnowledge(dir, 'ACME')).knowledge.nodes.map((node) => node.label), ['Upper']);
+  assert.deepEqual((await loadKnowledge(dir, 'acme')).knowledge.nodes.map((node) => node.label), ['Lower']);
 });
 
 test('the migration reads nobody\'s graph but the team it belongs to', async () => {

@@ -176,9 +176,16 @@ export function looksLikeAddress(source: string): boolean {
   // The suggestion is declined deliberately: any dotted bare host counts as a page, which is the conservative direction — it can only CAP a grade or REFUSE
   // a revival, never raise one — and the repo's own tests lock in bare `evil.test` as a page. A named document wrongly capped keeps its history entry and a
   // wrongly-refused revival can return with a differently-worded source; the reverse error would let a page claim A1. Over-catching is the cheap mistake.
-  // BUT a bare DECIMAL (`v2.1`, `4.2 million`) is a number, not a host: its last label is all digits and digits-only labels never reach the host test
-  // (eighth 0.4.19 review, MINOR) — a measured figure is exactly the independent evidence a revival needs, and a version number is not a page.
-  return /(?:^|[\s([<,;:@])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i.test(`${text} `) && !/(?:^|[\s([<,;:@])[a-z0-9-]+(?:\.[0-9]+)+(?::\d+)?(?:$|[\s)\],;:.])/i.test(`${text} `);
+  //
+  // The one carve-out is SHAPE, stated once and locked by tests (eighth and ninth 0.4.19 reviews): among two-label dotted tokens, one that ends in a NUMBER
+  // is a figure or version — `4.2`, `v2.1` — the independent evidence a revival may cite, never a page. A two-label token ending in letters stays a page
+  // (`evil.test`, `annual-report.pdf`). A FOUR-label all-numeric token is an IPv4 address and stays a page (`192.0.2.1`, `10.0.0.1/x`): three-plus numeric
+  // labels is the address shape, and treating it as a decimal was the leak the ninth review caught. Anything longer keeps the conservative page verdict.
+  const match = `${text} `.match(/(?:^|[\s([<,;:@])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i);
+  if (!match) return false;
+  const labels = match[1]!.split('.');
+  if (labels.length === 2) return !/^\d+$/.test(labels[1]!);
+  return labels.length >= 4 && labels.every((label) => /^\d+$/.test(label));
 }
 
 /** The grade a claim about something an agent READ is worth: C3 at most, whichever shape it arrives in. */

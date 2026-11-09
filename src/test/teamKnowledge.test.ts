@@ -307,6 +307,11 @@ test('a decimal is not a host: a measured figure or version can be the independe
   const revived = graph.nodes[0]!;
   assert.match(JSON.stringify(revived.facts.map((fact) => fact.text)), /4\.2 million/, 'a decimal-bearing source is independent evidence, not a page');
   assert.equal(revived.history?.some((fact) => fact.text.includes('4.2 million')), false, 'the claim is current again, not in history');
+  // Ninth 0.4.19 review, BLOCKER: the decimal carve-out must not swallow IPv4 addresses — four numeric labels is the address shape, and a page it stays.
+  let ip = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
+  ip = mergeKnowledge(ip, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour authority notice' }] }], edges: [] });
+  ip = mergeKnowledge(ip, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: '192.0.2.1/report' }] }], edges: [] });
+  assert.match(JSON.stringify((ip.nodes[0]!.history ?? []).map((fact) => fact.text)), /4\.2 million/, 'a source at an IPv4 address is a page, so the claim is not revived');
 });
 
 test('a re-assertion with independent evidence revives a refuted claim, and retires what it now contradicts', () => {
