@@ -168,14 +168,15 @@ export function looksLikeAddress(source: string): boolean {
   const text = source.normalize('NFKC')
     .replace(/[\u00AD\u200B-\u200F\u2060\uFEFF]/g, '')
     .replace(/[\u3002\uFF0E\uFF61]/g, '.')
-    .replace(/\[\.\]|\(\.\)|\{\.\}/g, '.')
+    // An obfuscator can write the dot in words or brackets, or hang the host off an address (`contact@evil.test`, which browsers do resolve); all are pages.
+    .replace(/\[(?:[.·]|dot)\]|\((?:[.]|dot)\)|\{[.]\}/gi, '.')
     .trim();
   if (/https?:\/\//i.test(text)) return true;
   // Fifth 0.4.19 review suggested requiring a scheme, a path or a known TLD here, so a dotted DOCUMENT name (`annual-report.pdf`) is not treated as a page.
   // The suggestion is declined deliberately: any dotted bare host counts as a page, which is the conservative direction — it can only CAP a grade or REFUSE
   // a revival, never raise one — and the repo's own tests lock in bare `evil.test` as a page. A named document wrongly capped keeps its history entry and a
   // wrongly-refused revival can return with a differently-worded source; the reverse error would let a page claim A1. Over-catching is the cheap mistake.
-  return /(?:^|[\s([<,;:])[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i.test(`${text} `);
+  return /(?:^|[\s([<,;:@])[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i.test(`${text} `);
 }
 
 /** The grade a claim about something an agent READ is worth: C3 at most, whichever shape it arrives in. */
@@ -318,8 +319,10 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       // review, MAJOR): a graded contradiction retires a current fact only when it is at least as credible as what stands — a hostile page capped to C3
       // must not push an A1 the team verified out of current belief — and an ungraded contradiction never retires a graded one. Web-sourced claims arrive
       // here already capped, so the gate is what stops a page refuting alone.
-      const contradicts = existing.facts.find((old) => isContradicted(old.text, incomingFact.text));
-      if (contradicts) {
+      // Every contradicting belief is retired, not just the first match (seventh 0.4.19 review, MINOR): two current beliefs that both contradict the claim
+      // would otherwise leave the second standing beside it as still-true.
+      const contradicted = existing.facts.filter((old) => isContradicted(old.text, incomingFact.text));
+      for (const contradicts of contradicted) {
         const outgoing = contradicts.grading;
         const incoming = grading ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
         if (!outgoing || (incoming !== undefined && atLeastAsStrong(incoming, outgoing))) {
@@ -364,7 +367,13 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
   }
   // An actor that gained a web-sourced fact in THIS addition re-caps the grades of every relation it touches (second 0.4.19 review, MINOR): the edge loop
   // re-grades an edge only when the same edge is mentioned again, so without this pass an edge could stay A1 while its end had just been revealed as a page.
-  // weakerGrade keeps the stronger side, so the pass only ever lowers.
+  // weakerGrade keeps the stronger side, so the pass only ever lowers. The ACTORS are re-capped too (seventh 0.4.19 review, MAJOR): an addition that declares
+  // no grading of its own used to leave an A1 node untouched while page-sourced facts piled onto it — an actor whose knowledge includes what it merely read
+  // cannot claim the top grade overall, whichever addition carried the page in. The pass runs every merge, so it also heals graph states an earlier version
+  // wrote before these caps existed.
+  for (const node of nodes.values()) {
+    if (node.grading && webEnd(node)) node.grading = weakerGrade(node.grading, capForWebSource(node.grading));
+  }
   for (const edge of edges.values()) {
     if (!edge.grading) continue;
     if (webEnd(nodes.get(edge.from)) || webEnd(nodes.get(edge.to))) edge.grading = weakerGrade(edge.grading, capForWebSource(edge.grading));

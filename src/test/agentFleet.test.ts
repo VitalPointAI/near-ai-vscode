@@ -95,6 +95,39 @@ test('a background agent returns at once, and the run waits for its report befor
   assert.equal(fleet.agents[0].status, 'completed');
 });
 
+test('a report that arrived while the parent streamed feeds the run at once, with no hold and no notice', async () => {
+  // The other interleaving the drain-first wait describes (seventh 0.4.19 review, MINOR): the child finishes DURING the parent's turn, so when the parent
+  // goes to wait the report is already drained — the run feeds it and completes without announcing a hold that instantly ends. The parent's second turn is
+  // held until the child's generator has RESOLVED, so the drain is provably non-empty at wait time: a timer here would be the mirror image of the flake.
+  const { gsd, posted, conversation } = await project();
+  const gate: { release?: () => void } = {};
+  const childResolved = new Promise<void>((resolve) => { gate.release = resolve; });
+  const client = scriptedClient({
+    parent: [
+      { calls: [call('a1', 'Agent', { subagent_type: 'gsd-planner', description: 'Draft a plan', prompt: 'Plan it.', run_in_background: true })] },
+      { text: 'Started the planner; waiting for it.' },
+      { text: 'The planner says: plan ready.' }
+    ],
+    child: [{ text: 'plan ready' }]
+  });
+  const streamed = client.streamCompletion.bind(client);
+  let parentTurns = 0;
+  client.streamCompletion = async function* (model: string, messages: AgentMessage[]) {
+    if (String(messages[0]?.content ?? '').startsWith('You are the planner.')) {
+      yield * streamed(model, messages);
+      gate.release?.();
+      return;
+    }
+    parentTurns += 1;
+    if (parentTurns === 2) await childResolved;
+    yield * streamed(model, messages);
+  };
+  await conversation.send(request(client, gsd));
+  assert.deepEqual(client.log, ['parent:1', 'child:1', 'parent:2', 'parent:3'], 'the child finished inside the parent turn and the final parent turn came after its report');
+  assert.equal(posted.some((message) => message.type === 'notice' && /Waiting for/.test(String(message.text))), false, 'no hold was announced, because there was none');
+  conversation.dispose();
+});
+
 test('the parallel-agent limit runs extra agents one after another', async () => {
   const { gsd, conversation } = await project();
   let running = 0;
