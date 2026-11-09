@@ -45,6 +45,10 @@ the button writes. A chart shows the score over time, by task type, so you can s
 - **A team's knowledge graph accumulates, and learns.** Facts are no longer silently dropped past a limit, and a fact that later evidence refutes moves to a
   recorded history with why and when it stopped being believed, rather than staying as if it were still true. Nothing is deleted, so a decision made on the old
   knowledge can still be revisited. A refuted claim is not re-learned as new.
+- **A team's knowledge graph has no size ceiling.** Nodes, relations, facts and functions accumulate without limit, because a ceiling that silently dropped
+  the oldest entries made a team forget what it had learned. What changes over time is what is currently *believed*: a fact that later evidence refutes moves to
+  history, so the record grows while the beliefs stay current.
+
 - **An existing team's knowledge is found after the file-name fix.** A team whose name is not already a plain lowercase slug (`My Team`) keeps its graph:
   the old file is read and moved to the new name once.
 

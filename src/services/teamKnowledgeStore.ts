@@ -14,9 +14,10 @@ import { emptyKnowledge, mergeKnowledge, type KnowledgeAddition, type TeamKnowle
 /** A team name as a file name that is also INJECTIVE: two names that sanitise differently still get different files (see knowledgeFile). */
 function teamSlug(team: string): string {
   const cleaned = team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
-  // A name that is already a plain slug maps to itself, so every existing graph keeps its file. A name that had to be sanitised gets a hash of the
-  // ORIGINAL appended, because sanitising is lossy: `acme co` and `acme-co` both sanitised to `acme-co`, so two teams shared one graph (0.4.19 review).
-  if (cleaned === team.toLowerCase()) return cleaned;
+  // Sanitising is lossy: `acme co`, `acme-co`, `ACME` and `acme` would all become `acme` and share one graph, which is two teams reading and overwriting
+  // each other (0.4.19 review). A name that is ALREADY exactly its own plain lowercase slug keeps the old file name, so every graph on disk is still found;
+  // anything else gets a hash of the ORIGINAL appended, which makes the mapping injective.
+  if (cleaned === team) return cleaned;
   return `${cleaned}-${createHash('sha256').update(team).digest('hex').slice(0, 8)}`;
 }
 

@@ -316,7 +316,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     // relation with no basis at all is capped too. An end that was itself researched from a page caps it as well, whichever end, in either direction
     // (0.4.19 review).
     const webEnd = (node: KnowledgeNode | undefined): boolean => Boolean(node && (looksLikeAddress(node.label) || node.facts.some((fact) => webSourced(fact.source))));
-    const grading = gradeFor(incoming.grading, incoming.basis === undefined || looksLikeAddress(incoming.basis) || webEnd(nodes.get(from)) || webEnd(nodes.get(to)));
+    const grading = gradeFor(incoming.grading, incoming.basis === undefined || webSourced(incoming.basis) || webEnd(nodes.get(from)) || webEnd(nodes.get(to)));
     const existing = edges.get(id);
     if (!existing) {
       edges.set(id, { id, from, to, kind, tension, ...(incoming.basis ? { basis: incoming.basis } : {}), origin: addition.origin, ...(grading ? { grading } : {}), lastSeen: addition.at, mentions: 1 });
@@ -328,8 +328,9 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     existing.lastSeen = addition.at;
     existing.mentions += 1;
   }
-  // NO ceiling: a knowledge graph is meant to accumulate, and a silent truncation makes a team forget what it learned. A team that has learned a great deal
-  // keeps all of it; the fact that something is no longer true is recorded by supersession (see retire), not by deletion (owner, 2026-11-08).
+  // DELIBERATE: there is NO ceiling on nodes or relations. A knowledge graph is meant to accumulate, and a silent truncation makes a team forget what it
+  // learned. Something no longer being true is recorded by supersession (see retire), not by deletion, so the record grows as the team's knowledge does
+  // (owner, 2026-11-08).
   const allNodes = [...nodes.values()];
   const keptIds = new Set(allNodes.map((node) => node.id));
   return { version: 1, team: base.team, nodes: allNodes, edges: [...edges.values()].filter((edge) => keptIds.has(edge.from) && keptIds.has(edge.to)), updatedAt: addition.at };

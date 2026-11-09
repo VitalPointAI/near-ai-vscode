@@ -169,7 +169,7 @@ test('an edge whose basis names a document but whose end was researched from a p
   assert.deepEqual(cited.edges[0]?.grading, { reliability: 'B', credibility: 2 });
 });
 
-test('the graph is bounded, so an agent cannot grow the file without limit', () => {
+test('the graph accumulates: 30 batches of actors and relations all survive', () => {
   // 0.4.19 review: nothing capped the total, and the whole file is parsed on every later addition.
   let graph = emptyKnowledge('t', at);
   for (let batch = 0; batch < 30; batch += 1) {
