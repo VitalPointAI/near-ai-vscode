@@ -312,6 +312,14 @@ test('a decimal is not a host: a measured figure or version can be the independe
   ip = mergeKnowledge(ip, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour authority notice' }] }], edges: [] });
   ip = mergeKnowledge(ip, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: '192.0.2.1/report' }] }], edges: [] });
   assert.match(JSON.stringify((ip.nodes[0]!.history ?? []).map((fact) => fact.text)), /4\.2 million/, 'a source at an IPv4 address is a page, so the claim is not revived');
+  // A dotted FIGURE before a real host must not hide the page (eleventh 0.4.19 review, BLOCKER): every token is judged, not just the first.
+  let buried = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
+  buried = mergeKnowledge(buried, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour authority notice' }] }], edges: [] });
+  buried = mergeKnowledge(buried, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: '1.0 evil.test/about' }] }], edges: [] });
+  assert.match(JSON.stringify((buried.nodes[0]!.history ?? []).map((fact) => fact.text)), /4\.2 million/, 'a page after a version figure is still a page');
+  buried = mergeKnowledge(emptyKnowledge('t2', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The mooring fee is 900 per night.', source: 'confirmed by the harbourmaster' }] }], edges: [] });
+  buried = mergeKnowledge(buried, { origin: 'document', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The mooring fee is 1200 per night.', source: 'v2.1 see evil.test/x' }] }], edges: [] });
+  assert.match(JSON.stringify((buried.nodes[0]!.facts.map((fact) => fact.grading))), /"credibility":3/, 'a source citing a page after a version number is capped');
 });
 
 test('a re-assertion with independent evidence revives a refuted claim, and retires what it now contradicts', () => {

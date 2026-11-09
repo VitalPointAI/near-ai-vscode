@@ -68,7 +68,7 @@ const additionOf = (graph: TeamKnowledge): KnowledgeAddition => {
       label: node.label,
       ...(node.kind !== 'actor' ? { kind: node.kind } : {}),
       functions: node.functions,
-      facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.grading ? { grading: fact.grading } : {}), ...(fact.source ? { source: fact.source } : {}) })),
+      facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.grading ? { grading: fact.grading } : {}), ...(fact.since ? { since: fact.since } : {}), ...(fact.source ? { source: fact.source } : {}) })),
       ...(node.grading ? { grading: node.grading } : {})
     })),
     edges: graph.edges.map((edge) => ({ from: labelOf.get(edge.from) ?? edge.from, to: labelOf.get(edge.to) ?? edge.to, kind: edge.kind, ...(edge.tension !== null ? { tension: edge.tension } : {}), ...(edge.basis ? { basis: edge.basis } : {}), ...(edge.grading ? { grading: edge.grading } : {}) }))
@@ -98,7 +98,11 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
   // the file is left for its real owner. An unreadable file reports and rebuilds, as before.
   const owns = read.knowledge === undefined || read.knowledge.team === team;
   const current = presented(owns ? read : {}, team);
-  if (!owns) return current;
+  if (!owns) {
+    // Not served the file, and never written over it either (eleventh 0.4.19 review, MAJOR): the next addKnowledge would merge into this empty graph and
+    // SAVE, destroying the other team's record before its own load could migrate it. The caller is told why, and nothing is written.
+    return { ...current, problem: `The knowledge file at ${path.basename(file)} belongs to another team (${read.knowledge?.team}); nothing was read for ${team} and nothing will be written over it.` };
+  }
   // 0.4.19 review: the gate was "the new graph has nodes", which made a legitimately EMPTIED new graph re-import the old file's nodes on every load. The
   // gate is now whether the new file exists at all: migration happens once, when it does not.
   if (existsSync(file) || file === legacy) return current;
@@ -131,7 +135,10 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
         return { knowledge: legacyGraph, problem: `The knowledge graph for ${team} could not be moved to its new file name (${(error as Error).message}). The old file is untouched and will be tried again.` };
       }
     }
-    const newer = presented(await readKnowledgeFile(file, team), team);
+    const newerRead = await readKnowledgeFile(file, team);
+    // A DAMAGED new file is reported, not silently replaced (eleventh 0.4.19 review, MINOR): the merge below rebuilds over it, and the caller must know the
+    // graph it is shown was reconstructed, not read.
+    const newer = presented(newerRead, team);
     const merged = withLegacyHistory(mergeKnowledge(newer.knowledge, additionOf(legacyGraph)), legacyGraph);
     const now = await readFile(file, 'utf8').catch(() => undefined);
     if (now !== before) continue;

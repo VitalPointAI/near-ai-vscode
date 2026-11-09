@@ -143,7 +143,7 @@ export interface TeamKnowledge {
 
 /** What an agent proposes to add: the raw shape, before it is merged, which is what makes adding idempotent. */
 export interface KnowledgeAddition {
-  nodes: Array<{ label: string; kind?: NodeKind; functions?: string[]; facts?: Array<{ text: string; source?: string; grading?: Grading }>; grading?: Grading }>;
+  nodes: Array<{ label: string; kind?: NodeKind; functions?: string[]; facts?: Array<{ text: string; source?: string; grading?: Grading; since?: string }>; grading?: Grading }>;
   edges: Array<{ from: string; to: string; kind?: EdgeKind; tension?: number | null; basis?: string; grading?: Grading }>;
   origin: KnowledgeOrigin;
   /** When it was learned, ISO; passed in so the merge is deterministic. */
@@ -177,17 +177,19 @@ export function looksLikeAddress(source: string): boolean {
   // a revival, never raise one — and the repo's own tests lock in bare `evil.test` as a page. A named document wrongly capped keeps its history entry and a
   // wrongly-refused revival can return with a differently-worded source; the reverse error would let a page claim A1. Over-catching is the cheap mistake.
   //
-  // The one carve-out is SHAPE, stated once and locked by tests (eighth and ninth 0.4.19 reviews): among two-label dotted tokens, one that ends in a NUMBER
-  // is a figure or version — `4.2`, `v2.1` — the independent evidence a revival may cite, never a page. A two-label token ending in letters stays a page
-  // (`evil.test`, `annual-report.pdf`). A FOUR-label all-numeric token is an IPv4 address and stays a page (`192.0.2.1`, `10.0.0.1/x`): three-plus numeric
-  // labels is the address shape, and treating it as a decimal was the leak the ninth review caught. Anything longer keeps the conservative page verdict.
-  const match = `${text} `.match(/(?:^|[\s([<,;:@])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i);
-  if (!match) return false;
-  const labels = match[1]!.split('.');
-  if (labels.length === 2) return !/^\d+$/.test(labels[1]!);
-  // THREE numeric labels is also an address shape to a resolver (`10.0.0/report` — tenth 0.4.19 review, MINOR), so anything numeric from three labels up is
-  // a page; only the two-label figure keeps its carve-out.
-  return labels.length >= 3 && labels.every((label) => /^\d+$/.test(label));
+  // The one carve-out is SHAPE, stated once and locked by tests (eighth, ninth and eleventh 0.4.19 reviews): among two-label dotted tokens, one that ends in
+  // a NUMBER is a figure or version — `4.2`, `v2.1` — the independent evidence a revival may cite, never a page. A two-label token ending in letters stays a
+  // page (`evil.test`, `annual-report.pdf`). A three-or-more-label all-numeric token is an IPv4-style address and stays a page (`192.0.2.1`, `10.0.0/report`).
+  // EVERY dotted token in the text is judged (eleventh 0.4.19 review, BLOCKER): matching only the first let `1.0 evil.test/about` read as the figure `1.0`
+  // and keep a hostile page at A1 — a page is a page wherever in the sentence it hides, so any page-shaped token decides true. The left boundary is a
+  // LOOKBEHIND, not a consumed character: a consumed boundary ate the space between `1.0` and the page that followed, and the second token never matched.
+  let sawFigure = false;
+  for (const match of `${text} `.matchAll(/(?<=^|[\s([<,;:@])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?=[/?#]|$|[\s)\],;.])/gi)) {
+    const labels = match[1]!.split('.');
+    if (labels.length === 2 && /^\d+$/.test(labels[1]!)) { sawFigure = true; continue; } // a figure or version, judged on its own
+    return true; // a two-label host, an address-shaped token, or anything longer: a page
+  }
+  return false; // every dotted token was a figure — or there was none
 }
 
 /** The grade a claim about something an agent READ is worth: C3 at most, whichever shape it arrives in. */
@@ -228,13 +230,14 @@ export function clampTension(value: number | null | undefined): number | null {
  * The same fact stated twice in one addition, kept once, and with its source: the first mention may have none and the second one may, so a plain
  * "first wins" or "last wins" both lose a source. An agent's own duplicate should never cost it the citation.
  */
-function dedupeFacts(facts: ReadonlyArray<{ text: string; source?: string }>): Array<{ text: string; source?: string }> {
-  const byText = new Map<string, { text: string; source?: string }>();
+function dedupeFacts(facts: ReadonlyArray<{ text: string; source?: string; grading?: Grading; since?: string }>): Array<{ text: string; source?: string; grading?: Grading; since?: string }> {
+  const byText = new Map<string, { text: string; source?: string; grading?: Grading; since?: string }>();
   for (const fact of facts) {
     const key = fact.text.trim().toLowerCase();
     const known = byText.get(key);
-    if (!known) { byText.set(key, { text: fact.text, ...(fact.source ? { source: fact.source } : {}) }); continue; }
+    if (!known) { byText.set(key, { text: fact.text, ...(fact.grading ? { grading: fact.grading } : {}), ...(fact.since ? { since: fact.since } : {}), ...(fact.source ? { source: fact.source } : {}) }); continue; }
     if (!known.source && fact.source) known.source = fact.source;
+    if (!known.grading && fact.grading) known.grading = fact.grading;
   }
   return [...byText.values()];
 }
@@ -283,17 +286,19 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     // the one path where a person, not a page, is the witness. Facts may also carry their OWN grade (a raced migration's legacy graph), which the
     // node-level cap below must not raise.
     const fromWeb = looksLikeAddress(label) || (incoming.facts ?? []).some((fact) => webSourced(fact.source));
+    // The NODE's grade is judged on the actor itself — its label and whether the addition cites pages — not on whichever fact happens to be examined first
+    // (eleventh 0.4.19 review, MAJOR): a research node citing a named register keeps its own grade while its unsourced facts individually arrive capped.
+    const grading = gradeFor(incoming.grading, fromWeb || looksLikeAddress(label));
     const factGrading = (fact: { grading?: Grading; source?: string }): Grading | undefined => {
       if (fact.grading) return gradeFor(fact.grading, fact.source !== undefined && webSourced(fact.source));
-      return gradeFor(incoming.grading, fromWeb || looksLikeAddress(label) || (fact.source !== undefined && webSourced(fact.source)) || (addition.origin !== 'interaction' && fact.source === undefined));
+      return gradeFor(incoming.grading, looksLikeAddress(label) || (fact.source !== undefined && webSourced(fact.source)) || (addition.origin !== 'interaction' && fact.source === undefined));
     };
-    const grading = factGrading({ source: undefined });
     const existing = nodes.get(id);
     if (!existing) {
       nodes.set(id, {
         id, label, kind: incoming.kind ?? 'actor', functions: [...new Set(incoming.functions ?? [])],
         // A new actor's facts are deduplicated too: an agent that states the same fact twice in one addition should not store it twice.
-        facts: dedupeFacts(incoming.facts ?? []).map((fact) => ({ text: fact.text, origin: addition.origin, since: addition.at, ...(fact.source ? { source: fact.source } : {}), ...(factGrading(fact) ? { grading: factGrading(fact) } : {}) })),
+        facts: dedupeFacts(incoming.facts ?? []).map((fact) => ({ text: fact.text, origin: addition.origin, ...(fact.since ? { since: fact.since } : { since: addition.at }), ...(fact.source ? { source: fact.source } : {}), ...(factGrading(fact) ? { grading: factGrading(fact) } : {}) })),
         origin: addition.origin, ...(grading ? { grading } : {}), firstSeen: addition.at, lastSeen: addition.at, mentions: 1
       });
       continue;
@@ -333,7 +338,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
           if (!current.grading || (incoming !== undefined && atLeastAsStrong(incoming, current.grading))) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
         }
         existing.history = (existing.history ?? []).filter((old) => old !== refuted);
-        existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(factGrading(incomingFact) ? { grading: factGrading(incomingFact) } : {}) });
+        existing.facts.push({ text: incomingFact.text, origin: addition.origin, ...(incomingFact.since ? { since: incomingFact.since } : { since: addition.at }), ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(factGrading(incomingFact) ? { grading: factGrading(incomingFact) } : {}) });
         continue;
       }
       // A contradiction: the incoming fact names the same actor and says the opposite. The clear case is a `not` or `no longer`, which is how an agent
@@ -352,7 +357,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
           retire(existing, contradicts, why, addition.at);
         }
       }
-      existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(factGrading(incomingFact) ? { grading: factGrading(incomingFact) } : {}) });
+      existing.facts.push({ text: incomingFact.text, origin: addition.origin, ...(incomingFact.since ? { since: incomingFact.since } : { since: addition.at }), ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(factGrading(incomingFact) ? { grading: factGrading(incomingFact) } : {}) });
     }
     // A later grade can only LOWER the stored one. Replacing it outright let a second addition that named no source ("a document", or nothing at all)
     // restore an A1 over a grade the first addition had already capped to C3 (0.4.19 review).
