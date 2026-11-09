@@ -133,3 +133,50 @@ test('a fact taken from a web page cannot claim the top grade, so a hostile page
   const unwritten = kit.learn.parse({ nodes: [{ label: 'Note', grading: { reliability: 'B', credibility: 2 } }] } as never);
   assert.deepEqual(unwritten.nodes[0]?.grading, { reliability: 'B', credibility: 2 });
 });
+
+test('a node with no facts cannot keep an A1 by naming the page in its label', () => {
+  // 0.4.19 review: the cap only looked at facts, so an actor with no facts was never capped whatever it was called.
+  const kit = tools();
+  const input = kit.learn.parse({ nodes: [{ label: 'https://evil.test/about', grading: { reliability: 'A', credibility: 1 } }] } as never);
+  assert.deepEqual(input.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
+});
+
+test('a source that is not a string, or a host written with a homoglyph or an invisible character, cannot keep an A1', () => {
+  const kit = tools();
+  // An object or a number as `source` used to be dropped, leaving the node looking unsourced and uncapped.
+  const notString = kit.learn.parse({ nodes: [{ label: 'Evil Corp', facts: [{ text: 'Certifies.', source: { url: 'https://evil.test' } }], grading: { reliability: 'A', credibility: 1 } }] } as never);
+  assert.deepEqual(notString.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
+  for (const source of ['evil\u3002test', 'evil.\u200Btest', 'evil[.]test', 'see EVIL.TEST/about']) {
+    const input = kit.learn.parse({ nodes: [{ label: 'Evil Corp', facts: [{ text: 'Certifies.', source }], grading: { reliability: 'A', credibility: 1 } }] } as never);
+    assert.deepEqual(input.nodes[0]?.grading, { reliability: 'C', credibility: 3 }, `${JSON.stringify(source)} is a page`);
+  }
+});
+
+test('an edge whose end was researched from a page is capped even when its basis names a document', () => {
+  // 0.4.19 review: a named basis was treated as proof the relation was not read off a page.
+  const kit = tools();
+  const input = kit.learn.parse({
+    nodes: [
+      { label: 'Evil Corp', facts: [{ text: 'Certifies.', source: 'evil.test/about' }] },
+      { label: 'Ministry', facts: [{ text: 'Named it.', source: 'Certification register, 2026-10-02' }] }
+    ],
+    edges: [{ from: 'Evil Corp', to: 'Ministry', kind: 'regulates', basis: "the vendor's own site", grading: { reliability: 'A', credibility: 1 } }]
+  } as never);
+  assert.deepEqual(input.edges[0]?.grading, { reliability: 'C', credibility: 3 });
+  // Two documented ends with a documented basis keep their grade.
+  const cited = kit.learn.parse({
+    nodes: [{ label: 'Port', facts: [{ text: 'Runs it.', source: 'Certification register, 2026-10-02' }] }, { label: 'Ministry', facts: [{ text: 'Regulates it.', source: 'Certification register, 2026-10-02' }] }],
+    edges: [{ from: 'Port', to: 'Ministry', kind: 'regulates', basis: 'Certification register, 2026-10-02', grading: { reliability: 'B', credibility: 2 } }]
+  } as never);
+  assert.deepEqual(cited.edges[0]?.grading, { reliability: 'B', credibility: 2 });
+});
+
+test('Learn carries at most 40 actors and 60 relations, so one call cannot flood the graph', () => {
+  const kit = tools();
+  const input = kit.learn.parse({
+    nodes: Array.from({ length: 100 }, (_, index) => ({ label: `actor-${index}` })),
+    edges: Array.from({ length: 200 }, (_, index) => ({ from: `actor-${index % 100}`, to: `actor-${(index + 1) % 100}` }))
+  } as never);
+  assert.equal(input.nodes.length, 40);
+  assert.equal(input.edges.length, 60);
+});

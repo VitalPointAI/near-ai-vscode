@@ -5,7 +5,7 @@ import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { addKnowledge, knowledgeFile, loadKnowledge, saveKnowledge } from '../services/teamKnowledgeStore';
+import { MAX_KNOWLEDGE_BYTES, addKnowledge, knowledgeFile, loadKnowledge, saveKnowledge } from '../services/teamKnowledgeStore';
 import { emptyKnowledge } from '../domain/teamKnowledge';
 
 const at = '2026-11-08T10:00:00.000Z';
@@ -59,7 +59,53 @@ test('the graph file is named from the team, safe for a file system, and written
   await saveKnowledge(dir, { ...emptyKnowledge('My Team/One', at), nodes: [] });
   const written = await readFile(knowledgeFile(dir, 'My Team/One'), 'utf8');
   assert.match(written, /"version": 1/);
-  assert.match(knowledgeFile(dir, 'My Team/One'), /my-team-one\.json$/);
+  // A sanitised name also carries a short hash, so two names never collapse to one file (0.4.19 review).
+  assert.match(knowledgeFile(dir, 'My Team/One'), /my-team-one-[0-9a-f]{8}\.json$/);
+});
+
+test('two team names that sanitised to the same file now get their own, so one team cannot read or write another\'s graph', async () => {
+  // 0.4.19 review: `team.replace(/[^a-z0-9-]+/gi,'-')` is lossy, so several DIFFERENT teams shared one graph file.
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-slug-'));
+  const pairs: Array<[string, string]> = [
+    ['acme co', 'acme-co'],
+    ['Acme Co', 'acme_co'],
+    ['..', '--'],
+    ['../escape', 'escape'],
+    ['café', 'cafe']
+  ];
+  for (const [one, two] of pairs) {
+    assert.notEqual(knowledgeFile(dir, one), knowledgeFile(dir, two), `${JSON.stringify(one)} and ${JSON.stringify(two)} must not share a file`);
+  }
+  // And the file still stays inside <dir>/knowledge, so a name cannot escape the folder.
+  const root = path.resolve(dir, 'knowledge');
+  for (const team of ['..', '../escape', '../../etc/passwd', '..%2f..%2fx', 'a/../../b']) {
+    assert.equal(path.dirname(path.resolve(knowledgeFile(dir, team))), root, `${JSON.stringify(team)} stays in the knowledge folder`);
+  }
+  // Prove it end to end: knowledge added by one is invisible to the other.
+  await addKnowledge(dir, 'acme co', addition('Alpha'));
+  await addKnowledge(dir, 'acme-co', addition('Bravo'));
+  assert.deepEqual((await loadKnowledge(dir, 'acme co')).knowledge.nodes.map((node) => node.label), ['Alpha']);
+  assert.deepEqual((await loadKnowledge(dir, 'acme-co')).knowledge.nodes.map((node) => node.label), ['Bravo']);
+});
+
+test('a plain team name keeps its existing file, so a graph already on disk is still found', () => {
+  const dir = path.join(tmpdir(), 'near-ai-know-plain-');
+  assert.match(knowledgeFile(dir, 'scouts'), /knowledge[/\\]scouts\.json$/);
+  // A name every caller already slugifies stays the plain slug; a lossy one is disambiguated, never silently shared.
+  assert.match(knowledgeFile(dir, 'my-team'), /my-team\.json$/);
+  assert.match(knowledgeFile(dir, 'My Team/One'), /my-team-one-[0-9a-f]{8}\.json$/);
+});
+
+test('a graph file over the size limit is refused and reported rather than parsed', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-big-'));
+  const file = knowledgeFile(dir, 'scouts');
+  await mkdir(path.dirname(file), { recursive: true });
+  // A valid graph padded past the ceiling: parsing it is the cost the limit exists to avoid.
+  const padded = JSON.stringify({ version: 1, team: 'scouts', nodes: [], edges: [], updatedAt: at, pad: 'x'.repeat(MAX_KNOWLEDGE_BYTES + 1024) });
+  await writeFile(file, padded, 'utf8');
+  const loaded = await loadKnowledge(dir, 'scouts');
+  assert.match(loaded.problem ?? '', /over the 8 MB limit/);
+  assert.deepEqual(loaded.knowledge.nodes, []);
 });
 
 test('a write from another window is merged, not overwritten', async () => {

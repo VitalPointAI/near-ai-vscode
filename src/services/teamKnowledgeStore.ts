@@ -4,13 +4,31 @@
 //
 // One file per team under the team library's own storage, beside the team files: <teams>/knowledge/<slug>.json. A team is its file, so its knowledge
 // travels with it and two teams never share a map. Writes are whole-file and atomic, and a damaged file is reported rather than thrown away silently.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { emptyKnowledge, mergeKnowledge, type KnowledgeAddition, type TeamKnowledge } from '../domain/teamKnowledge';
+
+/** The most a graph file may be. The whole file is read, parsed and rewritten on every addition, so a huge one costs every later Learn. */
+export const MAX_KNOWLEDGE_BYTES = 8 * 1024 * 1024;
+
+/** A team name as a file name that is also INJECTIVE: two names that sanitise differently still get different files (see knowledgeFile). */
+function teamSlug(team: string): string {
+  const cleaned = team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
+  // A name that is already a plain slug maps to itself, so every existing graph keeps its file. A name that had to be sanitised gets a hash of the
+  // ORIGINAL appended, because sanitising is lossy: `acme co` and `acme-co` both sanitised to `acme-co`, so two teams shared one graph (0.4.19 review).
+  if (cleaned === team.toLowerCase()) return cleaned;
+  return `${cleaned}-${createHash('sha256').update(team).digest('hex').slice(0, 8)}`;
+}
 
 /** The graph for a team, or an empty one when it has not learned anything yet. A file that cannot be read is reported, not replaced. */
 export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
   const file = knowledgeFile(dir, team);
+  const size = await stat(file).then((info) => info.size, () => undefined);
+  // 0.4.19 review: an agent could grow the graph without limit, and every later read parsed the whole file. Too large is reported like too damaged.
+  if (size !== undefined && size > MAX_KNOWLEDGE_BYTES) {
+    return { knowledge: emptyKnowledge(team, new Date().toISOString()), problem: `The knowledge graph for ${team} is ${Math.round(size / 1024 / 1024)} MB, over the ${MAX_KNOWLEDGE_BYTES / 1024 / 1024} MB limit, so it was not read. It will be rebuilt as the team works.` };
+  }
   let text: string;
   try { text = await readFile(file, 'utf8'); } catch { return { knowledge: emptyKnowledge(team, new Date().toISOString()) }; }
   try {
@@ -87,7 +105,13 @@ export async function addKnowledge(dir: string, team: string, addition: Knowledg
   });
 }
 
-export const knowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()}.json`);
+/**
+ * Where a team's graph file is. The name is sanitised so it is safe on every file system, and it is injective, so two teams can never share a file:
+ * `../x`, a team named `..`, `acme co` and `acme-co`, `ACME`, and a name with an accent or an invisible character all get their own file, or at least a
+ * name that cannot escape `<dir>/knowledge` (0.4.19 review). Before this, the sanitised name alone let `..` become the empty slug and `acme co` collide
+ * with `acme-co`, so one team could read and write another's graph.
+ */
+export const knowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${teamSlug(team) || 'team'}.json`);
 
 /**
  * What a run is told about the graph, and how to add to it. Short on purpose: it is a hint about a tool, not a second system prompt. The Admiralty

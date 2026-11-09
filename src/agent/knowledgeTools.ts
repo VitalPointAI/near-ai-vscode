@@ -2,7 +2,7 @@
 // do, how they relate, and how strongly, each with the Admiralty grade of the evidence. Prose alone cannot be drawn, compared, or questioned, which is the
 // point of the graph.
 import type { KnowledgeAddition, NodeKind, EdgeKind, Grading, KnowledgeOrigin } from '../domain/teamKnowledge';
-import { neighbours, type TeamKnowledge } from '../domain/teamKnowledge';
+import { capForWebSource, looksLikeAddress, neighbours, sourceText, type TeamKnowledge } from '../domain/teamKnowledge';
 import type { AgentTool } from './tools';
 import { ToolError } from './workspace';
 
@@ -19,29 +19,6 @@ function gradingOf(raw: unknown, where: string): Grading | undefined {
   if (!RELIABILITY.includes(reliability as (typeof RELIABILITY)[number])) throw new ToolError(`${where}: grading.reliability must be one of A to F.`);
   if (!Number.isInteger(credibility) || credibility < 1 || credibility > 6) throw new ToolError(`${where}: grading.credibility must be a whole number from 1 to 6.`);
   return { reliability: reliability as Grading['reliability'], credibility: credibility as Grading['credibility'] };
-}
-
-/**
- * Whether a source is an address on the web rather than a named document. The scheme is optional, because `evil.test/about` and `https://evil.test/about`
- * are the same thing to a reader, and a cap that misses the first is a cap an agent can step around (0.4.19 review).
- */
-function looksLikeAddress(source: string): boolean {
-  const text = source.trim();
-  // 0.4.19 review: this only looked at the FIRST token, so `see evil.test/about` or `from www.example.org` kept an A1. Any address anywhere in the source
-  // counts, wherever it sits in the sentence.
-  if (/https?:\/\//i.test(text)) return true;
-  // A host-looking word with a dot somewhere: `evil.test/about`, `www.example.org`, `192.0.2.1`, and the same after "see" or "from".
-  return /(?:^|[\s([<,;:])[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i.test(`${text} `);
-}
-
-/**
- * The grade a claim about something the agent READ is worth: C3 at most. C is "fairly reliable" and 3 is "possibly true", which is what an agent's own reading
- * of a page is worth. Both halves are floored, because a page just read cannot be confirmed by other sources either.
- */
-function capForWebSource(grading: Grading): Grading {
-  const rank = ['A', 'B', 'C', 'D', 'E', 'F'];
-  const reliability = rank.indexOf(grading.reliability) < rank.indexOf('C') ? 'C' : grading.reliability;
-  return { reliability, credibility: (grading.credibility < 3 ? 3 : grading.credibility) as Grading['credibility'] };
 }
 
 export interface KnowledgeTools {
@@ -139,7 +116,10 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
           if (!value || typeof value !== 'object') return [];
           const fact = value as Record<string, unknown>;
           if (typeof fact.text !== 'string' || !fact.text.trim()) return [];
-          return [{ text: fact.text.slice(0, 400), ...(typeof fact.source === 'string' && fact.source.trim() ? { source: fact.source.slice(0, 300) } : {}) }];
+          // 0.4.19 review: a source that was not a string was dropped, which made the fact look unsourced and kept its A1. It is flattened to text here
+          // so the cap sees the address it holds.
+          const source = sourceText(fact.source).trim().slice(0, 300);
+          return [{ text: fact.text.slice(0, 400), ...(source ? { source } : {}) }];
         }).slice(0, 12) : [];
         let grading = gradingOf(node.grading, `nodes[${index}]`);
         // 0.4.19 review: a hostile page an agent read could be given an A1 grade by that agent and become durable team memory. A fact with an external
@@ -148,9 +128,15 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
         // 0.4.19 review: the cap only fired for a source starting `http(s)://`, so an agent could write `evil.test/about` and keep its A1. Any source that
         // LOOKS like an address counts, with or without a scheme.
         const fromWeb = facts.some((fact) => fact.source !== undefined && looksLikeAddress(fact.source));
-        if (fromWeb && grading) grading = capForWebSource(grading);
+        // 0.4.19 review: a node with NO facts kept its A1, so an agent could grade an actor it read about in a page by putting the address in the label
+        // alone, or by citing nothing at all. The label is checked too, so a node named after an address is capped like a fact sourced from it.
+        if (grading && (fromWeb || looksLikeAddress(node.label))) grading = capForWebSource(grading);
         return { label: node.label.trim().slice(0, 120), kind, functions, facts, ...(grading ? { grading } : {}) };
       });
+      // The labels this addition researched from a page, read before the edges, so an edge to one of them can be recognized below.
+      const researched = new Set(nodes
+        .filter((node) => looksLikeAddress(node.label) || node.facts.some((fact) => fact.source !== undefined && looksLikeAddress(fact.source)))
+        .map((node) => node.label.trim().toLowerCase()));
       const edges = Array.isArray(raw.edges) ? raw.edges.slice(0, 60).flatMap((entry, index) => {
         if (!entry || typeof entry !== 'object') return [];
         const edge = entry as Record<string, unknown>;
@@ -161,7 +147,10 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
         const basis = typeof edge.basis === 'string' && edge.basis.trim() ? edge.basis.slice(0, 300) : undefined;
         // 0.4.19 review: edges were never capped, so a hostile page could be given an A1 RELATION rather than an A1 fact. A relation from an address the agent
         // read, or asserted with no basis at all, is C3 at most, exactly as a fact from the same place is.
-        if (grading && (basis === undefined || looksLikeAddress(basis))) grading = capForWebSource(grading);
+        // 0.4.19 review: a named basis still is not evidence the relation was not read off a page, so an edge whose END is an actor this same addition
+        // researched from a web source is capped too: `basis: "the vendor's own site"` was a way to keep an A1 on a page's claim.
+        const researchedEnd = researched.has(edge.from.trim().toLowerCase()) || researched.has(edge.to.trim().toLowerCase());
+        if (grading && (basis === undefined || looksLikeAddress(basis) || researchedEnd)) grading = capForWebSource(grading);
         return [{ from: edge.from.trim().slice(0, 120), to: edge.to.trim().slice(0, 120), kind, tension, ...(basis ? { basis } : {}), ...(grading ? { grading } : {}) }];
       }) : [];
       return { nodes, edges, origin, at: new Date().toISOString() };

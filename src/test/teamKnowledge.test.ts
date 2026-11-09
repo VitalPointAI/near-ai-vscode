@@ -3,7 +3,7 @@
 // must never erase a measured relation.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { clampTension, emptyKnowledge, gradingCoverage, mergeKnowledge, neighbours, nodeId, strongestEdges } from '../domain/teamKnowledge';
+import { MAX_GRAPH_EDGES, MAX_GRAPH_NODES, MAX_NODE_FACTS, MAX_NODE_FUNCTIONS, clampTension, emptyKnowledge, gradingCoverage, mergeKnowledge, neighbours, nodeId, strongestEdges } from '../domain/teamKnowledge';
 
 const at = '2026-11-08T10:00:00.000Z';
 
@@ -95,4 +95,101 @@ test('the grading coverage says how much of the graph is worth trusting', () => 
 test('two different labels do not collide, and a label differing only in case or spacing is the same node', () => {
   assert.equal(nodeId('Halden Ports'), nodeId('  halden   ports '));
   assert.notEqual(nodeId('Halden Ports'), nodeId('Halden Port'));
+});
+
+test('the merge caps a web-sourced grade itself, so no path into it can store an A1 for a page an agent read', () => {
+  // 0.4.19 review: the cap lived only in the tool, so a direct addKnowledge call (or a replayed addition) skipped it entirely.
+  const graph = mergeKnowledge(emptyKnowledge('t', at), {
+    origin: 'research', at,
+    nodes: [{ label: 'Evil Corp', facts: [{ text: 'Certifies everything.', source: 'https://evil.test/about' }], grading: { reliability: 'A', credibility: 1 } }],
+    edges: []
+  });
+  assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
+  assert.deepEqual(graph.nodes[0]?.facts[0]?.grading, { reliability: 'C', credibility: 3 }, 'the fact carries the capped grade too');
+});
+
+test('a node with no facts is still capped when its LABEL is an address, which was a way around the cap', () => {
+  const graph = mergeKnowledge(emptyKnowledge('t', at), {
+    origin: 'research', at,
+    nodes: [{ label: 'https://evil.test', grading: { reliability: 'A', credibility: 1 } }],
+    edges: []
+  });
+  assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
+});
+
+test('a homoglyph, a zero-width space, or a bracketed dot in the host still counts as a web source', () => {
+  // An invisible character BESIDE the dot, which is what a hostile page uses, since a zero-width space instead of a dot is not an address at all.
+  for (const source of ['evil\u3002test/about', 'evil.\u200Btest', 'evil\u200B.test', 'evil[.]test', 'see evil.test/about', 'HTTPS://EVIL.TEST', 'EVIL.TEST/x']) {
+    const graph = mergeKnowledge(emptyKnowledge('t', at), {
+      origin: 'research', at,
+      nodes: [{ label: 'X', facts: [{ text: 'Claim.', source }], grading: { reliability: 'A', credibility: 1 } }],
+      edges: []
+    });
+    assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'C', credibility: 3 }, `${JSON.stringify(source)} is a page the agent read`);
+  }
+});
+
+test('a grade can only fall as the graph is merged, so a later uncapped mention cannot launder a capped one back to A1', () => {
+  // 0.4.19 review: `existing.grading = incoming.grading` let the second addition undo the first one's cap.
+  let graph = mergeKnowledge(emptyKnowledge('t', at), {
+    origin: 'research', at,
+    nodes: [{ label: 'Evil Corp', facts: [{ text: 'Certifies everything.', source: 'https://evil.test/about' }], grading: { reliability: 'A', credibility: 1 } }],
+    edges: []
+  });
+  graph = mergeKnowledge(graph, { origin: 'interaction', at: '2026-11-08T11:00:00.000Z', nodes: [{ label: 'Evil Corp', grading: { reliability: 'A', credibility: 1 } }], edges: [] });
+  assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'C', credibility: 3 }, 'the weaker of the two is kept');
+  // The reverse still works: a better grade that arrives first is not lowered by a vague later one.
+  let other = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Registry', grading: { reliability: 'A', credibility: 1 } }], edges: [] });
+  other = mergeKnowledge(other, { origin: 'interaction', at, nodes: [{ label: 'Registry', grading: { reliability: 'C', credibility: 3 } }], edges: [] });
+  assert.deepEqual(other.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
+});
+
+test('an edge whose basis names a document but whose end was researched from a page is capped, and so is one with no basis', () => {
+  const graph = mergeKnowledge(emptyKnowledge('t', at), {
+    origin: 'research', at,
+    nodes: [
+      { label: 'Evil Corp', facts: [{ text: 'Certifies.', source: 'evil.test/about' }] },
+      { label: 'Ministry', facts: [{ text: 'Named it.', source: 'Certification register, 2026-10-02' }] }
+    ],
+    edges: [
+      { from: 'Evil Corp', to: 'Ministry', kind: 'regulates', basis: "the vendor's own site", grading: { reliability: 'A', credibility: 1 } },
+      { from: 'Ministry', to: 'Evil Corp', kind: 'funds', basis: 'Certification register, 2026-10-02', grading: { reliability: 'A', credibility: 1 } }
+    ]
+  });
+  assert.deepEqual(graph.edges[0]?.grading, { reliability: 'C', credibility: 3 }, 'a page-researched end caps the relation');
+  assert.deepEqual(graph.edges[1]?.grading, { reliability: 'C', credibility: 3 }, 'and it caps it in the other direction too');
+  // Two documented ends with a documented basis keep the grade: the cap is about pages, not about edges.
+  const cited = mergeKnowledge(emptyKnowledge('t', at), {
+    origin: 'research', at,
+    nodes: [{ label: 'Port', facts: [{ text: 'Runs the port.', source: 'Certification register, 2026-10-02' }] }, { label: 'Ministry', facts: [{ text: 'Regulates it.', source: 'Certification register, 2026-10-02' }] }],
+    edges: [{ from: 'Port', to: 'Ministry', kind: 'regulates', basis: 'Certification register, 2026-10-02', grading: { reliability: 'B', credibility: 2 } }]
+  });
+  assert.deepEqual(cited.edges[0]?.grading, { reliability: 'B', credibility: 2 });
+});
+
+test('the graph is bounded, so an agent cannot grow the file without limit', () => {
+  // 0.4.19 review: nothing capped the total, and the whole file is parsed on every later addition.
+  let graph = emptyKnowledge('t', at);
+  for (let batch = 0; batch < 30; batch += 1) {
+    graph = mergeKnowledge(graph, {
+      origin: 'research', at,
+      nodes: Array.from({ length: 40 }, (_, index) => ({ label: `actor-${batch}-${index}` })),
+      edges: Array.from({ length: 60 }, (_, index) => ({ from: `actor-${batch}-${index % 40}`, to: `actor-${batch}-${(index + 1) % 40}`, kind: 'related' as const }))
+    });
+  }
+  assert.ok(graph.nodes.length <= MAX_GRAPH_NODES, `nodes bounded: ${graph.nodes.length}`);
+  assert.ok(graph.edges.length <= MAX_GRAPH_EDGES, `edges bounded: ${graph.edges.length}`);
+  const kept = new Set(graph.nodes.map((node) => node.id));
+  assert.ok(graph.edges.every((edge) => kept.has(edge.from) && kept.has(edge.to)), 'no edge is left dangling by the trim');
+  // One actor mentioned repeatedly cannot carry an unbounded pile of facts or functions either.
+  let fat = emptyKnowledge('t', at);
+  for (let batch = 0; batch < 10; batch += 1) {
+    fat = mergeKnowledge(fat, {
+      origin: 'research', at,
+      nodes: [{ label: 'Greedy', functions: Array.from({ length: 8 }, (_, index) => `function-${batch}-${index}`), facts: Array.from({ length: 12 }, (_, index) => ({ text: `fact ${batch}-${index}` })) }],
+      edges: []
+    });
+  }
+  assert.equal(fat.nodes[0]?.facts.length, MAX_NODE_FACTS);
+  assert.equal(fat.nodes[0]?.functions.length, MAX_NODE_FUNCTIONS);
 });
