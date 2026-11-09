@@ -103,6 +103,9 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
   // `acme-co.json`, which is team `acme-co`'s graph), and its parsed `team` names `acme-co`, not the team asking. Only a file that names THIS team migrates;
   // anything else stays exactly where it is, so one team never reads or copies another's graph.
   if (legacyGraph?.team !== team || !legacyGraph.nodes.length) return current;
+  // A legacy file that parsed damaged carries its problem forward (eighth 0.4.19 review, MINOR): the caller is adopting whatever readable parts survived,
+  // and it must be told the record it came from was not whole — the previous code reported this and the identity-gate rewrite dropped it.
+  const legacyProblem = older.problem;
   // Migration races like any other writer (0.4.19 review MAJOR): between the existsSync above and a save below, a concurrent addKnowledge — here or in
   // another window — can create the new file, and a blind rename would clobber its addition. The compare-and-retry below is the same guard addKnowledge
   // uses across windows, and it deliberately does NOT enter the per-file write queue: addKnowledge already holds that queue while it calls this function,
@@ -116,7 +119,7 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
       // caller is told the legacy graph is NOT in place.
       try {
         await writeFile(file, JSON.stringify(legacyGraph, null, 2), { flag: 'wx' });
-        return presented(older, team);
+        return { knowledge: legacyGraph, ...(legacyProblem ? { problem: legacyProblem } : {}) };
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
         return { knowledge: legacyGraph, problem: `The knowledge graph for ${team} could not be moved to its new file name (${(error as Error).message}). The old file is untouched and will be tried again.` };
@@ -133,11 +136,12 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
     });
     // Return the MERGED graph (second 0.4.19 review, MAJOR): the caller asked for this team's knowledge now, and after the merge that is the concurrent
     // window's graph plus the legacy one — returning the pre-merge snapshot would hide nodes another window already learned.
-    return { knowledge: merged, ...(mergedProblem ? { problem: mergedProblem } : {}) };
+    return { knowledge: merged, ...(mergedProblem || legacyProblem ? { problem: mergedProblem ?? legacyProblem } : {}) };
   }
   // The retry budget ran out without a confirmed write: re-read whatever IS on disk now (sixth 0.4.19 review, MINOR) rather than presenting a legacy snapshot
-  // that may hold less than another window has already learned.
-  return presented(await readKnowledgeFile(file, team), team);
+  // that may hold less than another window has already learned. The legacy file's damage report, if any, rides along.
+  const after = presented(await readKnowledgeFile(file, team), team);
+  return legacyProblem ? { ...after, problem: after.problem ?? legacyProblem } : after;
 }
 
 export async function saveKnowledge(dir: string, knowledge: TeamKnowledge): Promise<void> {

@@ -133,10 +133,12 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
         if (grading && (fromWeb || looksLikeAddress(node.label))) grading = capForWebSource(grading);
         return { label: node.label.trim().slice(0, 120), kind, functions, facts, ...(grading ? { grading } : {}) };
       });
-      // The labels this addition researched from a page, read before the edges, so an edge to one of them can be recognized below.
+      // The labels this addition researched from a page, read before the edges, so an edge to one of them can be recognized below. The comparison runs
+      // against the TRIMMED label (eighth 0.4.19 review, NIT): edges reference stored nodes, and an unsliced edge end longer than 120 chars never equalled
+      // its own node label, so the relation through it kept an A1 the cap should have taken.
       const researched = new Set(nodes
         .filter((node) => looksLikeAddress(node.label) || node.facts.some((fact) => fact.source !== undefined && looksLikeAddress(fact.source)))
-        .map((node) => node.label.trim().toLowerCase()));
+        .map((node) => node.label.trim().slice(0, 120).toLowerCase()));
       const edges = Array.isArray(raw.edges) ? raw.edges.slice(0, 60).flatMap((entry, index) => {
         if (!entry || typeof entry !== 'object') return [];
         const edge = entry as Record<string, unknown>;
@@ -149,7 +151,7 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
         // read, or asserted with no basis at all, is C3 at most, exactly as a fact from the same place is.
         // 0.4.19 review: a named basis still is not evidence the relation was not read off a page, so an edge whose END is an actor this same addition
         // researched from a web source is capped too: `basis: "the vendor's own site"` was a way to keep an A1 on a page's claim.
-        const researchedEnd = researched.has(edge.from.trim().toLowerCase()) || researched.has(edge.to.trim().toLowerCase());
+        const researchedEnd = researched.has(edge.from.trim().slice(0, 120).toLowerCase()) || researched.has(edge.to.trim().slice(0, 120).toLowerCase());
         if (grading && (basis === undefined || looksLikeAddress(basis) || researchedEnd)) grading = capForWebSource(grading);
         return [{ from: edge.from.trim().slice(0, 120), to: edge.to.trim().slice(0, 120), kind, tension, ...(basis ? { basis } : {}), ...(grading ? { grading } : {}) }];
       }) : [];

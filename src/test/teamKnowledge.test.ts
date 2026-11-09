@@ -288,6 +288,27 @@ test('a relation is re-capped when its end gains a web source in the same additi
   assert.equal(edge.grading?.reliability, 'C', 'the relation through a page-researched end is capped too');
 });
 
+test('an already-believed fact falls to the cap when a page cites it again, even in an addition with no grading', () => {
+  // Eighth 0.4.19 review, MAJOR + MINOR: the fact-level fall only fired when the addition declared a node grade, so a grade-less addition citing the page
+  // attached the URL and left the stored fact at A1; the node re-cap pass touched node.grading, never the facts.
+  const verified = { text: 'Acme ships in 3 days.', origin: 'interaction' as const, source: 'confirmed by Acme support', grading: { reliability: 'A' as const, credibility: 1 as const } };
+  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Acme', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [verified] }], edges: [] });
+  const trimmed = { text: verified.text, source: 'https://resellers.example/acme' };
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Acme', facts: [trimmed] }], edges: [] });
+  const fact = graph.nodes[0]!.facts.find((entry) => entry.text === verified.text)!;
+  assert.deepEqual(fact.grading, { reliability: 'C', credibility: 3 }, 'the stored fact is capped, whatever the addition declared');
+});
+
+test('a decimal is not a host: a measured figure or version can be the independent evidence that revives', () => {
+  // Eighth 0.4.19 review, MINOR: `measured 4.2 million TEU` matched the dotted-host shape, so the legitimate revival source was refused as a page.
+  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour authority notice' }] }], edges: [] });
+  graph = mergeKnowledge(graph, { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'measured on site 4.2 by the harbourmaster, software v2.1' }] }], edges: [] });
+  const revived = graph.nodes[0]!;
+  assert.match(JSON.stringify(revived.facts.map((fact) => fact.text)), /4\.2 million/, 'a decimal-bearing source is independent evidence, not a page');
+  assert.equal(revived.history?.some((fact) => fact.text.includes('4.2 million')), false, 'the claim is current again, not in history');
+});
+
 test('a re-assertion with independent evidence revives a refuted claim, and retires what it now contradicts', () => {
   // 0.4.19 review MINOR: `if (refuted) continue;` suppressed a retracted claim permanently, so evidence that re-established it could never restore it.
   let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });

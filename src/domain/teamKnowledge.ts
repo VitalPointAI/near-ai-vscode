@@ -176,7 +176,9 @@ export function looksLikeAddress(source: string): boolean {
   // The suggestion is declined deliberately: any dotted bare host counts as a page, which is the conservative direction — it can only CAP a grade or REFUSE
   // a revival, never raise one — and the repo's own tests lock in bare `evil.test` as a page. A named document wrongly capped keeps its history entry and a
   // wrongly-refused revival can return with a differently-worded source; the reverse error would let a page claim A1. Over-catching is the cheap mistake.
-  return /(?:^|[\s([<,;:@])[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i.test(`${text} `);
+  // BUT a bare DECIMAL (`v2.1`, `4.2 million`) is a number, not a host: its last label is all digits and digits-only labels never reach the host test
+  // (eighth 0.4.19 review, MINOR) — a measured figure is exactly the independent evidence a revival needs, and a version number is not a page.
+  return /(?:^|[\s([<,;:@])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i.test(`${text} `) && !/(?:^|[\s([<,;:@])[a-z0-9-]+(?:\.[0-9]+)+(?::\d+)?(?:$|[\s)\],;:.])/i.test(`${text} `);
 }
 
 /** The grade a claim about something an agent READ is worth: C3 at most, whichever shape it arrives in. */
@@ -290,9 +292,12 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       const known = existing.facts.find((old) => normalise(old.text) === text);
       if (known) {
         if (!known.source && incomingFact.source) known.source = incomingFact.source;
-        // The known fact's OWN grade falls too (fourth 0.4.19 review, MINOR): the node-level fall below did not touch it, so a mention from a capped page
-        // left the stored fact at its original A1 even as the actor's grade dropped.
-        if (grading && known.grading) known.grading = weakerGrade(known.grading, grading);
+        // The known fact's OWN grade falls too (fourth 0.4.19 review, MINOR; widened eighth 0.4.19 review, MAJOR): the node-level fall below did not touch
+        // it, so a mention from a capped page left the stored fact at its original A1 even as the actor's grade dropped — and an addition that declares NO
+        // grade but cites the page left the fact at A1 outright. A web-sourced mention of an already-believed fact lowers that fact's grade to the cap
+        // whenever the cap is the weaker, whatever the addition declared.
+        if (incomingFact.source && webSourced(incomingFact.source) && known.grading) known.grading = weakerGrade(known.grading, capForWebSource(known.grading));
+        else if (grading && known.grading) known.grading = weakerGrade(known.grading, grading);
         else if (grading && !known.grading && incomingFact.source && webSourced(incomingFact.source)) known.grading = gradeFor(grading, true);
         continue;
       }
