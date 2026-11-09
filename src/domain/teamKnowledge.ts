@@ -285,9 +285,22 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
         if (!known.grading && grading) known.grading = gradeFor(grading, webSourced(incomingFact.source));
         continue;
       }
-      // Already refuted: do not re-learn it as new. A team that read a retraction should not forget that it did.
+      // Already refuted: an echo — the same claim again, with no source of its own — is not re-learned, because a team that read a retraction should not
+      // forget that it did. A re-assertion that carries independent evidence (a source that is not a page the agent read) is new information though, and
+      // it moves the entry back out of history: believed again, dated from the re-assertion, with its grading as the revival's strength (0.4.19 review).
       const refuted = (existing.history ?? []).find((old) => normalise(old.text) === text);
-      if (refuted) continue;
+      if (refuted) {
+        const revived = Boolean(incomingFact.source) && !webSourced(incomingFact.source);
+        if (!revived) continue;
+        // The revival is independent evidence, so what the claim contradicts NOW may be the out-of-date side: a current belief the revived claim contradicts
+        // is retired too, with the revival as the reason, rather than both standing as current at once (0.4.19 review).
+        for (const current of [...existing.facts]) {
+          if (isContradicted(current.text, incomingFact.text)) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
+        }
+        existing.history = (existing.history ?? []).filter((old) => old !== refuted);
+        existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(grading ? { grading } : {}) });
+        continue;
+      }
       // A contradiction: the incoming fact names the same actor and says the opposite. The clear case is a `not` or `no longer`, which is how an agent
       // states a refutation in one sentence; the general case is left to `supersedes` below.
       const contradicts = existing.facts.find((old) => isContradicted(old.text, incomingFact.text));

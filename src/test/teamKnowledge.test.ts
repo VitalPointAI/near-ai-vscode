@@ -245,3 +245,28 @@ test('a refuted fact is not re-learned as new when the same claim comes back', (
   assert.equal(port.history?.length, 1, 'and it stays in the record');
 });
 
+test('a re-assertion with independent evidence revives a refuted claim, and retires what it now contradicts', () => {
+  // 0.4.19 review MINOR: `if (refuted) continue;` suppressed a retracted claim permanently, so evidence that re-established it could never restore it.
+  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.' }] }], edges: [] });
+  // An unsourced echo does NOT revive: a team that read a retraction should not forget that it did.
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
+  const echoed = graph.nodes[0]!;
+  assert.equal(echoed.facts.length, 1, 'the echo changed nothing');
+  assert.match(echoed.facts[0]!.text, /3\.1 million/);
+  // A page the agent read does not revive it either — a web source is exactly what the refutation protected against.
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'https://ports.example/teu' }] }], edges: [] });
+  assert.equal(graph.nodes[0]!.facts.length, 1, 'a web-sourced re-assertion is still an echo of the page');
+  // An INDEPENDENT source — a person who measured it themselves — is new information: believed again, dated, with the revival's grading (per node, as every addition carries it).
+  graph = mergeKnowledge(graph, { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'measured on site by the harbourmaster, 2026-11-09' }] }], edges: [] });
+  const revived = graph.nodes[0]!;
+  assert.match(JSON.stringify(revived.facts.map((fact) => fact.text)), /4\.2 million/, 'the claim is believed again');
+  assert.match(revived.facts[0]!.text, /4\.2 million/, 'and it stands first as current belief');
+  assert.match(revived.facts[0]!.source ?? '', /harbourmaster/);
+  assert.equal(revived.facts[0]!.grading?.reliability, 'A', 'the revival carries its own grading');
+  assert.match(JSON.stringify((revived.history ?? []).map((fact) => fact.text)), /3\.1 million/, 'what it contradicts is retired with the revival as the reason');
+  assert.match(JSON.stringify((revived.history ?? []).map((fact) => fact.refutedBy)), /4\.2 million/, 'the revival names itself as the refutation');
+  // The old entry's history record for the revived claim is gone from history: it is current again, not double-counted.
+  assert.equal((revived.history ?? []).some((fact) => fact.text.includes('4.2 million')), false);
+});
+

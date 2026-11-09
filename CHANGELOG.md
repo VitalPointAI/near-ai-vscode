@@ -42,15 +42,22 @@ the button writes. A chart shows the score over time, by task type, so you can s
   by itself, or stop between steps in any of the asking modes.
 - **"1 to fix" now says what needs fixing**, and takes you to the step that holds it.
 
-- **A team's knowledge graph accumulates, and learns.** Facts are no longer silently dropped past a limit, and a fact that later evidence refutes moves to a
-  recorded history with why and when it stopped being believed, rather than staying as if it were still true. Nothing is deleted, so a decision made on the old
-  knowledge can still be revisited. A refuted claim is not re-learned as new.
-- **A team's knowledge graph has no size ceiling.** Nodes, relations, facts and functions accumulate without limit, because a ceiling that silently dropped
-  the oldest entries made a team forget what it had learned. What changes over time is what is currently *believed*: a fact that later evidence refutes moves to
-  history, so the record grows while the beliefs stay current.
+- **A team's knowledge graph accumulates, and learns.** Nothing a team learned is silently dropped to enforce a size: the graph itself has no ceiling, because a
+  ceiling that dropped the oldest entries made a team forget what it had learned. (The Learn tool still accepts at most 40 actors, 60 relations, and 12 facts per
+  actor in one call — that bounds one call, not the graph.) What changes over time is what is currently *believed*: a fact that later evidence refutes moves to a
+  recorded history with why and when it stopped being believed, rather than staying as if it were still true, so a decision made on the old knowledge can still be
+  revisited. A refuted claim is not re-learned from an unsourced echo, but a re-assertion carrying independent evidence — a source that is not a page the agent
+  read — is believed again, with the revival dated and anything it contradicts retired beside it.
+- **One team's knowledge can no longer end up in another team's graph.** The upgrade migration only adopts an old graph file when that file names the team asking
+  for it, so a team whose name is not a plain slug (`acme co`) no longer reads the live file of the team it used to collide with (`acme-co`); that file stays where
+  it is, untouched.
+- **Two teams can no longer share one graph file, whatever their names.** Plain lowercase names keep their file; every other name gets `<slug>~<hash>` under a
+  character plain names cannot contain, so `acme co` and `acme-co`, an accented name, an empty one, and a team named to imitate a hashed file all keep separate
+  graphs. A plain-name graph is still found with no migration; anything renamed was always paired with the migration above.
 
-- **An existing team's knowledge is found after the file-name fix.** A team whose name is not already a plain lowercase slug (`My Team`) keeps its graph:
-  the old file is read and moved to the new name once.
+- **An existing team's knowledge survives the file-name fix.** A graph written under a plain slug (`scouts`) keeps its file outright. A graph written under a
+  name that used to be sanitised (`My Team`) is adopted from the old file once — and only when that file names this team — so the upgrade moves nobody else's
+  memory and loses nobody's own.
 
 ## 0.4.18
 

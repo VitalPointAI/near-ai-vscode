@@ -10,33 +10,42 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { emptyKnowledge, mergeKnowledge, type KnowledgeAddition, type TeamKnowledge } from '../domain/teamKnowledge';
 
-/** The most a graph file may be. The whole file is read, parsed and rewritten on every addition, so a huge one costs every later Learn. */
-/** A team name as a file name that is also INJECTIVE: two names that sanitise differently still get different files (see knowledgeFile). */
+/** A team name as a file name that is INJECTIVE: hash anything that is not already a plain lowercase slug, under a separator a plain name cannot contain (see knowledgeFile). */
 function teamSlug(team: string): string {
   const cleaned = team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
-  // Sanitising is lossy: `acme co`, `acme-co`, `ACME` and `acme` would all become `acme` and share one graph, which is two teams reading and overwriting
-  // each other (0.4.19 review). A name that is ALREADY exactly its own plain lowercase slug keeps the old file name, so every graph on disk is still found;
-  // anything else gets a hash of the ORIGINAL appended, which makes the mapping injective.
-  if (cleaned === team) return cleaned;
-  return `${cleaned}-${createHash('sha256').update(team).digest('hex').slice(0, 8)}`;
+  // A non-empty name that is EXACTLY its own plain lowercase slug keeps the plain file name, so every graph already on disk under a plain name is still found
+  // with no migration. Such a name is built only from [a-z0-9-], which is why the hash form below can never collide with it (0.4.19 review).
+  if (team && cleaned === team) return team;
+  // Sanitising is lossy — `acme co`, `acme-co`, `ACME` and `acme` would all clean to `acme` — so everything else takes `<clean>~<hash of the ORIGINAL>`.
+  // The `~` never occurs in a plain name and occurs exactly once here, so no two names can reach one file, and the empty name is hashed too rather than
+  // falling back to the shared `team.json` (0.4.19 review). Twelve hex like a node id, for margin over the reviewer's 8.
+  return `${cleaned || 'team'}~${createHash('sha256').update(team).digest('hex').slice(0, 12)}`;
 }
 
 /** The file name a team had BEFORE teamSlug became injective, mirroring the old expression EXACTLY: the old code wrote `knowledge/.json` for a name like `..`. */
 const legacyKnowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()}.json`);
 
-/** One file, read and parsed. A file that cannot be read is reported, not replaced. */
-async function readKnowledgeFile(file: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
+/** One file, read and parsed. A file that cannot be read is reported, not replaced. The parsed `team` field is returned AS READ: it is the file's own claim
+  * about who it belongs to, and the migration gate in loadKnowledge must check that claim rather than the name of whoever is asking — stamping it here would
+  * make every file name its reader, and the identity check would compare a name against itself (0.4.19 review). */
+async function readKnowledgeFile(file: string, team: string): Promise<{ knowledge?: TeamKnowledge; problem?: string }> {
   const text = await readFile(file, 'utf8').catch(() => undefined);
-  if (text === undefined) return { knowledge: emptyKnowledge(team, new Date().toISOString()) };
+  if (text === undefined) return {};
   try {
     const parsed = JSON.parse(text) as TeamKnowledge;
     if (parsed.version !== 1 || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error('unexpected shape');
-    return { knowledge: { ...parsed, team } };
+    return { knowledge: parsed };
   } catch (error) {
     // The graph is a record of what the team learned, so a damaged one is reported but must not stop the team working.
-    return { knowledge: emptyKnowledge(team, new Date().toISOString()), problem: `The knowledge graph for ${team} could not be read (${(error as Error).message}). It will be rebuilt as the team works.` };
+    return { problem: `The knowledge graph for ${team} could not be read (${(error as Error).message}). It will be rebuilt as the team works.` };
   }
 }
+
+/** What a caller always gets: the graph read from disk stamped with the team that asked, or an empty one when nothing readable is there. */
+const presented = (read: { knowledge?: TeamKnowledge; problem?: string }, team: string): { knowledge: TeamKnowledge; problem?: string } => ({
+  knowledge: read.knowledge ? { ...read.knowledge, team } : emptyKnowledge(team, new Date().toISOString()),
+  ...(read.problem ? { problem: read.problem } : {})
+});
 
 /**
  * The graph for a team, or an empty one when it has not learned anything yet.
@@ -48,14 +57,18 @@ async function readKnowledgeFile(file: string, team: string): Promise<{ knowledg
 export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
   const file = knowledgeFile(dir, team);
   const legacy = legacyKnowledgeFile(dir, team);
-  const current = await readKnowledgeFile(file, team);
+  const current = presented(await readKnowledgeFile(file, team), team);
   // 0.4.19 review: the gate was "the new graph has nodes", which made a legitimately EMPTIED new graph re-import the old file's nodes on every load. The
   // gate is now whether the new file exists at all: migration happens once, when it does not.
   if (existsSync(file) || file === legacy) return current;
   const older = await readKnowledgeFile(legacy, team);
+  // Identity check before adopting (0.4.19 review): the legacy file of a NON-plain name is also the LIVE file of a plain team (`acme co` once sanitised to
+  // `acme-co.json`, which is team `acme-co`'s graph), and its parsed `team` names `acme-co`, not the team asking. Only a file that names THIS team migrates;
+  // anything else stays exactly where it is, so one team never reads or copies another's graph.
+  if (older.knowledge?.team !== team) return current;
   if (!older.knowledge.nodes.length) return current;
   await saveKnowledge(dir, older.knowledge).catch(() => undefined);
-  return older;
+  return presented(older, team);
 }
 
 export async function saveKnowledge(dir: string, knowledge: TeamKnowledge): Promise<void> {
@@ -123,12 +136,13 @@ export async function addKnowledge(dir: string, team: string, addition: Knowledg
 }
 
 /**
- * Where a team's graph file is. The name is sanitised so it is safe on every file system, and it is injective, so two teams can never share a file:
- * `../x`, a team named `..`, `acme co` and `acme-co`, `ACME`, and a name with an accent or an invisible character all get their own file, or at least a
- * name that cannot escape `<dir>/knowledge` (0.4.19 review). Before this, the sanitised name alone let `..` become the empty slug and `acme co` collide
- * with `acme-co`, so one team could read and write another's graph.
+ * Where a team's graph file is: `<dir>/knowledge/<slug>.json`, where slug is plain for a name that is already a lowercase slug and `<clean>~<hash>`
+ * for everything else. Plain names use only `[a-z0-9-]` and hashed names carry the `~` no plain name can hold, so the mapping is injective: `acme co`,
+ * `acme-co`, `ACME`, `..`, `../escape`, an accented name, the empty name, and the reviewer's adversarial team named after its own hash all land on
+ * separate files, while a name cannot escape `<dir>/knowledge` (0.4.19 review). Before hashing, sanitising alone let two teams share one file and one
+ * could read and write the other's graph.
  */
-export const knowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${teamSlug(team) || 'team'}.json`);
+export const knowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${teamSlug(team)}.json`);
 
 /**
  * What a run is told about the graph, and how to add to it. Short on purpose: it is a hint about a tool, not a second system prompt. The Admiralty

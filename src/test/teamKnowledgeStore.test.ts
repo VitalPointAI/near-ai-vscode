@@ -1,6 +1,7 @@
 // The store that keeps a team's graph (owner, 2026-11-08). The blocker from review is what this test exists for: every member of a team shares one file
 // and up to 8 run at once, so concurrent adds must not lose each other.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -59,8 +60,8 @@ test('the graph file is named from the team, safe for a file system, and written
   await saveKnowledge(dir, { ...emptyKnowledge('My Team/One', at), nodes: [] });
   const written = await readFile(knowledgeFile(dir, 'My Team/One'), 'utf8');
   assert.match(written, /"version": 1/);
-  // A sanitised name also carries a short hash, so two names never collapse to one file (0.4.19 review).
-  assert.match(knowledgeFile(dir, 'My Team/One'), /my-team-one-[0-9a-f]{8}\.json$/);
+  // A plain name keeps its plain slug; anything sanitised lands under the ~-separator no plain name can hold (0.4.19 review).
+  assert.match(knowledgeFile(dir, 'My Team/One'), /my-team-one~[0-9a-f]{12}\.json$/);
 });
 
 test('two team names that sanitised to the same file now get their own, so one team cannot read or write another\'s graph', async () => {
@@ -88,12 +89,44 @@ test('two team names that sanitised to the same file now get their own, so one t
   assert.deepEqual((await loadKnowledge(dir, 'acme-co')).knowledge.nodes.map((node) => node.label), ['Bravo']);
 });
 
+test('the migration reads nobody\'s graph but the team it belongs to', async () => {
+  // 0.4.19 review BLOCKER: the legacy fallback read the OLD sanitised file for any non-slug name — which is the LIVE file of the plain team it used to
+  // collide with — and copied that team's graph across. `acme co` must not adopt `acme-co`'s knowledge.
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-leak-'));
+  await addKnowledge(dir, 'acme-co', addition('Bravo')); // the plain team's live graph, sitting at the legacy name of `acme co`
+  const leaked = await loadKnowledge(dir, 'acme co');
+  assert.deepEqual(leaked.knowledge.nodes, [], 'another team\'s graph is not copied into this team');
+  assert.match(knowledgeFile(dir, 'acme co'), /~/, 'the sanitised name lives under its own hashed file, not the plain team\'s');
+  // A legacy file that DOES name this team still migrates.
+  const legacy = path.join(dir, 'knowledge', 'my-team.json');
+  await mkdir(path.dirname(legacy), { recursive: true });
+  await writeFile(legacy, JSON.stringify({ version: 1, team: 'My Team', nodes: [{ id: 'n1', label: 'Halden Ports', kind: 'actor', functions: [], facts: [], origin: 'research', firstSeen: at, lastSeen: at, mentions: 1 }], edges: [], updatedAt: at }), 'utf8');
+  const own = await loadKnowledge(dir, 'My Team');
+  assert.equal(own.knowledge.nodes.length, 1, 'a file that names this team is adopted');
+  // And the misattributed file is left exactly where it was, for its real owner.
+  assert.match(await readFile(knowledgeFile(dir, 'acme-co'), 'utf8'), /Bravo/, 'the plain team keeps its file untouched');
+});
+
+test('a team named to imitate a hashed file still cannot share it, and no name maps to team.json', () => {
+  // 0.4.19 review MAJOR: hashing only when the clean differs let a team literally named `acme-co-<hash of "acme co">` keep a plain slug that collided with
+  // `acme co`'s hashed file. Plain names are [a-z0-9-] only and hashed names carry `~`, which no plain name contains — and `~` cannot appear IN the hash
+  // either, so plain and hashed spaces are disjoint.
+  const dir = path.join(tmpdir(), 'near-ai-know-adv-');
+  const impersonator = `acme-co-${createHash('sha256').update('acme co').digest('hex').slice(0, 12)}`;
+  assert.notEqual(knowledgeFile(dir, impersonator), knowledgeFile(dir, 'acme co'), 'the impersonating plain name does not reach the hashed file');
+  assert.match(knowledgeFile(dir, impersonator), /knowledge[/\\]acme-co-[0-9a-f]{12}\.json$/, 'it is a plain name, so it keeps a plain file');
+  assert.match(knowledgeFile(dir, 'acme co'), /~/, 'the sanitised name is the hashed one');
+  // The empty name no longer falls back to the shared `team.json` (0.4.19 review MINOR).
+  assert.notEqual(knowledgeFile(dir, ''), knowledgeFile(dir, 'team'));
+  assert.match(knowledgeFile(dir, ''), /~[0-9a-f]{12}\.json$/, 'the empty name is hashed like any other');
+});
+
 test('a plain team name keeps its existing file, so a graph already on disk is still found', () => {
   const dir = path.join(tmpdir(), 'near-ai-know-plain-');
   assert.match(knowledgeFile(dir, 'scouts'), /knowledge[/\\]scouts\.json$/);
   // A name every caller already slugifies stays the plain slug; a lossy one is disambiguated, never silently shared.
   assert.match(knowledgeFile(dir, 'my-team'), /my-team\.json$/);
-  assert.match(knowledgeFile(dir, 'My Team/One'), /my-team-one-[0-9a-f]{8}\.json$/);
+  assert.match(knowledgeFile(dir, 'My Team/One'), /my-team-one~[0-9a-f]{12}\.json$/);
 });
 
 test('a large graph is read, not refused: a knowledge graph accumulates', async () => {
