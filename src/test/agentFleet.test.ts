@@ -51,11 +51,10 @@ test('a background agent returns at once, and the run waits for its report befor
   const { root, gsd, posted, conversation } = await project();
   const store = new ActivityStore(root);
   const session = await store.start({ project: 'demo', model: 'z-ai/glm-5.3' });
-  // The child's turn is gated on a latch the test holds, so BOTH interleavings are exercised deterministically: at the parent's second turn the child has
-  // not finished (the run holds, and the notice says why), and after the latch opens the child's report feeds the run. An unmanaged timer made this a race
-  // that flaked CI: on a loaded runner the child could finish while the parent streamed, the drain-first wait returned the report without waiting, and the
-  // notice — which states why the run is holding — was rightly absent.
-  const gate: { release?: () => void } = {};
+  // The child holds on a latch the test controls, so the hold is deterministic: while the child is latched the run has a live background agent and nothing
+  // drained, so the waiting notice MUST appear — no timer race, which is what flaked CI (on a loaded runner the child finished during the parent's turn and
+  // the notice was rightly absent, because the report was already ready). The interleaving is asserted, not hoped for.
+  const gate: { release?: () => void; held: number } = { held: 0 };
   const latch = new Promise<void>((resolve) => { gate.release = resolve; });
   const client = scriptedClient({
     parent: [
@@ -63,24 +62,38 @@ test('a background agent returns at once, and the run waits for its report befor
       { text: 'Started the planner; waiting for it.' },
       { text: 'The planner says: plan ready.' }
     ],
-    child: [{ text: 'plan ready', delayMs: 50 }]
+    child: [{ text: 'plan ready' }]
   });
   const streamed = client.streamCompletion.bind(client);
   client.streamCompletion = async function* (model: string, messages: AgentMessage[]) {
-    if (messages.at(-1)?.role !== 'assistant') { yield * streamed(model, messages); return; }
-    await latch;
+    if (String(messages[0]?.content ?? '').startsWith('You are the planner.')) {
+      gate.held += 1;
+      await latch;
+    }
     yield * streamed(model, messages);
   };
-  await conversation.send(request(client, gsd, { activity: { store, sessionId: session.sessionId } }));
-  assert.deepEqual(client.log, ['parent:1', 'child:1', 'parent:2', 'parent:3'], 'the agent starts at once, in parallel with the parent, and the final parent turn comes after its report');
+  const running = conversation.send(request(client, gsd, { activity: { store, sessionId: session.sessionId } }));
+  let notice: Record<string, unknown> | undefined;
+  for (let attempt = 0; attempt < 400 && !notice; attempt += 1) {
+    notice = posted.find((message) => message.type === 'notice' && /Waiting for 1 background agent/.test(String(message.text)));
+    if (!notice) await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  try {
+    assert.ok(gate.held >= 1, 'the child turn was held by the latch');
+    assert.ok(notice, 'the run says why it is holding while the child works');
+  } finally {
+    gate.release?.();
+  }
+  await running;
+  // The latched order is the proof: the child is SPAWNED during parent turn 1 and runs in parallel with turn 2 (it was latched, still unfinished), and its
+  // report lands before the parent's final turn — the run held for it.
+  assert.deepEqual(client.log, ['parent:1', 'parent:2', 'child:1', 'parent:3'], 'the agent starts at once, in parallel with the parent, and the final parent turn comes after its report');
   const agentResult = posted.find((message) => message.type === 'tool-end' && message.callId === 'a1');
   assert.match(String(agentResult?.output), /Started gsd-planner in the background as gsd-planner-[a-f0-9]{6}/);
-  assert.ok(posted.some((message) => message.type === 'notice' && /Waiting for 1 background agent/.test(String(message.text))));
   const fleet = (await new AnalyticsStore({ sessions: await store.list() }).query()).fleet;
   assert.equal(fleet.agents.length, 1);
   assert.equal(fleet.agents[0].role, 'gsd-planner');
   assert.equal(fleet.agents[0].status, 'completed');
-  gate.release?.();
 });
 
 test('the parallel-agent limit runs extra agents one after another', async () => {

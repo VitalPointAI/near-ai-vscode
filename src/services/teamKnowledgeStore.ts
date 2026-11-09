@@ -91,7 +91,9 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
     const now = await readFile(file, 'utf8').catch(() => undefined);
     if (now !== before) continue;
     await saveKnowledge(dir, merged).catch(() => undefined);
-    break;
+    // Return the MERGED graph (second 0.4.19 review, MAJOR): the caller asked for this team's knowledge now, and after the merge that is the concurrent
+    // window's graph plus the legacy one — returning the pre-merge snapshot would hide nodes another window already learned.
+    return presented({ knowledge: merged }, team);
   }
   return presented(older, team);
 }

@@ -245,6 +245,41 @@ test('a refuted fact is not re-learned as new when the same claim comes back', (
   assert.equal(port.history?.length, 1, 'and it stays in the record');
 });
 
+test('a contradiction retires only what it out-evidences: a capped page claim cannot push a verified fact out of current belief', () => {
+  // Second 0.4.19 review, MAJOR: isContradicted alone let a C3 claim from a hostile page retire an A1 the team had verified, so the page's number became
+  // the current belief. Retirement now needs the incoming side to be at least as credible as what stands.
+  const verified = { text: 'The port handled 4.2 million TEU in 2025.', origin: 'interaction' as const, source: 'audited annual report', grading: { reliability: 'A' as const, credibility: 1 as const } };
+  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [verified] }], edges: [] });
+  // A page-sourced contradiction arrives capped at C3 (gradeFor capped it before it got here); the A1 fact stays exactly where it is.
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'https://rumours.example/port' }] }], edges: [] });
+  const held = graph.nodes[0]!;
+  assert.match(JSON.stringify(held.facts.map((fact) => fact.text)), /4\.2 million/, 'the verified fact is still current belief');
+  assert.equal(held.history?.length ?? 0, 0, 'nothing was retired');
+  assert.match(JSON.stringify(held.facts.map((fact) => fact.text)), /3\.1 million/, 'the capped claim still accumulates beside it');
+  // An EQUAL-grade contradiction retires — proved from a fresh graph, because after the capped claim has accumulated the equal assertion would only strengthen
+  // the claim it already matches, which is the already-believed branch, not a contradiction.
+  let equal = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'audited annual report' }] }], edges: [] });
+  equal = mergeKnowledge(equal, { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour authority notice' }] }], edges: [] });
+  const retired = equal.nodes[0]!;
+  assert.match(JSON.stringify((retired.history ?? []).map((fact) => fact.text)), /4\.2 million/, 'an evidence-backed contradiction of equal standing retires');
+  assert.match(JSON.stringify(retired.facts.map((fact) => fact.text)), /3\.1 million/, 'and the equal-standing claim stands');
+  // An UNGRADED contradiction never retires a graded fact, from a fresh graph for the same reason.
+  let solo = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'audited annual report' }] }], edges: [] });
+  solo = mergeKnowledge(solo, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 9.9 million TEU in 2025.' }] }], edges: [] });
+  const ungraded = solo.nodes[0]!;
+  assert.match(JSON.stringify(ungraded.facts.map((fact) => fact.text)), /4\.2 million/, 'the graded fact survives an ungraded contradiction');
+  assert.equal(ungraded.history?.length ?? 0, 0, 'nothing was retired');
+});
+
+test('a relation is re-capped when its end gains a web source in the same addition, even if the edge is not mentioned again', () => {
+  // Second 0.4.19 review, MINOR: the edge loop re-grades only a re-mentioned edge, so an A1 edge could outlive its end being revealed as a page. (An edge
+  // with NO grade stays ungraded — that is honest; the pass exists so a GRADED edge cannot outlive the cap.)
+  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Acme', grading: { reliability: 'A' as const, credibility: 1 as const } }, { label: 'Gulf Port', grading: { reliability: 'A' as const, credibility: 1 as const } }], edges: [{ from: 'Acme', to: 'Gulf Port', kind: 'supplies' as const, tension: 0.8, grading: { reliability: 'A' as const, credibility: 1 as const } }] });
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Gulf Port', grading: { reliability: 'C' as const, credibility: 3 as const }, facts: [{ text: 'Handles 12 million TEU.', source: 'https://gulfport.example/about' }] }], edges: [] });
+  const edge = graph.edges[0]!;
+  assert.equal(edge.grading?.reliability, 'C', 'the relation through a page-researched end is capped too');
+});
+
 test('a re-assertion with independent evidence revives a refuted claim, and retires what it now contradicts', () => {
   // 0.4.19 review MINOR: `if (refuted) continue;` suppressed a retracted claim permanently, so evidence that re-established it could never restore it.
   let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });

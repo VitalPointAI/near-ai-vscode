@@ -48,16 +48,14 @@ the button writes. A chart shows the score over time, by task type, so you can s
   recorded history with why and when it stopped being believed, rather than staying as if it were still true, so a decision made on the old knowledge can still be
   revisited. A refuted claim is not re-learned from an unsourced echo, but a re-assertion carrying independent evidence — a source that is not a page the agent
   read — is believed again, with the revival dated and anything it contradicts retired beside it.
-- **One team's knowledge can no longer end up in another team's graph.** The upgrade migration only adopts an old graph file when that file names the team asking
-  for it, so a team whose name is not a plain slug (`acme co`) no longer reads the live file of the team it used to collide with (`acme-co`); that file stays where
-  it is, untouched.
-- **Two teams can no longer share one graph file, whatever their names.** Plain lowercase names keep their file; every other name gets `<slug>~<hash>` under a
-  character plain names cannot contain, so `acme co` and `acme-co`, an accented name, an empty one, and a team named to imitate a hashed file all keep separate
-  graphs. A plain-name graph is still found with no migration; anything renamed was always paired with the migration above.
-
-- **An existing team's knowledge survives the file-name fix.** A graph written under a plain slug (`scouts`) keeps its file outright. A graph written under a
-  name that used to be sanitised (`My Team`) is adopted from the old file once — and only when that file names this team — so the upgrade moves nobody else's
-  memory and loses nobody's own.
+- **One team's knowledge can no longer end up in another team's graph — for anything written from this version on.** Plain lowercase names keep their file;
+  every other name gets `<slug>~<hash>` under a character plain names cannot contain, so `acme co` and `acme-co`, an accented name, an empty one, and a team
+  named to imitate a hashed file all keep separate graphs. A graph written under a name that used to be sanitised (`My Team`) is adopted from the old file once —
+  and only when that file names this team — so the upgrade moves nobody else's memory and loses nobody's own. (A graph file written by earlier versions when two
+  names still collided holds whichever team wrote it last, and the identity gate reads exactly that claim.)
+- **A contradiction can only retire what it out-evidences.** A graded current fact keeps its place against a claim the agent merely read on a page or left
+  ungraded: retirement now needs the incoming side to be at least as credible as what stands, so a hostile page cannot push verified knowledge out of current
+  belief on vocabulary alone. What is retired keeps its history entry, and independent evidence can still bring it back.
 
 ## 0.4.18
 

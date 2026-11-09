@@ -292,21 +292,32 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       if (refuted) {
         const revived = Boolean(incomingFact.source) && !webSourced(incomingFact.source);
         if (!revived) continue;
-        // The revival is independent evidence, so what the claim contradicts NOW may be the out-of-date side: a current belief the revived claim contradicts
-        // is retired too, with the revival as the reason, rather than both standing as current at once (0.4.19 review).
+        // The revival is independent evidence, so what the claim contradicts NOW may be the out-of-date side. The same evidence gate applies: a revival
+        // retires a current belief only when it stands at least as strong (0.4.19 review).
         for (const current of [...existing.facts]) {
-          if (isContradicted(current.text, incomingFact.text)) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
+          if (!isContradicted(current.text, incomingFact.text)) continue;
+          const incoming = grading ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
+          const stronger = !current.grading || (incoming !== undefined && ['A', 'B', 'C'].indexOf(incoming.reliability) <= ['A', 'B', 'C', 'D', 'E', 'F'].indexOf(current.grading.reliability) && incoming.credibility <= current.grading.credibility);
+          if (stronger) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
         }
         existing.history = (existing.history ?? []).filter((old) => old !== refuted);
         existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(grading ? { grading } : {}) });
         continue;
       }
       // A contradiction: the incoming fact names the same actor and says the opposite. The clear case is a `not` or `no longer`, which is how an agent
-      // states a refutation in one sentence; the general case is left to `supersedes` below.
+      // states a refutation in one sentence; the general case is left to `supersedes` below. Retirement is gated on EVIDENCE STRENGTH (second 0.4.19
+      // review, MAJOR): a graded contradiction retires a current fact only when it is at least as credible as what stands — a hostile page capped to C3
+      // must not push an A1 the team verified out of current belief — and an ungraded contradiction never retires a graded one. Web-sourced claims arrive
+      // here already capped, so the gate is what stops a page refuting alone.
       const contradicts = existing.facts.find((old) => isContradicted(old.text, incomingFact.text));
       if (contradicts) {
-        const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
-        retire(existing, contradicts, why, addition.at);
+        const outgoing = contradicts.grading;
+        const incoming = grading ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
+        const stronger = !outgoing || (incoming !== undefined && ['A', 'B', 'C'].indexOf(incoming.reliability) <= ['A', 'B', 'C', 'D', 'E', 'F'].indexOf(outgoing.reliability) && incoming.credibility <= outgoing.credibility);
+        if (stronger) {
+          const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
+          retire(existing, contradicts, why, addition.at);
+        }
       }
       existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(grading ? { grading } : {}) });
     }
@@ -317,6 +328,9 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     existing.mentions += 1;
   }
   const edges = new Map(base.edges.map((edge) => [edge.id, { ...edge }]));
+  // Whether an actor's side of a relation was researched from a page. Declared once for the whole merge (second 0.4.19 review, MINOR): an end can GAIN a web
+  // source in this same addition, and an edge touched by such an actor must be re-capped below even if the edge itself was not mentioned again.
+  const webEnd = (node: KnowledgeNode | undefined): boolean => Boolean(node && (looksLikeAddress(node.label) || node.facts.some((fact) => webSourced(fact.source))));
   for (const incoming of addition.edges) {
     const from = labelToId.get(incoming.from.trim().toLowerCase());
     const to = labelToId.get(incoming.to.trim().toLowerCase());
@@ -328,7 +342,6 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     // Same cap, same reason: a named basis is not evidence that the relation was not read off a page, so an address anywhere in the basis caps it, and a
     // relation with no basis at all is capped too. An end that was itself researched from a page caps it as well, whichever end, in either direction
     // (0.4.19 review).
-    const webEnd = (node: KnowledgeNode | undefined): boolean => Boolean(node && (looksLikeAddress(node.label) || node.facts.some((fact) => webSourced(fact.source))));
     const grading = gradeFor(incoming.grading, incoming.basis === undefined || webSourced(incoming.basis) || webEnd(nodes.get(from)) || webEnd(nodes.get(to)));
     const existing = edges.get(id);
     if (!existing) {
@@ -340,6 +353,13 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     if (grading) existing.grading = existing.grading ? weakerGrade(existing.grading, grading) : grading;
     existing.lastSeen = addition.at;
     existing.mentions += 1;
+  }
+  // An actor that gained a web-sourced fact in THIS addition re-caps the grades of every relation it touches (second 0.4.19 review, MINOR): the edge loop
+  // re-grades an edge only when the same edge is mentioned again, so without this pass an edge could stay A1 while its end had just been revealed as a page.
+  // weakerGrade keeps the stronger side, so the pass only ever lowers.
+  for (const edge of edges.values()) {
+    if (!edge.grading) continue;
+    if (webEnd(nodes.get(edge.from)) || webEnd(nodes.get(edge.to))) edge.grading = weakerGrade(edge.grading, capForWebSource(edge.grading));
   }
   // DELIBERATE: there is NO ceiling on nodes or relations. A knowledge graph is meant to accumulate, and a silent truncation makes a team forget what it
   // learned. Something no longer being true is recorded by supersession (see retire), not by deletion, so the record grows as the team's knowledge does
