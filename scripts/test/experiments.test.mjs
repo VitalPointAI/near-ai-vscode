@@ -15,11 +15,13 @@ function ledger(rows) {
 }
 
 test('the spend report pairs each request\'s opening and closing lines, and sums cost and time per kind', () => {
+  // ONE captured timestamp: four separate Date.now() calls drift by a millisecond and make the mean 20.0005s, which is a flaky test rather than a defect.
+  const now = Date.now();
   const file = ledger([
-    { t: 'e', id: 'r1', v: 1, at: Date.now() - 60_000, model: 'big', kind: 'main', run: 'run-1', est: 500_000_000 },
-    { t: 'e', id: 'r1', v: 2, end: Date.now() - 30_000, st: 'completed', in: 1000, cin: 900, out: 100 },
-    { t: 'e', id: 'r2', v: 1, at: Date.now() - 20_000, model: 'fast', kind: 'sub-agent', run: 'run-1', est: 250_000_000 },
-    { t: 'e', id: 'r2', v: 2, end: Date.now() - 10_000, st: 'completed', in: 2000, cin: 0, out: 400 }
+    { t: 'e', id: 'r1', v: 1, at: now - 60_000, model: 'big', kind: 'main', run: 'run-1', est: 500_000_000 },
+    { t: 'e', id: 'r1', v: 2, end: now - 30_000, st: 'completed', in: 1000, cin: 900, out: 100 },
+    { t: 'e', id: 'r2', v: 1, at: now - 20_000, model: 'fast', kind: 'sub-agent', run: 'run-1', est: 250_000_000 },
+    { t: 'e', id: 'r2', v: 2, end: now - 10_000, st: 'completed', in: 2000, cin: 0, out: 400 }
   ]);
   const { requests } = readRequests([file]);
   assert.equal(requests.length, 2);

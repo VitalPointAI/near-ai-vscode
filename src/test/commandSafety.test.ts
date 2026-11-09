@@ -28,6 +28,17 @@ test('classifier: ordinary build, test, lint, and read-only commands inside the 
   ]);
 });
 
+test('GitHub reads are safe so a poll does not ask, and anything that writes is not', () => {
+  // The waiting guidance tells a run to poll with exactly these, so an unknown `gh` would make every poll a question in an asking mode.
+  for (const command of ['gh pr checks 26', 'gh pr view 12', 'gh pr view 12 --json state,statusCheckRollup', 'gh pr list', 'gh run view 44', 'gh release view v1', 'gh repo view']) {
+    assert.equal(classifyCommand(command, context).verdict, 'safe', `${command} only reads`);
+  }
+  for (const command of ['gh pr merge 12', 'gh pr comment 12 -b hi', 'gh release create v1', 'gh pr edit 12', 'gh run rerun 44', 'gh pr ready 12']) {
+    assert.equal(classifyCommand(command, context).verdict, 'risky', `${command} writes to GitHub`);
+  }
+  assert.equal(classifyCommand('gh api repos/x/y/pulls', context).verdict, 'unknown', 'gh api keeps its own rule');
+});
+
 test('classifier: destructive file operations are risky', () => {
   table('risky', [
     'rm -rf .', 'rm -rf ./', 'rm -r .git', 'rm .git/config', 'rm -rf ../src', 'rm ../notes.txt', 'rm -fr node_modules ~/', 'sudo rm -rf /var/lib', 'rm -rf dist/*',
@@ -138,7 +149,8 @@ test('classifier: commands the rules cannot decide are unknown, never safe', () 
     'git commit --no-verify -m x', 'git branch feature', 'git stash drop-not-a-verb', 'git -C ../other status', 'git rm -f a.ts', 'git clean -n',
     'curl https://example.com', 'wget https://example.com/file', 'docker build .', 'docker run --rm image', 'chmod +x scripts/run.sh', 'kill 1234', 'ln -s ../x link',
     'export PATH=/tmp:$PATH', 'FOO=bar', 'LD_PRELOAD=/tmp/x.so npm test', 'NODE_OPTIONS=--require=/tmp/x.js npm test', 'env', 'printenv', 'sed s/a/b/e file', "sed 'w out' f", 'sed -f script.sed f', "awk 'BEGIN{system(\"id\")}'", "awk '{print > \"out\"}' f", "awk '{print | \"sh\"}' f",
-    'make install', 'make -C ../other', 'gh pr view 12', 'gh pr list', 'near account view-account-summary alice.near', 'aws s3 ls', 'tail -f log.txt', 'xargs echo',
+    // `gh pr view` and `gh pr list` are tested as safe in their own test: a run polls GitHub with them.
+    'make install', 'make -C ../other', 'near account view-account-summary alice.near', 'aws s3 ls', 'tail -f log.txt', 'xargs echo',
     'cp /etc/hosts ./hosts', 'find . -newer /etc/passwd', 'git log -1 -o out.txt', 'ls | xargs -n 1 echo', 'npm --prefix ../other test', 'npm test -- ../outside', './gradlew test', '../node_modules/.bin/tsc',
     // Malformed: unterminated quotes or operators.
     'echo "unterminated', 'ls &&', 'ls | ', 'echo \'x'
