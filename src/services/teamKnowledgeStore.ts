@@ -55,10 +55,10 @@ const presented = (read: { knowledge?: TeamKnowledge; problem?: string }, team: 
  * legacy graph is read and written back under the new name, so the migration happens once and the old file is left as a backup.
  */
 /** The whole graph as one addition, so a raced migration can merge a legacy file into a graph another window has just created (see loadKnowledge). Each fact
-  * keeps its own source and grade and the node keeps its functions and grade; per-fact timestamps and mention counts are rebuildable metadata that the merge
-  * re-dates on purpose, since the merge itself is the moment of arrival for a raced window's copy. Edge endpoints resolve through a label map built once
-  * rather than a find per edge (sixth 0.4.19 review, MINOR — quadratic on a large graph). Provenance reads as `seed`, the honest mark for knowledge that
-  * arrived by migration rather than by a run. */
+  * keeps its own source AND its own grade (tenth 0.4.19 review, MAJOR): the merge stamps a node's grade onto its unsourced facts, so dropping the fact-level
+  * grade let a legacy fact already capped to C3 come back at the actor's A1 — a grade rising through migration, the invariant this file exists to hold. Edge
+  * endpoints resolve through a label map built once rather than a find per edge (sixth 0.4.19 review, MINOR — quadratic on a large graph). Provenance reads as
+  * `seed`, the honest mark for knowledge that arrived by migration rather than by a run. */
 const additionOf = (graph: TeamKnowledge): KnowledgeAddition => {
   const labelOf = new Map(graph.nodes.map((node) => [node.id, node.label]));
   return {
@@ -68,7 +68,7 @@ const additionOf = (graph: TeamKnowledge): KnowledgeAddition => {
       label: node.label,
       ...(node.kind !== 'actor' ? { kind: node.kind } : {}),
       functions: node.functions,
-      facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.source ? { source: fact.source } : {}) })),
+      facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.grading ? { grading: fact.grading } : {}), ...(fact.source ? { source: fact.source } : {}) })),
       ...(node.grading ? { grading: node.grading } : {})
     })),
     edges: graph.edges.map((edge) => ({ from: labelOf.get(edge.from) ?? edge.from, to: labelOf.get(edge.to) ?? edge.to, kind: edge.kind, ...(edge.tension !== null ? { tension: edge.tension } : {}), ...(edge.basis ? { basis: edge.basis } : {}), ...(edge.grading ? { grading: edge.grading } : {}) }))
@@ -92,7 +92,13 @@ const withLegacyHistory = (merged: TeamKnowledge, legacy: TeamKnowledge): TeamKn
 export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
   const file = knowledgeFile(dir, team);
   const legacy = legacyKnowledgeFile(dir, team);
-  const current = presented(await readKnowledgeFile(file, team), team);
+  const read = await readKnowledgeFile(file, team);
+  // The identity gate is not only a migration concern (tenth 0.4.19 review, MINOR): a PLAIN team's file was written by whichever colliding name touched it
+  // last under the old lossy slug, so a file that names someone else is not this team's record and is not served to it — the caller gets an empty graph and
+  // the file is left for its real owner. An unreadable file reports and rebuilds, as before.
+  const owns = read.knowledge === undefined || read.knowledge.team === team;
+  const current = presented(owns ? read : {}, team);
+  if (!owns) return current;
   // 0.4.19 review: the gate was "the new graph has nodes", which made a legitimately EMPTIED new graph re-import the old file's nodes on every load. The
   // gate is now whether the new file exists at all: migration happens once, when it does not.
   if (existsSync(file) || file === legacy) return current;
@@ -135,19 +141,24 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
     // deadlock (this load may itself be inside that queue), so instead the merged graph is written to a TEMP file and renamed only after re-reading and
     // confirming the file still holds what was merged over. A change in between restarts the attempt.
     const temporary = `${file}.${process.pid}.mig.tmp`;
-    let raced = false;
-    await writeFile(temporary, JSON.stringify({ ...merged, team }, null, 2), 'utf8').catch((error: Error) => {
-      mergedProblem = `The knowledge graph for ${team} could not be written (${error.message}). The addition may be lost when this window closes.`;
-      raced = true;
-    });
-    if (!raced) {
+    try {
+      await writeFile(temporary, JSON.stringify({ ...merged, team }, null, 2), 'utf8');
+      // The compare-and-retry only protects the READ (ninth 0.4.19 review, MAJOR): between the check above and the rename below another window can still
+      // write, and an unguarded whole-file rename would clobber it. The rename happens only after re-reading and confirming the file still holds what was
+      // merged over; a change in between restarts the attempt.
       const guard = await readFile(file, 'utf8').catch(() => undefined);
-      if (guard !== now) { raced = true; await writeFile(temporary, '').catch(() => undefined); await rm(temporary, { force: true }); continue; }
-      await rename(temporary, file).catch((error: Error) => {
-        mergedProblem = `The knowledge graph for ${team} could not be written (${error.message}). The addition may be lost when this window closes.`;
-      });
-    } else {
-      await writeFile(temporary, '', { flag: 'wx' }).catch(() => undefined);
+      if (guard !== now) continue;
+      try {
+        await rename(temporary, file);
+      } catch (error) {
+        mergedProblem = `The knowledge graph for ${team} could not be written (${(error as Error).message}). The addition may be lost when this window closes.`;
+      }
+    } catch (error) {
+      mergedProblem = `The knowledge graph for ${team} could not be written (${(error as Error).message}). The addition may be lost when this window closes.`;
+    } finally {
+      // The temp file never outlives the attempt, whichever path it took (tenth 0.4.19 review, MINOR): a leftover *.mig.tmp is one more file a person has
+      // to wonder about, and the next attempt writes a fresh one anyway.
+      await rm(temporary, { force: true });
     }
     // Return the MERGED graph (second 0.4.19 review, MAJOR): the caller asked for this team's knowledge now, and after the merge that is the concurrent
     // window's graph plus the legacy one — returning the pre-merge snapshot would hide nodes another window already learned. The graph is stamped with the

@@ -143,7 +143,7 @@ export interface TeamKnowledge {
 
 /** What an agent proposes to add: the raw shape, before it is merged, which is what makes adding idempotent. */
 export interface KnowledgeAddition {
-  nodes: Array<{ label: string; kind?: NodeKind; functions?: string[]; facts?: Array<{ text: string; source?: string }>; grading?: Grading }>;
+  nodes: Array<{ label: string; kind?: NodeKind; functions?: string[]; facts?: Array<{ text: string; source?: string; grading?: Grading }>; grading?: Grading }>;
   edges: Array<{ from: string; to: string; kind?: EdgeKind; tension?: number | null; basis?: string; grading?: Grading }>;
   origin: KnowledgeOrigin;
   /** When it was learned, ISO; passed in so the merge is deterministic. */
@@ -185,7 +185,9 @@ export function looksLikeAddress(source: string): boolean {
   if (!match) return false;
   const labels = match[1]!.split('.');
   if (labels.length === 2) return !/^\d+$/.test(labels[1]!);
-  return labels.length >= 4 && labels.every((label) => /^\d+$/.test(label));
+  // THREE numeric labels is also an address shape to a resolver (`10.0.0/report` — tenth 0.4.19 review, MINOR), so anything numeric from three labels up is
+  // a page; only the two-label figure keeps its carve-out.
+  return labels.length >= 3 && labels.every((label) => /^\d+$/.test(label));
 }
 
 /** The grade a claim about something an agent READ is worth: C3 at most, whichever shape it arrives in. */
@@ -276,15 +278,22 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     labelToId.set(label.toLowerCase(), id);
     // The cap is applied HERE, not only in the tool, so no path into the merge (a direct addKnowledge call, a replayed addition) can store a web-sourced
     // claim above C3. The node's own label counts as a source too: `https://evil.test` as an actor's NAME is as much a page the agent read as a fact
-    // source is, and there are no facts to look at in that case (0.4.19 review).
+    // source is, and there are no facts to look at in that case (0.4.19 review). An UNSOURCED fact is judged like an unsourced relation (tenth 0.4.19
+    // review, MAJOR): omitting `source` was a way to keep an A1 on a page's claim — an unsourced fact arrives capped, UNLESS the origin is an interaction,
+    // the one path where a person, not a page, is the witness. Facts may also carry their OWN grade (a raced migration's legacy graph), which the
+    // node-level cap below must not raise.
     const fromWeb = looksLikeAddress(label) || (incoming.facts ?? []).some((fact) => webSourced(fact.source));
-    const grading = gradeFor(incoming.grading, fromWeb);
+    const factGrading = (fact: { grading?: Grading; source?: string }): Grading | undefined => {
+      if (fact.grading) return gradeFor(fact.grading, fact.source !== undefined && webSourced(fact.source));
+      return gradeFor(incoming.grading, fromWeb || looksLikeAddress(label) || (fact.source !== undefined && webSourced(fact.source)) || (addition.origin !== 'interaction' && fact.source === undefined));
+    };
+    const grading = factGrading({ source: undefined });
     const existing = nodes.get(id);
     if (!existing) {
       nodes.set(id, {
         id, label, kind: incoming.kind ?? 'actor', functions: [...new Set(incoming.functions ?? [])],
         // A new actor's facts are deduplicated too: an agent that states the same fact twice in one addition should not store it twice.
-        facts: dedupeFacts(incoming.facts ?? []).map((fact) => ({ text: fact.text, origin: addition.origin, since: addition.at, ...(fact.source ? { source: fact.source } : {}), ...(grading ? { grading } : {}) })),
+        facts: dedupeFacts(incoming.facts ?? []).map((fact) => ({ text: fact.text, origin: addition.origin, since: addition.at, ...(fact.source ? { source: fact.source } : {}), ...(factGrading(fact) ? { grading: factGrading(fact) } : {}) })),
         origin: addition.origin, ...(grading ? { grading } : {}), firstSeen: addition.at, lastSeen: addition.at, mentions: 1
       });
       continue;
@@ -306,6 +315,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
         if (incomingFact.source && webSourced(incomingFact.source) && known.grading) known.grading = weakerGrade(known.grading, capForWebSource(known.grading));
         else if (grading && known.grading) known.grading = weakerGrade(known.grading, grading);
         else if (grading && !known.grading && incomingFact.source && webSourced(incomingFact.source)) known.grading = gradeFor(grading, true);
+        else if (!known.grading && addition.origin !== 'interaction' && !incomingFact.source) known.grading = grading ?? capForWebSource({ reliability: 'A', credibility: 1 });
         continue;
       }
       // Already refuted: an echo — the same claim again, with no source of its own — is not re-learned, because a team that read a retraction should not
@@ -323,7 +333,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
           if (!current.grading || (incoming !== undefined && atLeastAsStrong(incoming, current.grading))) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
         }
         existing.history = (existing.history ?? []).filter((old) => old !== refuted);
-        existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(grading ? { grading } : {}) });
+        existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(factGrading(incomingFact) ? { grading: factGrading(incomingFact) } : {}) });
         continue;
       }
       // A contradiction: the incoming fact names the same actor and says the opposite. The clear case is a `not` or `no longer`, which is how an agent
@@ -342,7 +352,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
           retire(existing, contradicts, why, addition.at);
         }
       }
-      existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(grading ? { grading } : {}) });
+      existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(factGrading(incomingFact) ? { grading: factGrading(incomingFact) } : {}) });
     }
     // A later grade can only LOWER the stored one. Replacing it outright let a second addition that named no source ("a document", or nothing at all)
     // restore an A1 over a grade the first addition had already capped to C3 (0.4.19 review).
