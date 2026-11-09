@@ -138,7 +138,9 @@ test('a grade can only fall as the graph is merged, so a later uncapped mention 
   });
   graph = mergeKnowledge(graph, { origin: 'interaction', at: '2026-11-08T11:00:00.000Z', nodes: [{ label: 'Evil Corp', grading: { reliability: 'A', credibility: 1 } }], edges: [] });
   assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'C', credibility: 3 }, 'the weaker of the two is kept');
-  // The reverse still works: a better grade that arrives first is not lowered by a vague later one.
+  // The reverse: a vague grade arriving AFTER an honest one lowers it. That is deliberate (a grade can only fall, so a later self-declared grade is never
+  // an upgrade), and the cost is accepted: an honestly graded actor can be lowered by a later mention that declares less. The alternative, letting a grade
+  // rise, is what made a hostile page into trusted memory.
   let other = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Registry', grading: { reliability: 'A', credibility: 1 } }], edges: [] });
   other = mergeKnowledge(other, { origin: 'interaction', at, nodes: [{ label: 'Registry', grading: { reliability: 'C', credibility: 3 } }], edges: [] });
   assert.deepEqual(other.nodes[0]?.grading, { reliability: 'C', credibility: 3 });

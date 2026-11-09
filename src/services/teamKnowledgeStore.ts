@@ -4,8 +4,9 @@
 //
 // One file per team under the team library's own storage, beside the team files: <teams>/knowledge/<slug>.json. A team is its file, so its knowledge
 // travels with it and two teams never share a map. Writes are whole-file and atomic, and a damaged file is reported rather than thrown away silently.
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { emptyKnowledge, mergeKnowledge, type KnowledgeAddition, type TeamKnowledge } from '../domain/teamKnowledge';
 
@@ -19,8 +20,8 @@ function teamSlug(team: string): string {
   return `${cleaned}-${createHash('sha256').update(team).digest('hex').slice(0, 8)}`;
 }
 
-/** The file name a team had BEFORE teamSlug became injective: what every existing graph is called. */
-const legacyKnowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${(team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase() || 'team')}.json`);
+/** The file name a team had BEFORE teamSlug became injective, mirroring the old expression EXACTLY: the old code wrote `knowledge/.json` for a name like `..`. */
+const legacyKnowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()}.json`);
 
 /** One file, read and parsed. A file that cannot be read is reported, not replaced. */
 async function readKnowledgeFile(file: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
@@ -47,7 +48,9 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
   const file = knowledgeFile(dir, team);
   const legacy = legacyKnowledgeFile(dir, team);
   const current = await readKnowledgeFile(file, team);
-  if (current.knowledge.nodes.length || file === legacy) return current;
+  // 0.4.19 review: the gate was "the new graph has nodes", which made a legitimately EMPTIED new graph re-import the old file's nodes on every load. The
+  // gate is now whether the new file exists at all: migration happens once, when it does not.
+  if (existsSync(file) || file === legacy) return current;
   const older = await readKnowledgeFile(legacy, team);
   if (!older.knowledge.nodes.length) return current;
   await saveKnowledge(dir, older.knowledge).catch(() => undefined);
