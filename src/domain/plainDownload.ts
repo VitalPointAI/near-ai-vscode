@@ -67,6 +67,17 @@ export function isPublicHost(url: string): boolean {
   // `localhost.` is the same host to DNS as `localhost`, so the final dot is stripped.
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (!host) return false;
+  // 0.4.19 review: these names RESOLVE to 127.0.0.1, so a download to them reaches the machine with no card. They are matched exactly, because a new
+  // service name would need its own entry anyway.
+  if (/^(?:[a-z0-9-]+\.)*(?:lvh\.me|localtest\.me|nip\.io|sslip\.io)$/.test(host)) {
+    // The label before the service encodes the address: `127-0-0-1.sslip.io`, `app.lvh.me`. Any digits-and-dashes label is judged as an address.
+    const label = host.split('.').slice(0, -2).join('.');
+    if (label && /^[0-9-]+$/.test(label)) {
+      const octets = label.split('-').map(Number);
+      if (octets.length === 4 && octets.every((value) => value >= 0 && value <= 255) && !isPublicAddress(octets.join('.'))) return false;
+    }
+    return false;
+  }
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.home.arpa')) return false;
   // A dotted address written anywhere in the name is judged as an address.
   for (const address of host.match(/(?:\d{1,3}\.){3}\d{1,3}/g) ?? []) if (!isPublicAddress(address)) return false;
