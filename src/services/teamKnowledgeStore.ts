@@ -34,6 +34,9 @@ async function readKnowledgeFile(file: string, team: string): Promise<{ knowledg
   try {
     const parsed = JSON.parse(text) as TeamKnowledge;
     if (parsed.version !== 1 || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error('unexpected shape');
+    // A file whose team field is missing or not a string is DAMAGED, not foreign (thirteenth 0.4.19 review, MINOR): ownership unknown is a read problem with
+    // a recovery path, not a refusal — reporting it lets the migration or rebuild proceed instead of stranding the graph forever.
+    if (typeof parsed.team !== 'string' || !parsed.team) throw new Error('the graph does not name its team');
     return { knowledge: parsed };
   } catch (error) {
     // The graph is a record of what the team learned, so a damaged one is reported but must not stop the team working.
@@ -153,6 +156,9 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
       // caller is told the legacy graph is NOT in place.
       try {
         await writeFile(file, JSON.stringify(legacyGraph, null, 2), { flag: 'wx' });
+        // Exclusive-create succeeded, so the legacy record now lives under the new name; the old file is retired (thirteenth 0.4.19 review, MAJOR) for the
+        // same reason the renamed-migration path removes it — a legacy file left behind makes the plain team that owns that path foreign forever.
+        await rm(legacy, { force: true });
         return { knowledge: legacyGraph, ...(legacyProblem ? { problem: legacyProblem } : {}) };
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
@@ -161,7 +167,7 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
     }
     const newerRead = await readKnowledgeFile(file, team);
     // A DAMAGED new file is reported, not silently replaced (eleventh 0.4.19 review, MINOR): the merge below rebuilds over it, and the caller must know the
-    // graph it is shown was reconstructed, not read.
+    // graph it is shown was reconstructed, not read. The damage report rides the returned read (thirteenth 0.4.19 review, MINOR).
     const newer = presented(newerRead, team);
     const merged = withLegacyHistory(mergeKnowledge(newer.knowledge, additionOf(legacyGraph)), legacyGraph);
     const now = await readFile(file, 'utf8').catch(() => undefined);
@@ -179,6 +185,10 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
       if (guard !== now) continue;
       try {
         await rename(temporary, file);
+        // The migration is DONE once this lands: the legacy file is retired (thirteenth 0.4.19 review, MAJOR). Leaving it made the plain team whose path it
+        // occupies hit ForeignGraphError on every load and every Learn, forever, with no recovery — a migration that strands a team is worse than one that
+        // loses a backup. The renamed copy IS the backup; the old name no longer points at a live graph.
+        await rm(legacy, { force: true });
       } catch (error) {
         mergedProblem = `The knowledge graph for ${team} could not be written (${(error as Error).message}). The addition may be lost when this window closes.`;
       }
@@ -192,7 +202,7 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
     // Return the MERGED graph (second 0.4.19 review, MAJOR): the caller asked for this team's knowledge now, and after the merge that is the concurrent
     // window's graph plus the legacy one — returning the pre-merge snapshot would hide nodes another window already learned. The graph is stamped with the
     // REQUESTING team (ninth 0.4.19 review, MINOR): a mismatched claim inside the merged file would fail the identity gate on every later load.
-    return { knowledge: { ...merged, team }, ...(mergedProblem || legacyProblem ? { problem: mergedProblem ?? legacyProblem } : {}) };
+    return { knowledge: { ...merged, team }, ...(mergedProblem || legacyProblem || newer.problem ? { problem: mergedProblem ?? newer.problem ?? legacyProblem } : {}) };
   }
   // The retry budget ran out without a confirmed write: re-read whatever IS on disk now (sixth 0.4.19 review, MINOR) rather than presenting a legacy snapshot
   // that may hold less than another window has already learned. The legacy file's damage report, if any, rides along.

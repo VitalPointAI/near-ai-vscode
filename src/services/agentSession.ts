@@ -38,7 +38,8 @@ import { PreparedAttachments } from '../agent/attachments';
 import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
-import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
+import { addKnowledge, ForeignGraphError, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
+import { emptyKnowledge } from '../domain/teamKnowledge';
 import { slugify } from '../agent/teams';
 import type { MemoryScope } from '../domain/contextGraph';
 import type { AgentRole } from '../domain/agents';
@@ -605,11 +606,27 @@ export class AgentConversation {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
     // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
-    // same graph, which is what makes it shared: a fact one member verified is there for the next one.
+    // same graph, which is what makes it shared: a fact one member verified is there for the next one. A REFUSAL — the graph file on this path names another
+    // team (twelfth 0.4.19 review) — is surfaced to the agent as a readable empty graph with the problem attached, not thrown into the run: the run keeps
+    // going, the message says why nothing was read, and the file is untouched for its owner.
     const teamKnowledge = request.team
       ? knowledgeTools({
-          read: async () => (await loadKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug))).knowledge,
-          add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug), addition)
+          read: async () => {
+            try {
+              return (await loadKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug))).knowledge;
+            } catch (error) {
+              if (error instanceof ForeignGraphError) return emptyKnowledge(slugify(request.team!.slug), new Date().toISOString());
+              throw error;
+            }
+          },
+          add: async (addition) => {
+            try {
+              return await addKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug), addition);
+            } catch (error) {
+              if (error instanceof ForeignGraphError) return emptyKnowledge(slugify(request.team!.slug), new Date().toISOString());
+              throw error;
+            }
+          }
         })
       : [];
     const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];

@@ -352,9 +352,11 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       for (const contradicts of contradicted) {
         const outgoing = contradicts.grading;
         // The claim's EFFECTIVE grade decides (twelfth 0.4.19 review, MINOR): a fact carrying its own stronger grade — a migrated legacy fact — must not be
-        // judged at the node's weaker one, or the gate retires knowledge it should not.
+        // judged at the node's weaker one, or the gate retires knowledge it should not. An UNGRADED current belief is not free to take either (thirteenth
+        // 0.4.19 review, MINOR): it still needs the contradiction to stand at C3 — the standard an unsourced claim arrives at — so a page claim cannot
+        // retire what a person vouched for just because nobody graded it yet.
         const incoming = factGrading(incomingFact) ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
-        if (!outgoing || (incoming !== undefined && atLeastAsStrong(incoming, outgoing))) {
+        if (incoming !== undefined && (!outgoing || atLeastAsStrong(incoming, outgoing))) {
           const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
           retire(existing, contradicts, why, addition.at);
         }
