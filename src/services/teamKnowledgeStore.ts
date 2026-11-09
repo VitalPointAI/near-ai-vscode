@@ -54,14 +54,35 @@ const presented = (read: { knowledge?: TeamKnowledge; problem?: string }, team: 
  * plain lowercase slug (`My Team` was `my-team.json`) would lose its memory on upgrade, because the new path would simply not exist (0.4.19 review). The
  * legacy graph is read and written back under the new name, so the migration happens once and the old file is left as a backup.
  */
-/** The whole graph as one addition, so a raced migration can merge a legacy file into a graph another window has just created (see loadKnowledge). Provenance
-  * of a merged-in graph reads as `seed`, which is the honest mark for knowledge that arrived by migration rather than by a run. */
+/** The whole graph as one addition, so a raced migration can merge a legacy file into a graph another window has just created (see loadKnowledge). Each fact
+  * keeps its own source and the node keeps its functions and grade. Provenance reads as `seed`, the honest mark for knowledge that arrived by migration rather
+  * than by a run. */
 const additionOf = (graph: TeamKnowledge): KnowledgeAddition => ({
   origin: 'seed',
   at: new Date().toISOString(),
-  nodes: graph.nodes.map((node) => ({ label: node.label, ...(node.kind !== 'actor' ? { kind: node.kind } : {}), functions: node.functions, facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.source ? { source: fact.source } : {}) })), ...(node.grading ? { grading: node.grading } : {}) })),
+  nodes: graph.nodes.map((node) => ({
+    label: node.label,
+    ...(node.kind !== 'actor' ? { kind: node.kind } : {}),
+    functions: node.functions,
+    facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.source ? { source: fact.source } : {}) })),
+    ...(node.grading ? { grading: node.grading } : {})
+  })),
   edges: graph.edges.map((edge) => ({ from: graph.nodes.find((node) => node.id === edge.from)?.label ?? edge.from, to: graph.nodes.find((node) => node.id === edge.to)?.label ?? edge.to, kind: edge.kind, ...(edge.tension !== null ? { tension: edge.tension } : {}), ...(edge.basis ? { basis: edge.basis } : {}), ...(edge.grading ? { grading: edge.grading } : {}) }))
 });
+
+/** A merge cannot carry the refutation HISTORY (an addition is claims, not a record), so the raced migration re-attaches each legacy node's history to the
+  * merged node by label: what the team un-believed, and why, is exactly what a merge must not lose (fourth 0.4.19 review, MINOR). */
+const withLegacyHistory = (merged: TeamKnowledge, legacy: TeamKnowledge): TeamKnowledge => {
+  const byLabel = new Map(merged.nodes.map((node) => [node.label.trim().toLowerCase(), node]));
+  for (const old of legacy.nodes) {
+    if (!old.history?.length) continue;
+    const kept = byLabel.get(old.label.trim().toLowerCase());
+    if (!kept) continue;
+    const known = new Set([...kept.facts, ...(kept.history ?? [])].map((fact) => fact.text.trim().toLowerCase()));
+    kept.history = [...(kept.history ?? []), ...old.history.filter((fact) => !known.has(fact.text.trim().toLowerCase()))];
+  }
+  return merged;
+};
 
 export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
   const file = knowledgeFile(dir, team);
@@ -83,11 +104,17 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const before = await readFile(file, 'utf8').catch(() => undefined);
     if (before === undefined) {
-      await saveKnowledge(dir, legacyGraph).catch(() => undefined);
-      return presented(older, team);
+      // The read came back empty, but a concurrent window may have written between that read and this moment (fourth 0.4.19 review, MINOR), so re-read
+      // before writing: if a file appeared, take the merge branch instead of clobbering it with the legacy snapshot.
+      const appeared = await readFile(file, 'utf8').catch(() => undefined);
+      if (appeared === undefined) {
+        await saveKnowledge(dir, legacyGraph).catch(() => undefined);
+        return presented(older, team);
+      }
+      continue;
     }
     const newer = presented(await readKnowledgeFile(file, team), team);
-    const merged = mergeKnowledge(newer.knowledge, additionOf(legacyGraph));
+    const merged = withLegacyHistory(mergeKnowledge(newer.knowledge, additionOf(legacyGraph)), legacyGraph);
     const now = await readFile(file, 'utf8').catch(() => undefined);
     if (now !== before) continue;
     await saveKnowledge(dir, merged).catch(() => undefined);

@@ -193,6 +193,15 @@ function weakerGrade(a: Grading, b: Grading): Grading {
   };
 }
 
+/** The full Admiralty rank, shared by every comparison of two grades. */
+const ADMIRALTY = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+/** Whether a claim stands at least as strong as the belief it contradicts, on BOTH axes, over the FULL rank (fourth 0.4.19 review): comparing against a
+  * truncated A-C rank made indexOf return -1 for a D, E or F — which compares below everything and let a D1 claim retire an A1 fact, the exact opposite
+  * of what the gate exists for. */
+const atLeastAsStrong = (incoming: Grading, outgoing: Grading): boolean =>
+  ADMIRALTY.indexOf(incoming.reliability) <= ADMIRALTY.indexOf(outgoing.reliability) && incoming.credibility <= outgoing.credibility;
+
 /** A tension outside -1 to 1 is clamped rather than rejected: an agent that says 2 means "very strong". */
 export function clampTension(value: number | null | undefined): number | null {
   if (value === null || value === undefined || !Number.isFinite(value)) return null;
@@ -282,7 +291,10 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       const known = existing.facts.find((old) => normalise(old.text) === text);
       if (known) {
         if (!known.source && incomingFact.source) known.source = incomingFact.source;
-        if (!known.grading && grading) known.grading = gradeFor(grading, webSourced(incomingFact.source));
+        // The known fact's OWN grade falls too (fourth 0.4.19 review, MINOR): the node-level fall below did not touch it, so a mention from a capped page
+        // left the stored fact at its original A1 even as the actor's grade dropped.
+        if (grading && known.grading) known.grading = weakerGrade(known.grading, grading);
+        else if (grading && !known.grading && incomingFact.source && webSourced(incomingFact.source)) known.grading = gradeFor(grading, true);
         continue;
       }
       // Already refuted: an echo — the same claim again, with no source of its own — is not re-learned, because a team that read a retraction should not
@@ -297,8 +309,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
         for (const current of [...existing.facts]) {
           if (!isContradicted(current.text, incomingFact.text)) continue;
           const incoming = grading ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
-          const stronger = !current.grading || (incoming !== undefined && ['A', 'B', 'C'].indexOf(incoming.reliability) <= ['A', 'B', 'C', 'D', 'E', 'F'].indexOf(current.grading.reliability) && incoming.credibility <= current.grading.credibility);
-          if (stronger) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
+          if (!current.grading || (incoming !== undefined && atLeastAsStrong(incoming, current.grading))) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
         }
         existing.history = (existing.history ?? []).filter((old) => old !== refuted);
         existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(grading ? { grading } : {}) });
@@ -313,8 +324,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       if (contradicts) {
         const outgoing = contradicts.grading;
         const incoming = grading ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
-        const stronger = !outgoing || (incoming !== undefined && ['A', 'B', 'C'].indexOf(incoming.reliability) <= ['A', 'B', 'C', 'D', 'E', 'F'].indexOf(outgoing.reliability) && incoming.credibility <= outgoing.credibility);
-        if (stronger) {
+        if (!outgoing || (incoming !== undefined && atLeastAsStrong(incoming, outgoing))) {
           const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
           retire(existing, contradicts, why, addition.at);
         }

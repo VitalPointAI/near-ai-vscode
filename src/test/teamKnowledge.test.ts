@@ -269,6 +269,14 @@ test('a contradiction retires only what it out-evidences: a capped page claim ca
   const ungraded = solo.nodes[0]!;
   assert.match(JSON.stringify(ungraded.facts.map((fact) => fact.text)), /4\.2 million/, 'the graded fact survives an ungraded contradiction');
   assert.equal(ungraded.history?.length ?? 0, 0, 'nothing was retired');
+  // A LOW-GRADED contradiction never retires either — the rank comparison must use the FULL Admiralty scale, not an A-C truncation whose indexOf returns
+  // -1 for a D, E or F and let a D1 claim defeat an A1 fact (fourth 0.4.19 review, BLOCKER).
+  let weak = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'audited annual report' }] }], edges: [] });
+  weak = mergeKnowledge(weak, { origin: 'document', at, nodes: [{ label: 'Port', grading: { reliability: 'D' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 2.2 million TEU in 2025.', source: 'a bar flyer' }] }], edges: [] });
+  const weakHeld = weak.nodes[0]!;
+  assert.match(JSON.stringify(weakHeld.facts.map((fact) => fact.text)), /4\.2 million/, 'the verified fact survives a D1 contradiction');
+  assert.equal(weakHeld.history?.length ?? 0, 0, 'nothing was retired by the weak claim');
+  assert.match(JSON.stringify(weakHeld.facts.map((fact) => fact.text)), /2\.2 million/, 'the weak claim still accumulates beside it');
 });
 
 test('a relation is re-capped when its end gains a web source in the same addition, even if the edge is not mentioned again', () => {

@@ -156,6 +156,21 @@ test("a graph written under the old file name is found and moved, so an upgrade 
   assert.match(await readFile(knowledgeFile(dir, 'My Team'), 'utf8'), /Halden Ports/);
 });
 
+test("the migration runs through addKnowledge too, where the write queue is already held, and does not deadlock", async () => {
+  // Fourth 0.4.19 review, MINOR: the deadlock-avoidance claim — addKnowledge holds the per-file queue and loadKnowledge must not re-enter it — was stated
+  // in a comment and never executed. This is the path a run actually takes on first Learn after upgrade.
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-legacy-add-'));
+  const legacy = path.join(dir, 'knowledge', 'my-team.json');
+  await mkdir(path.dirname(legacy), { recursive: true });
+  await writeFile(legacy, JSON.stringify({ version: 1, team: 'My Team', nodes: [{ id: 'n1', label: 'Halden Ports', kind: 'actor', functions: [], facts: [], origin: 'research', firstSeen: at, lastSeen: at, mentions: 1 }], edges: [], updatedAt: at }), 'utf8');
+  const merged = await Promise.race([
+    addKnowledge(dir, 'My Team', addition('Alpha')),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('deadlocked: migration re-entered the write queue')), 5_000))
+  ]);
+  assert.deepEqual(merged.nodes.map((node) => node.label).sort(), ['Alpha', 'Halden Ports'], 'the legacy graph and the new addition both landed');
+  assert.match(await readFile(knowledgeFile(dir, 'My Team'), 'utf8'), /Halden Ports/);
+});
+
 test('a write from another window is merged, not overwritten', async () => {
   // The review's finding: the in-process lock cannot see a second VS Code window, which has its own extension host and its own Map. Simulated here by writing
   // the file from "outside" between this process's read and its write, which is exactly what the other window does.
