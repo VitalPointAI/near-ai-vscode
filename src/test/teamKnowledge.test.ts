@@ -3,7 +3,7 @@
 // must never erase a measured relation.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MAX_GRAPH_EDGES, MAX_GRAPH_NODES, MAX_NODE_FACTS, MAX_NODE_FUNCTIONS, clampTension, emptyKnowledge, gradingCoverage, mergeKnowledge, neighbours, nodeId, strongestEdges } from '../domain/teamKnowledge';
+import { clampTension, emptyKnowledge, gradingCoverage, mergeKnowledge, neighbours, nodeId, strongestEdges } from '../domain/teamKnowledge';
 
 const at = '2026-11-08T10:00:00.000Z';
 
@@ -177,11 +177,12 @@ test('the graph is bounded, so an agent cannot grow the file without limit', () 
       edges: Array.from({ length: 60 }, (_, index) => ({ from: `actor-${batch}-${index % 40}`, to: `actor-${batch}-${(index + 1) % 40}`, kind: 'related' as const }))
     });
   }
-  assert.ok(graph.nodes.length <= MAX_GRAPH_NODES, `nodes bounded: ${graph.nodes.length}`);
-  assert.ok(graph.edges.length <= MAX_GRAPH_EDGES, `edges bounded: ${graph.edges.length}`);
+  // 1,200 actors learned over 30 batches: ALL of them survive. A knowledge graph accumulates, and a ceiling that silently dropped the oldest entries made a
+  // team forget what it had learned (owner, 2026-11-08).
+  assert.equal(graph.nodes.length, 1_200, `every actor is kept: ${graph.nodes.length}`);
   const kept = new Set(graph.nodes.map((node) => node.id));
-  assert.ok(graph.edges.every((edge) => kept.has(edge.from) && kept.has(edge.to)), 'no edge is left dangling by the trim');
-  // One actor mentioned repeatedly cannot carry an unbounded pile of facts or functions either.
+  assert.ok(graph.edges.every((edge) => kept.has(edge.from) && kept.has(edge.to)), 'no edge is left dangling');
+  // One actor mentioned repeatedly keeps every fact and every function it was given.
   let fat = emptyKnowledge('t', at);
   for (let batch = 0; batch < 10; batch += 1) {
     fat = mergeKnowledge(fat, {
@@ -190,6 +191,55 @@ test('the graph is bounded, so an agent cannot grow the file without limit', () 
       edges: []
     });
   }
-  assert.equal(fat.nodes[0]?.facts.length, MAX_NODE_FACTS);
-  assert.equal(fat.nodes[0]?.functions.length, MAX_NODE_FUNCTIONS);
+  assert.equal(fat.nodes[0]?.facts.length, 120);
+  assert.equal(fat.nodes[0]?.functions.length, 80);
 });
+
+test('a fact that later evidence refutes moves to history, with why and when, rather than staying as if it were true', () => {
+  // Owner, 2026-11-08: the graph accumulates but also learns. New evidence that refutes old knowledge removes it from what the team believes, and KEEPS it in
+  // case a decision made on it needs revisiting.
+  let graph = mergeKnowledge(emptyKnowledge('t', at), {
+    origin: 'research', at,
+    nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 's1-ministry.md' }] }],
+    edges: []
+  });
+  graph = mergeKnowledge(graph, {
+    origin: 'research', at: '2026-11-09T00:00:00.000Z',
+    nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'https://trade-weekly.test/a' }] }],
+    edges: []
+  });
+  const port = graph.nodes[0]!;
+  assert.deepEqual(port.facts.map((fact) => fact.text), ['The port handled 3.1 million TEU in 2025.'], 'only the current belief is believed');
+  assert.equal(port.history?.length, 1, 'the refuted fact is kept');
+  assert.match(port.history![0]!.text, /4\.2 million/);
+  assert.match(port.history![0]!.refutedBy ?? '', /3\.1 million/, 'why it was refuted is recorded');
+  assert.equal(port.history![0]!.refutedAt, '2026-11-09T00:00:00.000Z');
+  assert.equal(port.history![0]!.since, at, 'and when it was first believed, so the timeline survives');
+});
+
+test('a negation of the same claim refutes it, and unrelated facts about one actor do not', () => {
+  const base = mergeKnowledge(emptyKnowledge('t', at), {
+    origin: 'research', at,
+    nodes: [{ label: 'Supplier', facts: [{ text: 'The supplier is certified for medical use.' }, { text: 'The supplier ships from Halden.' }] }],
+    edges: []
+  });
+  // A negation of the SAME claim refutes it.
+  const negated = mergeKnowledge(base, { origin: 'research', at, nodes: [{ label: 'Supplier', facts: [{ text: 'The supplier is not certified for medical use.' }] }], edges: [] });
+  assert.equal(negated.nodes[0]?.history?.length, 1, 'the negated claim is retired');
+  assert.match(negated.nodes[0]?.facts.map((fact) => fact.text).join(' ') ?? '', /not certified/);
+  // A different fact about the same actor accumulates rather than contradicting.
+  const added = mergeKnowledge(base, { origin: 'research', at, nodes: [{ label: 'Supplier', facts: [{ text: 'The supplier employs 40 people.' }] }], edges: [] });
+  assert.equal(added.nodes[0]?.history?.length ?? 0, 0, 'an unrelated fact does not refute anything');
+  assert.equal(added.nodes[0]?.facts.length, 3);
+});
+
+test('a refuted fact is not re-learned as new when the same claim comes back', () => {
+  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.' }] }], edges: [] });
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
+  const port = graph.nodes[0]!;
+  assert.equal(port.facts.length, 1, 'the refuted claim is not resurrected beside the current one');
+  assert.match(port.facts[0]!.text, /3\.1 million/);
+  assert.equal(port.history?.length, 1, 'and it stays in the record');
+});
+

@@ -5,7 +5,7 @@ import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { MAX_KNOWLEDGE_BYTES, addKnowledge, knowledgeFile, loadKnowledge, saveKnowledge } from '../services/teamKnowledgeStore';
+import { addKnowledge, knowledgeFile, loadKnowledge, saveKnowledge } from '../services/teamKnowledgeStore';
 import { emptyKnowledge } from '../domain/teamKnowledge';
 
 const at = '2026-11-08T10:00:00.000Z';
@@ -96,16 +96,31 @@ test('a plain team name keeps its existing file, so a graph already on disk is s
   assert.match(knowledgeFile(dir, 'My Team/One'), /my-team-one-[0-9a-f]{8}\.json$/);
 });
 
-test('a graph file over the size limit is refused and reported rather than parsed', async () => {
+test('a large graph is read, not refused: a knowledge graph accumulates', async () => {
+  // With no graph ceiling there is no byte ceiling either: refusing a big file would reset a team's memory to empty, which is worse than a slow read.
   const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-big-'));
   const file = knowledgeFile(dir, 'scouts');
   await mkdir(path.dirname(file), { recursive: true });
-  // A valid graph padded past the ceiling: parsing it is the cost the limit exists to avoid.
-  const padded = JSON.stringify({ version: 1, team: 'scouts', nodes: [], edges: [], updatedAt: at, pad: 'x'.repeat(MAX_KNOWLEDGE_BYTES + 1024) });
-  await writeFile(file, padded, 'utf8');
+  const nodes = Array.from({ length: 5_000 }, (_, index) => ({ id: `n${index}`, label: `actor ${index}`, kind: 'actor', functions: [], facts: [], origin: 'research', firstSeen: at, lastSeen: at, mentions: 1 }));
+  await writeFile(file, JSON.stringify({ version: 1, team: 'scouts', nodes, edges: [], updatedAt: at }), 'utf8');
   const loaded = await loadKnowledge(dir, 'scouts');
-  assert.match(loaded.problem ?? '', /over the 8 MB limit/);
-  assert.deepEqual(loaded.knowledge.nodes, []);
+  assert.equal(loaded.problem, undefined, 'a big graph is not a problem');
+  assert.equal(loaded.knowledge.nodes.length, 5_000, 'and nothing is dropped');
+});
+
+test("a graph written under the old file name is found and moved, so an upgrade does not lose a team's memory", async () => {
+  // The review's blocker: the injective slug renamed every file whose team name was not already a plain lowercase slug, so `My Team` looked for a file that
+  // did not exist and the team silently started with nothing.
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-legacy-'));
+  const legacy = path.join(dir, 'knowledge', 'my-team.json');
+  await mkdir(path.dirname(legacy), { recursive: true });
+  const older = { version: 1, team: 'My Team', nodes: [{ id: 'n1', label: 'Halden Ports', kind: 'actor', functions: [], facts: [], origin: 'research', firstSeen: at, lastSeen: at, mentions: 1 }], edges: [], updatedAt: at };
+  await writeFile(legacy, JSON.stringify(older), 'utf8');
+  const loaded = await loadKnowledge(dir, 'My Team');
+  assert.equal(loaded.knowledge.nodes.length, 1, 'the existing graph is read from the old name');
+  assert.equal(loaded.knowledge.nodes[0]?.label, 'Halden Ports');
+  assert.notEqual(knowledgeFile(dir, 'My Team'), legacy);
+  assert.match(await readFile(knowledgeFile(dir, 'My Team'), 'utf8'), /Halden Ports/);
 });
 
 test('a write from another window is merged, not overwritten', async () => {

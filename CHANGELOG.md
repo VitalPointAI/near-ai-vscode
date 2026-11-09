@@ -42,6 +42,12 @@ the button writes. A chart shows the score over time, by task type, so you can s
   by itself, or stop between steps in any of the asking modes.
 - **"1 to fix" now says what needs fixing**, and takes you to the step that holds it.
 
+- **A team's knowledge graph accumulates, and learns.** Facts are no longer silently dropped past a limit, and a fact that later evidence refutes moves to a
+  recorded history with why and when it stopped being believed, rather than staying as if it were still true. Nothing is deleted, so a decision made on the old
+  knowledge can still be revisited. A refuted claim is not re-learned as new.
+- **An existing team's knowledge is found after the file-name fix.** A team whose name is not already a plain lowercase slug (`My Team`) keeps its graph:
+  the old file is read and moved to the new name once.
+
 ## 0.4.18
 
 - **A workflow carries on by itself in Auto.** A research or software project used to stop at every

@@ -10,8 +10,6 @@ import path from 'node:path';
 import { emptyKnowledge, mergeKnowledge, type KnowledgeAddition, type TeamKnowledge } from '../domain/teamKnowledge';
 
 /** The most a graph file may be. The whole file is read, parsed and rewritten on every addition, so a huge one costs every later Learn. */
-export const MAX_KNOWLEDGE_BYTES = 8 * 1024 * 1024;
-
 /** A team name as a file name that is also INJECTIVE: two names that sanitise differently still get different files (see knowledgeFile). */
 function teamSlug(team: string): string {
   const cleaned = team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
@@ -21,24 +19,39 @@ function teamSlug(team: string): string {
   return `${cleaned}-${createHash('sha256').update(team).digest('hex').slice(0, 8)}`;
 }
 
-/** The graph for a team, or an empty one when it has not learned anything yet. A file that cannot be read is reported, not replaced. */
-export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
-  const file = knowledgeFile(dir, team);
-  const size = await stat(file).then((info) => info.size, () => undefined);
-  // 0.4.19 review: an agent could grow the graph without limit, and every later read parsed the whole file. Too large is reported like too damaged.
-  if (size !== undefined && size > MAX_KNOWLEDGE_BYTES) {
-    return { knowledge: emptyKnowledge(team, new Date().toISOString()), problem: `The knowledge graph for ${team} is ${Math.round(size / 1024 / 1024)} MB, over the ${MAX_KNOWLEDGE_BYTES / 1024 / 1024} MB limit, so it was not read. It will be rebuilt as the team works.` };
-  }
-  let text: string;
-  try { text = await readFile(file, 'utf8'); } catch { return { knowledge: emptyKnowledge(team, new Date().toISOString()) }; }
+/** The file name a team had BEFORE teamSlug became injective: what every existing graph is called. */
+const legacyKnowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${(team.replace(/[^a-z0-9-]+/gi, '-').toLowerCase() || 'team')}.json`);
+
+/** One file, read and parsed. A file that cannot be read is reported, not replaced. */
+async function readKnowledgeFile(file: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
+  const text = await readFile(file, 'utf8').catch(() => undefined);
+  if (text === undefined) return { knowledge: emptyKnowledge(team, new Date().toISOString()) };
   try {
     const parsed = JSON.parse(text) as TeamKnowledge;
     if (parsed.version !== 1 || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error('unexpected shape');
     return { knowledge: { ...parsed, team } };
   } catch (error) {
-    // The graph is a cache of what the team learned, so a damaged one is worth reporting but must not stop the team working.
+    // The graph is a record of what the team learned, so a damaged one is reported but must not stop the team working.
     return { knowledge: emptyKnowledge(team, new Date().toISOString()), problem: `The knowledge graph for ${team} could not be read (${(error as Error).message}). It will be rebuilt as the team works.` };
   }
+}
+
+/**
+ * The graph for a team, or an empty one when it has not learned anything yet.
+ *
+ * The file name changed when teamSlug became injective, so this falls back to the OLD name: without that, every existing team whose name is not already a
+ * plain lowercase slug (`My Team` was `my-team.json`) would lose its memory on upgrade, because the new path would simply not exist (0.4.19 review). The
+ * legacy graph is read and written back under the new name, so the migration happens once and the old file is left as a backup.
+ */
+export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
+  const file = knowledgeFile(dir, team);
+  const legacy = legacyKnowledgeFile(dir, team);
+  const current = await readKnowledgeFile(file, team);
+  if (current.knowledge.nodes.length || file === legacy) return current;
+  const older = await readKnowledgeFile(legacy, team);
+  if (!older.knowledge.nodes.length) return current;
+  await saveKnowledge(dir, older.knowledge).catch(() => undefined);
+  return older;
 }
 
 export async function saveKnowledge(dir: string, knowledge: TeamKnowledge): Promise<void> {

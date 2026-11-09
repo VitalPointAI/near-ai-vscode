@@ -25,6 +25,23 @@ export type NodeKind = 'actor' | 'person' | 'organisation' | 'system' | 'documen
  */
 export interface Grading { reliability: 'A' | 'B' | 'C' | 'D' | 'E' | 'F'; credibility: 1 | 2 | 3 | 4 | 5 | 6 }
 
+/**
+ * One belief about an actor. `status` is why it is in `facts` or in `history`: a current belief, one that later evidence refuted, or one that simply became
+ * out of date (a price changed, a name was updated).
+ */
+export interface KnowledgeFact {
+  text: string;
+  origin: KnowledgeOrigin;
+  grading?: Grading;
+  source?: string;
+  /** When it became known, ISO. History entries keep this, so the timeline survives a refutation. */
+  since?: string;
+  /** Why it left `facts`. Only history entries carry it. */
+  refutedBy?: string;
+  /** When it left `facts`, ISO. Only history entries carry it. */
+  refutedAt?: string;
+}
+
 export interface KnowledgeNode {
   /** A stable key, derived from the label so the same actor mentioned twice is one node. */
   id: string;
@@ -32,8 +49,17 @@ export interface KnowledgeNode {
   kind: NodeKind;
   /** What this actor does or provides, each a short phrase. */
   functions: string[];
-  /** What is known about it, one sentence each, with where it came from. */
-  facts: Array<{ text: string; origin: KnowledgeOrigin; grading?: Grading; source?: string }>;
+  /**
+   * What is CURRENTLY believed about it, one sentence each, with where it came from. A knowledge graph accumulates, but it also learns: a fact that later
+   * evidence refutes moves to `history` rather than staying here as if it were still true (owner, 2026-11-08). Nothing is ever deleted outright, because a
+   * decision was made on it and may need to be revisited.
+   */
+  facts: KnowledgeFact[];
+  /**
+   * Facts that were believed once and are not any more, with why and when. Kept so a person can see what a decision rested on at the time, and so the team
+   * does not re-learn a refuted claim as new.
+   */
+  history?: KnowledgeFact[];
   origin: KnowledgeOrigin;
   grading?: Grading;
   /** When it was first and last written, ISO. */
@@ -58,6 +84,47 @@ export interface KnowledgeEdge {
   grading?: Grading;
   lastSeen: string;
   mentions: number;
+}
+
+/** Words that say nothing about WHAT is claimed, so they do not count when judging whether two sentences are about the same thing. */
+const STOP_WORDS = new Set(['the', 'and', 'was', 'were', 'has', 'had', 'have', 'been', 'being', 'for', 'from', 'with', 'that', 'this', 'its', 'their', 'they', 'it', 'are', 'but', 'about', 'into', 'over', 'than', 'then', 'also']);
+
+/**
+ * Whether a new statement REFUTES an old one about the same actor. A contradiction is hard to detect in general, so this recognises the two shapes an agent
+ * actually writes when it corrects something: a negation (`does not`, `no longer`, `isn't`) whose remainder is otherwise the same claim, and the same claim with
+ * a different figure in it (`4.2 million` against `3.1 million`). Everything else accumulates, because a false refutation would destroy real knowledge.
+ */
+function isContradicted(oldText: string, newText: string): boolean {
+  const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9\s.%]/g, ' ').split(/\s+/).filter((word) => word.length > 2 && !STOP_WORDS.has(word));
+  const oldWords = new Set(words(oldText));
+  const newWords = new Set(words(newText));
+  const negation = /\b(?:not|no longer|never|isn't|aren't|wasn't|weren't|doesn't|don't|didn't|cannot|can't|ceased|stopped|ended)\b/i;
+  const newNegates = negation.test(newText) && !negation.test(oldText);
+  const oldNegates = negation.test(oldText) && !negation.test(newText);
+  // The same claim, with one of them negated: the shared vocabulary must dominate, or two unrelated sentences about one actor would "contradict".
+  const shared = [...newWords].filter((word) => oldWords.has(word)).length;
+  const overlap = shared / Math.max(1, Math.min(oldWords.size, newWords.size));
+  if ((newNegates || oldNegates) && overlap >= 0.6) return true;
+  // The same claim with a different figure: `4.2 million TEU` becomes `3.1 million TEU`. Both must carry a number and share the rest.
+  const numbers = (text: string): string[] => text.match(/\d+(?:\.\d+)?/g) ?? [];
+  const oldNumbers = numbers(oldText);
+  const newNumbers = numbers(newText);
+  // Both must share real WORDS too, not just a shape: `function-0-0` and `function-1-0` differ by a number but are not a correction of each other, and
+  // treating them as one retired real entries (found by the accumulation test).
+  if (oldNumbers.length && newNumbers.length && shared >= 2 && overlap >= 0.6) {
+    const differ = oldNumbers.some((value) => !newNumbers.includes(value)) || newNumbers.some((value) => !oldNumbers.includes(value));
+    if (differ) return true;
+  }
+  return false;
+}
+
+/**
+ * Moves a fact from what is believed to the record of what was believed. Nothing is deleted: a decision may have been made on it, and a person revisiting that
+ * decision needs to see what the team knew at the time (owner, 2026-11-08).
+ */
+function retire(node: KnowledgeNode, fact: KnowledgeFact, refutedBy: string, at: string): void {
+  node.facts = node.facts.filter((entry) => entry !== fact);
+  node.history = [...(node.history ?? []), { ...fact, refutedBy, refutedAt: at }];
 }
 
 export interface TeamKnowledge {
@@ -154,11 +221,6 @@ export const emptyKnowledge = (team: string, at: string): TeamKnowledge => ({ ve
  * agent grows is unbounded: the whole file is read, parsed and rewritten on every addition, so its size is the cost of every later Learn (0.4.19 review).
  * The oldest entries are the ones kept, because an actor first seen is the one the team's other knowledge refers to.
  */
-export const MAX_GRAPH_NODES = 1_000;
-export const MAX_GRAPH_EDGES = 4_000;
-/** Per actor, so one actor mentioned by every run does not carry every function and fact ever stated. */
-export const MAX_NODE_FACTS = 24;
-export const MAX_NODE_FUNCTIONS = 16;
 
 /**
  * A fact's source as text. A source that is not a string (an object `{url: ...}`, a number) used to be dropped by the tool, which left the fact looking
@@ -203,26 +265,37 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     const existing = nodes.get(id);
     if (!existing) {
       nodes.set(id, {
-        id, label, kind: incoming.kind ?? 'actor', functions: [...new Set(incoming.functions ?? [])].slice(0, MAX_NODE_FUNCTIONS),
+        id, label, kind: incoming.kind ?? 'actor', functions: [...new Set(incoming.functions ?? [])],
         // A new actor's facts are deduplicated too: an agent that states the same fact twice in one addition should not store it twice.
-        facts: dedupeFacts(incoming.facts ?? []).slice(0, MAX_NODE_FACTS).map((fact) => ({ text: fact.text, origin: addition.origin, ...(fact.source ? { source: fact.source } : {}), ...(grading ? { grading } : {}) })),
+        facts: dedupeFacts(incoming.facts ?? []).map((fact) => ({ text: fact.text, origin: addition.origin, since: addition.at, ...(fact.source ? { source: fact.source } : {}), ...(grading ? { grading } : {}) })),
         origin: addition.origin, ...(grading ? { grading } : {}), firstSeen: addition.at, lastSeen: addition.at, mentions: 1
       });
       continue;
     }
-    for (const fn of incoming.functions ?? []) if (!existing.functions.includes(fn) && existing.functions.length < MAX_NODE_FUNCTIONS) existing.functions.push(fn);
+    // Functions accumulate, but a function that REPLACES an older one supersedes it rather than piling up beside it. There is no ceiling: the graph is meant
+    // to accumulate, and a silent truncation would make a team forget what it learned (owner, 2026-11-08).
+    for (const fn of incoming.functions ?? []) if (!existing.functions.includes(fn)) existing.functions.push(fn);
     for (const incomingFact of incoming.facts ?? []) {
-      // Deduplicated against the graph AND against what this same addition already added, so one Learn that mentions a fact twice stores it once.
-      const known = existing.facts.find((old) => old.text.trim().toLowerCase() === incomingFact.text.trim().toLowerCase());
+      const normalise = (text: string) => text.trim().toLowerCase().replace(/\s+/g, ' ');
+      const text = normalise(incomingFact.text);
+      // Already believed: fill in what is missing, and strengthen nothing.
+      const known = existing.facts.find((old) => normalise(old.text) === text);
       if (known) {
         if (!known.source && incomingFact.source) known.source = incomingFact.source;
-        // An existing fact with no grade takes the incoming one, capped by ITS OWN source: `https://x.test` in the second addition is still a page read.
         if (!known.grading && grading) known.grading = gradeFor(grading, webSourced(incomingFact.source));
         continue;
       }
-      // A fact added past the ceiling is dropped rather than growing the entry without limit.
-      if (existing.facts.length >= MAX_NODE_FACTS) continue;
-      existing.facts.push({ text: incomingFact.text, origin: addition.origin, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(grading ? { grading } : {}) });
+      // Already refuted: do not re-learn it as new. A team that read a retraction should not forget that it did.
+      const refuted = (existing.history ?? []).find((old) => normalise(old.text) === text);
+      if (refuted) continue;
+      // A contradiction: the incoming fact names the same actor and says the opposite. The clear case is a `not` or `no longer`, which is how an agent
+      // states a refutation in one sentence; the general case is left to `supersedes` below.
+      const contradicts = existing.facts.find((old) => isContradicted(old.text, incomingFact.text));
+      if (contradicts) {
+        const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
+        retire(existing, contradicts, why, addition.at);
+      }
+      existing.facts.push({ text: incomingFact.text, origin: addition.origin, since: addition.at, ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(grading ? { grading } : {}) });
     }
     // A later grade can only LOWER the stored one. Replacing it outright let a second addition that named no source ("a document", or nothing at all)
     // restore an A1 over a grade the first addition had already capped to C3 (0.4.19 review).
@@ -246,7 +319,6 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     const grading = gradeFor(incoming.grading, incoming.basis === undefined || looksLikeAddress(incoming.basis) || webEnd(nodes.get(from)) || webEnd(nodes.get(to)));
     const existing = edges.get(id);
     if (!existing) {
-      if (edges.size >= MAX_GRAPH_EDGES) continue;
       edges.set(id, { id, from, to, kind, tension, ...(incoming.basis ? { basis: incoming.basis } : {}), origin: addition.origin, ...(grading ? { grading } : {}), lastSeen: addition.at, mentions: 1 });
       continue;
     }
@@ -256,14 +328,11 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     existing.lastSeen = addition.at;
     existing.mentions += 1;
   }
-  // Trimmed last and only when over the ceiling, so an ordinary addition never cuts the graph down. The newest survive, because the team's latest work is
-  // what its next run reads, and an edge whose end was trimmed goes with it, so the drawing never has a dangling line.
+  // NO ceiling: a knowledge graph is meant to accumulate, and a silent truncation makes a team forget what it learned. A team that has learned a great deal
+  // keeps all of it; the fact that something is no longer true is recorded by supersession (see retire), not by deletion (owner, 2026-11-08).
   const allNodes = [...nodes.values()];
-  const trimmedNodes = allNodes.length > MAX_GRAPH_NODES ? allNodes.slice(allNodes.length - MAX_GRAPH_NODES) : allNodes;
-  const keptIds = new Set(trimmedNodes.map((node) => node.id));
-  const allEdges = [...edges.values()].filter((edge) => keptIds.has(edge.from) && keptIds.has(edge.to));
-  const trimmedEdges = allEdges.length > MAX_GRAPH_EDGES ? allEdges.slice(allEdges.length - MAX_GRAPH_EDGES) : allEdges;
-  return { version: 1, team: base.team, nodes: trimmedNodes, edges: trimmedEdges, updatedAt: addition.at };
+  const keptIds = new Set(allNodes.map((node) => node.id));
+  return { version: 1, team: base.team, nodes: allNodes, edges: [...edges.values()].filter((edge) => keptIds.has(edge.from) && keptIds.has(edge.to)), updatedAt: addition.at };
 }
 
 /** The relations of one node, in both directions, for the detail card and for the animation that highlights them. */
