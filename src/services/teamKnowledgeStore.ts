@@ -126,10 +126,10 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
     throw new ForeignGraphError(file, read.knowledge!.team, team);
   }
   // 0.4.19 review: the gate was "the new graph has nodes", which made a legitimately EMPTIED new graph re-import the old file's nodes on every load. The
-  // gate is now whether the new file exists AND READS (twelfth 0.4.19 review, MINOR): a damaged new file would otherwise block adoption forever — the team
-  // sees an empty graph while its legacy record sits unreadable-but-present under the old name, so the migration is attempted exactly when the new file is
-  // absent or unreadable, and the legacy graph merges into whatever the rebuild produces.
-  if ((existsSync(file) && read.knowledge !== undefined) || file === legacy) return current;
+  // gate is now "the new file exists AND READS" (twelfth 0.4.19 review, MINOR) — a damaged new file would otherwise block adoption forever — and the READ
+  // RESULT is what decides, not a second stat (fourteenth 0.4.19 review, MINOR): existsSync followed by a separate read raced a concurrent create between
+  // them, and the wx path then reported "could not be moved" after a write that had succeeded.
+  if ((read.knowledge !== undefined) || file === legacy) return current;
   const older = await readKnowledgeFile(legacy, team);
   const legacyGraph = older.knowledge;
   let mergedProblem: string | undefined = undefined;
@@ -142,7 +142,7 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
   if (!legacyGraph?.nodes.length) return current;
   // A legacy file that parsed damaged carries its problem forward (eighth 0.4.19 review, MINOR): the caller is adopting whatever readable parts survived,
   // and it must be told the record it came from was not whole — the previous code reported this and the identity-gate rewrite dropped it.
-  const legacyProblem = older.problem;
+  let legacyProblem = older.problem;
   // Migration races like any other writer (0.4.19 review MAJOR): between the existsSync above and a save below, a concurrent addKnowledge — here or in
   // another window — can create the new file, and a blind rename would clobber its addition. The compare-and-retry below is the same guard addKnowledge
   // uses across windows, and it deliberately does NOT enter the per-file write queue: addKnowledge already holds that queue while it calls this function,
@@ -187,8 +187,11 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
         await rename(temporary, file);
         // The migration is DONE once this lands: the legacy file is retired (thirteenth 0.4.19 review, MAJOR). Leaving it made the plain team whose path it
         // occupies hit ForeignGraphError on every load and every Learn, forever, with no recovery — a migration that strands a team is worse than one that
-        // loses a backup. The renamed copy IS the backup; the old name no longer points at a live graph.
-        await rm(legacy, { force: true });
+        // loses a backup. The renamed copy IS the backup; the old name no longer points at a live graph. A FAILED REMOVAL is its own message (fourteenth
+        // 0.4.19 review, MINOR): the write landed, so "the addition may be lost" would be false.
+        await rm(legacy, { force: true }).catch((error: Error) => {
+          legacyProblem = `The knowledge graph moved to its new file name, but the old file could not be removed (${error.message}). It is safe to delete by hand.`;
+        });
       } catch (error) {
         mergedProblem = `The knowledge graph for ${team} could not be written (${(error as Error).message}). The addition may be lost when this window closes.`;
       }

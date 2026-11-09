@@ -183,8 +183,10 @@ export function looksLikeAddress(source: string): boolean {
   // EVERY dotted token in the text is judged (eleventh 0.4.19 review, BLOCKER): matching only the first let `1.0 evil.test/about` read as the figure `1.0`
   // and keep a hostile page at A1 — a page is a page wherever in the sentence it hides, so any page-shaped token decides true. The left boundary is a
   // LOOKBEHIND, not a consumed character: a consumed boundary ate the space between `1.0` and the page that followed, and the second token never matched.
+  // QUOTES are boundaries on both sides (fourteenth 0.4.19 review, BLOCKER): `see "evil.test/about"` hid behind an unconsumed quotation mark and kept A1,
+  // and a quoted page even counted as independent evidence and revived a refuted claim.
   let sawFigure = false;
-  for (const match of `${text} `.matchAll(/(?<=^|[\s([<,;:@])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?=[/?#]|$|[\s)\],;.])/gi)) {
+  for (const match of `${text} `.matchAll(/(?<=^|[\s([<,;:@'"])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?=[/?#]|$|[\s)\],;:'"])/gi)) {
     const labels = match[1]!.split('.');
     if (labels.length === 2 && /^\d+$/.test(labels[1]!)) { sawFigure = true; continue; } // a figure or version, judged on its own
     return true; // a two-label host, an address-shaped token, or anything longer: a page
@@ -411,7 +413,9 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
   }
   // DELIBERATE: there is NO ceiling on nodes or relations. A knowledge graph is meant to accumulate, and a silent truncation makes a team forget what it
   // learned. Something no longer being true is recorded by supersession (see retire), not by deletion, so the record grows as the team's knowledge does
-  // (owner, 2026-11-08).
+  // (owner, 2026-11-08). The dangling-relation filter is the ONE deliberate exception, and it is about integrity, not memory: an edge whose endpoint is gone
+  // names nothing, renders nowhere, and would lie about who relates to whom — the file keeps the record honest rather than keeping a pointer to nothing.
+  // (Fourteenth 0.4.19 review, MINOR.)
   const allNodes = [...nodes.values()];
   const keptIds = new Set(allNodes.map((node) => node.id));
   return { version: 1, team: base.team, nodes: allNodes, edges: [...edges.values()].filter((edge) => keptIds.has(edge.from) && keptIds.has(edge.to)), updatedAt: addition.at };

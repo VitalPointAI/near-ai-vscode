@@ -28,6 +28,9 @@ export interface KnowledgeTools {
   add(addition: KnowledgeAddition): Promise<TeamKnowledge>;
 }
 
+/** A graph that carries a `problem` reports why it is empty or rebuilt, so a refused team is never read as a quiet nothing (fourteenth 0.4.19 review). */
+const graphProblem = (graph: TeamKnowledge): string | undefined => (graph as TeamKnowledge & { problem?: string }).problem;
+
 export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigin = 'interaction'): AgentTool<any>[] {
   const lookup: AgentTool<{ query?: string; node?: string }> = {
     name: 'TeamKnowledge',
@@ -38,6 +41,8 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     title: (input) => (input.node ? `Knowledge: ${input.node}` : input.query ? `Knowledge: search "${input.query}"` : 'Knowledge graph'),
     async run(input) {
       const graph = await knowledge.read();
+      const refused = graphProblem(graph);
+      if (refused) return `This team's knowledge graph could not be used: ${refused} Nothing was read and nothing this run adds will be written there.`;
       if (!graph.nodes.length) return 'The team has no knowledge yet. Anything you verify is worth adding with Learn.';
       const grade = (grading?: Grading) => (grading ? `${grading.reliability}${grading.credibility}` : 'ungraded');
       const byId = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -165,6 +170,8 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     },
     async run(input) {
       const graph = await knowledge.add(input);
+      const refused = graphProblem(graph);
+      if (refused) return `Nothing was added: ${refused} The learning in this step is kept in the transcript, but it did not reach a graph.`;
       return `The team's graph now holds ${graph.nodes.length} actor${graph.nodes.length === 1 ? '' : 's'} and ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}.`;
     }
   };

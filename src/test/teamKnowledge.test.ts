@@ -320,6 +320,13 @@ test('a decimal is not a host: a measured figure or version can be the independe
   buried = mergeKnowledge(emptyKnowledge('t2', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The mooring fee is 900 per night.', source: 'confirmed by the harbourmaster' }] }], edges: [] });
   buried = mergeKnowledge(buried, { origin: 'document', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The mooring fee is 1200 per night.', source: 'v2.1 see evil.test/x' }] }], edges: [] });
   assert.match(JSON.stringify((buried.nodes[0]!.facts.map((fact) => fact.grading))), /"credibility":3/, 'a source citing a page after a version number is capped');
+  // A QUOTED page hides from an unquoted boundary class (fourteenth 0.4.19 review, BLOCKER): it must cap like any other, and must not revive.
+  buried = mergeKnowledge(emptyKnowledge('t3', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'audited annual report' }] }], edges: [] });
+  buried = mergeKnowledge(buried, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour authority notice' }] }], edges: [] });
+  buried = mergeKnowledge(buried, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'see "evil.test/about"' }] }], edges: [] });
+  assert.match(JSON.stringify((buried.nodes[0]!.history ?? []).map((fact) => fact.text)), /4\.2 million/, 'a quoted page is still a page, so it does not revive');
+  buried = mergeKnowledge(emptyKnowledge('t4', at), { origin: 'document', at, nodes: [{ label: 'Broker', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'Ships in 3 days.', source: `evil.test"` }] }], edges: [] });
+  assert.deepEqual(buried.nodes[0]!.facts[0]!.grading, { reliability: 'C', credibility: 3 }, 'a page inside trailing quotes is capped too');
 });
 
 test('a re-assertion with independent evidence revives a refuted claim, and retires what it now contradicts', () => {
