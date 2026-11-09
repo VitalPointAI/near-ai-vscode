@@ -104,14 +104,14 @@ export async function loadKnowledge(dir: string, team: string): Promise<{ knowle
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const before = await readFile(file, 'utf8').catch(() => undefined);
     if (before === undefined) {
-      // The read came back empty, but a concurrent window may have written between that read and this moment (fourth 0.4.19 review, MINOR), so re-read
-      // before writing: if a file appeared, take the merge branch instead of clobbering it with the legacy snapshot.
-      const appeared = await readFile(file, 'utf8').catch(() => undefined);
-      if (appeared === undefined) {
-        await saveKnowledge(dir, legacyGraph).catch(() => undefined);
+      // The read came back empty, so the file does not exist YET — but a concurrent window may create it between now and the write (fifth 0.4.19 review,
+      // MINOR). Exclusive-create closes that window: EEXIST means someone else won the race, and the retry loop takes the merge branch instead.
+      try {
+        await writeFile(file, JSON.stringify(legacyGraph, null, 2), { flag: 'wx' });
         return presented(older, team);
+      } catch {
+        continue;
       }
-      continue;
     }
     const newer = presented(await readKnowledgeFile(file, team), team);
     const merged = withLegacyHistory(mergeKnowledge(newer.knowledge, additionOf(legacyGraph)), legacyGraph);

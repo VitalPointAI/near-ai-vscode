@@ -171,6 +171,10 @@ export function looksLikeAddress(source: string): boolean {
     .replace(/\[\.\]|\(\.\)|\{\.\}/g, '.')
     .trim();
   if (/https?:\/\//i.test(text)) return true;
+  // Fifth 0.4.19 review suggested requiring a scheme, a path or a known TLD here, so a dotted DOCUMENT name (`annual-report.pdf`) is not treated as a page.
+  // The suggestion is declined deliberately: any dotted bare host counts as a page, which is the conservative direction — it can only CAP a grade or REFUSE
+  // a revival, never raise one — and the repo's own tests lock in bare `evil.test` as a page. A named document wrongly capped keeps its history entry and a
+  // wrongly-refused revival can return with a differently-worded source; the reverse error would let a page claim A1. Over-catching is the cheap mistake.
   return /(?:^|[\s([<,;:])[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i.test(`${text} `);
 }
 
@@ -224,12 +228,6 @@ function dedupeFacts(facts: ReadonlyArray<{ text: string; source?: string }>): A
 }
 
 export const emptyKnowledge = (team: string, at: string): TeamKnowledge => ({ version: 1, team, nodes: [], edges: [], updatedAt: at });
-
-/**
- * The most a graph may hold. Every Learn adds at most 40 actors and 60 relations, but a run can call it hundreds of times, so without a ceiling the file an
- * agent grows is unbounded: the whole file is read, parsed and rewritten on every addition, so its size is the cost of every later Learn (0.4.19 review).
- * The oldest entries are the ones kept, because an actor first seen is the one the team's other knowledge refers to.
- */
 
 /**
  * A fact's source as text. A source that is not a string (an object `{url: ...}`, a number) used to be dropped by the tool, which left the fact looking
