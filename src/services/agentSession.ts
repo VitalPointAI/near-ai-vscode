@@ -750,10 +750,13 @@ export class AgentConversation {
 
   /** When the model is done but background agents are still running, wait for the next report. */
   private async waitForBackground(signal: AbortSignal): Promise<AgentMessage[] | undefined> {
+    if (!this.background.size || signal.aborted) return undefined;
+    // The notice comes BEFORE the drain, not only on an empty one: a background agent can finish while the parent is still streaming its turn, and a notice
+    // posted only when the drain came up empty would then never appear at all — the run held its finish for a background agent and said nothing (the race
+    // that flaked CI on 0.4.19). Posting first says truthfully why the run did not end, however quickly the report then arrives.
+    this.post({ type: 'notice', text: `Waiting for ${this.background.size} background agent${this.background.size === 1 ? '' : 's'} to finish…` });
     const ready = this.drainNotifications();
     if (ready.length) return ready;
-    if (!this.background.size || signal.aborted) return undefined;
-    this.post({ type: 'notice', text: `Waiting for ${this.background.size} background agent${this.background.size === 1 ? '' : 's'} to finish…` });
     // A message from the user wakes the agent too.
     let unsubscribe: (() => void) | undefined;
     await Promise.race([...this.background, new Promise<void>((resolve) => { signal.addEventListener('abort', () => resolve(), { once: true }); unsubscribe = this.steeringInput.subscribe(() => resolve()); })]);
