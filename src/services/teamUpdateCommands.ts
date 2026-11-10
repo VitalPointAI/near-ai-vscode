@@ -115,7 +115,7 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
   const decisions = await decide(preview);
   if (!decisions) return;
   const counts = (action: string) => preview.plan.members.filter((member) => member.action === action).length;
-  const guidanceLine = preview.guidance ? `\nAGENTS.md guidance: ${preview.guidance.action === 'auto' ? 'updated (unchanged since generated)' : preview.guidance.action === 'choice' ? (decisions.guidance === 'take' ? 'replaced, as you chose' : 'kept, as you chose') : 'already current'}.` : '';
+  const guidanceLine = preview.guidance ? `\nAGENTS.md guidance: ${preview.guidance.action === 'auto' ? 'updated (unchanged since generated)' : preview.guidance.action === 'choice' ? (decisions.guidance === 'take' ? 'replaced, as you chose' : 'kept, as you chose') : 'already current'}.` : preview.guidanceSkipped ? `\n${preview.guidanceSkipped}` : '';
   const confirm = await vscode.window.showInformationMessage(
     `Update "${preview.name}" to the ${preview.plan.template.label} template v${preview.plan.template.toVersion}?`,
     { modal: true, detail: `${describePlan(preview.plan)}\n\n${counts('auto')} replaced automatically, ${counts('choice')} by your choice, ${decisions.add?.length ?? 0} added; your own and removed members are kept.${guidanceLine}\n\nThe current file is backed up to the team's history first, so you can undo.` },

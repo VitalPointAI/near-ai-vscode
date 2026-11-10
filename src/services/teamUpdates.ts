@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { applyGuidanceUpdate, applyTeamUpdate, planGuidanceUpdate, planTeamUpdate, type GuidancePlan, type TeamUpdatePlan, type UpdateDecisions } from '../agent/teamUpdate';
 import { parseTeam, TeamLibrary } from '../agent/teams';
 import { guidanceFingerprint } from '../agent/teamFingerprints';
-import { templateVersion } from '../agent/projectTypes';
+import { readProjectGuidance, templateVersion } from '../agent/projectTypes';
 import { runInProgress } from '../agent/runActivity';
 
 // Update Team without VS Code: preview, apply with a backup first, and undo; and the record of
@@ -11,7 +11,8 @@ import { runInProgress } from '../agent/runActivity';
 // workspaceCommands.ts put these behind a preview and a confirmation.
 
 /** `text` and `agents` are the contents the plan was made from, so apply can tell whether either changed since. */
-export interface TeamUpdatePreview { file: string; name: string; plan: TeamUpdatePlan; guidance?: GuidancePlan; agentsFile?: string; text: string; agents?: string }
+/** `guidanceSkipped` says why AGENTS.md is left alone even though it has project-type guidance. */
+export interface TeamUpdatePreview { file: string; name: string; plan: TeamUpdatePlan; guidance?: GuidancePlan; agentsFile?: string; text: string; agents?: string; guidanceSkipped?: string }
 /** The files an update wrote and their backups. `configFile` is project.json, whose templateVersion and guidanceBase change with the guidance. */
 export interface AppliedUpdate { file: string; backup: string; agentsFile?: string; agentsBackup?: string; configFile?: string; configBackup?: string }
 
@@ -67,9 +68,15 @@ export class TeamUpdater {
     if (!root) return { file, name, plan, text };
     const agentsFile = path.join(root, 'AGENTS.md');
     const agents = await readFile(agentsFile, 'utf8').catch(() => undefined);
-    const config = await readFile(path.join(root, '.planning', '.near-ai', 'project.json'), 'utf8').then((raw) => JSON.parse(raw) as Record<string, unknown>).catch(() => ({} as Record<string, unknown>));
+    const raw = await readFile(path.join(root, '.planning', '.near-ai', 'project.json'), 'utf8').catch(() => undefined);
+    let config: Record<string, unknown> | undefined;
+    try { const parsed: unknown = raw === undefined ? undefined : JSON.parse(raw); config = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined; } catch { config = undefined; }
+    if (agents === undefined || !readProjectGuidance(agents)) return { file, name, plan, text };
+    // The guidance is updated only when project.json can record the result (its guidanceBase); without one, a later update could not tell
+    // the new guidance from an edit. Creating it would also switch on the project's red-team stage, so the guidance is left as it is.
+    if (!config) return { file, name, plan, text, guidanceSkipped: `AGENTS.md was left as it is: this project has ${raw === undefined ? 'no' : 'an unreadable'} .planning/.near-ai/project.json to record the guidance in. Set the project type up again (Set Up Project Team) to update its guidance.` };
     // Only guidance this extension wrote for the same type is updated.
-    if (agents === undefined || (config.type !== undefined && config.type !== plan.template.id)) return { file, name, plan, text };
+    if (config.type !== undefined && config.type !== plan.template.id) return { file, name, plan, text };
     const guidance = planGuidanceUpdate(agents, plan.template.id, typeof config.guidanceBase === 'string' ? config.guidanceBase : undefined);
     return { file, name, plan, text, ...(guidance.action === 'none' ? {} : { guidance, agentsFile, agents }) };
   }

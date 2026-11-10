@@ -407,3 +407,21 @@ test('the guidance is replaced only between its markers, even when the same text
   assert.equal(planGuidanceUpdate(updated, 'research').action, 'same');
   assert.throws(() => applyGuidanceUpdate(updated, plan), /changed since the update was planned/);
 });
+
+test('without a project.json to record it in, the guidance is left alone and the preview says why', async () => {
+  const { library, file, root, original, read } = await project();
+  const configFile = path.join(root, '.planning', '.near-ai', 'project.json');
+  const { rm } = await import('node:fs/promises');
+  await rm(configFile);
+  const updater = new TeamUpdater(library);
+  const preview = (await updater.preview(file))!;
+  assert.equal(preview.guidance, undefined);
+  assert.match(preview.guidanceSkipped!, /^AGENTS\.md was left as it is: this project has no \.planning\/\.near-ai\/project\.json to record the guidance in\./);
+  await updater.apply(preview, {});
+  assert.equal((await read().catch(() => undefined)), undefined, 'project.json is still absent');
+  assert.equal(await readFile(path.join(root, 'AGENTS.md'), 'utf8'), original.agents, 'AGENTS.md is unchanged');
+  assert.notEqual(await readFile(file, 'utf8'), original.team, 'the team itself is updated');
+  // An unreadable project.json is treated the same way.
+  await writeFile(configFile, '{ not json');
+  assert.match((await updater.preview(file))!.guidanceSkipped!, /has an unreadable \.planning\/\.near-ai\/project\.json/);
+});
