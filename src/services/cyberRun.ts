@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { beginRun } from '../agent/runActivity';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { DEFAULT_RULES, decidePermission, intrusiveGrantDecision, type IntrusiveStep, type PermissionRules, type RunGrants } from '../agent/permissions';
 import { verifyFinding, type CriticEvidence } from '../agent/cyberCritic';
@@ -121,6 +122,16 @@ export function newRunId(now: () => Date): string {
 const MAX_TRANSCRIPT = 12_000;
 
 export async function startCyberRun(input: CyberRunInput): Promise<CyberRunResult> {
+  // A scan drives the model itself rather than through AgentRun, so it counts as a run in progress here.
+  const endRun = beginRun();
+  try {
+    return await cyberRun(input);
+  } finally {
+    endRun();
+  }
+}
+
+async function cyberRun(input: CyberRunInput): Promise<CyberRunResult> {
   const now = input.now ?? (() => new Date());
   const emit = (event: CyberRunEvent) => input.onEvent?.(event);
   const runId = newRunId(now);
