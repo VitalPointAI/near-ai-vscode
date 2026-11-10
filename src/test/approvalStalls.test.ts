@@ -256,3 +256,53 @@ test('stopping a sub-agent removes its parked approval cards, and a later answer
   const { stat } = await import('node:fs/promises');
   assert.equal(await stat(path.join(root, 'parked.txt')).then(() => true, () => false), false, 'and nothing ran');
 });
+
+// Review of PR 34: the run-wide pause has an end, and the person coming back releases it.
+async function pausedRun(after: (conversation: AgentConversation, posted: Array<Record<string, unknown>>) => Promise<void>) {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-pause-limit-'));
+  let subTurn = 0;
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      if (String(messages[0]?.content ?? '').startsWith('You help')) {
+        subTurn += 1;
+        if (subTurn <= 3) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call(`s${subTurn}`, 'Write', { file_path: `p-${subTurn}.md`, content: 'x' })] }, finishReason: 'tool_calls', usage }; return; }
+        yield { type: 'done', message: { role: 'assistant', content: 'helper done' }, finishReason: 'stop', usage };
+        return;
+      }
+      const delegated = messages.some((message) => message.role === 'tool');
+      yield { type: 'done', message: delegated ? { role: 'assistant', content: 'Done.' } : { role: 'assistant', content: null, tool_calls: [call('a1', 'Agent', { subagent_type: 'helper', prompt: 'write', description: 'write' })] }, finishReason: delegated ? 'stop' : 'tool_calls', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.subagentApprovalWaitMs = 10;
+  conversation.approvalTimeoutsBeforePause = 3;
+  conversation.runPauseLimitMs = 150;
+  const running = conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, projectAgents: [{ name: 'helper', description: 'helper', tools: ['Write'], body: 'You help.', file: path.join(root, 'team.md') }] });
+  try {
+    await until(() => posted.find((message) => message.type === 'notice' && /^Paused: 3 approvals/.test(String(message.text))));
+    await after(conversation, posted);
+    await running;
+  } finally {
+    conversation.dispose();
+  }
+  return { posted, subTurn: () => subTurn };
+}
+
+test('a run paused on unanswered approvals is stopped cleanly when the pause reaches its limit', async () => {
+  const { posted, subTurn } = await pausedRun(async () => undefined);
+  assert.ok(posted.some((message) => message.type === 'notice' && /^Stopped the run: it was paused for .* on approvals nobody answered\. Everything it did is kept/.test(String(message.text))));
+  assert.equal(subTurn(), 3, 'nothing ran after the pause');
+  assert.ok(posted.some((message) => message.type === 'assistant-cancelled'), 'the run ended as stopped, not left open');
+});
+
+test('the person coming back releases the pause before its limit', async () => {
+  const { posted, subTurn } = await pausedRun(async (conversation, seen) => {
+    conversation.userActive();
+    await until(() => seen.find((message) => message.type === 'notice' && message.text === 'Resumed.'));
+    for (const prompt of conversation.waitingPrompts()) conversation.answerApproval(String(prompt.callId), { decision: 'deny' });
+  });
+  assert.equal(subTurn(), 4, 'the helper carried on and finished');
+  assert.equal(posted.some((message) => message.type === 'notice' && /^Stopped the run: it was paused/.test(String(message.text))), false, 'the limit never fired');
+});

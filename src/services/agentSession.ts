@@ -1067,7 +1067,9 @@ export class AgentConversation {
    * so an agent that keeps stalling is caught even while its siblings' approvals are being answered.
    */
   private readonly approvalTimeoutStreaks = new Map<string, number>();
-  private runPause: { wait: Promise<void>; release: () => void } | undefined;
+  private runPause: { wait: Promise<void>; release: () => void; limit: ReturnType<typeof setTimeout> } | undefined;
+  /** How long a run may stay paused for unanswered approvals before it is stopped (review of PR 34: the same day the main approval path allows). */
+  public runPauseLimitMs = 24 * 60 * 60_000;
 
   /** Holds every agent of the run before its next model turn while the run is paused for unanswered approvals. */
   private async whileRunPaused(signal: AbortSignal): Promise<void> {
@@ -1082,16 +1084,31 @@ export class AgentConversation {
     if (this.runPause) return;
     let release = () => {};
     const wait = new Promise<void>((resolve) => { release = resolve; });
-    this.runPause = { wait, release };
+    // A pause has an end: after runPauseLimitMs with nobody back, the run is stopped cleanly and its work kept, rather than held open for ever.
+    const limit = setTimeout(() => {
+      if (this.runPause?.wait !== wait) return;
+      this.resumeRun(false);
+      this.post({ type: 'notice', text: `Stopped the run: it was paused for ${Math.round(this.runPauseLimitMs / 3_600_000) || 1} hour${Math.round(this.runPauseLimitMs / 3_600_000) === 1 ? '' : 's'} on approvals nobody answered. Everything it did is kept; send a message to continue.` });
+      this.halt();
+    }, this.runPauseLimitMs);
+    limit.unref?.();
+    this.runPause = { wait, release, limit };
     for (const id of [this.mainAgentId, ...this.agents.keys()]) if (id) this.activity?.setPaused(id, true);
     this.post({ type: 'notice', text: `Paused: ${streak} approvals in a row went unanswered for one agent, so the run stopped before its next step instead of carrying on without them. Answer a waiting approval, press Resume on an agent, or send a message to carry on.` });
   }
+
+  /**
+   * The person is back (the window regained focus, or they used the chat): a run paused for unanswered approvals carries on, and its cards are still
+   * there for them to answer (review of PR 34).
+   */
+  public userActive(): void { this.resumeRun(); }
 
   /** Ends a pause; `announce` false when the run is ending anyway. */
   private resumeRun(announce = true): void {
     const pause = this.runPause;
     if (!pause) return;
     this.runPause = undefined;
+    clearTimeout(pause.limit);
     this.approvalTimeoutStreaks.clear();
     for (const id of [this.mainAgentId, ...this.agents.keys()]) if (id) this.activity?.setPaused(id, false);
     pause.release();

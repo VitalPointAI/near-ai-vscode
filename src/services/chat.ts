@@ -48,6 +48,9 @@ import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMI
 /** Chat model and safety model pairs already told that auto approve has no private safety model. */
 const warnedSafetyModels = new Set<string>();
 
+
+/** Chat messages that only a person's own action sends (review of PR 34: one releases a run paused on unanswered approvals). */
+const USER_ACTIONS: ReadonlySet<string> = new Set(['send', 'steer', 'approval-reply', 'questions-reply', 'agent-control', 'continue-run', 'switch-conversation', 'resume-interrupted']);
 export interface ChatHost {
   webview: vscode.Webview;
   onDidDispose: vscode.Event<void>;
@@ -357,6 +360,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   }).catch(() => undefined);
 
   const handle = async (message: ChatWebviewMessage, tab: ChatTab): Promise<void> => {
+    // A person acting in the chat releases a run paused on unanswered approvals; Stop below still stops it.
+    if (message.type !== 'stop' && USER_ACTIONS.has(message.type)) tab.agent?.userActive();
     if (message.type === 'stop') {
       const was = isRunning(tab);
       const outcome = tab.outcome;
@@ -820,6 +825,8 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
   conversation.compactAtTokens = Math.floor(bounded('agent.compactAtTokens', AGENT_DEFAULTS.compactAtTokens, 0, 10_000_000));
   conversation.maxParallelWorktrees = Math.floor(bounded('agent.maxParallelWorktrees', AGENT_DEFAULTS.maxParallelWorktrees, 1, 16));
   const focusRegained = () => {
+    // The person is back: a run paused on unanswered approvals carries on (its cards stay for them to answer).
+    conversation.userActive();
     const prompts = conversation.waitingPrompts();
     const fresh = new Set(notices.focusRegained(waitingIds()));
     for (const prompt of prompts) if (fresh.has(promptIdOf(prompt) ?? '')) announce(prompt);

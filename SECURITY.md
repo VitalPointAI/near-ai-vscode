@@ -159,7 +159,8 @@ allows that exact command, or edits, for the rest of the run and tells the lead
 agent; declining tells the lead not to run it. After
 `nearAi.agent.approvalTimeoutsBeforePause` (3) unanswered approvals in a row,
 every agent of the run pauses before its next model turn with a message;
-answering an approval, Resume, or a new message carries on. The main
+answering an approval, Resume, a new message, or coming back to the window
+carries on, and after a day with nobody back the run is stopped, its work kept. The main
 conversation's own approvals still wait for you (`nearAi.agent.approvalTimeoutMinutes`).
 
 Search results leave out credential-looking files unless you search one
