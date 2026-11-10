@@ -1,8 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { lstat, mkdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
 interface Snapshot { path: string; original: string | null }
+
+/** A temporary file this old is left over from a save that never finished (the editor closed between write and rename); a live save takes milliseconds. */
+const STALE_TEMPORARY_MS = 60_000;
 
 /**
  * Records each file's state before a run first changes it, so the whole run can be undone.
@@ -13,6 +16,7 @@ export class RunCheckpoints {
   private readonly snapshots = new Map<string, Snapshot>();
   /** Saves run one after another: parallel sub-agents capture at the same time, and two writes of one file could interleave. */
   private saving: Promise<void> = Promise.resolve();
+  private swept = false;
 
   public constructor(public readonly runId: string, private readonly storageDir?: string) {}
 
@@ -62,12 +66,27 @@ export class RunCheckpoints {
   /** Reloads a run's snapshots saved by an earlier session. */
   public static async load(runId: string, storageDir: string): Promise<RunCheckpoints | undefined> {
     const checkpoints = new RunCheckpoints(runId, storageDir);
+    await checkpoints.sweepTemporaries();
     try {
       const saved = JSON.parse(await readFile(checkpoints.file(), 'utf8')) as Snapshot[];
       for (const snapshot of saved) checkpoints.snapshots.set(snapshot.path, snapshot);
       return checkpoints;
     } catch {
       return undefined;
+    }
+  }
+
+  /** Deletes this run's temporary files left by a save that was cut off; once per instance, and never one a save could still be renaming. */
+  private async sweepTemporaries(): Promise<void> {
+    if (this.swept || !this.storageDir) return;
+    this.swept = true;
+    const prefix = `.${this.runId}.`;
+    const names = await readdir(this.storageDir).catch(() => [] as string[]);
+    for (const name of names) {
+      if (!name.startsWith(prefix) || !name.endsWith('.tmp') || !/^[0-9a-f]+$/.test(name.slice(prefix.length, -'.tmp'.length))) continue;
+      const file = path.join(this.storageDir, name);
+      const info = await stat(file).catch(() => undefined);
+      if (info && Date.now() - info.mtimeMs > STALE_TEMPORARY_MS) await rm(file, { force: true }).catch(() => undefined);
     }
   }
 
@@ -84,6 +103,7 @@ export class RunCheckpoints {
   private async write(): Promise<void> {
     const storageDir = this.storageDir!;
     await mkdir(storageDir, { recursive: true });
+    await this.sweepTemporaries();
     const temporary = path.join(storageDir, `.${this.runId}.${randomBytes(4).toString('hex')}.tmp`);
     try {
       await writeFile(temporary, JSON.stringify([...this.snapshots.values()]), 'utf8');

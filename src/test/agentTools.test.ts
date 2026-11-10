@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -145,6 +145,21 @@ test('KillShell stops only the run\'s own jobs, so it runs without asking in eve
   }
 });
 
+test('a shell that exits while a process it started holds the output open says later output was not captured', { skip: process.platform === 'win32' }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-shell-held-'));
+  const shell = new ShellSession(root);
+  try {
+    const started = Date.now();
+    const exited = await shell.run('echo before; (sleep 5; echo late) & exit 2', 60_000);
+    assert.ok(Date.now() - started < 4_000, 'it ended on the drain cap, not when the background process finished');
+    assert.equal(exited.exitCode, 2);
+    assert.match(exited.output, /before[\s\S]*ended the shell with exit code 2[\s\S]*later output was not captured/);
+    assert.doesNotMatch(exited.output, /late\n/);
+  } finally {
+    shell.dispose();
+  }
+});
+
 test('a command that ends the shell finishes at once, and the next command gets a fresh shell', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-shell-exit-'));
   const shell = new ShellSession(root);
@@ -156,6 +171,7 @@ test('a command that ends the shell finishes at once, and the next command gets 
     assert.equal(exited.exitCode, 3);
     assert.equal(exited.timedOut, false);
     assert.match(exited.output, /before[\s\S]*ended the shell with exit code 3/);
+    assert.doesNotMatch(exited.output, /not captured/, 'the output closed with the shell, so nothing was lost');
     const next = await shell.run('echo "again:${KEPT:-unset}"; pwd');
     assert.equal(next.exitCode, 0);
     assert.match(next.output, /again:unset/);
@@ -187,6 +203,26 @@ test('a missing bash fails only the shell, when it is first used', async () => {
   } finally {
     Object.defineProperty(process, 'platform', platform);
   }
+});
+
+test('temporary checkpoint files left by a cut-off save are deleted for that run, but not fresh ones or other runs\' ones', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-ckpt-tmp-'));
+  const storage = path.join(root, 'store');
+  await mkdir(storage, { recursive: true });
+  const old = new Date(Date.now() - 10 * 60_000);
+  const stale = async (name: string) => { await writeFile(path.join(storage, name), '[]'); await utimes(path.join(storage, name), old, old); };
+  await writeFile(path.join(storage, 'r1.json'), '[]');
+  await stale('.r1.0badf00d.tmp');
+  await stale('.r2.0badf00d.tmp');
+  await stale('.r1.notes.tmp');
+  await writeFile(path.join(storage, '.r1.cafe0001.tmp'), '[]');
+  assert.ok(await RunCheckpoints.load('r1', storage));
+  assert.deepEqual((await readdir(storage)).sort(), ['.r1.cafe0001.tmp', '.r1.notes.tmp', '.r2.0badf00d.tmp', 'r1.json']);
+  // The first save of a run sweeps too, so a run that resumes under its id does not keep the leftovers.
+  const file = path.join(root, 'a.txt');
+  await writeFile(file, 'a');
+  await new RunCheckpoints('r2', storage).capture(file);
+  assert.deepEqual((await readdir(storage)).sort(), ['.r1.cafe0001.tmp', '.r1.notes.tmp', 'r1.json', 'r2.json']);
 });
 
 test('checkpoints captured in parallel are all saved, one complete file at a time', async () => {
