@@ -16,7 +16,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
-import { TeamUpdater, UpdateNotices } from '../services/teamUpdates';
+import { PartialUpdateError, TeamUpdater, UpdateNotices } from '../services/teamUpdates';
 
 // Update Team: a team made from a built-in project type is brought up to date member by member,
 // replacing only what the user never changed, and asking about everything else.
@@ -272,4 +272,44 @@ test('a member the user kept or merged is not asked about again until the built-
   const taken = applyTeamUpdate(text, planTeamUpdate(text)!, { members: { editor: 'take' } });
   assert.match(String(detectTemplate(taken)!.base!.editor), /^[0-9a-f]{16}$/);
   assert.equal(planTeamUpdate(taken)!.members.find((member) => member.name === 'editor')!.action, 'same');
+});
+
+/** A project with the real ResearchX team, its generated AGENTS.md, and project.json. */
+async function project() {
+  const base = await mkdtemp(path.join(tmpdir(), 'near-ai-team-tx-'));
+  const library = new TeamLibrary(path.join(base, 'global'));
+  const root = path.join(base, 'project');
+  const file = TeamLibrary.projectTeamFile(root);
+  await mkdir(path.dirname(file), { recursive: true });
+  const team = await readFile(path.join(FIXTURES, 'wearable-research-team.md'), 'utf8');
+  const agents = await readFile(path.join(FIXTURES, 'wearable-research-AGENTS.md'), 'utf8');
+  const config = `${JSON.stringify({ type: 'research', goal: 'Researching any topic given.' }, null, 2)}\n`;
+  await writeFile(file, team);
+  await writeFile(path.join(root, 'AGENTS.md'), agents);
+  await writeFile(path.join(root, '.planning', '.near-ai', 'project.json'), config);
+  const read = async () => ({ team: await readFile(file, 'utf8'), agents: await readFile(path.join(root, 'AGENTS.md'), 'utf8'), config: await readFile(path.join(root, '.planning', '.near-ai', 'project.json'), 'utf8') });
+  return { library, root, file, original: { team, agents, config }, read };
+}
+
+test('an update is all or nothing: a failed write puts back what was written, and a failed rollback says exactly what changed and can be undone', async () => {
+  const { library, file, original, read } = await project();
+  // AGENTS.md cannot be written: the team file, already written, is put back.
+  const failingAgents = new TeamUpdater(library, async (target, content) => { if (target.endsWith('AGENTS.md')) throw new Error('disk full'); await writeFile(target, content, 'utf8'); });
+  const preview = (await failingAgents.preview(file))!;
+  await assert.rejects(() => failingAgents.apply(preview, {}), /^Error: Nothing was changed: writing AGENTS\.md failed \(disk full\), and what had been written was put back\.$/);
+  assert.deepEqual(await read(), original, 'every file is as it was');
+  // And putting the team file back fails too: the error names it, and Undo restores everything from the backups.
+  let teamWrites = 0;
+  const failingBoth = new TeamUpdater(library, async (target, content) => {
+    if (target.endsWith('AGENTS.md')) throw new Error('disk full');
+    if (target === file && (teamWrites += 1) > 1) throw new Error('read-only');
+    await writeFile(target, content, 'utf8');
+  });
+  const error = await failingBoth.apply((await failingBoth.preview(file))!, {}).then(() => undefined, (caught: unknown) => caught);
+  assert.ok(error instanceof PartialUpdateError, String(error));
+  assert.deepEqual(error.changed, ['team.md']);
+  assert.match(error.message, /team\.md could not be put back, so it has the update and the rest do not\. Undo restores the backups\./);
+  assert.notEqual((await read()).team, original.team, 'the team file really did change');
+  await new TeamUpdater(library).undo(error.applied);
+  assert.deepEqual(await read(), original, 'Undo restores every file');
 });

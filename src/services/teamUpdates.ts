@@ -14,8 +14,17 @@ export interface AppliedUpdate { file: string; backup: string; agentsFile?: stri
 
 const projectRoot = (file: string) => (path.basename(file) === 'team.md' && path.basename(path.dirname(file)) === '.near-ai' && path.basename(path.dirname(path.dirname(file))) === '.planning' ? path.resolve(path.dirname(file), '..', '..') : undefined);
 
+/** An update that could be neither finished nor rolled back: `changed` names the files that have it, and `applied` is what Undo needs. */
+export class PartialUpdateError extends Error {
+  public constructor(message: string, public readonly applied: AppliedUpdate, public readonly changed: string[]) {
+    super(message);
+    this.name = 'PartialUpdateError';
+  }
+}
+
 export class TeamUpdater {
-  public constructor(private readonly library: TeamLibrary) {}
+  /** `write` is replaceable so a test can make one write fail. */
+  public constructor(private readonly library: TeamLibrary, private readonly write: (file: string, content: string) => Promise<void> = (file, content) => writeFile(file, content, 'utf8')) {}
 
   /** What an update would change in a team file (and, for a project team, its AGENTS.md guidance); undefined when it is not from a built-in type. */
   public async preview(file: string): Promise<TeamUpdatePreview | undefined> {
@@ -43,27 +52,40 @@ export class TeamUpdater {
   }
 
   /**
-   * Writes the update: the team file (and the guidance, when `guidance` is take) is backed up into the team's version history first, then
-   * rewritten and stamped. The result names the backups, for undo.
+   * Writes the update as one change. Every new text is worked out first and every file is backed up (the team file into its version history,
+   * AGENTS.md beside it) before anything is written. If a write fails, everything already written is put back and the error says nothing
+   * changed; if putting it back fails too, a PartialUpdateError says exactly which files changed and carries what Undo needs.
    */
   public async apply(preview: TeamUpdatePreview, decisions: UpdateDecisions & { guidance?: 'take' | 'keep' }): Promise<AppliedUpdate> {
     const text = await readFile(preview.file, 'utf8');
     const updated = applyTeamUpdate(text, preview.plan, decisions);
     parseTeam(updated, preview.file);
-    await this.library.snapshot(preview.file);
-    const backup = (await this.library.versions(preview.file))[0];
-    // No second snapshot here: one in the same millisecond would take the backup's file name.
-    await writeFile(preview.file, updated, 'utf8');
-    const result: AppliedUpdate = { file: preview.file, backup };
+    const writes: Array<{ file: string; before: string; after: string; label: string }> = [{ file: preview.file, before: text, after: updated, label: path.basename(preview.file) }];
     const guidance = preview.guidance;
+    const result: AppliedUpdate = { file: preview.file, backup: '' };
     if (preview.agentsFile && guidance && (guidance.action === 'auto' || (guidance.action === 'choice' && decisions.guidance === 'take'))) {
       const agents = await readFile(preview.agentsFile, 'utf8');
-      result.agentsFile = preview.agentsFile;
-      result.agentsBackup = await this.library.backup(preview.file, preview.agentsFile, 'agents');
-      await writeFile(preview.agentsFile, applyGuidanceUpdate(agents, guidance), 'utf8');
+      writes.push({ file: preview.agentsFile, before: agents, after: applyGuidanceUpdate(agents, guidance), label: 'AGENTS.md' });
       const configFile = path.join(path.dirname(preview.agentsFile), '.planning', '.near-ai', 'project.json');
-      const config = await readFile(configFile, 'utf8').then((raw) => JSON.parse(raw) as Record<string, unknown>).catch(() => undefined);
-      if (config) await writeFile(configFile, `${JSON.stringify({ ...config, templateVersion: templateVersion(preview.plan.template.id), guidanceBase: guidanceFingerprint(guidance.proposed!) }, null, 2)}\n`, 'utf8');
+      const raw = await readFile(configFile, 'utf8').catch(() => undefined);
+      const config = raw === undefined ? undefined : (() => { try { return JSON.parse(raw) as Record<string, unknown>; } catch { return undefined; } })();
+      if (raw !== undefined && config) writes.push({ file: configFile, before: raw, after: `${JSON.stringify({ ...config, templateVersion: templateVersion(preview.plan.template.id), guidanceBase: guidanceFingerprint(guidance.proposed!) }, null, 2)}\n`, label: 'project.json' });
+      result.agentsFile = preview.agentsFile;
+    }
+    // Backups first, so a failure part-way can always be undone.
+    await this.library.snapshot(preview.file);
+    result.backup = (await this.library.versions(preview.file))[0];
+    if (result.agentsFile) result.agentsBackup = await this.library.backup(preview.file, result.agentsFile, 'agents');
+    // No snapshot after writing: one in the same millisecond would take the backup's file name.
+    const written: typeof writes = [];
+    try {
+      for (const write of writes) { await this.write(write.file, write.after); written.push(write); }
+    } catch (error) {
+      const failed: string[] = [];
+      for (const write of written.reverse()) await this.write(write.file, write.before).catch(() => failed.push(write.label));
+      const reason = (error as Error).message;
+      if (!failed.length) throw new Error(`Nothing was changed: writing ${writes[written.length]?.label ?? 'a file'} failed (${reason}), and what had been written was put back.`);
+      throw new PartialUpdateError(`The update stopped part-way: writing failed (${reason}), and ${failed.join(' and ')} could not be put back, so ${failed.length === 1 ? 'it has' : 'they have'} the update and the rest do not. Undo restores the backups.`, result, failed);
     }
     return result;
   }

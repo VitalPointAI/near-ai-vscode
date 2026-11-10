@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { describePlan, type MemberDecision, type UpdateDecisions } from '../agent/teamUpdate';
 import { TeamLibrary } from '../agent/teams';
 import { runInProgress, whenIdle } from './runActivity';
-import { TeamUpdater, UpdateNotices, type TeamUpdatePreview } from './teamUpdates';
+import { PartialUpdateError, TeamUpdater, UpdateNotices, type TeamUpdatePreview } from './teamUpdates';
 
 // "NEAR AI: Update Team…" and the one-time "Team update available" notice. Nothing is written
 // without a preview and a confirmation, never while a run is in progress, and every update can be
@@ -107,7 +107,12 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
     if (action === 'Undo') { await updater.undo(applied); void vscode.window.showInformationMessage(`Restored "${preview.name}" as it was before the update.`); }
     if (action === 'Open team file') await vscode.window.showTextDocument(vscode.Uri.file(applied.file));
   } catch (error) {
-    void vscode.window.showErrorMessage(`The team was not updated: ${(error as Error).message}`);
+    if (error instanceof PartialUpdateError) {
+      const action = await vscode.window.showErrorMessage(error.message, 'Undo');
+      if (action === 'Undo') { await updater.undo(error.applied); void vscode.window.showInformationMessage(`Restored "${preview.name}" from its backups.`); }
+      return;
+    }
+    void vscode.window.showErrorMessage(`"${preview.name}" was not updated. ${(error as Error).message}`);
   }
 }
 
