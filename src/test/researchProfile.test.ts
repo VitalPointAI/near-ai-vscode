@@ -73,7 +73,7 @@ test('the scaffolded verifiers pass the unattended check and find citation, figu
   assert.match(clean.stdout, /all research verifiers passed/);
 
   await writeFile(path.join(root, 'report', 'figures.json'), JSON.stringify([{ id: 'growth', value: 30, inputs: [80, 100], formula: 'pct-change', decimals: 0, text: '30%' }]));
-  await writeFile(path.join(root, 'report', 'report.md'), ['# Report', '', 'Spending grew 25%.[^1] See[^2].', '', 'Notes were drafted in /home/aaron/projects/x/notes.md and .planning/research/.', '', '[^1]: Budget 2026, https://example.org/budget', '[^3]: unused, https://example.org/x', '[^4]:'].join('\n'));
+  await writeFile(path.join(root, 'report', 'report.md'), ['# Report', '', 'Spending grew 25%.[^1] See[^2].', '', 'Notes were drafted in /home/someone/projects/x/notes.md and .planning/research/.', '', '[^1]: Budget 2026, https://example.org/budget', '[^3]: unused, https://example.org/x', '[^4]:'].join('\n'));
   const failing = run();
   assert.equal(failing.status, 1);
   assert.match(failing.stdout, /\[\^2\] is cited but never defined/);
