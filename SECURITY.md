@@ -131,8 +131,13 @@ as the one you picked (local or cloud) that are at least as private. A run on a
 TEE model never hands work to a forwarded model, and a local run stays local.
 A team member with `privacy: private` in its team file goes further: it runs
 only on a model in a NEAR TEE or on this machine, even when the chat's own
-model is forwarded. If the run has no such model, that member does not run and
-the lead is told why; its work is never sent to a forwarded model instead. New
+model is forwarded. The model must also be private on the run's own route:
+a run on NEAR AI Cloud uses only TEE models, and only on NEAR's own endpoint,
+where attestation can be checked (never a local catalog entry, and never a
+different endpoint that claims TEE); a run on a local runtime uses only its
+local models. If the run has no such model, or its route is unknown, that
+member does not run and the lead is told why; its work is never sent to a
+forwarded model instead. New
 research teams set this on every member, and new presales teams on their
 reviewer; `privacy: any` turns it off for a member.
 
