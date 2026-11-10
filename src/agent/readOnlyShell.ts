@@ -16,6 +16,30 @@ const GIT_LIST_ONLY = new Set(['branch', 'tag', 'remote']);
 const GIT_LIST_OPTIONS = /^(?:-a|-r|-v|-vv|-l|--list|--all|--remotes|--show-current|--verbose|--contains|--merged|--no-merged|--sort=.*|--format=.*)$/;
 const WORD = /^(?:[A-Za-z0-9_./:=@+,%^~-]+|'[^']*'|"[^"$`\\]*")$/;
 
+/** git options that open a program or run filters: `git grep -O` (open in a pager or editor), `cat-file --filters`. */
+const GIT_RUNS_PROGRAM = /^(?:-O.*|--open-files-in-pager.*|--filters|--pager.*|--paginate)$/;
+
+/**
+ * Review of PR 34: the per-program write and run forms of the readers above (the allowlist was audited one by one). A reader used this way is not
+ * read-only: an output file named as a positional or by an option, an option that runs another program, or one that never returns.
+ *   uniq INPUT OUTPUT writes OUTPUT; sort -o / --output (also caught above) and --compress-program; rg --pre runs a program; file -C writes a magic
+ *   file; tail -f / --follow never ends; tree -o (caught above); find's actions are caught above.
+ * Programs that write by nature (tee, split, csplit, tar, sed, awk, dd, cp, mv) are not on the list at all.
+ */
+function writesOrRuns(program: string, args: string[]): boolean {
+  const positionals = args.filter((word) => !word.startsWith('-'));
+  switch (program) {
+    case 'uniq': return positionals.length >= 2;
+    case 'sort': return args.some((word) => /^(?:-o.*|--output.*|--compress-program.*|-T.*|--temporary-directory.*)$/.test(word));
+    case 'rg': return args.some((word) => /^(?:--pre(?:=.*)?|--pre-glob.*|--search-zip|-z)$/.test(word));
+    case 'file': return args.some((word) => /^(?:-C|--compile)$/.test(word));
+    case 'tail': return args.some((word) => /^(?:-[A-Za-z]*[fF][A-Za-z]*|--follow.*|--retry)$/.test(word));
+    case 'tree': return args.some((word) => /^(?:-o.*|-R)$/.test(word));
+    case 'find': return args.some((word) => /^-(?:exec|execdir|ok|okdir|delete|fprint.*|fls|fprintf)$/.test(word));
+    default: return false;
+  }
+}
+
 /** Splits a command into the segments between `|`, `&&` and `||`, or undefined when it contains anything else (`;`, `&`, redirects, newlines, `$`, backticks). */
 function segments(command: string): string[][] | undefined {
   if (/[;<>`$\n\r\\(){}]|(?<!&)&(?!&)/.test(command.replace(/'[^']*'/g, "''"))) return undefined;
@@ -45,8 +69,9 @@ export function isReadOnlyShellCommand(command: string): boolean {
       const sub = rest.find((word) => !word.startsWith('-'));
       if (!sub || !GIT_READERS.has(sub) || rest.indexOf(sub) !== 0) return false;
       if (GIT_LIST_ONLY.has(sub)) return rest.slice(1).every((word) => GIT_LIST_OPTIONS.test(word));
-      return true;
+      return !rest.some((word) => GIT_RUNS_PROGRAM.test(word));
     }
-    return READERS.has(program);
+    if (!READERS.has(program)) return false;
+    return !writesOrRuns(program, rest);
   });
 }

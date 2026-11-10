@@ -151,3 +151,10 @@ test('repeated slot waits leave no abort listeners behind', async () => {
   await pending;
   assert.equal(live, 0, 'an abort removes it too');
 });
+
+// Review of PR 34: readers used to write a file, run a program or never return are not read-only.
+test('readers invoked with an output file, a program to run, or a follow are not read-only', () => {
+  const writes = ['uniq in.txt out.txt', 'uniq -c in.txt out.txt', 'sort -o out.txt in.txt', 'sort --output=out.txt in.txt', 'sort --compress-program=gzip big.txt', 'tee out.txt', 'cat a | tee b', 'split -l 10 big.txt part-', 'csplit big.txt /x/', 'tar -cf out.tar src', 'tar -xf in.tar', 'rg --pre ./decode.sh foo', 'rg --pre=./decode.sh foo', 'file -C -m magic', 'tail -f log.txt', 'tail -F log.txt', 'tail --follow=name log.txt', 'tree -o out.txt', 'find . -fprint out.txt', 'git grep -O foo', 'git -p log', 'git cat-file --filters HEAD:a', 'cat a > b', 'grep x a >> b', 'ls 2> err.txt'];
+  for (const command of writes) assert.equal(isReadOnlyShellCommand(command), false, command);
+  for (const command of ['uniq in.txt', 'uniq -c in.txt', 'sort -n in.txt', 'rg -n foo src', 'file a.md', 'tail -n 20 log.txt', 'tree -L 2', 'git grep -n foo', 'git cat-file -t HEAD', 'git log -p -3']) assert.equal(isReadOnlyShellCommand(command), true, command);
+});
