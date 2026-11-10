@@ -16,6 +16,7 @@ import { chatHandoff, runApprovedCommand } from './services/cyberHandoff';
 import { panelCyberRunStarter } from './services/cyberAssembly';
 import { openOnboarding } from './services/onboarding';
 import { registerAgentActivity } from './services/activityView';
+import { registerRunReport } from './services/runReportCommand';
 import { registerUsageExport } from './services/usageExport';
 import { registerSecurityScanning } from './services/securityScan';
 import { registerWebSearchSetup } from './services/webSearchSetup';
@@ -152,6 +153,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     vscode.commands.registerCommand('nearAi.saveCheckpoint', () => saveCheckpoint())
   );
 
+  registerRunReport(context);
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));

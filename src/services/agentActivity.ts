@@ -30,7 +30,7 @@ export interface ActivityEntry {
 export type AgentStatus = 'running' | 'completed' | 'max-turns' | 'stuck' | 'cancelled' | 'failed';
 
 /** What a running agent is doing right now. */
-export type AgentPhase = 'starting' | 'thinking' | 'generating' | 'tool' | 'waiting-you' | 'cooling-down' | 'paused';
+export type AgentPhase = 'starting' | 'thinking' | 'generating' | 'tool' | 'waiting-you' | 'cooling-down' | 'paused' | 'waiting-agents';
 
 /** Where the agent's model runs: inside NEAR's TEE, on this machine, or forwarded by NEAR. */
 export type AgentBoundary = 'tee' | 'local' | 'cloud';
@@ -82,6 +82,10 @@ export interface AgentStats {
   /** Time spent waiting to retry (cooling down), and waiting for the user to answer an approval. */
   coolMs: number;
   userWaitMs: number;
+  /** Time paused, or waiting for background agents with nothing else to do (PERF-07). */
+  idleMs?: number;
+  /** Approvals nobody answered within the agent's wait, so the call returned "awaiting approval" (PERF-01). */
+  approvalTimeouts?: number;
   approvals: ApprovalCounts;
   /** Calls and failures by tool name. */
   tools: Record<string, { calls: number; errors: number }>;
@@ -93,7 +97,7 @@ export interface AgentStats {
  * Where an agent's time went: waiting for each reply's first token, generating, and everything
  * else (tools, sub-agents, approvals); generation speed excludes the wait.
  */
-export function timeBreakdown(stat: AgentStats, now = Date.now()): { elapsedMs: number; waitMs: number; generateMs: number; otherMs: number; toolMs: number; userWaitMs: number; nearWaitMs: number; tokensPerSecond?: number; reasoningShare?: number } {
+export function timeBreakdown(stat: AgentStats, now = Date.now()): { elapsedMs: number; waitMs: number; generateMs: number; otherMs: number; toolMs: number; userWaitMs: number; nearWaitMs: number; idleMs: number; tokensPerSecond?: number; reasoningShare?: number } {
   const elapsedMs = Math.max(0, (stat.endedAt ?? now) - stat.startedAt);
   const waitMs = Math.min(stat.waitMs, stat.modelMs);
   const generateMs = stat.modelMs - waitMs;
@@ -101,15 +105,17 @@ export function timeBreakdown(stat: AgentStats, now = Date.now()): { elapsedMs: 
   const ongoing = stat.status === 'running' ? Math.max(0, now - stat.phaseSince) : 0;
   const userWaitMs = (stat.userWaitMs ?? 0) + (stat.phase === 'waiting-you' ? ongoing : 0);
   const coolMs = (stat.coolMs ?? 0) + (stat.phase === 'cooling-down' ? ongoing : 0);
+  const idleMs = (stat.idleMs ?? 0) + (stat.phase === 'paused' || stat.phase === 'waiting-agents' ? ongoing : 0);
   const otherMs = Math.max(0, elapsedMs - stat.modelMs);
   return {
     elapsedMs,
     waitMs,
     generateMs,
     otherMs,
-    /** Tools and sub-agents: everything outside model requests, approvals, and retry waits. */
-    toolMs: Math.max(0, otherMs - userWaitMs - coolMs),
+    /** Tools and sub-agents: everything outside model requests, approvals, retry waits, and idle time. */
+    toolMs: Math.max(0, otherMs - userWaitMs - coolMs - idleMs),
     userWaitMs,
+    idleMs,
     /** Waiting on NEAR: for each reply's first token, and to retry after a refusal or failure. */
     nearWaitMs: waitMs + coolMs,
     tokensPerSecond: generateMs > 0 && stat.outputTokens ? stat.outputTokens / (generateMs / 1000) : undefined,
@@ -190,7 +196,7 @@ export class ActivityFeed {
 
   public agentStarted(agent: { agentId: string; agent: string; runId: string; model: string; parentId?: string; conversationId?: string; boundary?: AgentBoundary }, prompt?: string, system?: string): void {
     const now = this.now();
-    this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: now, turns: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, waitMs: 0, reasoningTokens: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0, phase: 'starting', phaseSince: now, rateLimited: 0, coolMs: 0, userWaitMs: 0, approvals: { autoAllowed: 0, asked: 0, declined: 0, expired: 0 }, tools: {} });
+    this.stats.set(agent.agentId, { ...agent, status: 'running', startedAt: now, turns: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0, modelMs: 0, waitMs: 0, reasoningTokens: 0, toolCalls: 0, toolErrors: 0, retries: 0, injections: 0, hiddenRemoved: 0, held: 0, blocked: 0, phase: 'starting', phaseSince: now, rateLimited: 0, coolMs: 0, userWaitMs: 0, idleMs: 0, approvalTimeouts: 0, approvals: { autoAllowed: 0, asked: 0, declined: 0, expired: 0 }, tools: {} });
     if (agent.conversationId && !agent.parentId && !this.focused) this.conversation = agent.conversationId;
     for (const stale of [...this.stats.keys()].slice(0, Math.max(0, this.stats.size - MAX_AGENTS))) this.stats.delete(stale);
     const base = { runId: agent.runId, agentId: agent.agentId, agent: agent.agent };
@@ -329,6 +335,28 @@ export class ActivityFeed {
     });
   }
 
+  /**
+   * PERF-01: nobody answered within the agent's short wait, so the call returned "awaiting approval" and the card stays queued. The agent goes back to
+   * work, so it is no longer waiting on the person; the timeout is counted once here and the eventual answer (if any) is not counted again.
+   */
+  public approvalTimedOut(agentId: string): void {
+    this.withAgent(agentId, (_base, stat) => {
+      stat.approvalTimeouts = (stat.approvalTimeouts ?? 0) + 1;
+      if (stat.phase === 'waiting-you') this.enter(stat, 'tool');
+      this.changed([]);
+    });
+  }
+
+  /** PERF-07: the agent has nothing to do but wait for its background agents (idle time), or has stopped waiting. */
+  public waitingForAgents(agentId: string, waiting: boolean): void {
+    this.withAgent(agentId, (_base, stat) => {
+      if (stat.status !== 'running') return;
+      if (waiting) this.enter(stat, 'waiting-agents');
+      else if (stat.phase === 'waiting-agents') this.enter(stat, 'thinking');
+      this.changed([]);
+    });
+  }
+
   /** A gated action the policy allowed without asking, or a rule refused. */
   public permission(agentId: string, decision: 'auto-allowed' | 'denied'): void {
     this.withAgent(agentId, (_base, stat) => { if (decision === 'auto-allowed') stat.approvals.autoAllowed += 1; else stat.approvals.declined += 1; });
@@ -370,6 +398,7 @@ export class ActivityFeed {
     const spent = Math.max(0, now - stat.phaseSince);
     if (stat.phase === 'cooling-down') { stat.coolMs += spent; stat.coolUntil = undefined; stat.coolReason = undefined; }
     if (stat.phase === 'waiting-you') stat.userWaitMs += spent;
+    if (stat.phase === 'paused' || stat.phase === 'waiting-agents') stat.idleMs = (stat.idleMs ?? 0) + spent;
     stat.phase = phase;
     stat.phaseSince = now;
   }

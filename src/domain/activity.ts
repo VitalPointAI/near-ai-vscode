@@ -70,6 +70,8 @@ export interface ActivityEvent {
   estimatedCostUsd?: number;
   actualCostUsd?: number;
   inputTokens?: number;
+  /** Of inputTokens, how many NEAR served from its prompt cache (0.4.19, PERF-07). */
+  cachedInputTokens?: number;
   outputTokens?: number;
   durationMs?: number;
   approvalRequired?: boolean;
@@ -107,6 +109,33 @@ export interface ActivitySessionSummary {
   runOutcome?: RunOutcomeLabel;
   /** Counters summed over every agent of the run, as each ends: ids, counts, tool and model names only. */
   stats?: SessionStats;
+  /** Where the run's wall time went, written once when its main agent ends (PERF-07). */
+  run?: RunSplit;
+}
+
+/**
+ * One run's wall time, from its main agent's point of view, split so the four parts add up to the whole: waiting on the model (each reply, and retry
+ * waits), running tools (sub-agents included, since the lead waits on them as tool calls), waiting for an approval, and idle (paused, or waiting for
+ * background agents with nothing else to do). Tokens are the whole run's, sub-agents included.
+ */
+export interface RunSplit {
+  wallMs: number;
+  modelMs: number;
+  toolMs: number;
+  approvalWaitMs: number;
+  idleMs: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+}
+
+const RUN_SPLIT_KEYS: Array<keyof RunSplit> = ['wallMs', 'modelMs', 'toolMs', 'approvalWaitMs', 'idleMs', 'inputTokens', 'cachedInputTokens', 'outputTokens'];
+
+/** A run split read from disk: unknown fields dropped, anything not a non-negative number zeroed; undefined when it is not an object. */
+export function normalizeRunSplit(value: unknown): RunSplit | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(RUN_SPLIT_KEYS.map((key) => [key, count(source[key])])) as unknown as RunSplit;
 }
 
 export type RunOutcomeLabel = 'completed' | 'max-turns' | 'stuck' | 'cancelled' | 'failed';
@@ -124,6 +153,8 @@ export interface SessionCounters {
   stopped: number;
   inputTokens: number;
   outputTokens: number;
+  /** Of inputTokens, how many were prompt-cache hits (PERF-07). */
+  cachedInputTokens: number;
   generateMs: number;
   toolMs: number;
   userWaitMs: number;
@@ -132,6 +163,8 @@ export interface SessionCounters {
   approvalsAsked: number;
   approvalsDeclined: number;
   approvalsExpired: number;
+  /** Approvals that nobody answered within the agent's wait, so the call returned "awaiting approval" (PERF-01). */
+  approvalTimeouts: number;
 }
 
 export interface ModelCounters { agents: number; turns: number; retries: number; rateLimited: number; errors: number; stopped: number; inputTokens: number; outputTokens: number }
@@ -141,7 +174,7 @@ export interface SessionStats extends SessionCounters {
   models: Record<string, ModelCounters>;
 }
 
-const COUNTER_KEYS: Array<keyof SessionCounters> = ['agents', 'turns', 'toolCalls', 'toolErrors', 'retries', 'rateLimited', 'errors', 'stopped', 'inputTokens', 'outputTokens', 'generateMs', 'toolMs', 'userWaitMs', 'nearWaitMs', 'approvalsAutoAllowed', 'approvalsAsked', 'approvalsDeclined', 'approvalsExpired'];
+const COUNTER_KEYS: Array<keyof SessionCounters> = ['agents', 'turns', 'toolCalls', 'toolErrors', 'retries', 'rateLimited', 'errors', 'stopped', 'inputTokens', 'outputTokens', 'cachedInputTokens', 'generateMs', 'toolMs', 'userWaitMs', 'nearWaitMs', 'approvalsAutoAllowed', 'approvalsAsked', 'approvalsDeclined', 'approvalsExpired', 'approvalTimeouts'];
 const MODEL_KEYS: Array<keyof ModelCounters> = ['agents', 'turns', 'retries', 'rateLimited', 'errors', 'stopped', 'inputTokens', 'outputTokens'];
 const MAX_TOOLS = 80;
 const MAX_MODELS = 20;

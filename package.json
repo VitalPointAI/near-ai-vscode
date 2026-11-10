@@ -169,6 +169,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.showRunReport",
+        "title": "Show Run Performance Report",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.openAgentActivity",
         "title": "Open Agent Activity",
         "category": "NEAR AI",
@@ -689,6 +694,7 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run compile && node --test dist/test/*.test.js scripts/test/*.test.mjs",
     "report:spend": "node scripts/spend-report.mjs",
+    "report:runs": "node scripts/run-report.mjs",
     "experiment": "node scripts/ab-task.mjs",
     "compare:models": "node scripts/compare-models.mjs",
     "package": "npm run compile && npm run sbom && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",

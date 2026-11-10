@@ -1,4 +1,4 @@
-import { ActivitySessionSummary, addSessionStats, emptySessionStats, ModelCounters, SessionOutcome, SessionStats } from '../domain/activity';
+import { ActivitySessionSummary, addSessionStats, emptySessionStats, ModelCounters, RunSplit, SessionOutcome, SessionStats } from '../domain/activity';
 import { AgentBoundary, AgentPhase, AgentStats, redactForDisplay, timeBreakdown } from './agentActivity';
 import { DayBoundary, dayStart, nanoToUsd, SpendFilter, SpendTotals, totalNanoUsd } from './spendLedger';
 
@@ -39,6 +39,19 @@ export function windowStart(window: OverviewWindow, now: number, boundary: DayBo
   return date.getTime();
 }
 
+/**
+ * The run's wall-time split (PERF-07) from its main agent's counters, with the whole run's tokens. The four parts add up to the main agent's elapsed
+ * time: model (replies and retry waits), tools (sub-agents included), approval waits, and idle.
+ */
+export function runSplitOf(main: AgentStats, tokens: { inputTokens: number; cachedInputTokens: number; outputTokens: number }, now = Date.now()): RunSplit {
+  const time = timeBreakdown(main, now);
+  const modelMs = time.waitMs + time.generateMs + Math.max(0, time.nearWaitMs - time.waitMs);
+  const approvalWaitMs = time.userWaitMs;
+  const toolMs = time.toolMs;
+  const idleMs = Math.max(0, time.elapsedMs - modelMs - approvalWaitMs - toolMs);
+  return { wallMs: time.elapsedMs, modelMs, toolMs, approvalWaitMs, idleMs, inputTokens: tokens.inputTokens, cachedInputTokens: tokens.cachedInputTokens, outputTokens: tokens.outputTokens };
+}
+
 /** An agent's counters as a session stores them; the conversation persists this when the agent ends. */
 export function countersOf(stat: AgentStats, now = Date.now()): Partial<SessionStats> {
   const time = timeBreakdown(stat, now);
@@ -47,8 +60,8 @@ export function countersOf(stat: AgentStats, now = Date.now()): Partial<SessionS
   const model: ModelCounters = { agents: 1, turns: stat.turns, retries: stat.retries, rateLimited: stat.rateLimited, errors: failed, stopped, inputTokens: stat.inputTokens, outputTokens: stat.outputTokens };
   return {
     agents: 1, turns: stat.turns, toolCalls: stat.toolCalls, toolErrors: stat.toolErrors, retries: stat.retries, rateLimited: stat.rateLimited, errors: failed, stopped,
-    inputTokens: stat.inputTokens, outputTokens: stat.outputTokens, generateMs: time.generateMs, toolMs: time.toolMs, userWaitMs: time.userWaitMs, nearWaitMs: time.nearWaitMs,
-    approvalsAutoAllowed: stat.approvals.autoAllowed, approvalsAsked: stat.approvals.asked, approvalsDeclined: stat.approvals.declined, approvalsExpired: stat.approvals.expired,
+    inputTokens: stat.inputTokens, outputTokens: stat.outputTokens, cachedInputTokens: stat.cachedTokens, generateMs: time.generateMs, toolMs: time.toolMs, userWaitMs: time.userWaitMs, nearWaitMs: time.nearWaitMs,
+    approvalsAutoAllowed: stat.approvals.autoAllowed, approvalsAsked: stat.approvals.asked, approvalsDeclined: stat.approvals.declined, approvalsExpired: stat.approvals.expired, approvalTimeouts: stat.approvalTimeouts ?? 0,
     tools: stat.tools, models: stat.model ? { [stat.model]: model } : {}
   };
 }

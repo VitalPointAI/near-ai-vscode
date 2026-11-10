@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextStatus, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
-import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, RunInput, RunOutcome, RunResult } from '../agent/loop';
-import { countersOf } from './activityOverview';
+import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, RunInput, RunOutcome, RunResult } from '../agent/loop';
+import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
 import { SafetyModelCheck } from '../agent/safetyModel';
 import { ShellSession } from '../agent/shell';
@@ -215,6 +215,8 @@ export class AgentConversation {
   /** Estimated cost and tokens of the current run, across the agent and its sub-agents. */
   /** The current run's auto-mode safety check, shared with its sub-agents. */
   private runSafety: SafetyModelCheck | undefined;
+  /** The current run's main agent id, for the activity feed's idle time (PERF-07). */
+  private mainAgentId: string | undefined;
   private spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
   /** The current run's ID and the key's spend ledger: run cost, the run budget, and progress lines read it. */
   private runSpendSource: { runId: string; account: SpendAccount } | undefined;
@@ -282,6 +284,7 @@ export class AgentConversation {
     let ended: RunEnd = 'failed';
     await this.runMarkers?.start({ conversationId, runId, model: request.model });
     const mainId = `main-${runId}`;
+    this.mainAgentId = mainId;
     const boundary = runBoundary(request);
     this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
@@ -341,12 +344,14 @@ export class AgentConversation {
         result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => run.run(this.messages, abort.signal));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
+        await this.recordRunSplit(request, mainId, extraUsage);
         await this.persistAgent(request, mainId, 'failed');
         // Keep what the run did, so the next message continues from there.
         if (error instanceof AgentRunError) { this.messages = error.messages; await this.saveTranscript(request.model); throw error.cause; }
         throw error;
       }
       this.activity?.agentEnded(mainId, result.outcome);
+      await this.recordRunSplit(request, mainId, [...result.usage, ...extraUsage]);
       // The run's scratch folder is emptied when it ends (0.4.18), so a long session does not grow one. It never fails a run.
       await cleanScratch(this.root).catch(() => 0);
       ended = result.outcome;
@@ -756,7 +761,10 @@ export class AgentConversation {
     this.post({ type: 'notice', text: `Waiting for ${this.background.size} background agent${this.background.size === 1 ? '' : 's'} to finish…` });
     // A message from the user wakes the agent too.
     let unsubscribe: (() => void) | undefined;
+    const mainId = this.mainAgentId;
+    if (mainId) this.activity?.waitingForAgents(mainId, true);
     await Promise.race([...this.background, new Promise<void>((resolve) => { signal.addEventListener('abort', () => resolve(), { once: true }); unsubscribe = this.steeringInput.subscribe(() => resolve()); })]);
+    if (mainId) this.activity?.waitingForAgents(mainId, false);
     unsubscribe?.();
     return signal.aborted ? undefined : [...this.drainNotifications(), ...this.steeringInput.take()];
   }
@@ -902,6 +910,14 @@ export class AgentConversation {
     abort.abort();
   }
 
+  /** PERF-07: the run's wall time split and its whole token use, saved in its session when the main agent ends. */
+  private async recordRunSplit(request: AgentTurnRequest, mainId: string, usage: UsageMetadata[]): Promise<void> {
+    const stat = this.activity?.agentStat(mainId);
+    if (!stat || !request.activity) return;
+    const total = sumUsage(usage);
+    await request.activity.store.setRunSplit(request.activity.sessionId, runSplitOf(stat, { inputTokens: total.inputTokens ?? 0, cachedInputTokens: total.cachedInputTokens ?? 0, outputTokens: total.outputTokens ?? 0 })).catch(() => undefined);
+  }
+
   /**
    * Saves an ended agent's counters (no content) in its run's session in the project's activity
    * history, so the overview survives reloads; `outcome` is given for the run's main agent.
@@ -928,13 +944,22 @@ export class AgentConversation {
 
   private forward(event: AgentEvent, model: string, record: Record_): void {
     if (event.type === 'text') this.post({ type: 'assistant-delta', text: event.text });
-    else if (event.type === 'tool-start') { this.post({ type: 'tool-start', callId: event.callId, tool: event.tool, title: event.title }); void record({ status: 'running', kind: 'tool', tool: event.tool, summary: event.title.slice(0, 200) }); }
-    else if (event.type === 'tool-end') { this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output }); void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' }); }
+    else if (event.type === 'tool-start') { this.toolStarts.set(event.callId, { tool: event.tool, at: Date.now() }); this.post({ type: 'tool-start', callId: event.callId, tool: event.tool, title: event.title }); void record({ status: 'running', kind: 'tool', tool: event.tool, summary: event.title.slice(0, 200) }); }
+    else if (event.type === 'tool-end') {
+      // PERF-07: the end names its tool and how long it ran, so a report can tell an approval timeout from a slow command without pairing events.
+      const started = this.toolStarts.get(event.callId);
+      this.toolStarts.delete(event.callId);
+      this.post({ type: 'tool-end', callId: event.callId, ok: event.ok, output: event.output });
+      void record({ status: event.ok ? 'completed' : 'failed', kind: 'tool', ...(started ? { tool: started.tool, durationMs: Date.now() - started.at } : {}), ...(event.output.startsWith(AWAITING_APPROVAL_PREFIX) ? { errorCode: 'approval-pending' } : {}), summary: event.ok ? 'Tool call finished.' : 'Tool call failed or was declined.' });
+    }
     else if (event.type === 'todos') this.post({ type: 'todos', todos: event.todos });
     else if (event.type === 'retry') { this.post({ type: 'assistant-retry', discard: event.discardText, text: retryNotice(event) }); void record({ status: 'running', kind: 'model', model, summary: `Model turn failed; retrying (attempt ${event.attempt + 1}).` }); }
     else if (event.type === 'turn') this.tally(event.usage);
-    if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
+    if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model: event.model || model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, cachedInputTokens: event.usage.cachedInputTokens, cacheHit: (event.usage.cachedInputTokens ?? 0) > 0, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
   }
+
+  /** Start time and tool of each call in flight, by call id, so its end event records both (PERF-07). */
+  private readonly toolStarts = new Map<string, { tool: string; at: number }>();
 
   /** How long an approval may wait before it is declined, so an unattended run carries on (0: wait indefinitely). */
   public approvalTimeoutMs = 15 * 60_000;
