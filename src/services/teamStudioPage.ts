@@ -61,7 +61,7 @@ export interface StudioReview { markdown: string; errors: DraftIssue[]; warnings
 const READ = ['Read', 'Glob', 'Grep', 'TodoWrite', 'Recall', 'Remember'];
 const WEB = ['WebSearch', 'WebFetch', 'CheckCitations'];
 const WRITE = ['Write', 'Edit'];
-const DOCS = ['CreatePresentation', 'RenderSvg', 'VectorizeImage'];
+const DOCS = ['CreatePresentation', 'CreatePdf', 'CreateDocument', 'RenderSvg', 'VectorizeImage'];
 
 /** General team roles with suggested instructions; Open-GSD agent roles are added from the installed library. */
 const TEAM_ROLES: Array<Omit<StudioRole, 'source'>> = [

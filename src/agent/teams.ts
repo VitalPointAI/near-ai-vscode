@@ -25,7 +25,22 @@ export interface TeamDefinition { slug: string; name: string; description: strin
 
 const MEMBER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** The tools a member gets when its section has no `tools:` line. */
-export const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'Remember', 'Recall', 'VectorizeImage', 'RenderSvg', 'CreatePresentation'];
+export const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite', 'Remember', 'Recall', 'VectorizeImage', 'RenderSvg', 'CreatePresentation', 'CreatePdf', 'CreateDocument'];
+
+/**
+ * The document-output family: a member that can make one kind of deliverable can make all of them.
+ * Team files written before CreatePdf and CreateDocument existed list their tools explicitly, and
+ * their writers list CreatePresentation. So that those teams can deliver a PDF or Word file
+ * without anyone editing their team.md, a member whose tools include CreatePresentation also gets
+ * CreatePdf and CreateDocument when the file is loaded. The file on disk is never rewritten.
+ */
+export const DOCUMENT_OUTPUT_TOOLS = ['CreatePresentation', 'CreatePdf', 'CreateDocument'];
+
+/** A member's tools with the document-output compatibility rule applied (see DOCUMENT_OUTPUT_TOOLS). */
+export function resolveMemberTools(tools: string[]): string[] {
+  if (!tools.includes('CreatePresentation')) return tools;
+  return [...tools, ...DOCUMENT_OUTPUT_TOOLS.filter((tool) => !tools.includes(tool))];
+}
 const MAX_VERSIONS = 20;
 
 export function slugify(value: string): string {
@@ -55,7 +70,7 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     const instructions = rest.slice(index).join('\n').trim();
     if (!instructions) throw new Error(`Member ${memberName} needs instructions under its heading.`);
     const reportsTo = fields['reports-to'] ? slugify(fields['reports-to']) : undefined;
-    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), ...(reportsTo ? { reportsTo } : {}), tools: fields.tools ? fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean) : DEFAULT_TOOLS, instructions });
+    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), ...(reportsTo ? { reportsTo } : {}), tools: fields.tools ? resolveMemberTools(fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean)) : DEFAULT_TOOLS, instructions });
   }
   if (!members.length) throw new Error('Add at least one member as a "## member-name" section.');
   if (members.length > 12) throw new Error('A team can have at most 12 members.');

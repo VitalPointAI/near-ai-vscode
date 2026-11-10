@@ -429,6 +429,29 @@ until it runs out aren't shown.
   supplied images into SVG with VectorizeImage, render SVG to PNG, and build
   PowerPoint decks (.pptx) with CreatePresentation. All of this runs on your
   machine.
+- **PDF and Word documents.** Agents deliver a finished report as a PDF with
+  CreatePdf or as a Word document with CreateDocument, from Markdown they
+  pass inline or from a `.md` file in the workspace (`source_path`). Both take
+  headings 1-4, paragraphs, bold, italic, inline code, links, bullet and
+  numbered lists (nested by indentation), block quotes, code blocks, pipe
+  tables, and images on their own line (PNG, JPEG, or SVG in the workspace,
+  relative to the Markdown file). Options: `title`, `author`, `page_size`
+  (A4 or Letter), and `date`. The PDF has bookmarks from the headings,
+  numbered pages, clickable links, and its title and author in its
+  properties; the Word file uses Word's own Heading 1-4 styles, so the
+  Navigation pane and a table of contents work, with real tables, lists,
+  links, and pictures. Both are written on your machine with no library, and
+  the same input gives the same bytes: no date is written unless you pass one.
+  Like every write, they stay inside the workspace, ask first where a write
+  is protected, and **Revert** removes them. The PDF uses the standard PDF
+  fonts (Helvetica and Courier), which cover Western European text;
+  characters outside them are written as `?` and listed in the tool's result,
+  so use CreateDocument for other scripts. Web images are not downloaded:
+  save the image into the workspace first.
+  Every team member that can build decks can also make these documents: a
+  `tools:` line that lists `CreatePresentation` also grants `CreatePdf` and
+  `CreateDocument` when the team is loaded, so existing team files gain them
+  without being edited.
 - **Image generation.** When the provider lists an image model, the agent can
   create PNGs in your workspace with its GenerateImage tool. It asks first and
   shows the price, and **Revert** removes the file.

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Reports as PDF and Word files.** Two new tools, CreatePdf and CreateDocument, turn Markdown (inline,
+  or a `.md` file in the workspace) into a `.pdf` or a `.docx`: headings, lists, tables, quotes, code,
+  links, and workspace images (PNG, JPEG, or SVG). The PDF has bookmarks from the headings and
+  numbered pages; the Word file uses Word's Heading 1-4 styles, so its Navigation pane works. Both are
+  made on your machine with no extra software, the same input gives the same file, and they follow the
+  same rules as every other write: inside the workspace only, asking first where a write is protected,
+  and undone by **Revert**. The PDF uses the standard PDF fonts, which cover Western European text;
+  other characters are replaced with `?` and listed, and CreateDocument keeps every character.
+  Research, presales, writing, and software teams get both tools, and so does any existing team
+  member whose `tools:` line lists CreatePresentation: the tools are added when the team is loaded,
+  and your team files are not changed.
 - **A run does not lose its place when nobody answers.** An approval that used to be declined after 15
   minutes, so the agent worked around a decision you never made and the work was redone, now parks the run
   on that step. Nothing runs, nothing is lost, the card keeps its buttons, and answering whenever you are
