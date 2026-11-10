@@ -429,7 +429,10 @@ until it runs out aren't shown.
   TEE", or to a local model; if the configured tier model is forwarded, the
   next private tier model is used (deep, then standard, then fast for a deep
   member), then the most capable other private model. `privacy: any`, or no
-  line, lets the member use any model the run may use.
+  line, lets the member use any model the run may use. The extension always
+  writes `privacy:` as the member's last line before its instructions, so an
+  older version that does not know it still reads the member's tools
+  correctly; if you write it by hand, put it after `tools:` too.
   New research teams have `privacy: private` on every member (and presales
   teams on their reviewer), so client material stays on private models;
   change a member's line to `privacy: any` to relax it. Run one with `/team:<name> <task>`

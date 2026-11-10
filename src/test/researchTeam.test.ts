@@ -69,6 +69,6 @@ test('the research team runs on private, capable models, and the team file says 
   const team = parseTeam(projectTypeTeam(research, 'Assess the market', 'cloud'), '/p/.planning/.near-ai/team.md');
   assert.ok(team.members.every((entry) => entry.privacy === 'private'));
   assert.ok(teamAgents(team).every((agent) => agent.privacy === 'private'), 'the privacy reaches each sub-agent');
-  assert.match(projectTypeTeam(research, 'g', 'cloud'), /## editor\nrole: reviewer\nmodel: deep\nprivacy: private\n/);
+  assert.match(projectTypeTeam(research, 'g', 'cloud'), /## editor\nrole: reviewer\nmodel: deep\ntools: [^\n]+\nprivacy: private\n\n/);
   assert.match(research.guidance, /privacy: any/, 'the guidance says how to opt out');
 });

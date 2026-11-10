@@ -44,13 +44,16 @@ test('the privacy line parses, renders, survives the studio round trip, and reac
     { name: 'editor', role: 'reviewer', model: 'deep', privacy: 'private', tools: ['Read'], instructions: 'Edit.' },
     { name: 'writer', role: 'implementer', instructions: 'Write.' }
   ]);
-  assert.match(text, /## editor\nrole: reviewer\nmodel: deep\nprivacy: private\ntools: Read\n/);
+  assert.match(text, /## editor\nrole: reviewer\nmodel: deep\ntools: Read\nprivacy: private\n/, 'privacy is the last metadata line');
   const team = parseTeam(text, '/tmp/research.md');
   assert.equal(team.members[0].privacy, 'private');
   assert.equal(team.members[1].privacy, undefined);
   assert.equal(teamAgents(team)[0].privacy, 'private');
   assert.equal(teamAgents(team)[1].privacy, undefined);
   assert.equal(parseTeam(text.replace('privacy: private', 'privacy: tee'), 'x.md').members[0].privacy, 'private');
+  const handEdited = text.replace('tools: Read\nprivacy: private\n', 'privacy: private\ntools: Read\n');
+  assert.notEqual(handEdited, text);
+  assert.deepEqual([parseTeam(handEdited, 'x.md').members[0].privacy, parseTeam(handEdited, 'x.md').members[0].tools], ['private', ['Read']], 'privacy is read in any metadata position');
   assert.equal(parseTeam(text.replace('privacy: private', 'privacy: any'), 'x.md').members[0].privacy, undefined, 'privacy: any opts out');
   assert.throws(() => parseTeam(text.replace('privacy: private', 'privacy: secret'), 'x.md'), /Member editor has "privacy: secret"; use privacy: private/);
   const draft = draftFromMarkdown(text, '/tmp/research.md');
@@ -58,7 +61,7 @@ test('the privacy line parses, renders, survives the studio round trip, and reac
   assert.equal(teamMarkdown(draft, text), text, 'an unchanged draft saves byte for byte');
   assert.deepEqual(checkDraft(draft, text).errors, []);
   const changed = { ...draft, members: draft.members.map((member, index) => (index === 0 ? { ...member, instructions: 'Edit carefully.' } : member)) };
-  assert.match(teamMarkdown(changed, text), /## editor\nrole: reviewer\nmodel: deep\nprivacy: private\ntools: Read\n\nEdit carefully\./, 'an edited member keeps its privacy line');
+  assert.match(teamMarkdown(changed, text), /## editor\nrole: reviewer\nmodel: deep\ntools: Read\nprivacy: private\n\nEdit carefully\./, 'an edited member keeps its privacy line');
   const deck = { ...draft, members: draft.members.map((member, index) => (index === 1 ? { ...member, tools: ['Read', 'CreatePresentation'] } : member)) };
   assert.deepEqual(checkDraft(deck, text).errors, [], 'a member given CreatePresentation reads back with the document tools added, and that is not a mismatch');
 });

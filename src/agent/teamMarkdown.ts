@@ -84,10 +84,12 @@ function renderSection(member: ReturnType<typeof renderMembers>[number]): string
   const lines = [`## ${member.name}`];
   if (member.role) lines.push(`role: ${member.role}`);
   if (member.model) lines.push(`model: ${member.model}`);
-  if (member.privacy) lines.push(`privacy: ${member.privacy}`);
   // The hierarchy is written back, so a save keeps it (0.4.19 review: it was read but never written, so every save deleted it).
   if (member.reportsTo) lines.push(`reports-to: ${member.reportsTo}`);
   if (member.tools?.length) lines.push(`tools: ${member.tools.join(', ')}`);
+  // privacy is always the last metadata line: a build from before it existed reads role, model, and tools correctly and takes this line as
+  // the first line of the instructions, rather than stopping before tools and giving the member the default tools.
+  if (member.privacy) lines.push(`privacy: ${member.privacy}`);
   lines.push('', member.instructions, '', '');
   return lines.join('\n');
 }

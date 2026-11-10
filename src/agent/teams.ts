@@ -93,14 +93,16 @@ export function parsePrivacy(value: string | undefined, member: string): 'privat
 }
 
 export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>): string {
-  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), privacy (private: a NEAR TEE or local model only; any: whatever the run may use), tools (comma-separated), reports-to (another member). Then the member\'s instructions. Save to create a new version. -->', ''];
+  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member), and last, privacy (private: a NEAR TEE or local model only; any: whatever the run may use). Then the member\'s instructions. Save to create a new version. -->', ''];
   for (const member of members) {
     lines.push(`## ${member.name}`);
     if (member.role) lines.push(`role: ${member.role}`);
     if (member.model) lines.push(`model: ${member.model}`);
-    if (member.privacy) lines.push(`privacy: ${member.privacy}`);
     if (member.reportsTo) lines.push(`reports-to: ${member.reportsTo}`);
     if (member.tools?.length) lines.push(`tools: ${member.tools.join(', ')}`);
+    // privacy is always the last metadata line: a build from before it existed reads role, model, and tools correctly and takes this line as
+    // the first line of the instructions, rather than stopping before tools and giving the member the default tools.
+    if (member.privacy) lines.push(`privacy: ${member.privacy}`);
     lines.push('', member.instructions, '');
   }
   return lines.join('\n');

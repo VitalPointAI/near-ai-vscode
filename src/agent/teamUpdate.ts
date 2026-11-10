@@ -85,9 +85,11 @@ function renderSection(section: Omit<Section, 'raw'>): string {
   const lines = [`## ${section.name}`];
   if (section.role) lines.push(`role: ${section.role}`);
   if (section.model) lines.push(`model: ${section.model}`);
-  if (section.privacy) lines.push(`privacy: ${section.privacy}`);
   if (section.reportsTo) lines.push(`reports-to: ${section.reportsTo}`);
   if (section.tools?.length) lines.push(`tools: ${section.tools.join(', ')}`);
+  // privacy is always the last metadata line: a build from before it existed reads role, model, and tools correctly and takes this line as
+  // the first line of the instructions, rather than stopping before tools and giving the member the default tools.
+  if (section.privacy) lines.push(`privacy: ${section.privacy}`);
   return `${lines.join('\n')}\n\n${section.instructions.trim()}\n`;
 }
 
