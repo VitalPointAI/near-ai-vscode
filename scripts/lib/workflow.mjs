@@ -20,6 +20,11 @@ export const REVIEW_ACCOUNT = 'near-ai-reviewer';
 export const REQUIRED_CHECKS = Object.freeze([...CI_CHECKS, AGENT_REVIEW_CONTEXT]);
 /** Where the CI_CHECKS must come from: jobs of this workflow file, run by GitHub Actions. */
 export const CI_WORKFLOW = Object.freeze({ name: 'CI', path: '.github/workflows/ci.yml', app: 'github-actions' });
+/**
+ * The agent review workflow. It runs on workflow_run and workflow_dispatch, which GitHub runs on the default branch, so its jobs' check runs land on main's
+ * HEAD whichever PR they reviewed. Tagging main must not be blocked by another PR's failed review, so the release gate leaves its suites out.
+ */
+export const AGENT_REVIEW_WORKFLOW = Object.freeze({ name: 'Agent review', path: '.github/workflows/agent-review.yml' });
 
 export const BRANCH_PATTERN = /^(feat|fix|chore|docs)\/[a-z0-9][a-z0-9._-]*$|^(release|hotfix)\/\d+\.\d+\.\d+$/;
 export const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
@@ -352,6 +357,8 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
   const ciWorkflowRuns = workflowRuns
     .filter((run) => run.name === CI_WORKFLOW.name && String(run.path ?? '').replace(/@.*$/, '') === CI_WORKFLOW.path);
   const ciSuites = new Set(ciWorkflowRuns.map((run) => run.suiteId));
+  // Another PR's review lands its check runs on main's HEAD (see AGENT_REVIEW_WORKFLOW). They say nothing about this commit, so tagging ignores them.
+  const reviewSuites = new Set(workflowRuns.filter((run) => String(run.path ?? '').replace(/@.*$/, '') === AGENT_REVIEW_WORKFLOW.path).map((run) => run.suiteId));
   const runIdOfSuite = new Map(ciWorkflowRuns.map((run) => [run.suiteId, run.id]));
   const attempts = new Map();
   for (const run of checkRuns) {
@@ -438,7 +445,7 @@ export function evaluateCommit(commit, { required = REQUIRED_CHECKS, reviewer, e
       else if (entry.state !== 'success') block(`required check "${name}" is ${entry.state}`);
     }
   }
-  for (const run of runs) if (!required.includes(run.name) && failed(run.state)) block(`check "${run.name}" ${run.state === 'failure' ? 'failed' : `is ${run.state}`}`);
+  for (const run of runs) if (!required.includes(run.name) && failed(run.state) && !(exactCommitCi && reviewSuites.has(run.suiteId))) block(`check "${run.name}" ${run.state === 'failure' ? 'failed' : `is ${run.state}`}`);
   for (const status of latestStatuses) if (!required.includes(status.context) && status.state === 'failure') block(`status "${status.context}" (set by ${status.creator ?? 'an unknown account'}) failed`);
 
   const messages = [...new Set(problems.map((problem) => problem.message))];
@@ -568,6 +575,10 @@ export const GATE_PATHS = Object.freeze([
   /^scripts\/lib\//,
   /^scripts\/(secret-scan|merge-pr|agent-review|tag-release|prepare-release|verify-release-content|bootstrap-agent-review)\.(mjs|sh)$/,
   /^scripts\/ci-review-[^/]*\.mjs$/,
+  // The gate's own tests and compile's vendor step: deleting a gate test, or changing what compile runs, weakens CI without touching scripts/lib.
+  // (package.json's npm scripts define CI too, but every release bumps package.json, so gating it would hold every release for the owner; not done.)
+  /^scripts\/test\//,
+  /^scripts\/vendor-libs\.mjs$/,
   /^SECURITY\.md$/,
   /^\.claude\/commands\//
 ]);

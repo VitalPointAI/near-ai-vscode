@@ -144,6 +144,18 @@ test('a review whose CI passed on an older head is skipped', async () => {
   assert.deepEqual(fake.world.commits[HEAD].statuses, []);
 });
 
+test('a review is not posted when the PR moved while the model was reviewing, so it cannot overwrite the new head\'s result', async () => {
+  // Both heads' reviews run at once (concurrency is per head); the older one finishing last used to stamp its failure on the new head.
+  const fake = install();
+  const moved = '5'.repeat(40);
+  fake.world.commits[moved] = greenCommit({ review: false });
+  const result = await reviewPr(REPO, '12', { ...quiet, env: env(), run: async () => { fake.world.prs[12].headRefOid = moved; return PASS; } });
+  assert.equal(result.skipped, true);
+  assert.deepEqual(fake.world.commits[HEAD].statuses, []);
+  assert.deepEqual(fake.world.commits[moved].statuses, [], 'nothing is set on the new head');
+  assert.deepEqual(fake.world.comments ?? [], [], 'and no comment is posted');
+});
+
 /** Runs a CLI with a stub `gh` first on PATH that answers `api user` with `login`. */
 function runCli(script, args, { login, extraEnv = {} }) {
   const bin = mkdtempSync(path.join(tmpdir(), 'fake-gh-'));
