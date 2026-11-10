@@ -404,3 +404,13 @@ test('notes read back with their own ids, not their position, when the ids are n
   ]);
   assert.equal((await documentText(docx, 'docx', 'ids.docx')).text, 'Claim and another\n\nFootnotes:\n[3] Source three.\n[7] Source seven.');
 });
+
+test('a link with a stray % still makes a PDF, and the link keeps its target as written', async () => {
+  const result = createPdf({ title: 'Links', blocks: parseMarkdown('See [the sale](https://example.com/100%off) and [a good one](https://example.com/a%20b).\n'), images: new Map() });
+  const { doc, close } = await openPdf(result.bytes);
+  try {
+    const urls = (await (await doc.getPage(1)).getAnnotations()).map((annotation) => annotation.url);
+    assert.ok(urls.includes('https://example.com/100%off'), JSON.stringify(urls));
+    assert.ok(urls.includes('https://example.com/a%20b'));
+  } finally { await close(); }
+});

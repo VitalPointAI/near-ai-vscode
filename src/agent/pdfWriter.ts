@@ -88,7 +88,11 @@ const num = (value: number) => { const rounded = Math.round(value * 100) / 100; 
 const rgb = (color: Color, stroke = false) => `${color.map(num).join(' ')} ${stroke ? 'RG' : 'rg'}`;
 const escapeString = (bytes: string) => bytes.replace(/[\\()]/g, (char) => `\\${char}`).replace(/[\r\n]/g, ' ');
 const fontFor = (bold?: boolean, italic?: boolean): FontKey => (bold && italic ? 'F4' : bold ? 'F2' : italic ? 'F3' : 'F1');
-const linkable = (target: string | undefined) => (target && /^(https?:|mailto:)/i.test(target) ? encodeURI(decodeURI(target)) : undefined);
+/** A web or mail link for an annotation, re-encoded consistently; a target that is not valid percent-encoding (a stray %) is used as written. */
+const linkable = (target: string | undefined) => {
+  if (!target || !/^(https?:|mailto:)/i.test(target)) return undefined;
+  try { return encodeURI(decodeURI(target)); } catch { return target; }
+};
 
 class Layout {
   public readonly pages: Page[] = [];
