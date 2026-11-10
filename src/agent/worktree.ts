@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import { ToolError } from './workspace';
 
@@ -9,7 +9,8 @@ import { ToolError } from './workspace';
 // runs the agent there; the agent commits on that branch; the orchestrator merges and removes it.
 // Worktrees live in the extension's storage, so the project itself gets no extra folders.
 
-export interface AgentWorktree { path: string; branch: string; base: string; repo: string }
+/** `root` is where the agent works: the worktree's copy of the workspace folder, which is below `path` when the workspace is a subfolder of the repository. */
+export interface AgentWorktree { path: string; branch: string; base: string; repo: string; root: string }
 
 function git(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -27,7 +28,22 @@ export async function createAgentWorktree(root: string, baseDir: string, agentId
   await mkdir(path.dirname(dir), { recursive: true });
   const branch = `worktree-agent-${agentId}`;
   await git(repo, ['worktree', 'add', '--quiet', '-b', branch, dir, base]);
-  return { path: dir, branch, base, repo };
+  return { path: dir, branch, base, repo, root: await worktreeRoot(repo, root, dir) };
+}
+
+/**
+ * The workspace folder's place inside the worktree. A workspace opened at repo/packages/app works in
+ * <worktree>/packages/app, not at the repository's top. git reports the top level with symlinks
+ * resolved, so the workspace path is resolved too before comparing. A folder git does not track
+ * (so it is not in the checkout) is created empty.
+ */
+async function worktreeRoot(repo: string, workspaceRoot: string, worktreePath: string): Promise<string> {
+  const resolved = await realpath(workspaceRoot).catch(() => workspaceRoot);
+  const relative = path.relative(repo, resolved);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return worktreePath;
+  const root = path.join(worktreePath, relative);
+  await mkdir(root, { recursive: true });
+  return root;
 }
 
 /** Removes the worktree and its branch when the agent left nothing in them; otherwise keeps both for merging. */

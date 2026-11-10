@@ -5,6 +5,10 @@ const STATE_KEY = 'nearAi.emergencyStop';
 // A Node emitter, so importing this module needs no VS Code API until activation.
 const changes = new EventEmitter();
 let memento: vscode.Memento | undefined;
+/** The state this window last announced, so a change made in another window is noticed and announced once. */
+let announced = false;
+/** Global state is shared by every window, but VS Code tells only the window that wrote it, so the others check it on this interval. */
+const OTHER_WINDOWS_CHECK_MS = 2_000;
 
 /** Fires with the new state whenever the emergency stop is engaged or released. */
 export function onDidChangeEmergencyStop(listener: (engaged: boolean) => unknown, thisArgs?: unknown, disposables?: vscode.Disposable[]): vscode.Disposable {
@@ -24,8 +28,17 @@ export function initEmergencyStop(context: vscode.ExtensionContext): void {
   item.command = 'nearAi.resume';
   item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   const sync = (engaged: boolean) => { if (engaged) item.show(); else item.hide(); };
-  sync(isEmergencyStopped());
-  context.subscriptions.push(item, onDidChangeEmergencyStop(sync));
+  announced = isEmergencyStopped();
+  sync(announced);
+  // A stop pressed in another window stops this window's runs too, within a couple of seconds, and shows the status item here.
+  const watch = setInterval(() => {
+    const engaged = isEmergencyStopped();
+    if (engaged === announced) return;
+    announced = engaged;
+    changes.emit('change', engaged);
+  }, OTHER_WINDOWS_CHECK_MS);
+  watch.unref?.();
+  context.subscriptions.push(item, onDidChangeEmergencyStop(sync), { dispose: () => clearInterval(watch) });
 }
 
 export function isEmergencyStopped(): boolean {
@@ -34,5 +47,6 @@ export function isEmergencyStopped(): boolean {
 
 export async function setEmergencyStop(engaged: boolean): Promise<void> {
   await memento?.update(STATE_KEY, engaged);
+  announced = engaged;
   changes.emit('change', engaged);
 }

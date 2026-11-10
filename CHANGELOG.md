@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Agents are only told to hand work to sub-agents when they can.** A plain chat, or a sub-agent whose
+  tool list does not include Agent, was still told to "fan out with the Agent tool", so it tried a tool it
+  did not have and wasted a turn. The advice now appears only when the Agent tool is there.
+- **A sub-agent that starts its own sub-agent no longer hangs.** With the parallel-agent limit at 1 (or
+  every slot taken by agents waiting on their own helpers), the helper waited for ever for a slot its
+  parent held. An agent now gives its slot back while it waits for a helper it started.
+- **Isolated sub-agents start in your workspace folder.** In a repository opened at a subfolder (say
+  `packages/app`), an agent run with `isolation: "worktree"` started at the repository's top instead of
+  that folder in its worktree.
+- **The emergency stop reaches every open window.** Pressing it in one window stopped only that window's
+  runs; others kept running and showed no stop. Other windows now stop within a few seconds and show the
+  status-bar item, and resuming works the same way.
+- **Smaller fixes:** when the context is nearly full and summarizing cannot free space (the recent
+  messages hold most of it), the chat now says so once instead of carrying on silently; when the shell
+  ends while a process it started still holds the output open, the Bash result says later output was not
+  captured; and leftover temporary undo files from a save cut off by a crash are cleaned up.
+
 - **Long runs from a single request are summarized when the context fills up.** Before, only history
   before your last message could be summarized, so one long request kept growing until it hit the
   model's limit, while the chat still said "The conversation was summarized" and rewrote

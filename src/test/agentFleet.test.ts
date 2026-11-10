@@ -318,3 +318,65 @@ test('Check now for an agent that has gone is refused, so the button cannot clai
   assert.equal(conversation.controlAgent('gsd-planner-gone', 'nudge'), false);
   assert.deepEqual(posted.filter((message) => message.type === 'steer-state'), [], 'nothing was queued for an agent that is not there');
 });
+
+test('the prompt advises handing work to sub-agents only when the run has the Agent tool', async () => {
+  const { gsd, conversation } = await project();
+  const systems: string[] = [];
+  const client = scriptedClient({ parent: [{ calls: [call('a1', 'Agent', { subagent_type: 'gsd-planner', prompt: 'plan it' })] }, { text: 'done' }] });
+  const original = client.streamCompletion.bind(client);
+  client.streamCompletion = async function* (model: string, messages: AgentMessage[]) {
+    if (!systems.includes(String(messages[0]?.content))) systems.push(String(messages[0]?.content));
+    yield* original(model, messages);
+  };
+  await conversation.send(request(client, gsd));
+  const [lead, planner] = systems;
+  assert.match(lead, /Fan out every multi-part task/);
+  assert.match(lead, /use the Agent tool with that subagent_type/);
+  // The planner's tool list is Read only, so it has no Agent tool and is not told to use one.
+  assert.ok(planner.startsWith('You are the planner.'));
+  assert.doesNotMatch(planner, /Fan out every multi-part task|use the Agent tool|Agent call's task/);
+  assert.match(planner, /You have no Agent tool here/);
+
+  // A plain chat with no agents to start has no Agent tool either.
+  const plain = await project();
+  const plainSystems: string[] = [];
+  const plainClient = scriptedClient({ parent: [{ text: 'hi' }] });
+  const plainOriginal = plainClient.streamCompletion.bind(plainClient);
+  plainClient.streamCompletion = async function* (model: string, messages: AgentMessage[]) { plainSystems.push(String(messages[0]?.content)); yield* plainOriginal(model, messages); };
+  await plain.conversation.send({ ...request(plainClient, plain.gsd), gsd: undefined });
+  assert.doesNotMatch(plainSystems[0], /Fan out every multi-part task|Agent call's task/);
+});
+
+test('with one parallel slot, a sub-agent that starts its own foreground agent does not wait for ever on its own slot', { timeout: 20_000 }, async () => {
+  const { gsd, posted, conversation } = await project();
+  const nested: GsdContext = { ...gsd, agents: [
+    { name: 'gsd-lead', description: 'Leads', tools: ['Read', 'Agent'], body: 'You are the lead.', file: path.join(gsd.home, 'agents', 'gsd-lead.md') },
+    ...gsd.agents
+  ] };
+  const counters = { parent: 0, lead: 0, planner: 0 };
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const system = String(messages[0]?.content);
+      const who = system.startsWith('You are the lead.') ? 'lead' : system.startsWith('You are the planner.') ? 'planner' : 'parent';
+      const turn = counters[who]++;
+      const reply = (content: string | null, calls?: ToolCall[]): CompletionEvent => ({ type: 'done', message: { role: 'assistant', content, ...(calls ? { tool_calls: calls } : {}) }, finishReason: calls ? 'tool_calls' : 'stop', usage });
+      if (who === 'parent') yield turn === 0 ? reply(null, [call('p1', 'Agent', { subagent_type: 'gsd-lead', prompt: 'lead it' })]) : reply('all done');
+      else if (who === 'lead') yield turn === 0 ? reply(null, [call('l1', 'Agent', { subagent_type: 'gsd-planner', prompt: 'plan it' })]) : reply(`lead report: ${String(messages.at(-1)?.content)}`);
+      else yield reply('planner report');
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  await conversation.send(request(client as never, nested, { maxParallelAgents: 1 }));
+  assert.match(String(posted.find((message) => message.type === 'tool-end' && message.callId === 'p1')?.output), /lead report: planner report/);
+  assert.deepEqual(counters, { parent: 2, lead: 2, planner: 1 });
+});
+
+test('at the critical threshold when summarizing cannot free space, the user is told once', async () => {
+  const { root, gsd, posted, conversation } = await project();
+  await writeFile(path.join(root, 'small.txt'), 'x\n');
+  const client = scriptedClient({ parent: [{ calls: [call('r1', 'Read', { file_path: 'small.txt' })] }, { calls: [call('r2', 'Read', { file_path: 'small.txt' })] }, { text: 'the answer' }] });
+  await conversation.send(request(client, gsd, { text: 'y'.repeat(6_000), contextWindows: { 'z-ai/glm-5.3': 2_000 } }));
+  const notices = posted.filter((message) => message.type === 'notice' && /summarizing could not free space/.test(String(message.text)));
+  assert.equal(notices.length, 1, 'one notice across the run\'s three turns');
+  assert.ok(!posted.some((message) => message.type === 'notice' && /summarized to stay within/.test(String(message.text))));
+});
