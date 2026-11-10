@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Research teams that ship professional, fully sourced reports.** Each role in a new research team now
+  has one input, one job, one output file, and a definition of done, and they run in order:
+  investigator, source-verifier, analyst, writer, red team, editor. Every role reads the project's
+  `.planning/STYLE.md` (written at the plan stage; the team asks who the reader is rather than guessing)
+  and treats your recorded decisions as binding. The investigator keeps an open-questions list, marks each
+  finding new, confirming, or contradicting, checks analogous cases, and gives a blocking finding its way
+  forward (requirement, earliest date, action). The source-verifier writes `SOURCE-CHECK.md`, confirms
+  key quotes by an independent method, labels client and vendor statements as such, and records page and
+  access dates. The analyst recomputes every derived figure and ranking from its inputs. The writer cites
+  with real notes and keeps internal file paths and working codes out of the reader's text. The red team
+  attacks the finished document as well as the findings, and tests the project's checks with deliberate
+  breakages. The **editor is the release gate**: it checks the report against its audience, for
+  coherence and comprehension (a reader must be able to follow it without the authors' context, and a
+  failure here alone blocks release), for professional quality, and that every note's verified source
+  really says what the sentence claims; it fixes wording itself, sends factual problems back, and ends
+  `.planning/EDITORIAL-REVIEW.md` with SIGN-OFF or NOT READY. Nothing is released without SIGN-OFF.
+  The presales reviewer and the writing editor work the same way. The source-verifier, analyst, red
+  team, and editor use the deep tier, and every research member (and the presales reviewer) has
+  `privacy: private`; change a member's line to `privacy: any` to relax it.
+  **Existing projects keep the team they have**: their `.planning/.near-ai/team.md` is not changed. To
+  get the new roles, set the project type up again (or **Set Up Project Team**) and review the new
+  team, or copy the new member sections into your team file.
 - **A team member can be kept on private models.** A `privacy: private` line in a team file keeps that
   member on a model that runs in a NEAR TEE or on your machine: the most capable private model for its
   tier, and if none is available the member does not run and the lead is told why, rather than its

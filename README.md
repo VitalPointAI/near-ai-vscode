@@ -210,6 +210,20 @@ reason (accepted risk, deferred, disregarded), and verification and release
 notes list the items not fixed. In these projects `/gsd-execute-phase`,
 `/gsd-verify-work`, and `/gsd-autonomous` include the red-team step.
 
+A research team works in a fixed order: investigator, source verifier,
+analyst, writer, red team, editor. Each member has one output file
+(`TEAM-FINDINGS.md`, `SOURCE-CHECK.md`, `TEAM-ANALYSIS.md`, the report,
+`RED-TEAM.md`, `EDITORIAL-REVIEW.md`) and a stated definition of done, and all
+of them write for the audience and style in `.planning/STYLE.md`. The editor
+is the release gate: it checks the report for coherence and comprehension,
+professional quality, and that every note's verified source says what the
+sentence claims, makes copy edits itself, sends factual problems back, and
+signs off with SIGN-OFF or NOT READY. Nothing is released without SIGN-OFF,
+and the delivered report carries its sources as real endnotes or footnotes
+(CreateDocument and CreatePdf). The presales reviewer and the writing editor
+are release gates in the same way. A project set up before this keeps its own
+team file; set the team up again to pick up the new roles.
+
 In a software project, the **DevOps** member sets up a protected way of
 working: a CI workflow on every pull request (tests, a secret scan, and a
 dependency audit), required checks and a review before anything reaches the
@@ -415,7 +429,10 @@ until it runs out aren't shown.
   TEE", or to a local model; if the configured tier model is forwarded, the
   next private tier model is used (deep, then standard, then fast for a deep
   member), then the most capable other private model. `privacy: any`, or no
-  line, lets the member use any model the run may use. Run one with `/team:<name> <task>`
+  line, lets the member use any model the run may use.
+  New research teams have `privacy: private` on every member (and presales
+  teams on their reviewer), so client material stays on private models;
+  change a member's line to `privacy: any` to relax it. Run one with `/team:<name> <task>`
   or **Manage Agent Teams**; a lead agent delegates to the members as
   sub-agents, each limited to its own tools. Saving a team file records a
   version. Teams can be duplicated, archived, restored, imported, and deleted.
