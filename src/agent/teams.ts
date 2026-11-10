@@ -35,12 +35,19 @@ export function slugify(value: string): string {
 /**
  * Which knowledge graph a team file reads and feeds. A library team's is its slug. A project team's file is always `.planning/.near-ai/team.md`, so its
  * slug is "team" in every project: keyed by that, every project's team (and a library team saved as team.md) shared one graph (0.4.19 review). It is
- * keyed by its project folder instead, and the double hyphen means no slug can ever equal it, since slugify never leaves two in a row.
+ * keyed by its project folder instead, and the double hyphen means no slug can ever equal it, since slugify never leaves two in a row. The folder is
+ * normalised first so one project never gets two graphs: resolved (which also drops a trailing separator), and on Windows, where paths ignore case,
+ * lowercased, since VS Code hands out `c:\…` where a terminal says `C:\…`. `platform` is for tests.
  */
-export function teamKnowledgeKey(file: string): string {
-  const dir = path.dirname(file);
-  if (path.basename(file) === 'team.md' && path.basename(dir) === '.near-ai' && path.basename(path.dirname(dir)) === '.planning') return `project--${createHash('sha256').update(path.resolve(dir, '..', '..')).digest('hex').slice(0, 12)}`;
-  return slugify(path.basename(file, '.md'));
+export function teamKnowledgeKey(file: string, platform: NodeJS.Platform = process.platform): string {
+  const paths = platform === 'win32' ? path.win32 : path.posix;
+  const dir = paths.dirname(file);
+  if (paths.basename(file) === 'team.md' && paths.basename(dir) === '.near-ai' && paths.basename(paths.dirname(dir)) === '.planning') {
+    const resolved = paths.resolve(dir, '..', '..');
+    const root = platform === 'win32' ? resolved.toLowerCase() : resolved;
+    return `project--${createHash('sha256').update(root).digest('hex').slice(0, 12)}`;
+  }
+  return slugify(paths.basename(file, '.md'));
 }
 
 /** Parses a team file; throws with a message that says what to fix. */

@@ -298,3 +298,33 @@ test('a sourced re-assertion revives a refuted claim and retires what it now con
   strong = mergeKnowledge(strong, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'C', credibility: 4 }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'a blog' }] }], edges: [] });
   assert.match(JSON.stringify(strong.nodes[0]!.facts.map((fact) => fact.text)), /3\.1 million/, 'the B2 stands against a C4 revival');
 });
+
+test('a fact stored ungraded takes its first grade, since ungraded means "not assessed"; after that the grade only falls, and retirement still counts ungraded as weakest', () => {
+  // Agent review: an ungraded fact receiving a grade looked like a raise under "ungraded is weakest". It is filling in a missing assessment, pinned here.
+  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'Runs the port.' }] }], edges: [] });
+  assert.equal(graph.nodes[0]!.facts[0]!.grading, undefined, 'stored ungraded');
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'Runs the port.', grading: { reliability: 'A', credibility: 1 } }] }], edges: [] });
+  assert.deepEqual(graph.nodes[0]!.facts[0]!.grading, AGENT_CEILING, 'the first grade fills it in, held to the ceiling');
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'Runs the port.', grading: { reliability: 'D', credibility: 5 } }] }], edges: [] });
+  assert.deepEqual(graph.nodes[0]!.facts[0]!.grading, { reliability: 'D', credibility: 5 }, 'then it can only fall');
+  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'Runs the port.', grading: AGENT_CEILING }] }], edges: [] });
+  assert.deepEqual(graph.nodes[0]!.facts[0]!.grading, { reliability: 'D', credibility: 5 }, 'and never rises again');
+  // Retirement is unchanged: an ungraded claim cannot retire a graded belief, and an ungraded belief is retired by any graded claim.
+  const graded = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.', grading: { reliability: 'E', credibility: 5 } }] }], edges: [] });
+  const ungradedClaim = mergeKnowledge(graded, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'notice' }] }], edges: [] });
+  assert.equal(ungradedClaim.nodes[0]!.history?.length ?? 0, 0, 'an ungraded claim retires nothing graded');
+  const ungradedBelief = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
+  const gradedClaim = mergeKnowledge(ungradedBelief, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'notice', grading: { reliability: 'F', credibility: 6 } }] }], edges: [] });
+  assert.match(JSON.stringify((gradedClaim.nodes[0]!.history ?? []).map((fact) => fact.text)), /4\.2 million/, 'the weakest graded claim still retires an ungraded belief');
+});
+
+test('a fact\'s own date can be earlier than the addition but never later, and a date that is not a date is ignored', () => {
+  const earlier = '2025-01-01T00:00:00.000Z';
+  const facts = mergeKnowledge(emptyKnowledge('t', at), {
+    origin: 'research', at,
+    nodes: [{ label: 'Port', facts: [{ text: 'Old.', since: earlier }, { text: 'Future.', since: '2999-01-01T00:00:00.000Z' }, { text: 'Garbage.', since: 'not a date' }, { text: 'Plain.' }] }],
+    edges: []
+  }).nodes[0]!.facts;
+  const since = Object.fromEntries(facts.map((fact) => [fact.text, fact.since]));
+  assert.deepEqual(since, { 'Old.': earlier, 'Future.': at, 'Garbage.': at, 'Plain.': at });
+});

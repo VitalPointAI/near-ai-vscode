@@ -143,6 +143,11 @@ export interface TeamKnowledge {
    * the person is told. Never written to disk.
    */
   problem?: string;
+  /**
+   * Set with `problem` when the file exists but could not be OPENED (permissions, a lock), as opposed to opened and found damaged. Such a file is left as it
+   * is and nothing is added over it, so a reader must not promise that the knowledge starts again. Never written to disk.
+   */
+  unreadable?: boolean;
 }
 
 /** What an agent proposes to add: the raw shape, before it is merged, which is what makes adding idempotent. */
@@ -245,6 +250,12 @@ function dedupeFacts(facts: ReadonlyArray<{ text: string; source?: string; gradi
   return [...byText.values()];
 }
 
+/** A fact's own date when it is a real date no later than `at`, and `at` otherwise: backdating is allowed, future-dating and garbage are not. */
+function notAfter(since: string | undefined, at: string): string {
+  const when = since === undefined ? NaN : Date.parse(since);
+  return Number.isFinite(when) && when <= Date.parse(at) ? since! : at;
+}
+
 const normalise = (text: string): string => text.trim().toLowerCase().replace(/\s+/g, ' ');
 
 export const emptyKnowledge = (team: string, at: string): TeamKnowledge => ({ version: 1, team, nodes: [], edges: [], updatedAt: at });
@@ -267,7 +278,12 @@ export function sourceText(value: unknown): string {
  *
  * Trust is two rules, applied here so every path into the graph obeys them:
  *   - the ceiling: nothing is stored above AGENT_CEILING (see withinCeiling), and an older graph is brought under it first;
- *   - grades only fall: a later mention can lower a stored grade, never raise it, so a second path cannot launder a grade back up.
+ *   - grades only fall: a later mention can lower a stored grade, never raise it, so a second path cannot launder a grade back up. A fact, actor or
+ *     relation stored UNGRADED is the one exception: ungraded means "not assessed", not "assessed as the worst", so the first grade it is given fills in
+ *     the missing assessment (held to the ceiling like any other) and the rule applies from then on. Retirement is unaffected: deciding whether a claim
+ *     may push a belief out still counts ungraded as the weakest (atLeastAsStrong), so an ungraded belief never outweighs a graded one.
+ *   - nothing is dated in the future: a fact's own `since` (kept so migrated facts keep their age) is clamped to the addition's `at`, so backdating works
+ *     but a claim cannot present itself as newer than the moment it was learned.
  *
  * Belief changes without deleting anything (owner, 2026-11-08): a fact a later claim contradicts moves to the actor's `history` with why and when, but only
  * when the new claim is at least as strong as what it retires, so a weaker claim cannot push a stronger belief out. An unsourced echo of a refuted fact is not
@@ -278,7 +294,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
   const nodes = new Map(start.nodes.map((node) => [node.id, node]));
   const labelToId = new Map(start.nodes.map((node) => [node.label.trim().toLowerCase(), node.id]));
   const stored = (fact: { text: string; source?: string; since?: string }, grading: Grading | undefined): KnowledgeFact =>
-    ({ text: fact.text, origin: addition.origin, since: fact.since ?? addition.at, ...(fact.source ? { source: fact.source } : {}), ...(grading ? { grading } : {}) });
+    ({ text: fact.text, origin: addition.origin, since: notAfter(fact.since, addition.at), ...(fact.source ? { source: fact.source } : {}), ...(grading ? { grading } : {}) });
   for (const incoming of addition.nodes) {
     const label = incoming.label.trim();
     if (!label) continue;
@@ -300,7 +316,8 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     for (const incomingFact of dedupeFacts(incoming.facts ?? [])) {
       const text = normalise(incomingFact.text);
       const claimed = factGrading(incomingFact);
-      // Already believed: fill in a missing source, and let the grade only fall.
+      // Already believed: fill in a missing source, and let the grade only fall. A fact stored ungraded was never assessed, so a first grade fills that in
+      // rather than counting as a raise (see "grades only fall" above).
       const known = existing.facts.find((old) => normalise(old.text) === text);
       if (known) {
         if (!known.source && incomingFact.source) known.source = incomingFact.source;
