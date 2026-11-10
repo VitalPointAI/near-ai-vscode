@@ -1,17 +1,19 @@
 import { createHash } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
 import { DocImage, pdfImage } from './docImages';
-import { Block, Inline, plainText } from './docMarkdown';
+import { Block, Inline, Note, plainText } from './docMarkdown';
 import { ToolError } from './workspace';
 
 // A PDF from the Markdown subset, written here with no library: the 14 standard fonts (Helvetica
 // and Courier, WinAnsi encoding), so nothing is embedded and nothing is downloaded. Headings
-// become bookmarks, every page is numbered, and the same input always gives the same bytes: no
+// become bookmarks, every page is numbered, footnotes go to the foot of the page or to a Notes
+// section at the end, and the same input always gives the same bytes: no
 // clock is read, and the creation date is written only when the caller passes one.
 
 export type PageSize = 'A4' | 'Letter';
-export interface DocumentSpec { title: string; author?: string; date?: string; pageSize?: PageSize; blocks: Block[]; images: Map<string, DocImage> }
-export interface PdfResult { bytes: Buffer; pages: number; headings: number; images: number; substituted: string[] }
+export type NoteStyle = 'footnotes' | 'endnotes';
+export interface DocumentSpec { title: string; author?: string; date?: string; pageSize?: PageSize; blocks: Block[]; images: Map<string, DocImage>; notes?: Note[]; noteStyle?: NoteStyle }
+export interface PdfResult { bytes: Buffer; pages: number; headings: number; images: number; notes: number; substituted: string[] }
 
 const PAGE: Record<PageSize, [number, number]> = { A4: [595.28, 841.89], Letter: [612, 792] };
 const MARGIN = 56;
@@ -76,10 +78,10 @@ const LINK: Color = [0.1, 0.33, 0.75];
 const RULE: Color = [0.8, 0.82, 0.85];
 
 interface Style { font: FontKey; size: number; color: Color; link?: string; rise?: number }
-interface Atom { text: string; style: Style; space: boolean; width: number; br?: boolean }
+interface Atom { text: string; style: Style; space: boolean; width: number; br?: boolean; note?: number }
 interface Fragment { text: string; style: Style; x: number; width: number }
-interface Line { fragments: Fragment[]; width: number }
-interface Page { ops: string[]; links: Array<{ rect: number[]; uri: string }> }
+interface Line { fragments: Fragment[]; width: number; notes: number[] }
+interface Page { ops: string[]; links: Array<{ rect: number[]; uri: string }>; notes: number[]; reserved: number }
 interface OutlineEntry { level: number; title: string; page: number; y: number }
 
 const num = (value: number) => { const rounded = Math.round(value * 100) / 100; return Object.is(rounded, -0) ? '0' : String(rounded); };
@@ -92,28 +94,102 @@ class Layout {
   public readonly pages: Page[] = [];
   public readonly outline: OutlineEntry[] = [];
   public readonly usedImages: string[] = [];
+  /** Where each note is printed, for the links from its references. */
+  public readonly noteTargets = new Map<number, { page: number; y: number }>();
+  private readonly placed = new Set<number>();
+  private readonly noteLineCache = new Map<number, Line[]>();
+  private readonly noteNumbers: Map<string, number>;
   private y = 0;
   private readonly left = MARGIN;
   private readonly width: number;
   private readonly top: number;
   private readonly bottom = MARGIN + FOOTER;
 
-  public constructor(private readonly size: [number, number], private readonly encoder: Encoder, private readonly images: Map<string, DocImage>) {
+  public constructor(private readonly size: [number, number], private readonly encoder: Encoder, private readonly images: Map<string, DocImage>, private readonly notes: Note[] = [], private readonly noteStyle: NoteStyle = 'endnotes') {
+    this.noteNumbers = new Map(notes.map((note) => [note.id, note.number]));
     this.width = size[0] - 2 * MARGIN;
     this.top = size[1] - MARGIN;
     this.newPage();
   }
 
   private get page(): Page { return this.pages[this.pages.length - 1]; }
-  private newPage() { this.pages.push({ ops: [], links: [] }); this.y = this.top; }
+  private newPage() { this.pages.push({ ops: [], links: [], notes: [], reserved: 0 }); this.y = this.top; }
   private atTop() { return this.y >= this.top - 0.01; }
-  private ensure(height: number) { if (this.y - height < this.bottom && !this.atTop()) this.newPage(); }
+  /** The lowest point text may reach on this page, above any footnotes it carries. */
+  private floor() { return this.bottom + this.page.reserved; }
+  private ensure(height: number) { if (this.y - height < this.floor() && !this.atTop()) this.newPage(); }
+
+  // ---- Notes ----
+
+  private noteLines(number: number): Line[] {
+    let lines = this.noteLineCache.get(number);
+    if (!lines) {
+      const note = this.notes.find((item) => item.number === number)!;
+      lines = this.wrap(this.atoms(note.inlines, { size: this.noteStyle === 'footnotes' ? 8 : 9 }), this.width - 18);
+      this.noteLineCache.set(number, lines);
+    }
+    return lines;
+  }
+  /** Footnotes a line or row brings to this page that are not placed yet. */
+  private pending(numbers: number[]): number[] {
+    return this.noteStyle === 'footnotes' ? [...new Set(numbers)].filter((number) => !this.placed.has(number)) : [];
+  }
+  /** The room those footnotes need at the foot of the current page, with the separator if they are its first. */
+  private footHeight(numbers: number[]): number {
+    if (!numbers.length) return 0;
+    return (this.page.notes.length ? 0 : 10) + numbers.reduce((sum, number) => sum + this.noteLines(number).length * 10 + 2, 0);
+  }
+  private reserve(numbers: number[]) {
+    const height = this.footHeight(numbers);
+    for (const number of numbers) { this.placed.add(number); this.page.notes.push(number); }
+    this.page.reserved += height;
+  }
+
+  /** Prints each page's footnotes in the room reserved for them. */
+  public footnotes() {
+    this.pages.forEach((page, index) => {
+      if (!page.notes.length) return;
+      let y = this.bottom + page.reserved;
+      page.ops.push(`${rgb(RULE, true)} 0.5 w ${num(this.left)} ${num(y - 4)} m ${num(this.left + this.width / 3)} ${num(y - 4)} l S`);
+      y -= 10;
+      for (const number of page.notes) {
+        this.noteTargets.set(number, { page: index, y: y + 2 });
+        const marker = this.encoder.encode(`${number}.`);
+        page.ops.push(`${rgb(TEXT)} BT /F1 8 Tf ${num(this.left + 14 - measure(marker, 'F1', 8))} ${num(y - 8)} Td (${escapeString(marker)}) Tj ET`);
+        for (const line of this.noteLines(number)) { this.drawLineOn(page, line, this.left + 18, y - 8); y -= 10; }
+        y -= 2;
+      }
+    });
+  }
+
+  /** The Notes section at the end of the document. */
+  public endnotes() {
+    if (this.noteStyle !== 'endnotes' || !this.notes.length) return;
+    this.heading(1, [{ text: 'Notes' }]);
+    for (const note of this.notes) {
+      const lines = this.noteLines(note.number);
+      this.ensure(Math.min(lines.length, 2) * 12.5);
+      this.noteTargets.set(note.number, { page: this.pages.length - 1, y: this.y });
+      const marker = this.encoder.encode(`${note.number}.`);
+      this.page.ops.push(`${rgb(TEXT)} BT /F1 9 Tf ${num(this.left + 14 - measure(marker, 'F1', 9))} ${num(this.y - 9)} Td (${escapeString(marker)}) Tj ET`);
+      this.flow(lines, this.left + 18, 12.5, 9);
+      this.y -= 3;
+    }
+  }
   private gap(points: number) { if (!this.atTop()) this.y -= points; }
 
   /** Inline runs as atoms (words and spaces), each with its style and width. */
   private atoms(inlines: Inline[], base: { size: number; bold?: boolean; italic?: boolean; color?: Color }): Atom[] {
     const atoms: Atom[] = [];
     for (const run of inlines) {
+      if (run.note !== undefined) {
+        const number = this.noteNumbers.get(run.note);
+        if (number === undefined) throw new ToolError(`Footnote reference [^${run.note}] has no definition.`);
+        const text = this.encoder.encode(String(number));
+        const style: Style = { font: 'F1', size: base.size * 0.62, color: LINK, rise: base.size * 0.38, link: `#note-${number}` };
+        atoms.push({ text, style, space: false, width: measure(text, 'F1', style.size), note: number });
+        continue;
+      }
       const link = linkable(run.link);
       const style: Style = run.code
         ? { font: 'F5', size: base.size * 0.92, color: base.color ?? TEXT, ...(link ? { link } : {}) }
@@ -143,7 +219,7 @@ class Layout {
         if (last && last.style === atom.style) { last.text += atom.text; last.width += atom.width; } else fragments.push({ text: atom.text, style: atom.style, x, width: atom.width });
         x += atom.width;
       }
-      lines.push({ fragments, width: x });
+      lines.push({ fragments, width: x, notes: current.filter((atom) => atom.note !== undefined).map((atom) => atom.note!) });
       current = []; used = 0;
     };
     for (const atom of atoms) {
@@ -163,21 +239,28 @@ class Layout {
     return lines;
   }
 
-  private drawLine(line: Line, x: number, baseline: number) {
+  private drawLine(line: Line, x: number, baseline: number) { this.drawLineOn(this.page, line, x, baseline); }
+
+  private drawLineOn(page: Page, line: Line, x: number, baseline: number) {
     for (const fragment of line.fragments) {
       const style = fragment.style;
-      this.page.ops.push(`${rgb(style.color)} BT /${style.font} ${num(style.size)} Tf ${style.rise ? `${num(style.rise)} Ts ` : ''}${num(x + fragment.x)} ${num(baseline)} Td (${escapeString(fragment.text)}) Tj ET`);
-      if (style.link) this.page.links.push({ rect: [x + fragment.x, baseline - style.size * 0.25, x + fragment.x + fragment.width, baseline + style.size * 0.85], uri: style.link });
+      // Text rise is part of the text state and outlives ET, so a superscript resets it.
+      page.ops.push(`${rgb(style.color)} BT /${style.font} ${num(style.size)} Tf ${style.rise ? `${num(style.rise)} Ts ` : ''}${num(x + fragment.x)} ${num(baseline)} Td (${escapeString(fragment.text)}) Tj${style.rise ? ' 0 Ts' : ''} ET`);
+      const lift = style.rise ?? 0;
+      if (style.link) page.links.push({ rect: [x + fragment.x, baseline + lift - style.size * 0.25, x + fragment.x + fragment.width, baseline + lift + style.size * 0.85], uri: style.link });
     }
   }
 
   /** Flows lines down the page, starting a new page when one does not fit. */
   private flow(lines: Line[], x: number, leading: number, size: number, decorate?: (top: number, bottom: number) => void) {
     for (const line of lines) {
-      this.ensure(leading);
+      const notes = this.pending(line.notes);
+      // A line moves to the next page with its footnotes when both do not fit on this one.
+      if (this.y - leading - this.footHeight(notes) < this.floor() && !this.atTop()) this.newPage();
       const top = this.y;
       this.drawLine(line, x, this.y - size);
       this.y -= leading;
+      this.reserve(this.pending(line.notes));
       decorate?.(top, this.y);
     }
   }
@@ -286,19 +369,30 @@ class Layout {
       });
       this.y -= height;
     };
-    const header = () => drawRow(0, 0, Math.max(...wrapped[0].map((lines) => lines.length)));
+    const rowNotes = (rowIndex: number, from: number, to: number) => this.pending(wrapped[rowIndex].flatMap((lines) => lines.slice(from, to).flatMap((line) => line.notes)));
+    const header = () => { const count = Math.max(...wrapped[0].map((lines) => lines.length)); const notes = rowNotes(0, 0, count); drawRow(0, 0, count); this.reserve(notes); };
     this.ensure(2 * (leading + 2 * pad) + leading);
     header();
+    let fresh = true;
     for (let rowIndex = 1; rowIndex < wrapped.length; rowIndex += 1) {
       const count = Math.max(1, ...wrapped[rowIndex].map((lines) => lines.length));
       let from = 0;
       while (from < count) {
-        const room = Math.floor((this.y - this.bottom - 2 * pad) / leading);
-        if (room < 1 || (from === 0 && room < count && count <= 4)) { this.newPage(); header(); continue; }
-        const to = Math.min(count, from + room);
+        const room = () => this.y - this.floor();
+        let to = Math.min(count, from + Math.max(0, Math.floor((room() - 2 * pad) / leading)));
+        // A short row is kept whole rather than split across pages.
+        if (from === 0 && to < count && count <= 4) to = from;
+        while (to > from && (to - from) * leading + 2 * pad + this.footHeight(rowNotes(rowIndex, from, to)) > room()) to -= 1;
+        if (to === from) {
+          if (!fresh) { this.newPage(); header(); fresh = true; continue; }
+          to = Math.max(from + 1, Math.min(count, from + Math.floor((room() - 2 * pad) / leading)));
+        }
+        const notes = rowNotes(rowIndex, from, to);
         drawRow(rowIndex, from, to);
+        this.reserve(notes);
+        fresh = false;
         from = to;
-        if (from < count) { this.newPage(); header(); }
+        if (from < count) { this.newPage(); header(); fresh = true; }
       }
     }
     this.y -= 10;
@@ -341,8 +435,10 @@ export function pdfDate(value: string): string {
 export function createPdf(spec: DocumentSpec): PdfResult {
   const size = PAGE[spec.pageSize ?? 'A4'];
   const encoder = new Encoder();
-  const layout = new Layout(size, encoder, spec.images);
+  const layout = new Layout(size, encoder, spec.images, spec.notes ?? [], spec.noteStyle ?? 'endnotes');
   for (const block of spec.blocks) layout.block(block);
+  layout.endnotes();
+  layout.footnotes();
   const pages = layout.pages;
 
   const objects: Array<Buffer | string> = [];
@@ -369,7 +465,12 @@ export function createPdf(spec: DocumentSpec): PdfResult {
     const footer = encoder.encode(`Page ${index + 1} of ${pages.length}`);
     const ops = [...page.ops, `${rgb(MUTED)} BT /F1 8.5 Tf ${num((size[0] - measure(footer, 'F1', 8.5)) / 2)} ${num(MARGIN - 4)} Td (${escapeString(footer)}) Tj ET`];
     set(content, stream('/Filter /FlateDecode', deflateSync(Buffer.from(ops.join('\n'), 'latin1'), { level: 9 })));
-    const annots = page.links.map((link) => `<< /Type /Annot /Subtype /Link /Rect [${link.rect.map(num).join(' ')}] /Border [0 0 0] /A << /S /URI /URI ${textString(link.uri)} >> >>`);
+    const annots = page.links.map((link) => {
+      const note = /^#note-(\d+)$/.exec(link.uri);
+      const target = note ? layout.noteTargets.get(Number(note[1])) : undefined;
+      const action = note ? (target ? `/Dest [${pageIds[target.page]} 0 R /XYZ null ${num(target.y)} null]` : '') : `/A << /S /URI /URI ${textString(link.uri)} >>`;
+      return action ? `<< /Type /Annot /Subtype /Link /Rect [${link.rect.map(num).join(' ')}] /Border [0 0 0] ${action} >>` : '';
+    }).filter(Boolean);
     set(pageIds[index], `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${num(size[0])} ${num(size[1])}] /Resources ${resources} /Contents ${content} 0 R${annots.length ? ` /Annots [${annots.join(' ')}]` : ''} >>`);
   });
   set(pagesId, `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pages.length} >>`);
@@ -417,5 +518,5 @@ export function createPdf(spec: DocumentSpec): PdfResult {
   const fingerprint = createHash('md5').update(Buffer.concat(parts)).digest('hex');
   const xref = [`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`, ...offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`)].join('');
   parts.push(Buffer.from(`${xref}trailer\n<< /Size ${objects.length + 1} /Root ${catalog} 0 R /Info ${info} 0 R /ID [<${fingerprint}> <${fingerprint}>] >>\nstartxref\n${length}\n%%EOF\n`, 'latin1'));
-  return { bytes: Buffer.concat(parts), pages: pages.length, headings: layout.outline.length, images: layout.usedImages.length, substituted: [...encoder.missing] };
+  return { bytes: Buffer.concat(parts), pages: pages.length, headings: layout.outline.length, images: layout.usedImages.length, notes: spec.notes?.length ?? 0, substituted: [...encoder.missing] };
 }

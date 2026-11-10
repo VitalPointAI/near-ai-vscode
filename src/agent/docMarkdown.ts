@@ -1,10 +1,15 @@
+import { ToolError } from './workspace';
+
 // The Markdown subset that CreatePdf and CreateDocument turn into pages: headings 1-4,
 // paragraphs, bold, italic, inline code, links, bullet and numbered lists (nested by indentation),
 // block quotes, fenced or indented code blocks, pipe tables, horizontal rules, and images on a
-// line of their own. Anything else is kept as plain text rather than dropped, so nothing the
+// line of their own, and footnotes ([^id] references with [^id]: definitions). Anything else is kept as plain text rather than dropped, so nothing the
 // writer put in the report silently disappears.
 
-export interface Inline { text: string; bold?: boolean; italic?: boolean; code?: boolean; link?: string }
+/** `note`: a footnote reference, by its id in the source; resolved to its number by parseDocument. */
+export interface Inline { text: string; bold?: boolean; italic?: boolean; code?: boolean; link?: string; note?: string }
+/** A footnote definition, numbered in the order of its first reference. */
+export interface Note { id: string; number: number; inlines: Inline[] }
 export type Align = 'left' | 'center' | 'right';
 export interface ListItem { inlines: Inline[]; level: number; ordered: boolean; number: number }
 
@@ -27,7 +32,7 @@ export function parseInline(source: string): Inline[] {
   const push = (text: string, style: Omit<Inline, 'text'>) => {
     if (!text) return;
     const last = runs[runs.length - 1];
-    if (last && !!last.bold === !!style.bold && !!last.italic === !!style.italic && !!last.code === !!style.code && last.link === style.link) last.text += text;
+    if (last && last.note === undefined && !!last.bold === !!style.bold && !!last.italic === !!style.italic && !!last.code === !!style.code && last.link === style.link) last.text += text;
     else runs.push({ text, ...(style.bold ? { bold: true } : {}), ...(style.italic ? { italic: true } : {}), ...(style.code ? { code: true } : {}), ...(style.link ? { link: style.link } : {}) });
   };
   const walk = (text: string, style: Omit<Inline, 'text'>, depth: number) => {
@@ -43,7 +48,11 @@ export function parseInline(source: string): Inline[] {
         const close = text.indexOf(ticks, index + ticks.length);
         if (close > 0) { flush(); push(text.slice(index + ticks.length, close).replace(/^ (.+) $/, '$1'), { ...style, code: true }); index = close + ticks.length; continue; }
       }
+      const note = /^\[\^([^\]\s]+)\]/.exec(rest);
+      if (note) { flush(); runs.push({ text: '', note: note[1] }); index += note[0].length; continue; }
       if (depth < 6) {
+        const bare = /^(?:https?:\/\/|www\.)[^\s<>]*[^\s<>().,;:!?'"*_\]]/.exec(rest);
+        if (bare && !style.link && !/[\w/]/.test(text[index - 1] ?? '')) { flush(); push(bare[0], { ...style, link: bare[0].startsWith('www.') ? `https://${bare[0]}` : bare[0] }); index += bare[0].length; continue; }
         const image = /^!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/.exec(rest);
         if (image) { plain += image[1] || 'image'; index += image[0].length; continue; }
         const link = /^\[((?:\\.|[^\]\\])+)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/.exec(rest);
@@ -95,9 +104,71 @@ function splitRow(line: string): string[] {
 
 const isTableStart = (lines: string[], index: number) => lines[index].includes('|') && index + 1 < lines.length && TABLE_SEPARATOR.test(lines[index + 1]) && lines[index + 1].includes('-') && (lines[index + 1].includes('|') || lines[index].trim().startsWith('|'));
 
-/** Parses the supported Markdown subset into blocks. Front matter (--- ... ---) at the top is skipped. */
+const NOTE_DEFINITION = /^ {0,3}\[\^([^\]\s]+)\]:\s?(.*)$/;
+
+/** Parses the supported Markdown subset into blocks; footnotes must be well formed (see parseDocument). */
 export function parseMarkdown(source: string): Block[] {
-  const lines = source.replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n');
+  return parseDocument(source).blocks;
+}
+
+/** Every inline run list in a block, in reading order. */
+function inlineLists(block: Block): Inline[][] {
+  switch (block.kind) {
+    case 'heading': case 'paragraph': return [block.inlines];
+    case 'list': return block.items.map((item) => item.inlines);
+    case 'quote': return block.paragraphs;
+    case 'table': return [...block.header, ...block.rows.flat()];
+    default: return [];
+  }
+}
+
+/**
+ * Parses the Markdown subset into blocks and footnotes. Notes are numbered in the order they are
+ * first referenced. A reference with no definition, a definition nothing references, a repeated
+ * definition, or a note that references another note is an error that names the id: a citation is
+ * never silently dropped.
+ */
+export function parseDocument(source: string): { blocks: Block[]; notes: Note[] } {
+  const definitions = new Map<string, string>();
+  const body: string[] = [];
+  const raw = source.replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n');
+  let fenced: string | undefined;
+  for (let index = 0; index < raw.length; index += 1) {
+    const line = raw[index];
+    const fence = FENCE.exec(line);
+    if (fence && (fenced === undefined || line.trim().startsWith(fenced))) fenced = fenced === undefined ? fence[1] : undefined;
+    const definition = fenced === undefined ? NOTE_DEFINITION.exec(line) : null;
+    if (!definition) { body.push(line); continue; }
+    const id = definition[1];
+    if (definitions.has(id)) throw new ToolError(`Footnote [^${id}] is defined more than once.`);
+    const text = [definition[2].trim()];
+    while (index + 1 < raw.length && (/^ {2,}\S/.test(raw[index + 1]) || (!raw[index + 1].trim() && /^ {4,}\S/.test(raw[index + 2] ?? '')))) { index += 1; text.push(raw[index].trim()); }
+    definitions.set(id, text.filter(Boolean).join(' '));
+  }
+  const parsed = new Map([...definitions].map(([id, text]) => {
+    const inlines = parseInline(text);
+    const nested = inlines.find((run) => run.note !== undefined);
+    if (nested) throw new ToolError(`Footnote [^${id}] refers to another footnote ([^${nested.note}]); a note cannot cite a note.`);
+    return [id, inlines] as const;
+  }));
+  const blocks = parseBlocks(body.join('\n'));
+  const numbers = new Map<string, number>();
+  for (const block of blocks) {
+    for (const runs of inlineLists(block)) {
+      for (const run of runs) {
+        if (run.note === undefined) continue;
+        if (!definitions.has(run.note)) throw new ToolError(`Footnote reference [^${run.note}] has no definition. Add a line "[^${run.note}]: the source" or remove the reference.`);
+        if (!numbers.has(run.note)) numbers.set(run.note, numbers.size + 1);
+      }
+    }
+  }
+  for (const id of definitions.keys()) if (!numbers.has(id)) throw new ToolError(`Footnote [^${id}] is defined but nothing references it. Cite it in the text or remove the definition.`);
+  const notes = [...numbers].map(([id, number]) => ({ id, number, inlines: parsed.get(id)! }));
+  return { blocks, notes };
+}
+
+function parseBlocks(source: string): Block[] {
+  const lines = source.split('\n');
   const blocks: Block[] = [];
   let index = 0;
   if (lines[0] === '---') { const end = lines.indexOf('---', 1); if (end > 0) index = end + 1; }

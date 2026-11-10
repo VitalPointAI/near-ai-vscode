@@ -10,6 +10,11 @@
   same rules as every other write: inside the workspace only, asking first where a write is protected,
   and undone by **Revert**. The PDF uses the standard PDF fonts, which cover Western European text;
   other characters are replaced with `?` and listed, and CreateDocument keeps every character.
+  Both take footnotes (`[^id]` in the text, `[^id]: source` once): as real Word endnotes or footnotes,
+  or in the PDF as linked superscript numbers with a Notes section at the end or notes at the foot of
+  each page. A citation without a source, a source nothing cites, or a source defined twice stops the
+  tool with the note's name rather than dropping it. Word files you attach now include their
+  footnotes and endnotes in the text the agent reads.
   Research, presales, writing, and software teams get both tools, and so does any existing team
   member whose `tools:` line lists CreatePresentation: the tools are added when the team is loaded,
   and your team files are not changed.

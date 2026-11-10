@@ -7,7 +7,7 @@ import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { prepareImage } from '../agent/docImages';
-import { parseInline, parseMarkdown } from '../agent/docMarkdown';
+import { parseDocument, parseInline, parseMarkdown } from '../agent/docMarkdown';
 import { documentText, PDFJS_DIR } from '../agent/documents';
 import { createDocx } from '../agent/docxWriter';
 import { documentTool, GRAPHICS_TOOLS, pdfTool } from '../agent/graphicsTools';
@@ -217,7 +217,7 @@ test('CreatePdf and CreateDocument read and write only inside the workspace, ask
     assert.ok(GRAPHICS_TOOLS.includes(pdfTool) && GRAPHICS_TOOLS.includes(documentTool), 'both are registered with the graphics tools');
     for (const tool of [pdfTool, documentTool]) assert.equal(tool.capability, 'workspaceWrite');
     const pdf = pdfTool.parse({ output_path: 'out/report.pdf', title: 'Quarterly Report', source_path: 'report/REPORT.md', page_size: 'Letter' });
-    assert.match(await pdfTool.run(pdf, context), /^Saved out\/report\.pdf: \d+ pages, 4 bookmarks, 1 images, \d+ KB\.$/);
+    assert.match(await pdfTool.run(pdf, context), /^Saved out\/report\.pdf: \d+ pages, 4 bookmarks, 1 images, 0 endnotes, \d+ KB\.$/);
     const preview = await pdfTool.preview!(pdf, context);
     assert.match(preview.kind === 'note' ? preview.text : '', /Create PDF out\/report\.pdf \("Quarterly Report", Letter\) from report\/REPORT\.md: 4 headings, 1 tables, 1 images\./);
     const docx = documentTool.parse({ output_path: 'out/report.docx', title: 'Quarterly Report', markdown: '# Inline\n\n![c](report/figures/chart.png)\n' });
@@ -269,4 +269,115 @@ test('a member that lists CreatePresentation also gets CreatePdf and CreateDocum
   const team = parseTeam(text, '/tmp/old.md');
   assert.deepEqual(team.members[0].tools, ['Read', 'Write', 'CreatePresentation', 'RenderSvg', 'CreatePdf', 'CreateDocument']);
   assert.deepEqual(team.members[1].tools, ['Read', 'CheckCitations'], 'a member without CreatePresentation gains nothing');
+});
+
+const CITED = `# Cited report
+
+The market grew 12% in 2025.[^growth] Costs fell, as the regulator reported.[^reg] Growth again.[^growth]
+
+| Claim | Note |
+| --- | --- |
+| Prices rose | See source.[^prices] |
+
+[^reg]: Annual review, Regulator, 2026-03-01. https://regulator.example/review
+[^growth]: Market survey, Example Institute, 2026-01-15. [Survey page](https://institute.example/survey), accessed 2026-11-01.
+[^prices]: Price index, Statistics office.
+    https://stats.example/prices
+`;
+
+test('notes are numbered in order of first citation, and broken notes are errors that name the id', () => {
+  const { notes } = parseDocument(CITED);
+  assert.deepEqual(notes.map((note) => [note.id, note.number]), [['growth', 1], ['reg', 2], ['prices', 3]]);
+  assert.ok(notes[2].inlines.some((run) => run.link === 'https://stats.example/prices'), 'a continuation line and a bare URL become part of the note, as a link');
+  const fails: Array<[string, RegExp]> = [
+    ['Claim.[^missing]\n', /Footnote reference \[\^missing\] has no definition/],
+    ['Claim.\n\n[^orphan]: Source.\n', /Footnote \[\^orphan\] is defined but nothing references it/],
+    ['Claim.[^a]\n\n[^a]: One.\n[^a]: Two.\n', /Footnote \[\^a\] is defined more than once/],
+    ['Claim.[^a]\n\n[^a]: See [^b].\n[^b]: B.\n', /Footnote \[\^a\] refers to another footnote \(\[\^b\]\)/]
+  ];
+  for (const [source, message] of fails) assert.throws(() => parseDocument(source), (error: Error) => error instanceof ToolError && message.test(error.message), source);
+  assert.deepEqual(parseDocument('```\n[^x]: not a note\n```\n').notes, [], 'a note-like line inside a code block is code');
+});
+
+test('PDF endnotes and footnotes carry superscript numbers, a Notes section or page-foot notes, clickable URLs, and links from each reference', async () => {
+  const { blocks, notes } = parseDocument(CITED);
+  const endnotes = createPdf({ title: 'Cited', blocks, notes, images: new Map() });
+  assert.equal(endnotes.notes, 3);
+  assertXref(endnotes.bytes);
+  const text = (await documentText(endnotes.bytes, 'pdf', 'e.pdf')).text;
+  assert.match(text, /grew 12% in 2025\.\s*1 Costs fell, as the regulator reported\.\s*2 Growth again\.\s*1/, text);
+  const notesAt = text.indexOf('Notes\n');
+  assert.ok(notesAt > text.indexOf('Prices rose'), 'the Notes section comes after the body');
+  const section = text.slice(notesAt);
+  assert.ok(section.indexOf('Market survey') < section.indexOf('Annual review') && section.indexOf('Annual review') < section.indexOf('Price index'), 'notes are listed in number order');
+  const { doc, close } = await openPdf(endnotes.bytes);
+  try {
+    const titles = (await doc.getOutline())!.map((item) => item.title);
+    assert.ok(titles.includes('Notes') || JSON.stringify(await doc.getOutline()).includes('"Notes"'), 'Notes has a bookmark');
+    const annotations = (await doc.getPage(1)).getAnnotations();
+    const links = await annotations;
+    for (const url of ['https://regulator.example/review', 'https://institute.example/survey', 'https://stats.example/prices']) assert.ok(links.some((link) => link.url === url), `${url} is a link`);
+    assert.ok(links.filter((link) => link.subtype === 'Link' && !link.url).length >= 4, 'each reference links to its note');
+  } finally { await close(); }
+
+  const footnotes = createPdf({ title: 'Cited', blocks, notes, noteStyle: 'footnotes', images: new Map() });
+  assertXref(footnotes.bytes);
+  const footText = (await documentText(footnotes.bytes, 'pdf', 'f.pdf')).text;
+  assert.ok(!/\nNotes\n/.test(footText), 'footnotes have no Notes section');
+  assert.ok(footText.indexOf('Market survey') > footText.indexOf('Prices rose') && footText.indexOf('Market survey') < footText.indexOf('Page 1 of'), 'footnotes sit at the foot of the page, above the page number');
+  assert.ok(createPdf({ title: 'Cited', blocks, notes, images: new Map() }).bytes.equals(endnotes.bytes), 'deterministic with notes');
+});
+
+test('footnotes move with the line that cites them to the next page when they do not fit', async () => {
+  const filler = 'Body text that fills the page with ordinary sentences. '.repeat(52);
+  const source = `${filler}\n\n${filler}\n\nThe cited line.[^late]\n\n[^late]: ${'A long note that needs several lines at the foot of the page. '.repeat(6)}\n`;
+  const { blocks, notes } = parseDocument(source);
+  const result = createPdf({ title: 'Flow', blocks, notes, noteStyle: 'footnotes', images: new Map() });
+  const text = (await documentText(result.bytes, 'pdf', 'flow.pdf')).text;
+  const pageOf = (needle: string) => text.slice(0, text.indexOf(needle)).split('[Page ').length - 1;
+  assert.equal(pageOf('The cited line.'), pageOf('A long note that needs'), 'the note is printed on the page of its reference');
+});
+
+test('Word notes are real endnotes or footnotes, with styles, relationships, and content types, and read back in order', async () => {
+  const { blocks, notes } = parseDocument(CITED);
+  for (const kind of ['endnote', 'footnote'] as const) {
+    const result = createDocx({ title: 'Cited', blocks, notes, noteStyle: `${kind}s`, images: new Map() });
+    assert.equal(result.notes, 3);
+    const zip = readZip(result.bytes, 'cited.docx');
+    const part = (name: string) => zip.get(name)?.().toString('utf8') ?? '';
+    const document = part('word/document.xml');
+    const references = [...document.matchAll(new RegExp(`<w:${kind}Reference w:id="(\\d+)"/>`, 'g'))].map((match) => Number(match[1]));
+    assert.deepEqual(references, [1, 2, 3], `${kind} references in reading order`);
+    assert.match(document, /<w:rStyle w:val="\w+Reference"\/><\/w:rPr><w:t>1<\/w:t>/, 'the repeated citation shows the same number');
+    const notesXml = part(`word/${kind}s.xml`);
+    assert.match(notesXml, new RegExp(`<w:${kind} w:type="separator" w:id="-1">`));
+    assert.match(notesXml, new RegExp(`<w:${kind} w:id="1"><w:p><w:pPr><w:pStyle w:val="${kind === 'footnote' ? 'Footnote' : 'Endnote'}Text"/>`));
+    assert.match(part('word/_rels/document.xml.rels'), new RegExp(`Type="[^"]+/${kind}s" Target="${kind}s\\.xml"`));
+    assert.match(part('[Content_Types].xml'), new RegExp(`PartName="/word/${kind}s\\.xml" ContentType="application/vnd\\.openxmlformats-officedocument\\.wordprocessingml\\.${kind}s\\+xml"`));
+    assert.match(part('word/styles.xml'), new RegExp(`w:styleId="${kind === 'footnote' ? 'Footnote' : 'Endnote'}Reference"><w:name w:val="${kind} reference"/>[\\s\\S]*?<w:vertAlign w:val="superscript"/>`));
+    const noteRels = part(`word/_rels/${kind}s.xml.rels`);
+    assert.match(noteRels, /Target="https:\/\/institute\.example\/survey" TargetMode="External"/);
+    const link = /Id="(rId\d+)"[^>]*Target="https:\/\/stats\.example\/prices"/.exec(noteRels);
+    assert.ok(link && notesXml.includes(`<w:hyperlink r:id="${link[1]}">`), 'a URL in a note is a link in the notes part');
+    if (kind === 'endnote') assert.match(document, /<w:endnotePr><w:numFmt w:val="decimal"\/><\/w:endnotePr>/, 'endnotes are numbered 1, 2, 3, not i, ii, iii');
+    const text = (await documentText(result.bytes, 'docx', 'cited.docx')).text;
+    assert.match(text, new RegExp(`${kind === 'footnote' ? 'Footnotes' : 'Endnotes'}:\\n\\[1\\] Market survey, Example Institute, 2026-01-15\\. Survey page, accessed 2026-11-01\\.\\n\\[2\\] Annual review, Regulator, 2026-03-01\\. https://regulator\\.example/review\\n\\[3\\] Price index, Statistics office\\. https://stats\\.example/prices$`), text);
+    assert.ok(createDocx({ title: 'Cited', blocks, notes, noteStyle: `${kind}s`, images: new Map() }).bytes.equals(result.bytes), 'deterministic with notes');
+  }
+});
+
+test('the tools take a notes option and report a broken note as a ToolError', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-notes-'));
+  const context = toolContext(root);
+  try {
+    const input = documentTool.parse({ output_path: 'cited.docx', title: 'Cited', markdown: CITED, notes: 'footnotes' });
+    assert.equal(input.notes, 'footnotes');
+    assert.equal(pdfTool.parse({ output_path: 'c.pdf', title: 'C', markdown: CITED }).notes, 'endnotes', 'endnotes by default');
+    assert.match(await documentTool.run(input, context), /3 footnotes/);
+    assert.match(await pdfTool.run(pdfTool.parse({ output_path: 'cited.pdf', title: 'Cited', markdown: CITED }), context), /3 endnotes/);
+    assert.throws(() => pdfTool.parse({ output_path: 'c.pdf', title: 'C', markdown: CITED, notes: 'sidenotes' }), /notes must be endnotes or footnotes/);
+    await assert.rejects(() => pdfTool.run(pdfTool.parse({ output_path: 'c.pdf', title: 'C', markdown: 'Claim.[^gone]\n' }), context), (error: Error) => error instanceof ToolError && /\[\^gone\] has no definition/.test(error.message));
+  } finally {
+    context.shell.dispose();
+  }
 });

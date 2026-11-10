@@ -435,8 +435,16 @@ until it runs out aren't shown.
   headings 1-4, paragraphs, bold, italic, inline code, links, bullet and
   numbered lists (nested by indentation), block quotes, code blocks, pipe
   tables, and images on their own line (PNG, JPEG, or SVG in the workspace,
-  relative to the Markdown file). Options: `title`, `author`, `page_size`
-  (A4 or Letter), and `date`. The PDF has bookmarks from the headings,
+  relative to the Markdown file), and notes: cite with `[^id]` in the text
+  and define each note once as `[^id]: Title, publisher, date. https://...`.
+  Notes are numbered in order of first citation; a citation with no
+  definition, a definition nothing cites, or a repeated definition stops the
+  tool with an error naming the note, so no citation is dropped silently.
+  Options: `title`, `author`, `page_size` (A4 or Letter), `date`, and `notes`
+  (`endnotes`, the default, or `footnotes`). In the Word file the notes are
+  real Word endnotes or footnotes, numbered and linked by Word; in the PDF
+  they are superscript numbers that link to a Notes section at the end, or to
+  the foot of the page that cites them, and the URLs in them are clickable. The PDF has bookmarks from the headings,
   numbered pages, clickable links, and its title and author in its
   properties; the Word file uses Word's own Heading 1-4 styles, so the
   Navigation pane and a table of contents work, with real tables, lists,

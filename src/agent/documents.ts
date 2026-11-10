@@ -100,7 +100,12 @@ function officeText(bytes: Buffer, format: Exclude<DocumentFormat, 'pdf'>, name:
     let hidden = 0;
     // Runs formatted as hidden (w:vanish) are not shown in Word, so they are not read either.
     const xml = (read('word/document.xml') ?? missing(name, 'word/document.xml')).replace(/<w:r(?:\s[^>]*)?>(?:(?!<\/w:r>)[\s\S])*?<w:vanish(?:\s+w:val="(?:true|1|on)")?\s*\/>[\s\S]*?<\/w:r>/g, () => { hidden += 1; return ''; });
-    return { text: wordText(xml), ...(hidden ? { hiddenParts: hidden } : {}) };
+    // Footnotes and endnotes (often the citations) follow the body, numbered in order; Word's separator notes are skipped.
+    const notes = (['footnote', 'endnote'] as const).map((kind) => {
+      const items = [...(read(`word/${kind}s.xml`) ?? '').matchAll(new RegExp(`<w:${kind}\\b([^>]*)>([\\s\\S]*?)</w:${kind}>`, 'g'))].filter((match) => !/\bw:type="/.test(match[1]));
+      return items.length ? `\n\n${kind === 'footnote' ? 'Footnotes' : 'Endnotes'}:\n${items.map((match, index) => `[${index + 1}] ${wordText(match[2]).trim()}`).join('\n')}` : '';
+    }).join('');
+    return { text: wordText(xml) + notes, ...(hidden ? { hiddenParts: hidden } : {}) };
   }
   if (format === 'pptx') return slidesText(read, name);
   return sheetsText(read, name);
