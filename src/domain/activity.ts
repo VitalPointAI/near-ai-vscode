@@ -204,8 +204,9 @@ export function emptyAgentCounts(): AgentCounts {
 }
 
 /**
- * Counts agents, not events: a sub-agent records "running" and later "completed" or "failed", so only its latest event says where it is. An agent
- * event without an id stands for one agent of its own.
+ * Counts agents, not events: a sub-agent records "running" and later "completed" or "failed", so only its latest event says where it is. Every agent
+ * event the extension records carries the sub-agent's id (agentSession records started, completed and failed with `agent.id`, which is never empty),
+ * so grouping by id is exact. An agent event without one can only come from a hand-edited or foreign history file, and stands for one agent of its own.
  */
 export function summarizeAgentCounts(events: ActivityEvent[]): AgentCounts {
   const latest = new Map<string, ActivityStatus>();

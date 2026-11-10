@@ -12,7 +12,7 @@ import { checkDraft, draftFromMarkdown, lineDiff, teamMarkdown, type TeamDraft }
 import { DEFAULT_TOOLS, parseTeam, renderTeam, slugify, TeamLibrary, teamKnowledgeKey } from '../agent/teams';
 import { addKnowledge } from '../services/teamKnowledgeStore';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
-import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, parseStudioMessage, reviewDraft, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
+import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, optimiseTarget, parseStudioMessage, reviewDraft, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
 
 // Team Studio: a visual builder and manager for the Markdown team files, which stay the source of truth.
@@ -1129,6 +1129,36 @@ test('optimise-all asks once for every team with the total, then reports each te
   h.close();
 });
 
+test('the role tests rewrite the team the person acted on, never a library team that shares the project team\'s name', async () => {
+  // Agent review: the first name match won, so with a project team and a library team both called "Web", optimising one could rewrite the other's models.
+  const h = await harness();
+  const calls: Array<{ team: string; file?: string }> = [];
+  (h.deps as unknown as Record<string, unknown>).optimiseCandidates = async () => ['fast'];
+  (h.deps as unknown as Record<string, unknown>).optimiseTeam = async (_members: unknown[], team: string, options?: { file?: string }) => {
+    calls.push({ team, ...(options?.file ? { file: options.file } : {}) });
+    return { applied: 0, text: `${team}: done.` };
+  };
+  h.chooseAnswer.value = 'Run the tests';
+  const webTeam = '---\nname: Web\ndescription: One.\n---\n\n## a\nrole: planner\n\nDoes a.\n';
+  const libraryFile = await h.library.create('Web', webTeam);
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  await mkdir(path.dirname(projectFile), { recursive: true });
+  await writeFile(projectFile, webTeam, 'utf8');
+  await h.send({ type: 'optimise-all' });
+  await h.settle();
+  // Each team is run with its own file, so the optimiser cannot confuse the two.
+  assert.deepEqual(calls.map((call) => call.file).sort(), [libraryFile, projectFile].sort());
+
+  const entries = await h.library.list(h.root);
+  assert.equal(entries.filter((entry) => entry.team?.name === 'Web').length, 2, 'both teams are listed under the same name');
+  assert.equal(optimiseTarget(entries, 'Web', projectFile)?.file, projectFile, 'acting on the project team picks the project team');
+  assert.equal(optimiseTarget(entries, 'Web', libraryFile)?.file, libraryFile, 'acting on the library team picks the library team');
+  assert.equal(optimiseTarget(entries, 'Web')?.file, libraryFile, 'with only a name, the library team found by its slug comes first');
+  assert.equal(optimiseTarget(entries.filter((entry) => entry.project), 'Web')?.file, projectFile, 'the project team is still found by name when it is the only match');
+  assert.equal(optimiseTarget(entries, 'Web', path.join(h.root, 'elsewhere.md')), undefined, 'a file that is not listed matches nothing');
+  h.close();
+});
+
 test('optimise-all says so when there is nothing to test, and does not ask a pointless question', async () => {
   const h = await harness();
   (h.deps as unknown as Record<string, unknown>).optimiseTeam = async () => ({ applied: 0, text: 'unused' });
@@ -1139,6 +1169,20 @@ test('optimise-all says so when there is nothing to test, and does not ask a poi
   const notices = h.posted.filter((message) => message.type === 'notice').map((message) => String(message.text));
   assert.ok(notices.some((text) => /no teams to test/i.test(text)), `it says there is nothing to do: ${JSON.stringify(notices)}`);
   h.close();
+});
+
+test('the same project always gets the same knowledge graph key, however its folder is spelled', () => {
+  const posix = (root: string) => teamKnowledgeKey(`${root}/.planning/.near-ai/team.md`, 'linux');
+  assert.equal(posix('/work/app/'), posix('/work/app'), 'a trailing separator');
+  assert.equal(posix('/work/./other/../app'), posix('/work/app'), 'dot segments');
+  assert.notEqual(posix('/work/App'), posix('/work/app'), 'on Linux, case still tells two folders apart');
+  const win = (file: string) => teamKnowledgeKey(file, 'win32');
+  const lower = win('c:\\work\\app\\.planning\\.near-ai\\team.md');
+  assert.equal(win('C:\\work\\app\\.planning\\.near-ai\\team.md'), lower, 'the drive letter as VS Code and a terminal spell it');
+  assert.equal(win('C:\\Work\\APP\\.planning\\.near-ai\\team.md'), lower, 'Windows paths ignore case');
+  assert.equal(win('C:/work/app/.planning/.near-ai/team.md'), lower, 'forward slashes');
+  assert.match(lower, /^project--[0-9a-f]{12}$/);
+  assert.equal(win('C:\\teams\\Web-Team.md'), 'web-team', 'a library team keeps its slug');
 });
 
 test('a project team has its own knowledge graph, never one shared with every other project or a library team saved as team.md', async () => {
