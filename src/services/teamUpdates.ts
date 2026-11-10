@@ -9,10 +9,28 @@ import { templateVersion } from '../agent/projectTypes';
 // which teams have been offered an update or asked not to be. The commands in
 // workspaceCommands.ts put these behind a preview and a confirmation.
 
-export interface TeamUpdatePreview { file: string; name: string; plan: TeamUpdatePlan; guidance?: GuidancePlan; agentsFile?: string }
+/** `text` and `agents` are the contents the plan was made from, so apply can tell whether either changed since. */
+export interface TeamUpdatePreview { file: string; name: string; plan: TeamUpdatePlan; guidance?: GuidancePlan; agentsFile?: string; text: string; agents?: string }
 export interface AppliedUpdate { file: string; backup: string; agentsFile?: string; agentsBackup?: string }
 
 const projectRoot = (file: string) => (path.basename(file) === 'team.md' && path.basename(path.dirname(file)) === '.near-ai' && path.basename(path.dirname(path.dirname(file))) === '.planning' ? path.resolve(path.dirname(file), '..', '..') : undefined);
+
+/** What the user saw and confirmed, member by member and for the guidance. */
+function planSignature(preview: TeamUpdatePreview): string {
+  return JSON.stringify([preview.plan.template.id, preview.plan.template.toVersion, preview.plan.members.map((member) => [member.name, member.action, member.current ?? '', member.proposed ?? '', member.merged ?? '']), preview.guidance ? [preview.guidance.action, preview.guidance.current ?? '', preview.guidance.proposed ?? ''] : null]);
+}
+
+function samePlan(a: TeamUpdatePreview, b: TeamUpdatePreview): boolean {
+  return planSignature(a) === planSignature(b);
+}
+
+/** The team file (or its guidance) changed after the user confirmed the preview; `preview` is the plan for the file as it is now. */
+export class TeamChangedError extends Error {
+  public constructor(file: string, public readonly preview: TeamUpdatePreview | undefined) {
+    super(`${path.basename(file)} changed while you were reviewing the update, so nothing was written.`);
+    this.name = 'TeamChangedError';
+  }
+}
 
 /** An update that could be neither finished nor rolled back: `changed` names the files that have it, and `applied` is what Undo needs. */
 export class PartialUpdateError extends Error {
@@ -33,14 +51,14 @@ export class TeamUpdater {
     if (!plan) return undefined;
     const name = parseTeam(text, file).name;
     const root = projectRoot(file);
-    if (!root) return { file, name, plan };
+    if (!root) return { file, name, plan, text };
     const agentsFile = path.join(root, 'AGENTS.md');
     const agents = await readFile(agentsFile, 'utf8').catch(() => undefined);
     const config = await readFile(path.join(root, '.planning', '.near-ai', 'project.json'), 'utf8').then((raw) => JSON.parse(raw) as Record<string, unknown>).catch(() => ({} as Record<string, unknown>));
     // Only guidance this extension wrote for the same type is updated.
-    if (agents === undefined || (config.type !== undefined && config.type !== plan.template.id)) return { file, name, plan };
+    if (agents === undefined || (config.type !== undefined && config.type !== plan.template.id)) return { file, name, plan, text };
     const guidance = planGuidanceUpdate(agents, plan.template.id, typeof config.guidanceBase === 'string' ? config.guidanceBase : undefined);
-    return { file, name, plan, ...(guidance.action === 'none' ? {} : { guidance, agentsFile }) };
+    return { file, name, plan, text, ...(guidance.action === 'none' ? {} : { guidance, agentsFile, agents }) };
   }
 
   /** Whether the file should be offered an update: from a built-in type and not already current. */
@@ -56,15 +74,18 @@ export class TeamUpdater {
    * AGENTS.md beside it) before anything is written. If a write fails, everything already written is put back and the error says nothing
    * changed; if putting it back fails too, a PartialUpdateError says exactly which files changed and carries what Undo needs.
    */
-  public async apply(preview: TeamUpdatePreview, decisions: UpdateDecisions & { guidance?: 'take' | 'keep' }): Promise<AppliedUpdate> {
-    const text = await readFile(preview.file, 'utf8');
+  public async apply(confirmed: TeamUpdatePreview, decisions: UpdateDecisions & { guidance?: 'take' | 'keep' }): Promise<AppliedUpdate> {
+    // Plan again from the files as they are now: an edit made while the confirmation was open must not be overwritten by a stale plan.
+    const preview = await this.preview(confirmed.file);
+    if (!preview || !samePlan(preview, confirmed)) throw new TeamChangedError(confirmed.file, preview);
+    const text = preview.text;
     const updated = applyTeamUpdate(text, preview.plan, decisions);
     parseTeam(updated, preview.file);
     const writes: Array<{ file: string; before: string; after: string; label: string }> = [{ file: preview.file, before: text, after: updated, label: path.basename(preview.file) }];
     const guidance = preview.guidance;
     const result: AppliedUpdate = { file: preview.file, backup: '' };
     if (preview.agentsFile && guidance && (guidance.action === 'auto' || (guidance.action === 'choice' && decisions.guidance === 'take'))) {
-      const agents = await readFile(preview.agentsFile, 'utf8');
+      const agents = preview.agents!;
       writes.push({ file: preview.agentsFile, before: agents, after: applyGuidanceUpdate(agents, guidance), label: 'AGENTS.md' });
       const configFile = path.join(path.dirname(preview.agentsFile), '.planning', '.near-ai', 'project.json');
       const raw = await readFile(configFile, 'utf8').catch(() => undefined);

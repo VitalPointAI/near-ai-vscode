@@ -16,7 +16,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
-import { PartialUpdateError, TeamUpdater, UpdateNotices } from '../services/teamUpdates';
+import { PartialUpdateError, TeamChangedError, TeamUpdater, UpdateNotices } from '../services/teamUpdates';
 
 // Update Team: a team made from a built-in project type is brought up to date member by member,
 // replacing only what the user never changed, and asking about everything else.
@@ -312,4 +312,25 @@ test('an update is all or nothing: a failed write puts back what was written, an
   assert.notEqual((await read()).team, original.team, 'the team file really did change');
   await new TeamUpdater(library).undo(error.applied);
   assert.deepEqual(await read(), original, 'Undo restores every file');
+});
+
+test('an edit made while the confirmation was open is never overwritten: the update is planned again and shown again', async () => {
+  const { library, file, read } = await project();
+  const updater = new TeamUpdater(library);
+  const confirmed = (await updater.preview(file))!;
+  assert.equal(confirmed.plan.members.find((member) => member.name === 'editor')!.action, 'auto');
+  // The user edits the editor while the dialog is open.
+  const edited = (await read()).team.replace('Report required changes; do not rewrite the report yourself.', 'Report required changes; also check the house style.');
+  await writeFile(file, edited);
+  const error = await updater.apply(confirmed, {}).then(() => undefined, (caught: unknown) => caught);
+  assert.ok(error instanceof TeamChangedError, String(error));
+  assert.match(error.message, /^team\.md changed while you were reviewing the update, so nothing was written\.$/);
+  assert.equal((await read()).team, edited, 'the edit is kept');
+  assert.equal(error.preview!.plan.members.find((member) => member.name === 'editor')!.action, 'choice', 'the new plan asks about the edited member');
+  // A change the plan does not depend on (the description) is not a reason to stop, and is kept.
+  const fresh = (await updater.preview(file))!;
+  await writeFile(file, edited.replace('description: Researching any topic given.', 'description: Wearables research.'));
+  await updater.apply(fresh, { members: { editor: 'keep' } });
+  assert.match((await read()).team, /description: Wearables research\./);
+  assert.match((await read()).team, /also check the house style/);
 });
