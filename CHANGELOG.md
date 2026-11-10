@@ -42,23 +42,18 @@ the button writes. A chart shows the score over time, by task type, so you can s
   by itself, or stop between steps in any of the asking modes.
 - **"1 to fix" now says what needs fixing**, and takes you to the step that holds it.
 
-- **A team's knowledge graph accumulates, and learns.** Nothing a team learned is silently dropped to enforce a size: the graph itself has no ceiling, because a
+- **A team's knowledge graph accumulates, and learns.** Nothing a team learned is silently dropped to enforce a size: the graph has no ceiling, because a
   ceiling that dropped the oldest entries made a team forget what it had learned. (The Learn tool still accepts at most 40 actors, 60 relations, and 12 facts per
-  actor in one call — that bounds one call, not the graph.) What changes over time is what is currently *believed*: a fact that later evidence refutes moves to a
-  recorded history with why and when it stopped being believed, rather than staying as if it were still true, so a decision made on the old knowledge can still be
-  revisited. A refuted claim is not re-learned from an unsourced echo, but a re-assertion carrying independent evidence — a source that is not a page the agent
-  read — is believed again, with the revival dated and anything it contradicts retired beside it.
-- **One team's knowledge can no longer end up in another team's graph — for anything written from this version on.** Plain lowercase names keep their file;
-  every other name gets `<slug>~<hash>` under a character plain names cannot contain, so `acme co` and `acme-co`, an accented name, an empty one, and a team
-  named to imitate a hashed file all keep separate graphs. Graphs written before this version are adopted **only when the old file names the team exactly**
-  (`team: "My Team"`): files stamped the slug an earlier version wrote (`team: "my-team"`) are **left in place and not adopted**, because the slug is also the
-  identity of another, plain-named team — adopting it copied that team's knowledge into the first team's graph, the leak this entry exists to prevent. Such a
-  superseded graph is not lost or deleted: its load reports where the file is, what it holds, and why it was not copied, and renaming its `team` field to the
-  display name by hand adopts it on the next load. Teams whose display name was already their plain lowercase slug (`scouts`) never had a stamp mismatch and
-  are unaffected.
-- **A contradiction can only retire what it out-evidences.** A graded current fact keeps its place against a claim the agent merely read on a page or left
-  ungraded: retirement now needs the incoming side to be at least as credible as what stands, so a hostile page cannot push verified knowledge out of current
-  belief on vocabulary alone. What is retired keeps its history entry, and independent evidence can still bring it back.
+  actor in one call; that bounds one call, not the graph.) What changes over time is what is currently *believed*: a fact that later evidence contradicts moves to
+  a recorded history with why and when it stopped being believed, so a decision made on the old knowledge can still be revisited. Only a claim at least as
+  strong as what stands can retire it. A refuted claim is not re-learned from an unsourced echo; a re-assertion that cites a source is believed again, dated
+  from then.
+- **An agent's word is worth C3 at most in the knowledge graph.** An agent that read a hostile page can be steered into writing any grade and any source,
+  including one that does not look like a page, so whatever an agent records is stored at C3 ("fairly reliable, possibly true") or below, whatever it cites.
+  An agent can still grade lower (D5, F6), and a grade only ever falls as the graph is merged, so a later mention cannot raise one. Graphs written by 0.4.18,
+  where an agent could store A1, are read at C3 too. Nothing moves on disk: a team's graph stays in the file it was always in.
+- **A damaged knowledge file is kept, not overwritten.** When a team's graph cannot be read, the next addition copies the unreadable file aside as
+  `<team>.damaged-<time>.json` before starting a new graph, and the agent is told, rather than the file being replaced in silence.
 
 ## 0.4.18
 

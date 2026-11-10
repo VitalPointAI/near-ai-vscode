@@ -118,10 +118,9 @@ function isContradicted(oldText: string, newText: string): boolean {
   return false;
 }
 
-// Locked residue of the number rule above (sixteenth 0.4.19 review, MINOR): the shared>=2 + overlap>=0.6 gate can read a GENUINELY NEW figure about the same
-// actor as a correction of the old one — `handled 4.2 million TEU in 2025` then `handled 5.1 million TEU in 2026` is accumulation, but it retires. The trade
-// stays, because the reverse error (treating a re-stated figure as new) leaves BOTH numbers in current belief with nothing marking which one a decision may
-// rely on; the retired fact keeps its history entry and stays one revival away. The pin lives in the test suite (numericCorrectionRetiresNewFigures pin).
+// A known trade in the number rule above: `handled 4.2 million TEU in 2025` then `handled 5.1 million TEU in 2026` reads as a correction and retires the
+// first, although both may be true. It is kept because the reverse error leaves two figures standing as current with nothing saying which one holds; the
+// retired fact stays in history and a sourced re-assertion brings it back. Pinned by a test.
 
 /**
  * Moves a fact from what is believed to the record of what was believed. Nothing is deleted: a decision may have been made on it, and a person revisiting that
@@ -140,8 +139,8 @@ export interface TeamKnowledge {
   edges: KnowledgeEdge[];
   updatedAt: string;
   /**
-   * Why the file this came from could not be read, when it could not. A damaged graph is rebuilt from empty and the problem travels with it, so the person is
-   * told instead of the corruption disappearing (0.4.19 review). Never written to disk.
+   * Why the file this came from could not be read, when it could not. A damaged graph is set aside and rebuilt from empty, and the problem travels with it so
+   * the person is told. Never written to disk.
    */
   problem?: string;
 }
@@ -163,75 +162,64 @@ export function nodeId(label: string): string {
 
 const edgeId = (from: string, to: string, kind: EdgeKind): string => `${from}~${kind}~${to}`;
 
-/**
- * Whether a source is an address on the web rather than a named document. The scheme is optional, because `evil.test/about` and `https://evil.test/about`
- * are the same thing to a reader. Lives here rather than in the tool because the merge must apply the same test: a grade must not become uncapped just
- * because it arrived through `addKnowledge` instead of `Learn` (0.4.19 review).
- */
-export function looksLikeAddress(source: string): boolean {
-  // 0.4.19 review: a homoglyph or an invisible character in the host was enough to keep an A1, because the test only knew ASCII dots. The fold covers the
-  // CJK/ideographic full stops and zero-widths; Cyrillic/Greek LOOKALIKES (`еvil.test` with U+0435) do NOT fold under NFKC and stay invisible to this test —
-  // a known, deliberate residue (sixteenth 0.4.19 review, MINOR): the direction of the error is the safe one, since a source that slips through keeps its
-  // honest grade instead of gaining a cap it did not earn, and a proper Unicode-confusable table is a larger change than a review round.
-  const text = source.normalize('NFKC')
-    .replace(/[\u00AD\u200B-\u200F\u2060\uFEFF]/g, '')
-    .replace(/[\u3002\uFF0E\uFF61]/g, '.')
-    // An obfuscator can write the dot in words or brackets, or hang the host off an address (`contact@evil.test`, which browsers do resolve); all are pages.
-    .replace(/\[(?:[.·]|dot)\]|\((?:[.]|dot)\)|\{[.]\}/gi, '.')
-    .trim();
-  if (/https?:\/\//i.test(text)) return true;
-  // Fifth 0.4.19 review suggested requiring a scheme, a path or a known TLD here, so a dotted DOCUMENT name (`annual-report.pdf`) is not treated as a page.
-  // The suggestion is declined deliberately: any dotted bare host counts as a page, which is the conservative direction — it can only CAP a grade or REFUSE
-  // a revival, never raise one — and the repo's own tests lock in bare `evil.test` as a page. A named document wrongly capped keeps its history entry and a
-  // wrongly-refused revival can return with a differently-worded source; the reverse error would let a page claim A1. Over-catching is the cheap mistake.
-  //
-  // The one carve-out is SHAPE, stated once and locked by tests (eighth, ninth and eleventh 0.4.19 reviews): among two-label dotted tokens, one that ends in
-  // a NUMBER is a figure or version — `4.2`, `v2.1` — the independent evidence a revival may cite, never a page. A two-label token ending in letters stays a
-  // page (`evil.test`, `annual-report.pdf`). A three-or-more-label all-numeric token is an IPv4-style address and stays a page (`192.0.2.1`, `10.0.0/report`).
-  // A NAMED DOCUMENT is therefore treated as a page too (`annual-report.pdf` ends in letters): over-catching is the cheap mistake, and the CHANGELOG says so.
-  // EVERY dotted token in the text is judged (eleventh 0.4.19 review, BLOCKER): matching only the first let `1.0 evil.test/about` read as the figure `1.0`
-  // and keep a hostile page at A1 — a page is a page wherever in the sentence it hides, so any page-shaped token decides true. The left boundary is a
-  // LOOKBEHIND, not a consumed character: a consumed boundary ate the space between `1.0` and the page that followed, and the second token never matched.
-  // QUOTES are boundaries on both sides (fourteenth 0.4.19 review, BLOCKER): `see "evil.test/about"` hid behind an unconsumed quotation mark and kept A1,
-  // and a quoted page even counted as independent evidence and revived a refuted claim. A sentence-final DOT is a boundary too (fifteenth 0.4.19 review,
-  // MAJOR): at the end of a sentence `evil.test.` hides behind the period and keeps A1, so the trailing lookahead reads it as a boundary, not a label.
-  let sawPage = false;
-  for (const match of `${text} `.matchAll(/(?<=^|[\s([<,;:@'"])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?=[/?#]|$|[\s)\],;:'".])/gi)) {
-    const labels = match[1]!.split('.');
-    if (labels.length === 2 && /^\d+$/.test(labels[1]!)) continue; // a figure or version, judged on its own; a LATER page-shaped token still decides
-    sawPage = true;
-    break; // a two-label host, an address-shaped token, or anything longer: a page
-  }
-  return sawPage; // every dotted token was a figure — or there was none
-}
-
-/** The grade a claim about something an agent READ is worth: C3 at most, whichever shape it arrives in. */
-export function capForWebSource(grading: Grading): Grading {
-  const rank = ['A', 'B', 'C', 'D', 'E', 'F'];
-  const reliability = rank.indexOf(grading.reliability) < rank.indexOf('C') ? 'C' : grading.reliability;
-  return { reliability, credibility: (grading.credibility < 3 ? 3 : grading.credibility) as Grading['credibility'] };
-}
+/** The full Admiralty reliability rank, best first. */
+const ADMIRALTY = ['A', 'B', 'C', 'D', 'E', 'F'];
 
 /**
- * The weaker of two grades, axis by axis. A grade may only ever go DOWN as the graph is merged: a later addition that arrives without the web cap must not
- * launder an earlier capped grade back up to A1 (0.4.19 review).
+ * The most an agent's own say-so is worth: C3, "fairly reliable, possibly true".
+ *
+ * An agent writes the graph, and an agent that has read a hostile page can be steered into writing whatever that page wants, including the grade and a
+ * source that does not look like a page at all ("the official registry"). No test of the source text can tell those apart, so the grade an agent can store is
+ * capped whatever it cites. Only a person (`interaction`) can record a grade above it. An agent can still grade BELOW the ceiling (D5, F6), which is
+ * information worth keeping.
  */
+export const AGENT_CEILING: Grading = { reliability: 'C', credibility: 3 };
+
+/** The weaker of two grades, axis by axis. */
 function weakerGrade(a: Grading, b: Grading): Grading {
-  const rank = ['A', 'B', 'C', 'D', 'E', 'F'];
   return {
-    reliability: rank.indexOf(a.reliability) >= rank.indexOf(b.reliability) ? a.reliability : b.reliability,
+    reliability: ADMIRALTY.indexOf(a.reliability) >= ADMIRALTY.indexOf(b.reliability) ? a.reliability : b.reliability,
     credibility: (a.credibility >= b.credibility ? a.credibility : b.credibility) as Grading['credibility']
   };
 }
 
-/** The full Admiralty rank, shared by every comparison of two grades. */
-const ADMIRALTY = ['A', 'B', 'C', 'D', 'E', 'F'];
+/** The grade a claim may be stored with, given who wrote it: what was claimed, capped at AGENT_CEILING unless a person wrote it. */
+export function withinCeiling(grading: Grading | undefined, origin: KnowledgeOrigin): Grading | undefined {
+  if (!grading) return undefined;
+  return origin === 'interaction' ? grading : weakerGrade(grading, AGENT_CEILING);
+}
 
-/** Whether a claim stands at least as strong as the belief it contradicts, on BOTH axes, over the FULL rank (fourth 0.4.19 review): comparing against a
-  * truncated A-C rank made indexOf return -1 for a D, E or F — which compares below everything and let a D1 claim retire an A1 fact, the exact opposite
-  * of what the gate exists for. */
-const atLeastAsStrong = (incoming: Grading, outgoing: Grading): boolean =>
-  ADMIRALTY.indexOf(incoming.reliability) <= ADMIRALTY.indexOf(outgoing.reliability) && incoming.credibility <= outgoing.credibility;
+/** Ungraded evidence is the weakest there is, so it can never outweigh a graded belief. */
+const UNGRADED: Grading = { reliability: 'F', credibility: 6 };
+
+/** Whether a claim stands at least as strong as the belief it would retire, on BOTH axes. Ungraded counts as the weakest grade. */
+const atLeastAsStrong = (incoming: Grading | undefined, outgoing: Grading | undefined): boolean => {
+  const a = incoming ?? UNGRADED;
+  const b = outgoing ?? UNGRADED;
+  return ADMIRALTY.indexOf(a.reliability) <= ADMIRALTY.indexOf(b.reliability) && a.credibility <= b.credibility;
+};
+
+/**
+ * The same graph with every grade an agent wrote held to AGENT_CEILING. A graph written before the ceiling existed (0.4.18) can hold an agent's A1; it is
+ * brought down when it is read and when it is merged, so no stored grade outranks the rule however old the file is. Pure: returns a copy.
+ */
+export function heldToCeiling(graph: TeamKnowledge): TeamKnowledge {
+  const fact = (entry: KnowledgeFact): KnowledgeFact => {
+    const grading = withinCeiling(entry.grading, entry.origin);
+    return { ...entry, ...(grading ? { grading } : {}) };
+  };
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => {
+      const grading = withinCeiling(node.grading, node.origin);
+      return { ...node, functions: [...node.functions], facts: node.facts.map(fact), ...(node.history ? { history: node.history.map(fact) } : {}), ...(grading ? { grading } : {}) };
+    }),
+    edges: graph.edges.map((edge) => {
+      const grading = withinCeiling(edge.grading, edge.origin);
+      return { ...edge, ...(grading ? { grading } : {}) };
+    })
+  };
+}
 
 /** A tension outside -1 to 1 is clamped rather than rejected: an agent that says 2 means "very strong". */
 export function clampTension(value: number | null | undefined): number | null {
@@ -246,7 +234,7 @@ export function clampTension(value: number | null | undefined): number | null {
 function dedupeFacts(facts: ReadonlyArray<{ text: string; source?: string; grading?: Grading; since?: string }>): Array<{ text: string; source?: string; grading?: Grading; since?: string }> {
   const byText = new Map<string, { text: string; source?: string; grading?: Grading; since?: string }>();
   for (const fact of facts) {
-    const key = fact.text.trim().toLowerCase();
+    const key = normalise(fact.text);
     const known = byText.get(key);
     if (!known) { byText.set(key, { text: fact.text, ...(fact.grading ? { grading: fact.grading } : {}), ...(fact.since ? { since: fact.since } : {}), ...(fact.source ? { source: fact.source } : {}) }); continue; }
     if (!known.source && fact.source) known.source = fact.source;
@@ -255,11 +243,13 @@ function dedupeFacts(facts: ReadonlyArray<{ text: string; source?: string; gradi
   return [...byText.values()];
 }
 
+const normalise = (text: string): string => text.trim().toLowerCase().replace(/\s+/g, ' ');
+
 export const emptyKnowledge = (team: string, at: string): TeamKnowledge => ({ version: 1, team, nodes: [], edges: [], updatedAt: at });
 
 /**
- * A fact's source as text. A source that is not a string (an object `{url: ...}`, a number) used to be dropped by the tool, which left the fact looking
- * unsourced and therefore uncapped: a bag of JSON carried an address and kept an A1 (0.4.19 review). The text is also what the address test reads.
+ * A fact's source as text. A source that is not a string (an object `{url: ...}`, a number) used to be dropped by the tool, which lost the citation; it is
+ * flattened to text instead so the person reading the graph can still see where the claim came from.
  */
 export function sourceText(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -268,130 +258,72 @@ export function sourceText(value: unknown): string {
   return String(value);
 }
 
-/** Whether anything an agent gave as a source or basis is an address on the web, whatever its shape. */
-export function webSourced(value: unknown): boolean {
-  return looksLikeAddress(sourceText(value));
-}
-
-/** The grade a claim is stored with: the one claimed, capped when the evidence behind it is something the agent read on the web. */
-function gradeFor(claimed: Grading | undefined, fromWeb: boolean): Grading | undefined {
-  if (!claimed) return undefined;
-  return fromWeb ? capForWebSource(claimed) : claimed;
-}
-
 /**
  * Merges what an agent learned into the team's graph. Adding the same thing twice does not duplicate it: a node is keyed by its label, so a second
  * mention adds its facts (without repeating one already there), a mention count, and a later `lastSeen`. An edge is keyed by its two ends and its kind,
  * and a measured tension replaces an unmeasured one but never the other way round, so a later vague mention cannot erase a measured strength.
+ *
+ * Trust is two rules, applied here so every path into the graph obeys them:
+ *   - the ceiling: nothing an agent writes is stored above AGENT_CEILING (see withinCeiling), and an older graph is brought under it first;
+ *   - grades only fall: a later mention can lower a stored grade, never raise it, so a second path cannot launder a grade back up. A mention lowers it by
+ *     what it CLAIMS, so an agent that grades a fact D5 lowers it to D5, while an agent repeating a fact a person verified at A1 leaves it at A1: the
+ *     ceiling limits what an agent can store, not what a person decided.
+ *
+ * Belief changes without deleting anything (owner, 2026-11-08): a fact a later claim contradicts moves to the actor's `history` with why and when, but only
+ * when the new claim is at least as strong as what it retires, so a weaker claim cannot push a stronger belief out. An unsourced echo of a refuted fact is not
+ * re-learned; a re-assertion that cites a source brings it back.
  */
 export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition): TeamKnowledge {
-  const nodes = new Map(base.nodes.map((node) => [node.id, { ...node, functions: [...node.functions], facts: node.facts.map((fact) => ({ ...fact })) }]));
-  const labelToId = new Map(base.nodes.map((node) => [node.label.trim().toLowerCase(), node.id]));
+  const start = heldToCeiling(base);
+  const nodes = new Map(start.nodes.map((node) => [node.id, node]));
+  const labelToId = new Map(start.nodes.map((node) => [node.label.trim().toLowerCase(), node.id]));
+  const stored = (fact: { text: string; source?: string; since?: string }, grading: Grading | undefined): KnowledgeFact =>
+    ({ text: fact.text, origin: addition.origin, since: fact.since ?? addition.at, ...(fact.source ? { source: fact.source } : {}), ...(grading ? { grading } : {}) });
   for (const incoming of addition.nodes) {
     const label = incoming.label.trim();
     if (!label) continue;
     const id = labelToId.get(label.toLowerCase()) ?? nodeId(label);
     labelToId.set(label.toLowerCase(), id);
-    // The cap is applied HERE, not only in the tool, so no path into the merge (a direct addKnowledge call, a replayed addition) can store a web-sourced
-    // claim above C3. The node's own label counts as a source too: `https://evil.test` as an actor's NAME is as much a page the agent read as a fact
-    // source is, and there are no facts to look at in that case (0.4.19 review). An UNSOURCED fact is judged like an unsourced relation (tenth 0.4.19
-    // review, MAJOR): omitting `source` was a way to keep an A1 on a page's claim — an unsourced fact arrives capped, UNLESS the origin is an interaction,
-    // the one path where a person, not a page, is the witness. Facts may also carry their OWN grade (a raced migration's legacy graph), which the
-    // node-level cap below must not raise.
-    const fromWeb = looksLikeAddress(label) || (incoming.facts ?? []).some((fact) => webSourced(fact.source));
-    // The NODE's grade is judged on the actor itself — its label, its cited sources, and whether the addition carries any witness stronger than a page
-    // (eleventh 0.4.19 review, MAJOR; closed for the NODE too, sixteenth 0.4.19 review, MAJOR): an `origin: 'research'` addition with no sources at all and
-    // a declared A1 used to store the ACTOR at A1 while its facts individually arrived capped — omitting `source` was still a way to display a page's claim
-    // at the top grade. A non-interaction addition with no non-web-sourced fact anywhere is judged fromWeb: an interaction is the one path where a person,
-    // not a page, is the witness.
-    const hasWitness = (incoming.facts ?? []).some((fact) => fact.source !== undefined && !webSourced(fact.source)) || addition.origin === 'interaction';
-    const grading = gradeFor(incoming.grading, fromWeb || looksLikeAddress(label) || !hasWitness);
-    const factGrading = (fact: { grading?: Grading; source?: string }): Grading | undefined => {
-      if (fact.grading) return gradeFor(fact.grading, fact.source !== undefined && webSourced(fact.source));
-      return gradeFor(incoming.grading, looksLikeAddress(label) || (fact.source !== undefined && webSourced(fact.source)) || (addition.origin !== 'interaction' && fact.source === undefined));
-    };
+    const grading = withinCeiling(incoming.grading, addition.origin);
+    // A fact carries its own grade when it has one, and the actor's otherwise; either way within the ceiling when it is stored new.
+    const factGrading = (fact: { grading?: Grading }): Grading | undefined => withinCeiling(fact.grading ?? incoming.grading, addition.origin);
     const existing = nodes.get(id);
     if (!existing) {
       nodes.set(id, {
         id, label, kind: incoming.kind ?? 'actor', functions: [...new Set(incoming.functions ?? [])],
-        // A new actor's facts are deduplicated too: an agent that states the same fact twice in one addition should not store it twice.
-        facts: dedupeFacts(incoming.facts ?? []).map((fact) => ({ text: fact.text, origin: addition.origin, ...(fact.since ? { since: fact.since } : { since: addition.at }), ...(fact.source ? { source: fact.source } : {}), ...(factGrading(fact) ? { grading: factGrading(fact) } : {}) })),
+        facts: dedupeFacts(incoming.facts ?? []).map((fact) => stored(fact, factGrading(fact))),
         origin: addition.origin, ...(grading ? { grading } : {}), firstSeen: addition.at, lastSeen: addition.at, mentions: 1
       });
       continue;
     }
-    // Functions accumulate, but a function that REPLACES an older one supersedes it rather than piling up beside it. There is no ceiling: the graph is meant
-    // to accumulate, and a silent truncation would make a team forget what it learned (owner, 2026-11-08).
     for (const fn of incoming.functions ?? []) if (!existing.functions.includes(fn)) existing.functions.push(fn);
-    for (const incomingFact of incoming.facts ?? []) {
-      const normalise = (text: string) => text.trim().toLowerCase().replace(/\s+/g, ' ');
+    for (const incomingFact of dedupeFacts(incoming.facts ?? [])) {
       const text = normalise(incomingFact.text);
-      // Already believed: fill in what is missing, and strengthen nothing.
+      const claimed = factGrading(incomingFact);
+      // Already believed: fill in a missing source, and let the grade only fall.
       const known = existing.facts.find((old) => normalise(old.text) === text);
       if (known) {
         if (!known.source && incomingFact.source) known.source = incomingFact.source;
-        // The known fact's OWN grade falls too (fourth 0.4.19 review, MINOR; widened eighth 0.4.19 review, MAJOR): the node-level fall below did not touch
-        // it, so a mention from a capped page left the stored fact at its original A1 even as the actor's grade dropped — and an addition that declares NO
-        // grade but cites the page left the fact at A1 outright. A web-sourced mention of an already-believed fact lowers that fact's grade to the cap
-        // whenever the cap is the weaker, whatever the addition declared.
-        if (incomingFact.source && webSourced(incomingFact.source) && known.grading) known.grading = weakerGrade(known.grading, capForWebSource(known.grading));
-        else if (grading && known.grading) known.grading = weakerGrade(known.grading, grading);
-        else if (grading && !known.grading && incomingFact.source && webSourced(incomingFact.source)) known.grading = gradeFor(grading, true);
-        else if (!known.grading && addition.origin !== 'interaction' && !incomingFact.source) known.grading = grading ?? capForWebSource({ reliability: 'A', credibility: 1 });
+        const said = incomingFact.grading ?? incoming.grading;
+        if (said) known.grading = known.grading ? weakerGrade(known.grading, said) : claimed;
         continue;
       }
-      // Already refuted: an echo — the same claim again, with no source of its own — is not re-learned, because a team that read a retraction should not
-      // forget that it did. A re-assertion that carries independent evidence (a source that is not a page the agent read) is new information though, and
-      // it moves the entry back out of history: believed again, dated from the re-assertion, with its grading as the revival's strength (0.4.19 review).
+      // Already refuted: an echo with no source of its own is not re-learned, because a team that read a retraction should not forget that it did.
       const refuted = (existing.history ?? []).find((old) => normalise(old.text) === text);
-      if (refuted) {
-        const revived = Boolean(incomingFact.source) && !webSourced(incomingFact.source);
-        if (!revived) continue;
-        // The revival is independent evidence, so what the claim contradicts NOW may be the out-of-date side. The same evidence gate applies: a revival
-        // retires a current belief only when it stands at least as strong (0.4.19 review).
-        for (const current of [...existing.facts]) {
-          if (!isContradicted(current.text, incomingFact.text)) continue;
-          const incoming = grading ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
-          // An UNGRADED current belief needs the same C3 floor as the contradiction branch below (sixteenth 0.4.19 review, MINOR): the revival's effective
-          // strength is C3 when nothing declares better, so it cannot retire on vocabulary alone whatever it contradicts.
-          if (incoming !== undefined && (!current.grading || atLeastAsStrong(incoming, current.grading))) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
-        }
-        existing.history = (existing.history ?? []).filter((old) => old !== refuted);
-        existing.facts.push({ text: incomingFact.text, origin: addition.origin, ...(incomingFact.since ? { since: incomingFact.since } : { since: addition.at }), ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(factGrading(incomingFact) ? { grading: factGrading(incomingFact) } : {}) });
-        continue;
+      if (refuted && !incomingFact.source) continue;
+      // A new claim, or a refuted one re-asserted with a source. Whatever current belief it contradicts is retired, but only by a claim at least as strong.
+      const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
+      for (const current of existing.facts.filter((old) => isContradicted(old.text, incomingFact.text))) {
+        if (atLeastAsStrong(claimed, current.grading)) retire(existing, current, why, addition.at);
       }
-      // A contradiction: the incoming fact names the same actor and says the opposite. The clear case is a `not` or `no longer`, which is how an agent
-      // states a refutation in one sentence; the general case is left to `supersedes` below. Retirement is gated on EVIDENCE STRENGTH (second 0.4.19
-      // review, MAJOR): a graded contradiction retires a current fact only when it is at least as credible as what stands — a hostile page capped to C3
-      // must not push an A1 the team verified out of current belief — and an ungraded contradiction never retires a graded one. Web-sourced claims arrive
-      // here already capped, so the gate is what stops a page refuting alone.
-      // Every contradicting belief is retired, not just the first match (seventh 0.4.19 review, MINOR): two current beliefs that both contradict the claim
-      // would otherwise leave the second standing beside it as still-true.
-      const contradicted = existing.facts.filter((old) => isContradicted(old.text, incomingFact.text));
-      for (const contradicts of contradicted) {
-        const outgoing = contradicts.grading;
-        // The claim's EFFECTIVE grade decides (twelfth 0.4.19 review, MINOR): a fact carrying its own stronger grade — a migrated legacy fact — must not be
-        // judged at the node's weaker one, or the gate retires knowledge it should not. An UNGRADED current belief is not free to take either (thirteenth
-        // 0.4.19 review, MINOR): it still needs the contradiction to stand at C3 — the standard an unsourced claim arrives at — so a page claim cannot
-        // retire what a person vouched for just because nobody graded it yet.
-        const incoming = factGrading(incomingFact) ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
-        if (incoming !== undefined && (!outgoing || atLeastAsStrong(incoming, outgoing))) {
-          const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
-          retire(existing, contradicts, why, addition.at);
-        }
-      }
-      existing.facts.push({ text: incomingFact.text, origin: addition.origin, ...(incomingFact.since ? { since: incomingFact.since } : { since: addition.at }), ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(factGrading(incomingFact) ? { grading: factGrading(incomingFact) } : {}) });
+      if (refuted) existing.history = (existing.history ?? []).filter((old) => old !== refuted);
+      existing.facts.push(stored(incomingFact, claimed));
     }
-    // A later grade can only LOWER the stored one. Replacing it outright let a second addition that named no source ("a document", or nothing at all)
-    // restore an A1 over a grade the first addition had already capped to C3 (0.4.19 review).
-    if (grading) existing.grading = existing.grading ? weakerGrade(existing.grading, grading) : grading;
+    if (incoming.grading) existing.grading = existing.grading ? weakerGrade(existing.grading, incoming.grading) : grading;
     existing.lastSeen = addition.at;
     existing.mentions += 1;
   }
-  const edges = new Map(base.edges.map((edge) => [edge.id, { ...edge }]));
-  // Whether an actor's side of a relation was researched from a page. Declared once for the whole merge (second 0.4.19 review, MINOR): an end can GAIN a web
-  // source in this same addition, and an edge touched by such an actor must be re-capped below even if the edge itself was not mentioned again.
-  const webEnd = (node: KnowledgeNode | undefined): boolean => Boolean(node && (looksLikeAddress(node.label) || node.facts.some((fact) => webSourced(fact.source))));
+  const edges = new Map(start.edges.map((edge) => [edge.id, edge]));
   for (const incoming of addition.edges) {
     const from = labelToId.get(incoming.from.trim().toLowerCase());
     const to = labelToId.get(incoming.to.trim().toLowerCase());
@@ -400,10 +332,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     const kind = incoming.kind ?? 'related';
     const id = edgeId(from, to, kind);
     const tension = clampTension(incoming.tension);
-    // Same cap, same reason: a named basis is not evidence that the relation was not read off a page, so an address anywhere in the basis caps it, and a
-    // relation with no basis at all is capped too. An end that was itself researched from a page caps it as well, whichever end, in either direction
-    // (0.4.19 review).
-    const grading = gradeFor(incoming.grading, incoming.basis === undefined || webSourced(incoming.basis) || webEnd(nodes.get(from)) || webEnd(nodes.get(to)));
+    const grading = withinCeiling(incoming.grading, addition.origin);
     const existing = edges.get(id);
     if (!existing) {
       edges.set(id, { id, from, to, kind, tension, ...(incoming.basis ? { basis: incoming.basis } : {}), origin: addition.origin, ...(grading ? { grading } : {}), lastSeen: addition.at, mentions: 1 });
@@ -411,28 +340,12 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     }
     if (existing.tension === null && tension !== null) existing.tension = tension;
     if (!existing.basis && incoming.basis) existing.basis = incoming.basis;
-    if (grading) existing.grading = existing.grading ? weakerGrade(existing.grading, grading) : grading;
+    if (incoming.grading) existing.grading = existing.grading ? weakerGrade(existing.grading, incoming.grading) : grading;
     existing.lastSeen = addition.at;
     existing.mentions += 1;
   }
-  // An actor that gained a web-sourced fact in THIS addition re-caps the grades of every relation it touches (second 0.4.19 review, MINOR): the edge loop
-  // re-grades an edge only when the same edge is mentioned again, so without this pass an edge could stay A1 while its end had just been revealed as a page.
-  // weakerGrade keeps the stronger side, so the pass only ever lowers. The ACTORS are re-capped too (seventh 0.4.19 review, MAJOR): an addition that declares
-  // no grading of its own used to leave an A1 node untouched while page-sourced facts piled onto it — an actor whose knowledge includes what it merely read
-  // cannot claim the top grade overall, whichever addition carried the page in. The pass runs every merge, so it also heals graph states an earlier version
-  // wrote before these caps existed.
-  for (const node of nodes.values()) {
-    if (node.grading && webEnd(node)) node.grading = weakerGrade(node.grading, capForWebSource(node.grading));
-  }
-  for (const edge of edges.values()) {
-    if (!edge.grading) continue;
-    if (webEnd(nodes.get(edge.from)) || webEnd(nodes.get(edge.to))) edge.grading = weakerGrade(edge.grading, capForWebSource(edge.grading));
-  }
-  // DELIBERATE: there is NO ceiling on nodes or relations. A knowledge graph is meant to accumulate, and a silent truncation makes a team forget what it
-  // learned. Something no longer being true is recorded by supersession (see retire), not by deletion, so the record grows as the team's knowledge does
-  // (owner, 2026-11-08). The dangling-relation filter is the ONE deliberate exception, and it is about integrity, not memory: an edge whose endpoint is gone
-  // names nothing, renders nowhere, and would lie about who relates to whom — the file keeps the record honest rather than keeping a pointer to nothing.
-  // (Fourteenth 0.4.19 review, MINOR.)
+  // There is NO ceiling on the number of nodes or relations, deliberately (owner, 2026-11-08): a graph is meant to accumulate, and a silent truncation makes a
+  // team forget what it learned. The one exception is integrity, not memory: an edge whose end is gone names nothing and is dropped.
   const allNodes = [...nodes.values()];
   const keptIds = new Set(allNodes.map((node) => node.id));
   return { version: 1, team: base.team, nodes: allNodes, edges: [...edges.values()].filter((edge) => keptIds.has(edge.from) && keptIds.has(edge.to)), updatedAt: addition.at };

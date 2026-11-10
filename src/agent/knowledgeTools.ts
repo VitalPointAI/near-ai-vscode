@@ -2,7 +2,7 @@
 // do, how they relate, and how strongly, each with the Admiralty grade of the evidence. Prose alone cannot be drawn, compared, or questioned, which is the
 // point of the graph.
 import type { KnowledgeAddition, NodeKind, EdgeKind, Grading, KnowledgeOrigin } from '../domain/teamKnowledge';
-import { capForWebSource, looksLikeAddress, neighbours, sourceText, type TeamKnowledge } from '../domain/teamKnowledge';
+import { neighbours, sourceText, withinCeiling, type TeamKnowledge } from '../domain/teamKnowledge';
 import type { AgentTool } from './tools';
 import { ToolError } from './workspace';
 
@@ -28,10 +28,11 @@ export interface KnowledgeTools {
   add(addition: KnowledgeAddition): Promise<TeamKnowledge>;
 }
 
-/** A graph that carries a `problem` reports why it is empty or rebuilt, so a refused team is never read as a quiet nothing (fourteenth 0.4.19 review). */
-const graphProblem = (graph: TeamKnowledge): string | undefined => (graph as TeamKnowledge & { problem?: string }).problem;
-
-export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigin = 'interaction'): AgentTool<any>[] {
+/**
+ * The tools, for a graph written by `origin`. There is no default: a run's agent writes as `research`, which holds every grade it gives to the ceiling, and
+ * only a path where a person is the witness may pass `interaction`.
+ */
+export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigin): AgentTool<any>[] {
   const lookup: AgentTool<{ query?: string; node?: string }> = {
     name: 'TeamKnowledge',
     description: 'Read this team\'s shared knowledge graph: what the team has already learned, so you do not research it again. Without arguments it lists the most mentioned actors and their strongest relations; with "query" it searches labels, functions and facts; with "node" it shows one actor in full: what it does, its facts with sources and Admiralty grades, and every relation in both directions with the tension of each.',
@@ -41,8 +42,7 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     title: (input) => (input.node ? `Knowledge: ${input.node}` : input.query ? `Knowledge: search "${input.query}"` : 'Knowledge graph'),
     async run(input) {
       const graph = await knowledge.read();
-      const refused = graphProblem(graph);
-      if (refused) return `This team's knowledge graph could not be used: ${refused} Nothing was read and nothing this run adds will be written there.`;
+      if (graph.problem && !graph.nodes.length) return `${graph.problem} The team's knowledge starts again from here; anything you verify is worth adding with Learn.`;
       if (!graph.nodes.length) return 'The team has no knowledge yet. Anything you verify is worth adding with Learn.';
       const grade = (grading?: Grading) => (grading ? `${grading.reliability}${grading.credibility}` : 'ungraded');
       const byId = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -121,43 +121,22 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
           if (!value || typeof value !== 'object') return [];
           const fact = value as Record<string, unknown>;
           if (typeof fact.text !== 'string' || !fact.text.trim()) return [];
-          // 0.4.19 review: a source that was not a string was dropped, which made the fact look unsourced and kept its A1. It is flattened to text here
-          // so the cap sees the address it holds.
+          // A source that is not a string is flattened rather than dropped, so the citation survives.
           const source = sourceText(fact.source).trim().slice(0, 300);
           return [{ text: fact.text.slice(0, 400), ...(source ? { source } : {}) }];
         }).slice(0, 12) : [];
-        let grading = gradingOf(node.grading, `nodes[${index}]`);
-        // 0.4.19 review: a hostile page an agent read could be given an A1 grade by that agent and become durable team memory. A fact with an external
-        // SOURCE but no grade is therefore ungraded on purpose, and one claiming the top grade for a web source is capped at C3: the agent cannot vouch for
-        // a page it just read, and the card shows what it claimed rather than silently trusting it.
-        // 0.4.19 review: the cap only fired for a source starting `http(s)://`, so an agent could write `evil.test/about` and keep its A1. Any source that
-        // LOOKS like an address counts, with or without a scheme.
-        const fromWeb = facts.some((fact) => fact.source !== undefined && looksLikeAddress(fact.source));
-        // 0.4.19 review: a node with NO facts kept its A1, so an agent could grade an actor it read about in a page by putting the address in the label
-        // alone, or by citing nothing at all. The label is checked too, so a node named after an address is capped like a fact sourced from it.
-        if (grading && (fromWeb || looksLikeAddress(node.label))) grading = capForWebSource(grading);
+        // Held to the ceiling here as well as in the merge, so what the approval preview shows is what will be stored.
+        const grading = withinCeiling(gradingOf(node.grading, `nodes[${index}]`), origin);
         return { label: node.label.trim().slice(0, 120), kind, functions, facts, ...(grading ? { grading } : {}) };
       });
-      // The labels this addition researched from a page, read before the edges, so an edge to one of them can be recognized below. The comparison runs
-      // against the TRIMMED label (eighth 0.4.19 review, NIT): edges reference stored nodes, and an unsliced edge end longer than 120 chars never equalled
-      // its own node label, so the relation through it kept an A1 the cap should have taken.
-      const researched = new Set(nodes
-        .filter((node) => looksLikeAddress(node.label) || node.facts.some((fact) => fact.source !== undefined && looksLikeAddress(fact.source)))
-        .map((node) => node.label.trim().slice(0, 120).toLowerCase()));
       const edges = Array.isArray(raw.edges) ? raw.edges.slice(0, 60).flatMap((entry, index) => {
         if (!entry || typeof entry !== 'object') return [];
         const edge = entry as Record<string, unknown>;
         if (typeof edge.from !== 'string' || !edge.from.trim() || typeof edge.to !== 'string' || !edge.to.trim()) return [];
         const kind = typeof edge.kind === 'string' && EDGE_KINDS.includes(edge.kind as EdgeKind) ? edge.kind as EdgeKind : 'related';
         const tension = typeof edge.tension === 'number' && Number.isFinite(edge.tension) ? edge.tension : null;
-        let grading = gradingOf(edge.grading, `edges[${index}]`);
+        const grading = withinCeiling(gradingOf(edge.grading, `edges[${index}]`), origin);
         const basis = typeof edge.basis === 'string' && edge.basis.trim() ? edge.basis.slice(0, 300) : undefined;
-        // 0.4.19 review: edges were never capped, so a hostile page could be given an A1 RELATION rather than an A1 fact. A relation from an address the agent
-        // read, or asserted with no basis at all, is C3 at most, exactly as a fact from the same place is.
-        // 0.4.19 review: a named basis still is not evidence the relation was not read off a page, so an edge whose END is an actor this same addition
-        // researched from a web source is capped too: `basis: "the vendor's own site"` was a way to keep an A1 on a page's claim.
-        const researchedEnd = researched.has(edge.from.trim().slice(0, 120).toLowerCase()) || researched.has(edge.to.trim().slice(0, 120).toLowerCase());
-        if (grading && (basis === undefined || looksLikeAddress(basis) || researchedEnd)) grading = capForWebSource(grading);
         return [{ from: edge.from.trim().slice(0, 120), to: edge.to.trim().slice(0, 120), kind, tension, ...(basis ? { basis } : {}), ...(grading ? { grading } : {}) }];
       }) : [];
       return { nodes, edges, origin, at: new Date().toISOString() };
@@ -170,9 +149,7 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     },
     async run(input) {
       const graph = await knowledge.add(input);
-      const refused = graphProblem(graph);
-      if (refused) return `Nothing was added: ${refused} The learning in this step is kept in the transcript, but it did not reach a graph.`;
-      return `The team's graph now holds ${graph.nodes.length} actor${graph.nodes.length === 1 ? '' : 's'} and ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}.`;
+      return `${graph.problem ? `${graph.problem} ` : ''}The team's graph now holds ${graph.nodes.length} actor${graph.nodes.length === 1 ? '' : 's'} and ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}.`;
     }
   };
 
