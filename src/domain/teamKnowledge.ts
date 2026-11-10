@@ -265,9 +265,9 @@ export function sourceText(value: unknown): string {
  *
  * Trust is two rules, applied here so every path into the graph obeys them:
  *   - the ceiling: nothing an agent writes is stored above AGENT_CEILING (see withinCeiling), and an older graph is brought under it first;
- *   - grades only fall: a later mention can lower a stored grade, never raise it, so a second path cannot launder a grade back up. A mention lowers it by
- *     what it CLAIMS, so an agent that grades a fact D5 lowers it to D5, while an agent repeating a fact a person verified at A1 leaves it at A1: the
- *     ceiling limits what an agent can store, not what a person decided.
+ *   - grades only fall: a later mention can lower a stored grade, never raise it, so a second path cannot launder a grade back up;
+ *   - what a person recorded is theirs: an agent's mention never changes the grade of an entry a person wrote, and an agent's claim never retires a
+ *     person's fact. Otherwise an agent could lower a person's A1 to F6 in one call and retire it with a C3 claim in the next.
  *
  * Belief changes without deleting anything (owner, 2026-11-08): a fact a later claim contradicts moves to the actor's `history` with why and when, but only
  * when the new claim is at least as strong as what it retires, so a weaker claim cannot push a stronger belief out. An unsourced echo of a refuted fact is not
@@ -277,6 +277,8 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
   const start = heldToCeiling(base);
   const nodes = new Map(start.nodes.map((node) => [node.id, node]));
   const labelToId = new Map(start.nodes.map((node) => [node.label.trim().toLowerCase(), node.id]));
+  // A person may regrade or retire anything; an agent only what an agent wrote.
+  const mayRegrade = (owner: KnowledgeOrigin): boolean => addition.origin === 'interaction' || owner !== 'interaction';
   const stored = (fact: { text: string; source?: string; since?: string }, grading: Grading | undefined): KnowledgeFact =>
     ({ text: fact.text, origin: addition.origin, since: fact.since ?? addition.at, ...(fact.source ? { source: fact.source } : {}), ...(grading ? { grading } : {}) });
   for (const incoming of addition.nodes) {
@@ -304,8 +306,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       const known = existing.facts.find((old) => normalise(old.text) === text);
       if (known) {
         if (!known.source && incomingFact.source) known.source = incomingFact.source;
-        const said = incomingFact.grading ?? incoming.grading;
-        if (said) known.grading = known.grading ? weakerGrade(known.grading, said) : claimed;
+        if (claimed && mayRegrade(known.origin)) known.grading = known.grading ? weakerGrade(known.grading, claimed) : claimed;
         continue;
       }
       // Already refuted: an echo with no source of its own is not re-learned, because a team that read a retraction should not forget that it did.
@@ -314,12 +315,12 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       // A new claim, or a refuted one re-asserted with a source. Whatever current belief it contradicts is retired, but only by a claim at least as strong.
       const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
       for (const current of existing.facts.filter((old) => isContradicted(old.text, incomingFact.text))) {
-        if (atLeastAsStrong(claimed, current.grading)) retire(existing, current, why, addition.at);
+        if (mayRegrade(current.origin) && atLeastAsStrong(claimed, current.grading)) retire(existing, current, why, addition.at);
       }
       if (refuted) existing.history = (existing.history ?? []).filter((old) => old !== refuted);
       existing.facts.push(stored(incomingFact, claimed));
     }
-    if (incoming.grading) existing.grading = existing.grading ? weakerGrade(existing.grading, incoming.grading) : grading;
+    if (grading && mayRegrade(existing.origin)) existing.grading = existing.grading ? weakerGrade(existing.grading, grading) : grading;
     existing.lastSeen = addition.at;
     existing.mentions += 1;
   }
@@ -340,7 +341,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     }
     if (existing.tension === null && tension !== null) existing.tension = tension;
     if (!existing.basis && incoming.basis) existing.basis = incoming.basis;
-    if (incoming.grading) existing.grading = existing.grading ? weakerGrade(existing.grading, incoming.grading) : grading;
+    if (grading && mayRegrade(existing.origin)) existing.grading = existing.grading ? weakerGrade(existing.grading, grading) : grading;
     existing.lastSeen = addition.at;
     existing.mentions += 1;
   }

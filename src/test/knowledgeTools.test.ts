@@ -76,6 +76,14 @@ test('an empty graph says so, and a full lookup names the actor, its grade, its 
   assert.match(list, /Strong relation: Ministry of Trade regulates Halden Ports \(-0\.7\)/);
 });
 
+test('a lookup shows what the team no longer believes, with why and when', async () => {
+  const kit = tools();
+  await kit.learn.run(kit.learn.parse({ nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }] } as never), {} as never);
+  await kit.learn.run(kit.learn.parse({ nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour authority' }] }] } as never), {} as never);
+  const text = await kit.lookup.run({ node: 'Port' } as never, {} as never);
+  assert.match(text, /No longer believed:\n- The port handled 4\.2 million TEU in 2025\. \(refuted \d{4}-\d{2}-\d{2} by: The port handled 3\.1 million TEU in 2025\. \(harbour authority\)\)/);
+});
+
 test('a lookup for an actor that is not there says so instead of returning nothing', async () => {
   const kit = tools();
   await kit.learn.run(kit.learn.parse(honest as never), {} as never);

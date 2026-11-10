@@ -53,6 +53,11 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
         const lines = [`${node.label} (${node.kind}), ${grade(node.grading)}, mentioned ${node.mentions} time${node.mentions === 1 ? '' : 's'}`];
         if (node.functions.length) lines.push(`Does: ${node.functions.join('; ')}`);
         for (const fact of node.facts.slice(0, 12)) lines.push(`- ${fact.text}${fact.source ? ` [${fact.source}]` : ''} (${grade(fact.grading)}, ${fact.origin})`);
+        // What the team no longer believes, and why, so an agent does not re-research a refuted claim and a person can see what a decision rested on.
+        if (node.history?.length) {
+          lines.push('No longer believed:');
+          for (const fact of node.history.slice(-8)) lines.push(`- ${fact.text}${fact.refutedBy ? ` (refuted ${fact.refutedAt?.slice(0, 10) ?? ''} by: ${fact.refutedBy})` : ''}`);
+        }
         for (const relation of neighbours(graph, node.id)) {
           lines.push(`${relation.direction === 'out' ? '->' : '<-'} ${relation.edge.kind} ${relation.other.label} (tension ${relation.edge.tension ?? 'unmeasured'}${relation.edge.basis ? `, ${relation.edge.basis}` : ''})`);
         }

@@ -6,7 +6,8 @@
 // team file's own name in the library and therefore unique there, so two library teams never share a map. Writes are whole-file and atomic, and a damaged
 // file is set aside and reported rather than thrown away silently.
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { emptyKnowledge, heldToCeiling, mergeKnowledge, type KnowledgeAddition, type TeamKnowledge } from '../domain/teamKnowledge';
 
@@ -111,9 +112,10 @@ export async function addKnowledge(dir: string, team: string, addition: Knowledg
 
 /** Copies a damaged graph file aside before it is replaced, and says where it went (or that it could not be kept). */
 async function setAside(file: string, problem: string): Promise<string> {
-  const copy = file.replace(/\.json$/, `.damaged-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+  // The process id and a random suffix keep two windows setting the same file aside in the same millisecond from overwriting each other's copy.
+  const copy = file.replace(/\.json$/, `.damaged-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}-${randomBytes(3).toString('hex')}.json`);
   try {
-    await copyFile(file, copy);
+    await copyFile(file, copy, fsConstants.COPYFILE_EXCL);
     return `${problem} The unreadable file was kept as ${path.basename(copy)} and a new graph was started.`;
   } catch (error) {
     return `${problem} The unreadable file could not be kept (${(error as Error).message}) and a new graph was started.`;
