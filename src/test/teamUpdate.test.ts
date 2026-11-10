@@ -16,7 +16,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
 import type { AgentMessage, CompletionEvent } from '../services/nearAiClient';
-import { PartialUpdateError, TeamChangedError, TeamUpdater, UpdateNotices } from '../services/teamUpdates';
+import { PartialUpdateError, RunStartedError, TeamChangedError, TeamUpdater, UpdateNotices } from '../services/teamUpdates';
 
 // Update Team: a team made from a built-in project type is brought up to date member by member,
 // replacing only what the user never changed, and asking about everything else.
@@ -353,4 +353,29 @@ test('Undo restores project.json too, so the restored guidance is recognised as 
   await updater.undo(applied);
   assert.deepEqual(await read(), original, 'team, guidance, and project.json are all as they were');
   assert.equal((await updater.preview(file))!.guidance!.action, 'auto', 'the restored guidance is again the generated one, so a later update replaces it without asking');
+});
+
+test('a run that starts while the update is being written stops it, and what was written is put back', async () => {
+  const { library, file, original, read } = await project();
+  let endRun: (() => void) | undefined;
+  // The run starts right after the first file (the team) is written.
+  const updater = new TeamUpdater(library, async (target, content) => { await writeFile(target, content, 'utf8'); if (!endRun) endRun = beginRun(); });
+  try {
+    const error = await updater.apply((await updater.preview(file))!, {}).then(() => undefined, (caught: unknown) => caught);
+    assert.ok(error instanceof RunStartedError, String(error));
+    assert.equal(error.message, 'A run started, so the team was not changed. Update it when the run ends.');
+    assert.deepEqual(await read(), original, 'the team file written before the run started is put back');
+  } finally {
+    endRun?.();
+  }
+  // A run already in progress when apply starts: nothing is written at all.
+  const end = beginRun();
+  try {
+    const writes: string[] = [];
+    const quiet = new TeamUpdater(library, async (target, content) => { writes.push(target); await writeFile(target, content, 'utf8'); });
+    await assert.rejects(async () => quiet.apply((await quiet.preview(file))!, {}), RunStartedError);
+    assert.deepEqual(writes, []);
+  } finally {
+    end();
+  }
 });

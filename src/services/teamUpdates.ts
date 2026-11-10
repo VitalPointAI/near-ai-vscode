@@ -4,6 +4,7 @@ import { applyGuidanceUpdate, applyTeamUpdate, planGuidanceUpdate, planTeamUpdat
 import { parseTeam, TeamLibrary } from '../agent/teams';
 import { guidanceFingerprint } from '../agent/teamFingerprints';
 import { templateVersion } from '../agent/projectTypes';
+import { runInProgress } from '../agent/runActivity';
 
 // Update Team without VS Code: preview, apply with a backup first, and undo; and the record of
 // which teams have been offered an update or asked not to be. The commands in
@@ -41,9 +42,20 @@ export class PartialUpdateError extends Error {
   }
 }
 
+/** A run started while the update was being written; nothing was left changed. */
+export class RunStartedError extends Error {
+  public constructor() {
+    super('A run started, so the team was not changed. Update it when the run ends.');
+    this.name = 'RunStartedError';
+  }
+}
+
 export class TeamUpdater {
-  /** `write` is replaceable so a test can make one write fail. */
-  public constructor(private readonly library: TeamLibrary, private readonly write: (file: string, content: string) => Promise<void> = (file, content) => writeFile(file, content, 'utf8')) {}
+  /**
+   * `write` is replaceable so a test can make one write fail; `busy` says whether a run is in progress. It is checked synchronously right
+   * before every write, so no run can start between the check and the write, and a run that starts part-way rolls the update back.
+   */
+  public constructor(private readonly library: TeamLibrary, private readonly write: (file: string, content: string) => Promise<void> = (file, content) => writeFile(file, content, 'utf8'), private readonly busy: () => boolean = runInProgress) {}
 
   /** What an update would change in a team file (and, for a project team, its AGENTS.md guidance); undefined when it is not from a built-in type. */
   public async preview(file: string): Promise<TeamUpdatePreview | undefined> {
@@ -103,11 +115,16 @@ export class TeamUpdater {
     // No snapshot after writing: one in the same millisecond would take the backup's file name.
     const written: typeof writes = [];
     try {
-      for (const write of writes) { await this.write(write.file, write.after); written.push(write); }
+      for (const write of writes) {
+        if (this.busy()) throw new RunStartedError();
+        await this.write(write.file, write.after);
+        written.push(write);
+      }
     } catch (error) {
       const failed: string[] = [];
       for (const write of written.reverse()) await this.write(write.file, write.before).catch(() => failed.push(write.label));
       const reason = (error as Error).message;
+      if (!failed.length && error instanceof RunStartedError) throw error;
       if (!failed.length) throw new Error(`Nothing was changed: writing ${writes[written.length]?.label ?? 'a file'} failed (${reason}), and what had been written was put back.`);
       throw new PartialUpdateError(`The update stopped part-way: writing failed (${reason}), and ${failed.join(' and ')} could not be put back, so ${failed.length === 1 ? 'it has' : 'they have'} the update and the rest do not. Undo restores the backups.`, result, failed);
     }

@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { describePlan, type MemberDecision, type UpdateDecisions } from '../agent/teamUpdate';
 import { TeamLibrary } from '../agent/teams';
 import { runInProgress, whenIdle } from './runActivity';
-import { PartialUpdateError, TeamChangedError, TeamUpdater, UpdateNotices, type TeamUpdatePreview } from './teamUpdates';
+import { PartialUpdateError, RunStartedError, TeamChangedError, TeamUpdater, UpdateNotices, type TeamUpdatePreview } from './teamUpdates';
 
 // "NEAR AI: Update Team…" and the one-time "Team update available" notice. Nothing is written
 // without a preview and a confirmation, never while a run is in progress, and every update can be
@@ -100,7 +100,7 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
     'Update'
   );
   if (confirm !== 'Update') return;
-  if (runInProgress()) { void vscode.window.showWarningMessage('A run started; the team was not changed. Try again when it ends.'); return; }
+  // The updater checks again right before every write, and rolls back if a run starts part-way (RunStartedError).
   try {
     const applied = await updater.apply(preview, decisions);
     const action = await vscode.window.showInformationMessage(`Updated "${preview.name}" to v${preview.plan.template.toVersion}. The previous version is in the team history.`, 'Undo', 'Open team file');
@@ -114,6 +114,7 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
       if (again === 'Review') await updateTeam(library, preview.file);
       return;
     }
+    if (error instanceof RunStartedError) { void vscode.window.showWarningMessage(error.message); return; }
     if (error instanceof PartialUpdateError) {
       const action = await vscode.window.showErrorMessage(error.message, 'Undo');
       if (action === 'Undo') { await updater.undo(error.applied); void vscode.window.showInformationMessage(`Restored "${preview.name}" from its backups.`); }
