@@ -11,6 +11,6 @@ commit: 413cee9
 - Read without a range on a file over 600 lines returns 400 lines plus an outline.
 - Sub-agent reports capped at 12 000 characters (`boundedReport`); the Open-GSD prompt asks for one sub-agent per plan/task/workstream returning a summary.
 - `completionRequestBody()` builds every request; a test proves tools are byte-identical and messages a byte prefix across turns, and cached tokens reach the activity log.
-- Model deadline (`modelDeadlineSeconds`, 120) retries once on `backupModel` (standard tier, then deep, only models as private as the chat's).
+- Model stall deadline (`modelStallSeconds`, 120: time to first token and between chunks; a steady stream is never cut; 30-min ceiling per reply) retries once on `backupModel` (standard tier, then deep, only models as private as the chat's).
 - Tier routing defaults: planner, plan-checker, verifier, analyst, editor, red-team → deep; fetch, extract → fast.
 - Tests: `contextDiscipline.test.ts` (4), `modelDeadline.test.ts` (3). `roleModels.test.ts`: the gsd-planner default expectation moved from undefined to `deep`, the owner-approved PERF-03 change.

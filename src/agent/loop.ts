@@ -145,12 +145,15 @@ export interface AgentRunOptions {
   /** Output tokens one reply may use (the client's default when unset). */
   maxOutputTokens?: number;
   /**
-   * PERF-03: a model turn that has not finished this long after it was sent is cut and tried again, once, on `backupModel` (the safety check's
-   * second-model pattern). Without a backup model nothing is cut: the stream's idle timeout still catches a dead connection. 0 or unset: no deadline.
+   * PERF-03: a stall deadline, not a time limit. A turn that has streamed nothing for this long (no first token yet, or no new chunk since the last
+   * one) is cut and tried again, once, on `backupModel` (the safety check's second-model pattern). A reply that keeps streaming is never cut by it,
+   * however long it runs. Without a backup model nothing is cut: the stream's idle timeout still catches a dead connection. 0 or unset: off.
    */
-  deadlineMs?: number;
-  /** The model a turn past its deadline is retried on; ignored when it is the run's own model. */
+  stallMs?: number;
+  /** The model a stalled turn is retried on; ignored when it is the run's own model. */
   backupModel?: string;
+  /** The hard ceiling for one turn, streaming or not (passed to the client as its turn timeout; DEFAULT_TURN_CEILING_MS while a stall deadline is set). */
+  turnCeilingMs?: number;
   /**
    * Repetitions of the same action with the same result, within the last 20 calls, before the
    * agent is nudged, then warned more strongly, then stopped (default 8, 11 and 14; a nudgeAt
@@ -222,6 +225,8 @@ export class ModelUnavailableError extends Error {
     this.name = 'ModelUnavailableError';
   }
 }
+/** PERF-03: the hard ceiling for one turn while a stall deadline is set: generous, because a healthy long reply is never cut by the stall deadline. */
+export const DEFAULT_TURN_CEILING_MS = 30 * 60_000;
 /** Retries of one turn after the model stopped responding, before the run stops and says so. */
 export const STALL_RETRIES = 3;
 
@@ -356,10 +361,11 @@ export class AgentRun {
     let stalls = 0;
     const stallRetries = Math.max(0, this.options.stallRetries ?? STALL_RETRIES);
     const input = this.options.input;
-    // PERF-03: the model this turn is sent to; it moves to the backup once, when the primary passes its deadline.
+    // PERF-03: the model this turn is sent to; it moves to the backup once, when the primary stalls.
     let turnModel = this.options.model;
     const backup = this.options.backupModel && this.options.backupModel !== this.options.model ? this.options.backupModel : undefined;
-    const deadlineMs = Math.max(0, this.options.deadlineMs ?? 0);
+    const stallMs = Math.max(0, this.options.stallMs ?? 0);
+    const turnCeilingMs = this.options.turnCeilingMs ?? (stallMs > 0 && backup ? DEFAULT_TURN_CEILING_MS : undefined);
     for (let attempt = 0; ; attempt += 1) {
       let streamed = 0;
       // Messages the user sent since the last request go into this one.
@@ -370,8 +376,16 @@ export class AgentRun {
       const attemptAbort = new AbortController();
       let received = false;
       let cutForInput = false;
-      let cutForDeadline = false;
-      const deadline = deadlineMs > 0 && backup && turnModel !== backup ? setTimeout(() => { cutForDeadline = true; attemptAbort.abort(); }, deadlineMs) : undefined;
+      let cutForStall = false;
+      // Re-armed on every streamed event: it fires only after stallMs with nothing new, before the first token or between chunks.
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+      const watchStall = stallMs > 0 && backup && turnModel !== backup;
+      const armStall = () => {
+        if (!watchStall) return;
+        if (stallTimer) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => { cutForStall = true; attemptAbort.abort(); }, stallMs);
+      };
+      armStall();
       const onAbort = () => attemptAbort.abort();
       signal.addEventListener('abort', onAbort, { once: true });
       // A person who presses Steer is asking for the reply to stop now, so that is what happens: the attempt is cut whatever has streamed, and the
@@ -387,8 +401,10 @@ export class AgentRun {
       });
       try {
         let reply: { message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata; finishReason?: string } | undefined;
-        for await (const event of this.options.client.streamCompletion(turnModel, transcript, this.definitions, attemptAbort.signal, { ...(idleTimeoutMs ? { idleTimeoutMs } : {}), ...(this.options.maxOutputTokens ? { maxOutputTokens: this.options.maxOutputTokens } : {}) })) {
+        for await (const event of this.options.client.streamCompletion(turnModel, transcript, this.definitions, attemptAbort.signal, { ...(idleTimeoutMs ? { idleTimeoutMs } : {}), ...(turnCeilingMs ? { turnTimeoutMs: turnCeilingMs } : {}), ...(this.options.maxOutputTokens ? { maxOutputTokens: this.options.maxOutputTokens } : {}) })) {
           received = true;
+          armStall();
+          if (event.type === 'progress') continue;
           if (event.type === 'text') { streamed += event.text.length; this.options.emit({ type: 'text', text: event.text }); }
           else if (event.type === 'reasoning') this.options.emit({ type: 'reasoning', text: event.text });
           else reply = { message: event.message, usage: event.usage, finishReason: event.finishReason };
@@ -400,8 +416,9 @@ export class AgentRun {
         throw Object.assign(new Error('The model ended its turn without a response.'), { retryable: true, unresponsive: true });
       } catch (error) {
         if (cutForInput && !signal.aborted) { attempt -= 1; continue; }
-        if (cutForDeadline && !signal.aborted && backup) {
-          this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs: 0, reason: `${turnModel} had not finished its reply after ${Math.round(deadlineMs / 1000)} s, so this turn is being retried on ${backup}.`, discardText: streamed });
+        if (cutForStall && !signal.aborted && backup) {
+          // The stalled attempt's text is discarded (discardText), so the retry's reply replaces it rather than following it.
+          this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs: 0, reason: `${turnModel} sent nothing for ${Math.round(stallMs / 1000)} s ${received ? 'in the middle of its reply' : 'before its first token'}, so this turn is being retried on ${backup}.`, discardText: streamed });
           turnModel = backup;
           attempt -= 1;
           continue;
@@ -443,7 +460,7 @@ export class AgentRun {
         }
         if (signal.aborted) throw error;
       } finally {
-        if (deadline) clearTimeout(deadline);
+        if (stallTimer) clearTimeout(stallTimer);
         signal.removeEventListener('abort', onAbort);
         unsubscribe?.();
       }

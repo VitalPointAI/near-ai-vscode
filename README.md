@@ -581,8 +581,8 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.approvalTimeoutsBeforePause` | `3` | Unanswered approvals in a row that pause the whole run with a message (0 never pauses). |
 | `nearAi.agent.approvalTimeoutMinutes` | `15` | How long an approval in the main conversation waits before the run shows as paused on that step (it keeps waiting, up to a day). |
 | `nearAi.agent.compactAtTokens` | `70000` | Summarize a conversation's earlier history at this many tokens whatever the model's window (old tool output is trimmed from 80% of it). 0 uses only the window thresholds. |
-| `nearAi.agent.modelDeadlineSeconds` | `120` | A reply not finished after this long is retried once on the backup model. 0 turns it off. |
-| `nearAi.agent.backupModel` | standard tier, then deep | The model a reply past its deadline is retried on; only a model at least as private as the chat's. |
+| `nearAi.agent.modelStallSeconds` | `120` | A reply that sends nothing for this long (before its first token, or between chunks) is retried once on the backup model; a reply that keeps streaming is never cut (30-minute ceiling per reply). 0 turns it off. |
+| `nearAi.agent.backupModel` | standard tier, then deep | The model a stalled reply is retried on; only a model at least as private as the chat's. |
 | `nearAi.agent.maxParallelWorktrees` | `4` | Sub-agents that may work in their own git worktree at once (within `maxParallelAgents`). |
 | `nearAi.agent.autoResumeAfterReload` | `true` | A run a reload cut off in the last 12 hours carries on by itself, with a notice; finished steps are not run again. |
 | `nearAi.agent.roleModels` | research, mapping, fetch and extract roles → fast; planner, plan-checker, verifier, analyst, editor, red-team → deep | Model or tier per agent role, by name or `*` pattern; a team member's own `model:` line wins. |

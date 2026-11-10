@@ -19,11 +19,13 @@
   sub-agent's report to its lead is capped at 12,000 characters, and every request now repeats the
   previous one byte for byte before adding to it, so NEAR's prompt cache can serve the shared part.
   Cached tokens are recorded in the activity history.
-- **Slow replies fail over.** A model reply not finished after 120 seconds is retried once on a backup
-  model (`nearAi.agent.modelDeadlineSeconds`, `nearAi.agent.backupModel`; the standard tier by
-  default, and only a model at least as private as the chat's). Planner, plan-checker, verifier,
-  analyst, editor and red-team roles now default to the deep tier, and fetch and extract roles to the
-  fast tier (`nearAi.agent.roleModels`); a team member's own model line still wins.
+- **Stalled replies fail over.** A model reply that sends nothing for 120 seconds, before its first
+  token or between chunks, is retried once on a backup model (`nearAi.agent.modelStallSeconds`,
+  `nearAi.agent.backupModel`; the standard tier by default, and only a model at least as private as
+  the chat's). A reply that keeps streaming is never cut, however long it runs; one reply still has a
+  30-minute ceiling. Planner, plan-checker, verifier, analyst, editor and red-team roles now default to
+  the deep tier, and fetch and extract roles to the fast tier (`nearAi.agent.roleModels`); a team
+  member's own model line still wins.
 - **More runs at once.** Read-only shell commands (`git status`, `git diff`, `ls`, `grep`, `cat` …) now
   run side by side with other lookups instead of queuing; anything that changes something still runs
   alone and in order. Sub-agents in their own git worktree are capped by

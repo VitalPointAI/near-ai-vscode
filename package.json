@@ -624,17 +624,17 @@
           "maximum": 10000000,
           "description": "Summarize a conversation's earlier history once it reaches this many tokens, whatever the model's context window, and trim old tool output from 80% of it. Smaller transcripts make every turn faster and cheaper. 0 uses only the window-based thresholds."
         },
-        "nearAi.agent.modelDeadlineSeconds": {
+        "nearAi.agent.modelStallSeconds": {
           "type": "number",
           "default": 120,
           "minimum": 0,
           "maximum": 3600,
-          "description": "A model reply not finished after this many seconds is cut and retried once on the backup model (nearAi.agent.backupModel). Without a backup model the reply keeps going. 0 turns the deadline off."
+          "description": "A model reply that sends nothing for this many seconds, before its first token or between chunks, is cut and retried once on the backup model (nearAi.agent.backupModel). A reply that keeps streaming is never cut, however long it takes (a 30-minute ceiling still applies to one reply). Without a backup model the reply keeps waiting. 0 turns it off."
         },
         "nearAi.agent.backupModel": {
           "type": "string",
           "default": "",
-          "description": "The model a reply past its deadline (nearAi.agent.modelDeadlineSeconds) is retried on. Empty uses the standard tier, then the deep tier. Only a model at least as private as the chat's model is used."
+          "description": "The model a stalled reply (nearAi.agent.modelStallSeconds) is retried on. Empty uses the standard tier, then the deep tier. Only a model at least as private as the chat's model is used."
         },
         "nearAi.agent.maxOutputTokens": {
           "type": "number",

@@ -120,9 +120,9 @@ export interface AgentTurnRequest {
   rememberAllowRule?(rule: string): void | Promise<void>;
   /** PERF-06: the research profile's plan-checker gate (nearAi.gsd.researchProfile, default on). */
   researchProfile?: boolean;
-  /** PERF-03: how long a model turn may take before it is retried on `backupModel` (0: no deadline). */
-  modelDeadlineMs?: number;
-  /** PERF-03: the model a turn past its deadline is retried on (at least as private as the chat's model). */
+  /** PERF-03: how long a model turn may stream nothing (before its first token, or between chunks) before it is retried on `backupModel` (0: off). */
+  modelStallMs?: number;
+  /** PERF-03: the model a stalled turn is retried on (at least as private as the chat's model). */
   backupModel?: string;
   /** PERF-01: sub-agents' safe and verification commands run without a card in auto and mostly-autonomous (nearAi.agent.unattendedAutoApprove, default on). */
   unattendedAutoApprove?: boolean;
@@ -333,7 +333,7 @@ export class AgentConversation {
       ...(request.riskSwitches ? { riskSwitches: request.riskSwitches } : {}),
       maxTurns: request.maxTurns,
       maxOutputTokens: request.maxOutputTokens,
-      ...(request.modelDeadlineMs ? { deadlineMs: request.modelDeadlineMs } : {}),
+      ...(request.modelStallMs ? { stallMs: request.modelStallMs } : {}),
       ...(request.backupModel ? { backupModel: request.backupModel } : {}),
       beforeTool: (signal) => this.whileRunPaused(signal),
       beforeTurn: async (transcript, lastUsage, signal) => {
@@ -735,7 +735,7 @@ export class AgentConversation {
               client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt) } } : {}),
               // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
-              ...(request.modelDeadlineMs ? { deadlineMs: request.modelDeadlineMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
+              ...(request.modelStallMs ? { stallMs: request.modelStallMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
               beforeTool: (signal) => this.whileRunPaused(signal),
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);

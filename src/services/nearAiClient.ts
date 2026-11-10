@@ -33,6 +33,8 @@ export interface ToolDefinition {
 export type CompletionEvent =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
+  /** A tool call's name or arguments arrived: the reply is still making progress even though no text streams (PERF-03 stall detection). */
+  | { type: 'progress' }
   | { type: 'done'; message: Extract<AgentMessage, { role: 'assistant' }>; finishReason: string; usage: UsageMetadata };
 
 export interface ModelInfo {
@@ -736,6 +738,7 @@ export class NearAiClient {
             if (typeof fragment.function?.name === 'string') call.name += fragment.function.name;
             if (typeof fragment.function?.arguments === 'string') call.arguments += fragment.function.arguments;
           }
+          if (delta.tool_calls?.length) yield { type: 'progress' };
         }
         if (next.done) { eof = true; break; }
       }
