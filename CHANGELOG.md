@@ -50,9 +50,12 @@ the button writes. A chart shows the score over time, by task type, so you can s
   read — is believed again, with the revival dated and anything it contradicts retired beside it.
 - **One team's knowledge can no longer end up in another team's graph — for anything written from this version on.** Plain lowercase names keep their file;
   every other name gets `<slug>~<hash>` under a character plain names cannot contain, so `acme co` and `acme-co`, an accented name, an empty one, and a team
-  named to imitate a hashed file all keep separate graphs. A graph written under a name that used to be sanitised (`My Team`) is adopted from the old file once —
-  and only when that file names this team — so the upgrade moves nobody else's memory and loses nobody's own. (A graph file written by earlier versions when two
-  names still collided holds whichever team wrote it last, and the identity gate reads exactly that claim.)
+  named to imitate a hashed file all keep separate graphs. Graphs written before this version are adopted **only when the old file names the team exactly**
+  (`team: "My Team"`): files stamped the slug an earlier version wrote (`team: "my-team"`) are **left in place and not adopted**, because the slug is also the
+  identity of another, plain-named team — adopting it copied that team's knowledge into the first team's graph, the leak this entry exists to prevent. Such a
+  superseded graph is not lost or deleted: its load reports where the file is, what it holds, and why it was not copied, and renaming its `team` field to the
+  display name by hand adopts it on the next load. Teams whose display name was already their plain lowercase slug (`scouts`) never had a stamp mismatch and
+  are unaffected.
 - **A contradiction can only retire what it out-evidences.** A graded current fact keeps its place against a claim the agent merely read on a page or left
   ungraded: retirement now needs the incoming side to be at least as credible as what stands, so a hostile page cannot push verified knowledge out of current
   belief on vocabulary alone. What is retired keeps its history entry, and independent evidence can still bring it back.

@@ -79,7 +79,9 @@ const foreignOwner = async (file: string, team: string): Promise<string | undefi
   * keeps its own source AND its own grade (tenth 0.4.19 review, MAJOR): the merge stamps a node's grade onto its unsourced facts, so dropping the fact-level
   * grade let a legacy fact already capped to C3 come back at the actor's A1 — a grade rising through migration, the invariant this file exists to hold. Edge
   * endpoints resolve through a label map built once rather than a find per edge (sixth 0.4.19 review, MINOR — quadratic on a large graph). Provenance reads as
-  * `seed`, the honest mark for knowledge that arrived by migration rather than by a run. */
+  * `seed`, the honest mark for knowledge that arrived by migration rather than by a run. The origin difference is handled EXPLICITLY (sixteenth 0.4.19 review,
+  * MINOR): `seed` arriving with no source caps an honest A1 fact to C3, so each fact carries ITS OWN grade through and an unsourced one is stamped `interaction`
+  * — the honest witness for knowledge the TEAM wrote earlier — rather than re-judged as if a page had just been read. */
 const additionOf = (graph: TeamKnowledge): KnowledgeAddition => {
   const labelOf = new Map(graph.nodes.map((node) => [node.id, node.label]));
   return {
@@ -89,7 +91,7 @@ const additionOf = (graph: TeamKnowledge): KnowledgeAddition => {
       label: node.label,
       ...(node.kind !== 'actor' ? { kind: node.kind } : {}),
       functions: node.functions,
-      facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.grading ? { grading: fact.grading } : {}), ...(fact.since ? { since: fact.since } : {}), ...(fact.source ? { source: fact.source } : {}) })),
+      facts: node.facts.map((fact) => ({ text: fact.text, ...(fact.grading ? { grading: fact.grading } : { grading: { reliability: 'A' as const, credibility: 1 as const } }), ...(fact.since ? { since: fact.since } : {}), ...(fact.source ? { source: fact.source } : {}) })),
       ...(node.grading ? { grading: node.grading } : {})
     })),
     edges: graph.edges.map((edge) => ({ from: labelOf.get(edge.from) ?? edge.from, to: labelOf.get(edge.to) ?? edge.to, kind: edge.kind, ...(edge.tension !== null ? { tension: edge.tension } : {}), ...(edge.basis ? { basis: edge.basis } : {}), ...(edge.grading ? { grading: edge.grading } : {}) }))
@@ -149,9 +151,10 @@ export async function loadKnowledge(dir: string, team: string, slug?: string): P
     // hashed name merge into an empty graph and save over the plain team's record, and the colliding team could then never create its own file. The write
     // below is already gated on this team's OWN distinct path (knowledgeFile), so the plain team's file is safe either way — proceeding is the honest read.
     // The SUPERSUDED note (sixteenth 0.4.19 review, BLOCKER, "say so"): a slug-stamped file IS this team's 0.4.18 record — not adopted because the slug is
-    // also another team's identity, and the person has to know the knowledge is still there, one file rename away, rather than silently gone.
+    // also another team's identity, and the person has to know the knowledge is still there, one field edit away, rather than silently gone. A file naming
+    // neither this team nor its slug gets no such note: it was never plausibly ours.
     const superseded = slug !== undefined && slug !== team && legacyGraph.team === slug;
-    return { ...current, ...(superseded ? { problem: `The knowledge graph for ${team} was written under its older slug name (${slug}), which now belongs to another team's file name, so it was left in place rather than copied. Nothing was lost: the file still holds the team's knowledge as of 0.4.18.` } : {}) };
+    return { ...current, ...(superseded ? { problem: `The knowledge graph for ${team} was written under its older slug name (${slug}), which is also another team's file identity, so it was not adopted — adopting it copied other teams' knowledge. Nothing was lost: ${path.basename(legacy)} still holds the team's knowledge as of 0.4.18, and renaming its "team" field to "${team}" adopts it on the next load.` } : {}) };
   }
   if (!legacyGraph?.nodes.length) return current;
   // A legacy file that parsed damaged carries its problem forward (eighth 0.4.19 review, MINOR): the caller is adopting whatever readable parts survived,

@@ -188,19 +188,21 @@ export function looksLikeAddress(source: string): boolean {
   // The one carve-out is SHAPE, stated once and locked by tests (eighth, ninth and eleventh 0.4.19 reviews): among two-label dotted tokens, one that ends in
   // a NUMBER is a figure or version — `4.2`, `v2.1` — the independent evidence a revival may cite, never a page. A two-label token ending in letters stays a
   // page (`evil.test`, `annual-report.pdf`). A three-or-more-label all-numeric token is an IPv4-style address and stays a page (`192.0.2.1`, `10.0.0/report`).
+  // A NAMED DOCUMENT is therefore treated as a page too (`annual-report.pdf` ends in letters): over-catching is the cheap mistake, and the CHANGELOG says so.
   // EVERY dotted token in the text is judged (eleventh 0.4.19 review, BLOCKER): matching only the first let `1.0 evil.test/about` read as the figure `1.0`
   // and keep a hostile page at A1 — a page is a page wherever in the sentence it hides, so any page-shaped token decides true. The left boundary is a
   // LOOKBEHIND, not a consumed character: a consumed boundary ate the space between `1.0` and the page that followed, and the second token never matched.
   // QUOTES are boundaries on both sides (fourteenth 0.4.19 review, BLOCKER): `see "evil.test/about"` hid behind an unconsumed quotation mark and kept A1,
   // and a quoted page even counted as independent evidence and revived a refuted claim. A sentence-final DOT is a boundary too (fifteenth 0.4.19 review,
   // MAJOR): at the end of a sentence `evil.test.` hides behind the period and keeps A1, so the trailing lookahead reads it as a boundary, not a label.
-  let sawFigure = false;
+  let sawPage = false;
   for (const match of `${text} `.matchAll(/(?<=^|[\s([<,;:@'"])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?=[/?#]|$|[\s)\],;:'".])/gi)) {
     const labels = match[1]!.split('.');
-    if (labels.length === 2 && /^\d+$/.test(labels[1]!)) { sawFigure = true; continue; } // a figure or version, judged on its own
-    return true; // a two-label host, an address-shaped token, or anything longer: a page
+    if (labels.length === 2 && /^\d+$/.test(labels[1]!)) continue; // a figure or version, judged on its own; a LATER page-shaped token still decides
+    sawPage = true;
+    break; // a two-label host, an address-shaped token, or anything longer: a page
   }
-  return false; // every dotted token was a figure — or there was none
+  return sawPage; // every dotted token was a figure — or there was none
 }
 
 /** The grade a claim about something an agent READ is worth: C3 at most, whichever shape it arrives in. */
@@ -297,9 +299,13 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     // the one path where a person, not a page, is the witness. Facts may also carry their OWN grade (a raced migration's legacy graph), which the
     // node-level cap below must not raise.
     const fromWeb = looksLikeAddress(label) || (incoming.facts ?? []).some((fact) => webSourced(fact.source));
-    // The NODE's grade is judged on the actor itself — its label and whether the addition cites pages — not on whichever fact happens to be examined first
-    // (eleventh 0.4.19 review, MAJOR): a research node citing a named register keeps its own grade while its unsourced facts individually arrive capped.
-    const grading = gradeFor(incoming.grading, fromWeb || looksLikeAddress(label));
+    // The NODE's grade is judged on the actor itself — its label, its cited sources, and whether the addition carries any witness stronger than a page
+    // (eleventh 0.4.19 review, MAJOR; closed for the NODE too, sixteenth 0.4.19 review, MAJOR): an `origin: 'research'` addition with no sources at all and
+    // a declared A1 used to store the ACTOR at A1 while its facts individually arrived capped — omitting `source` was still a way to display a page's claim
+    // at the top grade. A non-interaction addition with no non-web-sourced fact anywhere is judged fromWeb: an interaction is the one path where a person,
+    // not a page, is the witness.
+    const hasWitness = (incoming.facts ?? []).some((fact) => fact.source !== undefined && !webSourced(fact.source)) || addition.origin === 'interaction';
+    const grading = gradeFor(incoming.grading, fromWeb || looksLikeAddress(label) || !hasWitness);
     const factGrading = (fact: { grading?: Grading; source?: string }): Grading | undefined => {
       if (fact.grading) return gradeFor(fact.grading, fact.source !== undefined && webSourced(fact.source));
       return gradeFor(incoming.grading, looksLikeAddress(label) || (fact.source !== undefined && webSourced(fact.source)) || (addition.origin !== 'interaction' && fact.source === undefined));
@@ -346,7 +352,9 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
         for (const current of [...existing.facts]) {
           if (!isContradicted(current.text, incomingFact.text)) continue;
           const incoming = grading ?? (existing.grading ? undefined : { reliability: 'C' as const, credibility: 3 as const });
-          if (!current.grading || (incoming !== undefined && atLeastAsStrong(incoming, current.grading))) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
+          // An UNGRADED current belief needs the same C3 floor as the contradiction branch below (sixteenth 0.4.19 review, MINOR): the revival's effective
+          // strength is C3 when nothing declares better, so it cannot retire on vocabulary alone whatever it contradicts.
+          if (incoming !== undefined && (!current.grading || atLeastAsStrong(incoming, current.grading))) retire(existing, current, incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text, addition.at);
         }
         existing.history = (existing.history ?? []).filter((old) => old !== refuted);
         existing.facts.push({ text: incomingFact.text, origin: addition.origin, ...(incomingFact.since ? { since: incomingFact.since } : { since: addition.at }), ...(incomingFact.source ? { source: incomingFact.source } : {}), ...(factGrading(incomingFact) ? { grading: factGrading(incomingFact) } : {}) });
