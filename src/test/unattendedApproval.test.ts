@@ -110,7 +110,7 @@ test('Ask before edits, the main run, the deny list and the emergency stop are u
 });
 
 test('script invocations, forbidden content and plan-named scripts are parsed conservatively', () => {
-  assert.deepEqual(scriptInvocation('bash scripts/verify.sh --quick', '/p'), { script: '/p/scripts/verify.sh', cwd: '/p' });
+  assert.deepEqual(scriptInvocation('bash scripts/verify.sh --quick', '/p'), { script: '/p/scripts/verify.sh', cwd: '/p', args: ['--quick'] });
   assert.equal(scriptInvocation('node -e "x"', '/p'), undefined);
   assert.equal(scriptInvocation('bash scripts/verify.sh; rm x', '/p'), undefined);
   assert.equal(scriptInvocation('node $(echo x).mjs', '/p'), undefined);
@@ -229,4 +229,19 @@ test('every form of a parent-folder path keeps a verification script asking', as
   }
   await writeFile(path.join(root, 'scripts', 'check-spread.mjs'), "const parts = [...['a', 'b']];\nconsole.log(parts.join('..b'));\n");
   assert.equal((await decide(root, 'node scripts/check-spread.mjs')).decision, 'allow', 'a spread and a dot inside a name are not parent paths');
+});
+
+// Review of PR 34 (blocker): a verification script's arguments are held to the same rules as the script.
+test('a verification script with an argument that leaves the project asks; a clean relative argument still runs', async () => {
+  const root = await project();
+  await mkdir(path.join(root, 'report'), { recursive: true });
+  await writeFile(path.join(root, 'report', 'a.md'), 'a');
+  const outside = await mkdtemp(path.join(tmpdir(), 'near-ai-arg-outside-'));
+  const { symlink } = await import('node:fs/promises');
+  await symlink(outside, path.join(root, 'linked-out'));
+  const asks = ['../x', '../../etc', '/etc/passwd', '~/.ssh/id_rsa', '$HOME/x', '${HOME}', 'report/*.md', '/tmp/*', '--file=../x', '--file=/etc/passwd', 'report/../../x', 'linked-out/secret.txt', 'C:/Windows'];
+  for (const arg of asks) assert.notEqual((await decide(root, `node scripts/check-citations.mjs ${arg}`)).decision, 'allow', arg);
+  for (const arg of ['report', 'report/a.md', '--strict', '--figures=report/figures.json', 'a.md']) assert.equal((await decide(root, `node scripts/check-citations.mjs ${arg}`)).decision, 'allow', arg);
+  await writeFile(path.join(root, 'scripts', 'verify-calls.sh'), 'node scripts/check-citations.mjs ../outside\n');
+  assert.notEqual((await decide(root, 'bash scripts/verify-calls.sh')).decision, 'allow', 'a script a shell script runs is held to the same argument rules');
 });

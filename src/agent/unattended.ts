@@ -87,7 +87,7 @@ function riskyShellLine(text: string, context: CommandContext): string | undefin
 }
 
 /** The script a command runs, when it is exactly `[cd <dir> &&] [interpreter] <script> [plain arguments]`. */
-export function scriptInvocation(command: string, cwd: string): { script: string; cwd: string } | undefined {
+export function scriptInvocation(command: string, cwd: string): { script: string; cwd: string; args: string[] } | undefined {
   let rest = command.trim();
   let folder = cwd;
   const cd = /^cd\s+([A-Za-z0-9_./:=@+,%-]+)\s*&&\s*/.exec(rest);
@@ -99,7 +99,32 @@ export function scriptInvocation(command: string, cwd: string): { script: string
   const script = words[index];
   if (!script || !SCRIPT_EXTENSION.test(script) || script.startsWith('-')) return undefined;
   // Options to the interpreter itself (node --eval, python -c) are never part of this shape: the first word after it must be the script.
-  return { script: path.resolve(folder, script), cwd: folder };
+  return { script: path.resolve(folder, script), cwd: folder, args: words.slice(index + 1) };
+}
+
+/**
+ * Why a script's arguments keep it asking, or undefined when every one is clean (review of PR 34: only the script used to be checked, so
+ * `node scripts/verify/x.mjs ../x` or `/etc/passwd` passed). Each argument, and the value of a `--name=value` option, may not contain a `..` segment,
+ * be absolute, start with `~`, expand a variable or a glob, or resolve (symbolic links followed where it exists) outside the project root. Anything
+ * that cannot be judged asks.
+ */
+export async function argumentProblem(args: string[], cwd: string, root: string): Promise<string | undefined> {
+  const realRoot = await realpath(root).catch(() => path.resolve(root));
+  for (const arg of args) {
+    const values = [arg, ...(arg.includes('=') ? [arg.slice(arg.indexOf('=') + 1)] : [])];
+    for (const value of values) {
+      if (!PLAIN_WORD.test(value) && value !== '') return `its argument ${arg} is not plain text`;
+      if (/[$~*?[\]{}`]/.test(value)) return `its argument ${arg} is expanded by the shell`;
+      if (value.split(/[\/]/).includes('..')) return `its argument ${arg} names a parent folder`;
+      if (path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value)) return `its argument ${arg} is an absolute path`;
+      if (value.startsWith('-') || !value) continue;
+      // Any other word is judged as a path from the folder the script runs in: it must stay inside the project.
+      const resolved = path.resolve(cwd, value);
+      const real = await realpath(resolved).catch(() => resolved);
+      if (real !== realRoot && !real.startsWith(`${realRoot}${path.sep}`)) return `its argument ${arg} resolves outside the project`;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -112,6 +137,8 @@ export async function verificationScript(command: string, context: CommandContex
   const invocation = scriptInvocation(command, context.cwd ?? root);
   if (!invocation) return { allow: false, reason: 'it is not a plain run of one script' };
   if (!inside(root, invocation.cwd)) return { allow: false, reason: 'it runs from outside the project' };
+  const badArgument = await argumentProblem(invocation.args, invocation.cwd, root);
+  if (badArgument) return { allow: false, reason: badArgument };
   let real: string;
   let realRoot: string;
   try { real = await realpath(invocation.script); realRoot = await realpath(root); } catch { return { allow: false, reason: 'the script does not exist' }; }
@@ -145,9 +172,10 @@ export function contentHash(text: string): string {
  * What one file of a script's closure loads or runs, or a reason it cannot be followed: JavaScript imports, re-exports, `require` and `import()`
  * (a non-literal argument fails closed), Python imports, and scripts a shell script runs.
  */
-export function dependenciesOf(file: string, text: string, shellCwd = path.dirname(file)): { relative: string[]; builtins: string[] } | { problem: string } {
+export function dependenciesOf(file: string, text: string, shellCwd = path.dirname(file)): { relative: string[]; builtins: string[]; invocations?: Array<{ args: string[]; cwd: string }> } | { problem: string } {
   const relative: string[] = [];
   const builtins: string[] = [];
+  const invocations: Array<{ args: string[]; cwd: string }> = [];
   const take = (specifier: string): string | undefined => {
     if (specifier.startsWith('./') || specifier.startsWith('../')) { relative.push(specifier); return undefined; }
     const name = specifier.replace(/^node:/, '');
@@ -176,9 +204,10 @@ export function dependenciesOf(file: string, text: string, shellCwd = path.dirna
       const invoked = scriptInvocation(line, shellCwd);
       if (!invoked) return { problem: `it runs another program in a way that cannot be followed (${line.slice(0, 80)})` };
       relative.push(invoked.script);
+      invocations.push({ args: invoked.args, cwd: invoked.cwd });
     }
   }
-  return { relative, builtins };
+  return { relative, builtins, invocations };
 }
 
 /** The scaffold's recorded hashes (.planning/.near-ai/verifiers.json), by project-relative path; empty when there is none. */
@@ -224,6 +253,11 @@ async function checkClosure(entry: string, realRoot: string, context: CommandCon
     }
     const dependencies = dependenciesOf(file, text, context.cwd ?? realRoot);
     if ('problem' in dependencies) return `${shown}: ${dependencies.problem}`;
+    // A script a shell script runs is held to the same argument rules as the one on the command line.
+    for (const invocation of dependencies.invocations ?? []) {
+      const problem = await argumentProblem(invocation.args, invocation.cwd, realRoot);
+      if (problem) return `${shown}: ${problem}`;
+    }
     onPath.add(file);
     for (const dependency of dependencies.relative) {
       const problem = await visit(path.resolve(path.dirname(file), dependency), shown);

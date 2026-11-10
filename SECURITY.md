@@ -118,6 +118,13 @@ is usually there to answer one and runs used to wait hours on their own checks
   line of a shell script must also not be risky to
   the rules.
 
+  Its arguments follow the same rules: an argument (or the value of a
+  `--name=value` option) that has a `..` segment, is an absolute path, starts
+  with `~`, expands a variable or a glob, or resolves outside the project
+  (symbolic links followed) makes the command ask; so does any argument that is
+  not plain text. A script another script runs is held to the same argument
+  rules.
+
   These rules apply to the script's whole closure, not just the file named on
   the command line: every relative `import`, `export … from`, `require()` and
   `import()` in a JavaScript file, and every script a shell script runs, is
