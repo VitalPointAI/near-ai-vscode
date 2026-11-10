@@ -255,6 +255,13 @@ test('each reply is capped, a cut-off reply asks for a shorter continuation and 
   void texts;
 });
 
+test('cut-off replies stop a run only when they come one after another', async () => {
+  // Four cut-off replies over a long run, each followed by one that finished, are not a run stuck at the limit.
+  const { result, turns } = await runScriptWithFinish((turn) => (turn >= 8 ? { text: 'done', finish: 'stop' } : turn % 2 === 0 ? { text: 'long reply', finish: 'length' } : { calls: [call(`g${turn}`, 'Glob', { pattern: `*.none${turn}` })], finish: 'tool_calls' }));
+  assert.equal(result.outcome, 'completed');
+  assert.equal(turns, 9);
+});
+
 async function runScriptWithFinish(next: (turn: number) => { calls?: ToolCall[]; text?: string; finish: string }) {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-output-limit-'));
   let turn = 0;
@@ -285,7 +292,9 @@ test('the token limit applies only to turns without a known price; priced turns 
     const posted: Array<Record<string, unknown>> = [];
     const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
     try {
-      await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, budget: { maxCostUsd: 5, maxTokens: 2_000_000 } });
+      await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, budget: { maxCostUsd: 5, maxTokens: 2_000_000 },
+        // A window large enough that the 900,000-token turns never fill it: this test is about spend, and a summary request would be another model call.
+        contextWindows: { m: 10_000_000 } });
     } finally {
       conversation.dispose();
     }

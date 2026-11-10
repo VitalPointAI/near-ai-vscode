@@ -277,6 +277,16 @@ export class AgentConversation {
     this.halt();
     const abort = new AbortController();
     this.abort = abort;
+    // The run's own finally clears the controller, but preparing the run can throw first (no shell, a missing skill, a
+    // failed save): the conversation must not then stay "running" with nothing behind it.
+    try {
+      await this.runTurn(request, abort);
+    } finally {
+      if (this.abort === abort) this.abort = undefined;
+    }
+  }
+
+  private async runTurn(request: AgentTurnRequest, abort: AbortController): Promise<void> {
     this.spend = { costUsd: 0, tokens: 0, totalTokens: 0, cachedTokens: 0, stopped: false };
     const runId = request.runId ?? AgentConversation.newRunId();
     const account = request.local ? undefined : spendAccountOf(request.client);
@@ -614,7 +624,10 @@ export class AgentConversation {
     }
     if (status.level !== 'critical') return next;
     try {
-      next = await compactConversation(request.client, request.model, next, signal);
+      // Nothing older than the recent messages to summarize: trimming is all that applies, and no summary is announced.
+      const compacted = await compactConversation(request.client, request.model, next, signal);
+      if (!compacted) return next;
+      next = compacted;
       if (mainRun) {
         this.post({ type: 'notice', text: 'The conversation was summarized to stay within the model\'s context window. A handoff was saved to .planning/HANDOFF.json.' });
         await saveHandoff(this.root, { reason: 'context-critical', currentAction: this.title || 'Agent conversation', nextAction: 'Continue from the summarized conversation, or resume it from NEAR AI history.', activeAgents: this.agents.size, pendingApprovals: this.approvals.size }).catch(() => undefined);
