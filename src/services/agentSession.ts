@@ -31,6 +31,7 @@ import { SCRATCH_INSTRUCTIONS } from '../domain/scratch';
 import { WAITING_INSTRUCTIONS, checkNowMessage, isCheckNow } from '../domain/checkNow';
 import { cleanScratch } from './scratch';
 import { scriptsNamedIn } from '../agent/unattended';
+import { planCheckSkip, researchProfileActive } from '../gsd/researchProfile';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
@@ -117,6 +118,8 @@ export interface AgentTurnRequest {
   riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
   /** Saves an approval card's "always allow" entry to the workspace allow list. */
   rememberAllowRule?(rule: string): void | Promise<void>;
+  /** PERF-06: the research profile's plan-checker gate (nearAi.gsd.researchProfile, default on). */
+  researchProfile?: boolean;
   /** PERF-03: how long a model turn may take before it is retried on `backupModel` (0: no deadline). */
   modelDeadlineMs?: number;
   /** PERF-03: the model a turn past its deadline is retried on (at least as private as the chat's model). */
@@ -648,6 +651,18 @@ export class AgentConversation {
       ask: (questions, askSignal) => this.askQuestions(questions, askSignal),
       spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;
+        // PERF-06: in a research-profile project the plan-checker runs only for plans that change a gate or verifier; for content-only plans it returns
+        // a VERIFICATION PASSED report saying it was skipped, so the workflow carries on without a model pass.
+        if (/plan-checker/i.test(label) && request.researchProfile !== false && await researchProfileActive(this.root)) {
+          const skipped = await planCheckSkip(spawn.prompt, this.root).catch(() => undefined);
+          if (skipped) {
+            void record({ status: 'completed', kind: 'agent', agentRole: label, action: spawn.description, summary: `Sub-agent ${label} skipped by the research profile.` });
+            this.post({ type: 'notice', text: `${label} skipped: the research profile checks only plans that change a gate or verifier, and these plans change content only.` });
+            if (!spawn.background) return skipped;
+            this.notifications.push({ role: 'user', content: `<agent-notification id="${label}-skipped" agent="${label}" status="finished">\n${skipped}\n</agent-notification>` });
+            return `Started ${label} in the background. Its report will arrive in a later message.`;
+          }
+        }
         const tiers = request.tiers ?? { deep: request.model, standard: request.model, fast: request.model };
         // A team member's own model line wins; then the role's configured model; then the tier the workflow asked for.
         const teamMember = Boolean(spawn.agent && (!gsd || !spawn.agent.file.startsWith(gsd.home)));

@@ -28,7 +28,9 @@ async function project(): Promise<string> {
     'check-keys.py': "open('/home/someone/.ssh/id_rsa').read()\n",
     'check-outside.mjs': "import { readFileSync } from 'node:fs';\nreadFileSync('/etc/passwd', 'utf8');\n",
     'lint-env.mjs': 'console.log(process.env.GITHUB_TOKEN);\n',
-    'check-fetch.mjs': "await fetch('http://169.254.169.254/');\n"
+    'check-fetch.mjs': "await fetch('http://169.254.169.254/');\n",
+    'verify-source.sh': 'echo start\nsource helpers.sh\n',
+    'gate-dot.sh': '. ./helpers.sh\n'
   };
   for (const [name, text] of Object.entries(bad)) await writeFile(path.join(root, 'scripts', name), text);
   return root;
@@ -77,7 +79,7 @@ test('a push, a delete outside the project, publishing, the network and credenti
 
 test('a verification script that reaches the network, deletes, publishes, spawns, or touches credentials or outside paths still asks', async () => {
   const root = await project();
-  for (const name of ['verify-curl.sh', 'verify-rm.sh', 'check-spawn.mjs', 'gate-push.sh', 'check-keys.py', 'check-outside.mjs', 'lint-env.mjs', 'check-fetch.mjs']) {
+  for (const name of ['verify-curl.sh', 'verify-rm.sh', 'check-spawn.mjs', 'gate-push.sh', 'check-keys.py', 'check-outside.mjs', 'lint-env.mjs', 'check-fetch.mjs', 'verify-source.sh', 'gate-dot.sh']) {
     const command = name.endsWith('.py') ? `python3 scripts/${name}` : name.endsWith('.sh') ? `bash scripts/${name}` : `node scripts/${name}`;
     const verdict = await unattendedDecision(command, { root, cwd: root, home: homedir() }, false);
     assert.equal(verdict.allow, false, `${name}: ${verdict.reason}`);

@@ -43,7 +43,7 @@ const FORBIDDEN_CONTENT: Array<[RegExp, string]> = [
   [/\bhttps?:\/\//i, 'it names a URL'],
   [/\bfetch\s*\(|XMLHttpRequest|WebSocket|\b(?:urllib|requests|httpx|aiohttp|socket|paramiko|ftplib|smtplib)\b|http\.client/, 'it can reach the network'],
   [/(?:require\s*\(|from\s+|import\s*\(?)\s*['"](?:node:)?(?:https?|http2|net|tls|dgram|dns|child_process|cluster|worker_threads|vm)['"]/, 'it loads a network or process module'],
-  [/child_process|\bspawn(?:Sync)?\s*\(|\bexec(?:Sync|File|FileSync)?\s*\(|\bos\.(?:system|popen|exec\w*|spawn\w*)\b|\bsubprocess\b|\beval\b|new\s+Function|\bsource\s|\bsudo\b|\bxargs\b/, 'it starts other programs or evaluates code'],
+  [/child_process|\bspawn(?:Sync)?\s*\(|\bexec(?:Sync|File|FileSync)?\s*\(|\bos\.(?:system|popen|exec\w*|spawn\w*)\b|\bsubprocess\b|\beval\b|new\s+Function|(?:^|[;&|(]\s*)(?:source|\.)\s+\S|\bsudo\b|\bxargs\b/m, 'it starts other programs or evaluates code'],
   [/\brm\s+-|\brm\s+[^\s|;&]+|\brmdir\b|\bunlink|\brmSync\b|\brm\s*\(|\bshutil\.rmtree|\bos\.remove|\s-delete\b|\bshred\b|\btruncate\b|\bgit\s+(?:reset|clean|checkout|restore)\b/, 'it deletes or discards files'],
   [/\bgit\s+push\b|\bnpm\s+publish\b|\bpnpm\s+publish\b|\byarn\s+publish\b|\bvsce\b|\bovsx\b|\btwine\b|\bgh\s+(?:release|pr|api)\b|\bdocker\s+push\b|\bcargo\s+publish\b/, 'it publishes or pushes'],
   [/\.ssh\b|\.aws\b|\.gnupg|near-credentials|\.npmrc|\.netrc|\.pypirc|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\.(?:pem|p12|pfx|keystore|kbkey)\b|\bcredentials?\b|(?:^|[^\w])\.env\b|process\.env|os\.environ|getenv|\$\{?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_?KEY)/i, 'it names a credential or the environment'],

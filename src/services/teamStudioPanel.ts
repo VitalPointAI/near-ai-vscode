@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { layoutProbeAsset, registerLayoutProbe, sharedMedia } from './layoutProbe';
 import { applyProjectType } from '../agent/projectTypes';
+import { applyResearchProfile, usesResearchProfile } from '../gsd/researchProfile';
 import { slugify, TeamLibrary } from '../agent/teams';
 import { AuthService } from './auth';
 import { attachTeamStudio, StudioTarget, teamStudioHtml, versionLabel } from './teamStudioPage';
@@ -184,7 +185,12 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     ask: (prompt, value) => Promise.resolve(vscode.window.showInputBox({ title: 'Team Studio', prompt, value, validateInput: (text) => text.trim() ? undefined : 'Enter a name.' })),
     pickExportTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(root ?? context.globalStorageUri.fsPath, name)), filters: { 'Team file': ['md'] }, title: 'Export team' }))?.fsPath,
     pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'Team file': ['md'] }, title: 'Import a NEAR AI team file', canSelectMany: false }))?.[0]?.fsPath,
-    applyProjectType: (projectRoot, type, goal) => applyProjectType(projectRoot, type, goal),
+    applyProjectType: async (projectRoot, type, goal) => {
+      const applied = await applyProjectType(projectRoot, type, goal);
+      // PERF-06: research and writing projects also get the research GSD profile and its verifier scripts (nearAi.gsd.researchProfile).
+      if (usesResearchProfile(type.id) && vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false) await applyResearchProfile(projectRoot);
+      return applied;
+    },
     drafts: { get: () => context.globalState.get(DRAFT_KEY), set: (value) => Promise.resolve(context.globalState.update(DRAFT_KEY, value)) },
     kept: { get: () => context.globalState.get(KEPT_KEY), set: (value) => Promise.resolve(context.globalState.update(KEPT_KEY, value)) },
     watch: (listener) => {
