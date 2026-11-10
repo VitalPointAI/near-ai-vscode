@@ -371,6 +371,36 @@ test('with one parallel slot, a sub-agent that starts its own foreground agent d
   assert.deepEqual(counters, { parent: 2, lead: 2, planner: 1 });
 });
 
+test('with one parallel slot, a sub-agent that starts a BACKGROUND agent finishes and frees its slot, and the background agent then runs', { timeout: 20_000 }, async () => {
+  // A background call returns at once and no tool lets a sub-agent block on its report, so the sub-agent ends its own turn and releases the slot;
+  // the background agent queues behind it rather than deadlocking.
+  const { gsd, posted, conversation } = await project();
+  const nested: GsdContext = { ...gsd, agents: [
+    { name: 'gsd-lead', description: 'Leads', tools: ['Read', 'Agent'], body: 'You are the lead.', file: path.join(gsd.home, 'agents', 'gsd-lead.md') },
+    ...gsd.agents
+  ] };
+  const counters = { parent: 0, lead: 0, planner: 0 };
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const system = String(messages[0]?.content);
+      const who = system.startsWith('You are the lead.') ? 'lead' : system.startsWith('You are the planner.') ? 'planner' : 'parent';
+      const turn = counters[who]++;
+      const reply = (content: string | null, calls?: ToolCall[]): CompletionEvent => ({ type: 'done', message: { role: 'assistant', content, ...(calls ? { tool_calls: calls } : {}) }, finishReason: calls ? 'tool_calls' : 'stop', usage });
+      if (who === 'parent') yield turn === 0 ? reply(null, [call('p1', 'Agent', { subagent_type: 'gsd-lead', prompt: 'lead it' })]) : reply('all done');
+      else if (who === 'lead') yield turn === 0 ? reply(null, [call('l1', 'Agent', { subagent_type: 'gsd-planner', prompt: 'plan it', run_in_background: true })]) : reply('lead started the planner');
+      else yield reply('planner report');
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  try {
+    await conversation.send(request(client as never, nested, { maxParallelAgents: 1 }));
+  } finally {
+    conversation.dispose();
+  }
+  assert.match(String(posted.find((message) => message.type === 'tool-end' && message.callId === 'p1')?.output), /lead started the planner/);
+  assert.equal(counters.planner, 1, 'the background planner ran once the lead had freed the slot');
+});
+
 test('at the critical threshold when summarizing cannot free space, the user is told once', async () => {
   const { root, gsd, posted, conversation } = await project();
   await writeFile(path.join(root, 'small.txt'), 'x\n');

@@ -696,7 +696,8 @@ export class AgentConversation {
               // Once the agent is stopped there is no next turn to hold a slot for, and waiting on the aborted signal would throw here and replace the
               // child's finished report with an error.
               while (slot.nested === 0 && !slot.held && !agent.abort.signal.aborted) {
-                await this.acquireSlot(limit, agent.abort.signal);
+                // Stopped while waiting: there is no next turn, and the child's finished report must still be returned, not replaced by the abort.
+                try { await this.acquireSlot(limit, agent.abort.signal); } catch { break; }
                 slot.held = true;
                 // Another foreground child started while this one waited for the slot: it needs the slot more.
                 if (slot.nested > 0) { slot.held = false; this.releaseSlot(); }

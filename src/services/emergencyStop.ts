@@ -60,7 +60,10 @@ export function initEmergencyStop(context: vscode.ExtensionContext): void {
   item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   const sync = (engaged: boolean) => { if (engaged) item.show(); else item.hide(); };
   // The shared file is the newest word from any window; global state covers a machine that stopped before the file existed.
-  current = readShared() ?? memento.get<boolean>(STATE_KEY, false) ?? false;
+  const shared = readShared();
+  current = shared ?? memento.get<boolean>(STATE_KEY, false) ?? false;
+  // A stop recorded only in global state (before the shared file existed) is written out, so the other open windows learn of it too.
+  if (shared === undefined && current) { try { writeShared(true); } catch { /* this window still stops */ } }
   sync(current);
   const watch = setInterval(checkOtherWindows, OTHER_WINDOWS_CHECK_MS);
   watch.unref?.();
@@ -76,7 +79,7 @@ export function checkOtherWindows(): void {
   const shared = readShared();
   if (shared === undefined || shared === current) return;
   current = shared;
-  void memento?.update(STATE_KEY, shared);
+  void memento?.update(STATE_KEY, shared).then(undefined, () => undefined);
   changes.emit('change', shared);
 }
 

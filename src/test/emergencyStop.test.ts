@@ -5,7 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 // The emergency stop must reach every open window. globalState is per-window in memory, so windows share the stop through a file in the extension's
-// global storage folder, which is the same folder for every window. Two "windows" here are two loads of the module pointed at one folder.
+// global storage folder, which is the same folder for every window. Two "windows" here are two loads of the module pointed at one folder. The check is
+// called directly; initEmergencyStop runs it on a 2-second interval, which is not waited for here.
 
 function stubVscode(): { restore(): void; visible(): boolean } {
   let shown = false;
@@ -95,6 +96,7 @@ test('a stop recorded before the shared file existed still holds after a reload'
     const one = freshWindow();
     one.initEmergencyStop({ subscriptions, globalState: state, globalStorageUri: { fsPath: storage } } as never);
     assert.equal(one.isEmergencyStopped(), true);
+    assert.equal(JSON.parse(await readFile(path.join(storage, 'emergency-stop.json'), 'utf8')).engaged, true, 'and written to the shared file, so other windows learn of it');
   } finally {
     for (const subscription of subscriptions) subscription.dispose();
     stub.restore();
