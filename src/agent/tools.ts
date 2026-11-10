@@ -238,9 +238,13 @@ function applyEdit(text: string, edit: { oldString: string; newString: string; r
  * that uses \r\n, both are converted to \r\n, unless only the text as given matches (a file with mixed line endings).
  */
 function matchLineEndings(text: string, input: { oldString: string; newString: string; replaceAll: boolean }): { oldString: string; newString: string; replaceAll: boolean } {
-  if (!text.includes('\r\n') || input.oldString.includes('\r\n')) return input;
-  const converted = { ...input, oldString: input.oldString.replace(/\n/g, '\r\n'), newString: input.newString.replace(/\r?\n/g, '\r\n') };
-  return text.includes(converted.oldString) || !text.includes(input.oldString) ? converted : input;
+  if (!text.includes('\r\n')) return input;
+  // old_string and new_string always take the SAME line endings as the text they match, so an edit never introduces a new mix: CRLF where the
+  // match is CRLF, LF where (in a mixed file) only the LF form matches.
+  const crlf = { ...input, oldString: input.oldString.replace(/\r?\n/g, '\r\n'), newString: input.newString.replace(/\r?\n/g, '\r\n') };
+  if (text.includes(crlf.oldString)) return crlf;
+  const lf = { ...input, oldString: input.oldString.replace(/\r\n/g, '\n'), newString: input.newString.replace(/\r\n/g, '\n') };
+  return text.includes(lf.oldString) ? lf : input;
 }
 
 /** The skipped directories a glob or path names as a whole segment (`node_modules/**`), which are searched after all. */

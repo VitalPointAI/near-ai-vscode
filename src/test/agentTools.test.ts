@@ -113,6 +113,10 @@ test('Edit matches multi-line text in a CRLF file and keeps its line endings', a
   await writeFile(file, 'a\nb\r\nc\r\n');
   await editTool.run(editTool.parse({ file_path: 'win.ts', old_string: 'a\nb', new_string: 'A\nB' }), context);
   assert.equal(await readFile(file, 'utf8'), 'A\nB\r\nc\r\n');
+  // An old_string that already carries \r\n still gets a CRLF new_string, so no LF lines are introduced into a CRLF file.
+  await writeFile(file, 'one\r\ntwo\r\n');
+  await editTool.run(editTool.parse({ file_path: 'win.ts', old_string: 'one\r\ntwo', new_string: 'uno\ndos' }), context);
+  assert.equal(await readFile(file, 'utf8'), 'uno\r\ndos\r\n');
 });
 
 const systemRipgrep = ['/usr/bin/rg', '/usr/local/bin/rg', '/opt/homebrew/bin/rg'].find(existsSync);
@@ -135,7 +139,7 @@ test('ripgrep output is split at the NUL after each path, so a Windows drive let
 });
 
 test('KillShell stops only the run\'s own jobs, so it runs without asking in every mode', async () => {
-  for (const mode of ['approve-risky', 'auto'] as const) {
+  for (const mode of ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'] as const) {
     const decided = await decidePermissionAsync(killShellTool.capability, undefined, { mode, emergencyStop: false }, DEFAULT_RULES, new RunGrants());
     assert.equal(decided.decision, 'allow', mode);
   }
@@ -156,6 +160,10 @@ test('a command that ends the shell finishes at once, and the next command gets 
     assert.equal(next.exitCode, 0);
     assert.match(next.output, /again:unset/);
     assert.equal(path.resolve(next.cwd), path.resolve(root), 'the earlier cd / was reset too, as the message says: the fresh shell starts in the workspace');
+    // A large burst printed just before exit is kept whole, not cut off when the shell ends.
+    const burst = await shell.run('seq 1 20000; exit 4', 60_000);
+    assert.equal(burst.exitCode, 4);
+    assert.match(burst.output, /\b20000\b[\s\S]*ended the shell/);
     const failed = await shell.run('set -e; false; echo unreachable', 60_000);
     assert.equal(failed.exitCode, 1);
     assert.doesNotMatch(failed.output, /unreachable/);

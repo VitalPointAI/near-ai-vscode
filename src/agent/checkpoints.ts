@@ -50,9 +50,12 @@ export class RunCheckpoints {
       restored.push(snapshot.path);
     }
     this.snapshots.clear();
-    // A save still queued would bring the file back after it is removed.
-    await this.saving;
-    if (this.storageDir) await rm(this.file(), { force: true });
+    // The removal joins the same queue as the saves, so a save queued before OR during the revert runs first and cannot bring the file back afterwards.
+    if (this.storageDir) {
+      const removed = this.saving.then(() => rm(this.file(), { force: true }));
+      this.saving = removed.catch(() => undefined);
+      await removed;
+    }
     return restored;
   }
 
