@@ -42,7 +42,10 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     title: (input) => (input.node ? `Knowledge: ${input.node}` : input.query ? `Knowledge: search "${input.query}"` : 'Knowledge graph'),
     async run(input) {
       const graph = await knowledge.read();
-      if (graph.problem && !graph.nodes.length) return `${graph.problem} The team's knowledge starts again from here; anything you verify is worth adding with Learn.`;
+      // Two different troubles, two different outlooks. A damaged file is set aside on the next Learn and the graph restarts, so learning is worth it. A file
+      // that could not be OPENED is left as it is and Learn is refused until it can be, so inviting Learn would only waste a call and an approval.
+      if (graph.problem && graph.unreadable) return `${graph.problem} The file is left as it is, so nothing the team knew is lost, but it cannot be read or added to until it can be opened again (check its permissions, or whether another program holds it). Learn will be refused until then; carry on without the team's knowledge and tell the person.`;
+      if (graph.problem && !graph.nodes.length) return `${graph.problem} The damaged file will be set aside and the team's knowledge starts again from here; anything you verify is worth adding with Learn.`;
       if (!graph.nodes.length) return 'The team has no knowledge yet. Anything you verify is worth adding with Learn.';
       const grade = (grading?: Grading) => (grading ? `${grading.reliability}${grading.credibility}` : 'ungraded');
       const byId = new Map(graph.nodes.map((node) => [node.id, node]));
