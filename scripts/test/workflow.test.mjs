@@ -315,6 +315,10 @@ test('tagging main is not blocked by another PR\'s failed agent review, which la
   tagged.workflowRuns.push({ id: 3, name: 'Agent review', path: '.github/workflows/agent-review.yml', event: 'workflow_run', status: 'completed', conclusion: 'failure', suiteId: 909 });
   tagged.checkRuns.push(ciRun('agent-review', { suiteId: 909, conclusion: 'failure' }), ciRun('approve', { suiteId: 909, conclusion: 'cancelled' }));
   assert.equal(gate(tagged, { required: CI_CHECKS, exactCommitCi: true }).ok, true, gate(tagged, { required: CI_CHECKS, exactCommitCi: true }).problems.join('\n'));
+  // The list tagging main really uses (releaseGate on main) is CI_CHECKS; REQUIRED_CHECKS is only for a hotfix head, which is never main's HEAD.
+  const plan = releaseGate({ version: '1.2.3', sha: SHA, onMain: true });
+  assert.deepEqual(plan.required, CI_CHECKS);
+  assert.equal(gate(tagged, { required: plan.required, exactCommitCi: true }).ok, true);
   // Any OTHER failed check still blocks the tag.
   tagged.checkRuns.push(ciRun('codeql', { suiteId: 777, conclusion: 'failure' }));
   assert.match(gate(tagged, { required: CI_CHECKS, exactCommitCi: true }).problems.join('\n'), /"codeql" failed/);

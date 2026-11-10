@@ -101,7 +101,7 @@ export async function reviewPr(repo, number, { env = process.env, log = console.
 
     // The head this review read: if the PR moved while the model ran, nothing is posted (submitReview), as for the expectedHead check above.
     const result = submitReview(repo, number, review, { log, requireRecommendation: true, reviewedHead: pr.headRefOid });
-    if (result.skipped) return { state: 'none', skipped: true };
+    if (result.skipped) return { state: 'none', skipped: true, reviewedSha: pr.headRefOid, gateFiles: [], omitted: [], dir };
     return {
       state: result.state,
       skipped: false,
