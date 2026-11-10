@@ -115,7 +115,7 @@ export class ShellSession {
       const onData = (chunk: Buffer) => {
         this.pending += chunk.toString();
         // Output still arriving after the shell exited: wait for it (up to a bound) rather than cut it off.
-        if (exitGrace) { clearTimeout(exitGrace); exitGrace = setTimeout(ended, Math.max(0, Math.min(200, exitDeadline - Date.now())), false); }
+        if (exitGrace) { clearTimeout(exitGrace); exitGrace = setTimeout(ended, Math.max(0, Math.min(500, exitDeadline - Date.now())), false); }
         const match = new RegExp(`\\n?${marker}:(\\d+):([^\\n]*)\\n`).exec(this.pending);
         if (!match) return;
         this.cwd = match[2] || this.cwd;
@@ -138,8 +138,8 @@ export class ShellSession {
         finish({ output: truncate(`${this.pending}\n[The command ended the shell${code === null ? '' : ` with exit code ${code}`} (exit, or a failure under set -e). A fresh shell starts for the next command, so earlier cd and exported variables were reset.${closed ? '' : ' A process it started still held the output open, so later output was not captured.'}]`), exitCode: code, timedOut: false, cwd: this.cwd });
       };
       const onClose = () => ended(true);
-      // 'close' normally follows at once; 200 ms after the last output (2 s at most) covers a background process holding the pipe open.
-      const onExit = () => { exitDeadline = Date.now() + 2_000; exitGrace = setTimeout(ended, 200, false); };
+      // 'close' normally follows at once; 500 ms after the last output (2 s at most) covers a background process holding the pipe open.
+      const onExit = () => { exitDeadline = Date.now() + 2_000; exitGrace = setTimeout(ended, 500, false); };
       const onAbort = () => interrupt('[Stopped by the user.]');
       const timer = setTimeout(() => interrupt(`[Command timed out after ${Math.round(timeoutMs / 1000)}s and was killed. The shell was restarted, so earlier cd and exported variables were reset.]`), timeoutMs);
       signal?.addEventListener('abort', onAbort, { once: true });
