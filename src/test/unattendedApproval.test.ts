@@ -207,3 +207,26 @@ test('a script written after the main agent read outside content still asks when
   }
   assert.equal(asked.length, 1, 'the helper was asked, not allowed silently');
 });
+
+// Review of PR 34: a `..` segment is refused in every form, not only as `../`.
+test('every form of a parent-folder path keeps a verification script asking', async () => {
+  const root = await project();
+  const forms: Record<string, string> = {
+    'check-join.mjs': "import { join } from 'node:path';\nimport { readFileSync } from 'node:fs';\nreadFileSync(join('..', 'other', 'x.md'), 'utf8');\n",
+    'check-bare.mjs': "import { readdirSync } from 'node:fs';\nreaddirSync('..');\n",
+    'check-double.mjs': 'import { readdirSync } from "node:fs";\nreaddirSync("..");\n',
+    'check-backtick.mjs': "import { readdirSync } from 'node:fs';\nreaddirSync(`..`);\n",
+    'check-slash-up.mjs': "import { readFileSync } from 'node:fs';\nreadFileSync('report/..', 'utf8');\n",
+    'verify-arg.sh': 'ls ..\n',
+    'check-pardir.py': 'import os\nprint(os.path.pardir)\n',
+    'check-chdir.mjs': "process.chdir('/');\n",
+    'check-dirname.mjs': "import { dirname } from 'node:path';\nconsole.log(dirname(dirname(process.argv[1])));\n"
+  };
+  for (const [name, text] of Object.entries(forms)) {
+    await writeFile(path.join(root, 'scripts', name), text);
+    const command = name.endsWith('.py') ? `python3 scripts/${name}` : name.endsWith('.sh') ? `bash scripts/${name}` : `node scripts/${name}`;
+    assert.notEqual((await decide(root, command)).decision, 'allow', name);
+  }
+  await writeFile(path.join(root, 'scripts', 'check-spread.mjs'), "const parts = [...['a', 'b']];\nconsole.log(parts.join('..b'));\n");
+  assert.equal((await decide(root, 'node scripts/check-spread.mjs')).decision, 'allow', 'a spread and a dot inside a name are not parent paths');
+});

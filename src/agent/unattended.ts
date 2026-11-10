@@ -52,7 +52,10 @@ const FORBIDDEN_CONTENT: Array<[RegExp, string]> = [
   [/\bgit\s+push\b|\bnpm\s+publish\b|\bpnpm\s+publish\b|\byarn\s+publish\b|\bvsce\b|\bovsx\b|\btwine\b|\bgh\s+(?:release|pr|api)\b|\bdocker\s+push\b|\bcargo\s+publish\b/, 'it publishes or pushes'],
   [/\.ssh\b|\.aws\b|\.gnupg|near-credentials|\.npmrc|\.netrc|\.pypirc|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\.(?:pem|p12|pfx|keystore|kbkey)\b|\bcredentials?\b|(?:^|[^\w])\.env\b|process\.env|os\.environ|getenv|\$\{?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_?KEY)/i, 'it names a credential or the environment'],
   [/(?:^|[\s'"`=(,])~\//, 'it names a path in a home directory'],
-  [/\.\.[\\/]/, 'it names a path above its own folder']
+  // Review of PR 34: any `..` path segment in any form (`../`, `/..`, `'..'`, `".."`, `join('..', 'x')`, a bare `..` argument), not only `../`. A run of
+  // three dots (a spread or an ellipsis) and a dot inside a name (`a..b`) are not segments. Ways to climb without writing `..` ask too.
+  [/(?<![.\w])\.\.(?![.\w])/, 'it names a path above its own folder'],
+  [/\bpardir\b|\bchdir\b|\bdirname\s*\(\s*(?:path\.)?dirname\s*\(|\bparent\.parent\b|\.parents\b/, 'it can climb above its own folder']
 ];
 
 /** Absolute paths a check may name: the interpreter on a shebang line, the null device, and the temporary folder. */

@@ -112,7 +112,10 @@ is usually there to answer one and runs used to wait hours on their own checks
   or URL, starts no other program and evaluates no code, deletes or discards
   nothing, publishes or pushes nothing, names no credential, environment
   variable or home-directory path, and names no absolute path outside the
-  project or `..` path. Each line of a shell script must also not be risky to
+  project, and names no `..` path segment in any form (`../`, `/..`, a quoted
+  `'..'` or `".."`, `join('..', …)`, or `..` as an argument) and no other way to
+  climb out (`os.pardir`, `chdir`, nested `dirname`, `.parent.parent`). Each
+  line of a shell script must also not be risky to
   the rules.
 
   These rules apply to the script's whole closure, not just the file named on
