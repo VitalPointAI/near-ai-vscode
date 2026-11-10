@@ -7,7 +7,7 @@ import { PROJECT_TYPES, projectType, projectTypeTeam, templateVersion, withProje
 import { definitionHash, guidanceFingerprint, memberFingerprint } from '../agent/teamFingerprints';
 import { splitTeam } from '../agent/teamMarkdown';
 import { TEMPLATE_HISTORY } from '../agent/teamTemplateHistory';
-import { applyTeamUpdate, describePlan, detectTemplate, planGuidanceUpdate, planTeamUpdate, stampTeam } from '../agent/teamUpdate';
+import { applyGuidanceUpdate, applyTeamUpdate, describePlan, detectTemplate, planGuidanceUpdate, planTeamUpdate, stampTeam } from '../agent/teamUpdate';
 import { parseTeam, renderTeam, TeamLibrary } from '../agent/teams';
 import { RED_TEAM_POLICY } from '../agent/projectTypes';
 import { beginRun, runInProgress, whenIdle } from '../services/runActivity';
@@ -391,4 +391,19 @@ test('"add only the new parts" keeps the user\'s own Output and Done-when sectio
   const text = base.replace(/## editor\n[\s\S]*?(?=\n## |$)/, both);
   const result = parseTeam(applyTeamUpdate(text, planTeamUpdate(text)!, { members: { editor: 'merge' } }), 'x.md').members.find((member) => member.name === 'editor')!;
   assert.equal((result.instructions.match(/^(Output|Done when):/gim) ?? []).length, 2, 'nothing added when they have both, whatever the case');
+});
+
+test('the guidance is replaced only between its markers, even when the same text appears elsewhere in AGENTS.md', async () => {
+  const generated = await readFile(path.join(FIXTURES, 'wearable-research-AGENTS.md'), 'utf8');
+  const inner = generated.slice(generated.indexOf('## Project type'), generated.indexOf('\n<!-- near-ai:project-type:end'));
+  // The user keeps a copy of the old guidance above the block, for reference.
+  const agents = generated.replace('# Agent instructions\n', `# Agent instructions\n\nOur notes, with the old guidance quoted:\n\n${inner}\n`);
+  assert.equal(agents.split(inner).length - 1, 2, 'the text appears twice');
+  const plan = planGuidanceUpdate(agents, 'research');
+  assert.equal(plan.action, 'auto');
+  const updated = applyGuidanceUpdate(agents, plan);
+  assert.ok(updated.startsWith(`# Agent instructions\n\nOur notes, with the old guidance quoted:\n\n${inner}\n`), 'the copy outside the markers is untouched');
+  assert.match(updated, /<!-- near-ai:project-type:start -->\n## Project type: Research and analysis[\s\S]*\*\*Workflow:\*\*[\s\S]*\n<!-- near-ai:project-type:end -->\n$/);
+  assert.equal(planGuidanceUpdate(updated, 'research').action, 'same');
+  assert.throws(() => applyGuidanceUpdate(updated, plan), /changed since the update was planned/);
 });

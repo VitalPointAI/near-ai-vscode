@@ -256,6 +256,14 @@ export function readProjectGuidance(agents: string): { inner: string; goal?: str
   return { inner, goal: /^Goal: (.*)$/m.exec(inner)?.[1]?.trim() };
 }
 
+/** AGENTS.md with the text between the project-type markers replaced by `inner`; everything outside the markers is left exactly as it was. */
+export function replaceProjectGuidance(agents: string, inner: string): string | undefined {
+  const start = agents.indexOf(START);
+  const end = agents.indexOf(END);
+  if (start < 0 || end <= start) return undefined;
+  return `${agents.slice(0, start + START.length)}\n${inner}\n${agents.slice(end)}`;
+}
+
 /** The current template version of a project type (see teamTemplateHistory.ts). */
 export function templateVersion(id: string): number {
   return TEMPLATE_HISTORY[id]?.[TEMPLATE_HISTORY[id].length - 1]?.version ?? 0;

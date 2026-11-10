@@ -1,5 +1,5 @@
 import { parseFrontmatter } from '../gsd/library';
-import { PROJECT_TYPES, projectGuidanceBlock, readProjectGuidance, templateVersion, type ProjectType } from './projectTypes';
+import { PROJECT_TYPES, projectGuidanceBlock, readProjectGuidance, replaceProjectGuidance, templateVersion, type ProjectType } from './projectTypes';
 import { guidanceFingerprint, memberFingerprint, splitGoal } from './teamFingerprints';
 import { lineDiff, splitTeam, type DiffLine, type Section } from './teamMarkdown';
 import { TEMPLATE_HISTORY } from './teamTemplateHistory';
@@ -243,8 +243,12 @@ export function planGuidanceUpdate(agents: string, typeId: string, base?: string
   return { action: unchanged ? 'auto' : 'choice', current: block.inner, proposed, ...(unchanged ? {} : { diff: lineDiff(block.inner, proposed) }) };
 }
 
-/** AGENTS.md with the project-type block replaced by the proposed one; the rest of the file is untouched. */
+/**
+ * AGENTS.md with the project-type block replaced by the proposed one, only between its markers: the same text elsewhere in the file (a quoted
+ * copy, notes the user keeps above it) is never touched. Throws when the block is no longer what the plan was made from.
+ */
 export function applyGuidanceUpdate(agents: string, plan: GuidancePlan): string {
   if (!plan.proposed || plan.current === undefined) return agents;
-  return agents.replace(plan.current, () => plan.proposed!);
+  if (readProjectGuidance(agents)?.inner !== plan.current) throw new Error('The project-type guidance in AGENTS.md changed since the update was planned.');
+  return replaceProjectGuidance(agents, plan.proposed) ?? agents;
 }
