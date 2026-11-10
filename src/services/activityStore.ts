@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { redactSecrets } from '../domain/redaction';
-import { ActivityApprovalSummary, ActivityEvent, ActivityLedger, ActivitySessionSummary, ActivityStatus, addSessionStats, AttributionSnapshot, emptyAgentCounts, normalizeAttribution, normalizeSessionStats, RunOutcomeLabel, sessionOutcome, SessionStats, summarizeAgentCounts } from '../domain/activity';
+import { ActivityApprovalSummary, ActivityEvent, ActivityLedger, ActivitySessionSummary, ActivityStatus, addSessionStats, AttributionSnapshot, emptyAgentCounts, normalizeAttribution, normalizeSessionStats, RunOutcomeLabel, runningCost, sessionOutcome, SessionStats, summarizeAgentCounts } from '../domain/activity';
 import { redactForDisplay } from './agentActivity';
 import type { UsageMetadata } from './nearAiClient';
 
@@ -99,9 +99,11 @@ export class ActivityStore {
     if (!session) throw new Error('Activity session was not found.');
     const kind = update.kind ?? 'session';
     const event: ActivityEvent = { id: `${sessionId}-${session.events.length + 1}`, sessionId, timestamp: this.clock(), attribution: clone(session.attribution), kind, status: update.status, summary: operationalSummary(kind, update.summary), phase: safeText(update.phase ?? session.phase, 120), agentId: safeText(update.agentId, 120), agentRole: safeText(update.agentRole, 120), model: safeText(update.model, 160), tool: safeText(update.tool, 120), action: safeText(update.action, 120), route: safeText(update.route, 160), requestId: safeText(update.requestId, 160), cacheHit: update.cacheHit === true, agentCount: safeInteger(update.agentCount), attempt: safeInteger(update.attempt), retry: update.retry === true, estimatedCostUsd: safeNumber(update.estimatedCostUsd), actualCostUsd: safeNumber(update.actualCostUsd), inputTokens: safeInteger(update.inputTokens), outputTokens: safeInteger(update.outputTokens), durationMs: safeInteger(update.durationMs), approvalRequired: update.approvalRequired === true, errorCode: safeText(update.errorCode, 80) };
+    // The run's cost adds up its requests (0.4.19 review: each event used to replace it, so a run showed only its last turn's cost).
+    session.estimatedCostUsd = runningCost(session.estimatedCostUsd, event.estimatedCostUsd, event.requestId, session.events, 'estimatedCostUsd');
+    session.actualCostUsd = runningCost(session.actualCostUsd, event.actualCostUsd, event.requestId, session.events, 'actualCostUsd');
     session.events = [...session.events, event].slice(-this.maxEventsPerSession); session.updatedAt = event.timestamp;
     if (event.phase) session.phase = event.phase; if (update.plan) session.plans = uniqueSafeText([...session.plans, update.plan], 120); if (event.model) session.models = uniqueSafeText([...session.models, event.model], 160);
-    if (event.estimatedCostUsd !== undefined) session.estimatedCostUsd = event.estimatedCostUsd; if (event.actualCostUsd !== undefined) session.actualCostUsd = event.actualCostUsd;
     if (event.kind === 'agent') session.agents = summarizeAgentCounts(session.events);
     if (event.kind === 'approval') { session.approvals.required += event.approvalRequired ? 1 : 0; if (event.status === 'completed') session.approvals.approved += 1; session.approvals.pending = Math.max(0, session.approvals.required - session.approvals.approved); }
     if (event.kind === 'message') { if (event.summary.toLocaleLowerCase().includes('user message')) session.context.userTurns += 1; if (event.summary.toLocaleLowerCase().includes('assistant response')) session.context.assistantTurns += 1; }
@@ -145,12 +147,30 @@ export class ActivityStore {
   }
   private async load(): Promise<void> {
     if (this.loaded) return; this.loaded = true;
-    try { const parsed = JSON.parse(await this.fileSystem.readFile(this.filePath, 'utf8')) as Partial<ActivityLedger>; if (parsed.version !== STORE_VERSION || !Array.isArray(parsed.sessions)) throw new Error('Unsupported activity ledger.'); this.ledger = { version: STORE_VERSION, sessions: parsed.sessions.map(normalizeSession).filter((value): value is ActivitySessionSummary => Boolean(value)).slice(0, this.maxSessions) }; } catch { this.ledger = { version: STORE_VERSION, sessions: [] }; }
+    this.ledger = { version: STORE_VERSION, sessions: await this.readSessions() };
   }
+  private async readSessions(): Promise<ActivitySessionSummary[]> {
+    try { const parsed = JSON.parse(await this.fileSystem.readFile(this.filePath, 'utf8')) as Partial<ActivityLedger>; if (parsed.version !== STORE_VERSION || !Array.isArray(parsed.sessions)) throw new Error('Unsupported activity ledger.'); return parsed.sessions.map(normalizeSession).filter((value): value is ActivitySessionSummary => Boolean(value)).slice(0, this.maxSessions); } catch { return []; }
+  }
+  /**
+   * Writes the history, merged with what is on disk now. Several stores share one file (the sidebar chat keeps one for the whole window, the chat view
+   * makes one per request, other windows have their own), so writing only this store's copy would erase the runs the others recorded since it loaded
+   * (0.4.19 review). Runs are matched by session id, and the copy updated last wins.
+   */
   private async persist(): Promise<void> {
-    for (const session of this.ledger.sessions.slice(this.maxSessionsWithEvents)) if (session.events.length) session.events = [];
-    const payload = `${JSON.stringify(this.ledger)}\n`; const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}`;
-    this.writeQueue = this.writeQueue.then(async () => { await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath); }); await this.writeQueue;
+    const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}`;
+    this.writeQueue = this.writeQueue.catch(() => undefined).then(async () => {
+      const ours = new Map(this.ledger.sessions.map((session) => [session.sessionId, session]));
+      for (const theirs of await this.readSessions()) {
+        const mine = ours.get(theirs.sessionId);
+        if (!mine || theirs.updatedAt > mine.updatedAt) ours.set(theirs.sessionId, theirs);
+      }
+      this.ledger.sessions = [...ours.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, this.maxSessions);
+      for (const session of this.ledger.sessions.slice(this.maxSessionsWithEvents)) if (session.events.length) session.events = [];
+      const payload = `${JSON.stringify(this.ledger)}\n`;
+      await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath);
+    });
+    await this.writeQueue;
   }
 }
 const interrupted = new Map<string, Promise<number>>();

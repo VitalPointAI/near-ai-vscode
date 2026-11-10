@@ -125,11 +125,11 @@ const CAPS: Partial<Record<ActivityKind, number>> = { system: 20_000, prompt: 20
 const TOOL_INPUT_CAP = 4_000;
 const TOOL_OUTPUT_CAP = 8_000;
 const MAX_AGENTS = 300;
-const TOKENS = /\b(?:sk-[A-Za-z0-9_-]{20,}|sk_(?:live|test)_[A-Za-z0-9]{10,}|gh[pousr]_[A-Za-z0-9]{30,}|glpat-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+)\b/g;
 const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
 
 export function redactForDisplay(value: string): string {
-  return redactSecrets(value).replace(PRIVATE_KEY, '[PRIVATE KEY REDACTED]').replace(TOKENS, '[REDACTED]');
+  // Well-known tokens (sk-…, ghp_…, JWTs) are redacted by redactSecrets itself, so every caller gets them, not only the feed.
+  return redactSecrets(value).replace(PRIVATE_KEY, '[PRIVATE KEY REDACTED]');
 }
 
 function cap(value: string | undefined, limit: number): string | undefined {

@@ -59,7 +59,8 @@ export function runNode(args: string[], cwd: string, extraEnv: Record<string, st
 }
 
 export async function gradeExecution(task: ExecutionTask, root: string, signal?: AbortSignal): Promise<{ score: number; passed: number; total: number; misses: string[] }> {
-  const total = (await hiddenTestNames(task)).length;
+  const hidden = await hiddenTestNames(task);
+  const total = [...hidden.values()].reduce((sum, names) => sum + names.length, 0);
   for (const name of task.visibleTests) {
     const given = await readFile(path.join(task.dir, 'start', name), 'utf8');
     if (await readFile(path.join(root, name), 'utf8').catch(() => '') !== given) return { score: 0, passed: 0, total, misses: [`changed the given test ${name}`] };
@@ -74,19 +75,43 @@ export async function gradeExecution(task: ExecutionTask, root: string, signal?:
   for (const file of (await readdir(check)).filter((name) => name.endsWith('.test.js')).sort()) {
     // Run directly, not with --test, so each test() reports at the top level of the TAP output.
     const result = await runNode(['--test-reporter=tap', path.join(check, file)], root, task.hiddenEnv, 120_000, signal);
-    for (const match of result.stdout.matchAll(/^(not )?ok \d+ - (.+)$/gm)) {
-      if (match[1]) misses.push(match[2].trim()); else passed += 1;
-    }
+    const counted = tapResults(result.stdout, hidden.get(file) ?? []);
+    passed += counted.passed;
+    misses.push(...counted.misses);
   }
   // A crash before any test ran (e.g. a syntax error) leaves tests unreported: they count as failed.
+  passed = Math.min(passed, total);
   if (passed + misses.length < total) misses.push(`${total - passed - misses.length} acceptance tests did not run`);
-  return { score: total ? Math.round((10 * passed) / total) : 0, passed, total, misses };
+  return { score: total ? Math.min(10, Math.round((10 * passed) / total)) : 0, passed, total, misses };
 }
 
-async function hiddenTestNames(task: ExecutionTask): Promise<string[]> {
-  const names: string[] = [];
+/**
+ * The hidden tests one TAP report shows passing and failing. Only a line naming one of `names` counts, and each name once (0.4.19 review: any `ok N - …`
+ * line counted, so the code under test could print its own, and passed could exceed the total). A skipped or to-do test is not a pass.
+ */
+export function tapResults(stdout: string, names: readonly string[]): { passed: number; misses: string[] } {
+  const wanted = new Set(names);
+  const seen = new Set<string>();
+  let passed = 0;
+  const misses: string[] = [];
+  for (const match of stdout.matchAll(/^(not )?ok \d+ - (.+)$/gm)) {
+    const line = match[2].trim();
+    const directive = /\s#\s*(SKIP|TODO)\b/i.exec(line);
+    // TAP escapes # and \ in a name; the directive, when there is one, follows the name after an unescaped #.
+    const name = (directive ? line.slice(0, directive.index) : line).trim().replace(/\\([#\\])/g, '$1');
+    if (!wanted.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    if (match[1] || directive) misses.push(name); else passed += 1;
+  }
+  return { passed, misses };
+}
+
+/** Each hidden test file's test names, by file name. */
+async function hiddenTestNames(task: ExecutionTask): Promise<Map<string, string[]>> {
+  const names = new Map<string, string[]>();
   for (const file of (await readdir(path.join(task.dir, 'hidden'))).filter((name) => name.endsWith('.test.js'))) {
-    for (const match of (await readFile(path.join(task.dir, 'hidden', file), 'utf8')).matchAll(/^test\((['"])(.+?)\1/gm)) names.push(match[2]);
+    // A name may hold an escaped quote (`'the plan\'s tests'`), so the match runs to the first UNescaped closing quote, and the escape is undone.
+    names.set(file, [...(await readFile(path.join(task.dir, 'hidden', file), 'utf8')).matchAll(/^test\((['"])((?:\\.|(?!\1)[^\\\n])+)\1/gm)].map((match) => match[2].replace(/\\(.)/g, '$1')));
   }
   return names;
 }

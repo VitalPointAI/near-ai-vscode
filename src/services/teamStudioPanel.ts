@@ -114,7 +114,9 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       // The team's own file, found the way the library finds teams, so a name with spaces or capitals still lands on the right file. It is resolved ONCE,
       // before the tests, and the same path is used afterwards (0.4.19 review: resolving it twice, and once when the team could not be found, made the
       // change guard report "changed while its roles were being tested" every time).
-      const teamEntry = (await library.list()).find((entry) => entry.team?.name === teamName || path.basename(entry.file, '.md') === slugify(teamName));
+      // The project's own team is listed only with the root, so it is passed; a match by file name skips the project team, whose file is always team.md.
+      const entries = await library.list(root);
+      const teamEntry = entries.find((entry) => entry.team?.name === teamName) ?? entries.find((entry) => !entry.project && path.basename(entry.file, '.md') === slugify(teamName));
       const file = teamEntry?.file;
       const beforeTests = file ? await readFile(file, 'utf8').catch(() => undefined) : undefined;
       if (!file || beforeTests === undefined) return { applied: 0, text: `${teamName} could not be found on disk, so its models were left alone.` };

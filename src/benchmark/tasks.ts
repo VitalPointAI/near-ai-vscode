@@ -161,5 +161,9 @@ export async function costOf(client: { actualCostsUsd?(requestIds: string[]): Pr
   const ids = usage.map((turn) => turn.requestId!).filter(Boolean);
   const actual = ids.length && client.actualCostsUsd ? await client.actualCostsUsd(ids).catch(() => undefined) : undefined;
   const estimated = usage.reduce((sum, turn) => sum + (turn.estimatedCostUsd ?? 0), 0);
-  return { usd: actual ?? (estimated > 0 ? estimated : undefined), estimated: actual === undefined };
+  if (actual === undefined) return { usd: estimated > 0 ? estimated : undefined, estimated: true };
+  // Billing knows only the turns with a request id; the others are added at their estimate rather than dropped (0.4.19 review), and the total then
+  // says it is partly estimated.
+  const unbilled = usage.filter((turn) => !turn.requestId).reduce((sum, turn) => sum + (turn.estimatedCostUsd ?? 0), 0);
+  return { usd: actual + unbilled, estimated: unbilled > 0 };
 }

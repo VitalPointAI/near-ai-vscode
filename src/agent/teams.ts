@@ -32,6 +32,17 @@ export function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'team';
 }
 
+/**
+ * Which knowledge graph a team file reads and feeds. A library team's is its slug. A project team's file is always `.planning/.near-ai/team.md`, so its
+ * slug is "team" in every project: keyed by that, every project's team (and a library team saved as team.md) shared one graph (0.4.19 review). It is
+ * keyed by its project folder instead, and the double hyphen means no slug can ever equal it, since slugify never leaves two in a row.
+ */
+export function teamKnowledgeKey(file: string): string {
+  const dir = path.dirname(file);
+  if (path.basename(file) === 'team.md' && path.basename(dir) === '.near-ai' && path.basename(path.dirname(dir)) === '.planning') return `project--${createHash('sha256').update(path.resolve(dir, '..', '..')).digest('hex').slice(0, 12)}`;
+  return slugify(path.basename(file, '.md'));
+}
+
 /** Parses a team file; throws with a message that says what to fix. */
 export function parseTeam(text: string, file: string): TeamDefinition {
   const { data, body } = parseFrontmatter(text);

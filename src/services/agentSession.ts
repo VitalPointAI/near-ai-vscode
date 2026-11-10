@@ -39,7 +39,7 @@ import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
 import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
-import { slugify } from '../agent/teams';
+import { teamKnowledgeKey } from '../agent/teams';
 import type { MemoryScope } from '../domain/contextGraph';
 import type { AgentRole } from '../domain/agents';
 import type { ContextGraphMemory } from './contextGraphMemory';
@@ -608,8 +608,8 @@ export class AgentConversation {
     // same graph, which is what makes it shared: a fact one member verified is there for the next one.
     const teamKnowledge = request.team
       ? knowledgeTools({
-          read: async () => (await loadKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug))).knowledge,
-          add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug), addition)
+          read: async () => (await loadKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file))).knowledge,
+          add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
         })
       : [];
     const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
@@ -936,7 +936,7 @@ export class AgentConversation {
     if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
   }
 
-  /** How long an approval may wait before it is declined, so an unattended run carries on (0: wait indefinitely). */
+  /** How long an approval may wait before the run is paused on it (and declined a day after that); 0 waits indefinitely. */
   public approvalTimeoutMs = 15 * 60_000;
 
   /** The prompts still waiting for the user, oldest first, marked as replays for a reloaded view. */
