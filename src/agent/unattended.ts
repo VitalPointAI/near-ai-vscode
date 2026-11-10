@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { classifyCommand, CommandContext } from './commandSafety';
 import { NETWORK_COMMAND } from './untrusted';
+import { VERIFIER_FILES, VERIFIER_MANIFEST } from '../gsd/verifierScaffold';
 
 // PERF-01: what a sub-agent may run without a person at the screen. Measured on two research projects, sub-agents spent hours parked on approval cards
 // for their own verification scripts: `bash scripts/verify.sh` is `unknown` to the rules (an interpreter runs code they cannot see), so it asked, and
@@ -109,25 +111,123 @@ export async function verificationScript(command: string, context: CommandContex
   let realRoot: string;
   try { real = await realpath(invocation.script); realRoot = await realpath(root); } catch { return { allow: false, reason: 'the script does not exist' }; }
   if (!inside(realRoot, real)) return { allow: false, reason: 'the script is outside the project' };
-  const info = await stat(real);
-  if (!info.isFile() || info.size > MAX_SCRIPT_BYTES) return { allow: false, reason: 'the script is not a small regular file' };
   const relative = path.relative(realRoot, real).split(path.sep).join('/');
   const named = (context.planScripts ?? []).some((entry) => {
     const normalized = entry.replace(/\\/g, '/').replace(/^\.\//, '');
     return normalized === relative || (path.isAbsolute(entry) && path.resolve(entry) === invocation.script);
   });
   if (!named && !VERIFY_NAME.test(relative)) return { allow: false, reason: `${relative} is not named like a check and the plan does not name it` };
-  if (tainted && context.runStartedAt !== undefined && info.mtimeMs >= context.runStartedAt - 1_000) {
-    return { allow: false, reason: `${relative} changed during this run, which has read outside content` };
-  }
-  const text = await readFile(real, 'utf8');
-  const forbidden = forbiddenScriptContent(text, realRoot);
-  if (forbidden) return { allow: false, reason: `${relative} cannot run unattended: ${forbidden}` };
-  if (/\.(?:sh|bash)$/i.test(real) || /^#!.*\b(?:ba)?sh\b/.test(text)) {
-    const line = riskyShellLine(text, { ...context, root: realRoot, cwd: path.dirname(real) });
-    if (line) return { allow: false, reason: `${relative} cannot run unattended: ${line}` };
-  }
+  // Every file the script can run is judged, not only the entry: each relative import, require, dynamic import and script it invokes, recursively.
+  const problem = await checkClosure(real, realRoot, context, tainted);
+  if (problem) return { allow: false, reason: `${relative} cannot run unattended: ${problem}` };
   return { allow: true, reason: `${relative} is a verification script inside the project` };
+}
+
+/** node: built-ins a verification script may load: files and paths only, nothing that starts programs or reaches the network. */
+const ALLOWED_BUILTINS = new Set(['fs', 'fs/promises', 'path', 'url', 'util', 'assert', 'assert/strict']);
+/** Python standard modules a verification script may import; anything else (and any relative import) asks. */
+const ALLOWED_PYTHON = new Set(['json', 're', 'sys', 'pathlib', 'math', 'csv', 'collections', 'statistics', 'argparse', 'decimal', 'fractions', 'itertools', 'functools', 'typing', 'dataclasses', 'datetime', 'string', 'textwrap', 'unicodedata', 'enum', 'glob', 'fnmatch']);
+const MAX_CLOSURE_FILES = 50;
+const JS_FILE = /\.(?:mjs|cjs|js)$/i;
+const SHELL_FILE = /\.(?:sh|bash)$/i;
+
+/** SHA-256 of a file's text, as the scaffold manifest records it. */
+export function contentHash(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * What one file of a script's closure loads or runs, or a reason it cannot be followed: JavaScript imports, re-exports, `require` and `import()`
+ * (a non-literal argument fails closed), Python imports, and scripts a shell script runs.
+ */
+export function dependenciesOf(file: string, text: string, shellCwd = path.dirname(file)): { relative: string[]; builtins: string[] } | { problem: string } {
+  const relative: string[] = [];
+  const builtins: string[] = [];
+  const take = (specifier: string): string | undefined => {
+    if (specifier.startsWith('./') || specifier.startsWith('../')) { relative.push(specifier); return undefined; }
+    const name = specifier.replace(/^node:/, '');
+    if (ALLOWED_BUILTINS.has(name)) { builtins.push(name); return undefined; }
+    return `it loads ${specifier}, which is not a file of the project or an allowed built-in`;
+  };
+  if (JS_FILE.test(file)) {
+    // A call whose argument is not one string literal is decided at run time, so nothing here can follow it.
+    if (/\b(?:require|import)\s*\(\s*(?!['"][^'"\n]*['"]\s*\))/.test(text)) return { problem: 'it loads a module chosen at run time' };
+    const patterns = [/\bimport\s+(?:[\w*{}\s,]+\s+from\s+)?['"]([^'"\n]+)['"]/g, /\bexport\s+(?:\*|\{[^}]*\})\s*(?:as\s+\w+\s+)?from\s+['"]([^'"\n]+)['"]/g, /\b(?:require|import)\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g];
+    for (const pattern of patterns) for (const match of text.matchAll(pattern)) { const problem = take(match[1]); if (problem) return { problem }; }
+  } else if (/\.py$/i.test(file)) {
+    for (const match of text.matchAll(/^\s*(?:from\s+(\S+)\s+import|import\s+([\w.,\s]+))/gm)) {
+      const modules = match[1] ? [match[1]] : match[2].split(',').map((item) => item.trim().split(/\s+/)[0]);
+      for (const module of modules) if (module.startsWith('.') || !ALLOWED_PYTHON.has(module.split('.')[0])) return { problem: `it imports ${module}, which is not an allowed standard module` };
+    }
+    if (/\b__import__\b|\bimportlib\b/.test(text)) return { problem: 'it imports a module chosen at run time' };
+  } else if (SHELL_FILE.test(file) || /^#!.*\b(?:ba)?sh\b/.test(text)) {
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const words = line.split(/\s+/);
+      const runsScript = INTERPRETERS.has(words[0]) || /^\.?\.?\//.test(words[0]) || SCRIPT_EXTENSION.test(words[0]);
+      if (!runsScript) continue;
+      // A shell script's commands run from the folder it was started in, not its own.
+      const invoked = scriptInvocation(line, shellCwd);
+      if (!invoked) return { problem: `it runs another program in a way that cannot be followed (${line.slice(0, 80)})` };
+      relative.push(invoked.script);
+    }
+  }
+  return { relative, builtins };
+}
+
+/** The scaffold's recorded hashes (.planning/.near-ai/verifiers.json), by project-relative path; empty when there is none. */
+async function scaffoldManifest(root: string): Promise<Record<string, string>> {
+  try {
+    const value = JSON.parse(await readFile(path.join(root, VERIFIER_MANIFEST), 'utf8')) as unknown;
+    return value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Checks every file a verification script can run: the entry, and recursively each relative import, require, dynamic import and invoked script. Each
+ * must resolve inside the project, be a small regular file, not have changed during a run that read outside content, pass the content check (and, for
+ * shell, the per-line rules), and, if it is one of the scaffolded verifier files, still match the hash recorded when it was scaffolded. A cycle, an
+ * unresolvable or non-literal load, or more than MAX_CLOSURE_FILES files asks. Returns the first problem, or undefined when the whole closure is clean.
+ */
+async function checkClosure(entry: string, realRoot: string, context: CommandContext & UnattendedScope, tainted: boolean): Promise<string | undefined> {
+  const manifest = await scaffoldManifest(realRoot);
+  const done = new Set<string>();
+  const onPath = new Set<string>();
+  const visit = async (requested: string, from: string): Promise<string | undefined> => {
+    let file: string;
+    try { file = await realpath(requested); } catch { return `${from} loads ${path.basename(requested)}, which does not exist`; }
+    const shown = path.relative(realRoot, file).split(path.sep).join('/');
+    if (!inside(realRoot, file)) return `${from} loads a file outside the project`;
+    if (onPath.has(file)) return `${shown} is part of an import cycle`;
+    if (done.has(file)) return undefined;
+    if (done.size + onPath.size >= MAX_CLOSURE_FILES) return 'it loads too many files to check';
+    const info = await stat(file);
+    if (!info.isFile() || info.size > MAX_SCRIPT_BYTES) return `${shown} is not a small regular file`;
+    if (tainted && context.runStartedAt !== undefined && info.mtimeMs >= context.runStartedAt - 1_000) return `${shown} changed during this run, which has read outside content`;
+    const text = await readFile(file, 'utf8');
+    const recorded = manifest[shown] ?? (VERIFIER_FILES[shown] !== undefined ? contentHash(VERIFIER_FILES[shown]) : undefined);
+    if (recorded !== undefined && contentHash(text) !== recorded) return `${shown} is a scaffolded verifier that has changed since it was scaffolded`;
+    const forbidden = forbiddenScriptContent(text, realRoot);
+    if (forbidden) return `${shown}: ${forbidden}`;
+    if (SHELL_FILE.test(file) || /^#!.*\b(?:ba)?sh\b/.test(text)) {
+      const line = riskyShellLine(text, { ...context, root: realRoot, cwd: path.dirname(file) });
+      if (line) return `${shown}: ${line}`;
+    }
+    const dependencies = dependenciesOf(file, text, context.cwd ?? realRoot);
+    if ('problem' in dependencies) return `${shown}: ${dependencies.problem}`;
+    onPath.add(file);
+    for (const dependency of dependencies.relative) {
+      const problem = await visit(path.resolve(path.dirname(file), dependency), shown);
+      if (problem) return problem;
+    }
+    onPath.delete(file);
+    done.add(file);
+    return undefined;
+  };
+  return visit(entry, path.relative(realRoot, entry));
 }
 
 /**

@@ -113,8 +113,24 @@ is usually there to answer one and runs used to wait hours on their own checks
   nothing, publishes or pushes nothing, names no credential, environment
   variable or home-directory path, and names no absolute path outside the
   project or `..` path. Each line of a shell script must also not be risky to
-  the rules. A script changed during a run that has read outside content still
-  asks.
+  the rules.
+
+  These rules apply to the script's whole closure, not just the file named on
+  the command line: every relative `import`, `export … from`, `require()` and
+  `import()` in a JavaScript file, and every script a shell script runs, is
+  resolved and checked the same way, recursively (at most 50 files). The only
+  other things a script may load are the built-ins `node:fs`,
+  `node:fs/promises`, `node:path`, `node:url`, `node:util` and `node:assert`
+  (and, for Python, a short list of standard modules with no process or
+  network access). Anything else asks: a load that does not resolve to a file
+  inside the project, a non-relative package, an `import()` or `require()`
+  whose argument is not one string literal, a Python relative import or
+  `importlib`, an invocation a shell line makes that cannot be followed, and an
+  import cycle. The verifier scripts NEAR AI scaffolds are also compared with
+  the SHA-256 recorded in `.planning/.near-ai/verifiers.json` when they were
+  written (a file agents cannot change without asking); a scaffolded file that
+  differs in any way asks. When the run has read outside content, any file of
+  the closure changed during the run makes the script ask.
 
 Everything else asks exactly as before, including for sub-agents: a push, a
 delete outside the project, publishing, any command that can reach the

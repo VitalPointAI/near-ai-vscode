@@ -1,4 +1,5 @@
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
 // PERF-06: deterministic verifier scripts for research and writing projects, so most verification is a cheap script run instead of a model reading the
@@ -178,15 +179,29 @@ export const VERIFIER_FILES: Record<string, string> = {
   'scripts/verify/README.md': README
 };
 
-/** Writes the verifier scripts that are not there yet; never overwrites. Returns the files written, relative to the root. */
+/**
+ * Where the scaffold records the SHA-256 of each file it wrote. It sits in .planning/.near-ai/, which an agent cannot write without asking, so a changed
+ * verifier (or a changed helper it imports) is recognised and asks before it runs unattended (src/agent/unattended.ts).
+ */
+export const VERIFIER_MANIFEST = path.join('.planning', '.near-ai', 'verifiers.json');
+
+/** Writes the verifier scripts that are not there yet, never overwriting, and records the hash of each one it wrote. Returns those files. */
 export async function writeVerifierScaffold(root: string): Promise<string[]> {
   const written: string[] = [];
+  const manifestFile = path.join(root, VERIFIER_MANIFEST);
+  let manifest: Record<string, string> = {};
+  try { manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as Record<string, string>; } catch { manifest = {}; }
   for (const [relative, content] of Object.entries(VERIFIER_FILES)) {
     const file = path.join(root, relative);
     if (await stat(file).then(() => true, () => false)) continue;
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, content, 'utf8');
+    manifest[relative] = createHash('sha256').update(content, 'utf8').digest('hex');
     written.push(relative);
+  }
+  if (written.length) {
+    await mkdir(path.dirname(manifestFile), { recursive: true });
+    await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   }
   return written;
 }

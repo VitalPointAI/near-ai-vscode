@@ -119,3 +119,56 @@ test('script invocations, forbidden content and plan-named scripts are parsed co
   assert.match(String(forbiddenScriptContent('cat /var/log/x', '/p')), /outside the project/);
   assert.deepEqual(scriptsNamedIn('Run `scripts/verify-gates.sh` then node scripts/figures.mjs and ../evil.sh'), ['scripts/verify-gates.sh', 'scripts/figures.mjs']);
 });
+
+// Agent review of PR 34 (blocker): the check follows everything a script can run, not only the entry file.
+test('the whole import closure is checked: changed scaffold helpers, new imports, dynamic and non-relative loads, cycles and invoked scripts ask', async () => {
+  const { applyResearchProfile } = await import('../gsd/researchProfile');
+  const root = await project();
+  await applyResearchProfile(root);
+  const run = async (command: string, options: { tainted?: boolean; runStartedAt?: number } = {}) => (await decide(root, command, options)).decision;
+  assert.equal(await run('node scripts/verify/verify-all.mjs'), 'allow', 'an untouched scaffold still runs by itself');
+  assert.equal(await run('node scripts/verify/check-citations.mjs'), 'allow');
+
+  const shared = path.join(root, 'scripts', 'verify', 'shared.mjs');
+  const original = await import('node:fs/promises').then((fs) => fs.readFile(shared, 'utf8'));
+  await writeFile(shared, `${original}\nconsole.log('changed');\n`);
+  assert.equal(await run('node scripts/verify/verify-all.mjs'), 'ask', 'a modified imported helper asks, even though the entry is unchanged');
+  assert.equal(await run('node scripts/verify/check-figures.mjs'), 'ask');
+  await writeFile(shared, original);
+  assert.equal(await run('node scripts/verify/verify-all.mjs'), 'allow', 'restored, it runs again');
+
+  const figures = path.join(root, 'scripts', 'verify', 'check-figures.mjs');
+  const figuresText = await import('node:fs/promises').then((fs) => fs.readFile(figures, 'utf8'));
+  await writeFile(path.join(root, 'scripts', 'verify', 'extra.mjs'), 'export const x = 1;\n');
+  await writeFile(figures, `import { x } from './extra.mjs';\n${figuresText}`);
+  assert.equal(await run('node scripts/verify/check-figures.mjs'), 'ask', 'a newly added import in a scaffolded verifier asks');
+  await writeFile(figures, figuresText);
+
+  const write = (name: string, text: string) => writeFile(path.join(root, 'scripts', name), text);
+  await write('helper-clean.mjs', "import { readFileSync } from 'node:fs';\nexport const read = (file) => readFileSync(file, 'utf8');\n");
+  await write('helper-bad.mjs', "import { execSync } from 'node:child_process';\nexport const go = () => execSync('ls');\n");
+  await write('check-clean-import.mjs', "import { read } from './helper-clean.mjs';\nread('a.md');\n");
+  await write('check-bad-import.mjs', "import { go } from './helper-bad.mjs';\ngo();\n");
+  await write('check-dynamic.mjs', "const name = './helper-' + 'bad.mjs';\nawait import(name);\n");
+  await write('check-require.cjs', "const _ = require('lodash');\n");
+  await write('check-missing.mjs', "import './not-there.mjs';\n");
+  await write('check-cycle-a.mjs', "import './check-cycle-b.mjs';\n");
+  await write('check-cycle-b.mjs', "import './check-cycle-a.mjs';\n");
+  await write('verify-runs-node.sh', 'node scripts/helper-bad.mjs\n');
+  await write('verify-runs-clean.sh', 'node scripts/helper-clean.mjs\n');
+  await write('check-imports.py', 'import json\nimport subprocess\n');
+  assert.equal(await run('node scripts/check-clean-import.mjs'), 'allow', 'a clean relative import is followed and allowed');
+  assert.equal(await run('node scripts/check-bad-import.mjs'), 'ask', 'a helper that spawns asks');
+  assert.equal(await run('node scripts/check-dynamic.mjs'), 'ask', 'a dynamic import() asks');
+  assert.equal(await run('node scripts/check-require.cjs'), 'ask', 'require of a non-relative module asks');
+  assert.equal(await run('node scripts/check-missing.mjs'), 'ask', 'an unresolvable import asks');
+  assert.equal(await run('node scripts/check-cycle-a.mjs'), 'ask', 'a cyclic import asks');
+  assert.equal(await run('bash scripts/verify-runs-node.sh'), 'ask', 'a script a shell script runs is checked too');
+  assert.equal(await run('bash scripts/verify-runs-clean.sh'), 'allow');
+  assert.equal(await run('python3 scripts/check-imports.py'), 'ask', 'a Python import outside the allowed standard modules asks');
+
+  const startedAt = Date.now() - 60_000;
+  const { utimes: touch } = await import('node:fs/promises');
+  await touch(path.join(root, 'scripts', 'helper-clean.mjs'), new Date(), new Date());
+  assert.equal(await run('node scripts/check-clean-import.mjs', { tainted: true, runStartedAt: startedAt }), 'ask', 'a helper changed during a tainted run asks, not only the entry');
+});
