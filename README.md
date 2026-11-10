@@ -301,6 +301,14 @@ the hash recorded when it was scaffolded, so agents ask before running it until
 you run **NEAR AI: Trust Research Verifiers**, which lists what changed and asks
 before recording the new versions.
 
+In a research project the plan checker runs only for plans that change a gate,
+verifier, test or CI file (judged from the plan and from what has actually
+changed, using git). For a content-only plan the checker's reply starts with
+Open-GSD's `## VERIFICATION PASSED` marker so the workflow carries on without
+asking, and its next line says "PLAN CHECK SKIPPED (content-only plan): the plan
+checker was NOT run" with the evidence: the marker means "carry on", not
+"checked". See SECURITY.md, "Plan checks the research profile skips".
+
 **NEAR AI: Export Usage and Activity** (also on the Agent Activity page and in
 the Tools tab) saves usage for an organization, a project, or everything, over
 today, the last 7 or 30 days, or custom dates, as CSV or JSON: one row per run

@@ -163,6 +163,21 @@ answering an approval, Resume, a new message, or coming back to the window
 carries on, and after a day with nobody back the run is stopped, its work kept. The main
 conversation's own approvals still wait for you (`nearAi.agent.approvalTimeoutMinutes`).
 
+### Plan checks the research profile skips
+
+In a research or writing project (`nearAi.gsd.researchProfile`, on by
+default), Open-GSD's plan checker is not run for a plan that changes content
+only. A plan counts as content-only when its `files_modified` list and its
+text name no gate, verifier, test or CI file, and when nothing this run wrote
+and no uncommitted change git reports touches one; without git, the checker
+runs. The checker's place in the workflow is then filled by a reply that
+starts with `## VERIFICATION PASSED`, because Open-GSD continues only on that
+marker or `## ISSUES FOUND` and otherwise stops to ask you. The next line
+always reads "PLAN CHECK SKIPPED (content-only plan): the plan checker was NOT
+run, so these plans were not verified", followed by the evidence. In this
+case the marker means only "carry on"; nothing was checked. Set
+`nearAi.gsd.researchProfile` to `false` to have every plan checked.
+
 Search results leave out credential-looking files unless you search one
 directly. WebFetch follows redirects itself, requires https at every hop, and
 refuses hosts that resolve to loopback, private, link-local or metadata

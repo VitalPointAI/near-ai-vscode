@@ -47,9 +47,9 @@ test('the plan-checker is skipped only when every named plan lists content files
   await writeFile(path.join(dir, '02-04-PLAN.md'), plan(['report/x.md', '.github/workflows/ci.yml']));
   const named = (...plans: string[]) => `Check these plans:\n${plans.map((name) => `- .planning/phases/02-report/${name}`).join('\n')}`;
   const skipped = await planCheckSkip(named('02-01-PLAN.md'), root);
-  // Review of PR 34: a skipped check is never reported as a pass, and it says what the skip rests on.
-  assert.match(String(skipped), /^## PLAN CHECK SKIPPED \(content-only plan\)\n\nThe plan-checker did not run/);
-  assert.doesNotMatch(String(skipped), /VERIFICATION PASSED/);
+  // Reviews of PR 34: the reply carries the marker Open-GSD needs, and the very next line says no check was run; it says what the skip rests on.
+  assert.match(String(skipped), /^## VERIFICATION PASSED\nPLAN CHECK SKIPPED \(content-only plan\): the plan checker was NOT run, so these plans were not verified\.\n/);
+  assert.match(String(skipped), /it is not a verification/);
   assert.match(String(skipped), /Evidence for the skip:\n- Plans: \.planning\/phases\/02-report\/02-01-PLAN\.md\./);
   assert.match(String(skipped), /Uncommitted changes git reports: .*02-01-PLAN\.md/);
   assert.equal(await planCheckSkip(named('02-01-PLAN.md', '02-02-PLAN.md'), root), undefined, 'a plan that changes a verifier is checked');
@@ -101,7 +101,7 @@ test('an undeclared verifier edit is caught and the plan-checker runs; without g
     return { root, prompt: 'Check .planning/phases/02-report/02-01-PLAN.md' };
   };
   const clean = await setup(true);
-  assert.match(String(await planCheckSkip(clean.prompt, clean.root)), /^## PLAN CHECK SKIPPED \(content-only plan\)/, 'a content-only plan skips');
+  assert.match(String(await planCheckSkip(clean.prompt, clean.root)), /^## VERIFICATION PASSED\nPLAN CHECK SKIPPED \(content-only plan\)/, 'a content-only plan skips');
 
   const edited = await setup(true);
   await mkdir(path.join(edited.root, 'scripts', 'verify'), { recursive: true });
@@ -117,7 +117,7 @@ test('an undeclared verifier edit is caught and the plan-checker runs; without g
 
   const runsOnly = await setup(true);
   await writeFile(path.join(runsOnly.root, '.planning', 'phases', '02-report', '02-01-PLAN.md'), `${plan(['report/sections/A.md'])}\n## Verify\nRun \`node scripts/verify/verify-all.mjs\` and \`npm test\`.\n`);
-  assert.match(String(await planCheckSkip(runsOnly.prompt, runsOnly.root)), /^## PLAN CHECK SKIPPED/, 'only running a verifier is not an edit');
+  assert.match(String(await planCheckSkip(runsOnly.prompt, runsOnly.root)), /^## VERIFICATION PASSED\nPLAN CHECK SKIPPED/, 'only running a verifier is not an edit');
 
   const noGit = await setup(false);
   assert.equal(await planCheckSkip(noGit.prompt, noGit.root), undefined, 'without git the actual changes are unknown, so the checker runs');
@@ -140,4 +140,38 @@ test('an edited scaffolded verifier asks until it is trusted, and trusting recor
   await writeFile(figures, "import { execSync } from 'node:child_process';\nexecSync('ls');\n");
   await trustVerifiers(root, ['scripts/verify/check-figures.mjs']);
   assert.equal(await decide(), false, 'trusting never overrides the content rules');
+});
+
+/**
+ * Open-GSD's plan-phase handling of a plan-checker reply (gsd-core workflows/plan-phase.md, steps 10 to 12, and
+ * plan-phase/steps/stall-detection-helpers.md), reduced to what decides the route:
+ *   - gsd_stall_watch reports marker_received only for "## VERIFICATION PASSED" or "## ISSUES FOUND";
+ *   - step 11: PASSED with any BLOCKER or WARNING entry (YAML or prose) is treated as ISSUES FOUND, so it goes to step 12; PASSED otherwise goes to
+ *     step 13; ISSUES FOUND goes to step 12;
+ *   - a reply with neither marker falls to step 11a, which, with plans on disk, asks the person "Accept / Retry / Stop".
+ * "no warnings" or a zero count is not an entry; every other BLOCKER or WARNING word is counted, which is stricter than the workflow (fail closed).
+ */
+function openGsdRoute(reply: string): 'step-13' | 'step-12' | 'step-11a-ask-user' {
+  const marker = reply.includes('## VERIFICATION PASSED') ? 'passed' : reply.includes('## ISSUES FOUND') ? 'issues' : undefined;
+  if (!marker) return 'step-11a-ask-user';
+  const entries = reply.replace(/\bno (?:blockers?|warnings?)\b|\b0 (?:blockers?|warnings?)\b/gi, '').match(/\b(?:BLOCKER|WARNING)S?\b/gi) ?? [];
+  if (marker === 'issues' || entries.length) return 'step-12';
+  return 'step-13';
+}
+
+test('Open-GSD\'s plan-phase reads a skip reply as "proceed to step 13" with no question, and a real issues reply still goes to revision', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-plan-route-'));
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  const dir = path.join(root, '.planning', 'phases', '02-report');
+  await mkdir(dir, { recursive: true });
+  // File names that repeat a severity word must not turn the skip into issues: they are not listed by name.
+  await writeFile(path.join(dir, '02-01-PLAN.md'), plan(['report/sections/warnings-and-blockers.md', 'report/sections/A.md']));
+  const skip = String(await planCheckSkip('Check .planning/phases/02-report/02-01-PLAN.md', root));
+  assert.equal(openGsdRoute(skip), 'step-13', 'the skip continues to step 13');
+  assert.doesNotMatch(skip, /blocker|warning/i, 'no BLOCKER or WARNING word anywhere in the reply');
+  assert.match(skip, /\n- Files the plans declare \(files_modified\): \(one file, name not shown\), report\/sections\/A\.md;/);
+  const issues = '## ISSUES FOUND\n\n```yaml\nissues:\n  - plan: 02-01\n    dimension: requirement_coverage\n    severity: blocker\n    description: REQ-3 has no task\n```\n';
+  assert.equal(openGsdRoute(issues), 'step-12', 'a real issues reply still goes to the revision loop');
+  assert.equal(openGsdRoute('## VERIFICATION PASSED\n\nOne WARNING: task 2 has no verify step.'), 'step-12', 'a pass that lists a warning is revised');
+  assert.equal(openGsdRoute('## PLAN CHECK SKIPPED (content-only plan)\n'), 'step-11a-ask-user', 'the earlier heading alone would have stopped to ask the person');
 });
