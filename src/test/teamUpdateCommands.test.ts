@@ -11,11 +11,12 @@ import { TeamLibrary } from '../agent/teams';
 const errors: Array<{ message: string; items: string[] }> = [];
 const opened: string[] = [];
 let errorAnswer: string | undefined;
+const infos: string[] = [];
 const vscodeStub = {
   workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }), fs: { stat: async () => ({}) }, openTextDocument: async () => ({}) },
   window: {
     showErrorMessage: async (message: string, ...items: string[]) => { errors.push({ message, items }); return errorAnswer; },
-    showInformationMessage: async () => undefined,
+    showInformationMessage: async (message: string) => { infos.push(message); return undefined; },
     showWarningMessage: async () => undefined,
     showQuickPick: async () => undefined,
     showTextDocument: async (uri: { fsPath: string }) => { opened.push(uri.fsPath); }
@@ -91,4 +92,28 @@ test('Update Team writes only a project team file or a team in the library, neve
   assert.match(errors[1].message, /is a symbolic link\.$/);
   assert.equal(await readFile(outside, 'utf8'), team, 'the file outside is untouched');
   vscodeStub.workspace.workspaceFolders = [];
+});
+
+test('asking for Update Team again and again during a run leaves one offer waiting, not one per request', async () => {
+  const { updateTeam, afterRun } = load();
+  const { beginRun } = require('../agent/runActivity') as typeof import('../agent/runActivity');
+  const library = new TeamLibrary(await mkdtemp(path.join(tmpdir(), 'near-ai-update-once-')));
+  const end = beginRun();
+  infos.length = 0;
+  try {
+    for (let index = 0; index < 5; index += 1) await updateTeam(library, '/some/team.md');
+    assert.equal(infos.filter((message) => /Update Team will be offered when it ends/.test(message)).length, 5, 'each request is answered');
+    let calls = 0;
+    assert.equal(afterRun(`update|${library.directory}|/some/team.md`, () => { calls += 1; }), false, 'the same team already has an offer waiting');
+    assert.equal(afterRun('other', () => { calls += 1; }), true);
+  } finally {
+    end();
+  }
+  assert.equal(infos.filter((message) => /The run has ended\. Update your team now\?/.test(message)).length, 1, 'one offer after the run, not five');
+  infos.length = 0;
+  let later = 0;
+  const again = beginRun();
+  assert.equal(afterRun(`update|${library.directory}|/some/team.md`, () => { later += 1; }), true, 'after it fired, a new run can queue one again');
+  again();
+  assert.equal(later, 1);
 });

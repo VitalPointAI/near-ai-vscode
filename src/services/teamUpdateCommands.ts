@@ -64,10 +64,21 @@ async function decide(preview: TeamUpdatePreview): Promise<(UpdateDecisions & { 
   return { members, add, ...(guidance ? { guidance } : {}) };
 }
 
+/** Offers waiting for the current run to end, one per library and team file, so asking again during a run does not queue another. */
+const pendingAfterRun = new Set<string>();
+
+/** Runs `then` once when no run is in progress; a second request with the same key while one is waiting is dropped. Returns whether it was queued. */
+export function afterRun(key: string, then: () => void): boolean {
+  if (pendingAfterRun.has(key)) return false;
+  pendingAfterRun.add(key);
+  whenIdle(() => { pendingAfterRun.delete(key); then(); });
+  return true;
+}
+
 export async function updateTeam(library: TeamLibrary, requested?: string): Promise<void> {
   if (runInProgress()) {
     void vscode.window.showInformationMessage('A team run is in progress. Update Team will be offered when it ends.');
-    whenIdle(() => { void vscode.window.showInformationMessage('The run has ended. Update your team now?', 'Update Team…').then((choice) => { if (choice) void updateTeam(library, requested); }); });
+    afterRun(`update|${library.directory}|${requested ?? ''}`, () => { void vscode.window.showInformationMessage('The run has ended. Update your team now?', 'Update Team…').then((choice) => { if (choice) void updateTeam(library, requested); }); });
     return;
   }
   const updater = new TeamUpdater(library);
@@ -138,7 +149,7 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
 /** One notice for the first out-of-date team that has not been told about this version and did not ask to be left alone. */
 export async function offerTeamUpdates(library: TeamLibrary, notices: UpdateNotices): Promise<void> {
   if (!vscode.workspace.getConfiguration('nearAi').get<boolean>(UPDATE_NOTICE_SETTING, true)) return;
-  if (runInProgress()) { whenIdle(() => { void offerTeamUpdates(library, notices); }); return; }
+  if (runInProgress()) { afterRun(`offer|${library.directory}`, () => { void offerTeamUpdates(library, notices); }); return; }
   const updater = new TeamUpdater(library);
   for (const file of await teamFiles(library)) {
     const preview = await updater.outdated(file);
