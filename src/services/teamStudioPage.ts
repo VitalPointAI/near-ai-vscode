@@ -395,9 +395,10 @@ export interface TeamStudioDeps {
   /**
    * The final step of adding a team (owner, 2026-11-08): run each member's role test with the candidate models and apply the winner, so a new team's
    * models come from evidence rather than a default. Returns what each member ended up with, or undefined when the person skipped it. `confirm: false`
-   * means the caller has already asked, so no modal is shown; `signal` cancels the tests part-way.
+   * means the caller has already asked, so no modal is shown; `signal` cancels the tests part-way. `file` is the team file the caller is acting on, the
+   * most specific identity it has: a name alone can match both the project team and a library team (see optimiseTarget).
    */
-  optimiseTeam?(members: Array<{ name: string; role?: string; model?: string }>, teamName: string, options?: { signal?: AbortSignal; confirm?: boolean }): Promise<{ applied: number; text: string } | undefined>;
+  optimiseTeam?(members: Array<{ name: string; role?: string; model?: string }>, teamName: string, options?: { signal?: AbortSignal; confirm?: boolean; file?: string }): Promise<{ applied: number; text: string } | undefined>;
   /** The models a role test would try, so testing every team can show the whole cost once before it starts. */
   optimiseCandidates?(): Promise<string[]>;
   /** The person asked everything to stop (Emergency stop), so long-running work can be cancelled. */
@@ -413,6 +414,19 @@ export interface TeamStudioDeps {
 }
 
 interface OpenTeam { id: string; file: string; text: string; base: string }
+
+/**
+ * The library entry whose models a role test rewrites. The file the caller acted on decides when it is given and listed. Without one, a name can match
+ * both the project team and a library team of the same name (agent review: the first name match won, so the wrong file's models could be rewritten): a
+ * library team found by its slug comes first, then a library team by name, and the project team only when nothing in the library matches.
+ */
+export function optimiseTarget<T extends { file: string; project: boolean; team?: { name: string } }>(entries: readonly T[], teamName: string, file?: string): T | undefined {
+  if (file) return entries.find((entry) => path.resolve(entry.file) === path.resolve(file));
+  const library = entries.filter((entry) => !entry.project);
+  return library.find((entry) => path.basename(entry.file, '.md') === slugify(teamName))
+    ?? library.find((entry) => entry.team?.name === teamName)
+    ?? entries.find((entry) => entry.project && entry.team?.name === teamName);
+}
 
 /** Wires the studio page to the team library. Returns refresh/dispose for the host and the tests. */
 export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refresh(): Promise<void>; startWizard(target: StudioTarget): Promise<void>; dispose(): void; ready: Promise<void> } {
@@ -571,7 +585,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         // The whole cost is worked out and asked about ONCE, before any run, and the notice after each team shows the work moving rather than a long silence.
         if (!deps.optimiseTeam) { post({ type: 'error', text: 'No model is available to test the teams. Set up a NEAR AI profile first.' }); return; }
         const all = await deps.library.list(deps.root);
-        const teams = all.flatMap((entry) => entry.team ? [{ name: entry.team.name, members: entry.team.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })) }] : []);
+        const teams = all.flatMap((entry) => entry.team ? [{ name: entry.team.name, file: entry.file, members: entry.team.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })) }] : []);
         if (!teams.length) { post({ type: 'notice', text: 'There are no teams to test yet.' }); return; }
         const candidates = await deps.optimiseCandidates?.().catch(() => undefined) ?? [];
         // Each member is tested on each candidate model, which is what the role suite plans, so the total is members x models summed over the teams.
@@ -594,7 +608,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             if (controller.signal.aborted) break;
             let outcome: string;
             try {
-              const result = await deps.optimiseTeam(team.members, team.name, { signal: controller.signal, confirm: false });
+              const result = await deps.optimiseTeam(team.members, team.name, { signal: controller.signal, confirm: false, file: team.file });
               outcome = result ? result.text : team.name + ': skipped.';
             } catch (error) { outcome = team.name + ': ' + (error as Error).message; }
             results.push(outcome);
@@ -712,7 +726,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         // is optimised on demand with "Optimise all teams".
         if (created && deps.optimiseTeam && saved.members.length) {
           try {
-            const result = await deps.optimiseTeam(saved.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })), saved.name);
+            const result = await deps.optimiseTeam(saved.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })), saved.name, { file });
             if (result) { post({ type: 'notice', text: result.text }); await sendTeam(id, file); }
           } catch (error) { post({ type: 'error', text: `The role tests could not run: ${(error as Error).message}` }); }
         }

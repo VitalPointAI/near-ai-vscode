@@ -49,8 +49,14 @@ test('only the hidden tests count: a printed "ok" line, a skip or a to-do is not
   assert.deepEqual(result.misses, ['handles leap years', 'rejects bad input', 'formats # signs']);
 });
 
-test('the last report of a hidden test decides, so a matching line printed earlier by the code under test cannot pass it', () => {
-  const stdout = ['ok 1 - parses dates', '# Subtest: parses dates', 'not ok 1 - parses dates'].join('\n');
-  assert.deepEqual(tapResults(stdout, ['parses dates']), { passed: 0, misses: ['parses dates'] });
-  assert.deepEqual(tapResults('not ok 1 - parses dates\nok 1 - parses dates', ['parses dates']), { passed: 1, misses: [] });
+test('a failing report of a hidden test dominates, whether the code under test prints a matching line before or after it', () => {
+  // Printed before the real result (while being imported, say).
+  const before = ['ok 1 - parses dates', '# Subtest: parses dates', 'not ok 1 - parses dates'].join('\n');
+  assert.deepEqual(tapResults(before, ['parses dates']), { passed: 0, misses: ['parses dates'] });
+  // Printed after it (an exit handler or teardown): a genuine `not ok` stays a miss.
+  assert.deepEqual(tapResults('not ok 1 - parses dates\nok 1 - parses dates', ['parses dates']), { passed: 0, misses: ['parses dates'] });
+  // A later skip or to-do report also keeps it from passing.
+  assert.deepEqual(tapResults('ok 1 - parses dates\nok 1 - parses dates # SKIP', ['parses dates']), { passed: 0, misses: ['parses dates'] });
+  // Repeated plain `ok` reports are still one pass.
+  assert.deepEqual(tapResults('ok 1 - parses dates\nok 1 - parses dates', ['parses dates']), { passed: 1, misses: [] });
 });

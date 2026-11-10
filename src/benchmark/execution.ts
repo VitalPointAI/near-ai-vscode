@@ -91,19 +91,20 @@ export async function gradeExecution(task: ExecutionTask, root: string, signal?:
  */
 export function tapResults(stdout: string, names: readonly string[]): { passed: number; misses: string[] } {
   const wanted = new Set(names);
-  // The LAST report of a name decides: the test runner reports a test when it finishes, so a matching line the code under test printed earlier (while
-  // being imported, say) cannot stand in for the real result that follows it.
-  const latest = new Map<string, boolean>();
+  // A failure dominates: a name passes only when it was reported and EVERY report of it is a plain `ok`. Neither the first nor the last report can be
+  // trusted alone: the code under test can print a matching line before the real result (while being imported) or after it (an exit handler, teardown),
+  // and with "last wins" a genuine `not ok` followed by a printed `ok` was a pass.
+  const reported = new Map<string, boolean>();
   for (const match of stdout.matchAll(/^(not )?ok \d+ - (.+)$/gm)) {
     const line = match[2].trim();
     const directive = /\s#\s*(SKIP|TODO)\b/i.exec(line);
     // TAP escapes # and \ in a name; the directive, when there is one, follows the name after an unescaped #.
     const name = (directive ? line.slice(0, directive.index) : line).trim().replace(/\\([#\\])/g, '$1');
     if (!wanted.has(name)) continue;
-    latest.set(name, !match[1] && !directive);
+    reported.set(name, (reported.get(name) ?? true) && !match[1] && !directive);
   }
-  const misses = [...latest].filter(([, ok]) => !ok).map(([name]) => name);
-  return { passed: [...latest.values()].filter(Boolean).length, misses };
+  const misses = [...reported].filter(([, ok]) => !ok).map(([name]) => name);
+  return { passed: [...reported.values()].filter(Boolean).length, misses };
 }
 
 /** Each hidden test file's test names, by file name. */
