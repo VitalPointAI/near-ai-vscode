@@ -7,6 +7,7 @@ import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMeta
 import { AutoApprovalContext, allowRuleBlocker, decidePermissionAsync, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import { PREAMBLE_START, resolveGsdRun } from '../gsd/preamble';
 import type { CommandSafetyCheck } from './safetyModel';
+import type { UnattendedScope } from './unattended';
 import { truncate } from './shell';
 import { describeWeakened, isTestFile, weakenedTests } from './testIntegrity';
 import { coversOnlyThisCommand, exactRuleFor, riskSentence } from '../domain/approvalRisk';
@@ -155,6 +156,8 @@ export interface AgentRunOptions {
   safety?: CommandSafetyCheck;
   /** 0.4.17: the kinds of risk this project has already allowed, read once per run (shared with sub-agents). */
   riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
+  /** PERF-01: this is a sub-agent nobody watches; its safe and verification commands run without a card in auto and mostly-autonomous. */
+  unattended?: UnattendedScope;
   /**
    * Called before every model turn with the transcript and the last turn's usage. May wait (a
    * paused agent) and may return a replacement transcript (compaction, injected notifications).
@@ -254,6 +257,8 @@ const UI_OUTPUT_CHARS = 6_000;
  */
 export class AgentRun {
   public readonly grants: RunGrants;
+  /** When this run was created: a script changed after it was written by the run (PERF-01). */
+  private readonly startedAt = Date.now();
   private readonly byName: Map<string, AgentTool<any>>;
   private readonly definitions: ToolDefinition[];
 
@@ -534,7 +539,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     let risky: string | undefined;
     try { sensitive = await tool.sensitive?.(input, context); risky = await tool.risky?.(input, context); } catch (error) { return this.finish(call.id, false, `Error: ${(error as Error).message}`); }
     // Auto's context is built for every gated call, because a tool that marks itself autoSafe (the web tools) needs it as well as a shell command.
-    const autoCtx = this.options.policy.mode === 'auto' ? { ...(await this.autoContext(context, command ?? '')), autoSafeTool: tool.autoSafe === true } : undefined;
+    const unattended = this.options.unattended && (this.options.policy.mode === 'auto' || this.options.policy.mode === 'mostly-autonomous') && command !== undefined;
+    const autoCtx = this.options.policy.mode === 'auto' || unattended ? { ...(await this.autoContext(context, command ?? '')), autoSafeTool: tool.autoSafe === true } : undefined;
     const decided = await decidePermissionAsync(tool.capability, command, this.options.policy, this.options.rules, this.grants, autoCtx);
     // A risky action asks in every mode, and an earlier "allow this command" does not cover it.
     const permission = decided.decision === 'deny' ? decided : risky ? { decision: 'ask' as const } : sensitive && decided.decision === 'allow' && this.options.policy.mode !== 'fully-autonomous' ? { decision: 'ask' as const } : decided;
@@ -635,7 +641,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       : {};
     return {
       root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: [...this.writtenScratch], ...gsd, safety: this.options.safety, signal: context.signal,
-      ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {})
+      ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {}),
+      ...(this.options.unattended ? { unattended: { runStartedAt: this.startedAt, ...this.options.unattended } } : {})
     };
   }
 

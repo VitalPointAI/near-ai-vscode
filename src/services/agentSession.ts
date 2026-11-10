@@ -30,6 +30,7 @@ import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { SCRATCH_INSTRUCTIONS } from '../domain/scratch';
 import { WAITING_INSTRUCTIONS, checkNowMessage, isCheckNow } from '../domain/checkNow';
 import { cleanScratch } from './scratch';
+import { scriptsNamedIn } from '../agent/unattended';
 import type { AgentMessage, ModelInfo, NearAiClient, UsageMetadata } from './nearAiClient';
 import { TranscriptStore } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
@@ -116,6 +117,8 @@ export interface AgentTurnRequest {
   riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
   /** Saves an approval card's "always allow" entry to the workspace allow list. */
   rememberAllowRule?(rule: string): void | Promise<void>;
+  /** PERF-01: sub-agents' safe and verification commands run without a card in auto and mostly-autonomous (nearAi.agent.unattendedAutoApprove, default on). */
+  unattendedAutoApprove?: boolean;
   /** Model or tier per agent role (nearAi.agent.roleModels); a team member's own model line wins. */
   roleModels?: Record<string, string>;
   /** The run's ID, when the host already tagged spend for it (attachments read before the run). */
@@ -315,6 +318,7 @@ export class AgentConversation {
       maxOutputTokens: request.maxOutputTokens,
       beforeTurn: async (transcript, lastUsage, signal) => {
         this.enforceBudget(request, abort);
+        await this.whileRunPaused(signal);
         const pending = this.drainNotifications();
         const managed = await this.manageContext(pending.length ? [...transcript, ...pending] : transcript, lastUsage, request, signal, true);
         const next = managed ?? (pending.length ? [...transcript, ...pending] : undefined);
@@ -451,7 +455,7 @@ export class AgentConversation {
     }
     if (action === 'stop') agent.abort.abort();
     else if (action === 'pause') agent.paused = true;
-    else { agent.paused = false; agent.resume?.(); agent.resume = undefined; }
+    else { agent.paused = false; agent.resume?.(); agent.resume = undefined; this.resumeRun(); }
     if (action !== 'stop') this.activity?.setPaused(agentId, action === 'pause');
     this.postAgents();
     return true;
@@ -464,6 +468,8 @@ export class AgentConversation {
   }
 
   private halt(): void {
+    this.resumeRun(false);
+    this.approvalTimeoutStreak = 0;
     this.abort?.abort();
     this.abort = undefined;
     for (const agent of this.agents.values()) agent.abort.abort();
@@ -475,6 +481,7 @@ export class AgentConversation {
    * its transcript before its next model request; a retry wait ends early for it.
    */
   public steer(id: string, text: string, options: { interrupt?: boolean } = {}): void {
+    this.resumeRun();
     this.steering.push({ id, text });
     this.post({ type: 'steer-state', id, state: 'queued' });
     // 0.4.18: a message the person asked to interrupt with cuts the turn in flight; one that did not waits for the next safe point as before.
@@ -676,12 +683,19 @@ export class AgentConversation {
             this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}`, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, spawn.prompt, system);
             const child = new AgentRun({
               client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
+              ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt) } } : {}),
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
+                await this.whileRunPaused(signal);
                 while (agent.paused && !signal.aborted) await new Promise<void>((resolve) => { agent.resume = resolve; signal.addEventListener('abort', () => resolve(), { once: true }); });
                 return this.manageContext(transcript, lastUsage, { ...request, model }, signal, false);
               },
-              requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id),
+              // PERF-01: nobody may be watching a sub-agent, so its card waits only briefly; unanswered, the call returns "awaiting approval", the card
+              // stays queued, and a later answer is passed to the lead (an allow grants that exact command for the rest of the run).
+              requestApproval: (approval) => this.askApproval({ ...approval, callId: `${agent.id}:${approval.callId}`, title: `${label} › ${approval.title}` }, agent.abort.signal, label, agent.id, {
+                waitMs: this.subagentApprovalWaitMs,
+                onLate: (reply) => this.lateApproval(label, approval, reply, grants)
+              }),
               rememberAllowRule: request.rememberAllowRule,
               emit: (event) => {
                 this.track(agent.id, event);
@@ -982,7 +996,55 @@ export class AgentConversation {
     this.onWaitingChange?.(this.waiting.size);
   }
 
-  private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string, agentId?: string): Promise<ApprovalReply> {
+  /** PERF-01: how long a sub-agent's approval card waits before the call returns "awaiting approval" (nearAi.agent.subagentApprovalWaitSeconds). */
+  public subagentApprovalWaitMs = 20_000;
+  /** PERF-01: consecutive "awaiting approval" outcomes that pause the run (nearAi.agent.approvalTimeoutsBeforePause; 0 never pauses). */
+  public approvalTimeoutsBeforePause = 3;
+  private approvalTimeoutStreak = 0;
+  private runPause: { wait: Promise<void>; release: () => void } | undefined;
+
+  /** Holds every agent of the run before its next model turn while the run is paused for unanswered approvals. */
+  private async whileRunPaused(signal: AbortSignal): Promise<void> {
+    while (this.runPause && !signal.aborted) {
+      const { wait } = this.runPause;
+      await Promise.race([wait, new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))]);
+    }
+  }
+
+  /** Pauses the run after too many approvals in a row went unanswered, so it stops working around decisions nobody made. */
+  private pauseRun(): void {
+    if (this.runPause) return;
+    let release = () => {};
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    this.runPause = { wait, release };
+    for (const id of [this.mainAgentId, ...this.agents.keys()]) if (id) this.activity?.setPaused(id, true);
+    this.post({ type: 'notice', text: `Paused: ${this.approvalTimeoutStreak} approvals in a row went unanswered, so the run stopped before its next step instead of carrying on without them. Answer a waiting approval, press Resume on an agent, or send a message to carry on.` });
+  }
+
+  /** Ends a pause; `announce` false when the run is ending anyway. */
+  private resumeRun(announce = true): void {
+    const pause = this.runPause;
+    if (!pause) return;
+    this.runPause = undefined;
+    this.approvalTimeoutStreak = 0;
+    for (const id of [this.mainAgentId, ...this.agents.keys()]) if (id) this.activity?.setPaused(id, false);
+    pause.release();
+    if (announce) this.post({ type: 'notice', text: 'Resumed.' });
+  }
+
+  /** A queued sub-agent approval answered after the agent moved on: an allow grants that exact command for the run, and the lead is told either way. */
+  private lateApproval(label: string, approval: ApprovalRequest, reply: ApprovalReply, grants: RunGrants): void {
+    const allowed = reply.decision === 'allow' || reply.decision === 'allow-run' || reply.decision === 'allow-always';
+    const command = approval.subject?.trim();
+    if (allowed && command && approval.capability === 'shell') grants.commands.add(command);
+    if (allowed && approval.capability === 'workspaceWrite') grants.edits = true;
+    const what = command ? `\`${command.slice(0, 300)}\`` : `"${approval.title.slice(0, 200)}"`;
+    this.notifications.push({ role: 'user', content: allowed
+      ? `<approval-update agent="${label}" decision="allowed">\nThe user approved ${what}, which ${label} had queued. It is now allowed for the rest of this run: run it, or have an agent run it, if it is still needed.\n</approval-update>`
+      : `<approval-update agent="${label}" decision="declined">\nThe user declined ${what}, which ${label} had queued.${reply.feedback ? ` Their note: ${reply.feedback}` : ''} Do not run it; adjust instead.\n</approval-update>` });
+  }
+
+  private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string, agentId?: string, unattended?: { waitMs: number; onLate(reply: ApprovalReply): void }): Promise<ApprovalReply> {
     if (signal.aborted) return Promise.resolve({ decision: 'deny' });
     if (agentId) this.activity?.approvalAsked(agentId);
     return new Promise((resolve) => {
@@ -990,16 +1052,35 @@ export class AgentConversation {
       let parkLimit: ReturnType<typeof setTimeout> | undefined;
       // A day past the first timeout, which is long enough that nobody is surprised and short enough that an abandoned run does not live for ever.
       const parkLimitMs = 24 * 60 * 60_000;
+      /** Set once the call has returned "awaiting approval": a later answer goes to `onLate`, not to the finished call. */
+      let returned = false;
       const settle = (reply: ApprovalReply, cancelled = false) => {
         if (timer) clearTimeout(timer);
         if (parkLimit) clearTimeout(parkLimit);
         this.closePrompt(request.callId, cancelled);
+        if (!cancelled) { this.approvalTimeoutStreak = 0; this.resumeRun(); }
+        if (returned) {
+          if (!cancelled) unattended?.onLate(reply);
+          return;
+        }
         if (agentId) this.activity?.approvalSettled(agentId, cancelled ? 'cancelled' : reply.decision === 'deny' ? 'declined' : 'allowed');
         resolve(reply);
       };
       this.approvals.set(request.callId, settle);
-      signal.addEventListener('abort', () => { if (this.approvals.delete(request.callId)) settle({ decision: 'deny' }, true); }, { once: true });
-      if (this.approvalTimeoutMs > 0) {
+      signal.addEventListener('abort', () => { if (!returned && this.approvals.delete(request.callId)) settle({ decision: 'deny' }, true); }, { once: true });
+      if (unattended) {
+        // PERF-01: the sub-agent goes back to work after a short wait; its card stays open (until the run ends, or a day at most).
+        timer = setTimeout(() => {
+          if (!this.approvals.has(request.callId)) return;
+          returned = true;
+          if (agentId) this.activity?.approvalTimedOut(agentId);
+          this.approvalTimeoutStreak += 1;
+          resolve({ decision: 'pending' });
+          if (this.approvalTimeoutsBeforePause > 0 && this.approvalTimeoutStreak >= this.approvalTimeoutsBeforePause) this.pauseRun();
+          parkLimit = setTimeout(() => { if (this.approvals.delete(request.callId)) this.closePrompt(request.callId, true); }, parkLimitMs);
+          parkLimit.unref?.();
+        }, Math.max(0, unattended.waitMs));
+      } else if (this.approvalTimeoutMs > 0) {
         timer = setTimeout(() => {
           // 0.4.19 (owner, 2026-11-07: "stop the idling"): the wait no longer ends by declining an action nobody saw. Measured on the owner's own runs,
           // 35 waits hit this timeout exactly and 49 more ran long, which is up to 752 minutes of a run parked on a question. Declining made the run work

@@ -574,7 +574,26 @@
           "default": 15,
           "minimum": 0,
           "maximum": 1440,
-          "description": "How long an action waiting for your approval waits before it is declined, so an unattended run carries on without it (the agent is told and reports what still needs you). 0 waits indefinitely."
+          "description": "How long an approval in the main conversation waits before the run is shown as paused on that step; it keeps waiting for your answer, for up to a day. Sub-agents wait nearAi.agent.subagentApprovalWaitSeconds instead and then carry on. 0 waits indefinitely."
+        },
+        "nearAi.agent.unattendedAutoApprove": {
+          "type": "boolean",
+          "default": true,
+          "description": "In the Auto and Edits auto approval modes, sub-agents run without a card: commands the safety rules call safe (reads, read-only git, tests, lint, type checks, builds, and writes inside the sub-agent's own folder or worktree) and verification scripts inside the project that are named like a check (verify, check, gate, lint, test, typecheck, validate, audit) or named by the plan and contain nothing that reaches the network, deletes, publishes, starts other programs, or touches credentials. Pushes, deletes outside the project, publishing, network commands and credential paths still ask. Ask before edits is never affected."
+        },
+        "nearAi.agent.subagentApprovalWaitSeconds": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "maximum": 3600,
+          "description": "How long a sub-agent's approval card waits for an answer before the sub-agent is told \"awaiting approval\" and carries on with other work. The card stays queued; approving it later allows that exact command for the rest of the run and tells the lead agent. The main conversation's own approvals use nearAi.agent.approvalTimeoutMinutes."
+        },
+        "nearAi.agent.approvalTimeoutsBeforePause": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 50,
+          "description": "Pause the whole run after this many approvals in a row go unanswered, with a message, instead of letting it carry on without them. Answering an approval, pressing Resume on an agent, or sending a message carries on. 0 never pauses."
         },
         "nearAi.agent.maxOutputTokens": {
           "type": "number",

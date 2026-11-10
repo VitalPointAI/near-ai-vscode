@@ -9,5 +9,10 @@ export const AGENT_DEFAULTS = {
   maxRunCostUsd: 5,
   maxRunTokens: 4_000_000,
   maxOutputTokens: 32_000,
-  approvalTimeoutMinutes: 15
+  approvalTimeoutMinutes: 15,
+  /** PERF-01: how long a sub-agent's approval card waits before the call returns "awaiting approval". */
+  subagentApprovalWaitSeconds: 20,
+  /** PERF-01: consecutive unanswered approvals that pause the run (0 never pauses). */
+  approvalTimeoutsBeforePause: 3,
+  unattendedAutoApprove: true
 } as const;
