@@ -164,3 +164,48 @@ test('one agent\'s unanswered approvals pause the run even while another agent\'
   }
   assert.ok(posted.some((message) => message.type === 'tool-end' && String(message.callId).endsWith(':b1') && message.ok === true), 'beta\'s answered writes ran');
 });
+
+// Review of PR 34 (major): a late allow of a queued Bash card grants that exact command, and the lead is told so only because it did.
+test('a late allow of a sub-agent\'s Bash command grants that command for the run, and the lead\'s own run of it does not ask again', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-late-bash-'));
+  const command = 'echo late > late.txt';
+  let subTurn = 0;
+  let leadTurn = 0;
+  const leadSaw: AgentMessage[][] = [];
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      if (String(messages[0]?.content ?? '').startsWith('You help')) {
+        subTurn += 1;
+        if (subTurn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('s1', 'Bash', { command })] }, finishReason: 'tool_calls', usage }; return; }
+        yield { type: 'done', message: { role: 'assistant', content: 'Queued the write; it is waiting for approval.' }, finishReason: 'stop', usage };
+        return;
+      }
+      leadSaw.push(structuredClone(messages));
+      leadTurn += 1;
+      if (leadTurn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('a1', 'Agent', { subagent_type: 'helper', prompt: 'write it', description: 'write' })] }, finishReason: 'tool_calls', usage }; return; }
+      const told = messages.some((message) => String(message.content ?? '').startsWith('<approval-update agent="helper" decision="allowed">'));
+      if (told && !messages.some((message) => message.role === 'tool' && message.tool_call_id === 'l2')) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('l2', 'Bash', { command })] }, finishReason: 'tool_calls', usage }; return; }
+      if (!told) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call(`wait${leadTurn}`, 'Bash', { command: 'pwd' })] }, finishReason: 'tool_calls', usage }; return; }
+      yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.subagentApprovalWaitMs = 20;
+  const rules = { allowCommands: ['pwd'], denyCommands: DEFAULT_RULES.denyCommands };
+  const running = conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules, projectAgents: [{ name: 'helper', description: 'helper', tools: ['Bash'], body: 'You help.', file: path.join(root, 'team.md') }] });
+  try {
+    const card = await until(() => posted.find((message) => message.type === 'approval-request' && String(message.callId).endsWith(':s1')));
+    await until(() => (posted.some((message) => message.type === 'tool-end' && String(message.output).startsWith(AWAITING_APPROVAL_PREFIX)) ? true : undefined));
+    conversation.answerApproval(String(card.callId), { decision: 'allow' });
+    await running;
+  } finally {
+    conversation.dispose();
+  }
+  const cards = posted.filter((message) => message.type === 'approval-request');
+  assert.equal(cards.length, 1, 'only the sub-agent\'s card was ever shown: the lead\'s run of the same command was allowed by the grant');
+  assert.ok(posted.some((message) => message.type === 'tool-end' && message.callId === 'l2' && message.ok === true), 'the lead ran the command');
+  const { readFile } = await import('node:fs/promises');
+  assert.equal((await readFile(path.join(root, 'late.txt'), 'utf8')).trim(), 'late');
+});

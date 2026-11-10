@@ -66,6 +66,11 @@ export interface ApprovalRequest {
   reasonShort?: string;
   /** 0.4.17: the exact command or code the card shows in its expander, when the tool's preview does not already show it. */
   subject?: string;
+  /**
+   * PERF-01 (review of PR 34): what allowing this card grants for the rest of the run, recorded when the card is created, for every tool: the exact
+   * command for a shell call, edits for a file write. Undefined when nothing may be granted (a risky action, which asks every time).
+   */
+  grant?: { command?: string; edits?: boolean };
 }
 /**
  * `pending` (PERF-01): nobody answered within the agent's wait. The action did not run and its card stays queued for the person; the agent is told so and
@@ -642,7 +647,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
         // person "NEAR AI was not sure this is safe" about it would be untrue.
         ...(reason ? { risk: { kind: risk.kind, headline: risk.headline } } : {}),
         ...(allowRule ? { allowRule } : {}),
-        ...(command ? { subject: command } : {})
+        ...(command ? { subject: command } : {}),
+        ...(!risky && command !== undefined && command.trim() ? { grant: { command: command.trim() } } : !risky && tool.capability === 'workspaceWrite' ? { grant: { edits: true } } : {})
       });
       if (reply.decision === 'deny') {
         if (risky) context.onSecurity?.({ kind: 'blocked', source: title, detail: 'The user declined it.' });

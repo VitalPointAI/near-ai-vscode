@@ -1101,13 +1101,18 @@ export class AgentConversation {
   /** A queued sub-agent approval answered after the agent moved on: an allow grants that exact command for the run, and the lead is told either way. */
   private lateApproval(label: string, approval: ApprovalRequest, reply: ApprovalReply, grants: RunGrants): void {
     const allowed = reply.decision === 'allow' || reply.decision === 'allow-run' || reply.decision === 'allow-always';
-    const command = approval.subject?.trim();
-    if (allowed && command && approval.capability === 'shell') grants.commands.add(command);
-    if (allowed && approval.capability === 'workspaceWrite') grants.edits = true;
+    // The grant recorded on the card when it was made (review of PR 34: the subject line was not always set, so an allow could grant nothing while the
+    // lead was told it was allowed). The lead hears "allowed for the run" only when a grant really took effect.
+    const command = approval.grant?.command;
+    let granted = false;
+    if (allowed && command) { grants.commands.add(command); granted = grants.commands.has(command); }
+    if (allowed && approval.grant?.edits) { grants.edits = true; granted = true; }
     const what = command ? `\`${command.slice(0, 300)}\`` : `"${approval.title.slice(0, 200)}"`;
-    this.notifications.push({ role: 'user', content: allowed
+    this.notifications.push({ role: 'user', content: allowed && granted
       ? `<approval-update agent="${label}" decision="allowed">\nThe user approved ${what}, which ${label} had queued. It is now allowed for the rest of this run: run it, or have an agent run it, if it is still needed.\n</approval-update>`
-      : `<approval-update agent="${label}" decision="declined">\nThe user declined ${what}, which ${label} had queued.${reply.feedback ? ` Their note: ${reply.feedback}` : ''} Do not run it; adjust instead.\n</approval-update>` });
+      : allowed
+        ? `<approval-update agent="${label}" decision="approved-once">\nThe user approved ${what}, which ${label} had queued, but this kind of action asks every time, so nothing was allowed for the rest of the run. If it is still needed, run it again: it will ask again.\n</approval-update>`
+        : `<approval-update agent="${label}" decision="declined">\nThe user declined ${what}, which ${label} had queued.${reply.feedback ? ` Their note: ${reply.feedback}` : ''} Do not run it; adjust instead.\n</approval-update>` });
   }
 
   private askApproval(request: ApprovalRequest, signal: AbortSignal, agent?: string, agentId?: string, unattended?: { waitMs: number; onLate(reply: ApprovalReply): void }): Promise<ApprovalReply> {
