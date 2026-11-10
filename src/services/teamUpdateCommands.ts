@@ -79,7 +79,16 @@ export async function updateTeam(library: TeamLibrary, requested?: string): Prom
     if (!pick) return;
     file = pick.file;
   }
-  const preview = await updater.preview(file);
+  // The file may have been edited (or deleted) since the picker or the studio card listed it.
+  let preview: TeamUpdatePreview | undefined;
+  try {
+    preview = await updater.preview(file);
+  } catch (error) {
+    const reason = (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'it no longer exists' : `it can't be read as a team: ${(error as Error).message.replace(/\.$/, '')}`;
+    const action = await vscode.window.showErrorMessage(`${path.basename(file)} was not updated because ${reason}. Fix the file, then run Update Team again.`, ...((error as NodeJS.ErrnoException).code === 'ENOENT' ? [] : ['Open team file']));
+    if (action === 'Open team file') await vscode.window.showTextDocument(vscode.Uri.file(file));
+    return;
+  }
   if (!preview) { void vscode.window.showInformationMessage(`${path.basename(file)} was not made from a built-in project type, so there is nothing to update.`); return; }
   const decisions = await decide(preview);
   if (!decisions) return;
