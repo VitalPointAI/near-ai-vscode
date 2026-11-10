@@ -139,7 +139,9 @@ is usually there to answer one and runs used to wait hours on their own checks
   import cycle. The verifier scripts NEAR AI scaffolds are also compared with
   the SHA-256 recorded in `.planning/.near-ai/verifiers.json` when they were
   written (a file agents cannot change without asking); a scaffolded file that
-  differs in any way asks. When the run has read outside content, any file of
+  differs in any way asks. You may edit a scaffolded verifier, but it asks until
+  you run **NEAR AI: Trust Research Verifiers**, which lists the changed files
+  and records their new hashes only after you confirm. When the run has read outside content, any file of
   the closure changed after the moment any agent of the run first read it
   makes the script ask, however late the agent running the script started.
 

@@ -122,3 +122,22 @@ test('an undeclared verifier edit is caught and the plan-checker runs; without g
   const noGit = await setup(false);
   assert.equal(await planCheckSkip(noGit.prompt, noGit.root), undefined, 'without git the actual changes are unknown, so the checker runs');
 });
+
+// Review of PR 34: an edited verifier asks until the person trusts the new version; trusting records only scaffolded files.
+test('an edited scaffolded verifier asks until it is trusted, and trusting records only what changed', async () => {
+  const { changedVerifiers, trustVerifiers } = await import('../gsd/verifierScaffold');
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-trust-verifiers-'));
+  await applyResearchProfile(root);
+  assert.deepEqual(await changedVerifiers(root), []);
+  const figures = path.join(root, 'scripts', 'verify', 'check-figures.mjs');
+  await writeFile(figures, `${await readFile(figures, 'utf8')}\n// tolerance widened by the project\n`);
+  assert.deepEqual(await changedVerifiers(root), ['scripts/verify/check-figures.mjs']);
+  const decide = async () => (await unattendedDecision('node scripts/verify/check-figures.mjs', { root, cwd: root, home: homedir() }, false)).allow;
+  assert.equal(await decide(), false, 'edited: it asks');
+  assert.deepEqual(await trustVerifiers(root, ['scripts/verify/check-figures.mjs', 'scripts/other.mjs']), ['scripts/verify/check-figures.mjs'], 'only scaffolded files are recorded');
+  assert.deepEqual(await changedVerifiers(root), []);
+  assert.equal(await decide(), true, 'trusted: it runs again');
+  await writeFile(figures, "import { execSync } from 'node:child_process';\nexecSync('ls');\n");
+  await trustVerifiers(root, ['scripts/verify/check-figures.mjs']);
+  assert.equal(await decide(), false, 'trusting never overrides the content rules');
+});

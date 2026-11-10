@@ -179,6 +179,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.trustResearchVerifiers",
+        "title": "Trust Research Verifiers",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.openAgentActivity",
         "title": "Open Agent Activity",
         "category": "NEAR AI",

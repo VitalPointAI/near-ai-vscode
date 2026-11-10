@@ -37,7 +37,8 @@
   mode for content edits, and send only plans that change a gate or verifier to the plan-checker
   (`nearAi.gsd.researchProfile`). They also get three verifier scripts in `scripts/verify/`: citation
   resolution, figure recompute, and an internal-path leak check, which agents run without asking.
-  **NEAR AI: Set Up Research Verifiers** adds them to an existing project.
+  **NEAR AI: Set Up Research Verifiers** adds them to an existing project. An edited verifier asks before
+  it runs until **NEAR AI: Trust Research Verifiers** records the new version, after you confirm.
 - **See where a run's time went.** **NEAR AI: Show Run Performance Report** (and
   `npm run report:runs`) prints each run's wall time split into model wait, tools, approval wait and
   idle, with input, cached and output tokens, model latency and unanswered approvals. The activity

@@ -296,7 +296,10 @@ existing project: a block in AGENTS.md, coarse phases, and three scripts in
 `scripts/verify/` (citation resolution, figure recompute from
 `report/figures.json`, and an internal-path leak check) plus `verify-all.mjs`.
 They read files only, so agents run them without asking; existing files are
-never overwritten.
+never overwritten. You may edit them, but an edited verifier no longer matches
+the hash recorded when it was scaffolded, so agents ask before running it until
+you run **NEAR AI: Trust Research Verifiers**, which lists what changed and asks
+before recording the new versions.
 
 **NEAR AI: Export Usage and Activity** (also on the Agent Activity page and in
 the Tools tab) saves usage for an organization, a project, or everything, over

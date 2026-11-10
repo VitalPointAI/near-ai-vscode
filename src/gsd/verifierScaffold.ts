@@ -166,7 +166,9 @@ them without asking. Run them from the project root:
 - \`node scripts/verify/check-figures.mjs\`: every figure in \`report/figures.json\` recomputes from its inputs and appears in the report;
 - \`node scripts/verify/check-internal-paths.mjs\`: no home-directory paths, file links, planning folders or private addresses in the report.
 
-Each takes report folders or files as arguments; by default it reads \`report/\` (or \`docs/\`). Edit them freely: NEAR AI never overwrites them.
+Each takes report folders or files as arguments; by default it reads \`report/\` (or \`docs/\`). NEAR AI never overwrites them. You may edit
+them, but an edited verifier no longer matches the hash recorded when it was scaffolded, so agents ask before running it until you run
+**NEAR AI: Trust Research Verifiers**, which shows what changed and asks before recording the new versions.
 `;
 
 /** The scaffold's files, relative to the project root. */
@@ -184,6 +186,43 @@ export const VERIFIER_FILES: Record<string, string> = {
  * verifier (or a changed helper it imports) is recognised and asks before it runs unattended (src/agent/unattended.ts).
  */
 export const VERIFIER_MANIFEST = path.join('.planning', '.near-ai', 'verifiers.json');
+
+/** Scaffolded verifier files whose contents no longer match their recorded hash (or the template, when none is recorded), relative to the root. */
+export async function changedVerifiers(root: string): Promise<string[]> {
+  let manifest: Record<string, string> = {};
+  try { manifest = JSON.parse(await readFile(path.join(root, VERIFIER_MANIFEST), 'utf8')) as Record<string, string>; } catch { manifest = {}; }
+  const changed: string[] = [];
+  for (const [relative, template] of Object.entries(VERIFIER_FILES)) {
+    const text = await readFile(path.join(root, relative), 'utf8').catch(() => undefined);
+    if (text === undefined) continue;
+    const recorded = manifest[relative] ?? createHash('sha256').update(template, 'utf8').digest('hex');
+    if (createHash('sha256').update(text, 'utf8').digest('hex') !== recorded) changed.push(relative);
+  }
+  return changed;
+}
+
+/**
+ * Records the current contents of the given scaffolded verifiers as trusted (review of PR 34). Only the command "NEAR AI: Trust Research Verifiers"
+ * calls it, after the person confirmed the list; an agent cannot, because the manifest sits where agent writes always ask. Returns what was recorded.
+ */
+export async function trustVerifiers(root: string, files: string[]): Promise<string[]> {
+  const manifestFile = path.join(root, VERIFIER_MANIFEST);
+  let manifest: Record<string, string> = {};
+  try { manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as Record<string, string>; } catch { manifest = {}; }
+  const recorded: string[] = [];
+  for (const relative of files) {
+    if (!(relative in VERIFIER_FILES)) continue;
+    const text = await readFile(path.join(root, relative), 'utf8').catch(() => undefined);
+    if (text === undefined) continue;
+    manifest[relative] = createHash('sha256').update(text, 'utf8').digest('hex');
+    recorded.push(relative);
+  }
+  if (recorded.length) {
+    await mkdir(path.dirname(manifestFile), { recursive: true });
+    await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  }
+  return recorded;
+}
 
 /** Writes the verifier scripts that are not there yet, never overwriting, and records the hash of each one it wrote. Returns those files. */
 export async function writeVerifierScaffold(root: string): Promise<string[]> {
