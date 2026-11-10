@@ -222,6 +222,8 @@ function parseBlocks(source: string): Block[] {
       const rows: Inline[][][] = [];
       while (index < lines.length && !blank(lines[index]) && lines[index].includes('|')) {
         const cells = splitRow(lines[index]);
+        // Extra cells would otherwise vanish from the document; a short row is padded with empty cells, which loses nothing.
+        if (cells.length > header.length) throw new ToolError(`Row ${rows.length + 1} of the table headed "${header.join(' | ')}" has ${cells.length} cells, but the header has ${header.length} columns: ${lines[index].trim().slice(0, 200)}. Add the missing header column, or write a literal | in a cell as \\|.`);
         rows.push(header.map((_, column) => parseInline(cells[column] ?? '')));
         index += 1;
       }

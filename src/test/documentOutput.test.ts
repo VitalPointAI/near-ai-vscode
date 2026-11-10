@@ -381,3 +381,17 @@ test('the tools take a notes option and report a broken note as a ToolError', as
     context.shell.dispose();
   }
 });
+
+test('a table row with more cells than its header is an error that names the row, not a silent loss', async () => {
+  assert.throws(() => parseMarkdown('| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 | 5 |\n'), (error: Error) => error instanceof ToolError && /^Row 2 of the table headed "A \| B" has 3 cells, but the header has 2 columns: \| 3 \| 4 \| 5 \|\./.test(error.message));
+  const short = parseMarkdown('| A | B |\n| --- | --- |\n| 1 |\n| a \\| b | c |\n');
+  assert.deepEqual(short[0].kind === 'table' && short[0].rows.map((row) => row.map((cell) => cell.map((run) => run.text).join(''))), [['1', ''], ['a | b', 'c']], 'a short row is padded and an escaped | is text');
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-table-'));
+  const context = toolContext(root);
+  try {
+    await assert.rejects(() => pdfTool.run(pdfTool.parse({ output_path: 't.pdf', title: 'T', markdown: '| A |\n| --- |\n| 1 | 2 |\n' }), context), (error: Error) => error instanceof ToolError && /Row 1 of the table headed "A" has 2 cells/.test(error.message));
+    assert.equal(existsSync(path.join(root, 't.pdf')), false, 'nothing is written');
+  } finally {
+    context.shell.dispose();
+  }
+});
