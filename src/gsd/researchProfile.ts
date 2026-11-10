@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { readFile, realpath, writeFile, mkdir } from 'node:fs/promises';
 import * as path from 'node:path';
 import { writeVerifierScaffold } from './verifierScaffold';
@@ -89,15 +90,43 @@ export function plansNamedIn(prompt: string): string[] {
   return [...new Set([...prompt.matchAll(/((?:[A-Za-z0-9_.\/-]*\/)?[A-Za-z0-9_.-]*-PLAN\.md)\b/g)].map((match) => match[1]))].slice(0, 30);
 }
 
+/** A plan's text without its frontmatter (whose files_modified list is judged separately). */
+const frontmatterless = (text: string): string => text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+
+/** The heading a skipped plan check reports under: never a pass, because nothing was checked. */
+export const PLAN_CHECK_SKIPPED = '## PLAN CHECK SKIPPED (content-only plan)';
+
+/** Files changed in the project's working tree and not yet committed (tracked and untracked), or undefined when git cannot say. */
+export async function workingTreeChanges(root: string): Promise<string[] | undefined> {
+  return new Promise((resolve) => {
+    execFile('git', ['status', '--porcelain', '--untracked-files=all', '-z'], { cwd: root, timeout: 10_000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+      if (error) { resolve(undefined); return; }
+      const entries = stdout.split('\0').filter(Boolean);
+      const files: string[] = [];
+      for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        files.push(entry.slice(3));
+        // A rename lists its old path as the next entry.
+        if (/^R|^C/.test(entry)) { const old = entries[index + 1]; if (old) files.push(old); index += 1; }
+      }
+      resolve(files);
+    });
+  });
+}
+
 /**
- * The report a skipped plan-checker returns, or undefined when it must run. It is skipped only when the prompt names at least one plan, every named plan
- * can be read inside the project and lists its files_modified, and none of those files is a gate or verifier. Anything uncertain runs the checker.
+ * The report a skipped plan-checker returns, or undefined when it must run (review of PR 34: the plan's own files_modified list, written by the same
+ * agent, is not evidence on its own). The check is skipped only when ALL of these hold, and the report lists the evidence:
+ *   - the prompt names at least one plan, each readable inside the project, each with a files_modified list naming no gate or verifier;
+ *   - the plan's whole text names no gate or verifier path (an undeclared edit described in a task is caught here);
+ *   - the actual changes so far, the files this run wrote and every uncommitted change git reports, touch no gate or verifier.
+ * When git cannot report the working tree (not a repository, git missing), the evidence is unavailable and the checker runs.
  */
-export async function planCheckSkip(prompt: string, root: string): Promise<string | undefined> {
+export async function planCheckSkip(prompt: string, root: string, writtenByRun: string[] = []): Promise<string | undefined> {
   const named = plansNamedIn(prompt);
   if (!named.length) return undefined;
   const realRoot = await realpath(root).catch(() => path.resolve(root));
-  const touched: string[] = [];
+  const declared: string[] = [];
   for (const plan of named) {
     let text: string;
     try {
@@ -110,9 +139,30 @@ export async function planCheckSkip(prompt: string, root: string): Promise<strin
     const files = filesModified(text);
     if (!files?.length) return undefined;
     if (files.some((file) => GATE_PATH.test(file.replace(/\\/g, '/')))) return undefined;
-    touched.push(...files);
+    // Every path the plan's text mentions, not only the declared list.
+    // A command that only RUNS a verifier (`node scripts/verify/verify-all.mjs`, `npm test`) is not an edit, so run commands are left out first.
+    const prose = frontmatterless(text).replace(/\b(?:node|bash|sh|python3?|npx|npm\s+run|npm)\s+\S+/g, ' ');
+    const mentioned = [...prose.matchAll(/(?:^|[\s`'"(\[])((?:\.?[\w-]+\/)*[\w.-]+\.[A-Za-z0-9]{1,6})\b/gm)].map((match) => match[1]);
+    if (mentioned.some((file) => GATE_PATH.test(file)) || /\bscripts\/(?:verify|gates?|checks?)\b/.test(prose)) return undefined;
+    declared.push(...files);
   }
-  return `## VERIFICATION PASSED
+  const uncommitted = await workingTreeChanges(root);
+  if (uncommitted === undefined) return undefined;
+  const written = writtenByRun.map((file) => path.relative(realRoot, path.resolve(file)).split(path.sep).join('/')).filter((file) => file && !file.startsWith('..'));
+  const changed = [...new Set([...uncommitted, ...written])];
+  if (changed.some((file) => GATE_PATH.test(file.replace(/\\/g, '/')))) return undefined;
+  const list = (items: string[]) => (items.length ? `${items.slice(0, 8).join(', ')}${items.length > 8 ? `, and ${items.length - 8} more` : ''}` : 'none');
+  return `${PLAN_CHECK_SKIPPED}
 
-Plan check skipped by NEAR AI's research profile (PERF-06): ${named.length === 1 ? 'this plan changes' : `these ${named.length} plans change`} no gate or verifier, only ${touched.length} content file${touched.length === 1 ? '' : 's'} (${[...new Set(touched)].slice(0, 8).join(', ')}${touched.length > 8 ? ', …' : ''}). Plans that change a gate, verifier, test or CI file are checked as usual. Run \`node scripts/verify/verify-all.mjs\` after executing. To check every plan, set nearAi.gsd.researchProfile to false.`;
+The plan-checker did not run, so nothing here was checked. NEAR AI's research profile (PERF-06) skips it only for plans that change content, not gates or verifiers. No revision is needed for this step: continue the workflow, and run \`node scripts/verify/verify-all.mjs\` after executing.
+
+Evidence for the skip:
+- Plans: ${list(named)}.
+- Files the plans declare (files_modified): ${list([...new Set(declared)])}; none is a gate, verifier, test or CI file.
+- The plans' text names no gate or verifier path.
+- Files this run has written so far: ${list(written)}.
+- Uncommitted changes git reports: ${list(uncommitted)}.
+- None of those changed files is a gate, verifier, test or CI file.
+
+To check every plan, set nearAi.gsd.researchProfile to false.`;
 }

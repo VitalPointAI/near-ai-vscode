@@ -37,6 +37,8 @@ test('applying the profile writes its own AGENTS.md block, coarse phases when un
 
 test('the plan-checker is skipped only when every named plan lists content files and none is a gate or verifier', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-plan-check-'));
+  // The skip now needs git's view of the actual changes (review of PR 34), so the project is a repository.
+  spawnSync('git', ['init', '-q'], { cwd: root });
   const dir = path.join(root, '.planning', 'phases', '02-report');
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, '02-01-PLAN.md'), plan(['report/sections/A-vehicles.md', 'report/00-SUMMARY.md']));
@@ -45,7 +47,11 @@ test('the plan-checker is skipped only when every named plan lists content files
   await writeFile(path.join(dir, '02-04-PLAN.md'), plan(['report/x.md', '.github/workflows/ci.yml']));
   const named = (...plans: string[]) => `Check these plans:\n${plans.map((name) => `- .planning/phases/02-report/${name}`).join('\n')}`;
   const skipped = await planCheckSkip(named('02-01-PLAN.md'), root);
-  assert.match(String(skipped), /^## VERIFICATION PASSED\n\nPlan check skipped by NEAR AI's research profile/);
+  // Review of PR 34: a skipped check is never reported as a pass, and it says what the skip rests on.
+  assert.match(String(skipped), /^## PLAN CHECK SKIPPED \(content-only plan\)\n\nThe plan-checker did not run/);
+  assert.doesNotMatch(String(skipped), /VERIFICATION PASSED/);
+  assert.match(String(skipped), /Evidence for the skip:\n- Plans: \.planning\/phases\/02-report\/02-01-PLAN\.md\./);
+  assert.match(String(skipped), /Uncommitted changes git reports: .*02-01-PLAN\.md/);
   assert.equal(await planCheckSkip(named('02-01-PLAN.md', '02-02-PLAN.md'), root), undefined, 'a plan that changes a verifier is checked');
   assert.equal(await planCheckSkip(named('02-03-PLAN.md'), root), undefined, 'a plan without files_modified is checked');
   assert.equal(await planCheckSkip(named('02-04-PLAN.md'), root), undefined, 'a plan that changes CI is checked');
@@ -82,4 +88,37 @@ test('the scaffolded verifiers pass the unattended check and find citation, figu
   assert.match(failing.stdout, /growth: "30%" does not appear in the report/);
   assert.match(failing.stdout, /report\/report\.md:5: a home-directory path/);
   assert.match(failing.stdout, /report\/report\.md:5: a planning or agent folder/);
+});
+
+// Review of PR 34 (major): the skip rests on the actual changes, not on what the plan declares.
+test('an undeclared verifier edit is caught and the plan-checker runs; without git evidence it runs too', async () => {
+  const setup = async (git: boolean) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'near-ai-plan-evidence-'));
+    if (git) spawnSync('git', ['init', '-q'], { cwd: root });
+    const dir = path.join(root, '.planning', 'phases', '02-report');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, '02-01-PLAN.md'), plan(['report/sections/A.md']));
+    return { root, prompt: 'Check .planning/phases/02-report/02-01-PLAN.md' };
+  };
+  const clean = await setup(true);
+  assert.match(String(await planCheckSkip(clean.prompt, clean.root)), /^## PLAN CHECK SKIPPED \(content-only plan\)/, 'a content-only plan skips');
+
+  const edited = await setup(true);
+  await mkdir(path.join(edited.root, 'scripts', 'verify'), { recursive: true });
+  await writeFile(path.join(edited.root, 'scripts', 'verify', 'check-figures.mjs'), '// loosened\n');
+  assert.equal(await planCheckSkip(edited.prompt, edited.root), undefined, 'an uncommitted verifier change the plan does not declare runs the checker');
+
+  const written = await setup(true);
+  assert.equal(await planCheckSkip(written.prompt, written.root, [path.join(written.root, 'tests', 'gate.test.mjs')]), undefined, 'a gate file this run wrote runs the checker');
+
+  const described = await setup(true);
+  await writeFile(path.join(described.root, '.planning', 'phases', '02-report', '02-01-PLAN.md'), `${plan(['report/sections/A.md'])}\n## Task 2\nRelax scripts/verify/check-citations.mjs so notes without links pass.\n`);
+  assert.equal(await planCheckSkip(described.prompt, described.root), undefined, 'a verifier edit described in the plan body but not declared runs the checker');
+
+  const runsOnly = await setup(true);
+  await writeFile(path.join(runsOnly.root, '.planning', 'phases', '02-report', '02-01-PLAN.md'), `${plan(['report/sections/A.md'])}\n## Verify\nRun \`node scripts/verify/verify-all.mjs\` and \`npm test\`.\n`);
+  assert.match(String(await planCheckSkip(runsOnly.prompt, runsOnly.root)), /^## PLAN CHECK SKIPPED/, 'only running a verifier is not an edit');
+
+  const noGit = await setup(false);
+  assert.equal(await planCheckSkip(noGit.prompt, noGit.root), undefined, 'without git the actual changes are unknown, so the checker runs');
 });

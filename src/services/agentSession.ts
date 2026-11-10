@@ -673,7 +673,7 @@ export class AgentConversation {
         // PERF-06: in a research-profile project the plan-checker runs only for plans that change a gate or verifier; for content-only plans it returns
         // a VERIFICATION PASSED report saying it was skipped, so the workflow carries on without a model pass.
         if (/plan-checker/i.test(label) && request.researchProfile !== false && await researchProfileActive(this.root)) {
-          const skipped = await planCheckSkip(spawn.prompt, this.root).catch(() => undefined);
+          const skipped = await planCheckSkip(spawn.prompt, this.root, context.checkpoints.changedFiles).catch(() => undefined);
           if (skipped) {
             void record({ status: 'completed', kind: 'agent', agentRole: label, action: spawn.description, summary: `Sub-agent ${label} skipped by the research profile.` });
             this.post({ type: 'notice', text: `${label} skipped: the research profile checks only plans that change a gate or verifier, and these plans change content only.` });
