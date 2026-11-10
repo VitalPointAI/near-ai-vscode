@@ -129,6 +129,19 @@ test('a homoglyph, a zero-width space, or a bracketed dot in the host still coun
   }
 });
 
+test('a sentence-final dot hides nothing: the trailing-dot host is capped too', () => {
+  // Fifteenth 0.4.19 review, MAJOR: the trailing lookahead had no `.`, so a host at the END of a sentence (`source: "see evil.test."`) kept its A1 — the
+  // period swallowed the token, exactly where prose puts a domain. The dot is a boundary now, and both placements are locked.
+  for (const source of ['see evil.test.', 'the page was evil.test.']) {
+    const graph = mergeKnowledge(emptyKnowledge('t', at), {
+      origin: 'research', at,
+      nodes: [{ label: 'X', facts: [{ text: 'Claim.', source }], grading: { reliability: 'A', credibility: 1 } }],
+      edges: []
+    });
+    assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'C', credibility: 3 }, `${JSON.stringify(source)} is a page the agent read`);
+  }
+});
+
 test('a grade can only fall as the graph is merged, so a later uncapped mention cannot launder a capped one back to A1', () => {
   // 0.4.19 review: `existing.grading = incoming.grading` let the second addition undo the first one's cap.
   let graph = mergeKnowledge(emptyKnowledge('t', at), {

@@ -184,9 +184,10 @@ export function looksLikeAddress(source: string): boolean {
   // and keep a hostile page at A1 — a page is a page wherever in the sentence it hides, so any page-shaped token decides true. The left boundary is a
   // LOOKBEHIND, not a consumed character: a consumed boundary ate the space between `1.0` and the page that followed, and the second token never matched.
   // QUOTES are boundaries on both sides (fourteenth 0.4.19 review, BLOCKER): `see "evil.test/about"` hid behind an unconsumed quotation mark and kept A1,
-  // and a quoted page even counted as independent evidence and revived a refuted claim.
+  // and a quoted page even counted as independent evidence and revived a refuted claim. A sentence-final DOT is a boundary too (fifteenth 0.4.19 review,
+  // MAJOR): at the end of a sentence `evil.test.` hides behind the period and keeps A1, so the trailing lookahead reads it as a boundary, not a label.
   let sawFigure = false;
-  for (const match of `${text} `.matchAll(/(?<=^|[\s([<,;:@'"])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?=[/?#]|$|[\s)\],;:'"])/gi)) {
+  for (const match of `${text} `.matchAll(/(?<=^|[\s([<,;:@'"])([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?=[/?#]|$|[\s)\],;:'".])/gi)) {
     const labels = match[1]!.split('.');
     if (labels.length === 2 && /^\d+$/.test(labels[1]!)) { sawFigure = true; continue; } // a figure or version, judged on its own
     return true; // a two-label host, an address-shaped token, or anything longer: a page

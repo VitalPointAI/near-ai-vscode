@@ -608,14 +608,15 @@ export class AgentConversation {
     // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
     // same graph, which is what makes it shared: a fact one member verified is there for the next one. The RAW team name is what reaches the store, not the
     // pre-slugified one (fourteenth 0.4.19 review, MAJOR): slugify is itself lossy, so two names that slugify alike arrived as the identical string, the
-    // injective file naming never saw the difference, and the ownership gate compared a name with itself. The store hashes the name it is given. A REFUSAL —
-    // the graph file on this path names another team (twelfth 0.4.19 review) — surfaces as a problem-carrying empty graph the tool reports, not a silent
-    // empty success: the run keeps going, and the user is told why nothing was read or written.
+    // injective file naming never saw the difference, and the ownership gate compared a name with itself. The store hashes the name it is given. The SLUG
+    // rides along (fifteenth 0.4.19 review, BLOCKER): graphs written before this version carry the slug in their `team` field, and the migration gate needs
+    // it to recognise a 0.4.18 file as this team's own. A REFUSAL — the graph file on this path names another team (twelfth 0.4.19 review) — surfaces as a
+    // problem-carrying empty graph the tool reports, not a silent empty success: the run keeps going, and the user is told why nothing was read or written.
     const teamKnowledge = request.team
       ? knowledgeTools({
           read: async () => {
             try {
-              return (await loadKnowledge(teamLibraryDir(homeFolder()), request.team!.name)).knowledge;
+              return (await loadKnowledge(teamLibraryDir(homeFolder()), request.team!.name, request.team!.slug)).knowledge;
             } catch (error) {
               if (error instanceof ForeignGraphError) return { ...emptyKnowledge(request.team!.name, new Date().toISOString()), problem: error.message };
               throw error;
@@ -623,7 +624,7 @@ export class AgentConversation {
           },
           add: async (addition) => {
             try {
-              return await addKnowledge(teamLibraryDir(homeFolder()), request.team!.name, addition);
+              return await addKnowledge(teamLibraryDir(homeFolder()), request.team!.name, addition, request.team!.slug);
             } catch (error) {
               if (error instanceof ForeignGraphError) return { ...emptyKnowledge(request.team!.name, new Date().toISOString()), problem: error.message };
               throw error;
