@@ -18,5 +18,9 @@ export const AGENT_DEFAULTS = {
   /** PERF-02: compact a transcript at this many tokens whatever the model's window. */
   compactAtTokens: 70_000,
   /** PERF-03: a model turn not finished after this many seconds is retried once on the backup model. */
-  modelDeadlineSeconds: 120
+  modelDeadlineSeconds: 120,
+  /** PERF-04: sub-agents in their own git worktree at once. */
+  maxParallelWorktrees: 4,
+  /** PERF-05: resume a run a reload cut off. */
+  autoResumeAfterReload: true
 } as const;

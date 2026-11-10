@@ -41,7 +41,7 @@ import { ContextGraphMemory } from './contextGraphMemory';
 import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 import { rememberedRuleNotice } from '../domain/allowRuleNotice';
 import { syncAutoAdvance } from './autoAdvanceConfig';
-import { cutOffNotice, resumePrompt, RunMarker, RunMarkers } from './runMarkers';
+import { autoResumeNotice, cutOffNotice, MAX_AUTO_RESUMES, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 
@@ -341,6 +341,20 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     feed.focusConversation(activeId);
     sendSummary(true);
   })();
+
+  // PERF-05: a run a reload cut off carries on by itself (newest first, a few at most), with a notice, unless nearAi.agent.autoResumeAfterReload is off.
+  void ready.then(async () => {
+    const enabled = vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.autoResumeAfterReload', AGENT_DEFAULTS.autoResumeAfterReload) !== false;
+    const due = tabs.filter((tab) => tab.interrupted && shouldAutoResume(tab.interrupted, enabled))
+      .sort((a, b) => (b.interrupted?.activeAt ?? '').localeCompare(a.interrupted?.activeAt ?? '')).slice(0, MAX_AUTO_RESUMES);
+    for (const tab of due) {
+      if (disposed || !tab.interrupted) continue;
+      const text = autoResumeNotice(tab.interrupted);
+      tab.log.add({ type: 'notice', text });
+      tab.post({ type: 'notice', text });
+      void settleInterrupted(tab, 'resumed').catch(() => undefined);
+    }
+  }).catch(() => undefined);
 
   const handle = async (message: ChatWebviewMessage, tab: ChatTab): Promise<void> => {
     if (message.type === 'stop') {
@@ -802,6 +816,7 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
   conversation.subagentApprovalWaitMs = bounded('agent.subagentApprovalWaitSeconds', AGENT_DEFAULTS.subagentApprovalWaitSeconds, 0, 3_600) * 1_000;
   conversation.approvalTimeoutsBeforePause = Math.floor(bounded('agent.approvalTimeoutsBeforePause', AGENT_DEFAULTS.approvalTimeoutsBeforePause, 0, 50));
   conversation.compactAtTokens = Math.floor(bounded('agent.compactAtTokens', AGENT_DEFAULTS.compactAtTokens, 0, 10_000_000));
+  conversation.maxParallelWorktrees = Math.floor(bounded('agent.maxParallelWorktrees', AGENT_DEFAULTS.maxParallelWorktrees, 1, 16));
   const focusRegained = () => {
     const prompts = conversation.waitingPrompts();
     const fresh = new Set(notices.focusRegained(waitingIds()));

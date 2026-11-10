@@ -332,6 +332,8 @@ export class AgentConversation {
         return next;
       },
       afterAnswer: async (_transcript, signal) => this.waitForBackground(signal),
+      // PERF-05: the state is saved after every finished call too, not only before each model turn, so a reload mid-batch keeps the finished results.
+      onProgress: (transcript) => this.saveRunState(request.model, runId, transcript),
       input: this.steeringInput,
       requestApproval: (approval) => this.askApproval(approval, abort.signal, undefined, mainId),
       rememberAllowRule: request.rememberAllowRule,
@@ -546,7 +548,8 @@ export class AgentConversation {
     const transcript = await this.transcripts?.load(id);
     if (!transcript) return undefined;
     this.reset();
-    this.messages = transcript.messages;
+    // PERF-05: a run saved mid-batch has calls without results; they get a placeholder so the transcript is valid and nothing finished is redone.
+    this.messages = repairTranscript(transcript.messages);
     this.display = new Map(transcript.display ?? []);
     this.conversationId = transcript.id;
     this.title = transcript.title;
@@ -666,7 +669,12 @@ export class AgentConversation {
         parent.addEventListener('abort', onParentAbort, { once: true });
         const execute = async (): Promise<string> => {
           await this.acquireSlot(request.maxParallelAgents ?? 4, agent.abort.signal);
-          const releaseSlot = () => this.releaseSlot();
+          // PERF-04: agents in their own worktree also take a worktree slot (nearAi.agent.maxParallelWorktrees), since each one checks out and builds.
+          let worktreeSlot = false;
+          if (spawn.isolation === 'worktree') {
+            try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); worktreeSlot = true; } catch (error) { this.releaseSlot(); throw error; }
+          }
+          const releaseSlot = () => { if (worktreeSlot) this.worktreeSlots.release(); this.releaseSlot(); };
           let shell: ShellSession | undefined;
           let worktree: AgentWorktree | undefined;
           let worktreeState: 'removed' | 'kept' | undefined;
@@ -1006,6 +1014,10 @@ export class AgentConversation {
     this.onWaitingChange?.(this.waiting.size);
   }
 
+  /** PERF-04: sub-agents that may run in their own git worktree at once (nearAi.agent.maxParallelWorktrees), within maxParallelAgents. */
+  public maxParallelWorktrees = 4;
+  private readonly worktreeSlots = new Slots();
+
   /** PERF-02: compact a transcript at this many tokens whatever the window (nearAi.agent.compactAtTokens; 0 uses only the window's thresholds). */
   public compactAtTokens = DEFAULT_COMPACT_AT_TOKENS;
 
@@ -1149,6 +1161,27 @@ export class AgentConversation {
   }
 }
 
+/** A counting limit whose waiters wake in turn; a waiter whose signal aborts stops waiting and takes nothing. */
+export class Slots {
+  private used = 0;
+  private waiters: Array<() => void> = [];
+  public get inUse(): number { return this.used; }
+  public async acquire(limit: number, signal: AbortSignal): Promise<void> {
+    while (this.used >= Math.max(1, limit)) {
+      if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+      await new Promise<void>((resolve) => { this.waiters.push(resolve); signal.addEventListener('abort', () => resolve(), { once: true }); });
+    }
+    if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    this.used += 1;
+  }
+  public release(): void {
+    this.used = Math.max(0, this.used - 1);
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const wake of waiters) wake();
+  }
+}
+
 /** The memory actor the runner writes as; the host registers it as trusted when it creates the memory service. */
 export const AGENT_MEMORY_ACTOR = 'near-ai-agent';
 
@@ -1168,6 +1201,37 @@ export function roleFor(label: string): AgentRole | undefined {
 export function findSkill(skills: GsdSkill[], name: string): GsdSkill | undefined {
   const wanted = name.replace(/^\//, '').trim();
   return skills.find((skill) => skill.name === wanted) ?? skills.find((skill) => skill.name === `gsd-${wanted}` || skill.name.replace(/:/g, '-') === wanted);
+}
+
+/** The result a resumed transcript gives a tool call whose result was never saved (the run was cut off while it ran, or before it started). */
+export const MISSING_RESULT = 'No result was recorded: the run was cut off while this call was running (or before it started). It may or may not have taken effect. Check (the files, git status, or what it would have changed) before repeating it.';
+
+/**
+ * PERF-05: a saved transcript made valid to continue from. Every assistant tool call gets exactly one result; one that has none (the run was cut off
+ * mid-batch) gets MISSING_RESULT, placed after the results that were saved. Results that were saved are kept as they are, so a resumed run sees every
+ * finished call's real output and has no reason to run it again. A transcript that needs no repair is returned unchanged.
+ */
+export function repairTranscript(messages: AgentMessage[]): AgentMessage[] {
+  const repaired: AgentMessage[] = [];
+  let changed = false;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    repaired.push(message);
+    if (message.role !== 'assistant' || !message.tool_calls?.length) continue;
+    const answered = new Set<string>();
+    while (index + 1 < messages.length && messages[index + 1].role === 'tool') {
+      const result = messages[index + 1] as Extract<AgentMessage, { role: 'tool' }>;
+      answered.add(result.tool_call_id);
+      repaired.push(result);
+      index += 1;
+    }
+    for (const call of message.tool_calls) {
+      if (answered.has(call.id)) continue;
+      changed = true;
+      repaired.push({ role: 'tool', tool_call_id: call.id, content: MISSING_RESULT });
+    }
+  }
+  return changed ? repaired : messages;
 }
 
 /** The user-visible turns of a saved conversation: what the user typed and what the agent answered. */

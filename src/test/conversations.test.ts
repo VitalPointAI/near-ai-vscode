@@ -176,8 +176,13 @@ class Memento {
 const warnings: string[] = [];
 const windowListeners: Array<(state: { focused: boolean }) => void> = [];
 let confirmClose: string | undefined;
+/**
+ * PERF-05: whether nearAi.agent.autoResumeAfterReload is on in these tests. Off by default here, so the tests of the Resume and Dismiss buttons keep
+ * testing what a person does with the setting off; the auto-resume test turns it on.
+ */
+const autoResume = { on: false };
 const vscodeStub = {
-  workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
+  workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (key: string, fallback?: unknown) => (key === 'agent.autoResumeAfterReload' ? autoResume.on : fallback), inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
   window: { showInformationMessage: () => undefined, showWarningMessage: async (text: string) => { warnings.push(text); return /Stop it and close/.test(text) ? confirmClose : undefined; }, activeTextEditor: undefined, state: { focused: true }, onDidChangeWindowState: (listener: (state: { focused: boolean }) => void) => { windowListeners.push(listener); return { dispose() {} }; } },
   commands: { executeCommand: async () => undefined },
   Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }
@@ -676,6 +681,38 @@ test('sidebar: a run the extension host never finished is reported with Resume, 
     await first.send({ type: 'stop', conversationId: a });
     gate.release('long refactor');
   });
+});
+
+test('sidebar: with nearAi.agent.autoResumeAfterReload on, a cut-off run carries on by itself with a notice, keeping the step that finished', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  const gate = gates();
+  const readCall: Delta = { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'Read', arguments: '{"file_path":"app.ts"}' } }] };
+  const near = fakeNear(async (messages) => {
+    if (!messages.some((message) => message.role === 'tool')) return readCall;
+    if (!lastUser(messages).startsWith('Continue the task')) await gate.hold('long refactor');
+    return { content: 'Checked app.ts and finished the refactor.' };
+  });
+  autoResume.on = true;
+  try {
+    await withNear(near, async () => {
+      const first = await openSidebar(root, auth, shared);
+      const a = first.summary()!.activeId;
+      void first.send({ type: 'send', text: 'long refactor', model: MODEL, conversationId: a });
+      await until(() => gate.holding('long refactor'));
+      killHost(root, a, ['Edit']);
+      const second = await openSidebar(root, auth, { secrets: shared.secrets, workspaceState: new Memento() });
+      await until(() => near.requests.some((request) => lastUser(request).startsWith('Continue the task')));
+      assert.ok(second.posted.some((message) => message.type === 'notice' && /^Resuming automatically: this run was cut off by a reload/.test(String(message.text))), 'the conversation says it resumed by itself');
+      const resumed = near.requests.find((request) => lastUser(request).startsWith('Continue the task'))!;
+      assert.ok(resumed.some((message) => message.role === 'tool' && String(message.content).includes('export const port = 3000;')), 'the finished Read is kept, not run again');
+      assert.equal(near.requests.filter((request) => !request.some((message) => message.role === 'tool')).length, 1, 'the first step was never asked for again');
+      await until(() => second.item(a)?.status !== 'running');
+      assert.deepEqual(await new RunMarkers(path.join(root, '.global'), root).interrupted(), [], 'resumed: not reported again');
+      gate.release('long refactor');
+    });
+  } finally {
+    autoResume.on = false;
+  }
 });
 
 test('sidebar: Dismiss settles a cut-off run without running anything; a cut-off run with no saved transcript is not reopened', async () => {

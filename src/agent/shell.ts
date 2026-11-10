@@ -76,6 +76,8 @@ export class ShellSession {
   }
 
   public get workingDirectory(): string { return this.cwd; }
+  /** PERF-04: a new, independent shell with this one's program and environment, starting in `cwd` (for read-only commands run side by side). */
+  public fork(cwd = this.cwd): ShellSession { return new ShellSession(cwd, this.shellPath, this.extraEnv, this.allowEnv); }
   /** The environment the shell starts with (later `export`s in the session are not reflected). */
   public get environment(): NodeJS.ProcessEnv { return shellEnv(this.extraEnv, this.allowEnv); }
 

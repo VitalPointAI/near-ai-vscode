@@ -189,6 +189,22 @@ export function parseRunMarker(value: unknown, conversationId: string): RunMarke
   };
 }
 
+/** PERF-05: a run cut off longer ago than this is left for the person to resume; one this recent carries on by itself after the reload. */
+export const AUTO_RESUME_WITHIN_MS = 12 * 60 * 60_000;
+/** At most this many cut-off runs resume by themselves at once after a reload (the newest first). */
+export const MAX_AUTO_RESUMES = 3;
+
+/** Whether a cut-off run resumes by itself: the setting is on and it was active within AUTO_RESUME_WITHIN_MS. */
+export function shouldAutoResume(marker: Pick<RunMarker, 'activeAt'>, enabled: boolean, now = Date.now()): boolean {
+  const at = Date.parse(marker.activeAt);
+  return enabled && Number.isFinite(at) && now - at <= AUTO_RESUME_WITHIN_MS && now >= at - 60_000;
+}
+
+/** The notice a conversation shows when its cut-off run resumes by itself. */
+export function autoResumeNotice(marker: Pick<RunMarker, 'activeAt'>, now = Date.now()): string {
+  return `Resuming automatically: this run was cut off by a reload at ${cutOffTime(marker.activeAt, now)}. It carries on from its last saved step, and steps that had finished are not run again. Press Stop to halt it; turn this off with the setting nearAi.agent.autoResumeAfterReload.`;
+}
+
 /** How the chat says when a run was cut off: the time, and the date when it was not today. */
 export function cutOffTime(iso: string, now = Date.now()): string {
   const at = new Date(iso);

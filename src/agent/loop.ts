@@ -170,6 +170,11 @@ export interface AgentRunOptions {
    * paused agent) and may return a replacement transcript (compaction, injected notifications).
    */
   beforeTurn?(transcript: AgentMessage[], lastUsage: UsageMetadata | undefined, signal: AbortSignal): Promise<AgentMessage[] | void>;
+  /**
+   * PERF-05: called after each tool call (or batch of lookups) finishes, with the transcript so far: the assistant's calls and every result that is in.
+   * Saving it means a reload loses at most the call in flight, and a resumed run keeps the results of everything that had finished.
+   */
+  onProgress?(transcript: AgentMessage[]): void | Promise<void>;
   /** Called when the model answers without a tool call; returning messages continues the run with them. */
   afterAnswer?(transcript: AgentMessage[], signal: AbortSignal): Promise<AgentMessage[] | undefined>;
   /** The user's messages sent during the run; a retry wait, or a request still held by the model's cooldown, ends early when one arrives. */
@@ -307,7 +312,7 @@ export class AgentRun {
           transcript.push(...more);
           continue;
         }
-        const results = await this.executeCalls(assistant.tool_calls, signal);
+        const results = await this.executeCalls(assistant.tool_calls, signal, this.options.onProgress ? async (partial) => { try { await this.options.onProgress?.([...transcript, ...partial]); } catch { /* a failed save never stops the run */ } } : undefined);
         transcript.push(...results);
         const loop = this.checkLoop(assistant.tool_calls, results);
         if (loop) {
@@ -513,7 +518,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
   }
 
   /** Runs consecutive lookups (reads, searches, fetches) together, up to MAX_TOGETHER; anything that changes state runs alone, in order. */
-  private async executeCalls(calls: ToolCall[], signal: AbortSignal): Promise<AgentMessage[]> {
+  private async executeCalls(calls: ToolCall[], signal: AbortSignal, progress?: (results: AgentMessage[]) => Promise<void>): Promise<AgentMessage[]> {
     const results: AgentMessage[] = [];
     let index = 0;
     while (index < calls.length) {
@@ -522,13 +527,22 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
       const outputs = await Promise.all(batch.map((call) => this.executeCall(call, signal)));
       batch.forEach((call, offset) => results.push({ role: 'tool', tool_call_id: call.id, content: outputs[offset] }));
       index += batch.length;
+      if (progress && index < calls.length) await progress([...results]);
     }
     return results;
   }
 
   private canRunTogether(call: ToolCall): boolean {
     const tool = this.byName.get(call.function.name);
-    return tool?.capability === 'read' || tool?.capability === 'plan' || tool?.concurrent === true;
+    if (tool?.capability === 'read' || tool?.capability === 'plan' || tool?.concurrent === true) return true;
+    if (!tool?.concurrentFor) return false;
+    // PERF-04: a call that only reads (a read-only shell command) joins the batch; arguments that do not parse run alone and report their own error.
+    try {
+      const raw = JSON.parse(call.function.arguments || '{}') as unknown;
+      return Boolean(raw && typeof raw === 'object' && !Array.isArray(raw) && tool.concurrentFor(tool.parse(raw as Record<string, unknown>)));
+    } catch {
+      return false;
+    }
   }
 
   private async executeCall(call: ToolCall, signal: AbortSignal): Promise<string> {

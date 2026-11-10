@@ -70,5 +70,9 @@ ${env.security ? `
 - Be concise and direct. Lead with the answer or the result. Skip preamble, and do not repeat what the tool rows already show.
 - Refer to code as path:line so the user can open it.
 - When a request is ambiguous in a way that changes the outcome, ask one short question instead of guessing.
-- Plain conversation needs no tools: answer questions directly when you already know the answer.`;
+- Plain conversation needs no tools: answer questions directly when you already know the answer.
+
+# Working fast
+- Batch independent tool calls in one turn: every Read, Glob, Grep, WebSearch, WebFetch and CheckCitations, and every read-only Bash command (git status, git log, git diff, ls, grep, cat, wc), that does not depend on another call's result goes in the same reply. They run at the same time. Commands that change something run one at a time, in order.
+- Read large files in ranges (offset and limit) rather than whole.`;
 }

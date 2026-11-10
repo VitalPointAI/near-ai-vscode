@@ -469,6 +469,18 @@
           "maximum": 16,
           "description": "How many sub-agents may run at the same time. A research team of nine workstreams finishes in about the time of one workstream when this is 8 or more; the earlier default of 4, with agents that worked one part at a time, left most runs with a single request in flight."
         },
+        "nearAi.agent.maxParallelWorktrees": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "How many sub-agents may work in their own git worktree at the same time (each checks out the project and may build it). Counts within nearAi.agent.maxParallelAgents."
+        },
+        "nearAi.agent.autoResumeAfterReload": {
+          "type": "boolean",
+          "default": true,
+          "description": "When VS Code reloads (or code-server restarts) in the middle of an agent run, carry the run on by itself from its last saved step, with a notice in its conversation. Steps that had finished are not run again. Runs cut off more than 12 hours ago are left for you to resume."
+        },
         "nearAi.agent.maxTurns": {
           "type": "number",
           "default": 60,

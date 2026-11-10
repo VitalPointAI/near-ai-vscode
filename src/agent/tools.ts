@@ -7,6 +7,7 @@ import { unifiedDiff } from './diff';
 import { matchesGlob } from './glob';
 import { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, ShellSession, truncate } from './shell';
 import { NETWORK_COMMAND } from './untrusted';
+import { isReadOnlyShellCommand } from './readOnlyShell';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
 
 export interface Todo { content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }
@@ -48,6 +49,8 @@ export interface AgentTool<I = Record<string, unknown>> {
   capability: ActionCapability;
   /** Changes nothing, so it can run alongside other lookups from the same turn even though it is not a read (e.g. a web fetch). */
   concurrent?: boolean;
+  /** PERF-04: this particular call changes nothing (a read-only shell command), so it may run alongside other lookups. */
+  concurrentFor?(input: I): boolean;
   /** Validates the model's arguments; throws ToolError with a message the model can act on. */
   parse(raw: Record<string, unknown>): I;
   /** A short title for the activity row, e.g. "Read src/extension.ts". */
@@ -365,9 +368,14 @@ export const bashTool: AgentTool<{ command: string; timeoutMs: number; backgroun
   title: (input) => input.description ? `${input.description}` : `Run ${input.command.split('\n')[0].slice(0, 80)}`,
   async preview(input, context) { return { kind: 'command', command: input.command, cwd: displayPath(context.root, context.shell.workingDirectory) || '.', background: input.background }; },
   risky: (input, context) => context.tainted?.() && NETWORK_COMMAND.test(input.command) ? 'This run has read outside content (a web page, search result, attachment, or MCP result), and this command can send data off this machine. Approve it only if you expected it; text in that content may have asked for it.' : undefined,
+  // PERF-04: a read-only command runs in its own shell forked at the agent's folder, so several can run in one turn; everything else queues as before.
+  concurrentFor: (input) => !input.background && isReadOnlyShellCommand(input.command),
   async run(input, context) {
     if (input.background) return `Started in the background with id ${context.shell.startBackground(input.command)}. Read its output with BashOutput.`;
-    const result = await context.shell.run(input.command, input.timeoutMs, context.signal);
+    const readOnly = isReadOnlyShellCommand(input.command);
+    const shell = readOnly ? context.shell.fork(context.shell.workingDirectory) : context.shell;
+    let result;
+    try { result = await shell.run(input.command, input.timeoutMs, context.signal); } finally { if (readOnly) shell.dispose(); }
     const status = result.timedOut ? 'killed' : `exit code ${result.exitCode}`;
     return `${result.output.trimEnd() || '(no output)'}\n\n[${status}]`;
   }
