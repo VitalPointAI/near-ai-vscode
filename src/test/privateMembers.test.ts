@@ -7,6 +7,8 @@ import { DEFAULT_RULES } from '../agent/permissions';
 import { checkDraft, draftFromMarkdown, teamMarkdown } from '../agent/teamMarkdown';
 import { parseTeam, renderTeam, teamAgents } from '../agent/teams';
 import { privateModelFor, tierOf } from '../gsd/library';
+import { isNearCloudEndpoint } from '../domain/config';
+import { privateRouteFor } from '../services/providerCache';
 import { AgentConversation, GsdContext, routeAllows, type PrivateRoute } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 
@@ -161,4 +163,18 @@ test('a private member only runs on a model that is private on the run\'s own ro
   const unknown = await run(mixed, undefined, 'cloud/x');
   assert.deepEqual(unknown.used, []);
   assert.match(unknown.results, /did not say which route it uses/);
+});
+
+test('the run\'s route counts as attested NEAR for every spelling of NEAR\'s own endpoint, and for nothing else', () => {
+  const near = (baseUrl: string) => privateRouteFor({ provider: 'near-ai', baseUrl }, false);
+  for (const baseUrl of ['', '   ', 'https://cloud-api.near.ai/v1', 'https://cloud-api.near.ai/v1/', 'https://cloud-api.near.ai', 'https://cloud-api.near.ai/', 'https://CLOUD-API.near.ai:443/v1//']) {
+    assert.deepEqual(near(baseUrl), { kind: 'near', attestation: true }, JSON.stringify(baseUrl));
+  }
+  for (const baseUrl of ['https://proxy.example.com/v1', 'http://cloud-api.near.ai/v1', 'https://cloud-api.near.ai.evil.example/v1', 'https://cloud-api.near.ai:8443/v1', 'https://cloud-api.near.ai/other', 'https://user:pass@cloud-api.near.ai/v1', 'not a url']) {
+    assert.deepEqual(near(baseUrl), { kind: 'near', attestation: false }, `${baseUrl} is not attested`);
+  }
+  assert.deepEqual(privateRouteFor({ provider: 'local', baseUrl: 'http://localhost:11434/v1' }, false), { kind: 'local', attestation: false }, 'a local runtime is not NEAR');
+  assert.deepEqual(privateRouteFor({ provider: 'hybrid', baseUrl: '' }, true), { kind: 'local', attestation: false }, 'a hybrid run on its local model is local');
+  assert.deepEqual(privateRouteFor({ provider: 'hybrid', baseUrl: '' }, false), { kind: 'near', attestation: true });
+  assert.equal(isNearCloudEndpoint(undefined), true);
 });

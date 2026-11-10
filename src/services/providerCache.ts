@@ -1,4 +1,5 @@
 import type { OrganizationProfile, ResolvedProvider } from '../domain/auth';
+import { isNearCloudEndpoint } from '../domain/config';
 import { AuthService } from './auth';
 import type { ModelInfo } from './nearAiClient';
 import { ProfileStore } from './profileStore';
@@ -60,6 +61,15 @@ export function clientFor(active: ActiveProvider, model: string): { client: Reso
   const info = active.models.find((candidate) => candidate.id === model);
   const local = info?.privacyBoundary === 'local' || active.provider.provider === 'local';
   return { client: local && active.provider.localClient ? active.provider.localClient : active.provider.client, local };
+}
+
+/**
+ * The route a run's requests take, for private team members: a local runtime, or NEAR AI Cloud, attested only when the cloud client
+ * talks to NEAR's own endpoint (compared as a resolved URL, so an empty value, a trailing slash, or /v1 all count).
+ */
+export function privateRouteFor(provider: Pick<ResolvedProvider, 'provider' | 'baseUrl'>, local: boolean): { kind: 'near' | 'local'; attestation: boolean } {
+  if (local || provider.provider === 'local') return { kind: 'local', attestation: false };
+  return { kind: 'near', attestation: isNearCloudEndpoint(provider.baseUrl) };
 }
 
 /** Drops cached providers, e.g. after a profile or key is removed. */
