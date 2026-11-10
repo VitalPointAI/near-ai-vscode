@@ -9,7 +9,8 @@ import { decidePermission, DEFAULT_RULES, RunGrants } from '../agent/permissions
 import { CORE_TOOLS } from '../agent/tools';
 import { webFetchTool, webSearchTool } from '../agent/webTools';
 import { checkDraft, draftFromMarkdown, lineDiff, teamMarkdown, type TeamDraft } from '../agent/teamMarkdown';
-import { DEFAULT_TOOLS, parseTeam, renderTeam, TeamLibrary } from '../agent/teams';
+import { DEFAULT_TOOLS, parseTeam, renderTeam, slugify, TeamLibrary, teamKnowledgeKey } from '../agent/teams';
+import { addKnowledge } from '../services/teamKnowledgeStore';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, parseStudioMessage, reviewDraft, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
@@ -1137,5 +1138,32 @@ test('optimise-all says so when there is nothing to test, and does not ask a poi
   assert.equal(h.asked.length, 0, 'no modal when there are no teams');
   const notices = h.posted.filter((message) => message.type === 'notice').map((message) => String(message.text));
   assert.ok(notices.some((text) => /no teams to test/i.test(text)), `it says there is nothing to do: ${JSON.stringify(notices)}`);
+  h.close();
+});
+
+test('a project team has its own knowledge graph, never one shared with every other project or a library team saved as team.md', async () => {
+  // 0.4.19 review: a project team's file is always .planning/.near-ai/team.md, so it was keyed "team" and every project's team shared one graph.
+  const one = teamKnowledgeKey(TeamLibrary.projectTeamFile(path.join(tmpdir(), 'project-one')));
+  const two = teamKnowledgeKey(TeamLibrary.projectTeamFile(path.join(tmpdir(), 'project-two')));
+  assert.notEqual(one, two, 'two projects, two graphs');
+  assert.equal(one, teamKnowledgeKey(TeamLibrary.projectTeamFile(path.join(tmpdir(), 'project-one'))), 'the same project always finds its own graph');
+  assert.match(one, /^project--[0-9a-f]{12}$/);
+  assert.notEqual(slugify(one), one, 'no library team slug can ever equal a project key');
+  // A library team keeps the key it had, including one whose file is team.md.
+  assert.equal(teamKnowledgeKey(path.join(tmpdir(), 'teams', 'team.md')), 'team');
+  assert.equal(teamKnowledgeKey(path.join(tmpdir(), 'teams', 'web-team.md')), 'web-team');
+
+  // The studio reads the project team's graph under that key, not the old shared file.
+  const h = await harness();
+  await mkdir(path.dirname(TeamLibrary.projectTeamFile(h.root)), { recursive: true });
+  await writeFile(TeamLibrary.projectTeamFile(h.root), renderTeam('Project team', 'For this repo', [{ name: 'dev', model: 'standard', instructions: 'Build.' }]));
+  const at = '2026-11-08T10:00:00.000Z';
+  await addKnowledge(h.library.directory, 'team', { origin: 'research', at, nodes: [{ label: 'Another project actor' }], edges: [] });
+  await addKnowledge(h.library.directory, teamKnowledgeKey(TeamLibrary.projectTeamFile(h.root)), { origin: 'research', at, nodes: [{ label: 'This project actor' }], edges: [] });
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'project' });
+  const shown = JSON.stringify(last(h, 'team').knowledge);
+  assert.match(shown, /This project actor/);
+  assert.doesNotMatch(shown, /Another project actor/);
   h.close();
 });

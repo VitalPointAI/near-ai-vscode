@@ -41,7 +41,7 @@ import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
 import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
-import { slugify } from '../agent/teams';
+import { teamKnowledgeKey } from '../agent/teams';
 import type { MemoryScope } from '../domain/contextGraph';
 import type { AgentRole } from '../domain/agents';
 import type { ContextGraphMemory } from './contextGraphMemory';
@@ -632,12 +632,17 @@ export class AgentConversation {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
     // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
-    // same graph, which is what makes it shared: a fact one member verified is there for the next one.
+    // same graph, which is what makes it shared: a fact one member verified is there for the next one. The graph is keyed by teamKnowledgeKey: a library team's
+    // slug (its file name, unique in the library), or a project team's own per-project key, so no two projects share one graph. The agent writes as `research`: its own grades are held to the ceiling, because a run that read a hostile page
+    // can be steered into claiming anything. A damaged file's problem reaches the tool, so the agent and the person are told rather than shown a quiet nothing.
     const teamKnowledge = request.team
       ? knowledgeTools({
-          read: async () => (await loadKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug))).knowledge,
-          add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug), addition)
-        })
+          read: async () => {
+            const { knowledge, problem } = await loadKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file));
+            return problem ? { ...knowledge, problem } : knowledge;
+          },
+          add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
+        }, 'research')
       : [];
     const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
@@ -804,6 +809,8 @@ export class AgentConversation {
 
   /** When the model is done but background agents are still running, wait for the next report. */
   private async waitForBackground(signal: AbortSignal): Promise<AgentMessage[] | undefined> {
+    // Drain first, notice second (0.4.19 review): a report that arrived while the parent was still streaming feeds the run at once — posting "Waiting…" first
+    // would announce a hold that instantly ends. The notice therefore appears exactly when the run genuinely holds, and never when it does not.
     const ready = this.drainNotifications();
     if (ready.length) return ready;
     if (!this.background.size || signal.aborted) return undefined;
@@ -1010,7 +1017,7 @@ export class AgentConversation {
   /** Start time and tool of each call in flight, by call id, so its end event records both (PERF-07). */
   private readonly toolStarts = new Map<string, { tool: string; at: number }>();
 
-  /** How long an approval may wait before it is declined, so an unattended run carries on (0: wait indefinitely). */
+  /** How long an approval may wait before the run is paused on it (and declined a day after that); 0 waits indefinitely. */
   public approvalTimeoutMs = 15 * 60_000;
 
   /** The prompts still waiting for the user, oldest first, marked as replays for a reloaded view. */

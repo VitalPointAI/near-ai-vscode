@@ -596,7 +596,7 @@
           "default": 15,
           "minimum": 0,
           "maximum": 1440,
-          "description": "How long an approval in the main conversation waits before the run is shown as paused on that step; it keeps waiting for your answer, for up to a day. Sub-agents wait nearAi.agent.subagentApprovalWaitSeconds instead and then carry on. 0 waits indefinitely."
+          "description": "How long an action in the main conversation waits for your approval before the run is paused on that step. Nothing runs while it is paused; answering whenever you are back carries on from exactly there. If nobody answers for a further day, the action is declined and the run released. 0 waits indefinitely, with no pause and no decline. Sub-agents wait nearAi.agent.subagentApprovalWaitSeconds instead and then carry on."
         },
         "nearAi.agent.unattendedAutoApprove": {
           "type": "boolean",
@@ -764,7 +764,7 @@
     "report:spend": "node scripts/spend-report.mjs",
     "report:runs": "node scripts/run-report.mjs",
     "experiment": "node scripts/ab-task.mjs",
-    "compare:models": "node scripts/compare-models.mjs",
+    "compare:models": "npm run compile && node scripts/compare-models.mjs",
     "package": "npm run compile && npm run sbom && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
     "generate:icon": "node scripts/generate-near-ai-icon.mjs",
     "install:global": "node scripts/install-global-extension.mjs",

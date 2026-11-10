@@ -3,7 +3,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { PROJECT_TYPES, projectTypeTeam, type ProjectType } from '../agent/projectTypes';
 import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue, type DraftMember, type TeamDraft } from '../agent/teamMarkdown';
-import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, type TeamDefinition } from '../agent/teams';
+import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
 import { proposalDraft, proposalText, type TeamProposal } from '../agent/teamBuilder';
@@ -493,8 +493,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    */
   const knowledgeOf = async (file: string) => {
     try {
-      const slug = slugify(path.basename(file, '.md'));
-      const { knowledge, problem } = await loadKnowledge(deps.library.directory, slug);
+      // The same key a run of this team writes under, so a project team shows its own project's graph.
+      const { knowledge, problem } = await loadKnowledge(deps.library.directory, teamKnowledgeKey(file));
       const layout = layoutNetwork(knowledge);
       return { nodes: layout.nodes, edges: layout.edges, width: layout.width, height: layout.height, coverage: gradingCoverage(knowledge), groups: nodeDetails(knowledge), ...(problem ? { problem } : {}) };
     } catch { return undefined; }

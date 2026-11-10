@@ -150,3 +150,29 @@ test('a new log with exactly 100 events is not reported as cut by the old cap; a
   assert.doesNotMatch(formatRunReport(runPerformanceReport({ sessions: [session(true)] })), /old 100-event cap/);
   assert.equal(runPerformanceReport({ sessions: [session(false)] }).eventsCapped, true);
 });
+
+// Merge with main (PR 32): the history is merged with the file on disk before each write; coalescing, the bounds and run splits must hold on top of it.
+test('coalesced writes still merge with another store\'s runs, and a stale store does not drop a run split', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-perf07-merge-'));
+  const sidebar = new ActivityStore(root);
+  const mine = await sidebar.start({ sessionId: 'session-merge-mine-1', project: 'demo' });
+  const other = new ActivityStore(root);
+  const theirs = await other.start({ sessionId: 'session-merge-theirs-1', project: 'demo' });
+  const before = sidebar.writes;
+  await Promise.all([
+    ...Array.from({ length: 30 }, (_, index) => sidebar.append(mine.sessionId, { status: 'completed', kind: 'model', requestId: `req-${index}`, estimatedCostUsd: 0.01, summary: 'Model turn completed.' })),
+    other.append(theirs.sessionId, { status: 'completed', kind: 'message', summary: 'Assistant response completed.' })
+  ]);
+  assert.ok(sidebar.writes - before <= 2, `the burst was coalesced (${sidebar.writes - before} writes)`);
+  await other.setRunSplit(theirs.sessionId, { wallMs: 5_000, modelMs: 1_000, toolMs: 1_000, approvalWaitMs: 1_000, idleMs: 2_000, inputTokens: 10, cachedInputTokens: 5, outputTokens: 1 });
+  // The sidebar's copy of the other run is stale (no split); its next write must keep the split the other store recorded.
+  await sidebar.append(mine.sessionId, { status: 'completed', kind: 'message', summary: 'Assistant response completed.' });
+  await sidebar.flush();
+  const saved = new ActivityStore(root);
+  const runs = await saved.list();
+  assert.deepEqual(runs.map((run) => run.sessionId).sort(), ['session-merge-mine-1', 'session-merge-theirs-1'], 'neither store erased the other\'s run');
+  assert.equal((await saved.get(theirs.sessionId))?.run?.wallMs, 5_000, 'the run split survived the stale write');
+  const own = await saved.get(mine.sessionId);
+  assert.equal(own?.events.filter((event) => event.kind === 'model').length, 30, 'every coalesced event reached the file');
+  assert.ok(Math.abs((own?.estimatedCostUsd ?? 0) - 0.3) < 1e-9, `costs still add up per request (${own?.estimatedCostUsd})`);
+});

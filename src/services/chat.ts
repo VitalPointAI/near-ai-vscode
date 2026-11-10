@@ -549,7 +549,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
           const redTeam = project ? teamAgents(project).filter((agent) => agent.name === 'red-team') : [];
           redTeamStep = { addendum: RED_TEAM_WORKFLOW_STEP, agents: redTeam };
         }
-        panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHost, context.globalStorageUri.fsPath, root) });
+        panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHost, root) });
       } else {
         gsd = await gsdHost.context();
       }
@@ -606,6 +606,8 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
           // Reading attachments (vision, transcription) is billed to the run they are for.
           attachments = await withSpendTag({ kind: 'attachment', runId, conversationId }, () => prepareAttachments(staged, { client: route.client, model, models: active.models, visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, question: text }));
         } catch (error) {
+          // The run was opened above, so it is closed here too: otherwise Agent Activity shows it running until the window reloads.
+          await state.activity.append(session.sessionId, { status: 'failed', summary: 'Attachments could not be read.', errorCode: error instanceof Error ? error.name : 'unknown' }).catch(() => undefined);
           tab.post({ type: 'assistant-error', text: providerErrorMessage(error) });
           return;
         }
@@ -721,7 +723,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   if (initialPrompt) panel.webview.postMessage({ type: 'prefill', text: initialPrompt });
   followSpend(await spendAccountForRoot(workspaceRoot(), auth));
   panel.webview.postMessage(await statusMessage({ agents: 0, account: state.spend }));
-  panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHostFor(context), context.globalStorageUri.fsPath, workspaceRoot()) });
+  panel.webview.postMessage({ type: 'commands', commands: await commandList(gsdHostFor(context), workspaceRoot()) });
   await sendArtifacts(panel);
   await ready;
   state.activity = createActivityStore();
@@ -845,8 +847,10 @@ export function gsdHostFor(context: vscode.ExtensionContext): GsdHost {
 }
 
 /** Slash commands for the composer: the installed skills, or the core workflows before the first install. */
-async function commandList(host: GsdHost, storageDir?: string, root?: string): Promise<Array<{ command: string; title: string; description: string; argumentHint?: string }>> {
-  const teams = storageDir ? (await new TeamLibrary(storageDir).list(root).catch(() => [])).flatMap((entry) => entry.team ? [{ command: `team:${entry.project ? 'project' : entry.team.slug}`, title: entry.team.name, description: `Run the "${entry.team.name}" team${entry.team.description ? ` — ${entry.team.description}` : ''}`, argumentHint: '<task for the team>' }] : []) : [];
+async function commandList(host: GsdHost, root?: string): Promise<Array<{ command: string; title: string; description: string; argumentHint?: string }>> {
+  // The same library the send path runs a team from, so every team listed here is one /team: can find.
+  await whenTeamsMoved();
+  const teams = (await new TeamLibrary(teamLibraryDir(homeFolder())).list(root).catch(() => [])).flatMap((entry) => entry.team ? [{ command: `team:${entry.project ? 'project' : entry.team.slug}`, title: entry.team.name, description: `Run the "${entry.team.name}" team${entry.team.description ? ` — ${entry.team.description}` : ''}`, argumentHint: '<task for the team>' }] : []);
   return [...teams, ...await gsdCommandList(host)];
 }
 

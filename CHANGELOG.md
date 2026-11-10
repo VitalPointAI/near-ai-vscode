@@ -80,11 +80,47 @@ the button writes. A chart shows the score over time, by task type, so you can s
 - **The between-steps choice is a picker**, beside the approval picker and styled the same way: carry on
   by itself, or stop between steps in any of the asking modes.
 - **"1 to fix" now says what needs fixing**, and takes you to the step that holds it.
-- **A download runs without asking only in one exact shape.** `curl -sS [-w …] -o <path> <one https URL>` or `wget -q -O <path> <one https URL>`: one
-  public address, every word literal, no other flag and no header of any kind. Anything else asks, including a bare `curl <url>`, a user agent, a
+- **A download runs without asking only in one exact shape.** `curl -sS [-w …] -o <path> <one https URL>` or
+  `wget -q --max-redirect=0 -O <path> <one https URL>`: one public address, no redirect (wget follows redirects
+  unless told not to, so its shape turns them off), every word literal, no other flag and no header of any kind.
+  Anything else asks, including a bare `curl <url>`, a user agent, a
   `--resolve`, or an address on the local machine however it is written. Once a run has read outside content, even the exact shape asks.
 - **Reading from GitHub no longer asks.** `gh pr view`, `gh pr list`, `gh pr checks` and the other read-only subcommands run, so a run can poll for a
   verdict; anything that writes to GitHub still asks.
+- **A project's team keeps its own knowledge graph.** Every project's team, and a team of yours saved as
+  `team.md`, used to read and feed one shared graph. A project team now has a graph of its own, kept apart
+  from every other project, so it starts empty. The old shared graph is left where it was
+  (`knowledge/team.json` in your teams folder) and is not merged in, because it may mix several projects.
+- **Every team you made works from the message box again.** `/team:<name>` for a team created since 0.4.18
+  was not offered by the composer and went to the model as plain text; the composer now lists the same
+  teams a run uses. Testing a project team's roles in Team Studio no longer says the team "could not be
+  found on disk".
+- **Agent Activity adds up correctly.** A run's cost is the sum of its requests rather than the last one,
+  each sub-agent is counted once (a finished one no longer shows as still running), a run whose attachments
+  could not be read is marked failed instead of running until a reload, and the chat view's runs are no
+  longer erased from the history when the sidebar chat records its own.
+- **More secrets are masked in logs and activity.** Keys written as JSON (`"apiKey": "…"`), passwords,
+  client secrets, and a bare `sk-…` key are now redacted, not only `api_key=…` forms.
+- **Smaller fixes.** Model comparisons no longer count a test's own printed `ok` lines or skipped tests
+  as passes, so a score cannot exceed 10, and a cost with some turns unbilled includes their estimates;
+  `npm run compare:models` builds the extension first; saving a team file is versioned on Windows when
+  the drive letter's case differs; and the approval timeout setting describes what it does now (the run
+  pauses on that step, and the action is declined only after a further day).
+
+- **A team's knowledge graph accumulates, and learns.** Nothing a team learned is silently dropped to enforce a size: the graph has no ceiling, because a
+  ceiling that dropped the oldest entries made a team forget what it had learned. (The Learn tool still accepts at most 40 actors, 60 relations, and 12 facts per
+  actor in one call; that bounds one call, not the graph.) What changes over time is what is currently *believed*: a fact that later evidence contradicts moves to
+  a recorded history with why and when it stopped being believed, so a decision made on the old knowledge can still be revisited. Only a claim at least as
+  strong as what stands can retire it. A refuted claim is not re-learned from an unsourced echo; a re-assertion that cites a source is believed again, dated
+  from then.
+- **An agent's word is worth C3 at most in the knowledge graph.** An agent that read a hostile page can be steered into writing any grade and any source,
+  including one that does not look like a page, so everything in a team's graph is stored at C3 ("fairly reliable, possibly true") or below, whatever it
+  cites. An agent can still grade lower (D5, F6), and a grade only ever falls as the graph is merged, so a later mention cannot raise one. Graphs written by
+  0.4.18, where an agent could store A1, are read at C3, and saved at C3 the next time the team learns something. Nothing moves on disk: a team's graph stays
+  in the file it was always in. Looking up an actor now also lists what the team no longer believes about it, and why.
+- **A damaged knowledge file is kept, not overwritten.** When a team's graph cannot be parsed, the next addition copies it aside as
+  `<team>.damaged-<time>-….json` before starting a new graph, and the agent is told, rather than the file being replaced in silence. A graph file that
+  exists but cannot be opened at all (permissions, a lock) is never written over: the addition is refused and the file left as it is.
 
 ## 0.4.18
 
