@@ -225,14 +225,31 @@ export const editTool: AgentTool<{ path: string; oldString: string; newString: s
   }
 };
 
-function applyEdit(text: string, input: { oldString: string; newString: string; replaceAll: boolean }): string {
+function applyEdit(text: string, edit: { oldString: string; newString: string; replaceAll: boolean }): string {
+  const input = matchLineEndings(text, edit);
   const count = text.split(input.oldString).length - 1;
   if (count === 0) throw new ToolError('old_string was not found in the file. Re-read it and copy the exact text, including whitespace.');
   if (count > 1 && !input.replaceAll) throw new ToolError(`old_string appears ${count} times. Include more surrounding lines to make it unique, or set replace_all.`);
   return input.replaceAll ? text.split(input.oldString).join(input.newString) : text.replace(input.oldString, () => input.newString);
 }
 
-async function walk(root: string, start: string, visit: (absolute: string, relative: string) => void, signal: AbortSignal, includeSkipped: boolean): Promise<void> {
+/**
+ * Read shows a CRLF file without its \r, so the model's old_string and new_string arrive with \n line breaks. In a file
+ * that uses \r\n, both are converted to \r\n, unless only the text as given matches (a file with mixed line endings).
+ */
+function matchLineEndings(text: string, input: { oldString: string; newString: string; replaceAll: boolean }): { oldString: string; newString: string; replaceAll: boolean } {
+  if (!text.includes('\r\n') || input.oldString.includes('\r\n')) return input;
+  const converted = { ...input, oldString: input.oldString.replace(/\n/g, '\r\n'), newString: input.newString.replace(/\r?\n/g, '\r\n') };
+  return text.includes(converted.oldString) || !text.includes(input.oldString) ? converted : input;
+}
+
+/** The skipped directories a glob or path names as a whole segment (`node_modules/**`), which are searched after all. */
+function namedSkipDirs(...patterns: Array<string | undefined>): Set<string> {
+  const segments = new Set(patterns.flatMap((pattern) => (pattern ?? '').split(/[\\/]/)));
+  return new Set([...SKIP_DIRS].filter((name) => segments.has(name)));
+}
+
+async function walk(root: string, start: string, visit: (absolute: string, relative: string) => void, signal: AbortSignal, unskipped: ReadonlySet<string>): Promise<void> {
   const stack = [start];
   while (stack.length) {
     if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
@@ -240,7 +257,7 @@ async function walk(root: string, start: string, visit: (absolute: string, relat
     const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       const absolute = path.join(directory, entry.name);
-      if (entry.isDirectory()) { if (includeSkipped || !SKIP_DIRS.has(entry.name)) stack.push(absolute); }
+      if (entry.isDirectory()) { if (!SKIP_DIRS.has(entry.name) || unskipped.has(entry.name)) stack.push(absolute); }
       else if (entry.isFile()) visit(absolute, path.relative(root, absolute).split(path.sep).join('/'));
     }
   }
@@ -255,12 +272,12 @@ export const globTool: AgentTool<{ pattern: string; path?: string }> = {
   title: (input) => `Find ${input.pattern}${input.path ? ` in ${input.path}` : ''}`,
   async run(input, context) {
     const base = await resolveInWorkspace(context.root, input.path ?? '.', context.readOnlyRoots);
-    const includeSkipped = [...SKIP_DIRS].some((name) => input.pattern.includes(name));
+    const unskipped = namedSkipDirs(input.pattern);
     const found: Array<{ relative: string; absolute: string }> = [];
     await walk(context.root, base, (absolute, relative) => {
       const fromBase = path.relative(base, absolute).split(path.sep).join('/');
       if (matchesGlob(input.pattern, fromBase)) found.push({ relative, absolute });
-    }, context.signal, includeSkipped);
+    }, context.signal, unskipped);
     if (!found.length) return 'No files matched.';
     const withTimes = await Promise.all(found.slice(0, 5_000).map(async (file) => ({ ...file, mtime: (await stat(file.absolute).catch(() => undefined))?.mtimeMs ?? 0 })));
     withTimes.sort((a, b) => b.mtime - a.mtime);
@@ -269,7 +286,7 @@ export const globTool: AgentTool<{ pattern: string; path?: string }> = {
   }
 };
 
-type GrepMode = 'files_with_matches' | 'content' | 'count';
+export type GrepMode = 'files_with_matches' | 'content' | 'count';
 export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string; mode: GrepMode; ignoreCase: boolean; context: number; headLimit: number }> = {
   name: 'Grep',
   description: 'Search file contents with a regular expression (ripgrep syntax). output_mode: "files_with_matches" (default) lists files, "content" shows matching lines with line numbers, "count" shows matches per file. Filter files with glob (e.g. "*.ts").',
@@ -284,26 +301,43 @@ export const grepTool: AgentTool<{ pattern: string; path?: string; glob?: string
   sensitive: (input, context) => sensitiveRead(input.path, context),
   async run(input, context) {
     const base = await resolveInWorkspace(context.root, input.path ?? '.', context.readOnlyRoots);
-    const output = context.ripgrepPath ? await ripgrep(context.ripgrepPath, base, input, context) : await jsGrep(base, input, context);
-    // Credential-looking files are left out unless the search was aimed at one (which asked first).
+    const output = context.ripgrepPath ? parseRipgrepOutput(await ripgrep(context.ripgrepPath, base, input, context), input.mode) : await jsGrep(base, input, context);
+    // Credential-looking files are left out unless the search was aimed at one (which asked first). Each line carries its
+    // file apart from the text, so neither a drive letter (C:\) nor a context line (`file-12-text`) can hide which file it is.
     const aimed = input.path !== undefined && isSensitivePath(input.path);
-    const all = output.split('\n').filter(Boolean).map((line) => line.startsWith(context.root) ? displayPath(context.root, line.split(':')[0]) + line.slice(line.split(':')[0].length) : line);
-    const lines = aimed ? all : all.filter((line) => !isSensitivePath(line.split(':')[0]));
-    const hidden = all.length - lines.length;
+    const kept = aimed ? output : output.filter((line) => line.file === undefined || !isSensitivePath(line.file));
+    const hidden = output.length - kept.length;
+    const lines = kept.map((line) => (line.file === undefined ? line.text : `${displayPath(context.root, line.file)}${line.text}`));
     if (!lines.length) return hidden ? `No matches outside files that look like credentials (${hidden} line${hidden === 1 ? '' : 's'} hidden; search that file by path to include it).` : 'No matches.';
     return lines.length > input.headLimit ? `${lines.slice(0, input.headLimit).join('\n')}\n\n[${lines.length - input.headLimit} more lines. Narrow the search or raise head_limit.]` : lines.join('\n');
   }
 };
 
+/** One line of Grep output: the file it comes from (absent for ripgrep's `--` group separator) and the rest, separator included (`:12:text`, `-12-text`, `:3`, or empty). */
+export interface GrepLine { file?: string; text: string }
+
+/** Parses ripgrep's `--null` output, where every file path is followed by a NUL byte instead of a separator. */
+export function parseRipgrepOutput(stdout: string, mode: GrepMode): GrepLine[] {
+  // With --files-with-matches, each path ends in NUL and no newline follows it.
+  if (mode === 'files_with_matches') return stdout.split('\0').map((file) => file.replace(/^\r?\n/, '')).filter(Boolean).map((file) => ({ file, text: '' }));
+  return stdout.split('\n').filter(Boolean).map((line) => {
+    const end = line.indexOf('\0');
+    if (end < 0) return { text: line };
+    const rest = line.slice(end + 1);
+    return { file: line.slice(0, end), text: /^\d+-/.test(rest) ? `-${rest}` : `:${rest}` };
+  });
+}
+
 function ripgrep(rg: string, base: string, input: Parameters<typeof grepTool.run>[0], context: ToolContext): Promise<string> {
-  const args = ['--no-heading', '--color', 'never', '--max-columns', '500'];
+  const args = ['--no-heading', '--color', 'never', '--max-columns', '500', '--null'];
   if (input.mode === 'files_with_matches') args.push('--files-with-matches');
   if (input.mode === 'count') args.push('--count');
   if (input.mode === 'content') { args.push('--line-number'); if (input.context) args.push('-C', String(input.context)); }
   if (input.ignoreCase) args.push('-i');
   if (input.glob) args.push('--glob', input.glob);
   // Same exclusions as Glob and the JS fallback, even where no .gitignore exists.
-  for (const dir of SKIP_DIRS) if (!`${input.path ?? ''}${input.glob ?? ''}`.includes(dir)) args.push('--glob', `!${dir}/`);
+  const unskipped = namedSkipDirs(input.path, input.glob);
+  for (const dir of SKIP_DIRS) if (!unskipped.has(dir)) args.push('--glob', `!${dir}/`);
   args.push('--', input.pattern, base);
   return new Promise((resolve, reject) => {
     execFile(rg, args, { cwd: context.root, maxBuffer: 16 * 1024 * 1024, timeout: 30_000, signal: context.signal }, (error, stdout, stderr) => {
@@ -313,26 +347,27 @@ function ripgrep(rg: string, base: string, input: Parameters<typeof grepTool.run
   });
 }
 
-async function jsGrep(base: string, input: Parameters<typeof grepTool.run>[0], context: ToolContext): Promise<string> {
+async function jsGrep(base: string, input: Parameters<typeof grepTool.run>[0], context: ToolContext): Promise<GrepLine[]> {
   let regex: RegExp;
   try { regex = new RegExp(input.pattern, input.ignoreCase ? 'i' : ''); } catch (error) { throw new ToolError(`Invalid regular expression: ${(error as Error).message}`); }
   const files: string[] = [];
   const info = await stat(base);
   if (info.isFile()) files.push(base);
-  else await walk(context.root, base, (absolute, relative) => { if (!input.glob || matchesGlob(input.glob, relative)) files.push(absolute); }, context.signal, false);
-  const out: string[] = [];
+  else await walk(context.root, base, (absolute, relative) => { if (!input.glob || matchesGlob(input.glob, relative)) files.push(absolute); }, context.signal, namedSkipDirs(input.path, input.glob));
+  const out: GrepLine[] = [];
   for (const file of files) {
     let text: string;
     try { text = await readText(file); } catch { continue; }
     const lines = text.split(/\r?\n/);
     const hits = lines.map((line, index) => (regex.test(line) ? index : -1)).filter((index) => index >= 0);
     if (!hits.length) continue;
-    if (input.mode === 'files_with_matches') out.push(file);
-    else if (input.mode === 'count') out.push(`${file}:${hits.length}`);
-    else for (const hit of hits) for (let index = Math.max(0, hit - input.context); index <= Math.min(lines.length - 1, hit + input.context); index += 1) out.push(`${file}:${index + 1}:${lines[index]}`);
+    if (input.mode === 'files_with_matches') out.push({ file, text: '' });
+    else if (input.mode === 'count') out.push({ file, text: `:${hits.length}` });
+    // Context lines are marked with "-", matching lines with ":", as ripgrep does.
+    else for (const hit of hits) for (let index = Math.max(0, hit - input.context); index <= Math.min(lines.length - 1, hit + input.context); index += 1) out.push({ file, text: hits.includes(index) ? `:${index + 1}:${lines[index]}` : `-${index + 1}-${lines[index]}` });
     if (out.length > 5_000) break;
   }
-  return out.join('\n');
+  return out;
 }
 
 export const bashTool: AgentTool<{ command: string; timeoutMs: number; background: boolean; description?: string }> = {
@@ -369,7 +404,9 @@ export const killShellTool: AgentTool<{ id: string }> = {
   name: 'KillShell',
   description: 'Stop a background command started with Bash run_in_background.',
   parameters: { type: 'object', properties: { shell_id: { type: 'string' } }, required: ['shell_id'], additionalProperties: false },
-  capability: 'shell',
+  // It can only stop a job this run started (ids are the run's own), never run a command, so like TodoWrite it changes
+  // only the run's own state and does not ask. As 'shell' it had no command, and auto mode sent an empty one to the safety model.
+  capability: 'plan',
   parse: (raw) => ({ id: str(raw, 'shell_id')! }),
   title: (input) => `Stop ${input.id}`,
   async run(input, context) { return context.shell.kill(input.id) ? `Stopped ${input.id}.` : `${input.id} was not running.`; }

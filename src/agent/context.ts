@@ -48,16 +48,21 @@ export function trimOldToolResults(messages: AgentMessage[], keepRecent = KEEP_R
 
 /**
  * Second step: ask the model to summarize everything before the most recent exchanges, then
- * continue from [system, summary, recent]. The cut always lands on a user message so no tool
- * call is separated from its result.
+ * continue from [system, summary, recent]. The cut lands at the start of a user message or of an
+ * assistant message (with the tool results that follow it), never between a tool call and its
+ * result, so a long run from a single request can be summarized too. Returns undefined when there
+ * is nothing worth summarizing (nothing older than the recent messages, or less than a fifth of the
+ * conversation), so the caller does not report a summary that never happened.
  */
-export async function compactConversation(client: Client, model: string, messages: AgentMessage[], signal: AbortSignal, keepRecentMessages = 8): Promise<AgentMessage[]> {
+export async function compactConversation(client: Client, model: string, messages: AgentMessage[], signal: AbortSignal, keepRecentMessages = 8): Promise<AgentMessage[] | undefined> {
   const system = messages[0]?.role === 'system' ? [messages[0]] : [];
   const body = messages.slice(system.length);
   let cut = Math.max(0, body.length - keepRecentMessages);
-  while (cut > 0 && body[cut].role !== 'user') cut -= 1;
-  if (cut <= 0) return messages;
+  while (cut > 0 && body[cut].role !== 'user' && body[cut].role !== 'assistant') cut -= 1;
+  if (cut <= 0) return undefined;
   const older = body.slice(0, cut);
+  // Summarizing a sliver (say, only the previous summary) frees almost nothing and would repeat on every turn.
+  if (estimateTokens(older) < estimateTokens(body) / 5) return undefined;
   const recent = body.slice(cut);
   const transcript = older.map((message) => {
     if (message.role === 'tool') return `[tool result] ${message.content.slice(0, 1_500)}`;
@@ -75,5 +80,8 @@ export async function compactConversation(client: Client, model: string, message
     return text;
   });
   if (!summary.trim()) throw new Error('The model returned an empty summary.');
-  return [...system, { role: 'user', content: `<conversation-summary>\nEarlier parts of this conversation were summarized to save context:\n\n${summary.trim()}\n</conversation-summary>` }, { role: 'assistant', content: 'Understood. Continuing from the summary.' }, ...recent];
+  const summaryMessage: AgentMessage = { role: 'user', content: `<conversation-summary>\nEarlier parts of this conversation were summarized to save context:\n\n${summary.trim()}\n</conversation-summary>` };
+  // A kept part that starts with the assistant's own tool calls follows the summary directly, so two assistant messages never sit side by side.
+  if (recent[0].role === 'assistant') return [...system, summaryMessage, ...recent];
+  return [...system, summaryMessage, { role: 'assistant', content: 'Understood. Continuing from the summary.' }, ...recent];
 }

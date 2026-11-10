@@ -1,4 +1,5 @@
-import { lstat, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { lstat, mkdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 
 interface Snapshot { path: string; original: string | null }
@@ -10,6 +11,8 @@ interface Snapshot { path: string; original: string | null }
  */
 export class RunCheckpoints {
   private readonly snapshots = new Map<string, Snapshot>();
+  /** Saves run one after another: parallel sub-agents capture at the same time, and two writes of one file could interleave. */
+  private saving: Promise<void> = Promise.resolve();
 
   public constructor(public readonly runId: string, private readonly storageDir?: string) {}
 
@@ -47,6 +50,8 @@ export class RunCheckpoints {
       restored.push(snapshot.path);
     }
     this.snapshots.clear();
+    // A save still queued would bring the file back after it is removed.
+    await this.saving;
     if (this.storageDir) await rm(this.file(), { force: true });
     return restored;
   }
@@ -65,9 +70,24 @@ export class RunCheckpoints {
 
   private file(): string { return path.join(this.storageDir ?? '', `${this.runId}.json`); }
 
-  private async persist(): Promise<void> {
-    if (!this.storageDir) return;
-    await mkdir(this.storageDir, { recursive: true });
-    await writeFile(this.file(), JSON.stringify([...this.snapshots.values()]), 'utf8');
+  private persist(): Promise<void> {
+    if (!this.storageDir) return Promise.resolve();
+    const saved = this.saving.then(() => this.write());
+    this.saving = saved.catch(() => undefined);
+    return saved;
+  }
+
+  /** Writes every snapshot taken so far to a temporary file, then renames it over the saved one, so a reader never sees half a file. */
+  private async write(): Promise<void> {
+    const storageDir = this.storageDir!;
+    await mkdir(storageDir, { recursive: true });
+    const temporary = path.join(storageDir, `.${this.runId}.${randomBytes(4).toString('hex')}.tmp`);
+    try {
+      await writeFile(temporary, JSON.stringify([...this.snapshots.values()]), 'utf8');
+      await rename(temporary, this.file());
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 }

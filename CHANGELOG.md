@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Long runs from a single request are summarized when the context fills up.** Before, only history
+  before your last message could be summarized, so one long request kept growing until it hit the
+  model's limit, while the chat still said "The conversation was summarized" and rewrote
+  `.planning/HANDOFF.json` on every turn. That notice and the handoff now appear only when a summary
+  really happened.
+- **A command that ends the shell no longer hangs the agent.** `exit`, or a failing command after
+  `set -e`, used to leave the Bash tool waiting until its timeout (up to 10 minutes). It now finishes
+  at once, says the shell ended, and the next command starts in a fresh shell. `set -e` also no longer
+  carries over from one command to the next.
+- **Edits work in files with Windows line endings.** Changing several lines at once in a CRLF file
+  failed with "old_string was not found"; it now matches and keeps the file's line endings.
+- **File search no longer wanders into `node_modules` and `.git` by accident.** A pattern such as
+  `**/routes/**`, `.github/...` or `**/distance*` searched every skipped folder because it happened to
+  contain "out", ".git" or "dist". Only a folder the pattern names in full is searched now.
+- **Search keeps credential files out on Windows and in surrounding lines.** Grep failed to recognise
+  files like `.env` behind a `C:\` path, and showed the lines around a match in a credentials file.
+  Both are hidden now unless you search that file by path.
+- **Smaller fixes to runs:** a long run is no longer stopped as "stuck" after four replies hit the
+  output limit at different times (only four in a row count); on Windows without Git Bash, the agent
+  starts and only the Bash tool reports what to install, instead of the chat staying stuck as running;
+  stopping a background command the agent started no longer asks for approval; and sub-agents changing
+  files at the same time no longer risk a damaged undo record.
+
 - **A run does not lose its place when nobody answers.** An approval that used to be declined after 15
   minutes, so the agent worked around a decision you never made and the work was redone, now parks the run
   on that step. Nothing runs, nothing is lost, the card keeps its buttons, and answering whenever you are

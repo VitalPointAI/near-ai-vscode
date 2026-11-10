@@ -277,6 +277,8 @@ export class AgentRun {
           transcript.push({ role: 'user', content: '<output-limit>Your last reply hit the output limit and was cut off, so any tool call in it was not run. Continue more concisely: keep reasoning short, and write long files in several smaller parts.</output-limit>' });
           continue;
         }
+        // The limit stops only replies cut off one after another: a reply that finished resets the count.
+        this.truncations = 0;
         if (!assistant.tool_calls?.length) {
           // The user said something while this answer streamed: it is new direction, so keep going.
           const steered = this.options.input?.take() ?? [];

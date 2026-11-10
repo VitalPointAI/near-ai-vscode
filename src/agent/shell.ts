@@ -19,7 +19,10 @@ interface BackgroundJob { process: ChildProcess; output: string; read: number; e
  * commands, as in a terminal. Each command is written to a private file and sourced with stdin
  * from /dev/null, so neither its input nor an unterminated heredoc or quote can consume the
  * session's own control lines; its exit status and working directory are read from a random
- * end marker. A timeout or cancellation kills the whole process group and starts a fresh shell.
+ * end marker. A timeout or cancellation kills the whole process group and starts a fresh shell;
+ * so does a command that ends the shell itself (`exit`, or a failure under `set -e`), which
+ * finishes at once instead of waiting for a marker that will never come. `set -e` is switched off
+ * after each command, so it never outlives the command that set it.
  */
 export class ShellSession {
   private process: ChildProcess | undefined;
@@ -28,9 +31,17 @@ export class ShellSession {
   private cwd: string;
   private readonly jobs = new Map<string, BackgroundJob>();
   private scripts: string | undefined;
+  private resolvedShell: string | undefined;
 
-  public constructor(root: string, private readonly shellPath: string = findShell(), private readonly extraEnv: NodeJS.ProcessEnv = {}, private readonly allowEnv: string[] = []) {
+  /** With no shellPath, bash is looked up on first use, so a machine without it fails only the Bash tool, not the run. */
+  public constructor(root: string, shellPath?: string, private readonly extraEnv: NodeJS.ProcessEnv = {}, private readonly allowEnv: string[] = []) {
     this.cwd = root;
+    this.resolvedShell = shellPath;
+  }
+
+  private get shellPath(): string {
+    this.resolvedShell ??= findShell();
+    return this.resolvedShell;
   }
 
   public run(command: string, timeoutMs = DEFAULT_TIMEOUT_MS, signal?: AbortSignal): Promise<CommandResult> {
@@ -86,12 +97,16 @@ export class ShellSession {
     this.pending = '';
     return new Promise<CommandResult>((resolve) => {
       let settled = false;
+      let exitGrace: NodeJS.Timeout | undefined;
       const finish = (result: CommandResult) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        clearTimeout(exitGrace);
         signal?.removeEventListener('abort', onAbort);
         shell.stdout?.off('data', onData);
+        shell.off('exit', onExit);
+        shell.off('close', onClose);
         resolve(result);
       };
       const onData = (chunk: Buffer) => {
@@ -106,24 +121,39 @@ export class ShellSession {
         this.stopShell();
         finish({ output: truncate(`${output}\n${note}`), exitCode: null, timedOut: true, cwd: this.cwd });
       };
+      // The command ended the shell (`exit`, or a failure under `set -e`): no marker will come. Output still in the pipe
+      // arrives before 'close'; a background process holding the pipe open delays 'close', so 'exit' finishes shortly after.
+      const ended = () => {
+        if (this.process === shell) this.process = undefined;
+        killGroup(shell);
+        const code = shell.exitCode;
+        finish({ output: truncate(`${this.pending}\n[The command ended the shell${code === null ? '' : ` with exit code ${code}`} (exit, or a failure under set -e). A fresh shell starts for the next command, so earlier cd and exported variables were reset.]`), exitCode: code, timedOut: false, cwd: this.cwd });
+      };
+      const onClose = () => ended();
+      const onExit = () => { exitGrace = setTimeout(ended, 200); };
       const onAbort = () => interrupt('[Stopped by the user.]');
       const timer = setTimeout(() => interrupt(`[Command timed out after ${Math.round(timeoutMs / 1000)}s and was killed. The shell was restarted, so earlier cd and exported variables were reset.]`), timeoutMs);
       signal?.addEventListener('abort', onAbort, { once: true });
       shell.stdout?.on('data', onData);
+      shell.once('exit', onExit);
+      shell.once('close', onClose);
+      if (shell.exitCode !== null || shell.signalCode !== null) { onExit(); return; }
       this.scripts ??= mkdtempSync(path.join(tmpdir(), 'near-ai-shell-'));
       const script = path.join(this.scripts, `${marker}.sh`);
       writeFileSync(script, `${command}\n`, { mode: 0o600 });
       const quoted = `'${script.replace(/\\/g, '/').replace(/'/g, `'\\''`)}'`;
-      shell.stdin?.write(`{ . ${quoted}; } < /dev/null; __near_status=$?; rm -f ${quoted}; printf '\\n${marker}:%d:%s\\n' "$__near_status" "$PWD"\n`);
+      shell.stdin?.write(`{ . ${quoted}; } < /dev/null; __near_status=$?; set +e; rm -f ${quoted}; printf '\\n${marker}:%d:%s\\n' "$__near_status" "$PWD"\n`);
     });
   }
 
   private ensureShell(): ChildProcess {
-    if (this.process && this.process.exitCode === null) return this.process;
+    if (this.process && this.process.exitCode === null && this.process.signalCode === null) return this.process;
     const args = /bash(\.exe)?$/.test(this.shellPath) ? ['--noprofile', '--norc'] : [];
     const child = spawn(this.shellPath, args, { cwd: this.cwd, env: shellEnv(this.extraEnv, this.allowEnv), detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child.stderr?.on('data', (chunk: Buffer) => { child.stdout?.emit('data', chunk); });
     child.on('error', () => undefined);
+    // Writing to a shell that has just exited fails with EPIPE; the exit itself is reported by execute().
+    child.stdin?.on('error', () => undefined);
     child.stdin?.write('exec 2>&1\n');
     this.process = child;
     return child;
