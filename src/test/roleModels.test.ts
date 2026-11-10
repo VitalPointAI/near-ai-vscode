@@ -15,7 +15,8 @@ test('role models match exact names first, then the longest * pattern', () => {
   assert.equal(roleModelFor('gsd-project-researcher', DEFAULT_ROLE_MODELS), 'fast');
   assert.equal(roleModelFor('gsd-ui-researcher', DEFAULT_ROLE_MODELS), 'fast');
   assert.equal(roleModelFor('gsd-codebase-mapper', DEFAULT_ROLE_MODELS), 'fast');
-  assert.equal(roleModelFor('gsd-planner', DEFAULT_ROLE_MODELS), undefined);
+  // PERF-03 (owner, 2026-11-10): judgement roles now route to the deep tier by default; roles with no default still follow their definition.
+  assert.equal(roleModelFor('gsd-planner', DEFAULT_ROLE_MODELS), 'deep');
   assert.equal(roleModelFor('gsd-executor', DEFAULT_ROLE_MODELS), undefined);
   const custom = { 'gsd-*': 'standard', 'gsd-*-researcher': 'fast', 'gsd-phase-researcher': 'z-ai/glm-5.3' };
   assert.equal(roleModelFor('gsd-phase-researcher', custom), 'z-ai/glm-5.3', 'an exact name wins');

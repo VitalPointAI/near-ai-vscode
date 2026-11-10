@@ -595,6 +595,25 @@
           "maximum": 50,
           "description": "Pause the whole run after this many approvals in a row go unanswered, with a message, instead of letting it carry on without them. Answering an approval, pressing Resume on an agent, or sending a message carries on. 0 never pauses."
         },
+        "nearAi.agent.compactAtTokens": {
+          "type": "number",
+          "default": 70000,
+          "minimum": 0,
+          "maximum": 10000000,
+          "description": "Summarize a conversation's earlier history once it reaches this many tokens, whatever the model's context window, and trim old tool output from 80% of it. Smaller transcripts make every turn faster and cheaper. 0 uses only the window-based thresholds."
+        },
+        "nearAi.agent.modelDeadlineSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 0,
+          "maximum": 3600,
+          "description": "A model reply not finished after this many seconds is cut and retried once on the backup model (nearAi.agent.backupModel). Without a backup model the reply keeps going. 0 turns the deadline off."
+        },
+        "nearAi.agent.backupModel": {
+          "type": "string",
+          "default": "",
+          "description": "The model a reply past its deadline (nearAi.agent.modelDeadlineSeconds) is retried on. Empty uses the standard tier, then the deep tier. Only a model at least as private as the chat's model is used."
+        },
         "nearAi.agent.maxOutputTokens": {
           "type": "number",
           "default": 32000,
@@ -611,9 +630,17 @@
             "gsd-*-researcher": "fast",
             "gsd-research-synthesizer": "fast",
             "gsd-codebase-mapper": "fast",
-            "gsd-pattern-mapper": "fast"
+            "gsd-pattern-mapper": "fast",
+            "*planner*": "deep",
+            "*plan-checker*": "deep",
+            "*verifier*": "deep",
+            "*analyst*": "deep",
+            "*editor*": "deep",
+            "*red-team*": "deep",
+            "*fetch*": "fast",
+            "*extract*": "fast"
           },
-          "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier (GLM 5.3 Flash). A team member's own `model:` line wins, and an agent never uses a model less private than the chat's."
+          "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier; bulk fetch and extract roles do too. Planner, plan-checker, verifier, analyst, editor and red-team roles default to the deep tier, because their judgement decides the outcome. A team member's own `model:` line wins, and an agent never uses a model less private than the chat's."
         }
       }
     },

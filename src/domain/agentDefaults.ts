@@ -14,5 +14,9 @@ export const AGENT_DEFAULTS = {
   subagentApprovalWaitSeconds: 20,
   /** PERF-01: consecutive unanswered approvals that pause the run (0 never pauses). */
   approvalTimeoutsBeforePause: 3,
-  unattendedAutoApprove: true
+  unattendedAutoApprove: true,
+  /** PERF-02: compact a transcript at this many tokens whatever the model's window. */
+  compactAtTokens: 70_000,
+  /** PERF-03: a model turn not finished after this many seconds is retried once on the backup model. */
+  modelDeadlineSeconds: 120
 } as const;

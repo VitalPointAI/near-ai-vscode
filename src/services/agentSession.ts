@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
-import { compactConversation, contextStatus, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
+import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
 import { PermissionRules, RunGrants } from '../agent/permissions';
@@ -117,6 +117,10 @@ export interface AgentTurnRequest {
   riskSwitches?: { outsideWorkspace: boolean; installs: boolean };
   /** Saves an approval card's "always allow" entry to the workspace allow list. */
   rememberAllowRule?(rule: string): void | Promise<void>;
+  /** PERF-03: how long a model turn may take before it is retried on `backupModel` (0: no deadline). */
+  modelDeadlineMs?: number;
+  /** PERF-03: the model a turn past its deadline is retried on (at least as private as the chat's model). */
+  backupModel?: string;
   /** PERF-01: sub-agents' safe and verification commands run without a card in auto and mostly-autonomous (nearAi.agent.unattendedAutoApprove, default on). */
   unattendedAutoApprove?: boolean;
   /** Model or tier per agent role (nearAi.agent.roleModels); a team member's own model line wins. */
@@ -316,6 +320,8 @@ export class AgentConversation {
       ...(request.riskSwitches ? { riskSwitches: request.riskSwitches } : {}),
       maxTurns: request.maxTurns,
       maxOutputTokens: request.maxOutputTokens,
+      ...(request.modelDeadlineMs ? { deadlineMs: request.modelDeadlineMs } : {}),
+      ...(request.backupModel ? { backupModel: request.backupModel } : {}),
       beforeTurn: async (transcript, lastUsage, signal) => {
         this.enforceBudget(request, abort);
         await this.whileRunPaused(signal);
@@ -568,7 +574,7 @@ export class AgentConversation {
     // Open-GSD note so a workflow's own instructions read as the more specific direction.
     const base = `${agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}\n\n${WAITING_INSTRUCTIONS}${request.team ? `\n\n${KNOWLEDGE_INSTRUCTIONS}` : ''}`;
     if (!request.gsd) return base;
-    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). When the agent does an item on your task list, pass that item's exact content as the Agent call's task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
+    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Run each plan, task and research workstream as its own sub-agent with a fresh context, and ask it to end with a short summary (what changed, how it was verified, what is still open) rather than its working notes: your context stays small, which keeps every later turn fast. When the agent does an item on your task list, pass that item's exact content as the Agent call's task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
   }
 
   private shellFor(env: NodeJS.ProcessEnv): ShellSession {
@@ -593,13 +599,15 @@ export class AgentConversation {
     const used = Math.max(reported ?? 0, estimateTokens(transcript));
     const status = contextStatus(used, window, DEFAULT_THRESHOLDS);
     if (mainRun) this.post({ type: 'context', remainingPercent: status.remainingPercent, level: status.level });
-    if (status.remainingPercent > 40) return undefined;
+    // PERF-02: also an absolute threshold (nearAi.agent.compactAtTokens), so a large window does not mean a large, slow, expensive transcript.
+    const action = contextAction(used, window, this.compactAtTokens, DEFAULT_THRESHOLDS);
+    if (action === 'none') return undefined;
     let next = trimOldToolResults(transcript);
-    if (status.level === 'warning' && mainRun && !this.contextWarned) {
+    if (action === 'warn' && mainRun && !this.contextWarned) {
       this.contextWarned = true;
       this.post({ type: 'notice', text: `Context is ${100 - status.remainingPercent}% full. Older tool output is being trimmed; at ${100 - DEFAULT_THRESHOLDS.criticalRemaining}% the conversation is summarized automatically.` });
     }
-    if (status.level !== 'critical') return next;
+    if (action !== 'compact') return next;
     try {
       next = await compactConversation(request.client, request.model, next, signal);
       if (mainRun) {
@@ -684,6 +692,8 @@ export class AgentConversation {
             const child = new AgentRun({
               client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt) } } : {}),
+              // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
+              ...(request.modelDeadlineMs ? { deadlineMs: request.modelDeadlineMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
                 await this.whileRunPaused(signal);
@@ -722,7 +732,7 @@ export class AgentConversation {
             if (result.outcome === 'cancelled') return `${label} was stopped before it finished.${isolated}${note}`;
             // A sub-agent stopped short says so, so the lead does not take a partial report as finished work.
             const short = stopNotice(result);
-            return `${typeof report === 'string' && report.trim() ? report : `${label} finished without a written report.`}${short ? `\n\n${label} did not finish. ${short}` : ''}${isolated}${note}`;
+            return `${typeof report === 'string' && report.trim() ? boundedReport(report, label) : `${label} finished without a written report.`}${short ? `\n\n${label} did not finish. ${short}` : ''}${isolated}${note}`;
           } catch (error) {
             if (todo) this.moveTask(todo, 'pending');
             this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
@@ -996,6 +1006,9 @@ export class AgentConversation {
     this.onWaitingChange?.(this.waiting.size);
   }
 
+  /** PERF-02: compact a transcript at this many tokens whatever the window (nearAi.agent.compactAtTokens; 0 uses only the window's thresholds). */
+  public compactAtTokens = DEFAULT_COMPACT_AT_TOKENS;
+
   /** PERF-01: how long a sub-agent's approval card waits before the call returns "awaiting approval" (nearAi.agent.subagentApprovalWaitSeconds). */
   public subagentApprovalWaitMs = 20_000;
   /** PERF-01: consecutive "awaiting approval" outcomes that pause the run (nearAi.agent.approvalTimeoutsBeforePause; 0 never pauses). */
@@ -1214,6 +1227,15 @@ function sumUsage(turns: UsageMetadata[]): UsageMetadata {
   add('outputTokens');
   add('estimatedCostUsd');
   return total;
+}
+
+/** PERF-02: the most of a sub-agent's report its lead takes into its own context. */
+export const MAX_REPORT_CHARS = 12_000;
+
+/** A sub-agent's report, cut to MAX_REPORT_CHARS with a note, so a long report does not fill the lead's context (the lead wants a summary, not a transcript). */
+export function boundedReport(report: string, label: string): string {
+  if (report.length <= MAX_REPORT_CHARS) return report;
+  return `${report.slice(0, MAX_REPORT_CHARS)}\n\n[${label}'s report was cut to ${MAX_REPORT_CHARS.toLocaleString('en-US')} of ${report.length.toLocaleString('en-US')} characters to keep your context small. Anything it wrote to files is there in full; ask it for a shorter summary if you need the rest.]`;
 }
 
 /** The sentence for a run that stopped before the model finished, or undefined when it finished (or was cancelled). */

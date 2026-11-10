@@ -145,6 +145,13 @@ export interface AgentRunOptions {
   /** Output tokens one reply may use (the client's default when unset). */
   maxOutputTokens?: number;
   /**
+   * PERF-03: a model turn that has not finished this long after it was sent is cut and tried again, once, on `backupModel` (the safety check's
+   * second-model pattern). Without a backup model nothing is cut: the stream's idle timeout still catches a dead connection. 0 or unset: no deadline.
+   */
+  deadlineMs?: number;
+  /** The model a turn past its deadline is retried on; ignored when it is the run's own model. */
+  backupModel?: string;
+  /**
    * Repetitions of the same action with the same result, within the last 20 calls, before the
    * agent is nudged, then warned more strongly, then stopped (default 8, 11 and 14; a nudgeAt
    * of 0 turns it off; warnAt defaults to halfway between the two).
@@ -340,6 +347,10 @@ export class AgentRun {
     let stalls = 0;
     const stallRetries = Math.max(0, this.options.stallRetries ?? STALL_RETRIES);
     const input = this.options.input;
+    // PERF-03: the model this turn is sent to; it moves to the backup once, when the primary passes its deadline.
+    let turnModel = this.options.model;
+    const backup = this.options.backupModel && this.options.backupModel !== this.options.model ? this.options.backupModel : undefined;
+    const deadlineMs = Math.max(0, this.options.deadlineMs ?? 0);
     for (let attempt = 0; ; attempt += 1) {
       let streamed = 0;
       // Messages the user sent since the last request go into this one.
@@ -350,6 +361,8 @@ export class AgentRun {
       const attemptAbort = new AbortController();
       let received = false;
       let cutForInput = false;
+      let cutForDeadline = false;
+      const deadline = deadlineMs > 0 && backup && turnModel !== backup ? setTimeout(() => { cutForDeadline = true; attemptAbort.abort(); }, deadlineMs) : undefined;
       const onAbort = () => attemptAbort.abort();
       signal.addEventListener('abort', onAbort, { once: true });
       // A person who presses Steer is asking for the reply to stop now, so that is what happens: the attempt is cut whatever has streamed, and the
@@ -365,19 +378,25 @@ export class AgentRun {
       });
       try {
         let reply: { message: Extract<AgentMessage, { role: 'assistant' }>; usage: UsageMetadata; finishReason?: string } | undefined;
-        for await (const event of this.options.client.streamCompletion(this.options.model, transcript, this.definitions, attemptAbort.signal, { ...(idleTimeoutMs ? { idleTimeoutMs } : {}), ...(this.options.maxOutputTokens ? { maxOutputTokens: this.options.maxOutputTokens } : {}) })) {
+        for await (const event of this.options.client.streamCompletion(turnModel, transcript, this.definitions, attemptAbort.signal, { ...(idleTimeoutMs ? { idleTimeoutMs } : {}), ...(this.options.maxOutputTokens ? { maxOutputTokens: this.options.maxOutputTokens } : {}) })) {
           received = true;
           if (event.type === 'text') { streamed += event.text.length; this.options.emit({ type: 'text', text: event.text }); }
           else if (event.type === 'reasoning') this.options.emit({ type: 'reasoning', text: event.text });
           else reply = { message: event.message, usage: event.usage, finishReason: event.finishReason };
         }
         if (reply) {
-          this.options.emit({ type: 'turn', model: this.options.model, usage: reply.usage });
+          this.options.emit({ type: 'turn', model: turnModel, usage: reply.usage });
           return reply;
         }
         throw Object.assign(new Error('The model ended its turn without a response.'), { retryable: true, unresponsive: true });
       } catch (error) {
         if (cutForInput && !signal.aborted) { attempt -= 1; continue; }
+        if (cutForDeadline && !signal.aborted && backup) {
+          this.options.emit({ type: 'retry', attempt: attempt + 1, delayMs: 0, reason: `${turnModel} had not finished its reply after ${Math.round(deadlineMs / 1000)} s, so this turn is being retried on ${backup}.`, discardText: streamed });
+          turnModel = backup;
+          attempt -= 1;
+          continue;
+        }
         if (signal.aborted || (error as { retryable?: unknown }).retryable !== true) throw error;
         const reason = (error as Error).message;
         const status = (error as { status?: unknown }).status;
@@ -415,6 +434,7 @@ export class AgentRun {
         }
         if (signal.aborted) throw error;
       } finally {
+        if (deadline) clearTimeout(deadline);
         signal.removeEventListener('abort', onAbort);
         unsubscribe?.();
       }
