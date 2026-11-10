@@ -95,6 +95,44 @@ read outside the repository, or delete refs. These always ask, even after
   command;
 - writing into `.planning/.near-ai/`.
 
+### Sub-agents nobody is watching
+
+In the `auto` and `mostly-autonomous` policies, a sub-agent (an agent another
+agent started) runs two more kinds of command without a card, because nobody
+is usually there to answer one and runs used to wait hours on their own checks
+(`nearAi.agent.unattendedAutoApprove`, on by default):
+
+- a command the fixed safety rules call safe: reads, read-only git (`status`,
+  `log`, `diff`, `show`), tests, lint, type checks, builds, and writes inside
+  the sub-agent's own folder, which is its git worktree when it has one;
+- a verification script run by `bash`, `sh`, `node` or `python3`, when the
+  script resolves (symlinks followed) inside the project, is named like a check
+  (verify, check, gate, lint, test, typecheck, validate, audit) or is named in
+  the sub-agent's task, is under 256 KiB, and its text names no network program
+  or URL, starts no other program and evaluates no code, deletes or discards
+  nothing, publishes or pushes nothing, names no credential, environment
+  variable or home-directory path, and names no absolute path outside the
+  project or `..` path. Each line of a shell script must also not be risky to
+  the rules. A script changed during a run that has read outside content still
+  asks.
+
+Everything else asks exactly as before, including for sub-agents: a push, a
+delete outside the project, publishing, any command that can reach the
+network, and any credential path. The deny list, the emergency stop, the
+outside-content holds and credential-path checks are applied first and are
+never overridden. `approve-risky` and the main conversation are unchanged.
+
+A sub-agent's approval card waits `nearAi.agent.subagentApprovalWaitSeconds`
+(20 s by default). If nobody answers, the action does **not** run: the
+sub-agent is told it is awaiting approval and carries on with other work, and
+the card stays queued (until the run ends, or a day at most). Allowing it later
+allows that exact command, or edits, for the rest of the run and tells the lead
+agent; declining tells the lead not to run it. After
+`nearAi.agent.approvalTimeoutsBeforePause` (3) unanswered approvals in a row,
+every agent of the run pauses before its next model turn with a message;
+answering an approval, Resume, or a new message carries on. The main
+conversation's own approvals still wait for you (`nearAi.agent.approvalTimeoutMinutes`).
+
 Search results leave out credential-looking files unless you search one
 directly. WebFetch follows redirects itself, requires https at every hop, and
 refuses hosts that resolve to loopback, private, link-local or metadata

@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+- **Sub-agents no longer stall on approvals nobody is there to give.** Measured on two research
+  projects, sub-agents waited 15 minutes at a time on cards for their own checks (105 and 134 such
+  waits), and two long runs died after about three hours of them. In Auto and Edits auto, a sub-agent
+  now runs commands the safety rules call safe (reads, read-only git, tests, lint, type checks, builds,
+  and writes inside its own folder or worktree) and clean verification scripts inside the project
+  without a card (`nearAi.agent.unattendedAutoApprove`). Pushes, deletes outside the project,
+  publishing, network commands and credential paths still ask, and Ask before edits is unchanged. A
+  sub-agent's card now waits 20 seconds (`nearAi.agent.subagentApprovalWaitSeconds`); then the
+  sub-agent is told it is awaiting approval and carries on, and the card stays queued. Allowing it
+  later allows that command for the rest of the run and tells the lead. Three unanswered approvals in a
+  row pause the run with a message (`nearAi.agent.approvalTimeoutsBeforePause`).
+- **Smaller, cacheable context.** A conversation is summarized at 70,000 tokens whatever the model's
+  window (`nearAi.agent.compactAtTokens`); the median request in the measured runs carried about
+  190,000. Reading a large file without a range returns its first 400 lines and an outline, a
+  sub-agent's report to its lead is capped at 12,000 characters, and every request now repeats the
+  previous one byte for byte before adding to it, so NEAR's prompt cache can serve the shared part.
+  Cached tokens are recorded in the activity history.
+- **Slow replies fail over.** A model reply not finished after 120 seconds is retried once on a backup
+  model (`nearAi.agent.modelDeadlineSeconds`, `nearAi.agent.backupModel`; the standard tier by
+  default, and only a model at least as private as the chat's). Planner, plan-checker, verifier,
+  analyst, editor and red-team roles now default to the deep tier, and fetch and extract roles to the
+  fast tier (`nearAi.agent.roleModels`); a team member's own model line still wins.
+- **More runs at once.** Read-only shell commands (`git status`, `git diff`, `ls`, `grep`, `cat` …) now
+  run side by side with other lookups instead of queuing; anything that changes something still runs
+  alone and in order. Sub-agents in their own git worktree are capped by
+  `nearAi.agent.maxParallelWorktrees` (4), and leads are told to give parallel writers a worktree.
+- **A reload no longer ends a run.** A run cut off by a reload in the last 12 hours carries on by
+  itself with a notice (`nearAi.agent.autoResumeAfterReload`). Its state is now saved after every
+  finished tool call, so it keeps every finished step's result and does not run it again.
+- **A research profile for Open-GSD.** Research and writing projects plan coarser phases, use quick
+  mode for content edits, and send only plans that change a gate or verifier to the plan-checker
+  (`nearAi.gsd.researchProfile`). They also get three verifier scripts in `scripts/verify/`: citation
+  resolution, figure recompute, and an internal-path leak check, which agents run without asking.
+  **NEAR AI: Set Up Research Verifiers** adds them to an existing project.
+- **See where a run's time went.** **NEAR AI: Show Run Performance Report** (and
+  `npm run report:runs`) prints each run's wall time split into model wait, tools, approval wait and
+  idle, with input, cached and output tokens, model latency and unanswered approvals. The activity
+  history now keeps up to 256 KiB of events per run instead of only its last 100.
+
 - **A run does not lose its place when nobody answers.** An approval that used to be declined after 15
   minutes, so the agent worked around a decision you never made and the work was redone, now parks the run
   on that step. Nothing runs, nothing is lost, the card keeps its buttons, and answering whenever you are

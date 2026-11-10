@@ -174,6 +174,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.setupResearchVerifiers",
+        "title": "Set Up Research Verifiers",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.openAgentActivity",
         "title": "Open Agent Activity",
         "category": "NEAR AI",
@@ -480,6 +485,11 @@
           "type": "boolean",
           "default": true,
           "description": "When VS Code reloads (or code-server restarts) in the middle of an agent run, carry the run on by itself from its last saved step, with a notice in its conversation. Steps that had finished are not run again. Runs cut off more than 12 hours ago are left for you to resume."
+        },
+        "nearAi.gsd.researchProfile": {
+          "type": "boolean",
+          "default": true,
+          "description": "Research and writing projects use NEAR AI's research profile for Open-GSD: coarse phases, quick mode for content edits, deterministic verifier scripts in scripts/verify/, and the plan-checker only for plans that change a gate or verifier (a content-only plan's check is skipped with a note). Off: every plan is checked."
         },
         "nearAi.agent.maxTurns": {
           "type": "number",
