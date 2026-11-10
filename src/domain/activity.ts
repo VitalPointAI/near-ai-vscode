@@ -203,18 +203,35 @@ export function emptyAgentCounts(): AgentCounts {
   return { deployed: 0, active: 0, waiting: 0, completed: 0, failed: 0, cancelled: 0 };
 }
 
+/**
+ * Counts agents, not events: a sub-agent records "running" and later "completed" or "failed", so only its latest event says where it is. An agent
+ * event without an id stands for one agent of its own.
+ */
 export function summarizeAgentCounts(events: ActivityEvent[]): AgentCounts {
+  const latest = new Map<string, ActivityStatus>();
+  for (const event of events) if (event.kind === 'agent') latest.set(event.agentId ? `agent:${event.agentId}` : `event:${event.id}`, event.status);
   const counts = emptyAgentCounts();
-  for (const event of events) {
-    if (event.kind !== 'agent') continue;
-    counts.deployed += 1;
-    if (event.status === 'running') counts.active += 1;
-    if (event.status === 'waiting') counts.waiting += 1;
-    if (event.status === 'completed') counts.completed += 1;
-    if (event.status === 'failed') counts.failed += 1;
-    if (event.status === 'cancelled') counts.cancelled += 1;
+  counts.deployed = latest.size;
+  for (const status of latest.values()) {
+    if (status === 'running') counts.active += 1;
+    if (status === 'waiting') counts.waiting += 1;
+    if (status === 'completed') counts.completed += 1;
+    if (status === 'failed') counts.failed += 1;
+    if (status === 'cancelled') counts.cancelled += 1;
   }
   return counts;
+}
+
+/**
+ * A run's cost after one more event. An event with a request id is one request: its cost is added, less what an earlier event for the same request
+ * already added (a request may be recorded queued, running and done). An event without one is a total someone else summed (a sub-agent's, or the
+ * whole run's from the spend ledger), which already includes the requests above, so it raises the cost to that total rather than adding to it.
+ */
+export function runningCost(current: number | undefined, value: number | undefined, requestId: string | undefined, earlier: ActivityEvent[], field: 'estimatedCostUsd' | 'actualCostUsd'): number | undefined {
+  if (value === undefined) return current;
+  if (!requestId) return Math.max(current ?? 0, value);
+  const counted = earlier.reduce((most, event) => event.requestId === requestId && event[field] !== undefined ? Math.max(most, event[field] as number) : most, 0);
+  return (current ?? 0) + Math.max(0, value - counted);
 }
 
 export function sessionOutcome(status: ActivityStatus): SessionOutcome {

@@ -9,13 +9,14 @@
 // So this does not enumerate. It accepts EXACTLY ONE canonical shape per program and asks about everything else:
 //
 //   curl  -sS  [--max-time N]  [-w <status>]  -o <path>  [-w <status>]  <one https URL>
-//   wget  -q   [--timeout N]                   -O <path>                <one https URL>
+//   wget  -q   [--timeout N]  --max-redirect=0  -O <path>                <one https URL>
 //
 // That is the shape a research run actually uses. Anything else, however harmless it looks, asks, and a flag curl ships next year is caught because it is
 // not in the shape rather than because nobody listed it.
 //
 // What the shape guarantees, each checked directly:
-//   - one URL, http(s), a PUBLIC host (an address written in the name counts as that address);
+//   - one URL, http(s), a PUBLIC host (an address written in the name counts as that address), and no redirect to another host: curl follows none
+//     without -L, and wget's shape must say --max-redirect=0, since wget follows them by default;
 //   - every word literal, so no `$VAR`, `${…}`, backtick or `!` can put a secret in the request;
 //   - the reply is written to a path the caller then judges like any other write, and -w carries no %output{...} or @file;
 //   - no other flag, so no upload, NO HEADER of any kind (a user agent included, because `-A "sk-…"` is a literal channel for data that would
@@ -163,10 +164,19 @@ function canonicalWget(words: readonly string[]): PlainDownloadResult {
   const rest = [...words];
   const quiet = rest.shift();
   if (quiet !== '-q' && quiet !== '--quiet') return { plain: false, reason: 'a plain download starts with -q' };
-  while (rest.length && (rest[0] === '--timeout' || rest[0] === '-T' || rest[0] === '--tries' || rest[0] === '-t')) {
+  // wget follows up to 20 redirects by default, so a public URL could hand the request on to 169.254.169.254 or 127.0.0.1, which the host check never
+  // sees (0.4.19 review). The shape therefore requires redirects to be off; curl's shape is safe as it is, since curl follows none without -L.
+  let noRedirects = false;
+  while (rest.length && (rest[0] === '--timeout' || rest[0] === '-T' || rest[0] === '--tries' || rest[0] === '-t' || rest[0] === '--max-redirect' || rest[0] === '--max-redirect=0')) {
+    if (rest[0] === '--max-redirect=0') { noRedirects = true; rest.splice(0, 1); continue; }
+    if (rest[0] === '--max-redirect') {
+      if (rest[1] !== '0') return { plain: false, reason: 'a plain download follows no redirects: --max-redirect=0' };
+      noRedirects = true; rest.splice(0, 2); continue;
+    }
     if (!seconds(rest[1])) return { plain: false, reason: `${rest[0]} needs a number` };
     rest.splice(0, 2);
   }
+  if (!noRedirects) return { plain: false, reason: 'a plain download with wget turns redirects off with --max-redirect=0, so it cannot be sent on to a private address' };
   if (rest[0] !== '-O' && rest[0] !== '--output-document') return { plain: false, reason: 'a plain download writes to a path with -O' };
   const target = rest[1];
   if (target === undefined) return { plain: false, reason: '-O needs a path' };

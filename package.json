@@ -569,7 +569,7 @@
           "default": 15,
           "minimum": 0,
           "maximum": 1440,
-          "description": "How long an action waiting for your approval waits before it is declined, so an unattended run carries on without it (the agent is told and reports what still needs you). 0 waits indefinitely."
+          "description": "How long an action waits for your approval before the run is paused on that step. Nothing runs while it is paused; answering whenever you are back carries on from exactly there. If nobody answers for a further day, the action is declined and the run released. 0 waits indefinitely, with no pause and no decline."
         },
         "nearAi.agent.maxOutputTokens": {
           "type": "number",
@@ -690,7 +690,7 @@
     "test": "npm run compile && node --test dist/test/*.test.js scripts/test/*.test.mjs",
     "report:spend": "node scripts/spend-report.mjs",
     "experiment": "node scripts/ab-task.mjs",
-    "compare:models": "node scripts/compare-models.mjs",
+    "compare:models": "npm run compile && node scripts/compare-models.mjs",
     "package": "npm run compile && npm run sbom && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
     "generate:icon": "node scripts/generate-near-ai-icon.mjs",
     "install:global": "node scripts/install-global-extension.mjs",
