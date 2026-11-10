@@ -240,3 +240,36 @@ test('a run outside the chat (a bare agent loop, as sub-agents and benchmarks us
     shell.dispose();
   }
 });
+
+test('a member the user kept or merged is not asked about again until the built-in definition changes', () => {
+  const base = stampTeam(projectTypeTeam(research, 'Assess the market', 'cloud'), research);
+  const mine = '## editor\nrole: reviewer\nmodel: standard\ntools: Read, CheckCitations\n\nOUR HOUSE STYLE: plain English.\n\nProject goal: Assess the market\n';
+  const text = base.replace(/## editor\n[\s\S]*?(?=\n## |$)/, mine);
+  for (const decision of ['keep', 'merge'] as const) {
+    const first = applyTeamUpdate(text, planTeamUpdate(text)!, { members: { editor: decision } });
+    const recorded = String(detectTemplate(first)!.base!.editor);
+    assert.match(recorded, /^kept:[0-9a-f]{16}:[0-9a-f]{16}$/, `${decision}: the stamp records the user's own fingerprint and the built-in it was kept against`);
+    const again = planTeamUpdate(first)!;
+    assert.equal(again.members.find((member) => member.name === 'editor')!.action, 'kept', `${decision}: not asked again`);
+    assert.equal(again.upToDate, true);
+    assert.equal(applyTeamUpdate(first, again), first, `${decision}: a second update changes nothing`);
+    // The user edits their own version further: still theirs, still not asked.
+    const edited = first.replace('OUR HOUSE STYLE: plain English.', 'OUR HOUSE STYLE: plain English, short sentences.');
+    assert.equal(planTeamUpdate(edited)!.members.find((member) => member.name === 'editor')!.action, 'kept');
+    // When the built-in editor changes, they are asked again.
+    const editor = research.members.find((member) => member.name === 'editor')!;
+    const original = editor.instructions;
+    editor.instructions = `${original}\n\nDone when: also checked twice.`;
+    try {
+      const changed = planTeamUpdate(first)!.members.find((member) => member.name === 'editor')!;
+      assert.equal(changed.action, 'choice', `${decision}: asked again after the built-in changed`);
+      assert.match(changed.reason, /built-in definition has changed since/);
+    } finally {
+      editor.instructions = original;
+    }
+  }
+  // Taking the new definition records the built-in fingerprint, so later updates replace it automatically.
+  const taken = applyTeamUpdate(text, planTeamUpdate(text)!, { members: { editor: 'take' } });
+  assert.match(String(detectTemplate(taken)!.base!.editor), /^[0-9a-f]{16}$/);
+  assert.equal(planTeamUpdate(taken)!.members.find((member) => member.name === 'editor')!.action, 'same');
+});

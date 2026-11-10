@@ -26,10 +26,11 @@ export interface TemplateRef {
 }
 
 /**
- * auto: unchanged since generated, replaced. same: already current. choice: the user changed it; they choose.
+ * auto: unchanged since generated, replaced. same: already current. choice: the user changed it; they choose. kept: the user chose their own
+ * version against this same built-in definition before, so they are not asked again until the built-in changes.
  * new: a built-in member the file lacks, offered. removed: no longer built in, flagged and kept. custom: the user's own member, kept.
  */
-export type MemberAction = 'auto' | 'same' | 'choice' | 'new' | 'removed' | 'custom';
+export type MemberAction = 'auto' | 'same' | 'choice' | 'kept' | 'new' | 'removed' | 'custom';
 export interface MemberPlan { name: string; action: MemberAction; reason: string; current?: string; proposed?: string; merged?: string; diff?: DiffLine[] }
 export interface TeamUpdatePlan { template: TemplateRef; upToDate: boolean; local: boolean; goal?: string; members: MemberPlan[] }
 export type MemberDecision = 'take' | 'keep' | 'merge';
@@ -146,7 +147,16 @@ export function planTeamUpdate(text: string): TeamUpdatePlan | undefined {
     const proposed = renderSection(withPlace);
     const mine = fingerprintOf(section);
     if (mine === fingerprintOf(withPlace)) { members.push({ name: section.name, action: 'same', reason: 'Already the current definition.', current, proposed }); continue; }
-    const base = template.base?.[section.name];
+    const recorded = template.base?.[section.name];
+    // "kept:<their fingerprint>:<built-in fingerprint>" records an earlier keep or merge against that built-in definition.
+    const kept = /^kept:([0-9a-f]+):([0-9a-f]+)$/.exec(recorded ?? '');
+    if (kept) {
+      if (kept[2] === builtInFingerprint(type, section.name, local)) { members.push({ name: section.name, action: 'kept', reason: 'You chose to keep your version; not asked again until the built-in definition changes.', current, proposed }); continue; }
+      const merged = renderSection(mergeNewLines(section, withPlace));
+      members.push({ name: section.name, action: 'choice', reason: 'You kept your own version before, and the built-in definition has changed since; choose what to keep.', current, proposed, merged, diff: lineDiff(current, proposed) });
+      continue;
+    }
+    const base = recorded;
     const unchanged = base ? mine === base : history.some((version) => version.members[section.name]?.includes(mine));
     if (unchanged) {
       members.push({ name: section.name, action: 'auto', reason: base ? 'Unchanged since it was generated; replaced with the current definition.' : 'Matches an earlier built-in version exactly; replaced with the current definition.', current, proposed });
@@ -161,7 +171,7 @@ export function planTeamUpdate(text: string): TeamUpdatePlan | undefined {
     if (template.base && member.name in template.base) continue;
     members.push({ name: member.name, action: 'new', reason: 'A new member of the built-in team; add it?', proposed: renderSection(builtInSection(type, member.name, local, goal)!) });
   }
-  const upToDate = members.every((member) => member.action === 'same' || member.action === 'custom' || member.action === 'removed') && template.stamped && template.fromVersion === template.toVersion;
+  const upToDate = members.every((member) => member.action === 'same' || member.action === 'kept' || member.action === 'custom' || member.action === 'removed') && template.stamped && template.fromVersion === template.toVersion;
   return { template, upToDate, local, ...(goal ? { goal } : {}), members };
 }
 
@@ -191,15 +201,26 @@ export function applyTeamUpdate(text: string, plan: TeamUpdatePlan, decisions: U
   const head = (/^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(text)?.[0] ?? '').replace(/\r?\n?$/, '\n');
   const preamble = parts.preamble.trim() ? parts.preamble.replace(/\s*$/, '\n\n') : '\n';
   const body = `${head}${preamble}${out.join('\n')}`;
-  const present = new Set(splitTeam(body).sections.map((section) => section.name));
-  const stamp = [`template: ${type.id}`, `templateVersion: ${templateVersion(type.id)}`, 'templateBase:', ...type.members.filter((member) => present.has(member.name)).map((member) => `  - ${member.name}=${builtInFingerprint(type, member.name, plan.local)}`)];
+  // A member now matching the built-in records the built-in fingerprint, so a later update replaces it if the user leaves it alone. A
+  // member the user kept or merged records their own fingerprint and the built-in it was kept against, so it is not asked about again
+  // until the built-in definition changes.
+  const present = new Map(splitTeam(body).sections.map((section) => [section.name, section]));
+  const entry = (name: string) => {
+    const builtIn = builtInFingerprint(type, name, plan.local);
+    const mine = fingerprintOf(present.get(name)!);
+    const action = byName.get(name)?.action;
+    const decision = decisions.members?.[name] ?? 'keep';
+    const keptMine = mine !== builtIn && (action === 'kept' || (action === 'choice' && decision !== 'take'));
+    return keptMine ? `kept:${mine}:${builtIn}` : builtIn;
+  };
+  const stamp = [`template: ${type.id}`, `templateVersion: ${templateVersion(type.id)}`, 'templateBase:', ...type.members.filter((member) => present.has(member.name)).map((member) => `  - ${member.name}=${entry(member.name)}`)];
   return withFrontmatter(body, stamp);
 }
 
 /** One line per member, for a preview or a dry run. */
 export function describePlan(plan: TeamUpdatePlan): string {
   const from = plan.template.fromVersion ? `v${plan.template.fromVersion}` : plan.template.stamped ? 'an unknown version' : 'no recorded version (inferred from member names)';
-  const label: Record<MemberAction, string> = { auto: 'updates automatically', same: 'already current', choice: 'needs your choice', new: 'new built-in member, can be added', removed: 'no longer built in, kept', custom: 'your own member, kept' };
+  const label: Record<MemberAction, string> = { auto: 'updates automatically', same: 'already current', choice: 'needs your choice', kept: 'your version, kept as you chose', new: 'new built-in member, can be added', removed: 'no longer built in, kept', custom: 'your own member, kept' };
   return [`${plan.template.label} template: ${from} → v${plan.template.toVersion}`, ...plan.members.map((member) => `- ${member.name}: ${label[member.action]}. ${member.reason}`)].join('\n');
 }
 

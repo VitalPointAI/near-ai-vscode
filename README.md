@@ -457,7 +457,8 @@ until it runs out aren't shown.
   replaced with the current definition; a member you changed is shown as a
   diff and you choose to take the new one, keep yours, or keep yours and add
   only what is new (a `privacy:` line, new tools, and new Output and Done-when
-  sections); members you added are left alone; members no longer built in are
+  sections), and a member you kept is not asked about again until its
+  built-in definition changes; members you added are left alone; members no longer built in are
   kept and flagged; and new built-in members are offered. A project team's
   `AGENTS.md` guidance is updated the same way when the extension wrote it.
   Teams made before stamps existed are recognised by their member names, and
