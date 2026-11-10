@@ -149,6 +149,16 @@ class Layout {
     this.page.reserved += height;
   }
 
+  /** The error for footnotes that cannot fit on one page with the line that cites them. */
+  private noteTooLong(numbers: number[]): ToolError {
+    // Name the notes that are too long on their own; if none is, it is the notes of this one line together.
+    const room = this.top - this.bottom - 30;
+    const alone = numbers.filter((number) => this.noteLines(number).length * 10 + 12 > room);
+    const named = (alone.length ? alone : numbers).map((number) => `[^${this.notes.find((note) => note.number === number)?.id ?? number}]`);
+    const subject = named.length === 1 ? `Footnote ${named[0]} is` : `Footnotes ${named.join(', ')} are${alone.length ? '' : ' together'}`;
+    return new ToolError(`${subject} too long to fit at the foot of a page with the line that cites ${named.length === 1 ? 'it' : 'them'}. Shorten or split ${named.length === 1 ? 'it' : 'them'}, or use notes: endnotes, which have no such limit.`);
+  }
+
   /** Prints each page's footnotes in the room reserved for them. */
   public footnotes() {
     this.pages.forEach((page, index) => {
@@ -259,8 +269,10 @@ class Layout {
   private flow(lines: Line[], x: number, leading: number, size: number, decorate?: (top: number, bottom: number) => void) {
     for (const line of lines) {
       const notes = this.pending(line.notes);
-      // A line moves to the next page with its footnotes when both do not fit on this one.
+      // A line moves to the next page with its footnotes when both do not fit on this one; on a fresh page they must fit, or the note can
+      // never be placed and reserving its room would push it off the page.
       if (this.y - leading - this.footHeight(notes) < this.floor() && !this.atTop()) this.newPage();
+      if (this.y - leading - this.footHeight(this.pending(line.notes)) < this.floor()) throw this.noteTooLong(this.pending(line.notes));
       const top = this.y;
       this.drawLine(line, x, this.y - size);
       this.y -= leading;
@@ -390,6 +402,9 @@ class Layout {
         if (to === from) {
           if (!fresh) { this.newPage(); header(); fresh = true; continue; }
           to = Math.max(from + 1, Math.min(count, from + Math.floor((room() - 2 * pad) / leading)));
+          while (to > from + 1 && (to - from) * leading + 2 * pad + this.footHeight(rowNotes(rowIndex, from, to)) > room()) to -= 1;
+          // Even one line of the row with its footnotes does not fit on an empty page: the note can never be placed.
+          if (leading + 2 * pad + this.footHeight(rowNotes(rowIndex, from, to)) > room()) throw this.noteTooLong(rowNotes(rowIndex, from, to));
         }
         const notes = rowNotes(rowIndex, from, to);
         drawRow(rowIndex, from, to);

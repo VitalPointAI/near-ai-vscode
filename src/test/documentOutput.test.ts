@@ -423,3 +423,20 @@ test('an impossible date is refused rather than rolled over to another day', () 
   }
   assert.throws(() => pdfTool.parse({ output_path: 'x.pdf', title: 't', markdown: '# a', date: '2026-02-31' }), /is not a real date and time/);
 });
+
+test('a footnote too long for any page is an error naming it, not a note pushed off the page', () => {
+  const huge = 'A very long note that goes on and on. '.repeat(600);
+  const { blocks, notes } = parseDocument(`# Report\n\nA claim.[^long] Another claim.[^ok]\n\n[^long]: ${huge}\n[^ok]: Short source.\n`);
+  assert.throws(() => createPdf({ title: 'T', blocks, notes, noteStyle: 'footnotes', images: new Map() }), (error: Error) => error instanceof ToolError && /^Footnote \[\^long\] is too long to fit at the foot of a page with the line that cites it\./.test(error.message));
+  assert.ok(createPdf({ title: 'T', blocks, notes, noteStyle: 'endnotes', images: new Map() }).pages >= 2, 'as an endnote it is fine');
+  const table = parseDocument(`| Claim |\n| --- |\n| cited[^long] |\n\n[^long]: ${huge}\n`);
+  assert.throws(() => createPdf({ title: 'T', blocks: table.blocks, notes: table.notes, noteStyle: 'footnotes', images: new Map() }), /Footnote \[\^long\] is too long/);
+  // A long note that does fit moves to a fresh page with the line that cites it.
+  const fits = parseDocument(`${'Filler sentence for the page. '.repeat(160)}\n\nThe cited line.[^mid]\n\n[^mid]: ${'A note of moderate length. '.repeat(60)}\n`);
+  const result = createPdf({ title: 'T', blocks: fits.blocks, notes: fits.notes, noteStyle: 'footnotes', images: new Map() });
+  assertXref(result.bytes);
+  return documentText(result.bytes, 'pdf', 'fits.pdf').then((read) => {
+    const pageOf = (needle: string) => read.text.slice(0, read.text.indexOf(needle)).split('[Page ').length - 1;
+    assert.equal(pageOf('The cited line.'), pageOf('A note of moderate length.'));
+  });
+});
