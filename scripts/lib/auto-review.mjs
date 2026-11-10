@@ -99,7 +99,9 @@ export async function reviewPr(repo, number, { env = process.env, log = console.
     const review = defuse(await run('ci-review-call.mjs', [promptFile], { env }), Infinity);
     writeFileSync(path.join(dir, 'review.md'), review, { mode: 0o600 });
 
-    const result = submitReview(repo, number, review, { log, requireRecommendation: true });
+    // The head this review read: if the PR moved while the model ran, nothing is posted (submitReview), as for the expectedHead check above.
+    const result = submitReview(repo, number, review, { log, requireRecommendation: true, reviewedHead: pr.headRefOid });
+    if (result.skipped) return { state: 'none', skipped: true, reviewedSha: pr.headRefOid, gateFiles: [], omitted: [], dir };
     return {
       state: result.state,
       skipped: false,

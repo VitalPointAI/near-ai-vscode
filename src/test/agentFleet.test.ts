@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -206,23 +207,61 @@ test('context: old tool output is trimmed, thresholds follow Open-GSD, and compa
   assert.equal(contextStatus(10_000, 100_000).level, 'normal');
   const long: AgentMessage[] = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'first goal' }, { role: 'assistant', content: 'ok' }, { role: 'user', content: 'second' }, { role: 'assistant', content: null, tool_calls: [call('t1', 'Read', {})] }, { role: 'tool', tool_call_id: 't1', content: 'file' }, { role: 'assistant', content: 'read it' }, { role: 'user', content: 'third' }, { role: 'assistant', content: 'done third' }];
   const summarizer = { async *streamCompletion(): AsyncGenerator<CompletionEvent> { yield { type: 'done', message: { role: 'assistant', content: 'SUMMARY' }, finishReason: 'stop', usage }; } };
-  const compacted = await compactConversation(summarizer, 'm', long, new AbortController().signal, 3);
+  const compacted = (await compactConversation(summarizer, 'm', long, new AbortController().signal, 3))!;
   assert.equal(compacted[0].content, 'sys');
   assert.match(String(compacted[1].content), /SUMMARY/);
-  assert.equal(compacted[3].role, 'user', 'the kept part starts at a user message');
+  assert.deepEqual(compacted.slice(2).map((message) => message.content), ['read it', 'third', 'done third'], 'the kept part starts at an assistant message, right after the summary');
   assert.equal(compacted.some((message, index) => message.role === 'tool' && compacted[index - 1]?.role !== 'assistant'), false);
+  const atUser = (await compactConversation(summarizer, 'm', long, new AbortController().signal, 2))!;
+  assert.deepEqual(atUser.slice(2).map((message) => message.role), ['assistant', 'user', 'assistant'], 'a cut at a user message keeps the acknowledgement after the summary');
+
+  // One request followed by a long run of tool calls: the cut lands where a tool-call group starts, never between a call and its result.
+  const single: AgentMessage[] = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'do the whole job' }];
+  for (let n = 0; n < 10; n += 1) single.push({ role: 'assistant', content: null, tool_calls: [call(`s${n}a`, 'Read', {}), call(`s${n}b`, 'Read', {})] }, { role: 'tool', tool_call_id: `s${n}a`, content: 'a' }, { role: 'tool', tool_call_id: `s${n}b`, content: 'b' });
+  const summarized = (await compactConversation(summarizer, 'm', single, new AbortController().signal, 8))!;
+  assert.ok(summarized.length < single.length);
+  assert.equal(summarized[1].role, 'user');
+  assert.equal(summarized[2].role, 'assistant');
+  assert.ok((summarized[2] as { tool_calls?: unknown[] }).tool_calls?.length, 'the kept part starts with a tool-call group');
+  const ids = new Set(summarized.flatMap((message) => (message.role === 'assistant' ? (message.tool_calls ?? []).map((tool) => tool.id) : [])));
+  assert.ok(summarized.every((message) => message.role !== 'tool' || ids.has(message.tool_call_id)), 'every kept tool result keeps its call');
+
+  // Nothing older than the recent messages: no summary request, and the caller is told.
+  let asked = 0;
+  const counting = { async *streamCompletion(): AsyncGenerator<CompletionEvent> { asked += 1; yield { type: 'done', message: { role: 'assistant', content: 'SUMMARY' }, finishReason: 'stop', usage }; } };
+  assert.equal(await compactConversation(counting, 'm', [{ role: 'system', content: 'sys' }, { role: 'user', content: 'x'.repeat(9_000) }], new AbortController().signal), undefined);
+  assert.equal(asked, 0);
 });
 
 test('at the critical threshold the conversation is summarized and a handoff is saved', async () => {
   const { root, gsd, posted, conversation } = await project();
   await mkdir(path.join(root, '.planning'), { recursive: true });
-  const client = scriptedClient({ parent: [{ text: 'first answer' }, { text: 'SUMMARY OF WORK' }, { text: 'second answer' }] });
+  await writeFile(path.join(root, 'filler.txt'), `${'x'.repeat(100)}\n`.repeat(30));
+  // Enough history before the second request that there is something older to summarize.
+  const reads = Array.from({ length: 5 }, (_, n) => ({ calls: [call(`f${n}`, 'Read', { file_path: 'filler.txt' })] }));
+  const client = scriptedClient({ parent: [...reads, { text: 'first answer' }, { text: 'SUMMARY OF WORK' }, { text: 'second answer' }] });
   await conversation.send(request(client, gsd, { contextWindows: { 'z-ai/glm-5.3': 1_000_000 } }));
-  await writeFile(path.join(root, 'filler.txt'), '');
   await conversation.send(request(client, gsd, { text: 'y'.repeat(6_000), contextWindows: { 'z-ai/glm-5.3': 2_000 } }));
   assert.ok(posted.some((message) => message.type === 'notice' && /summarized to stay within/.test(String(message.text))));
   const handoff = JSON.parse(await readFile(path.join(root, '.planning', 'HANDOFF.json'), 'utf8')) as { reason: string };
   assert.equal(handoff.reason, 'context-critical');
+});
+
+test('at the critical threshold with nothing older to summarize, no summary or handoff is announced', async () => {
+  const { root, gsd, posted, conversation } = await project();
+  await mkdir(path.join(root, '.planning'), { recursive: true });
+  const client = scriptedClient({ parent: [{ text: 'the answer' }] });
+  await conversation.send(request(client, gsd, { text: 'y'.repeat(6_000), contextWindows: { 'z-ai/glm-5.3': 2_000 } }));
+  assert.ok(!posted.some((message) => message.type === 'notice' && /summarized to stay within/.test(String(message.text))));
+  assert.equal(existsSync(path.join(root, '.planning', 'HANDOFF.json')), false);
+  assert.deepEqual(client.log, ['parent:1'], 'no summary was requested');
+});
+
+test('a run that fails while it is being prepared does not leave the conversation running', async () => {
+  const { gsd, conversation } = await project();
+  const client = scriptedClient({ parent: [{ text: 'never' }] });
+  await assert.rejects(() => conversation.send(request(client, gsd, { skill: { name: 'no-such-skill', args: '' } })), /no skill named/);
+  assert.equal(conversation.running, false);
 });
 
 test('a saved conversation resumes with its full context', async () => {
