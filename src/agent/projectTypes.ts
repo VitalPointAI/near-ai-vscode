@@ -1,5 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { guidanceFingerprint } from './teamFingerprints';
+import { TEMPLATE_HISTORY } from './teamTemplateHistory';
 import { renderTeam, TeamMember } from './teams';
 
 // Project types: each tailors the team, and the guidance every agent reads (AGENTS.md), to a kind
@@ -240,9 +242,28 @@ export function projectTypeTeam(type: ProjectType, goal: string, locality: 'clou
 const START = '<!-- near-ai:project-type:start -->';
 const END = '<!-- near-ai:project-type:end -->';
 
+/** The text this type writes between the AGENTS.md markers. */
+export function projectGuidanceBlock(type: ProjectType, goal: string): string {
+  return `## Project type: ${type.label}\n\nGoal: ${goal}\n\n${type.guidance}\n\n${RED_TEAM_POLICY}`;
+}
+
+/** The project-type block in an AGENTS.md (between the markers), with its goal, or undefined when there is none. */
+export function readProjectGuidance(agents: string): { inner: string; goal?: string } | undefined {
+  const start = agents.indexOf(START);
+  const end = agents.indexOf(END);
+  if (start < 0 || end <= start) return undefined;
+  const inner = agents.slice(start + START.length, end).replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+  return { inner, goal: /^Goal: (.*)$/m.exec(inner)?.[1]?.trim() };
+}
+
+/** The current template version of a project type (see teamTemplateHistory.ts). */
+export function templateVersion(id: string): number {
+  return TEMPLATE_HISTORY[id]?.[TEMPLATE_HISTORY[id].length - 1]?.version ?? 0;
+}
+
 /** AGENTS.md with this type's guidance between markers; the rest of the file is left as it was. */
 export function withProjectGuidance(existing: string, type: ProjectType, goal: string): string {
-  const block = `${START}\n## Project type: ${type.label}\n\nGoal: ${goal}\n\n${type.guidance}\n\n${RED_TEAM_POLICY}\n${END}`;
+  const block = `${START}\n${projectGuidanceBlock(type, goal)}\n${END}`;
   const start = existing.indexOf(START);
   const end = existing.indexOf(END);
   if (start >= 0 && end > start) return `${existing.slice(0, start)}${block}${existing.slice(end + END.length)}`;
@@ -256,6 +277,7 @@ export async function applyProjectType(root: string, type: ProjectType, goal: st
   await writeFile(agentsFile, withProjectGuidance(existing, type, goal), 'utf8');
   const configFile = path.join(root, '.planning', '.near-ai', 'project.json');
   const previous = await readFile(configFile, 'utf8').then((text) => JSON.parse(text) as Record<string, unknown>).catch(() => ({}));
-  await writeFile(configFile, `${JSON.stringify({ ...previous, type: type.id, goal, redTeam: true, updatedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8');
+  // The template version and a fingerprint of the guidance as written, so Update Team can tell later whether the user changed it.
+  await writeFile(configFile, `${JSON.stringify({ ...previous, type: type.id, goal, redTeam: true, templateVersion: templateVersion(type.id), guidanceBase: guidanceFingerprint(projectGuidanceBlock(type, goal)), updatedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8');
   return { agentsFile, configFile };
 }

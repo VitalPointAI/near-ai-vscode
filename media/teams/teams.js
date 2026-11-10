@@ -382,6 +382,8 @@
       button('Duplicate', () => vscode.postMessage({ type: 'duplicate', id: team.id }), { label: 'Duplicate ' + team.name }),
       button('Export', () => vscode.postMessage({ type: 'export', id: team.id }), { label: 'Export ' + team.name })
     );
+    // A team made from a built-in project type can be brought up to date; the host previews every change and asks first.
+    if (team.update) actions.append(button(team.update.available ? 'Update team…' : 'Check for updates…', () => vscode.postMessage({ type: 'update-team', id: team.id }), { label: (team.update.available ? 'Update ' : 'Check for updates to ') + team.name + ' (' + team.update.template + ' template' + (team.update.from ? ' v' + team.update.from : '') + (team.update.available ? ' → v' + team.update.to : '') + ')', id: 'update-' + team.id }));
     if (team.kind === 'user') actions.append(button('Archive', () => vscode.postMessage({ type: 'archive', id: team.id }), { label: 'Archive ' + team.name }));
     card.append(actions);
     return card;

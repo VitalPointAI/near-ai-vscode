@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Update Team.** Teams made from a built-in project type can now pick up improved roles. **NEAR AI:
+  Update Team…**, or **Update team…** on a team's card in Team Studio, previews the change member by
+  member and asks before writing: members you never changed are replaced with the current definition;
+  for a member you changed you see the differences and choose to take the new one, keep yours, or keep
+  yours and add only what is new (a privacy line, new tools, and the new Output and Done-when
+  sections); members you added are left alone, members no longer built in are kept and flagged, and new
+  built-in members are offered. A project's `AGENTS.md` guidance is updated the same way when the
+  extension wrote it. The team is backed up to its version history first, and **Undo** puts it back.
+  New teams record their template in their frontmatter; teams made earlier are recognised by their
+  member names. When a team is out of date you are told once per version, with **Review**, **Later**,
+  and **Don't ask for this team** (turn the notice off with `nearAi.teams.updateNotifications`), and
+  nothing is updated while a run is in progress.
 - **Research teams that ship professional, fully sourced reports.** Each role in a new research team now
   has one input, one job, one output file, and a definition of done, and they run in order:
   investigator, source-verifier, analyst, writer, red team, editor. Every role reads the project's
@@ -21,9 +33,8 @@
   The presales reviewer and the writing editor work the same way. The source-verifier, analyst, red
   team, and editor use the deep tier, and every research member (and the presales reviewer) has
   `privacy: private`; change a member's line to `privacy: any` to relax it.
-  **Existing projects keep the team they have**: their `.planning/.near-ai/team.md` is not changed. To
-  get the new roles, set the project type up again (or **Set Up Project Team**) and review the new
-  team, or copy the new member sections into your team file.
+  **Existing projects keep the team they have** until you choose to update it: run **NEAR AI: Update
+  Team…** (below) to pick up the new roles.
 - **A team member can be kept on private models.** A `privacy: private` line in a team file keeps that
   member on a model that runs in a NEAR TEE or on your machine: the most capable private model for its
   tier, and if none is available the member does not run and the lead is told why, rather than its

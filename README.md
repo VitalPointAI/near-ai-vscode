@@ -222,7 +222,7 @@ signs off with SIGN-OFF or NOT READY. Nothing is released without SIGN-OFF,
 and the delivered report carries its sources as real endnotes or footnotes
 (CreateDocument and CreatePdf). The presales reviewer and the writing editor
 are release gates in the same way. A project set up before this keeps its own
-team file; set the team up again to pick up the new roles.
+team file; run **NEAR AI: Update Team…** to pick up the new roles.
 
 In a software project, the **DevOps** member sets up a protected way of
 working: a CI workflow on every pull request (tests, a secret scan, and a
@@ -445,6 +445,25 @@ until it runs out aren't shown.
   leaving the builder or the editor with unsaved changes asks first (Discard
   changes, or Save draft / Save); closing the tab keeps the unsaved team as a
   draft and says so the next time the studio opens.
+- **Update Team.** A team made from a built-in project type records where it
+  came from in its frontmatter (`template`, `templateVersion`, and a
+  `templateBase` list with a fingerprint of each member as generated), so it
+  can pick up improved built-in roles later. **NEAR AI: Update Team…** (or
+  **Update team…** on the team's card in Team Studio) previews the change
+  member by member before anything is written: a member you never changed is
+  replaced with the current definition; a member you changed is shown as a
+  diff and you choose to take the new one, keep yours, or keep yours and add
+  only what is new (a `privacy:` line, new tools, and new Output and Done-when
+  sections); members you added are left alone; members no longer built in are
+  kept and flagged; and new built-in members are offered. A project team's
+  `AGENTS.md` guidance is updated the same way when the extension wrote it.
+  Teams made before stamps existed are recognised by their member names, and
+  a member that matches any released version exactly is treated as unchanged.
+  The file is backed up to the team's version history first, and the result
+  has an **Undo**. When a team is out of date you are told once per version
+  ("Team update available", with Review, Later, and Don't ask for this team);
+  turn this off with `nearAi.teams.updateNotifications`. Nothing is updated
+  while a run is in progress; the update is offered when it ends.
 - **Attachments.** Attach images, audio, documents, and text files to a
   message. Images are read by the chosen model if it reads images, otherwise
   by a vision model (`nearAi.agent.visionModel`); audio is transcribed with
@@ -616,6 +635,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking, matched by their leading words (`git push` covers `git push origin main`, but never `--force` or a URL). The approval card's **Always allow** adds entries. In `auto`, each part of a chained command is matched on its own; in other modes, anything with `;`, `\|`, `>`, or `$( )` asks. |
 | `nearAi.agent.denyCommands` | `rm -rf /`, `git push --force`, … | Commands the agent may never run. |
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / Qwen3.6-35B-A3B | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). By default only research, synthesis, and mapping roles use the fast tier; GSD's `budget` and `adaptive` model profiles also send checkers and the test-writing auditor there. |
+| `nearAi.teams.updateNotifications` | `true` | Say once per version when a team made from a built-in project type has a newer template (**NEAR AI: Update Team…**). |
 | `nearAi.agent.safetyModel` | the fast tier | With `auto`, the model that checks commands the rules cannot decide. Used only when it runs privately (TEE or local); otherwise those commands ask. |
 | `nearAi.agent.maxParallelAgents` | `4` | Sub-agents that may run at once. |
 | `nearAi.agent.maxTurns` | `60` | Model turns per run before it pauses for you; **Continue** in the chat carries on. |

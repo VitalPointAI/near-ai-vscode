@@ -218,6 +218,15 @@ export class TeamLibrary {
     return Math.min(versions.length, MAX_VERSIONS);
   }
 
+  /** Copies any file (for example a project's AGENTS.md before Update Team changes it) into this team's backup folder; returns the copy's path. */
+  public async backup(teamFile: string, file: string, label: string): Promise<string> {
+    const dir = path.join(this.directory, '.versions', `${this.versionKey(teamFile)}-${label}`);
+    await mkdir(dir, { recursive: true });
+    const target = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
+    await copyFile(file, target);
+    return target;
+  }
+
   public async versions(file: string): Promise<string[]> {
     const dir = this.versionsDir(this.versionKey(file));
     return (await readdir(dir).catch(() => [])).sort().reverse().map((name) => path.join(dir, name));

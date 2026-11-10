@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { PROJECT_TYPES, projectTypeTeam, type ProjectType } from '../agent/projectTypes';
+import { detectTemplate, stampTeam } from '../agent/teamUpdate';
 import { checkDraft, draftFromMarkdown, lineDiff, type DiffLine, type DraftIssue, type DraftMember, type TeamDraft } from '../agent/teamMarkdown';
 import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
@@ -52,7 +53,8 @@ export interface StudioContext {
 }
 
 export interface StudioMemberModel { tier: string; model: string; privacy: DirectoryModel['privacy']; privacyText: string; available?: boolean }
-export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; members: Array<{ name: string; role?: string } & StudioMemberModel> }
+/** `update`: the built-in template the team was made from and whether a newer version exists, so the card can offer Update Team. */
+export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; update?: { template: string; from?: number; to: number; available: boolean }; members: Array<{ name: string; role?: string } & StudioMemberModel> }
 export interface LibraryArchived { id: string; name: string; file: string; savedAt?: string }
 export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[] }
 
@@ -206,11 +208,13 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
   const teams = await Promise.all(entries.map(async (entry): Promise<LibraryTeam> => {
     const slug = slugify(path.basename(entry.file, '.md'));
     const team = entry.team;
+    const template = team ? await readFile(entry.file, 'utf8').then((text) => detectTemplate(text), () => undefined) : undefined;
     return {
       id: entry.project ? 'project' : `user:${slug}`, kind: entry.project ? 'project' : 'user', file: entry.file,
       name: team?.name ?? slug, description: team?.description ?? '',
       ...(team ? { command: `/team:${entry.project ? 'project' : team.slug} ` } : {}),
       ...(entry.error ? { error: entry.error } : {}),
+      ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
       members: (team?.members ?? []).map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...memberModel(member, input) }))
     };
@@ -240,7 +244,7 @@ export type StudioMessage =
   | { type: 'leave-editor'; edit: OpenEdit }
   /** What is unsaved right now (nothing, the builder, or the editor), kept if the panel is closed. */
   | { type: 'unsaved'; wizard?: SavedWizard; edit?: OpenEdit }
-  | { type: 'open' | 'duplicate' | 'export' | 'archive' | 'restore' | 'use-in-chat' | 'open-markdown' | 'versions'; id: string }
+  | { type: 'open' | 'duplicate' | 'export' | 'archive' | 'restore' | 'use-in-chat' | 'open-markdown' | 'versions' | 'update-team'; id: string }
   | { type: 'version-view' | 'version-restore'; id: string; ref: string }
   | { type: 'review'; seq: number; draft: TeamDraft; id?: string }
   | { type: 'save'; draft: TeamDraft; id: string; base: string }
@@ -292,7 +296,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       if (message.edit !== undefined) { const edit = openEdit(message.edit); return edit ? { type: 'unsaved', edit } : undefined; }
       return { type: 'unsaved' };
     }
-    case 'open': case 'duplicate': case 'export': case 'archive': case 'restore': case 'use-in-chat': case 'open-markdown': case 'versions':
+    case 'open': case 'duplicate': case 'export': case 'archive': case 'restore': case 'use-in-chat': case 'open-markdown': case 'versions': case 'update-team':
       return exactKeys(message, ['type', 'id']) && id() ? { type: message.type, id: message.id as string } : undefined;
     case 'version-view': case 'version-restore':
       return exactKeys(message, ['type', 'id', 'ref']) && id() && typeof message.ref === 'string' && VERSION_REF.test(message.ref) ? { type: message.type, id: message.id as string, ref: message.ref } : undefined;
@@ -371,6 +375,8 @@ export interface TeamStudioDeps {
   sidebar: { prefill(text: string): Promise<void> };
   openFile(file: string): Promise<unknown>;
   openSetting(key: string): Promise<unknown>;
+  /** Runs Update Team on a team file (preview, choices, and confirmation happen there). */
+  updateTeam?(file: string): Promise<unknown>;
   confirm(message: string, action: string): Promise<boolean>;
   ask(prompt: string, value: string): Promise<string | undefined>;
   pickExportTarget(defaultName: string): Promise<string | undefined>;
@@ -675,6 +681,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         if (review.errors.length) { post({ type: 'save-failed', errors: review.errors }); return; }
         let file: string;
         let id: string;
+        // A team made from a project type records the template and each member's generated definition, so Update Team can bring it up to date later.
+        const fromType = message.projectType ? PROJECT_TYPES.find((candidate) => candidate.id === message.projectType!.id) : undefined;
+        const markdown = fromType ? stampTeam(review.markdown, fromType) : review.markdown;
         if (message.target === 'project') {
           if (!deps.root) { post({ type: 'error', text: 'Open a project folder to save a project team, or save it to My teams.' }); return; }
           file = TeamLibrary.projectTeamFile(deps.root);
@@ -683,13 +692,12 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             await deps.library.snapshot(file);
           }
           await mkdir(path.dirname(file), { recursive: true });
-          await writeFile(file, review.markdown, 'utf8');
+          await writeFile(file, markdown, 'utf8');
           await deps.library.snapshot(file);
           id = 'project';
-          const type = message.projectType ? PROJECT_TYPES.find((candidate) => candidate.id === message.projectType!.id) : undefined;
-          if (type) await deps.applyProjectType(deps.root, type, message.projectType!.goal.trim().slice(0, 400) || message.draft.description.trim());
+          if (fromType) await deps.applyProjectType(deps.root, fromType, message.projectType!.goal.trim().slice(0, 400) || message.draft.description.trim());
         } else {
-          file = await deps.library.create(message.draft.name.trim(), review.markdown);
+          file = await deps.library.create(message.draft.name.trim(), markdown);
           id = `user:${slugify(path.basename(file, '.md'))}`;
           created = true;
         }
@@ -724,6 +732,11 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'open-markdown': {
         const file = fileFor(message.id, ['project', 'user', 'archived']);
         if (file) await deps.openFile(file);
+        return;
+      }
+      case 'update-team': {
+        const file = fileFor(message.id);
+        if (file && deps.updateTeam) { await deps.updateTeam(file); await refreshLibrary(); }
         return;
       }
       case 'duplicate': {

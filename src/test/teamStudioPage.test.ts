@@ -1,3 +1,5 @@
+import { stampTeam } from '../agent/teamUpdate';
+import { projectType } from '../agent/projectTypes';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -359,12 +361,15 @@ test('host: the wizard saves exactly the rendered Markdown, as a user team or th
   const projectDraft = { ...start.draft, name: 'Project team' };
   await h.send({ type: 'create', draft: projectDraft, target: 'project', projectType: { id: 'software', goal: 'Ship billing' } });
   const projectFile = TeamLibrary.projectTeamFile(h.root);
-  assert.equal(await readFile(projectFile, 'utf8'), teamMarkdown(projectDraft));
+  // A team made from a project type is stamped with its template, so Update Team can bring it up to date later.
+  const stamped = stampTeam(teamMarkdown(projectDraft), projectType('software')!);
+  assert.match(stamped, /\ntemplate: software\ntemplateVersion: \d+\ntemplateBase:\n  - architect=[0-9a-f]{16}\n/);
+  assert.equal(await readFile(projectFile, 'utf8'), stamped);
   assert.deepEqual(h.applied, ['software:Ship billing']);
   // Replacing it asks first; "no" leaves it alone.
   h.confirmAnswer.value = false;
   await h.send({ type: 'create', draft: draft({ name: 'Other' }), target: 'project' });
-  assert.equal(await readFile(projectFile, 'utf8'), teamMarkdown(projectDraft));
+  assert.equal(await readFile(projectFile, 'utf8'), stamped);
   // Other starting points.
   await h.send({ type: 'starting-point', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
   assert.deepEqual(last(h, 'starting-point').draft.members.map((member: any) => member.name), ['planner', 'implementer', 'security', 'tester', 'reviewer']);

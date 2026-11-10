@@ -14,8 +14,8 @@ import { DEFAULT_TOOLS, parsePrivacy, parseTeam, renderTeam, resolveMemberTools,
 export interface DraftMember { name: string; role: string; model: string; tools: string[] | null; instructions: string; reportsTo?: string; privacy?: 'private' }
 export interface TeamDraft { name: string; description: string; members: DraftMember[] }
 
-interface Section { raw: string; name: string; role?: string; model?: string; tools?: string[]; reportsTo?: string; privacy?: 'private'; instructions: string }
-interface TeamParts { frontmatter?: { open: string; inner: string; close: string }; preamble: string; sections: Section[] }
+export interface Section { raw: string; name: string; role?: string; model?: string; tools?: string[]; reportsTo?: string; privacy?: 'private'; instructions: string }
+export interface TeamParts { frontmatter?: { open: string; inner: string; close: string }; preamble: string; sections: Section[] }
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const SECTION_START = /^##\s+/gm;
@@ -26,7 +26,7 @@ function privacyOf(value: string | undefined): 'private' | undefined {
   try { return parsePrivacy(value, 'member'); } catch { return undefined; }
 }
 
-function splitTeam(text: string): TeamParts {
+export function splitTeam(text: string): TeamParts {
   const match = FRONTMATTER.exec(text);
   let frontmatter: TeamParts['frontmatter'];
   let body = text;

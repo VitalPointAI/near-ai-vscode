@@ -1,0 +1,224 @@
+import { parseFrontmatter } from '../gsd/library';
+import { PROJECT_TYPES, projectGuidanceBlock, readProjectGuidance, templateVersion, type ProjectType } from './projectTypes';
+import { guidanceFingerprint, memberFingerprint, splitGoal } from './teamFingerprints';
+import { lineDiff, splitTeam, type DiffLine, type Section } from './teamMarkdown';
+import { TEMPLATE_HISTORY } from './teamTemplateHistory';
+
+// Update Team: bring a team file made from a built-in project type up to the current definition
+// without losing the user's own work. Each member is merged three ways: the base is the definition
+// the member was generated from (recorded in the file's frontmatter, or, for a file made before
+// stamps existed, any released version of that member); the user's copy is the file; the new
+// version is today's built-in. A member still equal to its base is replaced; a member the user
+// changed is never overwritten without their choice; members the user added are left alone.
+
+const WEB = ['WebSearch', 'WebFetch', 'CheckCitations'];
+const STAMP_KEYS = ['template', 'templateVersion', 'templateBase'];
+
+export interface TemplateRef {
+  id: string;
+  label: string;
+  /** Whether the file records its template (frontmatter), or it was inferred from member names. */
+  stamped: boolean;
+  fromVersion?: number;
+  toVersion: number;
+  /** Each member's fingerprint when it was generated, from the stamp. */
+  base?: Record<string, string>;
+}
+
+/**
+ * auto: unchanged since generated, replaced. same: already current. choice: the user changed it; they choose.
+ * new: a built-in member the file lacks, offered. removed: no longer built in, flagged and kept. custom: the user's own member, kept.
+ */
+export type MemberAction = 'auto' | 'same' | 'choice' | 'new' | 'removed' | 'custom';
+export interface MemberPlan { name: string; action: MemberAction; reason: string; current?: string; proposed?: string; merged?: string; diff?: DiffLine[] }
+export interface TeamUpdatePlan { template: TemplateRef; upToDate: boolean; local: boolean; goal?: string; members: MemberPlan[] }
+export type MemberDecision = 'take' | 'keep' | 'merge';
+export interface UpdateDecisions { members?: Record<string, MemberDecision>; add?: string[] }
+
+/** The stamp written into a team made from a project type: the template, its version, and each member's base fingerprint. */
+export function templateStamp(type: ProjectType, local = false): string[] {
+  return [`template: ${type.id}`, `templateVersion: ${templateVersion(type.id)}`, 'templateBase:', ...type.members.map((member) => `  - ${member.name}=${builtInFingerprint(type, member.name, local)}`)];
+}
+
+/** A team file with its template stamp set (replacing any earlier stamp); a team without the type's web tools is stamped as the local variant. */
+export function stampTeam(text: string, type: ProjectType, local = isLocalVariant(splitTeam(text).sections, type)): string {
+  return withFrontmatter(text, templateStamp(type, local));
+}
+
+/** A local-only project's team is generated without web tools. */
+function isLocalVariant(sections: Section[], type: ProjectType): boolean {
+  const webMembers = type.members.filter((member) => member.tools?.some((tool) => WEB.includes(tool))).map((member) => member.name);
+  const present = sections.filter((section) => webMembers.includes(section.name));
+  return present.length > 0 && present.every((section) => section.tools && !section.tools.some((tool) => WEB.includes(tool)));
+}
+
+function withFrontmatter(text: string, lines: string[]): string {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  if (!match) return `---\n${lines.join('\n')}\n---\n\n${text}`;
+  const kept: string[] = [];
+  let skipping = false;
+  for (const line of match[1].split(/\r?\n/)) {
+    if (skipping && /^\s+-\s/.test(line)) continue;
+    skipping = false;
+    const key = /^([A-Za-z0-9_-]+):/.exec(line)?.[1];
+    if (key && STAMP_KEYS.includes(key)) { skipping = true; continue; }
+    kept.push(line);
+  }
+  return `---\n${[...kept, ...lines].join('\n')}\n---\n${text.slice(match[0].length)}`;
+}
+
+function builtInSection(type: ProjectType, name: string, local: boolean, goal?: string): Omit<Section, 'raw'> | undefined {
+  const member = type.members.find((entry) => entry.name === name);
+  if (!member) return undefined;
+  const tools = member.tools ? (local ? member.tools.filter((tool) => !WEB.includes(tool)) : [...member.tools]) : undefined;
+  return { name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}), ...(member.privacy ? { privacy: member.privacy } : {}), ...(tools ? { tools } : {}), instructions: goal ? `${member.instructions}\n\nProject goal: ${goal}` : member.instructions };
+}
+
+function builtInFingerprint(type: ProjectType, name: string, local: boolean): string {
+  const section = builtInSection(type, name, local)!;
+  return memberFingerprint({ ...section, tools: section.tools ?? null });
+}
+
+const fingerprintOf = (section: Omit<Section, 'raw'>) => memberFingerprint({ ...section, tools: section.tools ?? null });
+
+function renderSection(section: Omit<Section, 'raw'>): string {
+  const lines = [`## ${section.name}`];
+  if (section.role) lines.push(`role: ${section.role}`);
+  if (section.model) lines.push(`model: ${section.model}`);
+  if (section.privacy) lines.push(`privacy: ${section.privacy}`);
+  if (section.reportsTo) lines.push(`reports-to: ${section.reportsTo}`);
+  if (section.tools?.length) lines.push(`tools: ${section.tools.join(', ')}`);
+  return `${lines.join('\n')}\n\n${section.instructions.trim()}\n`;
+}
+
+/** The project type a team file comes from: its stamp, or else the type whose member names it shares most (at least three, and half the type). */
+export function detectTemplate(text: string): TemplateRef | undefined {
+  const { data } = parseFrontmatter(text);
+  const stampedType = typeof data.template === 'string' ? PROJECT_TYPES.find((type) => type.id === data.template) : undefined;
+  if (stampedType) {
+    const base: Record<string, string> = {};
+    for (const entry of Array.isArray(data.templateBase) ? data.templateBase : []) { const [name, print] = String(entry).split('='); if (name && print) base[name.trim()] = print.trim(); }
+    const from = Number(data.templateVersion);
+    return { id: stampedType.id, label: stampedType.label, stamped: true, ...(Number.isFinite(from) && from > 0 ? { fromVersion: from } : {}), toVersion: templateVersion(stampedType.id), base };
+  }
+  let names: string[];
+  try { names = splitTeam(text).sections.map((section) => section.name); } catch { return undefined; }
+  let best: { type: ProjectType; score: number } | undefined;
+  for (const type of PROJECT_TYPES) {
+    const known = new Set(TEMPLATE_HISTORY[type.id]?.flatMap((version) => Object.keys(version.members)) ?? type.members.map((member) => member.name));
+    const shared = names.filter((name) => known.has(name)).length;
+    const score = shared / Math.max(1, type.members.length);
+    if (shared >= 3 && score >= 0.5 && (!best || score > best.score)) best = { type, score };
+  }
+  return best ? { id: best.type.id, label: best.type.label, stamped: false, toVersion: templateVersion(best.type.id) } : undefined;
+}
+
+/** A user's member with the new definition's additions only: a privacy line, new tools, and new Output and Done-when paragraphs. */
+function mergeNewLines(mine: Omit<Section, 'raw'>, theirs: Omit<Section, 'raw'>): Omit<Section, 'raw'> {
+  const { body, goal } = splitGoal(mine.instructions);
+  const additions = splitGoal(theirs.instructions).body.split(/\n\n+/).filter((paragraph) => /^(Output|Done when):/.test(paragraph.trim()) && !body.includes(paragraph.trim()));
+  const instructions = [body, ...additions].join('\n\n') + (goal ? `\n\nProject goal: ${goal}` : '');
+  const tools = mine.tools ? [...mine.tools, ...(theirs.tools ?? []).filter((tool) => !mine.tools!.includes(tool))] : undefined;
+  return { ...mine, ...(mine.privacy || theirs.privacy ? { privacy: mine.privacy ?? theirs.privacy } : {}), ...(tools ? { tools } : {}), instructions };
+}
+
+/** What Update Team would do to each member, without writing anything. Undefined when the file is not from a built-in type. */
+export function planTeamUpdate(text: string): TeamUpdatePlan | undefined {
+  const template = detectTemplate(text);
+  if (!template) return undefined;
+  const type = PROJECT_TYPES.find((entry) => entry.id === template.id)!;
+  const sections = splitTeam(text).sections;
+  const history = TEMPLATE_HISTORY[type.id] ?? [];
+  const goal = sections.map((section) => splitGoal(section.instructions).goal).find(Boolean);
+  const local = isLocalVariant(sections, type);
+  const members: MemberPlan[] = [];
+  for (const section of sections) {
+    const proposedSection = builtInSection(type, section.name, local, goal);
+    const current = renderSection(section);
+    if (!proposedSection) {
+      const historical = history.some((version) => section.name in version.members);
+      members.push({ name: section.name, action: historical ? 'removed' : 'custom', reason: historical ? 'No longer part of the built-in team; kept as it is.' : 'Your own member; left as it is.', current });
+      continue;
+    }
+    const withPlace = { ...proposedSection, ...(section.reportsTo ? { reportsTo: section.reportsTo } : {}) };
+    const proposed = renderSection(withPlace);
+    const mine = fingerprintOf(section);
+    if (mine === fingerprintOf(withPlace)) { members.push({ name: section.name, action: 'same', reason: 'Already the current definition.', current, proposed }); continue; }
+    const base = template.base?.[section.name];
+    const unchanged = base ? mine === base : history.some((version) => version.members[section.name]?.includes(mine));
+    if (unchanged) {
+      members.push({ name: section.name, action: 'auto', reason: base ? 'Unchanged since it was generated; replaced with the current definition.' : 'Matches an earlier built-in version exactly; replaced with the current definition.', current, proposed });
+    } else {
+      const merged = renderSection(mergeNewLines(section, withPlace));
+      members.push({ name: section.name, action: 'choice', reason: base || template.stamped ? 'You changed this member; choose what to keep.' : 'This member does not match any built-in version, so it is treated as changed by you; choose what to keep.', current, proposed, merged, diff: lineDiff(current, proposed) });
+    }
+  }
+  for (const member of type.members) {
+    if (sections.some((section) => section.name === member.name)) continue;
+    // A member the stamp recorded but the file no longer has was removed on purpose; do not offer it back.
+    if (template.base && member.name in template.base) continue;
+    members.push({ name: member.name, action: 'new', reason: 'A new member of the built-in team; add it?', proposed: renderSection(builtInSection(type, member.name, local, goal)!) });
+  }
+  const upToDate = members.every((member) => member.action === 'same' || member.action === 'custom' || member.action === 'removed') && template.stamped && template.fromVersion === template.toVersion;
+  return { template, upToDate, local, ...(goal ? { goal } : {}), members };
+}
+
+/** The team file after the update, stamped with the current version. Members without a decision keep the user's copy. */
+export function applyTeamUpdate(text: string, plan: TeamUpdatePlan, decisions: UpdateDecisions = {}): string {
+  const type = PROJECT_TYPES.find((entry) => entry.id === plan.template.id)!;
+  const parts = splitTeam(text);
+  const byName = new Map(plan.members.map((member) => [member.name, member]));
+  const out: string[] = [];
+  for (const section of parts.sections) {
+    const member = byName.get(section.name);
+    const decision = decisions.members?.[section.name] ?? 'keep';
+    if (member && (member.action === 'auto' || member.action === 'same')) out.push(member.proposed!);
+    else if (member?.action === 'choice' && decision === 'take') out.push(member.proposed!);
+    else if (member?.action === 'choice' && decision === 'merge') out.push(member.merged!);
+    else out.push(`${section.raw.replace(/\s+$/, '')}\n`);
+  }
+  // New members go where the built-in team has them, after the member that precedes them there.
+  for (const name of decisions.add ?? []) {
+    const member = byName.get(name);
+    if (member?.action !== 'new') continue;
+    const order = type.members.map((entry) => entry.name);
+    const after = order.slice(0, order.indexOf(name)).reverse().find((previous) => parts.sections.some((section) => section.name === previous));
+    const at = after ? out.findIndex((block) => block.startsWith(`## ${after}\n`)) + 1 : out.length;
+    out.splice(at, 0, member.proposed!);
+  }
+  const head = (/^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(text)?.[0] ?? '').replace(/\r?\n?$/, '\n');
+  const preamble = parts.preamble.trim() ? parts.preamble.replace(/\s*$/, '\n\n') : '\n';
+  const body = `${head}${preamble}${out.join('\n')}`;
+  const present = new Set(splitTeam(body).sections.map((section) => section.name));
+  const stamp = [`template: ${type.id}`, `templateVersion: ${templateVersion(type.id)}`, 'templateBase:', ...type.members.filter((member) => present.has(member.name)).map((member) => `  - ${member.name}=${builtInFingerprint(type, member.name, plan.local)}`)];
+  return withFrontmatter(body, stamp);
+}
+
+/** One line per member, for a preview or a dry run. */
+export function describePlan(plan: TeamUpdatePlan): string {
+  const from = plan.template.fromVersion ? `v${plan.template.fromVersion}` : plan.template.stamped ? 'an unknown version' : 'no recorded version (inferred from member names)';
+  const label: Record<MemberAction, string> = { auto: 'updates automatically', same: 'already current', choice: 'needs your choice', new: 'new built-in member, can be added', removed: 'no longer built in, kept', custom: 'your own member, kept' };
+  return [`${plan.template.label} template: ${from} → v${plan.template.toVersion}`, ...plan.members.map((member) => `- ${member.name}: ${label[member.action]}. ${member.reason}`)].join('\n');
+}
+
+// ---- AGENTS.md guidance -------------------------------------------------------------------------
+
+export interface GuidancePlan { action: 'none' | 'same' | 'auto' | 'choice'; current?: string; proposed?: string; diff?: DiffLine[] }
+
+/** What Update Team would do to the project-type guidance in AGENTS.md. `base` is the fingerprint recorded in project.json, if any. */
+export function planGuidanceUpdate(agents: string, typeId: string, base?: string): GuidancePlan {
+  const block = readProjectGuidance(agents);
+  const type = PROJECT_TYPES.find((entry) => entry.id === typeId);
+  if (!block || !type) return { action: 'none' };
+  const proposed = projectGuidanceBlock(type, block.goal ?? '');
+  const mine = guidanceFingerprint(block.inner);
+  if (mine === guidanceFingerprint(proposed)) return { action: 'same', current: block.inner, proposed };
+  const unchanged = base ? mine === base : (TEMPLATE_HISTORY[typeId] ?? []).some((version) => version.guidance.includes(mine));
+  return { action: unchanged ? 'auto' : 'choice', current: block.inner, proposed, ...(unchanged ? {} : { diff: lineDiff(block.inner, proposed) }) };
+}
+
+/** AGENTS.md with the project-type block replaced by the proposed one; the rest of the file is untouched. */
+export function applyGuidanceUpdate(agents: string, plan: GuidancePlan): string {
+  if (!plan.proposed || plan.current === undefined) return agents;
+  return agents.replace(plan.current, () => plan.proposed!);
+}
