@@ -2,7 +2,7 @@
 // do, how they relate, and how strongly, each with the Admiralty grade of the evidence. Prose alone cannot be drawn, compared, or questioned, which is the
 // point of the graph.
 import type { KnowledgeAddition, NodeKind, EdgeKind, Grading, KnowledgeOrigin } from '../domain/teamKnowledge';
-import { neighbours, type TeamKnowledge } from '../domain/teamKnowledge';
+import { neighbours, sourceText, withinCeiling, type TeamKnowledge } from '../domain/teamKnowledge';
 import type { AgentTool } from './tools';
 import { ToolError } from './workspace';
 
@@ -21,29 +21,6 @@ function gradingOf(raw: unknown, where: string): Grading | undefined {
   return { reliability: reliability as Grading['reliability'], credibility: credibility as Grading['credibility'] };
 }
 
-/**
- * Whether a source is an address on the web rather than a named document. The scheme is optional, because `evil.test/about` and `https://evil.test/about`
- * are the same thing to a reader, and a cap that misses the first is a cap an agent can step around (0.4.19 review).
- */
-function looksLikeAddress(source: string): boolean {
-  const text = source.trim();
-  // 0.4.19 review: this only looked at the FIRST token, so `see evil.test/about` or `from www.example.org` kept an A1. Any address anywhere in the source
-  // counts, wherever it sits in the sentence.
-  if (/https?:\/\//i.test(text)) return true;
-  // A host-looking word with a dot somewhere: `evil.test/about`, `www.example.org`, `192.0.2.1`, and the same after "see" or "from".
-  return /(?:^|[\s([<,;:])[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:[/?#]|$|[\s)\],;.])/i.test(`${text} `);
-}
-
-/**
- * The grade a claim about something the agent READ is worth: C3 at most. C is "fairly reliable" and 3 is "possibly true", which is what an agent's own reading
- * of a page is worth. Both halves are floored, because a page just read cannot be confirmed by other sources either.
- */
-function capForWebSource(grading: Grading): Grading {
-  const rank = ['A', 'B', 'C', 'D', 'E', 'F'];
-  const reliability = rank.indexOf(grading.reliability) < rank.indexOf('C') ? 'C' : grading.reliability;
-  return { reliability, credibility: (grading.credibility < 3 ? 3 : grading.credibility) as Grading['credibility'] };
-}
-
 export interface KnowledgeTools {
   /** The graph as it is now, so the agent reads before it researches. */
   read(): Promise<TeamKnowledge>;
@@ -51,7 +28,11 @@ export interface KnowledgeTools {
   add(addition: KnowledgeAddition): Promise<TeamKnowledge>;
 }
 
-export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigin = 'interaction'): AgentTool<any>[] {
+/**
+ * The tools, for a graph written by `origin`, which is recorded as provenance. There is no default: 0.4.18 defaulted to `interaction` and labelled every
+ * agent's addition as if a person had said it; a run's agent writes as `research`. Every grade is held to the ceiling whatever the origin.
+ */
+export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigin): AgentTool<any>[] {
   const lookup: AgentTool<{ query?: string; node?: string }> = {
     name: 'TeamKnowledge',
     description: 'Read this team\'s shared knowledge graph: what the team has already learned, so you do not research it again. Without arguments it lists the most mentioned actors and their strongest relations; with "query" it searches labels, functions and facts; with "node" it shows one actor in full: what it does, its facts with sources and Admiralty grades, and every relation in both directions with the tension of each.',
@@ -61,6 +42,7 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     title: (input) => (input.node ? `Knowledge: ${input.node}` : input.query ? `Knowledge: search "${input.query}"` : 'Knowledge graph'),
     async run(input) {
       const graph = await knowledge.read();
+      if (graph.problem && !graph.nodes.length) return `${graph.problem} The team's knowledge starts again from here; anything you verify is worth adding with Learn.`;
       if (!graph.nodes.length) return 'The team has no knowledge yet. Anything you verify is worth adding with Learn.';
       const grade = (grading?: Grading) => (grading ? `${grading.reliability}${grading.credibility}` : 'ungraded');
       const byId = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -71,6 +53,11 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
         const lines = [`${node.label} (${node.kind}), ${grade(node.grading)}, mentioned ${node.mentions} time${node.mentions === 1 ? '' : 's'}`];
         if (node.functions.length) lines.push(`Does: ${node.functions.join('; ')}`);
         for (const fact of node.facts.slice(0, 12)) lines.push(`- ${fact.text}${fact.source ? ` [${fact.source}]` : ''} (${grade(fact.grading)}, ${fact.origin})`);
+        // What the team no longer believes, and why, so an agent does not re-research a refuted claim and a person can see what a decision rested on.
+        if (node.history?.length) {
+          lines.push('No longer believed:');
+          for (const fact of node.history.slice(-8)) lines.push(`- ${fact.text}${fact.refutedBy ? ` (refuted ${fact.refutedAt?.slice(0, 10) ?? ''} by: ${fact.refutedBy})` : ''}`);
+        }
         for (const relation of neighbours(graph, node.id)) {
           lines.push(`${relation.direction === 'out' ? '->' : '<-'} ${relation.edge.kind} ${relation.other.label} (tension ${relation.edge.tension ?? 'unmeasured'}${relation.edge.basis ? `, ${relation.edge.basis}` : ''})`);
         }
@@ -139,16 +126,12 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
           if (!value || typeof value !== 'object') return [];
           const fact = value as Record<string, unknown>;
           if (typeof fact.text !== 'string' || !fact.text.trim()) return [];
-          return [{ text: fact.text.slice(0, 400), ...(typeof fact.source === 'string' && fact.source.trim() ? { source: fact.source.slice(0, 300) } : {}) }];
+          // A source that is not a string is flattened rather than dropped, so the citation survives.
+          const source = sourceText(fact.source).trim().slice(0, 300);
+          return [{ text: fact.text.slice(0, 400), ...(source ? { source } : {}) }];
         }).slice(0, 12) : [];
-        let grading = gradingOf(node.grading, `nodes[${index}]`);
-        // 0.4.19 review: a hostile page an agent read could be given an A1 grade by that agent and become durable team memory. A fact with an external
-        // SOURCE but no grade is therefore ungraded on purpose, and one claiming the top grade for a web source is capped at C3: the agent cannot vouch for
-        // a page it just read, and the card shows what it claimed rather than silently trusting it.
-        // 0.4.19 review: the cap only fired for a source starting `http(s)://`, so an agent could write `evil.test/about` and keep its A1. Any source that
-        // LOOKS like an address counts, with or without a scheme.
-        const fromWeb = facts.some((fact) => fact.source !== undefined && looksLikeAddress(fact.source));
-        if (fromWeb && grading) grading = capForWebSource(grading);
+        // Held to the ceiling here as well as in the merge, so what the approval preview shows is what will be stored.
+        const grading = withinCeiling(gradingOf(node.grading, `nodes[${index}]`));
         return { label: node.label.trim().slice(0, 120), kind, functions, facts, ...(grading ? { grading } : {}) };
       });
       const edges = Array.isArray(raw.edges) ? raw.edges.slice(0, 60).flatMap((entry, index) => {
@@ -157,11 +140,8 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
         if (typeof edge.from !== 'string' || !edge.from.trim() || typeof edge.to !== 'string' || !edge.to.trim()) return [];
         const kind = typeof edge.kind === 'string' && EDGE_KINDS.includes(edge.kind as EdgeKind) ? edge.kind as EdgeKind : 'related';
         const tension = typeof edge.tension === 'number' && Number.isFinite(edge.tension) ? edge.tension : null;
-        let grading = gradingOf(edge.grading, `edges[${index}]`);
+        const grading = withinCeiling(gradingOf(edge.grading, `edges[${index}]`));
         const basis = typeof edge.basis === 'string' && edge.basis.trim() ? edge.basis.slice(0, 300) : undefined;
-        // 0.4.19 review: edges were never capped, so a hostile page could be given an A1 RELATION rather than an A1 fact. A relation from an address the agent
-        // read, or asserted with no basis at all, is C3 at most, exactly as a fact from the same place is.
-        if (grading && (basis === undefined || looksLikeAddress(basis))) grading = capForWebSource(grading);
         return [{ from: edge.from.trim().slice(0, 120), to: edge.to.trim().slice(0, 120), kind, tension, ...(basis ? { basis } : {}), ...(grading ? { grading } : {}) }];
       }) : [];
       return { nodes, edges, origin, at: new Date().toISOString() };
@@ -174,7 +154,7 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
     },
     async run(input) {
       const graph = await knowledge.add(input);
-      return `The team's graph now holds ${graph.nodes.length} actor${graph.nodes.length === 1 ? '' : 's'} and ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}.`;
+      return `${graph.problem ? `${graph.problem} ` : ''}The team's graph now holds ${graph.nodes.length} actor${graph.nodes.length === 1 ? '' : 's'} and ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}.`;
     }
   };
 

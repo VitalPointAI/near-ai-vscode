@@ -52,23 +52,85 @@ test('a background agent returns at once, and the run waits for its report befor
   const { root, gsd, posted, conversation } = await project();
   const store = new ActivityStore(root);
   const session = await store.start({ project: 'demo', model: 'z-ai/glm-5.3' });
+  // The child holds on a latch the test controls, so the hold is deterministic: while the child is latched the run has a live background agent and nothing
+  // drained, so the waiting notice MUST appear — no timer race, which is what flaked CI (on a loaded runner the child finished during the parent's turn and
+  // the notice was rightly absent, because the report was already ready). The interleaving is asserted, not hoped for.
+  const gate: { release?: () => void; held: number } = { held: 0 };
+  const latch = new Promise<void>((resolve) => { gate.release = resolve; });
   const client = scriptedClient({
     parent: [
       { calls: [call('a1', 'Agent', { subagent_type: 'gsd-planner', description: 'Draft a plan', prompt: 'Plan it.', run_in_background: true })] },
       { text: 'Started the planner; waiting for it.' },
       { text: 'The planner says: plan ready.' }
     ],
-    child: [{ text: 'plan ready', delayMs: 50 }]
+    child: [{ text: 'plan ready' }]
   });
-  await conversation.send(request(client, gsd, { activity: { store, sessionId: session.sessionId } }));
-  assert.deepEqual(client.log, ['parent:1', 'child:1', 'parent:2', 'parent:3'], 'the agent starts at once, in parallel with the parent, and the final parent turn comes after its report');
+  const streamed = client.streamCompletion.bind(client);
+  client.streamCompletion = async function* (model: string, messages: AgentMessage[]) {
+    if (String(messages[0]?.content ?? '').startsWith('You are the planner.')) {
+      gate.held += 1;
+      await latch;
+    }
+    yield * streamed(model, messages);
+  };
+  const running = conversation.send(request(client, gsd, { activity: { store, sessionId: session.sessionId } }));
+  let notice: Record<string, unknown> | undefined;
+  for (let attempt = 0; attempt < 400 && !notice; attempt += 1) {
+    notice = posted.find((message) => message.type === 'notice' && /Waiting for 1 background agent/.test(String(message.text)));
+    if (!notice) await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  try {
+    assert.ok(gate.held >= 1, 'the child turn was held by the latch');
+    assert.ok(notice, 'the run says why it is holding while the child works');
+  } finally {
+    // The send is awaited even when an assertion above throws, so a failed run cannot leave an unhandled rejection behind (fifth 0.4.19 review, NIT).
+    gate.release?.();
+    await running.catch(() => undefined);
+  }
+  assert.deepEqual(client.log, ['parent:1', 'parent:2', 'child:1', 'parent:3'], 'the agent starts at once, in parallel with the parent, and the final parent turn comes after its report');
   const agentResult = posted.find((message) => message.type === 'tool-end' && message.callId === 'a1');
   assert.match(String(agentResult?.output), /Started gsd-planner in the background as gsd-planner-[a-f0-9]{6}/);
-  assert.ok(posted.some((message) => message.type === 'notice' && /Waiting for 1 background agent/.test(String(message.text))));
   const fleet = (await new AnalyticsStore({ sessions: await store.list() }).query()).fleet;
   assert.equal(fleet.agents.length, 1);
   assert.equal(fleet.agents[0].role, 'gsd-planner');
   assert.equal(fleet.agents[0].status, 'completed');
+});
+
+test('a report that arrived while the parent streamed feeds the run at once, with no hold and no notice', async () => {
+  // The other interleaving the drain-first wait describes (seventh 0.4.19 review, MINOR): the child finishes DURING the parent's turn, so when the parent
+  // goes to wait the report is already drained — the run feeds it and completes without announcing a hold that instantly ends. The parent's second turn is
+  // held until the child's generator has RESOLVED, so the drain is provably non-empty at wait time: a timer here would be the mirror image of the flake.
+  const { gsd, posted, conversation } = await project();
+  const gate: { release?: () => void } = {};
+  const childResolved = new Promise<void>((resolve) => { gate.release = resolve; });
+  const client = scriptedClient({
+    parent: [
+      { calls: [call('a1', 'Agent', { subagent_type: 'gsd-planner', description: 'Draft a plan', prompt: 'Plan it.', run_in_background: true })] },
+      { text: 'Started the planner; waiting for it.' },
+      { text: 'The planner says: plan ready.' }
+    ],
+    child: [{ text: 'plan ready' }]
+  });
+  const streamed = client.streamCompletion.bind(client);
+  let parentTurns = 0;
+  client.streamCompletion = async function* (model: string, messages: AgentMessage[]) {
+    if (String(messages[0]?.content ?? '').startsWith('You are the planner.')) {
+      yield * streamed(model, messages);
+      gate.release?.();
+      return;
+    }
+    parentTurns += 1;
+    if (parentTurns === 2) await childResolved;
+    yield * streamed(model, messages);
+  };
+  try {
+    await conversation.send(request(client, gsd));
+    assert.deepEqual(client.log, ['parent:1', 'child:1', 'parent:2', 'parent:3'], 'the child finished inside the parent turn and the final parent turn came after its report');
+    assert.equal(posted.some((message) => message.type === 'notice' && /Waiting for/.test(String(message.text))), false, 'no hold was announced, because there was none');
+  } finally {
+    // The session and its timers are disposed even when an assertion above throws, so a failed run cannot leak them (sixteenth 0.4.19 review, MINOR).
+    conversation.dispose();
+  }
 });
 
 test('the parallel-agent limit runs extra agents one after another', async () => {
