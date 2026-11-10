@@ -149,7 +149,18 @@ test('Learn holds every grade an agent gives to C3, whatever it cites, so a host
 
 test('a damaged graph read by the agent says so, rather than looking like a team that never learned anything', async () => {
   const kit = tools({ ...emptyKnowledge('scouts', '2026-11-08T10:00:00.000Z'), problem: 'The knowledge graph for scouts could not be read (unexpected shape).' });
-  assert.match(await kit.lookup.run({}, {} as never), /could not be read.*starts again/);
+  assert.match(await kit.lookup.run({}, {} as never), /could not be read.*set aside.*starts again/);
+});
+
+test('a graph file that could not be opened is not promised a fresh start, and Learn is not invited, since Learn would be refused', async () => {
+  // Agent review: an unopenable file got "starts again from here" and an invitation to Learn, but addKnowledge refuses to write over it.
+  const problem = 'The knowledge graph for scouts could not be opened (EACCES: permission denied).';
+  const kit = tools({ ...emptyKnowledge('scouts', '2026-11-08T10:00:00.000Z'), problem, unreadable: true });
+  const text = await kit.lookup.run({}, {} as never);
+  assert.match(text, /could not be opened/);
+  assert.match(text, /left as it is/);
+  assert.match(text, /Learn will be refused/);
+  assert.doesNotMatch(text, /starts again|worth adding/);
 });
 
 test('Learn carries at most 40 actors and 60 relations, so one call cannot flood the graph', () => {

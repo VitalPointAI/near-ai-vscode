@@ -187,3 +187,21 @@ test('two stores on one project keep each other\'s runs: a long-lived store does
   assert.deepEqual(sessions.map((session) => session.sessionId).sort(), ['session-participant-01', 'session-sidebar-001']);
   assert.ok(sessions.every((session) => session.outcome === 'completed'), 'each run keeps its own latest state');
 });
+
+test('a run trimmed from the history stays gone when an older store that still holds it writes again', async () => {
+  // Agent review of the merge: any path that REMOVES a run would be undone if the merge re-added it from another store's copy. Trimming to maxSessions is
+  // the only removal the history has (there is no clear or delete), and it is applied after the merge, so the oldest runs stay trimmed.
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-activity-trim-'));
+  let tick = 0;
+  const clock = () => `2026-01-01T00:00:${String(tick++).padStart(2, '0')}Z`;
+  const older = new ActivityStore(root, { clock, maxSessions: 2 });
+  await older.start({ sessionId: 'session-oldest-001', project: 'demo' });
+  await older.start({ sessionId: 'session-middle-001', project: 'demo' });
+  // Another store records a third run, which trims the oldest from the file.
+  await new ActivityStore(root, { clock, maxSessions: 2 }).start({ sessionId: 'session-newest-001', project: 'demo' });
+  // The older store still holds the trimmed run in memory, and writes again.
+  await older.append('session-oldest-001', { status: 'completed', kind: 'message', summary: 'Assistant response completed.' });
+  await older.append('session-middle-001', { status: 'completed', kind: 'message', summary: 'Assistant response completed.' });
+  const ids = (await new ActivityStore(root, { maxSessions: 2 }).list()).map((session) => session.sessionId);
+  assert.deepEqual(ids, ['session-newest-001', 'session-middle-001'], 'the trimmed run was not brought back by the older copy');
+});

@@ -25,35 +25,52 @@ function fileKey(team: string): string {
 /** Where a team's graph file is: `<dir>/knowledge/<key>.json` (see fileKey). */
 export const knowledgeFile = (dir: string, team: string): string => path.join(dir, 'knowledge', `${fileKey(team)}.json`);
 
+/** A graph file as read from disk: its text, nothing (no file yet), or the error that stopped it being opened. */
+type GraphRead = { text: string } | { missing: true } | { failure: Error };
+
+async function readGraph(file: string): Promise<GraphRead> {
+  try {
+    return { text: await readFile(file, 'utf8') };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { missing: true } : { failure: error as Error };
+  }
+}
+
+/**
+ * The graph a read holds, shared by loadKnowledge and addKnowledge so a write parses the very text it compares. No file yet is a team that has not learned
+ * anything. Any other read failure (permissions, a locked file) means a graph IS there and could not be opened: `unreadable` tells addKnowledge not to write
+ * over it, and it is also set on the knowledge itself, so a caller that passes the graph on (the TeamKnowledge tool) can tell the person the file is left
+ * as it is rather than started again.
+ */
+function knowledgeFrom(team: string, read: GraphRead): { knowledge: TeamKnowledge; problem?: string; unreadable?: boolean } {
+  if ('missing' in read) return { knowledge: emptyKnowledge(team, new Date().toISOString()) };
+  if ('failure' in read) {
+    const problem = `The knowledge graph for ${team} could not be opened (${read.failure.message}).`;
+    return { knowledge: { ...emptyKnowledge(team, new Date().toISOString()), problem, unreadable: true }, problem, unreadable: true };
+  }
+  try {
+    const parsed = JSON.parse(read.text) as TeamKnowledge;
+    if (parsed.version !== 1 || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error('unexpected shape');
+    const { problem: _problem, unreadable: _unreadable, ...stored } = parsed;
+    return { knowledge: heldToCeiling({ ...stored, team }) };
+  } catch (error) {
+    return { knowledge: emptyKnowledge(team, new Date().toISOString()), problem: `The knowledge graph for ${team} could not be read (${(error as Error).message}).` };
+  }
+}
+
 /**
  * The graph for a team, or an empty one when it has not learned anything yet. A file that cannot be read is reported, not replaced here. Every grade an
  * agent wrote is held to the ceiling as it is read, so a graph written before the ceiling existed is shown and used at the grade it is worth.
  */
 export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string; unreadable?: boolean }> {
-  const file = knowledgeFile(dir, team);
-  let text: string;
-  try {
-    text = await readFile(file, 'utf8');
-  } catch (error) {
-    // No file yet is a team that has not learned anything. Any other failure (permissions, a locked file) means a graph IS there and could not be read:
-    // `unreadable` tells addKnowledge not to write over it.
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { knowledge: emptyKnowledge(team, new Date().toISOString()) };
-    return { knowledge: emptyKnowledge(team, new Date().toISOString()), problem: `The knowledge graph for ${team} could not be opened (${(error as Error).message}).`, unreadable: true };
-  }
-  try {
-    const parsed = JSON.parse(text) as TeamKnowledge;
-    if (parsed.version !== 1 || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error('unexpected shape');
-    return { knowledge: heldToCeiling({ ...parsed, team }) };
-  } catch (error) {
-    return { knowledge: emptyKnowledge(team, new Date().toISOString()), problem: `The knowledge graph for ${team} could not be read (${(error as Error).message}).` };
-  }
+  return knowledgeFrom(team, await readGraph(knowledgeFile(dir, team)));
 }
 
 export async function saveKnowledge(dir: string, knowledge: TeamKnowledge): Promise<void> {
   const file = knowledgeFile(dir, knowledge.team);
   await mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.tmp`;
-  const { problem: _problem, ...record } = knowledge;
+  const { problem: _problem, unreadable: _unreadable, ...record } = knowledge;
   await writeFile(temporary, JSON.stringify(record, null, 2), 'utf8');
   await rename(temporary, file);
 }
@@ -95,8 +112,10 @@ export async function addKnowledge(dir: string, team: string, addition: Knowledg
   const file = knowledgeFile(dir, team);
   return serialised(file, async () => {
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const before = await readFile(file, 'utf8').catch(() => undefined);
-      const { knowledge, problem, unreadable } = await loadKnowledge(dir, team);
+      // Read once per attempt: the same text is parsed and later compared, so the merge is based on exactly what the compare checks.
+      const read = await readGraph(file);
+      const before = 'text' in read ? read.text : undefined;
+      const { knowledge, problem, unreadable } = knowledgeFrom(team, read);
       // A file that exists but could not be opened is never written over: nothing could be set aside, and what it holds would be lost.
       if (unreadable) throw new Error(`${problem} Nothing was added, so the file is left as it is.`);
       const merged = mergeKnowledge(knowledge, addition);

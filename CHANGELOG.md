@@ -90,6 +90,13 @@ the button writes. A chart shows the score over time, by task type, so you can s
   `npm run compare:models` builds the extension first; saving a team file is versioned on Windows when
   the drive letter's case differs; and the approval timeout setting describes what it does now (the run
   pauses on that step, and the action is declined only after a further day).
+- **More small fixes to teams and model comparisons.** A model comparison no longer lets a solution's own
+  printed output turn a failed test into a pass: a test passes only when every report of it is a pass.
+  On Windows, a project's team keeps one knowledge graph however the folder's drive letter or case is
+  written. Testing a team's roles always sets the models in the team you acted on, even when your
+  project team and one of your own teams share a name. And when a team's knowledge graph file cannot be
+  opened (its permissions, or another program holding it), the agent is told it is left as it is and
+  cannot be added to until it opens again, instead of being invited to start afresh.
 
 - **A team's knowledge graph accumulates, and learns.** Nothing a team learned is silently dropped to enforce a size: the graph has no ceiling, because a
   ceiling that dropped the oldest entries made a team forget what it had learned. (The Learn tool still accepts at most 40 actors, 60 relations, and 12 facts per

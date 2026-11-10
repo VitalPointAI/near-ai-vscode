@@ -181,6 +181,9 @@ test('a graph file that exists but cannot be opened is never written over, and n
     const read = await loadKnowledge(dir, 'scouts');
     assert.match(read.problem ?? '', /could not be opened/);
     assert.equal(read.unreadable, true);
+    // The flag travels ON the graph too, so a caller that passes the graph on (the TeamKnowledge tool) can tell "cannot be opened" from "damaged".
+    assert.equal(read.knowledge.unreadable, true);
+    assert.equal(read.knowledge.problem, read.problem);
     await assert.rejects(addKnowledge(dir, 'scouts', addition('bravo')), /could not be opened.*Nothing was added/);
   } finally {
     await chmod(file, 0o600);
