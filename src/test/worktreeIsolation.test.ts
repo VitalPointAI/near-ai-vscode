@@ -87,6 +87,40 @@ test('isolation="worktree" runs each agent on its own branch in its own director
   assert.ok(systems.every((system) => /isolated git worktree at .* on branch worktree-agent-/.test(system)), 'each agent is told where it works');
 });
 
+test('isolation="worktree" in a workspace opened at a subfolder of the repository starts the agent in that subfolder of the worktree', async () => {
+  const { root: repo, storage, gsd } = await repository();
+  const root = path.join(repo, 'packages', 'app');
+  await mkdir(root, { recursive: true });
+  await writeFile(path.join(root, 'package.json'), '{}\n');
+  await git(repo, 'add', '.');
+  await git(repo, 'commit', '-qm', 'app');
+  let system = '';
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const last = messages.at(-1)!;
+      if (String(messages[0]?.content).startsWith('You are the executor.')) {
+        system = String(messages[0]?.content);
+        if (last.role === 'user') { yield done({ role: 'assistant', content: null, tool_calls: [call('b1', 'Bash', { command: 'git rev-parse --show-prefix && ls' })] }); return; }
+        yield done({ role: 'assistant', content: `ran in: ${String(last.content).trim()}` });
+        return;
+      }
+      if (!messages.some((message) => message.role === 'tool')) { yield done({ role: 'assistant', content: null, tool_calls: [call('a1', 'Agent', { subagent_type: 'gsd-executor', prompt: 'where', isolation: 'worktree' })] }); return; }
+      yield done({ role: 'assistant', content: 'ok' });
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
+  try {
+    await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd });
+  } finally {
+    conversation.dispose();
+  }
+  const output = String(posted.find((message) => message.type === 'tool-end' && message.callId === 'a1')?.output);
+  assert.match(output, /ran in: packages\/app\/\npackage\.json/, `the agent's shell starts in the worktree's packages/app: ${output}`);
+  assert.match(system, /in its copy of the workspace folder, \S+packages[\\/]app\./, 'the agent is told which folder it works in');
+});
+
 test('isolation="worktree" outside a git repository is refused with a clear reason', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-wt-nogit-'));
   const { gsd, storage } = await repository();
@@ -116,4 +150,32 @@ test('SlashCommand loads the named skill with its arguments, as workflows use it
   assert.deepEqual(input, { name: 'gsd-plan-phase', args: '1 --auto' });
   assert.match(await slash.run(input, {} as never), /Plan phase with: 1 --auto/);
   assert.throws(() => slash.parse({ command: '' }), /must look like/);
+});
+
+// Merge with #36: a worktree agent that starts a foreground worktree helper hands back its worktree slot too, so a cap of one cannot deadlock.
+test('with one agent slot and one worktree slot, a worktree agent that starts a foreground worktree helper does not wait for ever', { timeout: 30_000 }, async () => {
+  const { root, storage, gsd } = await repository();
+  const nested: GsdContext = { ...gsd, agents: [{ name: 'gsd-lead', description: 'Leads', tools: ['Read', 'Agent'], body: 'You are the lead.', file: path.join(gsd.home, 'agents', 'gsd-lead.md') }, ...gsd.agents] };
+  const counters = { parent: 0, lead: 0, executor: 0 };
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const system = String(messages[0]?.content);
+      const who = system.startsWith('You are the lead.') ? 'lead' : system.startsWith('You are the executor.') ? 'executor' : 'parent';
+      const turn = counters[who]++;
+      if (who === 'parent') { yield done(turn === 0 ? { role: 'assistant', content: null, tool_calls: [call('p1', 'Agent', { subagent_type: 'gsd-lead', prompt: 'lead it', isolation: 'worktree' })] } : { role: 'assistant', content: 'all done' }); return; }
+      if (who === 'lead') { yield done(turn === 0 ? { role: 'assistant', content: null, tool_calls: [call('l1', 'Agent', { subagent_type: 'gsd-executor', prompt: 'noop', isolation: 'worktree' })] } : { role: 'assistant', content: `lead report: ${String(messages.at(-1)?.content).slice(0, 40)}` }); return; }
+      yield done({ role: 'assistant', content: 'executor report' });
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(storage, 'checkpoints'));
+  conversation.maxParallelWorktrees = 1;
+  try {
+    await conversation.send({ text: 'execute', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd: nested, maxParallelAgents: 1 });
+  } finally {
+    conversation.dispose();
+  }
+  assert.match(String(posted.find((message) => message.type === 'tool-end' && message.callId === 'p1')?.output), /lead report: executor report/);
+  assert.deepEqual(counters, { parent: 2, lead: 2, executor: 1 });
 });

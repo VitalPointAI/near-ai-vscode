@@ -715,6 +715,48 @@ test('sidebar: with nearAi.agent.autoResumeAfterReload on, a cut-off run carries
   }
 });
 
+test('sidebar: with the emergency stop on (#36), a cut-off run does not resume by itself even with auto-resume on, and keeps its Resume button', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  const gate = gates();
+  const readCall: Delta = { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'Read', arguments: '{"file_path":"app.ts"}' } }] };
+  const near = fakeNear(async (messages) => {
+    if (!messages.some((message) => message.role === 'tool')) return readCall;
+    if (!lastUser(messages).startsWith('Continue the task')) await gate.hold('long refactor');
+    return { content: 'Checked app.ts and finished the refactor.' };
+  });
+  const { setEmergencyStop } = require('../services/emergencyStop') as typeof import('../services/emergencyStop');
+  autoResume.on = true;
+  try {
+    await withNear(near, async () => {
+      const first = await openSidebar(root, auth, shared);
+      const a = first.summary()!.activeId;
+      void first.send({ type: 'send', text: 'long refactor', model: MODEL, conversationId: a });
+      await until(() => gate.holding('long refactor'));
+      // The stop is pressed; this test's first window is still alive, so it ends its own run. The host that ran it is then treated as gone with
+      // the run cut off, as a reload during the stop would leave it.
+      await setEmergencyStop(true);
+      await until(() => first.item(a)?.status === 'stopped');
+      const runs = path.join(root, '.global', 'runs');
+      const file = path.join(runs, readdirSync(runs)[0], `${a}.json`);
+      await until(() => (JSON.parse(readFileSync(file, 'utf8')).endedAt ? true : undefined));
+      const ended = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      delete ended.endedAt;
+      delete ended.outcome;
+      writeFileSync(file, JSON.stringify({ ...ended, pid: 2_147_483_646, steps: ['Edit'] }));
+      const second = await openSidebar(root, auth, { secrets: shared.secrets, workspaceState: new Memento() });
+      await until(() => second.posted.find((message) => message.type === 'notice' && /^Not resumed automatically: the emergency stop is on/.test(String(message.text))));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(near.requests.some((request) => lastUser(request).startsWith('Continue the task')), false, 'nothing was resumed');
+      assert.ok(second.posted.some((message) => message.type === 'run-interrupted' && message.resumable === true), 'the Resume button stays');
+      assert.equal((await new RunMarkers(path.join(root, '.global'), root).interrupted()).length, 1, 'the cut-off run is still there to resume later');
+      gate.release('long refactor');
+    });
+  } finally {
+    await setEmergencyStop(false);
+    autoResume.on = false;
+  }
+});
+
 test('sidebar: Dismiss settles a cut-off run without running anything; a cut-off run with no saved transcript is not reopened', async () => {
   const { root, auth, shared } = await projectWithProfile();
   const cut = 'conv-dism00-0a0b0c0d';

@@ -57,3 +57,13 @@ test('a cut-off run resumes by itself when recent and switched on, with a notice
   assert.equal(shouldAutoResume({ activeAt: 'not a date' }, true, now), false);
   assert.match(autoResumeNotice(recent, now), /^Resuming automatically: this run was cut off by a reload at .*steps that had finished are not run again.*nearAi\.agent\.autoResumeAfterReload/);
 });
+
+// Merge with #36: with the emergency stop on, nothing resumes by itself.
+test('the auto-resume choice is empty while the emergency stop is on, and otherwise newest first and capped', async () => {
+  const { autoResumeChoice, MAX_AUTO_RESUMES } = await import('../services/runMarkers');
+  const now = Date.parse('2026-11-10T12:00:00Z');
+  const markers = Array.from({ length: 5 }, (_, index) => ({ id: index, activeAt: new Date(now - (index + 1) * 60_000).toISOString() }));
+  assert.deepEqual(autoResumeChoice(markers, { enabled: true, emergencyStopped: true, now }), []);
+  assert.deepEqual(autoResumeChoice(markers, { enabled: false, emergencyStopped: false, now }), []);
+  assert.deepEqual(autoResumeChoice([...markers].reverse(), { enabled: true, emergencyStopped: false, now }).map((marker) => marker.id), [0, 1, 2].slice(0, MAX_AUTO_RESUMES));
+});

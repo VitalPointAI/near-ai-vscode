@@ -41,7 +41,7 @@ import { ContextGraphMemory } from './contextGraphMemory';
 import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 import { rememberedRuleNotice } from '../domain/allowRuleNotice';
 import { syncAutoAdvance } from './autoAdvanceConfig';
-import { autoResumeNotice, cutOffNotice, MAX_AUTO_RESUMES, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
+import { autoResumeChoice, autoResumeNotice, cutOffNotice, resumePrompt, RunMarker, RunMarkers, shouldAutoResume } from './runMarkers';
 import { WaitingNotices } from './waitingNotices';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 
@@ -348,9 +348,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   // PERF-05: a run a reload cut off carries on by itself (newest first, a few at most), with a notice, unless nearAi.agent.autoResumeAfterReload is off.
   void ready.then(async () => {
     const enabled = vscode.workspace.getConfiguration('nearAi').get<boolean>('agent.autoResumeAfterReload', AGENT_DEFAULTS.autoResumeAfterReload) !== false;
-    const due = tabs.filter((tab) => tab.interrupted && shouldAutoResume(tab.interrupted, enabled))
-      .sort((a, b) => (b.interrupted?.activeAt ?? '').localeCompare(a.interrupted?.activeAt ?? '')).slice(0, MAX_AUTO_RESUMES);
+    // With the emergency stop on (pressed here or in another window), nothing resumes by itself: the cut-off runs keep their Resume button.
+    const emergencyStopped = isEmergencyStopped();
+    const chosen = new Set(autoResumeChoice(tabs.flatMap((tab) => (tab.interrupted ? [tab.interrupted] : [])), { enabled, emergencyStopped }));
+    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "NEAR AI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
+    const due = tabs.filter((tab) => tab.interrupted && chosen.has(tab.interrupted));
     for (const tab of due) {
+      if (isEmergencyStopped()) break;
       if (disposed || !tab.interrupted) continue;
       const text = autoResumeNotice(tab.interrupted);
       tab.log.add({ type: 'notice', text });

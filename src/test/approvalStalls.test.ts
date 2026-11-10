@@ -306,3 +306,18 @@ test('the person coming back releases the pause before its limit', async () => {
   assert.equal(subTurn(), 4, 'the helper carried on and finished');
   assert.equal(posted.some((message) => message.type === 'notice' && /^Stopped the run: it was paused/.test(String(message.text))), false, 'the limit never fired');
 });
+
+// Merge with #36: the emergency stop reaches a run paused on unanswered approvals; it ends at once, and the pause's limit never fires afterwards.
+test('a stop (as the emergency stop sends to every conversation) ends a run paused on unanswered approvals', async () => {
+  let stoppedAt = 0;
+  const { posted, subTurn } = await pausedRun(async (conversation) => {
+    stoppedAt = Date.now();
+    conversation.stop();
+  });
+  assert.ok(Date.now() - stoppedAt < 5_000);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(subTurn(), 3, 'nothing ran after the pause');
+  assert.equal(posted.some((message) => message.type === 'notice' && /^Stopped the run: it was paused/.test(String(message.text))), false, 'the pause limit was cleared by the stop');
+  assert.equal(posted.some((message) => message.type === 'notice' && message.text === 'Resumed.'), false, 'a stop is not announced as resuming');
+  assert.ok(posted.some((message) => message.type === 'assistant-cancelled'));
+});

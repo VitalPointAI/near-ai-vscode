@@ -104,7 +104,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     vscode.commands.registerCommand('nearAi.useSavedProfile', () => useSavedProfile(context, auth, sidebar)),
     vscode.commands.registerCommand('nearAi.emergencyStop', async () => {
       await setEmergencyStop(true);
-      void vscode.window.showWarningMessage('NEAR AI emergency stop is on. Running requests and workflows were stopped, and nothing more will be sent until you resume.', 'Resume').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAi.resume'); });
+      void vscode.window.showWarningMessage('NEAR AI emergency stop is on. Running requests and workflows were stopped (in other open windows within a few seconds), and nothing more will be sent until you resume.', 'Resume').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAi.resume'); });
     }),
     vscode.commands.registerCommand('nearAi.resume', async () => {
       await setEmergencyStop(false);

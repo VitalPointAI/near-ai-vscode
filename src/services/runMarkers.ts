@@ -200,6 +200,15 @@ export function shouldAutoResume(marker: Pick<RunMarker, 'activeAt'>, enabled: b
   return enabled && Number.isFinite(at) && now - at <= AUTO_RESUME_WITHIN_MS && now >= at - 60_000;
 }
 
+/**
+ * Which cut-off runs resume by themselves after a reload: none while the emergency stop is on (in any window; #36 shares it), since a stop means
+ * nothing runs until the person resumes; otherwise the recent ones, newest first, at most MAX_AUTO_RESUMES. The rest keep their Resume button.
+ */
+export function autoResumeChoice<T extends { activeAt: string }>(cutOff: T[], options: { enabled: boolean; emergencyStopped: boolean; now?: number }): T[] {
+  if (options.emergencyStopped) return [];
+  return cutOff.filter((marker) => shouldAutoResume(marker, options.enabled, options.now)).sort((a, b) => b.activeAt.localeCompare(a.activeAt)).slice(0, MAX_AUTO_RESUMES);
+}
+
 /** The notice a conversation shows when its cut-off run resumes by itself. */
 export function autoResumeNotice(marker: Pick<RunMarker, 'activeAt'>, now = Date.now()): string {
   return `Resuming automatically: this run was cut off by a reload at ${cutOffTime(marker.activeAt, now)}. It carries on from its last saved step, and steps that had finished are not run again. Press Stop to halt it; turn this off with the setting nearAi.agent.autoResumeAfterReload.`;

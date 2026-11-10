@@ -158,3 +158,14 @@ test('readers invoked with an output file, a program to run, or a follow are not
   for (const command of writes) assert.equal(isReadOnlyShellCommand(command), false, command);
   for (const command of ['uniq in.txt', 'uniq -c in.txt', 'sort -n in.txt', 'rg -n foo src', 'file a.md', 'tail -n 20 log.txt', 'tree -L 2', 'git grep -n foo', 'git cat-file -t HEAD', 'git log -p -3']) assert.equal(isReadOnlyShellCommand(command), true, command);
 });
+
+// Merge with #36: the batching advice never mentions the Agent tool, so it fits a run without one; the sub-agent advice still depends on the tool.
+test('the "Working fast" advice is given with or without the Agent tool, and never tells a run without it to start agents', () => {
+  const without = agentSystemPrompt({ root: '/p', platform: 'linux', date: '2026-11-10', isGitRepo: true, model: 'm', agentTool: false });
+  const withAgents = agentSystemPrompt({ root: '/p', platform: 'linux', date: '2026-11-10', isGitRepo: true, model: 'm', agentTool: true });
+  for (const prompt of [without, withAgents]) assert.match(prompt, /# Working fast\n- Batch independent tool calls in one turn/);
+  const fast = without.slice(without.indexOf('# Working fast'));
+  assert.doesNotMatch(fast, /\bAgent\b|sub-agent/);
+  assert.doesNotMatch(without, /Fan out every multi-part task/);
+  assert.match(withAgents, /Fan out every multi-part task/);
+});

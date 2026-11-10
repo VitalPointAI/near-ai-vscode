@@ -217,6 +217,8 @@ export class AgentConversation {
   private slotWaiters: Array<() => void> = [];
   private slotsInUse = 0;
   private contextWarned = false;
+  /** The critical-level notice that summarizing could not free space was shown; it is shown once until a summary succeeds. */
+  private contextFullWarned = false;
   private agentsTimer: ReturnType<typeof setTimeout> | undefined;
   private lastVisibleAt = Date.now();
   private heartbeats = 0;
@@ -283,7 +285,7 @@ export class AgentConversation {
     this.shellEnvAllow = request.shellEnvAllow ?? [];
     const shell = this.shellFor(request.gsd?.shellEnv ?? {});
     const freshConversation = !this.messages.length;
-    if (freshConversation) this.messages.push({ role: 'system', content: this.systemPrompt(request) });
+    if (freshConversation) this.messages.push({ role: 'system', content: this.systemPrompt(request, this.root, this.spawnableAgents(request).length > 0) });
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
     if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
@@ -579,6 +581,7 @@ export class AgentConversation {
     this.conversationId = newConversationId();
     this.title = '';
     this.contextWarned = false;
+    this.contextFullWarned = false;
     this.notifications = [];
     this.shell?.dispose();
     this.shell = undefined;
@@ -586,12 +589,18 @@ export class AgentConversation {
 
   public dispose(): void { this.reset(); }
 
-  private systemPrompt(request: AgentTurnRequest, root = this.root): string {
+  /** The agent definitions a run can start; without any, the run has no Agent tool. */
+  private spawnableAgents(request: AgentTurnRequest): GsdAgent[] {
+    return [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
+  }
+
+  /** `agentTool` says whether this run's tools include Agent, so the prompt only advises handing work to sub-agents when it can. */
+  private systemPrompt(request: AgentTurnRequest, root: string, agentTool: boolean): string {
     // Every run is told where scratch work goes (0.4.18): inside the project, ignored by git, and emptied when the run ends. It goes before the
     // Open-GSD note so a workflow's own instructions read as the more specific direction.
-    const base = `${agentSystemPrompt({ security: Boolean(request.security), root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}\n\n${WAITING_INSTRUCTIONS}${request.team ? `\n\n${KNOWLEDGE_INSTRUCTIONS}` : ''}`;
+    const base = `${agentSystemPrompt({ security: Boolean(request.security), agentTool, root, platform: `${process.platform} ${process.arch}`, date: new Date().toISOString().slice(0, 10), isGitRepo: existsSync(path.join(root, '.git')), model: request.model })}${projectInstructions(root)}\n\n${SCRATCH_INSTRUCTIONS}\n\n${WAITING_INSTRUCTIONS}${request.team ? `\n\n${KNOWLEDGE_INSTRUCTIONS}` : ''}`;
     if (!request.gsd) return base;
-    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Run each plan, task and research workstream as its own sub-agent with a fresh context, and ask it to end with a short summary (what changed, how it was verified, what is still open) rather than its working notes: your context stays small, which keeps every later turn fast. When the agent does an item on your task list, pass that item's exact content as the Agent call's task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files. When it says to ask the user, use AskUserQuestion.`;
+    return `${base}\n\n# Open-GSD\nOpen-GSD is installed at ${request.gsd.home} (read-only to you). Its skills, agents, workflows, templates, and references live there; read them with Read when instructions point to them. Run gsd-tools as the workflows show; CLAUDE_CONFIG_DIR is already set in your shell. ${agentTool ? 'When a workflow says to spawn an agent, use the Agent tool with that subagent_type (run_in_background works). Run each plan, task and research workstream as its own sub-agent with a fresh context, and ask it to end with a short summary (what changed, how it was verified, what is still open) rather than its working notes: your context stays small, which keeps every later turn fast. When the agent does an item on your task list, pass that item\'s exact content as the Agent call\'s task: the list then shows it in progress and marks it completed (or back to pending) when the agent ends, even while other agents still run. Background agents\' reports arrive as messages on their own: once you have nothing else to do, end your turn to wait for them. Never wait with sleep or by polling for output files.' : 'You have no Agent tool here: when a workflow says to spawn an agent, do that part of the work yourself.'} When it says to ask the user, use AskUserQuestion.`;
   }
 
   private shellFor(env: NodeJS.ProcessEnv): ShellSession {
@@ -626,10 +635,18 @@ export class AgentConversation {
     }
     if (action !== 'compact') return next;
     try {
-      // Nothing older than the recent messages to summarize: trimming is all that applies, and no summary is announced.
+      // Nothing older than the recent messages to summarize: trimming is all that applies, and no summary is announced. The user is told once
+      // that the context is nearly full, since the recent messages themselves hold most of it and the run may soon hit the model's limit.
       const compacted = await compactConversation(request.client, request.model, next, signal);
-      if (!compacted) return next;
+      if (!compacted) {
+        if (mainRun && !this.contextFullWarned) {
+          this.contextFullWarned = true;
+          this.post({ type: 'notice', text: `Context is ${100 - status.remainingPercent}% full, and summarizing could not free space. Older tool output is trimmed; if the run fails for lack of space, start a new chat with a shorter request.` });
+        }
+        return next;
+      }
       next = compacted;
+      this.contextFullWarned = false;
       if (mainRun) {
         this.post({ type: 'notice', text: 'The conversation was summarized to stay within the model\'s context window. A handoff was saved to .planning/HANDOFF.json.' });
         await saveHandoff(this.root, { reason: 'context-critical', currentAction: this.title || 'Agent conversation', nextAction: 'Continue from the summarized conversation, or resume it from NEAR AI history.', activeAgents: this.agents.size, pendingApprovals: this.approvals.size }).catch(() => undefined);
@@ -658,7 +675,7 @@ export class AgentConversation {
         }, 'research')
       : [];
     const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
-    const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
+    const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;
     let all: AgentTool<any>[] = [];
@@ -701,14 +718,48 @@ export class AgentConversation {
         const parent = spawn.background ? runSignal : callSignal;
         const onParentAbort = () => agent.abort.abort();
         parent.addEventListener('abort', onParentAbort, { once: true });
-        const execute = async (): Promise<string> => {
-          await this.acquireSlot(request.maxParallelAgents ?? 4, agent.abort.signal);
-          // PERF-04: agents in their own worktree also take a worktree slot (nearAi.agent.maxParallelWorktrees), since each one checks out and builds.
-          let worktreeSlot = false;
-          if (spawn.isolation === 'worktree') {
-            try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); worktreeSlot = true; } catch (error) { this.releaseSlot(); throw error; }
+        const limit = request.maxParallelAgents ?? 4;
+        const slot = { held: false, nested: 0, worktree: spawn.isolation === 'worktree', worktreeHeld: false };
+        // A foreground agent this agent starts needs a slot from the same pool, so this agent hands its own slot back while it waits for that child
+        // and takes one again before its next turn. Otherwise a parent holding the last slot would wait for ever on a child that waits for that slot.
+        const yieldingSlot = (tool: AgentTool<any>): AgentTool<any> => ({
+          ...tool,
+          run: async (input, toolContext) => {
+            if ((input as { background?: boolean }).background) return tool.run(input, toolContext);
+            slot.nested += 1;
+            if (slot.nested === 1 && slot.held) { slot.held = false; this.releaseSlot(); }
+            if (slot.nested === 1 && slot.worktreeHeld) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
+            try {
+              return await tool.run(input, toolContext);
+            } finally {
+              slot.nested -= 1;
+              // Once the agent is stopped there is no next turn to hold a slot for, and waiting on the aborted signal would throw here and replace the
+              // child's finished report with an error.
+              while (slot.nested === 0 && !slot.held && !agent.abort.signal.aborted) {
+                // Stopped while waiting: there is no next turn, and the child's finished report must still be returned, not replaced by the abort.
+                try { await this.acquireSlot(limit, agent.abort.signal); } catch { break; }
+                slot.held = true;
+                // Another foreground child started while this one waited for the slot: it needs the slot more.
+                if (slot.nested > 0) { slot.held = false; this.releaseSlot(); }
+              }
+              // Then its worktree slot, the same way (PERF-04 with #36).
+              while (slot.worktree && slot.nested === 0 && slot.held && !slot.worktreeHeld && !agent.abort.signal.aborted) {
+                try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); } catch { break; }
+                slot.worktreeHeld = true;
+                if (slot.nested > 0) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
+              }
+            }
           }
-          const releaseSlot = () => { if (worktreeSlot) this.worktreeSlots.release(); this.releaseSlot(); };
+        });
+        const tools = allowed.map((tool) => (tool.name === 'Agent' || tool.name === 'Task' ? yieldingSlot(tool) : tool));
+        const execute = async (): Promise<string> => {
+          await this.acquireSlot(limit, agent.abort.signal);
+          slot.held = true;
+          // PERF-04: agents in their own worktree also take a worktree slot (nearAi.agent.maxParallelWorktrees), since each one checks out and builds.
+          // Like the agent slot (#36), it is handed back while the agent waits for a foreground helper, so a worktree cap of 1 cannot deadlock either.
+          if (slot.worktree) {
+            try { await this.worktreeSlots.acquire(this.maxParallelWorktrees, agent.abort.signal); slot.worktreeHeld = true; } catch (error) { slot.held = false; this.releaseSlot(); throw error; }
+          }
           let shell: ShellSession | undefined;
           let worktree: AgentWorktree | undefined;
           let worktreeState: 'removed' | 'kept' | undefined;
@@ -721,18 +772,18 @@ export class AgentConversation {
           void record({ status: 'running', kind: 'agent', agentId: agent.id, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} started.` });
           try {
             if (spawn.isolation === 'worktree') worktree = await createAgentWorktree(this.root, this.worktreeDir, agent.id);
-            const agentRoot = worktree?.path ?? this.root;
+            const agentRoot = worktree?.root ?? this.root;
             // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
             shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {}, request.shellEnvAllow ?? []);
             // Research agents gather outside content; their writes belong in .planning/ (others ask).
             const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}) };
-            const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}. Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
-            const base = `${this.systemPrompt({ ...request, model }, agentRoot)}${isolationNote}`;
+            const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}${worktree.root !== worktree.path ? `, in its copy of the workspace folder, ${worktree.root}` : ''}.${worktree.rootUnmatched ? ` The workspace folder (${this.root}) could not be placed inside the worktree, so you start at its top level: change into the matching subfolder before working.` : ''}${worktree.rootCreatedEmpty ? ` git does not track that folder, so its copy here is empty: files you need from it are only in the main checkout.` : ''} Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
+            const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             const boundary = runBoundary(request);
             this.activity?.agentStarted({ agentId: agent.id, agent: label, runId, model, parentId: `main-${runId}`, conversationId: this.conversationId, ...(boundary ? { boundary } : {}) }, spawn.prompt, system);
             const child = new AgentRun({
-              client: request.client, model, tools: allowed, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
+              client: request.client, model, tools, context: agentContext, policy: request.policy, rules: request.rules, grants, safety: this.runSafety, maxTurns: request.maxTurns, maxOutputTokens: request.maxOutputTokens,
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt) } } : {}),
               // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
               ...(request.modelStallMs ? { stallMs: request.modelStallMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
@@ -789,7 +840,8 @@ export class AgentConversation {
             if (worktree && !worktreeState) await finishAgentWorktree(worktree).catch(() => undefined);
             parent.removeEventListener('abort', onParentAbort);
             this.agents.delete(agent.id);
-            releaseSlot();
+            if (slot.worktreeHeld) { slot.worktreeHeld = false; this.worktreeSlots.release(); }
+            if (slot.held) { slot.held = false; this.releaseSlot(); }
             this.postAgents();
           }
         };
