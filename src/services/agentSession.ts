@@ -842,7 +842,7 @@ export class AgentConversation {
   private async acquireSlot(limit: number, signal: AbortSignal): Promise<void> {
     while (this.slotsInUse >= Math.max(1, limit)) {
       if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-      await new Promise<void>((resolve) => { this.slotWaiters.push(resolve); signal.addEventListener('abort', () => resolve(), { once: true }); });
+      await waitOrAbort(signal, (wake) => this.slotWaiters.push(wake));
     }
     if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
     this.slotsInUse += 1;
@@ -1073,7 +1073,7 @@ export class AgentConversation {
   private async whileRunPaused(signal: AbortSignal): Promise<void> {
     while (this.runPause && !signal.aborted) {
       const { wait } = this.runPause;
-      await Promise.race([wait, new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))]);
+      await waitOrAbort(signal, (wake) => { void wait.then(wake); });
     }
   }
 
@@ -1215,6 +1215,19 @@ export class AgentConversation {
   }
 }
 
+/**
+ * Waits until `register`'s wake function is called or the signal aborts, whichever comes first, and removes its abort listener either way (review of
+ * PR 34: a listener added per wait and never removed piled up on a long run's signal).
+ */
+export function waitOrAbort(signal: AbortSignal, register: (wake: () => void) => void): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => { signal.removeEventListener('abort', done); resolve(); };
+    signal.addEventListener('abort', done, { once: true });
+    register(done);
+  });
+}
+
 /** A counting limit whose waiters wake in turn; a waiter whose signal aborts stops waiting and takes nothing. */
 export class Slots {
   private used = 0;
@@ -1223,7 +1236,7 @@ export class Slots {
   public async acquire(limit: number, signal: AbortSignal): Promise<void> {
     while (this.used >= Math.max(1, limit)) {
       if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-      await new Promise<void>((resolve) => { this.waiters.push(resolve); signal.addEventListener('abort', () => resolve(), { once: true }); });
+      await waitOrAbort(signal, (wake) => this.waiters.push(wake));
     }
     if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
     this.used += 1;

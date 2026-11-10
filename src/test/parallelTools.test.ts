@@ -125,3 +125,29 @@ test('read-only commands still run side by side after a command ended the agent\
   assert.deepEqual(order(events).slice(0, 2), ['start:x', 'end:x'], 'the shell-ending command runs alone and finishes');
   assert.deepEqual(order(events).slice(2, 4), ['start:a', 'start:b'], 'the read-only calls after it still start together');
 });
+
+// Review of PR 34: a waiter removes its abort listener when it wakes, so repeated waits on one signal do not pile listeners up.
+test('repeated slot waits leave no abort listeners behind', async () => {
+  const { waitOrAbort } = await import('../services/agentSession');
+  const controller = new AbortController();
+  let live = 0;
+  const signal = controller.signal;
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  signal.addEventListener = ((...args: Parameters<typeof add>) => { if (args[0] === 'abort') live += 1; add(...args); }) as typeof signal.addEventListener;
+  signal.removeEventListener = ((...args: Parameters<typeof remove>) => { if (args[0] === 'abort') live -= 1; remove(...args); }) as typeof signal.removeEventListener;
+  const slots = new Slots();
+  await slots.acquire(1, signal);
+  for (let round = 0; round < 50; round += 1) {
+    const waiting = slots.acquire(1, signal);
+    slots.release();
+    await waiting;
+  }
+  assert.equal(live, 0, 'every waiter removed its listener when it woke');
+  for (let round = 0; round < 20; round += 1) await waitOrAbort(signal, (wake) => setTimeout(wake, 0));
+  assert.equal(live, 0);
+  const pending = waitOrAbort(signal, () => undefined);
+  controller.abort();
+  await pending;
+  assert.equal(live, 0, 'an abort removes it too');
+});
