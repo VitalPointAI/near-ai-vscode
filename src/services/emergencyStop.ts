@@ -46,7 +46,8 @@ export function isEmergencyStopped(): boolean {
 }
 
 export async function setEmergencyStop(engaged: boolean): Promise<void> {
-  await memento?.update(STATE_KEY, engaged);
+  // Recorded as announced BEFORE the write, so the other-window check cannot see the new value first and announce it a second time.
   announced = engaged;
+  await memento?.update(STATE_KEY, engaged);
   changes.emit('change', engaged);
 }

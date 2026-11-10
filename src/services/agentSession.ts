@@ -614,7 +614,7 @@ export class AgentConversation {
       if (!compacted) {
         if (mainRun && !this.contextFullWarned) {
           this.contextFullWarned = true;
-          this.post({ type: 'notice', text: `Context is ${100 - status.remainingPercent}% full, and summarizing could not free space: the recent messages hold most of it. Older tool output is trimmed; if the run fails for lack of space, start a new chat with a shorter request.` });
+          this.post({ type: 'notice', text: `Context is ${100 - status.remainingPercent}% full, and summarizing could not free space. Older tool output is trimmed; if the run fails for lack of space, start a new chat with a shorter request.` });
         }
         return next;
       }

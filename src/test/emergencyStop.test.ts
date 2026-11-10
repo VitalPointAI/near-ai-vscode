@@ -4,6 +4,10 @@ import test from 'node:test';
 // The emergency stop lives in global state, which every window shares, but VS Code tells only the
 // window that wrote it. A stop pressed in another window must still stop this window's runs and
 // show the status item here.
+//
+// What this proves: the check notices a value written behind its back and announces it once. What it cannot prove: that VS Code refreshes this
+// window's globalState with another window's write. The stub returns the write directly, so the real cross-window path needs a manual check in
+// two windows (see the PR).
 
 test('a stop or resume written by another window is announced here and shows on the status bar', async () => {
   const values = new Map<string, unknown>();
