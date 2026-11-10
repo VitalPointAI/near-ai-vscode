@@ -16,7 +16,7 @@ import { ShellSession } from '../agent/shell';
 import { DEFAULT_TOOLS, parseTeam, resolveMemberTools } from '../agent/teams';
 import type { ToolContext } from '../agent/tools';
 import { ToolError } from '../agent/workspace';
-import { readZip } from '../agent/zip';
+import { readZip, writeZip } from '../agent/zip';
 
 // CreatePdf and CreateDocument: Markdown in, a PDF or a Word file out, made on this machine with
 // no library, and read back with the extension's own document readers.
@@ -394,4 +394,13 @@ test('a table row with more cells than its header is an error that names the row
   } finally {
     context.shell.dispose();
   }
+});
+
+test('notes read back with their own ids, not their position, when the ids are not 1, 2, 3', async () => {
+  const w = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const docx = writeZip([
+    ['word/document.xml', Buffer.from(`<w:document xmlns:w="${w}"><w:body><w:p><w:r><w:t>Claim</w:t></w:r><w:r><w:footnoteReference w:id="7"/></w:r><w:r><w:t> and another</w:t></w:r><w:r><w:footnoteReference w:id="3"/></w:r></w:p></w:body></w:document>`)],
+    ['word/footnotes.xml', Buffer.from(`<w:footnotes xmlns:w="${w}"><w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:id="3"><w:p><w:r><w:t>Source three.</w:t></w:r></w:p></w:footnote><w:footnote w:id="7"><w:p><w:r><w:t>Source seven.</w:t></w:r></w:p></w:footnote></w:footnotes>`)]
+  ]);
+  assert.equal((await documentText(docx, 'docx', 'ids.docx')).text, 'Claim and another\n\nFootnotes:\n[3] Source three.\n[7] Source seven.');
 });
