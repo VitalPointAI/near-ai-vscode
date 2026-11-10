@@ -427,7 +427,8 @@ asking. It runs on `workflow_run` after CI succeeds for a PR, and on `workflow_d
   blocked: start it again with `gh workflow run agent-review.yml -f pr=<n>`.
 - **Gate changes need the owner.** A PR that touches a path in `GATE_PATHS`
   (`scripts/lib/workflow.mjs`: `.github/`, `scripts/lib/`, the review, merge, release and
-  secret-scan scripts, `scripts/ci-review-*.mjs`, `SECURITY.md`, `.claude/commands/`) is reviewed
+  secret-scan scripts, `scripts/ci-review-*.mjs`, the gate tests in `scripts/test/`,
+  `scripts/vendor-libs.mjs`, `SECURITY.md`, `.claude/commands/`) is reviewed
   as usual, but the approval waits for the owner's click. Every other PR is approved
   automatically when its review passes.
 

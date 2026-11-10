@@ -28,8 +28,9 @@ export function registerWorkspaceCommands(context: vscode.ExtensionContext, open
     vscode.workspace.onDidSaveTextDocument(async (document) => {
       const file = document.uri.fsPath;
       const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      const isLibrary = path.dirname(file) === library.directory;
-      const isProject = root !== undefined && file === TeamLibrary.projectTeamFile(root);
+      // path.relative, not ===: on Windows the same folder can come back with a different drive-letter case, and then no save was ever versioned.
+      const isLibrary = path.relative(path.dirname(file), library.directory) === '';
+      const isProject = root !== undefined && path.relative(file, TeamLibrary.projectTeamFile(root)) === '';
       if (!file.endsWith('.md') || (!isLibrary && !isProject)) return;
       try {
         const team = parseTeam(document.getText(), file);

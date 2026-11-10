@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  BRANCH_PATTERN, CI_CHECKS, REQUIRED_CHECKS, REVIEW_ACCOUNT, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName, latestReleaseVersion, mergeOutcomeProblem, releaseGate, releasePrProblems,
+  BRANCH_PATTERN, CI_CHECKS, gateFileChanges, REQUIRED_CHECKS, REVIEW_ACCOUNT, changelogSection, evaluateChecks, evaluateCommit, fitComment, isSecretFileName, latestReleaseVersion, mergeOutcomeProblem, releaseGate, releasePrProblems,
   isVersionBump, maskLine, normalizeChecks, parseAllowlist, parseReview, releaseVersionFromBranch, reviewDecision, scanLine
 } from '../lib/workflow.mjs';
 import { isNotFound } from '../lib/gh.mjs';
@@ -306,6 +306,27 @@ test('a release commit on main needs CI; a hotfix head also needs the owner\'s a
   assert.equal(stray.ok, false);
   assert.match(stray.reason, /neither on main nor the head of hotfix\/1\.2\.3/);
   assert.equal(releaseGate({ version: '1.2.3', sha: SHA, onMain: false }).ok, false);
+});
+
+test('tagging main is not blocked by another PR\'s failed agent review, which lands its check runs on main\'s HEAD', () => {
+  const tagged = greenCommit();
+  tagged.workflowRuns.push({ ...ciWorkflowRun, id: 2, event: 'push', suiteId: 808 });
+  tagged.checkRuns.push(...CI_CHECKS.map((name) => ciRun(name, { suiteId: 808 })));
+  tagged.workflowRuns.push({ id: 3, name: 'Agent review', path: '.github/workflows/agent-review.yml', event: 'workflow_run', status: 'completed', conclusion: 'failure', suiteId: 909 });
+  tagged.checkRuns.push(ciRun('agent-review', { suiteId: 909, conclusion: 'failure' }), ciRun('approve', { suiteId: 909, conclusion: 'cancelled' }));
+  assert.equal(gate(tagged, { required: CI_CHECKS, exactCommitCi: true }).ok, true, gate(tagged, { required: CI_CHECKS, exactCommitCi: true }).problems.join('\n'));
+  // The list tagging main really uses (releaseGate on main) is CI_CHECKS; REQUIRED_CHECKS is only for a hotfix head, which is never main's HEAD.
+  const plan = releaseGate({ version: '1.2.3', sha: SHA, onMain: true });
+  assert.deepEqual(plan.required, CI_CHECKS);
+  assert.equal(gate(tagged, { required: plan.required, exactCommitCi: true }).ok, true);
+  // Any OTHER failed check still blocks the tag.
+  tagged.checkRuns.push(ciRun('codeql', { suiteId: 777, conclusion: 'failure' }));
+  assert.match(gate(tagged, { required: CI_CHECKS, exactCommitCi: true }).problems.join('\n'), /"codeql" failed/);
+});
+
+test('a change to the gate tests or the vendor step is a gate change', () => {
+  assert.deepEqual(gateFileChanges(['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs', 'src/extension.ts', 'scripts/compare-models.mjs', 'package.json']),
+    ['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs']);
 });
 
 test('tagging needs a CI run that tested the commit itself, not only a pull request merge', () => {

@@ -39,7 +39,7 @@ import { imageTool, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { TeamDefinition, teamAgents, teamLeadPrompt } from '../agent/teams';
 import { knowledgeTools } from '../agent/knowledgeTools';
 import { addKnowledge, KNOWLEDGE_INSTRUCTIONS, loadKnowledge } from './teamKnowledgeStore';
-import { slugify } from '../agent/teams';
+import { teamKnowledgeKey } from '../agent/teams';
 import type { MemoryScope } from '../domain/contextGraph';
 import type { AgentRole } from '../domain/agents';
 import type { ContextGraphMemory } from './contextGraphMemory';
@@ -630,16 +630,16 @@ export class AgentConversation {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
     // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
-    // same graph, which is what makes it shared: a fact one member verified is there for the next one. The graph is keyed by the team's slug, its file name
-    // in the library, which is unique there. The agent writes as `research`: its own grades are held to the ceiling, because a run that read a hostile page
+    // same graph, which is what makes it shared: a fact one member verified is there for the next one. The graph is keyed by teamKnowledgeKey: a library team's
+    // slug (its file name, unique in the library), or a project team's own per-project key, so no two projects share one graph. The agent writes as `research`: its own grades are held to the ceiling, because a run that read a hostile page
     // can be steered into claiming anything. A damaged file's problem reaches the tool, so the agent and the person are told rather than shown a quiet nothing.
     const teamKnowledge = request.team
       ? knowledgeTools({
           read: async () => {
-            const { knowledge, problem } = await loadKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug));
+            const { knowledge, problem } = await loadKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file));
             return problem ? { ...knowledge, problem } : knowledge;
           },
-          add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug), addition)
+          add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
         }, 'research')
       : [];
     const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
@@ -980,7 +980,7 @@ export class AgentConversation {
     if (event.type === 'turn') void record({ status: 'completed', kind: 'model', model, requestId: event.usage.requestId, summary: 'Model turn completed.', estimatedCostUsd: event.usage.estimatedCostUsd, inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens, durationMs: event.usage.latencyMs });
   }
 
-  /** How long an approval may wait before it is declined, so an unattended run carries on (0: wait indefinitely). */
+  /** How long an approval may wait before the run is paused on it (and declined a day after that); 0 waits indefinitely. */
   public approvalTimeoutMs = 15 * 60_000;
 
   /** The prompts still waiting for the user, oldest first, marked as replays for a reloaded view. */
