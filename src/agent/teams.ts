@@ -224,7 +224,7 @@ export class TeamLibrary {
   public async backup(teamFile: string, file: string, label: string): Promise<string> {
     const dir = path.join(this.directory, '.versions', `${this.versionKey(teamFile)}-${label}`);
     await mkdir(dir, { recursive: true });
-    const target = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
+    const target = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}${path.extname(file) || '.md'}`);
     await copyFile(file, target);
     return target;
   }

@@ -11,7 +11,8 @@ import { templateVersion } from '../agent/projectTypes';
 
 /** `text` and `agents` are the contents the plan was made from, so apply can tell whether either changed since. */
 export interface TeamUpdatePreview { file: string; name: string; plan: TeamUpdatePlan; guidance?: GuidancePlan; agentsFile?: string; text: string; agents?: string }
-export interface AppliedUpdate { file: string; backup: string; agentsFile?: string; agentsBackup?: string }
+/** The files an update wrote and their backups. `configFile` is project.json, whose templateVersion and guidanceBase change with the guidance. */
+export interface AppliedUpdate { file: string; backup: string; agentsFile?: string; agentsBackup?: string; configFile?: string; configBackup?: string }
 
 const projectRoot = (file: string) => (path.basename(file) === 'team.md' && path.basename(path.dirname(file)) === '.near-ai' && path.basename(path.dirname(path.dirname(file))) === '.planning' ? path.resolve(path.dirname(file), '..', '..') : undefined);
 
@@ -97,6 +98,8 @@ export class TeamUpdater {
     await this.library.snapshot(preview.file);
     result.backup = (await this.library.versions(preview.file))[0];
     if (result.agentsFile) result.agentsBackup = await this.library.backup(preview.file, result.agentsFile, 'agents');
+    const configWrite = writes.find((write) => write.label === 'project.json');
+    if (configWrite) { result.configFile = configWrite.file; result.configBackup = await this.library.backup(preview.file, configWrite.file, 'config'); }
     // No snapshot after writing: one in the same millisecond would take the backup's file name.
     const written: typeof writes = [];
     try {
@@ -116,6 +119,8 @@ export class TeamUpdater {
     await writeFile(applied.file, await readFile(applied.backup, 'utf8'), 'utf8');
     await this.library.snapshot(applied.file);
     if (applied.agentsFile && applied.agentsBackup) await writeFile(applied.agentsFile, await readFile(applied.agentsBackup, 'utf8'), 'utf8');
+    // project.json too, so the restored guidance is again recognised as the one the extension wrote, not as an edit.
+    if (applied.configFile && applied.configBackup) await writeFile(applied.configFile, await readFile(applied.configBackup, 'utf8'), 'utf8');
   }
 }
 

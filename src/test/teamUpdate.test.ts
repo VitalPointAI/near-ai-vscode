@@ -334,3 +334,23 @@ test('an edit made while the confirmation was open is never overwritten: the upd
   assert.match((await read()).team, /description: Wearables research\./);
   assert.match((await read()).team, /also check the house style/);
 });
+
+test('Undo restores project.json too, so the restored guidance is recognised as generated, not as an edit', async () => {
+  const { library, file, root, read } = await project();
+  const configFile = path.join(root, '.planning', '.near-ai', 'project.json');
+  // A project set up by an earlier version: its project.json records the guidance it wrote.
+  const agents = (await read()).agents;
+  const inner = agents.slice(agents.indexOf('## Project type'), agents.indexOf('\n<!-- near-ai:project-type:end'));
+  const before = `${JSON.stringify({ type: 'research', goal: 'Researching any topic given.', templateVersion: 1, guidanceBase: guidanceFingerprint(inner) }, null, 2)}\n`;
+  await writeFile(configFile, before);
+  const original = await read();
+  const updater = new TeamUpdater(library);
+  const applied = await updater.apply((await updater.preview(file))!, {});
+  const updatedConfig = JSON.parse((await read()).config);
+  assert.equal(updatedConfig.templateVersion, templateVersion('research'));
+  assert.notEqual(updatedConfig.guidanceBase, JSON.parse(before).guidanceBase);
+  assert.equal(path.extname(applied.configBackup!), '.json');
+  await updater.undo(applied);
+  assert.deepEqual(await read(), original, 'team, guidance, and project.json are all as they were');
+  assert.equal((await updater.preview(file))!.guidance!.action, 'auto', 'the restored guidance is again the generated one, so a later update replaces it without asking');
+});
