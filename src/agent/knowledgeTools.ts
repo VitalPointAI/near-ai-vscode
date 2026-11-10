@@ -29,8 +29,8 @@ export interface KnowledgeTools {
 }
 
 /**
- * The tools, for a graph written by `origin`. There is no default: a run's agent writes as `research`, which holds every grade it gives to the ceiling, and
- * only a path where a person is the witness may pass `interaction`.
+ * The tools, for a graph written by `origin`, which is recorded as provenance. There is no default: 0.4.18 defaulted to `interaction` and labelled every
+ * agent's addition as if a person had said it; a run's agent writes as `research`. Every grade is held to the ceiling whatever the origin.
  */
 export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigin): AgentTool<any>[] {
   const lookup: AgentTool<{ query?: string; node?: string }> = {
@@ -131,7 +131,7 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
           return [{ text: fact.text.slice(0, 400), ...(source ? { source } : {}) }];
         }).slice(0, 12) : [];
         // Held to the ceiling here as well as in the merge, so what the approval preview shows is what will be stored.
-        const grading = withinCeiling(gradingOf(node.grading, `nodes[${index}]`), origin);
+        const grading = withinCeiling(gradingOf(node.grading, `nodes[${index}]`));
         return { label: node.label.trim().slice(0, 120), kind, functions, facts, ...(grading ? { grading } : {}) };
       });
       const edges = Array.isArray(raw.edges) ? raw.edges.slice(0, 60).flatMap((entry, index) => {
@@ -140,7 +140,7 @@ export function knowledgeTools(knowledge: KnowledgeTools, origin: KnowledgeOrigi
         if (typeof edge.from !== 'string' || !edge.from.trim() || typeof edge.to !== 'string' || !edge.to.trim()) return [];
         const kind = typeof edge.kind === 'string' && EDGE_KINDS.includes(edge.kind as EdgeKind) ? edge.kind as EdgeKind : 'related';
         const tension = typeof edge.tension === 'number' && Number.isFinite(edge.tension) ? edge.tension : null;
-        const grading = withinCeiling(gradingOf(edge.grading, `edges[${index}]`), origin);
+        const grading = withinCeiling(gradingOf(edge.grading, `edges[${index}]`));
         const basis = typeof edge.basis === 'string' && edge.basis.trim() ? edge.basis.slice(0, 300) : undefined;
         return [{ from: edge.from.trim().slice(0, 120), to: edge.to.trim().slice(0, 120), kind, tension, ...(basis ? { basis } : {}), ...(grading ? { grading } : {}) }];
       }) : [];

@@ -54,13 +54,13 @@ the button writes. A chart shows the score over time, by task type, so you can s
   strong as what stands can retire it. A refuted claim is not re-learned from an unsourced echo; a re-assertion that cites a source is believed again, dated
   from then.
 - **An agent's word is worth C3 at most in the knowledge graph.** An agent that read a hostile page can be steered into writing any grade and any source,
-  including one that does not look like a page, so whatever an agent records is stored at C3 ("fairly reliable, possibly true") or below, whatever it cites.
-  An agent can still grade lower (D5, F6), and a grade only ever falls as the graph is merged, so a later mention cannot raise one. What a person recorded
-  is theirs: an agent cannot lower its grade or retire it. Graphs written by 0.4.18, where an agent could store A1, are read at C3, and saved at C3 the next
-  time the team learns something. Nothing moves on disk: a team's graph stays in the file it was always in. Looking up an actor now also lists what the
-  team no longer believes about it, and why.
-- **A damaged knowledge file is kept, not overwritten.** When a team's graph cannot be read, the next addition copies the unreadable file aside as
-  `<team>.damaged-<time>.json` before starting a new graph, and the agent is told, rather than the file being replaced in silence.
+  including one that does not look like a page, so everything in a team's graph is stored at C3 ("fairly reliable, possibly true") or below, whatever it
+  cites. An agent can still grade lower (D5, F6), and a grade only ever falls as the graph is merged, so a later mention cannot raise one. Graphs written by
+  0.4.18, where an agent could store A1, are read at C3, and saved at C3 the next time the team learns something. Nothing moves on disk: a team's graph stays
+  in the file it was always in. Looking up an actor now also lists what the team no longer believes about it, and why.
+- **A damaged knowledge file is kept, not overwritten.** When a team's graph cannot be parsed, the next addition copies it aside as
+  `<team>.damaged-<time>-….json` before starting a new graph, and the agent is told, rather than the file being replaced in silence. A graph file that
+  exists but cannot be opened at all (permissions, a lock) is never written over: the addition is refused and the file left as it is.
 
 ## 0.4.18
 

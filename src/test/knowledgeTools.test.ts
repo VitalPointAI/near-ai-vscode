@@ -142,9 +142,9 @@ test('Learn holds every grade an agent gives to C3, whatever it cites, so a host
   // Below the ceiling the agent's grade stands.
   const weak = kit.learn.parse({ nodes: [{ label: 'Rumour', grading: { reliability: 'E', credibility: 5 } }] } as never);
   assert.deepEqual(weak.nodes[0]?.grading, { reliability: 'E', credibility: 5 });
-  // A path where a person is the witness keeps the grade as given.
-  const person = tools(undefined, 'interaction').learn.parse({ nodes: [{ label: 'Registry', grading: A1 }] } as never);
-  assert.deepEqual(person.nodes[0]?.grading, { reliability: 'A', credibility: 1 });
+  // The origin label does not lift the ceiling: 0.4.18 labelled every agent addition `interaction`.
+  const labelled = tools(undefined, 'interaction').learn.parse({ nodes: [{ label: 'Registry', grading: A1 }] } as never);
+  assert.deepEqual(labelled.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
 });
 
 test('a damaged graph read by the agent says so, rather than looking like a team that never learned anything', async () => {

@@ -169,3 +169,22 @@ test('a 0.4.18 graph is found where it was written, with no migration, and an ag
   assert.deepEqual(knowledge.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
   assert.deepEqual(knowledge.nodes[0]?.facts[0]?.grading, { reliability: 'C', credibility: 3 });
 });
+
+test('a graph file that exists but cannot be opened is never written over, and nothing is reported as learned', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+  const { chmod } = await import('node:fs/promises');
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-locked-'));
+  await addKnowledge(dir, 'scouts', addition('alpha'));
+  const file = knowledgeFile(dir, 'scouts');
+  const before = await readFile(file, 'utf8');
+  await chmod(file, 0o000);
+  try {
+    const read = await loadKnowledge(dir, 'scouts');
+    assert.match(read.problem ?? '', /could not be opened/);
+    assert.equal(read.unreadable, true);
+    await assert.rejects(addKnowledge(dir, 'scouts', addition('bravo')), /could not be opened.*Nothing was added/);
+  } finally {
+    await chmod(file, 0o600);
+  }
+  assert.equal(await readFile(file, 'utf8'), before, 'the file is exactly as it was');
+  assert.deepEqual((await readdir(path.dirname(file))).filter((name) => name.includes('damaged')), [], 'and nothing was set aside, because nothing was replaced');
+});

@@ -169,9 +169,12 @@ const ADMIRALTY = ['A', 'B', 'C', 'D', 'E', 'F'];
  * The most an agent's own say-so is worth: C3, "fairly reliable, possibly true".
  *
  * An agent writes the graph, and an agent that has read a hostile page can be steered into writing whatever that page wants, including the grade and a
- * source that does not look like a page at all ("the official registry"). No test of the source text can tell those apart, so the grade an agent can store is
- * capped whatever it cites. Only a person (`interaction`) can record a grade above it. An agent can still grade BELOW the ceiling (D5, F6), which is
- * information worth keeping.
+ * source that does not look like a page at all ("the official registry"). No test of the source text can tell those apart, so every stored grade is capped
+ * whatever it cites. An agent can still grade BELOW the ceiling (D5, F6), which is information worth keeping.
+ *
+ * The ceiling applies whatever an entry's `origin` says. Agents are the only writers of the graph, and 0.4.18's Learn tool labelled everything it wrote
+ * `interaction`, so the label cannot tell a person's word from an agent's. A feature that lets a person verify knowledge will need its own provenance
+ * (who set the grade), not this label.
  */
 export const AGENT_CEILING: Grading = { reliability: 'C', credibility: 3 };
 
@@ -183,10 +186,9 @@ function weakerGrade(a: Grading, b: Grading): Grading {
   };
 }
 
-/** The grade a claim may be stored with, given who wrote it: what was claimed, capped at AGENT_CEILING unless a person wrote it. */
-export function withinCeiling(grading: Grading | undefined, origin: KnowledgeOrigin): Grading | undefined {
-  if (!grading) return undefined;
-  return origin === 'interaction' ? grading : weakerGrade(grading, AGENT_CEILING);
+/** The grade a claim may be stored with: what was claimed, capped at AGENT_CEILING. */
+export function withinCeiling(grading: Grading | undefined): Grading | undefined {
+  return grading ? weakerGrade(grading, AGENT_CEILING) : undefined;
 }
 
 /** Ungraded evidence is the weakest there is, so it can never outweigh a graded belief. */
@@ -205,17 +207,17 @@ const atLeastAsStrong = (incoming: Grading | undefined, outgoing: Grading | unde
  */
 export function heldToCeiling(graph: TeamKnowledge): TeamKnowledge {
   const fact = (entry: KnowledgeFact): KnowledgeFact => {
-    const grading = withinCeiling(entry.grading, entry.origin);
+    const grading = withinCeiling(entry.grading);
     return { ...entry, ...(grading ? { grading } : {}) };
   };
   return {
     ...graph,
     nodes: graph.nodes.map((node) => {
-      const grading = withinCeiling(node.grading, node.origin);
+      const grading = withinCeiling(node.grading);
       return { ...node, functions: [...node.functions], facts: node.facts.map(fact), ...(node.history ? { history: node.history.map(fact) } : {}), ...(grading ? { grading } : {}) };
     }),
     edges: graph.edges.map((edge) => {
-      const grading = withinCeiling(edge.grading, edge.origin);
+      const grading = withinCeiling(edge.grading);
       return { ...edge, ...(grading ? { grading } : {}) };
     })
   };
@@ -264,10 +266,8 @@ export function sourceText(value: unknown): string {
  * and a measured tension replaces an unmeasured one but never the other way round, so a later vague mention cannot erase a measured strength.
  *
  * Trust is two rules, applied here so every path into the graph obeys them:
- *   - the ceiling: nothing an agent writes is stored above AGENT_CEILING (see withinCeiling), and an older graph is brought under it first;
- *   - grades only fall: a later mention can lower a stored grade, never raise it, so a second path cannot launder a grade back up;
- *   - what a person recorded is theirs: an agent's mention never changes the grade of an entry a person wrote, and an agent's claim never retires a
- *     person's fact. Otherwise an agent could lower a person's A1 to F6 in one call and retire it with a C3 claim in the next.
+ *   - the ceiling: nothing is stored above AGENT_CEILING (see withinCeiling), and an older graph is brought under it first;
+ *   - grades only fall: a later mention can lower a stored grade, never raise it, so a second path cannot launder a grade back up.
  *
  * Belief changes without deleting anything (owner, 2026-11-08): a fact a later claim contradicts moves to the actor's `history` with why and when, but only
  * when the new claim is at least as strong as what it retires, so a weaker claim cannot push a stronger belief out. An unsourced echo of a refuted fact is not
@@ -277,8 +277,6 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
   const start = heldToCeiling(base);
   const nodes = new Map(start.nodes.map((node) => [node.id, node]));
   const labelToId = new Map(start.nodes.map((node) => [node.label.trim().toLowerCase(), node.id]));
-  // A person may regrade or retire anything; an agent only what an agent wrote.
-  const mayRegrade = (owner: KnowledgeOrigin): boolean => addition.origin === 'interaction' || owner !== 'interaction';
   const stored = (fact: { text: string; source?: string; since?: string }, grading: Grading | undefined): KnowledgeFact =>
     ({ text: fact.text, origin: addition.origin, since: fact.since ?? addition.at, ...(fact.source ? { source: fact.source } : {}), ...(grading ? { grading } : {}) });
   for (const incoming of addition.nodes) {
@@ -286,9 +284,9 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     if (!label) continue;
     const id = labelToId.get(label.toLowerCase()) ?? nodeId(label);
     labelToId.set(label.toLowerCase(), id);
-    const grading = withinCeiling(incoming.grading, addition.origin);
+    const grading = withinCeiling(incoming.grading);
     // A fact carries its own grade when it has one, and the actor's otherwise; either way within the ceiling when it is stored new.
-    const factGrading = (fact: { grading?: Grading }): Grading | undefined => withinCeiling(fact.grading ?? incoming.grading, addition.origin);
+    const factGrading = (fact: { grading?: Grading }): Grading | undefined => withinCeiling(fact.grading ?? incoming.grading);
     const existing = nodes.get(id);
     if (!existing) {
       nodes.set(id, {
@@ -306,7 +304,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       const known = existing.facts.find((old) => normalise(old.text) === text);
       if (known) {
         if (!known.source && incomingFact.source) known.source = incomingFact.source;
-        if (claimed && mayRegrade(known.origin)) known.grading = known.grading ? weakerGrade(known.grading, claimed) : claimed;
+        if (claimed) known.grading = known.grading ? weakerGrade(known.grading, claimed) : claimed;
         continue;
       }
       // Already refuted: an echo with no source of its own is not re-learned, because a team that read a retraction should not forget that it did.
@@ -315,12 +313,12 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
       // A new claim, or a refuted one re-asserted with a source. Whatever current belief it contradicts is retired, but only by a claim at least as strong.
       const why = incomingFact.source ? `${incomingFact.text} (${incomingFact.source})` : incomingFact.text;
       for (const current of existing.facts.filter((old) => isContradicted(old.text, incomingFact.text))) {
-        if (mayRegrade(current.origin) && atLeastAsStrong(claimed, current.grading)) retire(existing, current, why, addition.at);
+        if (atLeastAsStrong(claimed, current.grading)) retire(existing, current, why, addition.at);
       }
       if (refuted) existing.history = (existing.history ?? []).filter((old) => old !== refuted);
       existing.facts.push(stored(incomingFact, claimed));
     }
-    if (grading && mayRegrade(existing.origin)) existing.grading = existing.grading ? weakerGrade(existing.grading, grading) : grading;
+    if (grading) existing.grading = existing.grading ? weakerGrade(existing.grading, grading) : grading;
     existing.lastSeen = addition.at;
     existing.mentions += 1;
   }
@@ -333,7 +331,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     const kind = incoming.kind ?? 'related';
     const id = edgeId(from, to, kind);
     const tension = clampTension(incoming.tension);
-    const grading = withinCeiling(incoming.grading, addition.origin);
+    const grading = withinCeiling(incoming.grading);
     const existing = edges.get(id);
     if (!existing) {
       edges.set(id, { id, from, to, kind, tension, ...(incoming.basis ? { basis: incoming.basis } : {}), origin: addition.origin, ...(grading ? { grading } : {}), lastSeen: addition.at, mentions: 1 });
@@ -341,7 +339,7 @@ export function mergeKnowledge(base: TeamKnowledge, addition: KnowledgeAddition)
     }
     if (existing.tension === null && tension !== null) existing.tension = tension;
     if (!existing.basis && incoming.basis) existing.basis = incoming.basis;
-    if (grading && mayRegrade(existing.origin)) existing.grading = existing.grading ? weakerGrade(existing.grading, grading) : grading;
+    if (grading) existing.grading = existing.grading ? weakerGrade(existing.grading, grading) : grading;
     existing.lastSeen = addition.at;
     existing.mentions += 1;
   }

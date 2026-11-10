@@ -116,7 +116,7 @@ test('nothing an agent writes is stored above C3, whatever it cites: the merge h
   assert.deepEqual(own.nodes[0]?.facts[0]?.grading, AGENT_CEILING);
 });
 
-test('an agent can still grade BELOW the ceiling, axis by axis, and a person\'s grade is kept as given', () => {
+test('an agent can still grade BELOW the ceiling, axis by axis, and the ceiling holds whatever the origin label says', () => {
   const graph = mergeKnowledge(emptyKnowledge('t', at), {
     origin: 'research', at,
     nodes: [{ label: 'Rumour', grading: { reliability: 'E', credibility: 5 } }, { label: 'Mixed', grading: { reliability: 'A', credibility: 5 } }],
@@ -124,11 +124,13 @@ test('an agent can still grade BELOW the ceiling, axis by axis, and a person\'s 
   });
   assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'E', credibility: 5 });
   assert.deepEqual(graph.nodes[1]?.grading, { reliability: 'C', credibility: 5 });
-  const person = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Registry', grading: { reliability: 'A' as const, credibility: 1 as const } }], edges: [] });
-  assert.deepEqual(person.nodes[0]?.grading, { reliability: 'A' as const, credibility: 1 as const });
+  // 0.4.18 labelled every agent addition `interaction`, so the label proves nothing about who said it.
+  for (const origin of ['interaction', 'document', 'seed'] as const) {
+    const labelled = mergeKnowledge(emptyKnowledge('t', at), { origin, at, nodes: [{ label: 'Registry', grading: { reliability: 'A' as const, credibility: 1 as const } }], edges: [] });
+    assert.deepEqual(labelled.nodes[0]?.grading, AGENT_CEILING, origin);
+  }
 });
-
-test('a graph written before the ceiling existed is brought under it, and a person\'s grade in it is left alone', () => {
+test('a 0.4.18 graph is brought under the ceiling, including entries 0.4.18 labelled interaction', () => {
   const old = {
     version: 1 as const, team: 't', updatedAt: at,
     nodes: [
@@ -136,20 +138,18 @@ test('a graph written before the ceiling existed is brought under it, and a pers
         facts: [{ text: 'f', origin: 'research' as const, grading: { reliability: 'A' as const, credibility: 1 as const } }], history: [{ text: 'h', origin: 'research' as const, grading: { reliability: 'A' as const, credibility: 1 as const }, refutedBy: 'x', refutedAt: at }] },
       { id: 'b', label: 'B', kind: 'actor' as const, functions: [], facts: [], origin: 'interaction' as const, firstSeen: at, lastSeen: at, mentions: 1, grading: { reliability: 'A' as const, credibility: 1 as const } }
     ],
-    edges: [{ id: 'e', from: 'a', to: 'b', kind: 'related' as const, tension: null, origin: 'research' as const, grading: { reliability: 'A' as const, credibility: 1 as const }, lastSeen: at, mentions: 1 }]
+    edges: [{ id: 'e', from: 'a', to: 'b', kind: 'related' as const, tension: null, origin: 'interaction' as const, grading: { reliability: 'A' as const, credibility: 1 as const }, lastSeen: at, mentions: 1 }]
   };
   const held = heldToCeiling(old);
   assert.deepEqual(held.nodes[0]?.grading, AGENT_CEILING);
   assert.deepEqual(held.nodes[0]?.facts[0]?.grading, AGENT_CEILING);
   assert.deepEqual(held.nodes[0]?.history?.[0]?.grading, AGENT_CEILING);
+  assert.deepEqual(held.nodes[1]?.grading, AGENT_CEILING, 'an `interaction` label written by 0.4.18\'s agent is held too');
   assert.deepEqual(held.edges[0]?.grading, AGENT_CEILING);
-  assert.deepEqual(held.nodes[1]?.grading, { reliability: 'A' as const, credibility: 1 as const }, 'a person\'s grade is not an agent\'s');
   assert.deepEqual(old.nodes[0]?.grading, { reliability: 'A' as const, credibility: 1 as const }, 'pure: the input is not changed');
-  // And the merge applies it, so even an untouched old entry leaves at the ceiling.
   const merged = mergeKnowledge(old, { origin: 'research', at, nodes: [{ label: 'C' }], edges: [] });
-  assert.deepEqual(merged.nodes.find((node) => node.id === 'a')?.grading, AGENT_CEILING);
+  assert.deepEqual(merged.nodes.find((node) => node.id === 'b')?.grading, AGENT_CEILING);
 });
-
 test('a genuinely new figure about one actor is retired, not accumulated — the number-rule trade, pinned', () => {
   // `isContradicted` reads two figures in otherwise-matching sentences as a correction, so the newer one retires the older. This is the deliberate trade
   // (see the note beside isContradicted), pinned so a change to the rule cannot flip it unnoticed.
@@ -168,45 +168,20 @@ test('a genuinely new figure about one actor is retired, not accumulated — the
   assert.match(graph.nodes[0]?.history?.[0]?.refutedBy ?? '', /5\.1 million/, 'the retirement names what out-evidenced it');
 });
 
-test('an agent never changes or retires what a person recorded: lowering a person\'s A1 first and contradicting it second does nothing', () => {
-  // The two-step attack: restate a person-verified fact at F6 (a grade may fall), then contradict it at C3, which would now be "at least as strong".
-  const fact = 'The port handled 4.2 million TEU in 2025.';
-  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: fact, source: 'audited annual report' }, { text: 'The port opens at 6.' }] }], edges: [{ from: 'Port', to: 'Port', kind: 'related' }] });
-  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'F', credibility: 6 }, facts: [{ text: fact, grading: { reliability: 'F', credibility: 6 } }] }], edges: [] });
-  assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'A' as const, credibility: 1 as const }, 'the actor\'s grade is untouched');
-  assert.deepEqual(graph.nodes[0]?.facts[0]?.grading, { reliability: 'A' as const, credibility: 1 as const }, 'the fact\'s grade is untouched');
-  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'a blog' }, { text: 'The port does not open at 6.', source: 'a forum' }] }], edges: [] });
-  const port = graph.nodes[0]!;
-  assert.match(JSON.stringify(port.facts.map((entry) => entry.text)), /4\.2 million/, 'the person\'s fact is still believed');
-  assert.match(JSON.stringify(port.facts.map((entry) => entry.text)), /opens at 6/, 'an ungraded fact a person recorded cannot be retired by an agent either');
-  assert.equal(port.history?.length ?? 0, 0);
-  // An agent's relation grade to a person's relation is ignored the same way, and a person can still lower or retire anything.
-  let edge = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'P' }, { label: 'Q' }], edges: [{ from: 'P', to: 'Q', grading: { reliability: 'A' as const, credibility: 1 as const } }] });
-  edge = mergeKnowledge(edge, { origin: 'research', at, nodes: [], edges: [{ from: 'P', to: 'Q', grading: { reliability: 'F', credibility: 6 } }] });
-  assert.deepEqual(edge.edges[0]?.grading, { reliability: 'A' as const, credibility: 1 as const });
-  const person = mergeKnowledge(graph, { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 3.9 million TEU in 2025.', source: 'harbour authority' }] }], edges: [] });
-  assert.match(JSON.stringify((person.nodes[0]!.history ?? []).map((entry) => entry.text)), /4\.2 million/, 'a person\'s equal-strength correction retires it');
-});
-
 test('a grade can only fall as the graph is merged, so a later mention cannot launder a held grade back up', () => {
-  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Evil Corp', grading: { reliability: 'A' as const, credibility: 1 as const } }], edges: [] });
-  graph = mergeKnowledge(graph, { origin: 'interaction', at: '2026-11-08T11:00:00.000Z', nodes: [{ label: 'Evil Corp', grading: { reliability: 'A' as const, credibility: 1 as const } }], edges: [] });
-  assert.deepEqual(graph.nodes[0]?.grading, AGENT_CEILING, 'the weaker of the two is kept');
-  // A weaker claim lowers it, on each axis separately.
+  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Evil Corp', grading: { reliability: 'D', credibility: 4 } }], edges: [] });
+  graph = mergeKnowledge(graph, { origin: 'interaction', at, nodes: [{ label: 'Evil Corp', grading: { reliability: 'A' as const, credibility: 1 as const } }], edges: [] });
+  assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'D', credibility: 4 }, 'the weaker of the two is kept');
   graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Evil Corp', grading: { reliability: 'B', credibility: 5 } }], edges: [] });
-  assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'C', credibility: 5 });
-  // An agent repeating a fact a person verified at A1 does not drag it to the ceiling: the ceiling limits what an agent stores, not what a person decided.
-  let verified = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Registry', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'Opens at 9.' }] }], edges: [] });
-  verified = mergeKnowledge(verified, { origin: 'research', at, nodes: [{ label: 'Registry', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'Opens at 9.', source: 'https://x.test' }] }], edges: [] });
-  assert.deepEqual(verified.nodes[0]?.grading, { reliability: 'A' as const, credibility: 1 as const });
-  assert.deepEqual(verified.nodes[0]?.facts[0]?.grading, { reliability: 'A' as const, credibility: 1 as const });
-  assert.equal(verified.nodes[0]?.facts[0]?.source, 'https://x.test', 'the missing source is filled in');
-  // Relations follow the same rule.
+  assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'D', credibility: 5 }, 'each axis falls separately');
+  let fact = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'R', facts: [{ text: 'Opens at 9.', grading: { reliability: 'C', credibility: 4 } }] }], edges: [] });
+  fact = mergeKnowledge(fact, { origin: 'research', at, nodes: [{ label: 'R', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'Opens at 9.', source: 'https://x.test' }] }], edges: [] });
+  assert.deepEqual(fact.nodes[0]?.facts[0]?.grading, { reliability: 'C', credibility: 4 });
+  assert.equal(fact.nodes[0]?.facts[0]?.source, 'https://x.test', 'the missing source is filled in');
   let edge = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'P' }, { label: 'Q' }], edges: [{ from: 'P', to: 'Q', grading: { reliability: 'D', credibility: 4 } }] });
   edge = mergeKnowledge(edge, { origin: 'interaction', at, nodes: [], edges: [{ from: 'P', to: 'Q', grading: { reliability: 'A' as const, credibility: 1 as const } }] });
   assert.deepEqual(edge.edges[0]?.grading, { reliability: 'D', credibility: 4 });
 });
-
 test('the graph accumulates: 30 batches of actors and relations all survive', () => {
   // 0.4.19 review: nothing capped the total, and the whole file is parsed on every later addition.
   let graph = emptyKnowledge('t', at);
@@ -283,46 +258,31 @@ test('a refuted fact is not re-learned as new when the same claim comes back', (
   assert.equal(port.history?.length, 1, 'and it stays in the record');
 });
 
-test('a contradiction retires only what it out-evidences: a capped page claim cannot push a verified fact out of current belief', () => {
-  // A contradiction alone would let a claim from a hostile page retire an A1 a person verified. Retirement needs the incoming side to be at least as strong.
-  const verified = { text: 'The port handled 4.2 million TEU in 2025.', origin: 'interaction' as const, source: 'audited annual report', grading: { reliability: 'A' as const, credibility: 1 as const } };
-  let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [verified] }], edges: [] });
-  // An agent's contradiction is held to C3, so the A1 fact stays exactly where it is.
-  graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'https://rumours.example/port' }] }], edges: [] });
-  const held = graph.nodes[0]!;
-  assert.match(JSON.stringify(held.facts.map((fact) => fact.text)), /4\.2 million/, 'the verified fact is still current belief');
-  assert.equal(held.history?.length ?? 0, 0, 'nothing was retired');
-  assert.match(JSON.stringify(held.facts.map((fact) => fact.text)), /3\.1 million/, 'the capped claim still accumulates beside it');
-  // An EQUAL-grade contradiction retires — proved from a fresh graph, because after the capped claim has accumulated the equal assertion would only strengthen
-  // the claim it already matches, which is the already-believed branch, not a contradiction.
-  let equal = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'audited annual report' }] }], edges: [] });
-  equal = mergeKnowledge(equal, { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour authority notice' }] }], edges: [] });
-  const retired = equal.nodes[0]!;
-  assert.match(JSON.stringify((retired.history ?? []).map((fact) => fact.text)), /4\.2 million/, 'an evidence-backed contradiction of equal standing retires');
-  assert.match(JSON.stringify(retired.facts.map((fact) => fact.text)), /3\.1 million/, 'and the equal-standing claim stands');
-  // An UNGRADED contradiction never retires a graded fact, from a fresh graph for the same reason.
-  let solo = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'audited annual report' }] }], edges: [] });
-  solo = mergeKnowledge(solo, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 9.9 million TEU in 2025.' }] }], edges: [] });
-  const ungraded = solo.nodes[0]!;
-  assert.match(JSON.stringify(ungraded.facts.map((fact) => fact.text)), /4\.2 million/, 'the graded fact survives an ungraded contradiction');
-  assert.equal(ungraded.history?.length ?? 0, 0, 'nothing was retired');
-  // A LOW-GRADED contradiction never retires either: the comparison uses the full Admiralty scale, so a D claim cannot defeat an A1 fact.
-  let weak = mergeKnowledge(emptyKnowledge('t', at), { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'audited annual report' }] }], edges: [] });
-  weak = mergeKnowledge(weak, { origin: 'document', at, nodes: [{ label: 'Port', grading: { reliability: 'D' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 2.2 million TEU in 2025.', source: 'a bar flyer' }] }], edges: [] });
-  const weakHeld = weak.nodes[0]!;
-  assert.match(JSON.stringify(weakHeld.facts.map((fact) => fact.text)), /4\.2 million/, 'the verified fact survives a D1 contradiction');
-  assert.equal(weakHeld.history?.length ?? 0, 0, 'nothing was retired by the weak claim');
-  assert.match(JSON.stringify(weakHeld.facts.map((fact) => fact.text)), /2\.2 million/, 'the weak claim still accumulates beside it');
+test('a contradiction retires only what it out-evidences: a weaker or ungraded claim cannot push a stronger fact out of current belief', () => {
+  // Everything is at most C3, so the strongest belief there is stands at C3, and only another C3 can retire it.
+  const base = () => mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'audited annual report', grading: { reliability: 'B', credibility: 2 } }] }], edges: [] });
+  assert.deepEqual(base().nodes[0]!.facts[0]!.grading, AGENT_CEILING, 'B2 is above the ceiling, so it is stored at C3');
+  const after = (grading: { reliability: 'A' | 'B' | 'C' | 'D' | 'E' | 'F'; credibility: 1 | 2 | 3 | 4 | 5 | 6 } | undefined) =>
+    mergeKnowledge(base(), { origin: 'research', at, nodes: [{ label: 'Port', ...(grading ? { grading } : {}), facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour notice' }] }], edges: [] }).nodes[0]!;
+  for (const weaker of [undefined, { reliability: 'C' as const, credibility: 4 as const }, { reliability: 'D' as const, credibility: 1 as const }]) {
+    const port = after(weaker);
+    assert.match(JSON.stringify(port.facts.map((fact) => fact.text)), /4\.2 million/, `${JSON.stringify(weaker)} does not retire C3`);
+    assert.match(JSON.stringify(port.facts.map((fact) => fact.text)), /3\.1 million/, 'it accumulates beside it');
+    assert.equal(port.history?.length ?? 0, 0);
+  }
+  // An equal claim retires it, including an A1 claim, which is held to C3 on the way in.
+  for (const equal of [AGENT_CEILING, { reliability: 'A' as const, credibility: 1 as const }]) {
+    const port = after(equal);
+    assert.match(JSON.stringify((port.history ?? []).map((fact) => fact.text)), /4\.2 million/);
+    assert.deepEqual(port.facts.map((fact) => fact.text), ['The port handled 3.1 million TEU in 2025.']);
+  }
 });
-
 test('a sourced re-assertion revives a refuted claim and retires what it now contradicts; an unsourced echo does not', () => {
   let graph = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
   graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.' }] }], edges: [] });
-  // An unsourced echo does NOT revive: a team that read a retraction should not forget that it did.
   graph = mergeKnowledge(graph, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
   assert.equal(graph.nodes[0]!.facts.length, 1, 'the echo changed nothing');
   assert.match(graph.nodes[0]!.facts[0]!.text, /3\.1 million/);
-  // A re-assertion that cites a source is new information: believed again, dated from now, at its own (held) grade.
   const later = '2026-11-09T00:00:00.000Z';
   graph = mergeKnowledge(graph, { origin: 'research', at: later, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'harbour authority annual report' }] }], edges: [] });
   const revived = graph.nodes[0]!;
@@ -330,11 +290,11 @@ test('a sourced re-assertion revives a refuted claim and retires what it now con
   assert.equal(revived.facts[0]!.since, later);
   assert.deepEqual(revived.facts[0]!.grading, AGENT_CEILING);
   assert.match(JSON.stringify((revived.history ?? []).map((fact) => fact.text)), /3\.1 million/, 'what it contradicts is retired');
-  assert.match(JSON.stringify((revived.history ?? []).map((fact) => fact.refutedBy)), /harbour authority/, 'with the revival and its source as the reason');
+  assert.match(JSON.stringify((revived.history ?? []).map((fact) => fact.refutedBy)), /harbour authority/);
   assert.equal((revived.history ?? []).some((fact) => fact.text.includes('4.2 million')), false, 'and it is not also left in history');
   // A revival weaker than what stands is believed again beside it, but retires nothing.
   let strong = mergeKnowledge(emptyKnowledge('t', at), { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }], edges: [] });
-  strong = mergeKnowledge(strong, { origin: 'interaction', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'audited' }] }], edges: [] });
-  strong = mergeKnowledge(strong, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'A' as const, credibility: 1 as const }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'a blog' }] }], edges: [] });
-  assert.match(JSON.stringify(strong.nodes[0]!.facts.map((fact) => fact.text)), /3\.1 million/, 'the person-verified A1 stands against a C3 revival');
+  strong = mergeKnowledge(strong, { origin: 'research', at, nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'audited', grading: { reliability: 'B', credibility: 2 } }] }], edges: [] });
+  strong = mergeKnowledge(strong, { origin: 'research', at, nodes: [{ label: 'Port', grading: { reliability: 'C', credibility: 4 }, facts: [{ text: 'The port handled 4.2 million TEU in 2025.', source: 'a blog' }] }], edges: [] });
+  assert.match(JSON.stringify(strong.nodes[0]!.facts.map((fact) => fact.text)), /3\.1 million/, 'the B2 stands against a C4 revival');
 });

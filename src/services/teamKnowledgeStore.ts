@@ -29,10 +29,17 @@ export const knowledgeFile = (dir: string, team: string): string => path.join(di
  * The graph for a team, or an empty one when it has not learned anything yet. A file that cannot be read is reported, not replaced here. Every grade an
  * agent wrote is held to the ceiling as it is read, so a graph written before the ceiling existed is shown and used at the grade it is worth.
  */
-export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
+export async function loadKnowledge(dir: string, team: string): Promise<{ knowledge: TeamKnowledge; problem?: string; unreadable?: boolean }> {
   const file = knowledgeFile(dir, team);
   let text: string;
-  try { text = await readFile(file, 'utf8'); } catch { return { knowledge: emptyKnowledge(team, new Date().toISOString()) }; }
+  try {
+    text = await readFile(file, 'utf8');
+  } catch (error) {
+    // No file yet is a team that has not learned anything. Any other failure (permissions, a locked file) means a graph IS there and could not be read:
+    // `unreadable` tells addKnowledge not to write over it.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { knowledge: emptyKnowledge(team, new Date().toISOString()) };
+    return { knowledge: emptyKnowledge(team, new Date().toISOString()), problem: `The knowledge graph for ${team} could not be opened (${(error as Error).message}).`, unreadable: true };
+  }
   try {
     const parsed = JSON.parse(text) as TeamKnowledge;
     if (parsed.version !== 1 || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error('unexpected shape');
@@ -87,15 +94,16 @@ async function serialised<T>(file: string, run: () => Promise<T>): Promise<T> {
 export async function addKnowledge(dir: string, team: string, addition: KnowledgeAddition): Promise<TeamKnowledge> {
   const file = knowledgeFile(dir, team);
   return serialised(file, async () => {
-    let last: { merged: TeamKnowledge; problem?: string } | undefined;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const before = await readFile(file, 'utf8').catch(() => undefined);
-      const { knowledge, problem } = await loadKnowledge(dir, team);
+      const { knowledge, problem, unreadable } = await loadKnowledge(dir, team);
+      // A file that exists but could not be opened is never written over: nothing could be set aside, and what it holds would be lost.
+      if (unreadable) throw new Error(`${problem} Nothing was added, so the file is left as it is.`);
       const merged = mergeKnowledge(knowledge, addition);
       // Write only if the file is still what was read. A rename is atomic, so a reader never sees half a file; this compares CONTENT, which is what another
       // window would have changed.
       const now = await readFile(file, 'utf8').catch(() => undefined);
-      if (now !== before) { last = { merged, problem }; continue; }
+      if (now !== before) continue;
       const kept = problem && before !== undefined ? await setAside(file, problem) : problem;
       await saveKnowledge(dir, merged);
       return kept ? { ...merged, problem: kept } : merged;
@@ -103,8 +111,10 @@ export async function addKnowledge(dir: string, team: string, addition: Knowledg
     // Another window kept writing through every attempt. Write anyway, merged over the latest read, so the caller's addition is in the file rather than
     // reported as learned and lost.
     const latest = await loadKnowledge(dir, team);
+    if (latest.unreadable) throw new Error(`${latest.problem} Nothing was added, so the file is left as it is.`);
     const final = mergeKnowledge(latest.knowledge, addition);
-    const kept = latest.problem ? await setAside(file, latest.problem) : last?.problem;
+    // Only the read this write is based on decides whether damage is reported, so a file an earlier attempt saw damaged but is fine now is not reported.
+    const kept = latest.problem ? await setAside(file, latest.problem) : undefined;
     await saveKnowledge(dir, final);
     return kept ? { ...final, problem: kept } : final;
   });
