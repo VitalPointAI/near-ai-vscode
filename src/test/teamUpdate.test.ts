@@ -379,3 +379,16 @@ test('a run that starts while the update is being written stops it, and what was
     end();
   }
 });
+
+test('"add only the new parts" keeps the user\'s own Output and Done-when sections instead of adding a second one', () => {
+  const base = stampTeam(projectTypeTeam(research, 'g', 'cloud'), research);
+  const mine = '## editor\nrole: reviewer\nmodel: standard\ntools: Read\n\nOur house style.\n\nOutput: our own review file.\n\nProject goal: g\n';
+  const merged = parseTeam(applyTeamUpdate(base.replace(/## editor\n[\s\S]*?(?=\n## |$)/, mine), planTeamUpdate(base.replace(/## editor\n[\s\S]*?(?=\n## |$)/, mine))!, { members: { editor: 'merge' } }), 'x.md').members.find((member) => member.name === 'editor')!;
+  assert.equal((merged.instructions.match(/^Output:/gm) ?? []).length, 1, 'one Output section, theirs');
+  assert.match(merged.instructions, /Output: our own review file\./);
+  assert.equal((merged.instructions.match(/^Done when:/gm) ?? []).length, 1, 'the missing Done-when section is added');
+  const both = mine.replace('Output: our own review file.', 'Output: our own review file.\n\ndone when: we say so.');
+  const text = base.replace(/## editor\n[\s\S]*?(?=\n## |$)/, both);
+  const result = parseTeam(applyTeamUpdate(text, planTeamUpdate(text)!, { members: { editor: 'merge' } }), 'x.md').members.find((member) => member.name === 'editor')!;
+  assert.equal((result.instructions.match(/^(Output|Done when):/gim) ?? []).length, 2, 'nothing added when they have both, whatever the case');
+});

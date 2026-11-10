@@ -119,7 +119,10 @@ export function detectTemplate(text: string): TemplateRef | undefined {
 /** A user's member with the new definition's additions only: a privacy line, new tools, and new Output and Done-when paragraphs. */
 function mergeNewLines(mine: Omit<Section, 'raw'>, theirs: Omit<Section, 'raw'>): Omit<Section, 'raw'> {
   const { body, goal } = splitGoal(mine.instructions);
-  const additions = splitGoal(theirs.instructions).body.split(/\n\n+/).filter((paragraph) => /^(Output|Done when):/.test(paragraph.trim()) && !body.includes(paragraph.trim()));
+  // A section the user already has (by its "Output:" or "Done when:" prefix, whatever its wording) is theirs; only missing ones are added.
+  const prefix = (paragraph: string) => /^(Output|Done when):/i.exec(paragraph.trim())?.[1].toLowerCase();
+  const own = new Set(body.split(/\n\n+/).map(prefix).filter(Boolean));
+  const additions = splitGoal(theirs.instructions).body.split(/\n\n+/).filter((paragraph) => { const kind = prefix(paragraph); return kind !== undefined && !own.has(kind); });
   const instructions = [body, ...additions].join('\n\n') + (goal ? `\n\nProject goal: ${goal}` : '');
   const tools = mine.tools ? [...mine.tools, ...(theirs.tools ?? []).filter((tool) => !mine.tools!.includes(tool))] : undefined;
   return { ...mine, ...(mine.privacy || theirs.privacy ? { privacy: mine.privacy ?? theirs.privacy } : {}), ...(tools ? { tools } : {}), instructions };
