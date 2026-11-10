@@ -2,9 +2,9 @@
 gsd_state_version: "1.0"
 milestone: 0.4.x
 milestone_name: line
-current_phase: null
-status: idle
-stopped_at: Phase 25 context gathered
+current_phase: 26
+status: verified
+stopped_at: Phase 26 executed and verified
 last_updated: "2026-10-30T23:48:08.860Z"
 state_head: 6fb1522794e0fc44eb16c49b8c63916902546f7c
 progress:
@@ -13,8 +13,8 @@ progress:
   total_plans: 0
   completed_plans: 0
   percent: 0
-last_activity: 2026-10-30
-last_activity_desc: Added Phase 25 (cybersecurity harness) to the 0.4.x line with 12 requirements
+last_activity: 2026-11-10
+last_activity_desc: Phase 26 (performance) planned, executed and verified on perf/research-runs
 ---
 
 # Project State
@@ -29,6 +29,7 @@ Next: `/gsd-plan-phase 25` (cybersecurity harness), or `/gsd-quick` for small ch
 
 ### Roadmap Evolution
 
+- Phase 26 added and completed on branch perf/research-runs: Performance — faster agent and research runs (PERF-01…07, 5 plans)
 - Phase 25 added: Cybersecurity harness with a target picker, offensive and defensive scans (CYBER-01…12; not planned yet)
 
 ## Notes

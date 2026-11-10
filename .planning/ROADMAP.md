@@ -54,11 +54,11 @@ Plans:
   5. After a reload, a cut-off run resumes by itself with a notice (switchable), and completed tool calls are not repeated. (PERF-05)
   6. Research and writing projects get a research GSD profile (coarse phases, quick mode for content edits, the plan-checker only for plans that change gates or verifiers) and a scaffold of deterministic verifier scripts. (PERF-06)
   7. The activity log is bounded by size rather than 100 events, each run records wall time split into model, tool, approval and idle time with input, cached and output tokens, and a report command prints the breakdown; the before baseline is in VERIFICATION. (PERF-07)
-**Plans:** 5 plans
+**Plans:** 5 plans (complete 2026-11-10; verification in 26-VERIFICATION.md)
 
 Plans:
-- [ ] 26-01-PLAN.md — Measurement: size-bounded activity log, per-run time and token split, run report command and the before baseline (PERF-07)
-- [ ] 26-02-PLAN.md — Approvals without stalls: unattended auto-approval classes, non-blocking sub-agent approvals, pause after three timeouts (PERF-01)
-- [ ] 26-03-PLAN.md — Context and models: compaction threshold, ranged reads, bounded reports, cache-stable prefix, model deadline with backup, tier routing (PERF-02, PERF-03)
-- [ ] 26-04-PLAN.md — Parallelism and reloads: read-only shell pool, worktree fan-out cap, batching instruction, auto-resume without repeats (PERF-04, PERF-05)
-- [ ] 26-05-PLAN.md — Research GSD profile and verifier scaffold, docs, verification (PERF-06)
+- [x] 26-01-PLAN.md — Measurement: size-bounded activity log, per-run time and token split, run report command and the before baseline (PERF-07)
+- [x] 26-02-PLAN.md — Approvals without stalls: unattended auto-approval classes, non-blocking sub-agent approvals, pause after three timeouts (PERF-01)
+- [x] 26-03-PLAN.md — Context and models: compaction threshold, ranged reads, bounded reports, cache-stable prefix, model deadline with backup, tier routing (PERF-02, PERF-03)
+- [x] 26-04-PLAN.md — Parallelism and reloads: read-only shell pool, worktree fan-out cap, batching instruction, auto-resume without repeats (PERF-04, PERF-05)
+- [x] 26-05-PLAN.md — Research GSD profile and verifier scaffold, docs, verification (PERF-06)
