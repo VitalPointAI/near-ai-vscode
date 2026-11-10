@@ -1138,7 +1138,13 @@ export class AgentConversation {
         resolve(reply);
       };
       this.approvals.set(request.callId, settle);
-      signal.addEventListener('abort', () => { if (!returned && this.approvals.delete(request.callId)) settle({ decision: 'deny' }, true); }, { once: true });
+      signal.addEventListener('abort', () => {
+        if (!this.approvals.delete(request.callId)) return;
+        // A card parked after "awaiting approval" belongs to an agent that has now been stopped: it is removed (review of PR 34), so it cannot linger for
+        // a day or grant anything to a run that no longer wants it. A later answer for it finds nothing and does nothing.
+        if (returned) { if (parkLimit) clearTimeout(parkLimit); this.closePrompt(request.callId, true); return; }
+        settle({ decision: 'deny' }, true);
+      }, { once: true });
       if (unattended) {
         // PERF-01: the sub-agent goes back to work after a short wait; its card stays open (until the run ends, or a day at most).
         timer = setTimeout(() => {

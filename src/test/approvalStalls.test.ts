@@ -209,3 +209,50 @@ test('a late allow of a sub-agent\'s Bash command grants that command for the ru
   const { readFile } = await import('node:fs/promises');
   assert.equal((await readFile(path.join(root, 'late.txt'), 'utf8')).trim(), 'late');
 });
+
+// Review of PR 34: stopping a sub-agent removes its parked cards; answering one afterwards does nothing.
+test('stopping a sub-agent removes its parked approval cards, and a later answer for one grants and reports nothing', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-parked-stop-'));
+  let subTurn = 0;
+  const leadSaw: AgentMessage[][] = [];
+  let leadTurn = 0;
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[], _tools: unknown, signal?: AbortSignal): AsyncGenerator<CompletionEvent> {
+      if (String(messages[0]?.content ?? '').startsWith('You help')) {
+        subTurn += 1;
+        if (subTurn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('s1', 'Bash', { command: 'echo parked > parked.txt' })] }, finishReason: 'tool_calls', usage }; return; }
+        // The sub-agent thinks until it is stopped.
+        await new Promise<void>((_resolve, reject) => signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true }));
+        return;
+      }
+      leadSaw.push(structuredClone(messages));
+      leadTurn += 1;
+      if (leadTurn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('a1', 'Agent', { subagent_type: 'helper', prompt: 'write it', description: 'write' })] }, finishReason: 'tool_calls', usage }; return; }
+      yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.subagentApprovalWaitMs = 20;
+  const running = conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, projectAgents: [{ name: 'helper', description: 'helper', tools: ['Bash'], body: 'You help.', file: path.join(root, 'team.md') }] });
+  let callId = '';
+  try {
+    const card = await until(() => posted.find((message) => message.type === 'approval-request' && String(message.callId).endsWith(':s1')));
+    callId = String(card.callId);
+    await until(() => (subTurn >= 2 ? true : undefined));
+    assert.equal(conversation.waitingPrompts().length, 1, 'the card is parked while the agent works on');
+    const agentId = callId.slice(0, callId.lastIndexOf(':'));
+    assert.equal(conversation.controlAgent(agentId, 'stop'), true);
+    await until(() => (conversation.waitingPrompts().length === 0 ? true : undefined));
+    assert.ok(posted.some((message) => message.type === 'prompt-closed' && message.id === callId && message.outcome === 'cancelled'), 'the view is told to drop the card');
+    conversation.answerApproval(callId, { decision: 'allow' });
+    await running;
+  } finally {
+    conversation.dispose();
+  }
+  const updates = leadSaw.flat().filter((message) => String(message.content ?? '').startsWith('<approval-update'));
+  assert.equal(updates.length, 0, 'a late answer for a stopped agent is a no-op: nothing is reported to the lead');
+  const { stat } = await import('node:fs/promises');
+  assert.equal(await stat(path.join(root, 'parked.txt')).then(() => true, () => false), false, 'and nothing ran');
+});
