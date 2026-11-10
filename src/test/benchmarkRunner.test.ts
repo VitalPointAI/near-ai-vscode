@@ -101,6 +101,9 @@ test('run metrics: tokens, cache share, and generation speed without the wait fo
   const estimated = await costOf({ actualCostsUsd: async () => undefined }, usage);
   assert.ok(estimated.estimated && Math.abs(estimated.usd! - 0.03) < 1e-9);
   assert.deepEqual(await costOf({}, []), { usd: undefined, estimated: true });
+  // Billing knows only the turns with a request id; a turn without one is added at its estimate, not dropped (0.4.19 review).
+  const mixed = await costOf({ actualCostsUsd: async () => 0.025 }, [...usage, { estimatedCostUsd: 0.005, verificationStatus: 'unknown' as const, latencyMs: 1 }]);
+  assert.ok(mixed.estimated && Math.abs(mixed.usd! - 0.03) < 1e-9, JSON.stringify(mixed));
 });
 
 test('a comparison runs each model in a temporary folder, grades it, tags its spend as eval, and cleans up', async () => {

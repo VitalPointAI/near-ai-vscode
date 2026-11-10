@@ -64,11 +64,32 @@ the button writes. A chart shows the score over time, by task type, so you can s
 - **The between-steps choice is a picker**, beside the approval picker and styled the same way: carry on
   by itself, or stop between steps in any of the asking modes.
 - **"1 to fix" now says what needs fixing**, and takes you to the step that holds it.
-- **A download runs without asking only in one exact shape.** `curl -sS [-w …] -o <path> <one https URL>` or `wget -q -O <path> <one https URL>`: one
-  public address, every word literal, no other flag and no header of any kind. Anything else asks, including a bare `curl <url>`, a user agent, a
+- **A download runs without asking only in one exact shape.** `curl -sS [-w …] -o <path> <one https URL>` or
+  `wget -q --max-redirect=0 -O <path> <one https URL>`: one public address, no redirect (wget follows redirects
+  unless told not to, so its shape turns them off), every word literal, no other flag and no header of any kind.
+  Anything else asks, including a bare `curl <url>`, a user agent, a
   `--resolve`, or an address on the local machine however it is written. Once a run has read outside content, even the exact shape asks.
 - **Reading from GitHub no longer asks.** `gh pr view`, `gh pr list`, `gh pr checks` and the other read-only subcommands run, so a run can poll for a
   verdict; anything that writes to GitHub still asks.
+- **A project's team keeps its own knowledge graph.** Every project's team, and a team of yours saved as
+  `team.md`, used to read and feed one shared graph. A project team now has a graph of its own, kept apart
+  from every other project, so it starts empty. The old shared graph is left where it was
+  (`knowledge/team.json` in your teams folder) and is not merged in, because it may mix several projects.
+- **Every team you made works from the message box again.** `/team:<name>` for a team created since 0.4.18
+  was not offered by the composer and went to the model as plain text; the composer now lists the same
+  teams a run uses. Testing a project team's roles in Team Studio no longer says the team "could not be
+  found on disk".
+- **Agent Activity adds up correctly.** A run's cost is the sum of its requests rather than the last one,
+  each sub-agent is counted once (a finished one no longer shows as still running), a run whose attachments
+  could not be read is marked failed instead of running until a reload, and the chat view's runs are no
+  longer erased from the history when the sidebar chat records its own.
+- **More secrets are masked in logs and activity.** Keys written as JSON (`"apiKey": "…"`), passwords,
+  client secrets, and a bare `sk-…` key are now redacted, not only `api_key=…` forms.
+- **Smaller fixes.** Model comparisons no longer count a test's own printed `ok` lines or skipped tests
+  as passes, so a score cannot exceed 10, and a cost with some turns unbilled includes their estimates;
+  `npm run compare:models` builds the extension first; saving a team file is versioned on Windows when
+  the drive letter's case differs; and the approval timeout setting describes what it does now (the run
+  pauses on that step, and the action is declined only after a further day).
 
 - **A team's knowledge graph accumulates, and learns.** Nothing a team learned is silently dropped to enforce a size: the graph has no ceiling, because a
   ceiling that dropped the oldest entries made a team forget what it had learned. (The Learn tool still accepts at most 40 actors, 60 relations, and 12 facts per

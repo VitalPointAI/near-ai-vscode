@@ -159,3 +159,31 @@ test('legacy activity records remain explicitly unknown despite conflicting pers
   assert.equal(session?.events.every((event) => event.attribution?.status === 'legacy-unknown' && event.attribution.projectId === 'unknown-project' && event.attribution.organizationProfileId === 'unknown-profile'), true);
   assert.notDeepEqual(session?.events[0]?.attribution, currentAttribution);
 });
+
+test('a run\'s cost is the sum of its turns, not the last turn alone', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-activity-cost-'));
+  const store = new ActivityStore(root);
+  const session = await store.start({ sessionId: 'session-cost-0001', project: 'demo' });
+  await store.append(session.sessionId, { status: 'completed', kind: 'model', requestId: 'req-1', estimatedCostUsd: 0.1, summary: 'Model turn completed.' });
+  await store.append(session.sessionId, { status: 'completed', kind: 'model', requestId: 'req-2', estimatedCostUsd: 0.2, summary: 'Model turn completed.' });
+  await store.append(session.sessionId, { status: 'running', kind: 'agent', agentId: 'sub-1', summary: 'Sub-agent started.' });
+  await store.append(session.sessionId, { status: 'completed', kind: 'agent', agentId: 'sub-1', estimatedCostUsd: 0.2, summary: 'Sub-agent completed.' });
+  const saved = await new ActivityStore(root).get(session.sessionId);
+  assert.ok(Math.abs((saved?.estimatedCostUsd ?? 0) - 0.3) < 1e-9, `the turns add up and the sub-agent's own total is not added again: ${saved?.estimatedCostUsd}`);
+  assert.deepEqual(saved?.agents, { deployed: 1, active: 0, waiting: 0, completed: 1, failed: 0, cancelled: 0 });
+});
+
+test('two stores on one project keep each other\'s runs: a long-lived store does not overwrite a run another one recorded', async () => {
+  // 0.4.19 review: the sidebar chat keeps one store for the window, the chat view makes one per request, and each rewrote the whole file from its copy.
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-activity-merge-'));
+  const sidebar = new ActivityStore(root);
+  const first = await sidebar.start({ sessionId: 'session-sidebar-001', project: 'demo', summary: 'Agent conversation turn started.' });
+  const participant = new ActivityStore(root);
+  const other = await participant.start({ sessionId: 'session-participant-01', project: 'demo', summary: 'Chat view session started.' });
+  await participant.append(other.sessionId, { status: 'completed', kind: 'message', summary: 'Assistant response completed.' });
+  // The sidebar's store loaded before the chat view's run existed, and writes again.
+  await sidebar.append(first.sessionId, { status: 'completed', kind: 'message', summary: 'Assistant response completed.' });
+  const sessions = await new ActivityStore(root).list();
+  assert.deepEqual(sessions.map((session) => session.sessionId).sort(), ['session-participant-01', 'session-sidebar-001']);
+  assert.ok(sessions.every((session) => session.outcome === 'completed'), 'each run keeps its own latest state');
+});
