@@ -291,6 +291,9 @@ test('the token limit applies only to turns without a known price; priced turns 
     };
     const posted: Array<Record<string, unknown>> = [];
     const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+    // PERF-02 compacts at 70k tokens whatever the window, which would also add a summary request here; this test is about spend, so it is off, as the
+    // large window below keeps the window-relative thresholds off.
+    conversation.compactAtTokens = 0;
     try {
       await conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, budget: { maxCostUsd: 5, maxTokens: 2_000_000 },
         // A window large enough that the 900,000-token turns never fill it: this test is about spend, and a summary request would be another model call.
