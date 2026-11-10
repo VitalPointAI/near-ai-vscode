@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { redactSecrets } from '../domain/redaction';
 import { ActivityApprovalSummary, ActivityEvent, ActivityLedger, ActivitySessionSummary, ActivityStatus, addSessionStats, AttributionSnapshot, emptyAgentCounts, normalizeAttribution, normalizeSessionStats, RunOutcomeLabel, runningCost, sessionOutcome, SessionStats, summarizeAgentCounts } from '../domain/activity';
 import { redactForDisplay } from './agentActivity';
@@ -158,7 +158,7 @@ export class ActivityStore {
    * (0.4.19 review). Runs are matched by session id, and the copy updated last wins.
    */
   private async persist(): Promise<void> {
-    const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}`;
+    const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
     this.writeQueue = this.writeQueue.catch(() => undefined).then(async () => {
       const ours = new Map(this.ledger.sessions.map((session) => [session.sessionId, session]));
       for (const theirs of await this.readSessions()) {

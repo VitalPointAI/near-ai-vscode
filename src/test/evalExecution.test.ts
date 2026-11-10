@@ -48,3 +48,9 @@ test('only the hidden tests count: a printed "ok" line, a skip or a to-do is not
   assert.equal(result.passed, 1);
   assert.deepEqual(result.misses, ['handles leap years', 'rejects bad input', 'formats # signs']);
 });
+
+test('the last report of a hidden test decides, so a matching line printed earlier by the code under test cannot pass it', () => {
+  const stdout = ['ok 1 - parses dates', '# Subtest: parses dates', 'not ok 1 - parses dates'].join('\n');
+  assert.deepEqual(tapResults(stdout, ['parses dates']), { passed: 0, misses: ['parses dates'] });
+  assert.deepEqual(tapResults('not ok 1 - parses dates\nok 1 - parses dates', ['parses dates']), { passed: 1, misses: [] });
+});

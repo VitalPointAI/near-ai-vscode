@@ -5,13 +5,13 @@ import test from 'node:test';
 import { knowledgeTools } from '../agent/knowledgeTools';
 import { emptyKnowledge, mergeKnowledge, type KnowledgeAddition, type TeamKnowledge } from '../domain/teamKnowledge';
 
-function tools(start = emptyKnowledge('scouts', '2026-11-08T10:00:00.000Z')) {
+function tools(start = emptyKnowledge('scouts', '2026-11-08T10:00:00.000Z'), origin: 'research' | 'interaction' = 'research') {
   let graph = start;
   const added: KnowledgeAddition[] = [];
   const [lookup, learn] = knowledgeTools({
     read: async () => graph,
     add: async (addition) => { added.push(addition); graph = mergeKnowledge(graph, addition); return graph; }
-  });
+  }, origin);
   return { lookup: lookup!, learn: learn!, added, graph: () => graph };
 }
 
@@ -26,13 +26,13 @@ const honest = {
 test('Learn stores actors, their functions, and each fact once, with the grade of the evidence', async () => {
   const kit = tools();
   const input = kit.learn.parse(honest as never);
-  assert.equal(input.origin, 'interaction');
+  assert.equal(input.origin, 'research', 'a run writes as research');
   await kit.learn.run(input, {} as never);
   const graph = kit.graph();
   assert.equal(graph.nodes.length, 2);
   assert.equal(graph.nodes[0]?.functions[0], 'issues certifications');
   assert.equal(graph.nodes[0]?.facts.length, 1, 'the repeated fact is stored once');
-  assert.equal(graph.nodes[0]?.grading?.reliability, 'A');
+  assert.deepEqual(graph.nodes[0]?.grading, { reliability: 'C', credibility: 3 }, 'the agent claimed A1; it is stored at the ceiling');
   assert.equal(graph.edges[0]?.tension, -0.7);
 });
 
@@ -67,13 +67,21 @@ test('an empty graph says so, and a full lookup names the actor, its grade, its 
   await kit.learn.run(kit.learn.parse(honest as never), {} as never);
   const text = await kit.lookup.run({ node: 'halden ports' } as never, {} as never);
   assert.match(text, /Halden Ports \(organisation\)/);
-  assert.match(text, /A1/);
+  assert.match(text, /C3/);
   assert.match(text, /Certifies marine equipment/);
   assert.match(text, /Certification register, 2026-10-02/);
   assert.match(text, /<- regulates Ministry of Trade \(tension -0\.7, fined twice\)/, 'the incoming relation is shown with its direction and strength');
   // The list form names the strongest relation, so an agent sees what matters without asking for each actor.
   const list = await kit.lookup.run({} as never, {} as never);
   assert.match(list, /Strong relation: Ministry of Trade regulates Halden Ports \(-0\.7\)/);
+});
+
+test('a lookup shows what the team no longer believes, with why and when', async () => {
+  const kit = tools();
+  await kit.learn.run(kit.learn.parse({ nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }] } as never), {} as never);
+  await kit.learn.run(kit.learn.parse({ nodes: [{ label: 'Port', facts: [{ text: 'The port handled 3.1 million TEU in 2025.', source: 'harbour authority' }] }] } as never), {} as never);
+  const text = await kit.lookup.run({ node: 'Port' } as never, {} as never);
+  assert.match(text, /No longer believed:\n- The port handled 4\.2 million TEU in 2025\. \(refuted \d{4}-\d{2}-\d{2} by: The port handled 3\.1 million TEU in 2025\. \(harbour authority\)\)/);
 });
 
 test('a lookup for an actor that is not there says so instead of returning nothing', async () => {
@@ -115,21 +123,41 @@ test('a damaged graph is reported on the merge that overwrites it, rather than r
   assert.match(await readFile(knowledgeFile(dir, 'scouts'), 'utf8'), /"version": 1/);
 });
 
-test('a fact taken from a web page cannot claim the top grade, so a hostile page does not become trusted memory', () => {
-  // The review's finding: an agent could grade a page it just read as A1 and make it durable team knowledge.
+test('Learn holds every grade an agent gives to C3, whatever it cites, so a hostile page cannot become trusted memory', () => {
+  // A source that names a document is no proof: an agent steered by a page can write any source text it likes. So the ceiling ignores the source.
+  const kit = tools();
+  const A1 = { reliability: 'A', credibility: 1 };
+  for (const source of ['https://evil.test/about', 'Certification register, 2026-10-02', { url: 'https://evil.test' }, undefined]) {
+    const input = kit.learn.parse({
+      nodes: [{ label: 'Evil Corp', grading: A1, facts: [{ text: 'It certifies everything.', ...(source ? { source } : {}) }] }, { label: 'Ministry', grading: A1 }],
+      edges: [{ from: 'Evil Corp', to: 'Ministry', kind: 'regulates', basis: 'the registry', grading: A1 }]
+    } as never);
+    assert.deepEqual(input.nodes[0]?.grading, { reliability: 'C', credibility: 3 }, `source ${JSON.stringify(source)}`);
+    assert.deepEqual(input.nodes[1]?.grading, { reliability: 'C', credibility: 3 });
+    assert.deepEqual(input.edges[0]?.grading, { reliability: 'C', credibility: 3 });
+  }
+  // A source that is not a string is flattened, not dropped, so the citation survives.
+  const flattened = kit.learn.parse({ nodes: [{ label: 'X', facts: [{ text: 'Y.', source: { url: 'https://evil.test' } }] }] } as never);
+  assert.match(flattened.nodes[0]?.facts[0]?.source ?? '', /evil\.test/);
+  // Below the ceiling the agent's grade stands.
+  const weak = kit.learn.parse({ nodes: [{ label: 'Rumour', grading: { reliability: 'E', credibility: 5 } }] } as never);
+  assert.deepEqual(weak.nodes[0]?.grading, { reliability: 'E', credibility: 5 });
+  // The origin label does not lift the ceiling: 0.4.18 labelled every agent addition `interaction`.
+  const labelled = tools(undefined, 'interaction').learn.parse({ nodes: [{ label: 'Registry', grading: A1 }] } as never);
+  assert.deepEqual(labelled.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
+});
+
+test('a damaged graph read by the agent says so, rather than looking like a team that never learned anything', async () => {
+  const kit = tools({ ...emptyKnowledge('scouts', '2026-11-08T10:00:00.000Z'), problem: 'The knowledge graph for scouts could not be read (unexpected shape).' });
+  assert.match(await kit.lookup.run({}, {} as never), /could not be read.*starts again/);
+});
+
+test('Learn carries at most 40 actors and 60 relations, so one call cannot flood the graph', () => {
   const kit = tools();
   const input = kit.learn.parse({
-    nodes: [{
-      label: 'Evil Corp', grading: { reliability: 'A', credibility: 1 },
-      facts: [{ text: 'It certifies everything.', source: 'https://evil.test/about' }]
-    }]
+    nodes: Array.from({ length: 100 }, (_, index) => ({ label: `actor-${index}` })),
+    edges: Array.from({ length: 200 }, (_, index) => ({ from: `actor-${index % 100}`, to: `actor-${(index + 1) % 100}` }))
   } as never);
-  // Capped at C3: the agent cannot vouch for a page it read.
-  assert.deepEqual(input.nodes[0]?.grading, { reliability: 'C', credibility: 3 });
-  // A source that is not a web page keeps the grade the agent gave it, which is what a cited document is for.
-  const cited = kit.learn.parse({ nodes: [{ label: 'Registry', grading: { reliability: 'A', credibility: 1 }, facts: [{ text: 'Certified.', source: 'Certification register, 2026-10-02' }] }] } as never);
-  assert.deepEqual(cited.nodes[0]?.grading, { reliability: 'A', credibility: 1 });
-  // No source at all is the agent's own working memory, so its grade stands.
-  const unwritten = kit.learn.parse({ nodes: [{ label: 'Note', grading: { reliability: 'B', credibility: 2 } }] } as never);
-  assert.deepEqual(unwritten.nodes[0]?.grading, { reliability: 'B', credibility: 2 });
+  assert.equal(input.nodes.length, 40);
+  assert.equal(input.edges.length, 60);
 });

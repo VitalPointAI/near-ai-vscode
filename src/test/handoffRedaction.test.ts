@@ -35,5 +35,7 @@ test('redactSecrets redacts JSON keys, passwords and secrets, and bare well-know
   // Prose that only mentions a secret is not redacted.
   assert.equal(redactSecrets('The password was changed and the secret handshake works.'), 'The password was changed and the secret handshake works.');
   assert.equal(redactSecrets('{"secretary": "Ann", "passwords_checked": 3}'), '{"secretary": "Ann", "passwords_checked": 3}');
+  // A prefixed or suffixed name is still the secret: db_password, user-secret, aws_secret_access_key.
+  assert.equal(redactSecrets('db_password=hunter2 user-secret: x1 AWS_SECRET_ACCESS_KEY=abc123'), 'db_password=[REDACTED] user-secret: [REDACTED] AWS_SECRET_ACCESS_KEY=[REDACTED]'); // secret-scan: allow
   assert.equal(redactSecrets('task-12 and risk-assessment are fine'), 'task-12 and risk-assessment are fine');
 });

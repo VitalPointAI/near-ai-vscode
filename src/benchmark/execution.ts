@@ -91,19 +91,19 @@ export async function gradeExecution(task: ExecutionTask, root: string, signal?:
  */
 export function tapResults(stdout: string, names: readonly string[]): { passed: number; misses: string[] } {
   const wanted = new Set(names);
-  const seen = new Set<string>();
-  let passed = 0;
-  const misses: string[] = [];
+  // The LAST report of a name decides: the test runner reports a test when it finishes, so a matching line the code under test printed earlier (while
+  // being imported, say) cannot stand in for the real result that follows it.
+  const latest = new Map<string, boolean>();
   for (const match of stdout.matchAll(/^(not )?ok \d+ - (.+)$/gm)) {
     const line = match[2].trim();
     const directive = /\s#\s*(SKIP|TODO)\b/i.exec(line);
     // TAP escapes # and \ in a name; the directive, when there is one, follows the name after an unescaped #.
     const name = (directive ? line.slice(0, directive.index) : line).trim().replace(/\\([#\\])/g, '$1');
-    if (!wanted.has(name) || seen.has(name)) continue;
-    seen.add(name);
-    if (match[1] || directive) misses.push(name); else passed += 1;
+    if (!wanted.has(name)) continue;
+    latest.set(name, !match[1] && !directive);
   }
-  return { passed, misses };
+  const misses = [...latest].filter(([, ok]) => !ok).map(([name]) => name);
+  return { passed: [...latest.values()].filter(Boolean).length, misses };
 }
 
 /** Each hidden test file's test names, by file name. */
