@@ -57,9 +57,15 @@ function setStatus(repo, sha, state, description, targetUrl) {
  *
  * Returns { state, reasons, commentUrl }.
  */
-export function submitReview(repo, number, text, { dryRun = false, log = console.log, requireRecommendation = false } = {}) {
+export function submitReview(repo, number, text, { dryRun = false, log = console.log, requireRecommendation = false, reviewedHead } = {}) {
   const pr = viewPr(repo, number);
   if (pr.state !== 'OPEN') throw new Error(`PR #${number} is ${pr.state}; only open PRs are reviewed`);
+  // A review takes minutes; the PR can move meanwhile, and the run for the new head reviews it. Posting this one would stamp a verdict about the old head on
+  // the new one, overwriting that run's result (both run at once: the workflow's concurrency groups are per head). Say so and post nothing.
+  if (reviewedHead && pr.headRefOid !== reviewedHead) {
+    log(`#${number}: this review covers ${reviewedHead.slice(0, 7)}, but the head is now ${pr.headRefOid.slice(0, 7)}; nothing was posted, and the run for the new head reviews it.`);
+    return { state: 'none', skipped: true, reasons: [] };
+  }
   const review = parseReview(text);
   const decision = reviewDecision(review, pr.headRefOid, { requireRecommendation });
   const { table, ci } = checkSummary(normalizeChecks(pr.statusCheckRollup));
