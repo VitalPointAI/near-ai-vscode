@@ -96,3 +96,39 @@ test('every request\'s tools are identical and its messages are a byte-identical
   assert.ok(ended.every((event) => event.tool && event.durationMs !== undefined), 'tool ends name their tool and duration');
   void ShellSession;
 });
+
+// Merge with main (PR 33): #33 lets a long run from a single request be summarized; with PERF-02's 70k threshold that must happen once when the
+// transcript reaches it, not again on the turns right after (the summary itself is small), and no summary is announced when nothing was cut.
+test('a long single-request run is summarized at the absolute threshold once, and the turns after it are not summarized again', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-single-request-compact-'));
+  for (let index = 0; index < 12; index += 1) await writeFile(path.join(root, `part-${index}.md`), Array.from({ length: 500 }, (_, line) => `evidence line ${line} ${'x'.repeat(40)}`).join('\n'));
+  const sent: Array<{ summary: boolean; tokens: number }> = [];
+  let turn = 0;
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[], tools: ToolDefinition[]): AsyncGenerator<CompletionEvent> {
+      const summary = tools.length === 0 && String(messages[0]?.content ?? '').startsWith('You compress');
+      const tokens = Math.ceil(messages.reduce((total, message) => total + String(message.content ?? '').length, 0) / 4);
+      sent.push({ summary, tokens });
+      const usage = { verificationStatus: 'unknown' as const, latencyMs: 1, inputTokens: tokens, outputTokens: 20 };
+      if (summary) { yield { type: 'done', message: { role: 'assistant', content: 'Read parts 0 to N; each holds evidence.' }, finishReason: 'stop', usage }; return; }
+      turn += 1;
+      const next = turn <= 12 ? [call(`r${turn}`, 'Read', { file_path: `part-${turn - 1}.md` })] : undefined;
+      yield { type: 'done', message: next ? { role: 'assistant', content: null, tool_calls: next } : { role: 'assistant', content: 'Done.' }, finishReason: next ? 'tool_calls' : 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  try {
+    await conversation.send({ text: 'read every part', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, contextWindows: { m: 1_000_000 } });
+  } finally {
+    conversation.dispose();
+  }
+  const summaries = sent.map((request, index) => (request.summary ? index : -1)).filter((index) => index >= 0);
+  assert.ok(summaries.length >= 1, 'the single-request run was summarized');
+  for (const index of summaries) assert.equal(sent[index + 1]?.summary, false, 'a summary is never followed directly by another');
+  const turns = sent.filter((request) => !request.summary);
+  assert.ok(turns.every((request) => request.tokens < 70_000 + 8_000), `no turn is sent far past the threshold (${Math.max(...turns.map((request) => request.tokens))})`);
+  assert.ok(summaries.length < turns.length / 2, `summaries (${summaries.length}) are rare compared with turns (${turns.length})`);
+  assert.equal(posted.filter((message) => message.type === 'notice' && /was summarized/.test(String(message.text))).length, summaries.length, 'each real summary is announced once, none without one');
+});

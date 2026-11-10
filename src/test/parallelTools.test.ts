@@ -101,3 +101,27 @@ test('the prompts tell agents to batch independent calls and teams to use worktr
   const lead = teamLeadPrompt({ slug: 't', name: 'T', description: '', file: '/t.md', members: [{ name: 'a', tools: [], instructions: 'x' }] }, 'task');
   assert.match(lead, /start each with `isolation: "worktree"`/);
 });
+
+// Merge with main (PR 33): a command that ends the agent's shell finishes at once and resets the folder to the workspace; read-only commands forked
+// from that shell afterwards (and side by side in one turn) still run, at the workspace.
+test('read-only commands still run side by side after a command ended the agent\'s shell, at the folder the shell was reset to', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-fork-exit-'));
+  await mkdir(path.join(root, 'sub'));
+  const shell = new ShellSession(root);
+  try {
+    const context = { root, signal: new AbortController().signal, checkpoints: new RunCheckpoints('fork-exit'), shell, readFiles: new Set<string>() };
+    await bashTool.run(bashTool.parse({ command: 'cd sub' }), context);
+    const ended = await bashTool.run(bashTool.parse({ command: 'exit 3' }), context);
+    assert.match(ended, /ended the shell/);
+    const outputs = await Promise.all([bashTool.run(bashTool.parse({ command: 'pwd' }), context), bashTool.run(bashTool.parse({ command: 'ls' }), context)]);
+    assert.match(outputs[0], new RegExp(`${path.basename(root)}\\n\\n\\[exit code 0\\]$`), 'the fork starts where the reset shell is: the workspace');
+    assert.match(outputs[1], /^sub\n\n\[exit code 0\]$/);
+    assert.match(await bashTool.run(bashTool.parse({ command: 'echo still-serial' }), context), /^still-serial/, 'the persistent shell starts again for the next command');
+  } finally {
+    shell.dispose();
+  }
+  const calls = [call('x', 'Bash', { command: 'exit 1' }), call('a', 'Bash', { command: 'git status' }), call('b', 'Bash', { command: 'ls' })];
+  const { events } = await oneTurn(root, calls);
+  assert.deepEqual(order(events).slice(0, 2), ['start:x', 'end:x'], 'the shell-ending command runs alone and finishes');
+  assert.deepEqual(order(events).slice(2, 4), ['start:a', 'start:b'], 'the read-only calls after it still start together');
+});
