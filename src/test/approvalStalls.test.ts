@@ -102,3 +102,65 @@ test('the main conversation keeps the 0.4.19 behaviour: its approvals wait for t
   }
   assert.ok(posted.some((message) => message.type === 'tool-end' && message.callId === 'w1' && message.ok === true));
 });
+
+// Agent review of PR 34: the streak is per agent, and the pause also holds the next call of a batch.
+test('one agent\'s unanswered approvals pause the run even while another agent\'s are answered, and the pause holds the rest of a batch', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-approval-agents-'));
+  const turns: Record<string, number> = { alpha: 0, beta: 0 };
+  let leadTurn = 0;
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const system = String(messages[0]?.content ?? '');
+      const who = system.startsWith('You are alpha') ? 'alpha' : system.startsWith('You are beta') ? 'beta' : undefined;
+      if (who === 'alpha') {
+        turns.alpha += 1;
+        // One turn with four writes: the pause after the third must hold the fourth.
+        if (turns.alpha === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [1, 2, 3, 4].map((n) => call(`a${n}`, 'Write', { file_path: `alpha-${n}.md`, content: 'x' })) }, finishReason: 'tool_calls', usage }; return; }
+        yield { type: 'done', message: { role: 'assistant', content: 'alpha done' }, finishReason: 'stop', usage };
+        return;
+      }
+      if (who === 'beta') {
+        turns.beta += 1;
+        if (turns.beta <= 3) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call(`b${turns.beta}`, 'Write', { file_path: `beta-${turns.beta}.md`, content: 'x' })] }, finishReason: 'tool_calls', usage }; return; }
+        yield { type: 'done', message: { role: 'assistant', content: 'beta done' }, finishReason: 'stop', usage };
+        return;
+      }
+      leadTurn += 1;
+      if (leadTurn === 1) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('l1', 'Agent', { subagent_type: 'alpha', prompt: 'write', description: 'alpha' }), call('l2', 'Agent', { subagent_type: 'beta', prompt: 'write', description: 'beta' })] }, finishReason: 'tool_calls', usage }; return; }
+      yield { type: 'done', message: { role: 'assistant', content: 'Done.' }, finishReason: 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const posted: Array<Record<string, unknown>> = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message), path.join(root, '.ckpt'));
+  conversation.subagentApprovalWaitMs = 40;
+  conversation.approvalTimeoutsBeforePause = 3;
+  // Someone answers beta's cards at once; alpha's are left alone.
+  const answering = setInterval(() => {
+    for (const prompt of conversation.waitingPrompts()) if (/^beta-/.test(String(prompt.callId))) conversation.answerApproval(String(prompt.callId), { decision: 'allow' });
+  }, 2);
+  const agents = [
+    { name: 'alpha', description: 'alpha', tools: ['Write'], body: 'You are alpha.', file: path.join(root, 'team.md') },
+    { name: 'beta', description: 'beta', tools: ['Write'], body: 'You are beta.', file: path.join(root, 'team.md') }
+  ];
+  const running = conversation.send({ text: 'go', client: near as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, projectAgents: agents });
+  try {
+    await until(() => posted.find((message) => message.type === 'notice' && /^Paused: 3 approvals in a row went unanswered for one agent/.test(String(message.text))));
+    const started = (id: string) => posted.some((message) => message.type === 'tool-start' && String(message.callId).endsWith(`:${id}`));
+    assert.ok(started('a3'), 'alpha\'s third write ran into its third timeout');
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(started('a4'), false, 'the fourth call of the same batch waits while the run is paused');
+    clearInterval(answering);
+    const alphaCard = conversation.waitingPrompts().find((prompt) => /^alpha-/.test(String(prompt.callId)))!;
+    conversation.answerApproval(String(alphaCard.callId), { decision: 'allow' });
+    await until(() => (started('a4') ? true : undefined));
+    for (const prompt of conversation.waitingPrompts()) conversation.answerApproval(String(prompt.callId), { decision: 'allow' });
+    const answerLater = setInterval(() => { for (const prompt of conversation.waitingPrompts()) conversation.answerApproval(String(prompt.callId), { decision: 'allow' }); }, 2);
+    await running;
+    clearInterval(answerLater);
+  } finally {
+    clearInterval(answering);
+    conversation.dispose();
+  }
+  assert.ok(posted.some((message) => message.type === 'tool-end' && String(message.callId).endsWith(':b1') && message.ok === true), 'beta\'s answered writes ran');
+});

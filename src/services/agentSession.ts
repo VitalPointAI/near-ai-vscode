@@ -325,6 +325,7 @@ export class AgentConversation {
       maxOutputTokens: request.maxOutputTokens,
       ...(request.modelDeadlineMs ? { deadlineMs: request.modelDeadlineMs } : {}),
       ...(request.backupModel ? { backupModel: request.backupModel } : {}),
+      beforeTool: (signal) => this.whileRunPaused(signal),
       beforeTurn: async (transcript, lastUsage, signal) => {
         this.enforceBudget(request, abort);
         await this.whileRunPaused(signal);
@@ -480,7 +481,7 @@ export class AgentConversation {
 
   private halt(): void {
     this.resumeRun(false);
-    this.approvalTimeoutStreak = 0;
+    this.approvalTimeoutStreaks.clear();
     this.abort?.abort();
     this.abort = undefined;
     for (const agent of this.agents.values()) agent.abort.abort();
@@ -717,6 +718,7 @@ export class AgentConversation {
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt) } } : {}),
               // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
               ...(request.modelDeadlineMs ? { deadlineMs: request.modelDeadlineMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
+              beforeTool: (signal) => this.whileRunPaused(signal),
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
                 await this.whileRunPaused(signal);
@@ -1040,7 +1042,11 @@ export class AgentConversation {
   public subagentApprovalWaitMs = 20_000;
   /** PERF-01: consecutive "awaiting approval" outcomes that pause the run (nearAi.agent.approvalTimeoutsBeforePause; 0 never pauses). */
   public approvalTimeoutsBeforePause = 3;
-  private approvalTimeoutStreak = 0;
+  /**
+   * Consecutive "awaiting approval" outcomes, per agent (agent review of PR 34): one agent's answered approval does not reset another agent's count,
+   * so an agent that keeps stalling is caught even while its siblings' approvals are being answered.
+   */
+  private readonly approvalTimeoutStreaks = new Map<string, number>();
   private runPause: { wait: Promise<void>; release: () => void } | undefined;
 
   /** Holds every agent of the run before its next model turn while the run is paused for unanswered approvals. */
@@ -1052,13 +1058,13 @@ export class AgentConversation {
   }
 
   /** Pauses the run after too many approvals in a row went unanswered, so it stops working around decisions nobody made. */
-  private pauseRun(): void {
+  private pauseRun(streak: number): void {
     if (this.runPause) return;
     let release = () => {};
     const wait = new Promise<void>((resolve) => { release = resolve; });
     this.runPause = { wait, release };
     for (const id of [this.mainAgentId, ...this.agents.keys()]) if (id) this.activity?.setPaused(id, true);
-    this.post({ type: 'notice', text: `Paused: ${this.approvalTimeoutStreak} approvals in a row went unanswered, so the run stopped before its next step instead of carrying on without them. Answer a waiting approval, press Resume on an agent, or send a message to carry on.` });
+    this.post({ type: 'notice', text: `Paused: ${streak} approvals in a row went unanswered for one agent, so the run stopped before its next step instead of carrying on without them. Answer a waiting approval, press Resume on an agent, or send a message to carry on.` });
   }
 
   /** Ends a pause; `announce` false when the run is ending anyway. */
@@ -1066,7 +1072,7 @@ export class AgentConversation {
     const pause = this.runPause;
     if (!pause) return;
     this.runPause = undefined;
-    this.approvalTimeoutStreak = 0;
+    this.approvalTimeoutStreaks.clear();
     for (const id of [this.mainAgentId, ...this.agents.keys()]) if (id) this.activity?.setPaused(id, false);
     pause.release();
     if (announce) this.post({ type: 'notice', text: 'Resumed.' });
@@ -1098,7 +1104,7 @@ export class AgentConversation {
         if (timer) clearTimeout(timer);
         if (parkLimit) clearTimeout(parkLimit);
         this.closePrompt(request.callId, cancelled);
-        if (!cancelled) { this.approvalTimeoutStreak = 0; this.resumeRun(); }
+        if (!cancelled) { this.approvalTimeoutStreaks.delete(agentId ?? 'main'); this.resumeRun(); }
         if (returned) {
           if (!cancelled) unattended?.onLate(reply);
           return;
@@ -1114,9 +1120,11 @@ export class AgentConversation {
           if (!this.approvals.has(request.callId)) return;
           returned = true;
           if (agentId) this.activity?.approvalTimedOut(agentId);
-          this.approvalTimeoutStreak += 1;
+          const streak = (this.approvalTimeoutStreaks.get(agentId ?? 'main') ?? 0) + 1;
+          this.approvalTimeoutStreaks.set(agentId ?? 'main', streak);
+          // Paused before the call returns, so the agent's next call in the same batch already waits (agent review of PR 34).
+          if (this.approvalTimeoutsBeforePause > 0 && streak >= this.approvalTimeoutsBeforePause) this.pauseRun(streak);
           resolve({ decision: 'pending' });
-          if (this.approvalTimeoutsBeforePause > 0 && this.approvalTimeoutStreak >= this.approvalTimeoutsBeforePause) this.pauseRun();
           parkLimit = setTimeout(() => { if (this.approvals.delete(request.callId)) this.closePrompt(request.callId, true); }, parkLimitMs);
           parkLimit.unref?.();
         }, Math.max(0, unattended.waitMs));

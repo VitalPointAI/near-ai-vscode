@@ -175,6 +175,8 @@ export interface AgentRunOptions {
    * Saving it means a reload loses at most the call in flight, and a resumed run keeps the results of everything that had finished.
    */
   onProgress?(transcript: AgentMessage[]): void | Promise<void>;
+  /** Called before each tool call, a call in a batch included; may wait (a run paused after unanswered approvals). */
+  beforeTool?(signal: AbortSignal): Promise<void>;
   /** Called when the model answers without a tool call; returning messages continues the run with them. */
   afterAnswer?(transcript: AgentMessage[], signal: AbortSignal): Promise<AgentMessage[] | undefined>;
   /** The user's messages sent during the run; a retry wait, or a request still held by the model's cooldown, ends early when one arrives. */
@@ -546,6 +548,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
   }
 
   private async executeCall(call: ToolCall, signal: AbortSignal): Promise<string> {
+    if (signal.aborted) return 'Cancelled before this tool ran.';
+    await this.options.beforeTool?.(signal);
     if (signal.aborted) return 'Cancelled before this tool ran.';
     const tool = this.byName.get(call.function.name);
     if (!tool) return `Error: unknown tool "${call.function.name}". Available tools: ${[...this.byName.keys()].join(', ')}.`;
