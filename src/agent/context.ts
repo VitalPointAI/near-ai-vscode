@@ -57,7 +57,8 @@ export function trimOldToolResults(messages: AgentMessage[], keepRecent = KEEP_R
 export async function compactConversation(client: Client, model: string, messages: AgentMessage[], signal: AbortSignal, keepRecentMessages = 8): Promise<AgentMessage[] | undefined> {
   const system = messages[0]?.role === 'system' ? [messages[0]] : [];
   const body = messages.slice(system.length);
-  let cut = Math.max(0, body.length - keepRecentMessages);
+  // At least one message is kept, so the cut always lands on a message (keepRecentMessages 0 would index past the end).
+  let cut = Math.max(0, body.length - Math.max(1, keepRecentMessages));
   while (cut > 0 && body[cut].role !== 'user' && body[cut].role !== 'assistant') cut -= 1;
   if (cut <= 0) return undefined;
   const older = body.slice(0, cut);

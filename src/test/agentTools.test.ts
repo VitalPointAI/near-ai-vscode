@@ -152,9 +152,10 @@ test('a command that ends the shell finishes at once, and the next command gets 
     assert.equal(exited.exitCode, 3);
     assert.equal(exited.timedOut, false);
     assert.match(exited.output, /before[\s\S]*ended the shell with exit code 3/);
-    const next = await shell.run('echo "again:${KEPT:-unset}"');
+    const next = await shell.run('echo "again:${KEPT:-unset}"; pwd');
     assert.equal(next.exitCode, 0);
     assert.match(next.output, /again:unset/);
+    assert.equal(path.resolve(next.cwd), path.resolve(root), 'the earlier cd / was reset too, as the message says: the fresh shell starts in the workspace');
     const failed = await shell.run('set -e; false; echo unreachable', 60_000);
     assert.equal(failed.exitCode, 1);
     assert.doesNotMatch(failed.output, /unreachable/);

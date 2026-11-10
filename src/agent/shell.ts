@@ -29,6 +29,7 @@ export class ShellSession {
   private pending = '';
   private queue: Promise<unknown> = Promise.resolve();
   private cwd: string;
+  private readonly root: string;
   private readonly jobs = new Map<string, BackgroundJob>();
   private scripts: string | undefined;
   private resolvedShell: string | undefined;
@@ -36,6 +37,7 @@ export class ShellSession {
   /** With no shellPath, bash is looked up on first use, so a machine without it fails only the Bash tool, not the run. */
   public constructor(root: string, shellPath?: string, private readonly extraEnv: NodeJS.ProcessEnv = {}, private readonly allowEnv: string[] = []) {
     this.cwd = root;
+    this.root = root;
     this.resolvedShell = shellPath;
   }
 
@@ -126,6 +128,8 @@ export class ShellSession {
       const ended = () => {
         if (this.process === shell) this.process = undefined;
         killGroup(shell);
+        // The message says cd was reset, so it is: the fresh shell starts in the workspace, not wherever `cd /; exit` left it.
+        this.cwd = this.root;
         const code = shell.exitCode;
         finish({ output: truncate(`${this.pending}\n[The command ended the shell${code === null ? '' : ` with exit code ${code}`} (exit, or a failure under set -e). A fresh shell starts for the next command, so earlier cd and exported variables were reset.]`), exitCode: code, timedOut: false, cwd: this.cwd });
       };

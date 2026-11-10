@@ -15,7 +15,7 @@
   failed with "old_string was not found"; it now matches and keeps the file's line endings.
 - **File search no longer wanders into `node_modules` and `.git` by accident.** A pattern such as
   `**/routes/**`, `.github/...` or `**/distance*` searched every skipped folder because it happened to
-  contain "out", ".git" or "dist". Only a folder the pattern names in full is searched now.
+  contain "out", ".git" or "dist". Only a skipped folder the pattern names in full (`node_modules`, say) is searched now, and only folders of that name.
 - **Search keeps credential files out on Windows and in surrounding lines.** Grep failed to recognise
   files like `.env` behind a `C:\` path, and showed the lines around a match in a credentials file.
   Both are hidden now unless you search that file by path.
