@@ -32,7 +32,9 @@ export const DEFAULT_MAX_EVENT_BYTES_PER_SESSION = 256 * 1024;
  * maxSessions bounds how many runs the history (and the Agent Activity overview) keeps; only the
  * newest `maxSessionsWithEvents` keep their event lists, so the file stays small.
  */
-export interface ActivityStoreOptions { clock?: () => string; fileSystem?: ActivityFileSystem; maxSessions?: number; maxEventsPerSession?: number; maxEventBytesPerSession?: number; maxSessionsWithEvents?: number; }
+export interface ActivityStoreOptions { clock?: () => string; fileSystem?: ActivityFileSystem; maxSessions?: number; maxEventsPerSession?: number; maxEventBytesPerSession?: number; maxSessionsWithEvents?: number; maxFileBytes?: number; }
+/** The most the whole file may hold; past it, the oldest sessions' events are dropped (their summaries and counters stay). */
+export const DEFAULT_MAX_FILE_BYTES = 4 * 1024 * 1024;
 /** `title` must already be redacted and short (runTitleFor); it is stored as given, re-redacted on load. */
 export interface StartSessionInput { sessionId?: string; project: string; phase?: string; plans?: string[]; model?: string; summary?: string; attribution?: AttributionSnapshot; runId?: string; conversationId?: string; title?: string; }
 export interface ActivityUpdate {
@@ -71,7 +73,13 @@ export class ActivityStore {
   private readonly maxSessionsWithEvents: number;
   private ledger: ActivityLedger = { version: STORE_VERSION, sessions: [] };
   private loaded = false;
-  private writeQueue: Promise<void> = Promise.resolve();
+  private readonly maxFileBytes: number;
+  /** The write in flight (or done), and the one queued behind it that every change made meanwhile joins (see persist). */
+  private flushing: Promise<void> = Promise.resolve();
+  private queued: Promise<void> | undefined;
+  private dirty = false;
+  /** Full-file writes so far, for tests and diagnostics. */
+  public writes = 0;
   public constructor(private readonly workspaceRoot: string, options: ActivityStoreOptions = {}) {
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.fileSystem = options.fileSystem ?? defaultFileSystem;
@@ -79,11 +87,25 @@ export class ActivityStore {
     this.maxEventsPerSession = Math.max(1, Math.min(20_000, options.maxEventsPerSession ?? DEFAULT_MAX_EVENTS_PER_SESSION));
     this.maxEventBytesPerSession = Math.max(1_024, Math.min(16 * 1024 * 1024, options.maxEventBytesPerSession ?? DEFAULT_MAX_EVENT_BYTES_PER_SESSION));
     this.maxSessionsWithEvents = Math.max(1, Math.min(100, options.maxSessionsWithEvents ?? 30));
+    this.maxFileBytes = Math.max(16 * 1024, Math.min(64 * 1024 * 1024, options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES));
   }
   public get filePath(): string { return path.join(this.workspaceRoot, '.planning', '.near-ai', 'activity.json'); }
   public async list(): Promise<ActivitySessionSummary[]> { await this.load(); return this.ledger.sessions.map(cloneSession); }
   /** Reads the file again (another store instance, or another window, wrote it). For readers only. */
-  public async reload(): Promise<void> { await this.writeQueue.catch(() => undefined); this.loaded = false; await this.load(); }
+  public async reload(): Promise<void> { await this.flush(); this.loaded = false; await this.load(); }
+  /** Waits until every change made so far is on disk. */
+  public async flush(): Promise<void> {
+    while (this.inFlight.size) await Promise.allSettled([...this.inFlight]);
+    await (this.queued ?? this.flushing).catch(() => undefined);
+  }
+  /** Changes still being made (an append that has not reached persist yet), so flush() also waits for ones nobody awaited. */
+  private readonly inFlight = new Set<Promise<unknown>>();
+  private track<T>(work: Promise<T>): Promise<T> {
+    this.inFlight.add(work);
+    const done = () => { this.inFlight.delete(work); };
+    work.then(done, done);
+    return work;
+  }
   public async get(sessionId: string): Promise<ActivitySessionSummary | undefined> {
     if (!SESSION_ID.test(sessionId)) return undefined;
     await this.load();
@@ -102,7 +124,8 @@ export class ActivityStore {
     await this.persist();
     return input.summary ? this.append(sessionId, { status: 'running', summary: input.summary, kind: 'session' }) : cloneSession(session);
   }
-  public async append(sessionId: string, update: ActivityUpdate): Promise<ActivitySessionSummary> {
+  public append(sessionId: string, update: ActivityUpdate): Promise<ActivitySessionSummary> { return this.track(this.appendNow(sessionId, update)); }
+  private async appendNow(sessionId: string, update: ActivityUpdate): Promise<ActivitySessionSummary> {
     await this.load();
     const session = this.ledger.sessions.find((candidate) => candidate.sessionId === sessionId);
     if (!session) throw new Error('Activity session was not found.');
@@ -165,11 +188,46 @@ export class ActivityStore {
     if (this.loaded) return; this.loaded = true;
     try { const parsed = JSON.parse(await this.fileSystem.readFile(this.filePath, 'utf8')) as Partial<ActivityLedger>; if (parsed.version !== STORE_VERSION || !Array.isArray(parsed.sessions)) throw new Error('Unsupported activity ledger.'); this.ledger = { version: STORE_VERSION, sessions: parsed.sessions.map((session) => normalizeSession(session, this.maxEventsPerSession, this.maxEventBytesPerSession)).filter((value): value is ActivitySessionSummary => Boolean(value)).slice(0, this.maxSessions) }; } catch { this.ledger = { version: STORE_VERSION, sessions: [] }; }
   }
-  private async persist(): Promise<void> {
-    for (const session of this.ledger.sessions.slice(this.maxSessionsWithEvents)) if (session.events.length) session.events = [];
-    const payload = `${JSON.stringify(this.ledger)}\n`; const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}`;
-    this.writeQueue = this.writeQueue.then(async () => { await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath); }); await this.writeQueue;
+  /**
+   * Saves the ledger. Writes are coalesced (agent review of PR 34): every change made while a write is in flight joins ONE queued write, which builds
+   * its payload when it starts, so a burst of appends costs at most two full-file writes instead of one each. Every caller's promise resolves only
+   * after a write that includes its change, so nothing is lost; flush() waits for all of them.
+   */
+  private persist(): Promise<void> {
+    this.dirty = true;
+    if (!this.queued) {
+      const next = this.flushing.catch(() => undefined).then(() => { this.queued = undefined; return this.writeNow(); });
+      this.queued = next;
+      this.flushing = next.catch(() => undefined);
+    }
+    return this.queued;
   }
+
+  private async writeNow(): Promise<void> {
+    if (!this.dirty) return;
+    this.dirty = false;
+    for (const session of this.ledger.sessions.slice(this.maxSessionsWithEvents)) if (session.events.length) session.events = [];
+    let payload = `${JSON.stringify(this.ledger)}\n`;
+    // The whole file is bounded too: the oldest sessions give up their events first; their summaries and counters stay.
+    for (let index = this.ledger.sessions.length - 1; index >= 1 && Buffer.byteLength(payload, 'utf8') > this.maxFileBytes; index -= 1) {
+      if (!this.ledger.sessions[index].events.length) continue;
+      this.ledger.sessions[index].events = [];
+      payload = `${JSON.stringify(this.ledger)}\n`;
+    }
+    // Still over: the newest session keeps its newest events, as many as fit.
+    const newest = this.ledger.sessions[0];
+    if (newest && Buffer.byteLength(payload, 'utf8') > this.maxFileBytes) {
+      const events = newest.events;
+      newest.events = [];
+      const base = Buffer.byteLength(JSON.stringify(this.ledger), 'utf8');
+      newest.events = boundEvents(events, this.maxEventsPerSession, Math.max(1_024, this.maxFileBytes - base - 4 * 1_024));
+      payload = `${JSON.stringify(this.ledger)}\n`;
+    }
+    const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}`;
+    this.writes += 1;
+    await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath);
+  }
+
 }
 const interrupted = new Map<string, Promise<number>>();
 /**

@@ -117,3 +117,28 @@ test('a log without a recorded split is estimated to fit the wall time and label
   assert.equal(run.approvalTimeouts, 4, 'expired approvals in the counters count when events were cut');
   assert.match(formatRunReport(runPerformanceReport({ sessions: [session] })), /\(est\.\)/);
 });
+
+// Agent review of PR 34: a burst of appends must not rewrite the whole ledger once per event, and nothing may be lost.
+test('a burst of appends is coalesced into a few full writes, flush waits for all of them, and the file has a total bound', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-perf07-burst-'));
+  const store = new ActivityStore(root);
+  const { sessionId } = await store.start({ sessionId: 'session-perf07-burst', project: 'demo' });
+  const before = store.writes;
+  const appends = Array.from({ length: 50 }, (_, index) => store.append(sessionId, { status: 'completed', kind: 'tool', tool: 'Bash', summary: `Tool call ${index} finished.` }));
+  await Promise.all(appends);
+  assert.ok(store.writes - before <= 2, `50 appends in a burst cost ${store.writes - before} full writes`);
+  assert.equal((await new ActivityStore(root).get(sessionId))?.events.length, 50, 'every event reached the file');
+
+  for (let index = 0; index < 20; index += 1) void store.append(sessionId, { status: 'completed', kind: 'tool', summary: `Late ${index}.` });
+  await store.flush();
+  assert.equal((await new ActivityStore(root).get(sessionId))?.events.length, 70, 'flush waits for appends nobody awaited');
+
+  const capped = new ActivityStore(await mkdtemp(path.join(tmpdir(), 'near-ai-perf07-cap-')), { maxFileBytes: 64 * 1024 });
+  for (let session = 0; session < 4; session += 1) {
+    const started = await capped.start({ sessionId: `session-perf07-cap-${session}`, project: 'demo' });
+    await Promise.all(Array.from({ length: 200 }, (_, index) => capped.append(started.sessionId, { status: 'completed', kind: 'tool', summary: `Event ${index} ${'x'.repeat(100)}.` })));
+  }
+  await capped.flush();
+  assert.ok((await readFile(capped.filePath, 'utf8')).length <= 64 * 1024, 'the whole file stays under its bound');
+  assert.ok(((await new ActivityStore(path.dirname(path.dirname(path.dirname(capped.filePath)))).get('session-perf07-cap-3'))?.events.length ?? 0) > 0, 'the newest session keeps its events');
+});
