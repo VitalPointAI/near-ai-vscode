@@ -130,7 +130,8 @@ is usually there to answer one and runs used to wait hours on their own checks
   the SHA-256 recorded in `.planning/.near-ai/verifiers.json` when they were
   written (a file agents cannot change without asking); a scaffolded file that
   differs in any way asks. When the run has read outside content, any file of
-  the closure changed during the run makes the script ask.
+  the closure changed after the moment any agent of the run first read it
+  makes the script ask, however late the agent running the script started.
 
 Everything else asks exactly as before, including for sub-agents: a push, a
 delete outside the project, publishing, any command that can reach the

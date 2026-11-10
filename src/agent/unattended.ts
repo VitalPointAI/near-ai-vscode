@@ -25,6 +25,8 @@ export interface UnattendedScope {
   planScripts?: string[];
   /** When the run started (ms): a script changed since then was written by this run. */
   runStartedAt?: number;
+  /** When the run (any of its agents) first read outside content (ms); a file changed after it asks. Falls back to runStartedAt when unknown. */
+  taintedAt?: number;
 }
 
 export interface UnattendedVerdict { allow: boolean; reason: string }
@@ -206,7 +208,8 @@ async function checkClosure(entry: string, realRoot: string, context: CommandCon
     if (done.size + onPath.size >= MAX_CLOSURE_FILES) return 'it loads too many files to check';
     const info = await stat(file);
     if (!info.isFile() || info.size > MAX_SCRIPT_BYTES) return `${shown} is not a small regular file`;
-    if (tainted && context.runStartedAt !== undefined && info.mtimeMs >= context.runStartedAt - 1_000) return `${shown} changed during this run, which has read outside content`;
+    const since = context.taintedAt ?? context.runStartedAt;
+    if (tainted && since !== undefined && info.mtimeMs >= since - 1_000) return `${shown} changed after this run read outside content`;
     const text = await readFile(file, 'utf8');
     const recorded = manifest[shown] ?? (VERIFIER_FILES[shown] !== undefined ? contentHash(VERIFIER_FILES[shown]) : undefined);
     if (recorded !== undefined && contentHash(text) !== recorded) return `${shown} is a scaffolded verifier that has changed since it was scaffolded`;

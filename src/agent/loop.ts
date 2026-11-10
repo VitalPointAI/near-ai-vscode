@@ -705,7 +705,7 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     return {
       root, cwd, home: homedir(), packageScripts, trustedToolRoots: context.trustedToolRoots, writtenScratch: [...this.writtenScratch], ...gsd, safety: this.options.safety, signal: context.signal,
       ...(this.options.riskSwitches ? { riskSwitches: this.options.riskSwitches } : {}),
-      ...(this.options.unattended ? { unattended: { runStartedAt: this.startedAt, ...this.options.unattended } } : {})
+      ...(this.options.unattended ? { unattended: { runStartedAt: this.startedAt, ...(this.grants.taintedAt !== undefined ? { taintedAt: this.grants.taintedAt } : {}), ...this.options.unattended } } : {})
     };
   }
 

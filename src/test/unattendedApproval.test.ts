@@ -36,10 +36,10 @@ async function project(): Promise<string> {
   return root;
 }
 
-async function decide(root: string, command: string, options: { mode?: ActionPolicyMode; unattended?: boolean; tainted?: boolean; planScripts?: string[]; runStartedAt?: number } = {}) {
+async function decide(root: string, command: string, options: { mode?: ActionPolicyMode; unattended?: boolean; tainted?: boolean; planScripts?: string[]; runStartedAt?: number; taintedAt?: number } = {}) {
   const grants = new RunGrants();
   grants.tainted = options.tainted === true;
-  const auto: AutoApprovalContext = { root, cwd: root, home: homedir(), packageScripts: { test: 'node --test', lint: 'tsc --noEmit' }, ...(options.unattended === false ? {} : { unattended: { planScripts: options.planScripts ?? [], runStartedAt: options.runStartedAt ?? 0 } }) };
+  const auto: AutoApprovalContext = { root, cwd: root, home: homedir(), packageScripts: { test: 'node --test', lint: 'tsc --noEmit' }, ...(options.unattended === false ? {} : { unattended: { planScripts: options.planScripts ?? [], runStartedAt: options.runStartedAt ?? 0, ...(options.taintedAt !== undefined ? { taintedAt: options.taintedAt } : {}) } }) };
   return decidePermissionAsync('shell', command, { mode: options.mode ?? 'mostly-autonomous', emergencyStop: false }, RULES, grants, auto);
 }
 
@@ -171,4 +171,39 @@ test('the whole import closure is checked: changed scaffold helpers, new imports
   const { utimes: touch } = await import('node:fs/promises');
   await touch(path.join(root, 'scripts', 'helper-clean.mjs'), new Date(), new Date());
   assert.equal(await run('node scripts/check-clean-import.mjs', { tainted: true, runStartedAt: startedAt }), 'ask', 'a helper changed during a tainted run asks, not only the entry');
+});
+
+// Review of PR 34: the recency check uses the moment the RUN first read outside content, not the start of the agent that runs the script.
+test('a script written after the main agent read outside content still asks when a helper started later runs it', async () => {
+  const root = await project();
+  const grants = new RunGrants();
+  assert.equal(grants.taintedAt, undefined);
+  grants.tainted = true;
+  const taintedAt = grants.taintedAt!;
+  assert.equal(typeof taintedAt, 'number');
+  grants.tainted = true;
+  assert.equal(grants.taintedAt, taintedAt, 'the first moment is kept');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // The main agent writes the script after reading outside content; the helper that runs it starts a minute later.
+  await writeFile(path.join(root, 'scripts', 'verify-planted.sh'), 'echo ok\n');
+  const helperStartedAt = Date.now() + 60_000;
+  assert.notEqual((await decide(root, 'bash scripts/verify-planted.sh', { tainted: true, runStartedAt: helperStartedAt, taintedAt })).decision, 'allow', 'still asks');
+  assert.equal((await decide(root, 'bash scripts/verify-planted.sh', { tainted: true, runStartedAt: helperStartedAt, taintedAt: Date.now() + 120_000 })).decision, 'allow', 'a script from before the taint runs');
+
+  const { AgentRun } = await import('../agent/loop');
+  const { RunCheckpoints } = await import('../agent/checkpoints');
+  const { ShellSession } = await import('../agent/shell');
+  const { CORE_TOOLS } = await import('../agent/tools');
+  let turn = 0;
+  const asked: string[] = [];
+  const client = { async *streamCompletion(): AsyncGenerator<import('../services/nearAiClient').CompletionEvent> { turn += 1; yield { type: 'done', message: turn === 1 ? { role: 'assistant', content: null, tool_calls: [{ id: 'v1', type: 'function', function: { name: 'Bash', arguments: JSON.stringify({ command: 'bash scripts/verify-planted.sh' }) } }] } : { role: 'assistant', content: 'done' }, finishReason: 'stop', usage: { verificationStatus: 'unknown', latencyMs: 1 } }; } };
+  const shell = new ShellSession(root);
+  try {
+    // The helper shares the run's grants (tainted earlier by the main agent) and is created after the script was written.
+    const helper = new AgentRun({ client, model: 'm', tools: CORE_TOOLS, grants, unattended: {}, context: { root, checkpoints: new RunCheckpoints('taint'), shell, readFiles: new Set() }, policy: { mode: 'mostly-autonomous', emergencyStop: false }, rules: RULES, requestApproval: async (request) => { asked.push(request.title); return { decision: 'deny' }; }, emit: () => undefined });
+    await helper.run([{ role: 'user', content: 'verify' }], new AbortController().signal);
+  } finally {
+    shell.dispose();
+  }
+  assert.equal(asked.length, 1, 'the helper was asked, not allowed silently');
 });

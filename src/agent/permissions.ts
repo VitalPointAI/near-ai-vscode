@@ -125,7 +125,17 @@ export class RunGrants {
   /** Allow-list entries added from an approval card ("always allow …") during this run. */
   public readonly allowRules = new Set<string>();
   /** Set once the run reads outside content; some actions then always ask. */
-  public tainted = false;
+  private wasTainted = false;
+  /**
+   * When any agent of the run first read outside content (ms), shared with every sub-agent through these grants (review of PR 34): a script changed
+   * after this moment may have been shaped by that content, whichever agent wrote it and whenever the agent running it started.
+   */
+  public taintedAt: number | undefined;
+  public get tainted(): boolean { return this.wasTainted; }
+  public set tainted(value: boolean) {
+    if (value && !this.wasTainted) this.taintedAt = Date.now();
+    this.wasTainted = value;
+  }
   /**
    * The engagement-wide grant for intrusive cyber steps (D-04): granted once for a run, and each
    * step must still name that engagement and an in-scope target. Undefined for every other run, so
