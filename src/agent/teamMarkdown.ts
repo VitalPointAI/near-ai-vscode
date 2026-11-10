@@ -1,5 +1,5 @@
 import { parseFrontmatter } from '../gsd/library';
-import { DEFAULT_TOOLS, parseTeam, renderTeam, slugify } from './teams';
+import { DEFAULT_TOOLS, parsePrivacy, parseTeam, renderTeam, resolveMemberTools, slugify } from './teams';
 
 // The Team Studio edits a team as a draft, but the Markdown file stays the source of truth: saving
 // a draft over an existing file rewrites only what the draft changed. Unknown frontmatter keys,
@@ -10,17 +10,22 @@ import { DEFAULT_TOOLS, parseTeam, renderTeam, slugify } from './teams';
  * A member as the studio edits it. `tools: null` means no `tools:` line (the default set). `reportsTo` carries the team's hierarchy: without it in this
  * type the studio rewrote every save from a draft that had no such field and silently deleted the hierarchy (0.4.19 review).
  */
-export interface DraftMember { name: string; role: string; model: string; tools: string[] | null; instructions: string; reportsTo?: string }
+/** `privacy: 'private'` keeps the member on a NEAR TEE or local model (a `privacy: private` line); like reportsTo, it must be carried or a save drops it. */
+export interface DraftMember { name: string; role: string; model: string; tools: string[] | null; instructions: string; reportsTo?: string; privacy?: 'private' }
 export interface TeamDraft { name: string; description: string; members: DraftMember[] }
 
-interface Section { raw: string; name: string; role?: string; model?: string; tools?: string[]; reportsTo?: string; instructions: string }
+interface Section { raw: string; name: string; role?: string; model?: string; tools?: string[]; reportsTo?: string; privacy?: 'private'; instructions: string }
 interface TeamParts { frontmatter?: { open: string; inner: string; close: string }; preamble: string; sections: Section[] }
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const SECTION_START = /^##\s+/gm;
-const FIELD = /^(role|model|tools|reports-to):\s*(.*)$/i;
+const FIELD = /^(role|model|tools|reports-to|privacy):\s*(.*)$/i;
 
 /** Splits a team file the same way parseTeam reads it, keeping each part's exact text. */
+function privacyOf(value: string | undefined): 'private' | undefined {
+  try { return parsePrivacy(value, 'member'); } catch { return undefined; }
+}
+
 function splitTeam(text: string): TeamParts {
   const match = FRONTMATTER.exec(text);
   let frontmatter: TeamParts['frontmatter'];
@@ -47,6 +52,7 @@ function splitTeam(text: string): TeamParts {
       raw, name: slugify(heading.trim()),
       ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}),
       ...(fields['reports-to'] ? { reportsTo: slugify(fields['reports-to']) } : {}),
+      ...(privacyOf(fields.privacy) ? { privacy: 'private' as const } : {}),
       ...(fields.tools !== undefined && fields.tools ? { tools: fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean) } : {}),
       instructions: rest.slice(line).join('\n').trim()
     };
@@ -62,7 +68,7 @@ export function draftFromMarkdown(text: string, file: string): TeamDraft {
     name: team.name, description: team.description,
     members: team.members.map((member) => {
       const section = sections.find((candidate) => candidate.name === member.name);
-      return { name: member.name, role: member.role ?? '', model: member.model ?? '', tools: section?.tools ? [...section.tools] : null, instructions: member.instructions, ...(section?.reportsTo ? { reportsTo: section.reportsTo } : {}) };
+      return { name: member.name, role: member.role ?? '', model: member.model ?? '', tools: section?.tools ? [...section.tools] : null, instructions: member.instructions, ...(section?.reportsTo ? { reportsTo: section.reportsTo } : {}), ...(member.privacy ? { privacy: member.privacy } : {}) };
     })
   };
 }
@@ -70,7 +76,7 @@ export function draftFromMarkdown(text: string, file: string): TeamDraft {
 function renderMembers(draft: TeamDraft) {
   return draft.members.map((member) => ({
     name: member.name, ...(member.role.trim() ? { role: member.role.trim() } : {}), ...(member.model.trim() ? { model: member.model.trim() } : {}),
-    ...(member.tools ? { tools: member.tools } : {}), ...(member.reportsTo?.trim() ? { reportsTo: member.reportsTo.trim() } : {}), instructions: member.instructions.trim()
+    ...(member.tools ? { tools: member.tools } : {}), ...(member.reportsTo?.trim() ? { reportsTo: member.reportsTo.trim() } : {}), ...(member.privacy === 'private' ? { privacy: 'private' as const } : {}), instructions: member.instructions.trim()
   }));
 }
 
@@ -78,6 +84,7 @@ function renderSection(member: ReturnType<typeof renderMembers>[number]): string
   const lines = [`## ${member.name}`];
   if (member.role) lines.push(`role: ${member.role}`);
   if (member.model) lines.push(`model: ${member.model}`);
+  if (member.privacy) lines.push(`privacy: ${member.privacy}`);
   // The hierarchy is written back, so a save keeps it (0.4.19 review: it was read but never written, so every save deleted it).
   if (member.reportsTo) lines.push(`reports-to: ${member.reportsTo}`);
   if (member.tools?.length) lines.push(`tools: ${member.tools.join(', ')}`);
@@ -87,7 +94,7 @@ function renderSection(member: ReturnType<typeof renderMembers>[number]): string
 
 function sameMember(section: Section, member: ReturnType<typeof renderMembers>[number]): boolean {
   return section.name === member.name && (section.role ?? '') === (member.role ?? '') && (section.model ?? '') === (member.model ?? '')
-    && JSON.stringify(section.tools ?? null) === JSON.stringify(member.tools ?? null) && section.instructions === member.instructions;
+    && JSON.stringify(section.tools ?? null) === JSON.stringify(member.tools ?? null) && (section.privacy ?? '') === (member.privacy ?? '') && section.instructions === member.instructions;
 }
 
 /** Sets one frontmatter key, keeping its line (and quoting) when the value is unchanged. */
@@ -170,7 +177,8 @@ export function checkDraft(draft: TeamDraft, original?: string): { markdown: str
     const expected = renderMembers(draft);
     const same = team.name === draft.name.trim() && team.description === draft.description.trim() && team.members.length === expected.length
       && team.members.every((member, index) => member.name === expected[index].name && (member.role ?? '') === (expected[index].role ?? '') && (member.model ?? '') === (expected[index].model ?? '')
-        && JSON.stringify(member.tools) === JSON.stringify(expected[index].tools ?? DEFAULT_TOOLS) && member.instructions === expected[index].instructions);
+        // A tools line is read with the document-output rule applied (resolveMemberTools), so the expected list gets it too.
+        && JSON.stringify(member.tools) === JSON.stringify(expected[index].tools ? resolveMemberTools(expected[index].tools!) : DEFAULT_TOOLS) && (member.privacy ?? '') === (expected[index].privacy ?? '') && member.instructions === expected[index].instructions);
     if (!same) errors.push({ message: 'The saved file would not read back as this team. Check that the name and description do not start and end with quotes, and that no instructions start with "role:", "model:", or "tools:".' });
   } catch (error) {
     errors.push({ message: `The saved file would not be a usable team: ${(error as Error).message}` });

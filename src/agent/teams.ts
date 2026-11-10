@@ -20,6 +20,12 @@ export interface TeamMember {
    * without it still runs and still draws, as a lead with its members. A member naming one that does not exist is drawn at the top, never dropped.
    */
   reportsTo?: string;
+  /**
+   * `private`: the member runs only on a private model, one in a NEAR TEE or on this machine, never one forwarded to an outside provider. From a
+   * `privacy: private` line; `privacy: any` (or no line) lets it use any model the run may use. A run fails for this member, rather than falling
+   * back to a forwarded model, when no private model is available.
+   */
+  privacy?: 'private';
 }
 export interface TeamDefinition { slug: string; name: string; description: string; members: TeamMember[]; file: string }
 
@@ -62,7 +68,7 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     const fields: Record<string, string> = {};
     let index = 0;
     while (index < rest.length) {
-      const field = /^(role|model|tools|reports-to):\s*(.*)$/i.exec(rest[index].trim());
+      const field = /^(role|model|tools|reports-to|privacy):\s*(.*)$/i.exec(rest[index].trim());
       if (!field) { if (rest[index].trim()) break; index += 1; continue; }
       fields[field[1].toLowerCase()] = field[2].trim();
       index += 1;
@@ -70,19 +76,29 @@ export function parseTeam(text: string, file: string): TeamDefinition {
     const instructions = rest.slice(index).join('\n').trim();
     if (!instructions) throw new Error(`Member ${memberName} needs instructions under its heading.`);
     const reportsTo = fields['reports-to'] ? slugify(fields['reports-to']) : undefined;
-    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), ...(reportsTo ? { reportsTo } : {}), tools: fields.tools ? resolveMemberTools(fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean)) : DEFAULT_TOOLS, instructions });
+    const privacy = parsePrivacy(fields.privacy, memberName);
+    members.push({ name: memberName, ...(fields.role ? { role: fields.role } : {}), ...(fields.model ? { model: fields.model } : {}), ...(reportsTo ? { reportsTo } : {}), ...(privacy ? { privacy } : {}), tools: fields.tools ? resolveMemberTools(fields.tools.split(',').map((tool) => tool.trim()).filter(Boolean)) : DEFAULT_TOOLS, instructions });
   }
   if (!members.length) throw new Error('Add at least one member as a "## member-name" section.');
   if (members.length > 12) throw new Error('A team can have at most 12 members.');
   return { slug: slugify(path.basename(file, '.md')), name, description: typeof data.description === 'string' ? data.description : '', members, file };
 }
 
+/** A member's `privacy:` line: private (also tee or local) or any (also default or cloud, the same as no line). */
+export function parsePrivacy(value: string | undefined, member: string): 'private' | undefined {
+  const privacy = (value ?? '').trim().toLowerCase();
+  if (!privacy || privacy === 'any' || privacy === 'default' || privacy === 'cloud') return undefined;
+  if (privacy === 'private' || privacy === 'tee' || privacy === 'local') return 'private';
+  throw new Error(`Member ${member} has "privacy: ${value}"; use privacy: private (a NEAR TEE or local model only) or privacy: any.`);
+}
+
 export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>): string {
-  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member). Then the member\'s instructions. Save to create a new version. -->', ''];
+  const lines = ['---', `name: ${name}`, `description: ${description}`, '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), privacy (private: a NEAR TEE or local model only; any: whatever the run may use), tools (comma-separated), reports-to (another member). Then the member\'s instructions. Save to create a new version. -->', ''];
   for (const member of members) {
     lines.push(`## ${member.name}`);
     if (member.role) lines.push(`role: ${member.role}`);
     if (member.model) lines.push(`model: ${member.model}`);
+    if (member.privacy) lines.push(`privacy: ${member.privacy}`);
     if (member.reportsTo) lines.push(`reports-to: ${member.reportsTo}`);
     if (member.tools?.length) lines.push(`tools: ${member.tools.join(', ')}`);
     lines.push('', member.instructions, '');
@@ -105,6 +121,7 @@ export function teamAgents(team: TeamDefinition): GsdAgent[] {
     description: member.role ?? member.name,
     tools: member.tools,
     model: member.model,
+    ...(member.privacy ? { privacy: member.privacy } : {}),
     body: `You are ${member.name}${member.role ? `, the ${member.role},` : ''} on the "${team.name}" team.\n\n${member.instructions}`,
     file: team.file
   }));

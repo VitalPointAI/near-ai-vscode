@@ -17,10 +17,10 @@ import { SecurityAccess, securityTool } from '../agent/securityTool';
 import { AgentTool, CORE_TOOLS, Todo, ToolContext } from '../agent/tools';
 import type { CyberRunAccess } from './cyberRun';
 import { TaskBoard } from '../agent/taskBoard';
-import { displayPath } from '../agent/workspace';
+import { displayPath, ToolError } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
-import { expandPrompt, GsdAgent, GsdSkill, modelForTier, roleModelFor } from '../gsd/library';
+import { expandPrompt, GsdAgent, GsdSkill, modelForTier, PrivacyCandidate, privateModelFor, roleModelFor, tierOf } from '../gsd/library';
 import { trustedPreambles } from '../gsd/preamble';
 import { gsdTools, Question } from '../gsd/tools';
 import type { ActivityFeed, AgentBoundary } from './agentActivity';
@@ -74,6 +74,8 @@ export interface AgentTurnRequest {
   /** NEAR models for GSD's model tiers; a tier model the provider lacks falls back to `model`. */
   tiers?: ModelTiers;
   availableModels?: string[];
+  /** The catalog entries of availableModels, with where each runs; a `privacy: private` team member is resolved against it. */
+  modelCatalog?: PrivacyCandidate[];
   /** The model's context window in tokens, from the catalog. */
   contextWindows?: Record<string, number | undefined>;
   maxParallelAgents?: number;
@@ -630,7 +632,15 @@ export class AgentConversation {
         const teamMember = Boolean(spawn.agent && (!gsd || !spawn.agent.file.startsWith(gsd.home)));
         const roleModel = spawn.agent && !(teamMember && spawn.agent.model) ? roleModelFor(label, request.roleModels ?? {}) : undefined;
         const wanted = modelForTier(roleModel ?? spawn.model ?? spawn.agent?.model, tiers, request.model);
-        const model = !request.availableModels || request.availableModels.includes(wanted) ? wanted : request.model;
+        let model = !request.availableModels || request.availableModels.includes(wanted) ? wanted : request.model;
+        // A member that must stay private runs on a TEE or local model, or not at all: it never falls back to a forwarded model.
+        if (spawn.agent?.privacy === 'private') {
+          const tier = tierOf(roleModel ?? spawn.model ?? spawn.agent.model);
+          const candidates = (request.modelCatalog ?? []).filter((candidate) => !request.availableModels || request.availableModels.includes(candidate.id) || candidate.id === request.model);
+          const chosen = privateModelFor(model, tier, tiers, candidates);
+          if (!chosen) throw new ToolError(`${label} must run on a private model (its team file says privacy: private), and none of the models this run may use runs in a NEAR TEE or on this machine. Choose a NEAR TEE model for the ${tier ?? 'deep'} tier (setting nearAi.agent.${tier ?? 'deep'}Model), or add a local model, then run again. To let ${label} use any model instead, change its line to privacy: any.`);
+          model = chosen;
+        }
         const agentBody = spawn.agent ? (gsd ? await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root }) : spawn.agent.body) : undefined;
         // Each sub-agent's Remember/Recall also reach its own private memory.
         const privateMemory = memoryFor({ kind: 'private-agent', id: `agent-${label}`.slice(0, 80) }, `${runId}-${label}`.slice(0, 100));

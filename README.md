@@ -405,7 +405,17 @@ until it runs out aren't shown.
 
 - **Agent teams.** A team is a Markdown file you edit in VS Code: one
   `## member` section per member, with optional `role:`, `model:` (a model ID
-  or deep/standard/fast), and `tools:` lines. Run one with `/team:<name> <task>`
+  or deep/standard/fast), `privacy:`, and `tools:` lines. `privacy: private`
+  keeps a member on a private model, one that runs in a NEAR TEE or on this
+  machine: it gets the private model the run may use that is most capable
+  for its tier, and if there is none the member does not run and the lead is
+  told why, so its work is never sent to a forwarded model. To choose that
+  model, set `nearAi.agent.deepModel` (or the standard or fast tier the
+  member names) to a model whose picker label reads "Private · runs in NEAR
+  TEE", or to a local model; if the configured tier model is forwarded, the
+  next private tier model is used (deep, then standard, then fast for a deep
+  member), then the most capable other private model. `privacy: any`, or no
+  line, lets the member use any model the run may use. Run one with `/team:<name> <task>`
   or **Manage Agent Teams**; a lead agent delegates to the members as
   sub-agents, each limited to its own tools. Saving a team file records a
   version. Teams can be duplicated, archived, restored, imported, and deleted.

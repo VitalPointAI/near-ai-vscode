@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A team member can be kept on private models.** A `privacy: private` line in a team file keeps that
+  member on a model that runs in a NEAR TEE or on your machine: the most capable private model for its
+  tier, and if none is available the member does not run and the lead is told why, rather than its
+  work going to a forwarded model. `privacy: any`, or no line, keeps today's behaviour. The Team
+  Studio keeps the line when you edit and save a team.
 - **Reports as PDF and Word files.** Two new tools, CreatePdf and CreateDocument, turn Markdown (inline,
   or a `.md` file in the workspace) into a `.pdf` or a `.docx`: headings, lists, tables, quotes, code,
   links, and workspace images (PNG, JPEG, or SVG). The PDF has bookmarks from the headings and

@@ -262,10 +262,11 @@ export function parseDraft(value: unknown): TeamDraft | undefined {
   const members: DraftMember[] = [];
   for (const member of value.members) {
     // `reportsTo` is optional and must be allowed here, or a draft that carries the team's hierarchy is refused outright (0.4.19 review).
-    if (!isPlain(member) || !exactKeys(member, ['name', 'role', 'model', 'tools', 'instructions'], ['reportsTo']) || !text(member.name, 60) || !text(member.role, 120) || !text(member.model, 160) || !text(member.instructions, 12_000)) return undefined;
+    if (!isPlain(member) || !exactKeys(member, ['name', 'role', 'model', 'tools', 'instructions'], ['reportsTo', 'privacy']) || !text(member.name, 60) || !text(member.role, 120) || !text(member.model, 160) || !text(member.instructions, 12_000)) return undefined;
     if (member.reportsTo !== undefined && !text(member.reportsTo, 60)) return undefined;
+    if (member.privacy !== undefined && member.privacy !== 'private') return undefined;
     if (member.tools !== null && (!Array.isArray(member.tools) || member.tools.length > 80 || !member.tools.every((tool) => typeof tool === 'string' && TOOL_NAME.test(tool)))) return undefined;
-    members.push({ name: member.name, role: member.role, model: member.model, tools: member.tools === null ? null : [...new Set(member.tools as string[])], instructions: member.instructions, ...(member.reportsTo ? { reportsTo: member.reportsTo as string } : {}) });
+    members.push({ name: member.name, role: member.role, model: member.model, tools: member.tools === null ? null : [...new Set(member.tools as string[])], instructions: member.instructions, ...(member.reportsTo ? { reportsTo: member.reportsTo as string } : {}), ...(member.privacy === 'private' ? { privacy: 'private' as const } : {}) });
   }
   return { name: value.name, description: value.description, members };
 }
