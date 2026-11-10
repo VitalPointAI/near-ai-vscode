@@ -693,7 +693,9 @@ export class AgentConversation {
               return await tool.run(input, toolContext);
             } finally {
               slot.nested -= 1;
-              while (slot.nested === 0 && !slot.held) {
+              // Once the agent is stopped there is no next turn to hold a slot for, and waiting on the aborted signal would throw here and replace the
+              // child's finished report with an error.
+              while (slot.nested === 0 && !slot.held && !agent.abort.signal.aborted) {
                 await this.acquireSlot(limit, agent.abort.signal);
                 slot.held = true;
                 // Another foreground child started while this one waited for the slot: it needs the slot more.
@@ -723,7 +725,7 @@ export class AgentConversation {
             shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {}, request.shellEnvAllow ?? []);
             // Research agents gather outside content; their writes belong in .planning/ (others ask).
             const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}) };
-            const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}${worktree.root !== worktree.path ? `, in its copy of the workspace folder, ${worktree.root}` : ''}. Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
+            const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}${worktree.root !== worktree.path ? `, in its copy of the workspace folder, ${worktree.root}` : ''}.${worktree.rootUnmatched ? ` The workspace folder (${this.root}) could not be placed inside the worktree, so you start at its top level: change into the matching subfolder before working.` : ''} Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
             const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             const boundary = runBoundary(request);

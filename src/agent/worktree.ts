@@ -10,7 +10,7 @@ import { ToolError } from './workspace';
 // Worktrees live in the extension's storage, so the project itself gets no extra folders.
 
 /** `root` is where the agent works: the worktree's copy of the workspace folder, which is below `path` when the workspace is a subfolder of the repository. */
-export interface AgentWorktree { path: string; branch: string; base: string; repo: string; root: string }
+export interface AgentWorktree { path: string; branch: string; base: string; repo: string; root: string; /** The workspace folder could not be placed inside the worktree, so `root` is its top level. */ rootUnmatched?: boolean }
 
 function git(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -28,7 +28,8 @@ export async function createAgentWorktree(root: string, baseDir: string, agentId
   await mkdir(path.dirname(dir), { recursive: true });
   const branch = `worktree-agent-${agentId}`;
   await git(repo, ['worktree', 'add', '--quiet', '-b', branch, dir, base]);
-  return { path: dir, branch, base, repo, root: await worktreeRoot(repo, root, dir) };
+  const placed = await worktreeRoot(repo, root, dir);
+  return { path: dir, branch, base, repo, root: placed, ...(placed === dir && path.resolve(await realpath(root).catch(() => root)) !== path.resolve(repo) ? { rootUnmatched: true } : {}) };
 }
 
 /**
