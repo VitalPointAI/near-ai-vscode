@@ -122,10 +122,14 @@ test('a report that arrived while the parent streamed feeds the run at once, wit
     if (parentTurns === 2) await childResolved;
     yield * streamed(model, messages);
   };
-  await conversation.send(request(client, gsd));
-  assert.deepEqual(client.log, ['parent:1', 'child:1', 'parent:2', 'parent:3'], 'the child finished inside the parent turn and the final parent turn came after its report');
-  assert.equal(posted.some((message) => message.type === 'notice' && /Waiting for/.test(String(message.text))), false, 'no hold was announced, because there was none');
-  conversation.dispose();
+  try {
+    await conversation.send(request(client, gsd));
+    assert.deepEqual(client.log, ['parent:1', 'child:1', 'parent:2', 'parent:3'], 'the child finished inside the parent turn and the final parent turn came after its report');
+    assert.equal(posted.some((message) => message.type === 'notice' && /Waiting for/.test(String(message.text))), false, 'no hold was announced, because there was none');
+  } finally {
+    // The session and its timers are disposed even when an assertion above throws, so a failed run cannot leak them (sixteenth 0.4.19 review, MINOR).
+    conversation.dispose();
+  }
 });
 
 test('the parallel-agent limit runs extra agents one after another', async () => {

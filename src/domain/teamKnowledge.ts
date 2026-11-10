@@ -118,6 +118,11 @@ function isContradicted(oldText: string, newText: string): boolean {
   return false;
 }
 
+// Locked residue of the number rule above (sixteenth 0.4.19 review, MINOR): the shared>=2 + overlap>=0.6 gate can read a GENUINELY NEW figure about the same
+// actor as a correction of the old one — `handled 4.2 million TEU in 2025` then `handled 5.1 million TEU in 2026` is accumulation, but it retires. The trade
+// stays, because the reverse error (treating a re-stated figure as new) leaves BOTH numbers in current belief with nothing marking which one a decision may
+// rely on; the retired fact keeps its history entry and stays one revival away. The pin lives in the test suite (numericCorrectionRetiresNewFigures pin).
+
 /**
  * Moves a fact from what is believed to the record of what was believed. Nothing is deleted: a decision may have been made on it, and a person revisiting that
  * decision needs to see what the team knew at the time (owner, 2026-11-08).
@@ -164,7 +169,10 @@ const edgeId = (from: string, to: string, kind: EdgeKind): string => `${from}~${
  * because it arrived through `addKnowledge` instead of `Learn` (0.4.19 review).
  */
 export function looksLikeAddress(source: string): boolean {
-  // 0.4.19 review: a homoglyph or an invisible character in the host was enough to keep an A1, because the test only knew ASCII dots.
+  // 0.4.19 review: a homoglyph or an invisible character in the host was enough to keep an A1, because the test only knew ASCII dots. The fold covers the
+  // CJK/ideographic full stops and zero-widths; Cyrillic/Greek LOOKALIKES (`еvil.test` with U+0435) do NOT fold under NFKC and stay invisible to this test —
+  // a known, deliberate residue (sixteenth 0.4.19 review, MINOR): the direction of the error is the safe one, since a source that slips through keeps its
+  // honest grade instead of gaining a cap it did not earn, and a proper Unicode-confusable table is a larger change than a review round.
   const text = source.normalize('NFKC')
     .replace(/[\u00AD\u200B-\u200F\u2060\uFEFF]/g, '')
     .replace(/[\u3002\uFF0E\uFF61]/g, '.')

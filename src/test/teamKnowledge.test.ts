@@ -142,6 +142,26 @@ test('a sentence-final dot hides nothing: the trailing-dot host is capped too', 
   }
 });
 
+test('a genuinely new figure about one actor is retired, not accumulated — the number-rule trade, pinned', () => {
+  // Sixteenth 0.4.19 review, MINOR: `isContradicted` reads `handled 4.2 million TEU in 2025` then `handled 5.1 million TEU in 2026` as a correction (both
+  // sentences share the vocabulary, the figures differ), so the NEW fact retires the OLD one into history instead of both staying current. That is the
+  // deliberate trade — the reverse error leaves two contradicting numbers in current belief with nothing marking which one a decision may rely on, and the
+  // retired fact keeps its history entry and stays one revival away — pinned here so a future change to the rule cannot flip it unnoticed.
+  let graph = mergeKnowledge(emptyKnowledge('t', at), {
+    origin: 'research', at,
+    nodes: [{ label: 'Port', facts: [{ text: 'The port handled 4.2 million TEU in 2025.' }] }],
+    edges: []
+  });
+  graph = mergeKnowledge(graph, {
+    origin: 'research', at: '2026-11-10T01:00:00.000Z',
+    nodes: [{ label: 'Port', facts: [{ text: 'The port handled 5.1 million TEU in 2026.' }] }],
+    edges: []
+  });
+  assert.deepEqual(graph.nodes[0]?.facts.map((fact) => fact.text), ['The port handled 5.1 million TEU in 2026.'], 'only the newer figure stays in current belief');
+  assert.equal(graph.nodes[0]?.history?.length, 1, 'the earlier figure is retired with its history entry, not destroyed');
+  assert.match(graph.nodes[0]?.history?.[0]?.refutedBy ?? '', /5\.1 million/, 'the retirement names what out-evidenced it');
+});
+
 test('a grade can only fall as the graph is merged, so a later uncapped mention cannot launder a capped one back to A1', () => {
   // 0.4.19 review: `existing.grading = incoming.grading` let the second addition undo the first one's cap.
   let graph = mergeKnowledge(emptyKnowledge('t', at), {

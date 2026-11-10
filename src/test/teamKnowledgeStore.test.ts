@@ -96,54 +96,70 @@ test('two team names that sanitised to the same file now get their own, so one t
 });
 
 test('the migration reads nobody\'s graph but the team it belongs to', async () => {
-  // 0.4.19 review BLOCKER: the legacy fallback read the OLD sanitised file for any non-slug name — which is the LIVE file of the plain team it used to
-  // collide with — and copied that team's graph across. `acme co` must not adopt `acme-co`'s knowledge.
+  // 0.4.19 review BLOCKER: the legacy fallback read the OLD sanitised file for any non-plain name — which is the LIVE file of the plain team it used to
+  // collide with — and copied that team's graph across. The fifteenth round reintroduced that leak by accepting the SLUG claim as proof (the slug is also
+  // the plain team's identity); the sixteenth review named it a BLOCKER again, so migration is gated on the RAW NAME ONLY.
   const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-leak-'));
   await addKnowledge(dir, 'acme-co', addition('Bravo')); // the plain team's live graph, sitting at the legacy name of `acme co`
-  // Reading it as legacy names acme-co — the slug identity of `acme co` — so the gate PASSES, and the plain team's graph is adopted into `acme co`'s own
-  // hashed file. That is the honest cost of accepting the slug stamp (fifteenth 0.4.19 review): at the legacy path, a spaced name and its slug are the SAME
-  // file, and no inference tells a genuine 0.4.18 stamp from a plain team's claim apart. What the gate must still never allow is DESTRUCTION: the original
-  // file is left byte-for-byte where it is (asserted below and in the no-retire test), so the plain team keeps its record either way — and library slugs are
-  // unique per team file, so there is no second, differently-named claimant to leak to.
-  const leaked = await loadKnowledge(dir, 'acme co', 'acme-co');
-  assert.deepEqual(leaked.knowledge.nodes.map((node) => node.label), ['Bravo'], 'the shared legacy graph reads; its original file stays untouched below');
-  assert.match(knowledgeFile(dir, 'acme co'), /~/, 'the sanitised name lives under its own hashed file, not the plain team\'s');
-  // And addKnowledge still refuses loudly at ITS OWN gate — the CURRENT file naming another team is a refusal (twelfth 0.4.19 review, BLOCKER) — so a plain
-  // team's record is never overwritten either way. Here `acme-co.json` IS `acme co`'s hashed file name, so the write gate sees the plain team's claim.
-  const plainTeamFile = knowledgeFile(dir, 'acme-co');
-  const bytesBefore = await readFile(plainTeamFile, 'utf8');
-  // The ORIGINAL-file refusal (twelfth 0.4.19 review, BLOCKER): a Learn from `acme co` gates on ITS OWN hashed file (`acme-co~<hash>.json`, not the plain
-  // team's `acme-co.json`), so the refusal has to be staged where the gate looks: the plain stamp is accepted (slug identity), so the file is re-stamped as
-  // a stranger — the write gate must refuse anything that is neither this caller's name nor this caller's own slug, and byte-for-byte recovery is asserted.
-  const hashedCopy = knowledgeFile(dir, 'acme co');
-  await mkdir(path.dirname(hashedCopy), { recursive: true });
-  await writeFile(hashedCopy, bytesBefore.replace('"team": "acme-co"', '"team": "someone-else"'), 'utf8');
-  await assert.rejects(() => addKnowledge(dir, 'acme co', addition('Alpha')), ForeignGraphError, 'a Learn into a foreign file throws instead of overwriting');
-  assert.equal(await readFile(hashedCopy, 'utf8'), bytesBefore.replace('"team": "acme-co"', '"team": "someone-else"'), 'the refused file is untouched');
-  await writeFile(plainTeamFile, bytesBefore, 'utf8');
-  const plainRead = await loadKnowledge(dir, 'acme-co');
-  assert.equal(plainRead.knowledge.nodes.length, 1, 'the plain team still reads its own graph');
-  assert.match(await readFile(plainTeamFile, 'utf8'), /Bravo/, 'the plain team\'s file is untouched after everything above');
-  // A SLUG-STAMPED legacy file is what the shipped version actually wrote (fifteenth 0.4.19 review, BLOCKER): callers passed `slugify(...)`, so a team named
-  // `Research Team` has a file that says `research-team` — a name the raw display name does not equal. The gate accepts both identities, and the migrated
-  // file is stamped with the raw name.
-  await writeFile(path.join(dir, 'knowledge', 'research-team.json'), JSON.stringify({ version: 1, team: 'research-team', nodes: [{ id: 'n9', label: 'Slug Legacy', kind: 'actor', functions: [], facts: [], origin: 'research', firstSeen: at, lastSeen: at, mentions: 1 }], edges: [], updatedAt: at }), 'utf8');
-  const slugged = await loadKnowledge(dir, 'Research Team', 'research-team');
-  assert.equal(slugged.knowledge.nodes.length, 1, 'a file stamped the way 0.4.18 wrote it is adopted, not refused');
-  assert.match(await readFile(knowledgeFile(dir, 'Research Team'), 'utf8'), /Slug Legacy/);
-  assert.match(await readFile(knowledgeFile(dir, 'Research Team'), 'utf8'), /"team": "Research Team"/, 'the migrated file is re-stamped with the raw display name');
+  // The slug identity matches (acme co's slug IS acme-co), and the graph is still NOT adopted: a slug stamp is not ownership.
+  const notCopied = await loadKnowledge(dir, 'acme co', 'acme-co');
+  assert.deepEqual(notCopied.knowledge.nodes, [], 'the plain team\'s graph is not copied into the hashed team\'s load');
+  assert.deepEqual(notCopied.knowledge.team, 'acme co');
+  assert.match(await readFile(knowledgeFile(dir, 'acme-co'), 'utf8'), /Bravo/, 'the plain team\'s file stays byte-for-byte in place');
+  // A raw-name-stamped legacy file IS adopted: the file says this team's own name, which no other team can claim.
+  const legacy = path.join(dir, 'knowledge', 'my-team.json');
+  await mkdir(path.dirname(legacy), { recursive: true });
+  await writeFile(legacy, JSON.stringify({ version: 1, team: 'My Team', nodes: [{ id: 'n1', label: 'Halden Ports', kind: 'actor', functions: [], facts: [], origin: 'research', firstSeen: at, lastSeen: at, mentions: 1 }], edges: [], updatedAt: at }), 'utf8');
+  const own = await loadKnowledge(dir, 'My Team', 'my-team');
+  assert.equal(own.knowledge.nodes.length, 1, 'a file stamped with the raw display name is adopted');
+  assert.match(await readFile(knowledgeFile(dir, 'My Team'), 'utf8'), /Halden Ports/);
+  // A foreign-claimed legacy file is set aside on READ (never adopted, never described as this team's retired knowledge) — and the loud refusal lives at the
+  // WRITE gate, which looks at the caller's OWN current file: staging a stranger's claim THERE is what a Learn must refuse.
+  const foreignDir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-foreign-claim-'));
+  const foreignFile = path.join(foreignDir, 'knowledge', 'my-team.json');
+  await mkdir(path.dirname(foreignFile), { recursive: true });
+  await writeFile(foreignFile, JSON.stringify({ version: 1, team: 'someone-else', nodes: [{ id: 'n2', label: 'Not Mine', kind: 'actor', functions: [], facts: [], origin: 'research', firstSeen: at, lastSeen: at, mentions: 1 }], edges: [], updatedAt: at }), 'utf8');
+  const refused = await loadKnowledge(foreignDir, 'My Team', 'my-team');
+  assert.deepEqual(refused.knowledge.nodes, [], 'a legacy file naming another team reads as no legacy graph');
+  assert.deepEqual(refused.problem, undefined, 'a foreign claim is not described as this team\'s retired knowledge');
+  assert.match(await readFile(foreignFile, 'utf8'), /Not Mine/, 'the foreign file is untouched by the read');
+  const ownCurrent = knowledgeFile(foreignDir, 'My Team');
+  await mkdir(path.dirname(ownCurrent), { recursive: true });
+  await writeFile(ownCurrent, JSON.stringify({ version: 1, team: 'someone-else', nodes: [], edges: [], updatedAt: at }), 'utf8');
+  await assert.rejects(() => addKnowledge(foreignDir, 'My Team', addition('Alpha'), 'my-team'), ForeignGraphError, 'the WRITE gate refuses a current file naming another team');
+  assert.match(await readFile(ownCurrent, 'utf8'), /someone-else/, 'the refused current file is byte-for-byte untouched');
+});
+
+test('a slug-stamped 0.4.18 graph is retained, reported, and never copied — the honest upgrade cost', async () => {
+  // The shipped version stamped files with the slug (`agentSession.ts` passed slugify(...)), so `My Team`'s 0.4.18 file says `my-team`. The sixteenth review's
+  // BLOCKER says adopting it is a leak when the slug is another team's identity, and prescribes: gate on the raw name, leave the old file, SAY SO. This test
+  // locks the "say so": the load reports the superseded graph instead of silently dropping the team's memory.
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-superseded-'));
+  const legacy = path.join(dir, 'knowledge', 'my-team.json');
+  await mkdir(path.dirname(legacy), { recursive: true });
+  const older = { version: 1, team: 'my-team', nodes: [{ id: 'n1', label: 'Halden Ports', kind: 'actor', functions: [], facts: [], origin: 'research', firstSeen: at, lastSeen: at, mentions: 1 }], edges: [], updatedAt: at };
+  await writeFile(legacy, JSON.stringify(older), 'utf8');
+  const loaded = await loadKnowledge(dir, 'My Team', 'my-team');
+  assert.deepEqual(loaded.knowledge.nodes, [], 'the slug-stamped graph is not adopted');
+  assert.match(loaded.problem ?? '', /my-team/, 'the load SAYS the superseded graph exists, where it is, and why it was not copied');
+  assert.match(await readFile(legacy, 'utf8'), /Halden Ports/, 'the superseded file is retained untouched, so the knowledge is recoverable');
+  // And a Learn still lands in the team's own (hashed) file after the refusal — the upgrade does not stop the team working.
+  const merged = await addKnowledge(dir, 'My Team', addition('Alpha'), 'my-team');
+  assert.deepEqual(merged.nodes.map((node) => node.label), ['Alpha']);
+  assert.match(await readFile(knowledgeFile(dir, 'My Team'), 'utf8'), /"team": "My Team"/, 'the new file is stamped with the raw name');
+  assert.deepEqual(await loadKnowledge(dir, 'My Team', 'my-team').then((r) => r.knowledge.nodes.map((n) => n.label)), ['Alpha'], 'the new graph reads without re-importing the superseded one');
 });
 
 test('a foreign legacy file does not stop a team from learning into its own file', async () => {
-  // Fifteenth 0.4.19 review, MAJOR: throwing made every later Learn die before its write, and the colliding team could never create its own file. This test
-  // stages the state AFTER that fix's fallback: the foreign legacy claim is set aside as "no legacy graph", `acme co` learns into its OWN hashed file, and
-  // the plain team's file — which the load left where it was — keeps its Bravo graph; the plain team's later read merges nothing of `acme co`'s.
+  // Fifteenth 0.4.19 review, MAJOR: throwing made every later Learn die before its write, and the colliding team could never create its own file. Here the
+  // legacy stamp claims another team entirely: the loader migrates nothing, `acme co` learns into its OWN hashed file, and the plain team's file — left
+  // where it was — keeps its Bravo graph untouched.
   const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-foreign-legacy-'));
   await addKnowledge(dir, 'acme-co', addition('Bravo')); // the plain team's live graph, sitting at knowledge/acme-co.json
   const plain = knowledgeFile(dir, 'acme-co');
   const bytes = await readFile(plain, 'utf8');
-  // A LEARNING (foreign-claim) legacy file: the plain team's stamp cannot belong to hashed `acme co`, so the loader migrates nothing, and the Learn lands
-  // in `acme co`'s own hashed file next to it.
+  // A foreign-claimed legacy file: the plain stamp cannot belong to hashed `acme co`, so the loader migrates nothing, and the Learn lands in `acme co`'s
+  // own hashed file next to it.
   await writeFile(plain, bytes.replace('"team": "acme-co"', '"team": "stranger"'), 'utf8');
   await assert.doesNotReject(() => addKnowledge(dir, 'acme co', addition('Alpha')), 'the colliding team can still learn into its own file');
   assert.deepEqual((await loadKnowledge(dir, 'acme co', 'acme-co')).knowledge.nodes.map((node) => node.label).sort(), ['Alpha'], 'the Learn went to the hashed file, not the plain team\'s');
@@ -251,17 +267,18 @@ test('a write from another window is merged, not overwritten', async () => {
 
 test('addKnowledge refuses to write over a file that names another team, so the record survives for its owner', async () => {
   // Twelfth 0.4.19 review, BLOCKER: the "belongs to another team" branch returned an empty graph and a problem, and the NEXT addKnowledge merged into that
-  // empty graph and SAVED — destroying the plain team's record before its own load could migrate it. The refusal is now enforced at the write, not just the
-  // read, and the plain team's file is byte-for-byte what it was.
+  // empty graph and SAVED — destroying the plain team's record before its own load could migrate it. The refusal is enforced at the write; on the READ side
+  // the same file reads as a problem-carrying empty graph instead of a throw (sixteenth 0.4.19 review, MAJOR — unchanged consumers like Team Studio's
+  // knowledge view call the loader without a catch), and the plain team's file is byte-for-byte what it was either way.
   const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-know-foreign-'));
   await addKnowledge(dir, 'acme-co', addition('Bravo'));
   const plain = knowledgeFile(dir, 'acme-co');
   const bytes = await readFile(plain, 'utf8');
-  // The caller reads ITS OWN plain file (`acme-co` IS already its plain slug, so live path and disputed file coincide) and stamps matching its slug identity
-  // would be ACCEPTED (fifteenth 0.4.19 review), so the refusal is proven with a stamp matching neither caller identity: the gate refuses anything that is
-  // not this caller's raw name or its own slug.
+  // The caller IS plain team `acme-co`, and the file on its own path names someone else: the gate refuses anything that is not this caller's raw name.
   await writeFile(plain, bytes.replace('"team": "acme-co"', '"team": "someone-else"'), 'utf8');
-  await assert.rejects(() => loadKnowledge(dir, 'acme-co', 'acme-co'), ForeignGraphError, 'the loader refuses a foreign CURRENT file');
+  const readBack = await loadKnowledge(dir, 'acme-co', 'acme-co');
+  assert.deepEqual(readBack.knowledge.nodes, [], 'the loader does not serve a foreign CURRENT file');
+  assert.match(readBack.problem ?? '', /belongs to someone-else/, 'and says why it read nothing');
   await assert.rejects(() => addKnowledge(dir, 'acme-co', addition('Alpha'), 'acme-co'), ForeignGraphError, 'a Learn into a foreign file throws instead of overwriting');
   assert.equal(await readFile(plain, 'utf8'), bytes.replace('"team": "acme-co"', '"team": "someone-else"'), 'the refused file is byte-for-byte unchanged');
 });

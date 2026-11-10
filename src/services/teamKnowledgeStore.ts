@@ -50,16 +50,6 @@ export class ForeignGraphError extends Error {
   }
 }
 
-/** The identity a graph written BEFORE this store carried in its `team` field: callers of the shipped version passed the SLUG (`agentSession.ts` used
-  * `slugify(...)`, the Team Studio page slugifies the file name), so a file stamped the way 0.4.18 actually wrote it says `research-team` where the raw
-  * display name is `Research Team` (fifteenth 0.4.19 review, BLOCKER). The slug IS derivable from the name, so ownership can be judged on it — but only
-  * from the exact caller inputs, never reconstructed from the file's cleaned name, or `ACME Corp` (clean `acme-corp`) would adopt the plain team
-  * `acme-corp`'s graph. Both caller inputs are REQUIRED rather than optional so the gate cannot be silently weakened back to a guess. */
-const legacyIdentities = (team: string, slug: string): string[] => [team, slug];
-
-/** Whether a parsed `team` claim names THIS caller: the raw display name now passed everywhere, or the slug-shaped stamp earlier versions wrote. */
-const ownsClaim = (claim: string, identities: string[]): boolean => identities.includes(claim);
-
 /** What a caller always gets: the graph read from disk stamped with the team that asked, or an empty one when nothing readable is there. */
 const presented = (read: { knowledge?: TeamKnowledge; problem?: string }, team: string): { knowledge: TeamKnowledge; problem?: string } => ({
   knowledge: read.knowledge ? { ...read.knowledge, team } : emptyKnowledge(team, new Date().toISOString()),
@@ -121,22 +111,23 @@ const withLegacyHistory = (merged: TeamKnowledge, legacy: TeamKnowledge): TeamKn
 };
 
 export async function loadKnowledge(dir: string, team: string, slug?: string): Promise<{ knowledge: TeamKnowledge; problem?: string }> {
-  // The slug is required from the callers that can reach the LEGACY paths at all — a caller that does not pass one cannot hit the mismatch the gate exists
-  // for, so it is defaulted to the raw name rather than guessed from the file (fifteenth 0.4.19 review, BLOCKER).
-  const identities = legacyIdentities(team, slug ?? team);
+  // The slug is accepted but no longer PROVES ownership (sixteenth 0.4.19 review, BLOCKER): 0.4.18 stamped files with the slug, but the legacy file of a
+  // non-plain name is ALSO the live file of the plain team that slug still names, so treating a slug claim as proof copies one team's graph into another.
+  // Ownership is judged on the RAW name alone; a slug-only claim is a SUPERSEDED graph the loader leaves exactly where it is and reports as retired.
   const file = knowledgeFile(dir, team);
   const legacy = legacyKnowledgeFile(dir, team);
   const read = await readKnowledgeFile(file, team);
   // The identity gate is not only a migration concern (tenth 0.4.19 review, MINOR): a PLAIN team's file was written by whichever colliding name touched it
   // last under the old lossy slug, so a file that names someone else is not this team's record and is not served to it — the caller gets an empty graph and
-  // the file is left for its real owner. An unreadable file reports and rebuilds, as before. The claim may be the raw name or the slug stamp of an earlier
-  // version (fifteenth 0.4.19 review, BLOCKER): a graph 0.4.18 wrote says `research-team` and belongs to `Research Team` all the same.
-  const owns = read.knowledge === undefined || ownsClaim(read.knowledge.team, identities);
+  // the file is left for its real owner. An unreadable file reports and rebuilds, as before. The claim names THIS team or it does not; no second identity
+  // softens that (sixteenth 0.4.19 review, BLOCKER).
+  const owns = read.knowledge === undefined || read.knowledge.team === team;
   const current = presented(owns ? read : {}, team);
   if (!owns) {
-    // Not served the file, and never written over it either: addKnowledge refuses through the same gate (twelfth 0.4.19 review, BLOCKER), so the comment and
-    // the CHANGELOG claim are true — merging into an empty graph and saving would destroy the other team's record before its own load could migrate it.
-    throw new ForeignGraphError(file, read.knowledge!.team, team);
+    // Not served the file, and never written over it either: addKnowledge refuses through the same gate (twelfth 0.4.19 review, BLOCKER). The refusal is
+    // NOT a thrown error (sixteenth 0.4.19 review, MAJOR): unchanged consumers (Team Studio's knowledge view) call the loader without a catch and a throw
+    // failed the page hard, so the caller gets a problem-carrying empty graph it can show — and the WRITE side still refuses loudly.
+    return { ...current, problem: `The knowledge file ${path.basename(file)} belongs to ${read.knowledge!.team}, not ${team}; nothing was read for ${team} and nothing was written over it.` };
   }
   // 0.4.19 review: the gate was "the new graph has nodes", which made a legitimately EMPTIED new graph re-import the old file's nodes on every load. The
   // gate is now "the new file exists AND READS" (twelfth 0.4.19 review, MINOR) — a damaged new file would otherwise block adoption forever — and the READ
@@ -147,14 +138,20 @@ export async function loadKnowledge(dir: string, team: string, slug?: string): P
   const legacyGraph = older.knowledge;
   let mergedProblem: string | undefined = undefined;
   // Identity check before adopting (0.4.19 review): the legacy file of a NON-plain name is also the LIVE file of a plain team (`acme co` once sanitised to
-  // `acme-co.json`, which is team `acme-co`'s graph), and its parsed `team` names `acme-co`, not the team asking. Only a file naming THIS team — by its raw
-  // name or by the slug an earlier version stamped (fifteenth 0.4.19 review, BLOCKER: the shipped callers passed `slugify(...)`, so a file 0.4.18 wrote says
-  // the slug) — migrates. A file that names only the OTHER shape is left exactly where it is: it is a plain team's live record, not an orphan.
-  if (legacyGraph !== undefined && !ownsClaim(legacyGraph.team, identities)) {
+  // `acme-co.json`, which is team `acme-co`'s graph). Only a file naming THIS TEAM BY ITS RAW NAME is adopted — never a slug claim (sixteenth 0.4.19 review,
+  // BLOCKER): the slug is exactly what 0.4.18 stamped AND exactly who the plain team is, so accepting it migrated one team's graph into the other's, the
+  // leak the twelfth review closed and the fifteenth round reopened. A slug-only or foreign claim is set aside as "no legacy graph" rather than thrown
+  // (fifteenth 0.4.19 review, MAJOR): the throw made every later Learn die before its write, and the colliding team could never create its own file. The
+  // slug-stamped superseded graph is RETAINED untouched, the honest upgrade cost: nobody's memory is copied across teams, and the slug-mismatched teams keep
+  // reading theirs (the raw-name slug of a plain slug IS its name; only a non-plain name loses its file, per its problem note).
+  if (legacyGraph !== undefined && legacyGraph.team !== team) {
     // Treating a foreign LEGACY file as "no legacy graph" rather than throwing (fifteenth 0.4.19 review, MAJOR): the throw made every later Learn of the
     // hashed name merge into an empty graph and save over the plain team's record, and the colliding team could then never create its own file. The write
     // below is already gated on this team's OWN distinct path (knowledgeFile), so the plain team's file is safe either way — proceeding is the honest read.
-    return current;
+    // The SUPERSUDED note (sixteenth 0.4.19 review, BLOCKER, "say so"): a slug-stamped file IS this team's 0.4.18 record — not adopted because the slug is
+    // also another team's identity, and the person has to know the knowledge is still there, one file rename away, rather than silently gone.
+    const superseded = slug !== undefined && slug !== team && legacyGraph.team === slug;
+    return { ...current, ...(superseded ? { problem: `The knowledge graph for ${team} was written under its older slug name (${slug}), which now belongs to another team's file name, so it was left in place rather than copied. Nothing was lost: the file still holds the team's knowledge as of 0.4.18.` } : {}) };
   }
   if (!legacyGraph?.nodes.length) return current;
   // A legacy file that parsed damaged carries its problem forward (eighth 0.4.19 review, MINOR): the caller is adopting whatever readable parts survived,
@@ -173,14 +170,15 @@ export async function loadKnowledge(dir: string, team: string, slug?: string): P
       // caller is told the legacy graph is NOT in place.
       try {
         await writeFile(file, JSON.stringify({ ...legacyGraph, team }, null, 2), { flag: 'wx' });
-        // Exclusive-create succeeded, so the legacy record now lives under the new name. The old file is LEFT WHERE IT IS — never renamed, never deleted
-        // (fifteenth 0.4.19 review): with the slug identity accepted, the legacy path can be another LIVE team's file (`acme-co.json` is plain team
-        // `acme-co`'s graph even while it is hashed `acme co`'s legacy path), and no inference this code can make tells those apart — so retiring the file
-        // by either name strands its other reader. The re-import on every load is bounded (the merge dedupes) and the durable original costs nothing.
-        return { knowledge: legacyGraph, ...(legacyProblem ? { problem: legacyProblem } : {}) };
+        // Exclusive-create succeeded, so the legacy record now lives under the new name, stamped with the RAW name (sixteenth 0.4.19 review, MAJOR): the
+        // unstamped return wrote the old claim back, and any later load without a slug refused the file the migration itself had just written. The old
+        // file is LEFT WHERE IT IS — never renamed, never deleted: the legacy path can be another LIVE team's file (`acme-co.json` is plain team
+        // `acme-co`'s graph even while it is hashed `acme co`'s legacy path), and no inference this code can make tells those apart — so retiring the
+        // file by either name strands its other reader. The re-import on every load is bounded (the merge dedupes) and the durable original costs nothing.
+        return { knowledge: { ...legacyGraph, team }, ...(legacyProblem ? { problem: legacyProblem } : {}) };
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
-        return { knowledge: legacyGraph, problem: `The knowledge graph for ${team} could not be moved to its new file name (${(error as Error).message}). The old file is untouched and will be tried again.` };
+        return { knowledge: { ...legacyGraph, team }, problem: `The knowledge graph for ${team} could not be moved to its new file name (${(error as Error).message}). The old file is untouched and will be tried again.` };
       }
     }
     const newerRead = await readKnowledgeFile(file, team);
@@ -225,11 +223,10 @@ export async function loadKnowledge(dir: string, team: string, slug?: string): P
   // The retry budget ran out without a confirmed write: re-read whatever IS on disk now (sixth 0.4.19 review, MINOR) rather than presenting a legacy snapshot
   // that may hold less than another window has already learned. The legacy file's damage report, if any, rides along. The SAME ownership gate runs here as at
   // the top of the function (fifteenth 0.4.19 review, MINOR): the file can have been re-pointed at another team by a concurrent writer while the budget was
-  // burning, and a fallback read bypassing the gate would serve that team's record stamped with THIS caller's name.
+  // burning, and a fallback read bypassing the gate would serve that team's record stamped with THIS caller's name — refused the same non-throwing way.
   const reRead = await readKnowledgeFile(file, team);
-  const stillOwns = reRead.knowledge === undefined || ownsClaim(reRead.knowledge.team, identities);
+  const stillOwns = reRead.knowledge === undefined || reRead.knowledge.team === team;
   const after = presented(stillOwns ? reRead : {}, team);
-  if (!stillOwns) throw new ForeignGraphError(file, reRead.knowledge!.team, team);
   return legacyProblem ? { ...after, problem: after.problem ?? legacyProblem } : after;
 }
 
@@ -278,11 +275,12 @@ export async function addKnowledge(dir: string, team: string, addition: Knowledg
   const file = knowledgeFile(dir, team);
   return serialised(file, async () => {
     // The ownership gate FIRST (twelfth 0.4.19 review, BLOCKER): an existing file naming another team is never read as ours and never overwritten — the
-    // throw stops the merge before any write, and the loader throws the same way, so a Learn into a mis-slugged file fails loudly instead of destroying it.
-    // The claim may be the raw name or the slug an earlier version stamped (fifteenth 0.4.19 review, BLOCKER), so the check runs over both identities.
-    const identities = legacyIdentities(team, slug ?? team);
+    // throw stops the merge before any write, and a Learn into a mis-stamped file fails loudly instead of destroying it. The claim names THIS team or the
+    // write refuses; no slug identity softens it (sixteenth 0.4.19 review, BLOCKER). The loader returns the same refusal as a problem-carrying empty graph
+    // instead of a throw (sixteenth 0.4.19 review, MAJOR), so readers without a catch survive; a WRITER refusing loudly is deliberate — silent no-op writes
+    // are how records got destroyed before the gate existed.
     const owner = await foreignOwner(file, team);
-    if (owner !== undefined && !ownsClaim(owner, identities)) throw new ForeignGraphError(file, owner, team);
+    if (owner !== undefined && owner !== team) throw new ForeignGraphError(file, owner, team);
     let last: TeamKnowledge | undefined;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const before = await readFile(file, 'utf8').catch(() => undefined);
@@ -296,8 +294,9 @@ export async function addKnowledge(dir: string, team: string, addition: Knowledg
       return problem ? { ...merged, problem } : merged;
     }
     // 0.4.19 review: this returned a merged graph that was never written, so Learn reported success for an addition that was lost. After the retries a last
-    // write is attempted without the compare, so the caller's addition IS in the file even if another window is still busy.
-    const final = last ?? mergeKnowledge((await loadKnowledge(dir, team)).knowledge, addition);
+    // write is attempted without the compare, so the caller's addition IS in the file even if another window is still busy. The slug rides along so a
+    // first-ever write still reads the legacy fallback the same way the loop's loads did (sixteenth 0.4.19 review).
+    const final = last ?? mergeKnowledge((await loadKnowledge(dir, team, slug)).knowledge, addition);
     await saveKnowledge(dir, final);
     return final;
   });
