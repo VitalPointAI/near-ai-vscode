@@ -11,7 +11,7 @@ import { parseDocument, parseInline, parseMarkdown } from '../agent/docMarkdown'
 import { documentText, PDFJS_DIR } from '../agent/documents';
 import { createDocx } from '../agent/docxWriter';
 import { documentTool, GRAPHICS_TOOLS, pdfTool } from '../agent/graphicsTools';
-import { createPdf } from '../agent/pdfWriter';
+import { createPdf, pdfDate } from '../agent/pdfWriter';
 import { ShellSession } from '../agent/shell';
 import { DEFAULT_TOOLS, parseTeam, resolveMemberTools } from '../agent/teams';
 import type { ToolContext } from '../agent/tools';
@@ -413,4 +413,13 @@ test('a link with a stray % still makes a PDF, and the link keeps its target as 
     assert.ok(urls.includes('https://example.com/100%off'), JSON.stringify(urls));
     assert.ok(urls.includes('https://example.com/a%20b'));
   } finally { await close(); }
+});
+
+test('an impossible date is refused rather than rolled over to another day', () => {
+  assert.equal(pdfDate('2026-02-28'), 'D:20260228000000Z');
+  assert.equal(pdfDate('2028-02-29T23:59:59Z'), 'D:20280229235959Z', 'a leap day');
+  for (const value of ['2026-02-31', '2026-02-29', '2026-13-01', '2026-00-10', '2026-04-31', '2026-01-01T24:00', '2026-01-01T10:60', '2026-01-01T10:00:61Z']) {
+    assert.throws(() => pdfDate(value), (error: Error) => error instanceof ToolError && error.message === `date "${value}" is not a real date and time.`, value);
+  }
+  assert.throws(() => pdfTool.parse({ output_path: 'x.pdf', title: 't', markdown: '# a', date: '2026-02-31' }), /is not a real date and time/);
 });

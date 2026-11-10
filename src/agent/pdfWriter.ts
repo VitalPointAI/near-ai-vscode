@@ -432,7 +432,11 @@ function textString(value: string): string {
 /** D:YYYYMMDDHHmmSSZ from an ISO date (YYYY-MM-DD, optionally with a UTC time). */
 export function pdfDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?Z?)?$/.exec(value.trim());
-  if (!match || Number.isNaN(Date.parse(`${match[1]}-${match[2]}-${match[3]}T00:00:00Z`))) throw new ToolError(`date must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ, not "${value}".`);
+  if (!match) throw new ToolError(`date must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ, not "${value}".`);
+  // Date.parse rolls 2026-02-31 over to March 3, so the parts are compared with the date they make.
+  const [year, month, day, hour, minute, second] = [match[1], match[2], match[3], match[4] ?? '00', match[5] ?? '00', match[6] ?? '00'].map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || date.getUTCHours() !== hour || date.getUTCMinutes() !== minute || date.getUTCSeconds() !== second) throw new ToolError(`date "${value}" is not a real date and time.`);
   return `D:${match[1]}${match[2]}${match[3]}${match[4] ?? '00'}${match[5] ?? '00'}${match[6] ?? '00'}Z`;
 }
 
