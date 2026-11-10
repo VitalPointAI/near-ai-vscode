@@ -38,7 +38,7 @@ export interface RunReport {
   model: { calls: number; latencyP50Ms?: number; latencyP90Ms?: number; latencyMaxMs?: number; inputMedian?: number; inputMax?: number; outputMedian?: number; cacheHitCalls: number; cachedShare?: number };
   tools: { calls: number; perModelTurn?: number; maxConcurrentAgents: number };
   models: string[];
-  /** Events per session as stored; 100 everywhere means the old cap cut the history. */
+  /** Some session may have been cut by the old 100-event cap (100 or more events and no recorded run split). */
   eventsCapped: boolean;
 }
 
@@ -130,7 +130,9 @@ export function runPerformanceReport(ledger: { sessions?: ActivitySessionSummary
     },
     tools: { calls: toolStarts, perModelTurn: modelEvents.length ? toolStarts / modelEvents.length : undefined, maxConcurrentAgents: Math.max(0, ...sessions.map((session) => session.stats?.agents ?? 0)) },
     models,
-    eventsCapped: sessions.some((session) => (session.events ?? []).length === 100)
+    // The old store capped events at 100 and never recorded a run split; this release records a split for every run, so a session at 100 events
+    // with no split is one the cap may have cut (agent review of PR 34: a new log with exactly 100 events is not).
+    eventsCapped: sessions.some((session) => (session.events ?? []).length >= 100 && !session.run)
   };
 }
 

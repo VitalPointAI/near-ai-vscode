@@ -142,3 +142,11 @@ test('a burst of appends is coalesced into a few full writes, flush waits for al
   assert.ok((await readFile(capped.filePath, 'utf8')).length <= 64 * 1024, 'the whole file stays under its bound');
   assert.ok(((await new ActivityStore(path.dirname(path.dirname(path.dirname(capped.filePath)))).get('session-perf07-cap-3'))?.events.length ?? 0) > 0, 'the newest session keeps its events');
 });
+
+// Agent review of PR 34: only a log the old store wrote is flagged as capped.
+test('a new log with exactly 100 events is not reported as cut by the old cap; an old one is', () => {
+  const session = (run: boolean) => ({ version: 1, sessionId: 'session-cap-check-1', project: 'demo', plans: [], agents: {}, models: [], approvals: {}, startedAt: at(0), updatedAt: at(100), outcome: 'completed', continuationAvailable: true, context: { userTurns: 0, assistantTurns: 0 }, events: Array.from({ length: 100 }, (_, index) => event(index, { status: 'completed', summary: 'Tool call finished.' })), ...(run ? { run: { wallMs: 100_000, modelMs: 0, toolMs: 0, approvalWaitMs: 0, idleMs: 100_000, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 } } : {}) }) as unknown as ActivitySessionSummary;
+  assert.equal(runPerformanceReport({ sessions: [session(true)] }).eventsCapped, false);
+  assert.doesNotMatch(formatRunReport(runPerformanceReport({ sessions: [session(true)] })), /old 100-event cap/);
+  assert.equal(runPerformanceReport({ sessions: [session(false)] }).eventsCapped, true);
+});
