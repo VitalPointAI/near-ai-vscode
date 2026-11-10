@@ -630,12 +630,17 @@ export class AgentConversation {
     const media = request.imageModel ? [imageTool(request.client, request.imageModel)] : [];
     const memoryFor = (agentScope?: MemoryScope, source = runId) => request.memory ? memoryTools(request.memory.store, { project: request.memory.projectScope, agent: agentScope }, AGENT_MEMORY_ACTOR, source) : [];
     // A team run reads and feeds the team's own knowledge graph, so the team gets better the more it works (owner, 2026-11-08). Every member writes to the
-    // same graph, which is what makes it shared: a fact one member verified is there for the next one.
+    // same graph, which is what makes it shared: a fact one member verified is there for the next one. The graph is keyed by the team's slug, its file name
+    // in the library, which is unique there. The agent writes as `research`: its own grades are held to the ceiling, because a run that read a hostile page
+    // can be steered into claiming anything. A damaged file's problem reaches the tool, so the agent and the person are told rather than shown a quiet nothing.
     const teamKnowledge = request.team
       ? knowledgeTools({
-          read: async () => (await loadKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug))).knowledge,
+          read: async () => {
+            const { knowledge, problem } = await loadKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug));
+            return problem ? { ...knowledge, problem } : knowledge;
+          },
           add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), slugify(request.team!.slug), addition)
-        })
+        }, 'research')
       : [];
     const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = [...(request.gsd?.agents ?? []), ...(request.team ? teamAgents(request.team) : []), ...(request.projectAgents ?? [])];
@@ -787,6 +792,8 @@ export class AgentConversation {
 
   /** When the model is done but background agents are still running, wait for the next report. */
   private async waitForBackground(signal: AbortSignal): Promise<AgentMessage[] | undefined> {
+    // Drain first, notice second (0.4.19 review): a report that arrived while the parent was still streaming feeds the run at once — posting "Waiting…" first
+    // would announce a hold that instantly ends. The notice therefore appears exactly when the run genuinely holds, and never when it does not.
     const ready = this.drainNotifications();
     if (ready.length) return ready;
     if (!this.background.size || signal.aborted) return undefined;
